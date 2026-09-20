@@ -1,7 +1,68 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `fix/glm5next-visual-materialization-20260920`.
+As of: 2026-09-20 · `fix/stage-a-speculative-prefetch-readset-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `fix/stage-a-speculative-prefetch-readset-20260920`)
+for **the declared-but-unmoved staged range** (PQ #874). A strict source read
+treated "no map entry covers this span" as a terminal refusal, so a range
+PrismaBuild had published and not yet moved was read as a range that would
+never arrive. Stage A of the GLM-5.3-Flash joint-AURA campaign (consumer
+`2fd0de4dbefc…`) died rc 1 after 574 s with no OOM, refusing
+`model-00087-of-00120.safetensors` on a *speculative* prefetch of layer 4
+while that shard's stage mover was still queued — published 180 s before the
+refusal, claimed 7.832 s after the run was already dead — and the speculative
+failure killed layer 0, the layer the run was working on. Three things change,
+and the third is where the fix lives.
+
+**(1) The resolver reports which kind of nothing it found.**
+`ResidencyResolver.staged_range` returned a bare `None` from four distinct
+paths; `staged_range_outcome` now carries the verdict beside the entry —
+`RANGE_HIT`, `RANGE_UNCOVERED` (no entry covers the span), `RANGE_UNDECLARED`
+(and PrismaBuild's sealed readset never named these bytes) or `RANGE_REFUSED`
+(an entry covers it and failed a check). `staged_range` keeps its
+`dict | None` spelling and every existing caller. Only `RANGE_UNCOVERED` is
+worth re-asking: a corrupt or out-of-range entry is evidence in hand, and
+re-polling cannot improve it.
+
+**(2) Declared-versus-undeclared is bound to PrismaBuild's request context,
+not inferred.** This process binds the data manifest's *digest*, so it could
+not tell a declared range from an undeclared one. `staged_lease` now resolves
+the sealed readset from the identity the reader-lease SDK already vouches:
+`injected_context`'s `queue_root` and `action_key` name the action's claim
+row, which carries the `cas_root` and `residency.manifest_sha256`/
+`manifest_bytes` PrismaBuild wrote at publish time; the CAS blob is read,
+bounded by that size, hashed against that digest *and* against the digest this
+run bound, and decoded by `prismabuild.core.read_data_manifest` — PB's own
+validating reader, not a second parser. Its `entries` are the declared spans
+in file offsets. **When any hop is missing the readset is *unbound*, and an
+unbound readset never waits**: not knowing whether a range is declared is
+precisely the state in which waiting would be guessing, so the pre-#874
+behaviour stands with `declared_readset` in the residency report saying why.
+This reads a pool row directly and is a protocol extension beyond the SDK's
+exported names; the clean shape is a PB-side `ctx` field.
+
+**(3) Readiness is decided before the shared gather pool is occupied.**
+`layer_streaming._await_layer_readset` runs in the thread about to submit a
+layer's gather — a prefetch worker — and never inside one. The gather runs on
+the module-global bounded `_LAYER_READ_POOL`, so a worker sleeping on a cold
+future range is a worker the current layer's already-staged reads queue
+behind; a ready current-layer read now proceeds while every lookahead layer is
+cold. It waits under one deadline for the whole layer, however many shards it
+spans (`PRISMAQUANT_STAGED_RANGE_WAIT_S`, default 300 s, `0` restores the
+pre-#874 behaviour, and the value must be finite). It only ever waits: it
+never reads payload and never refuses, so an unreachable range still fails
+from the same line with the same error. It is scoped by
+`policy_is_active()`, so a non-strict reader holding a map is untouched, and
+it is the layer path only — the production weight cache and the wire reader do
+not wait. Cost when everything is staged: one header parse per shard in the
+submitting thread, and no sleeps.
+
+**What this makes slower, honestly.** An *undeclared* range under a bound
+readset still refuses immediately, but a declared range that never arrives now
+costs the bound before it fails, and so does any uncovered span when the
+readset is bound. PrismaBuild remains the sole owner of movement and of the
+window: nothing here moves anything or asks for anything to be moved.
 
 Re-stamped (2026-09-20, `fix/glm5next-visual-materialization-20260920`) for
 **the streaming visual-materialization split** (PQ #872).
@@ -616,7 +677,9 @@ on the live GLM-5.3-Flash run 34 of 55 staged shard entries are ranges, and
 to cover the span outright, under the same pre-open fences `staged_read`
 applies, with a per-declared-path interval index rebuilt whenever the map is
 adopted or forgotten — and `stages(declared)`, the cheap question a reader asks
-before it wraps anything. `staged_read`'s own contract is untouched; its two
+before it wraps anything. (Since PQ #874 `staged_range` is a thin spelling over
+`staged_range_outcome`, which carries *why* a lookup found nothing; see the
+2026-09-20 stamp.) `staged_read`'s own contract is untouched; its two
 whole-file consumers depend on it. `prismaquant/residency_shard_reader.py` is
 the reader at `layer_streaming._source_safe_open`, a drop-in for `safe_open`
 including through `source_authentication.safe_open(opener, path)`, which hands

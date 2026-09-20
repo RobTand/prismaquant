@@ -2132,8 +2132,52 @@ def test_the_sealed_readset_is_refused_when_it_is_not_the_bound_manifest(
     assert other_digest != digest
     _publish_readset_on_the_claim(
         tmp_path, consumer, other_cas, other_digest, other_size)
-    reset_residency_resolver_for_tests()
+
+    # Rebound IN PLACE, on the resolver that already answered "bound": the
+    # declaration cache belongs to the binding, so it must go with it.
+    # Keeping it would answer manifest A's membership for manifest B's
+    # paths -- "not declared" for every one, an immediate refusal that
+    # looks deliberate. That is #874 again under a new cause.
+    bind_residency_manifest(other_digest)
+    state = resolver.declared_readset()
+    assert state['state'] == 'bound'
     bind_residency_manifest(digest)
-    state = residency_resolver().declared_readset()
+    state = resolver.declared_readset()
     assert state['state'] == 'unbound'
     assert digest[:12] in str(state['reason'])
+
+
+def test_a_non_strict_layer_read_with_a_map_still_never_waits(
+        tmp_path, monkeypatch):
+    """The wait is scoped by the POLICY, not by "a resolver exists".
+
+    An inactive-policy reader serves pool bytes for an uncovered span and
+    always could, so it has nothing to wait for. Entering the wait on the
+    mere presence of a resolver would change a path this fix has no
+    business touching.
+    """
+    _pb()
+    path, _ = _shard(tmp_path)
+    consumer = _hex64(f"consumer-{tmp_path}")
+    import prismabuild.pool as pool_mod
+    _pb_queue(tmp_path, pool_mod, consumer)
+    cas_root, digest, size = _seal_manifest(tmp_path, _whole_file(path))
+    _publish_readset_on_the_claim(tmp_path, consumer, cas_root, digest, size)
+    _launch_env(monkeypatch, consumer)
+    map_path = _write_map(tmp_path, {}, manifest_sha256=digest,
+                          stage_root=_stage_root(tmp_path))
+    resolver = _bind(monkeypatch, map_path, digest)      # bound, NOT active
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+    assert not active_policy()
+
+    started = time.monotonic()
+    served = _read_layer(path)
+    assert time.monotonic() - started < 10.0
+
+    from safetensors import safe_open
+    with safe_open(str(path), framework='pt') as reference:
+        assert torch.equal(served['layer.0.f32'].view(torch.uint8),
+                           reference.get_tensor('f32').view(torch.uint8))
+    report = resolver.report()
+    assert report['bytes_from_pool'] > 0
+    assert report['range_wait_polls'] == 0

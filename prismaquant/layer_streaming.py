@@ -21,6 +21,7 @@ import os
 import re
 import stat
 import threading
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, wait as wait_futures
 from pathlib import Path
@@ -1490,6 +1491,107 @@ def _advise_consumed_safetensors_pages(shard: str, keys: list[str],
         os.close(fd)
 
 
+def _await_layer_readset(by_shard, open_kwargs, *, source_authentication=None):
+    """Let PrismaBuild's movers land this layer's ranges before the fan-out.
+
+    Readiness is decided HERE, in the thread that is about to submit the
+    gather, and never inside a gather worker. The gather runs on
+    ``_LAYER_READ_POOL``, which is module-global and bounded and shared by
+    every streamed layer read: a worker sleeping on a cold future range is
+    a worker the current layer's already-staged reads queue behind. This
+    call blocks the submitting thread -- a layer prefetch worker, whose
+    whole job is getting a future layer ready -- and leaves every gather
+    slot free.
+
+    PQ #874: a speculative prefetch of layer 4 asked for
+    ``model-00087-of-00120`` while that shard's stage mover was still
+    queued (published 20:55:57 UTC, claimed 20:59:04 UTC, 7.832 s after
+    the consumer died -- root-verified), and the refusal killed layer 0,
+    which was the layer the run was actually working on.
+
+    Deliberately narrow, and the narrowness is the contract:
+
+    * It only ever **waits**; it never refuses and never reads payload.
+      The read that follows refuses exactly where and as it did before, so
+      an unreachable range fails with the same error from the same line.
+    * It waits only on ``RANGE_UNCOVERED`` -- a span PrismaBuild's sealed
+      readset declares and no mover has written yet. A span the readset
+      does not declare, or an entry that covers it and fails a check, ends
+      the wait at once.
+    * If the sealed readset is not bound (see
+      ``ResidencyResolver.declared_readset``) this process cannot tell
+      those apart, so it does not wait at all. Not knowing is not a
+      licence to wait: the pre-#874 behaviour stands, with a line saying
+      why. ``PRISMAQUANT_STAGED_RANGE_WAIT_S=0`` also disables it.
+    * It is the LAYER path only. Other strict readers -- the production
+      weight cache, wire blobs -- are unchanged and do not wait.
+
+    Cost when everything is already staged: one header parse per shard in
+    this thread (tens of KB against a multi-GB layer payload; the gather's
+    own readers parse their own headers as they always did) and one
+    resolver lookup per tensor, no sleeps.
+    """
+    from .residency_map import RANGE_HIT
+    from .residency_shard_reader import (
+        await_staged_spans, residency_resolver, staged_range_wait_s,
+    )
+    from .staged_tier_policy import policy_is_active
+
+    # Scoped to the strict path by the POLICY, not by "a resolver exists".
+    # A non-strict reader holding a map serves pool bytes for an uncovered
+    # span and always could, so it has nothing to wait for; entering the
+    # wait on the mere presence of a resolver would change its behaviour
+    # for no gain. Read the same verdict the readers read.
+    if not policy_is_active() or not by_shard:
+        return
+    resolver = residency_resolver()
+    if resolver is None:
+        return
+    budget = staged_range_wait_s()
+    if budget <= 0:
+        return
+    declared = resolver.declared_readset()
+    if declared.get("state") != "bound":
+        print("[residency] staged-range wait disabled: PrismaBuild's sealed "
+              f"readset is {declared.get('state')} "
+              f"({declared.get('reason')})", flush=True)
+        return
+    wanted = []
+    for shard, pairs in by_shard.items():
+        try:
+            with _source_safe_open(
+                    shard, source_authentication=source_authentication,
+                    **open_kwargs) as reader:
+                span_of = getattr(reader, "_span", None)
+                if span_of is None:
+                    # Not a staged reader, so this thread cannot enumerate
+                    # the shard's spans. Skipping only this shard would
+                    # wait on a strict subset of what the read needs and
+                    # call the result readiness, so wait on none of it.
+                    return
+                for _model_name, ckpt_name in pairs:
+                    span = span_of(ckpt_name)
+                    if span is not None and span[1] > span[0]:
+                        # The size comes from the header this reader just
+                        # parsed, so a covered span costs the resolver no
+                        # lstat of its own -- per tensor, on every poll.
+                        wanted.append((shard, span[0], span[1],
+                                       reader._declared_size))
+        except Exception:
+            # The pre-flight is an optimisation on top of a read that still
+            # owns every check. Anything that goes wrong opening a shard
+            # here goes wrong again, identically, in the read below --
+            # where it is handled.
+            return
+    if not wanted:
+        return
+    deadline = time.monotonic() + budget
+    verdict = await_staged_spans(resolver, wanted, deadline=deadline)
+    if verdict != RANGE_HIT:
+        print(f"[residency] layer readset not staged ({verdict}) after "
+              f"{budget:.0f}s; the read below decides", flush=True)
+
+
 def _read_layer_to_device(prefix: str,
                           model_to_shard: dict[str, str],
                           model_to_ckpt: dict[str, str],
@@ -1589,6 +1691,8 @@ def _read_layer_to_device(prefix: str,
                 [key for _, key in pairs], source_stats[shard])
         return local
 
+    _await_layer_readset(by_shard, open_kwargs,
+                         source_authentication=source_authentication)
     total_tensors = sum(len(pairs) for pairs in by_shard.values())
     threads = layer_read_threads()
     if threads > 1 and total_tensors >= _LAYER_READ_MIN_TENSORS:
