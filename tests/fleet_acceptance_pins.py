@@ -58,6 +58,28 @@ def _git(git_dir: Path, *args: str, timeout_s: int = 120) -> subprocess.Complete
                           capture_output=True, text=True, timeout=timeout_s)
 
 
+def _git_dir_of(checkout: Path) -> Path:
+    """The true git dir, including for linked worktrees (whose .git is a file)."""
+    dotgit = checkout / ".git"
+    if dotgit.is_dir():
+        return dotgit
+    try:
+        target = dotgit.read_text().strip()
+    except OSError:
+        raise NonQualified(
+            "pinned PB checkout has no git metadata",
+            detail={"checkout": str(checkout), "rev": PB_CANDIDATE_REV})
+    if target.startswith("gitdir: "):
+        resolved = Path(target[len("gitdir: "):])
+        if not resolved.is_absolute():
+            resolved = checkout / resolved
+        if resolved.is_dir():
+            return resolved
+    raise NonQualified(
+        "pinned PB checkout git metadata unreadable",
+        detail={"checkout": str(checkout), "rev": PB_CANDIDATE_REV})
+
+
 def _git_bytes(git_dir: Path, *args: str, timeout_s: int = 300) -> bytes:
     done = subprocess.run(["git", "--git-dir", str(git_dir), *args],
                           capture_output=True, timeout=timeout_s)
@@ -80,12 +102,7 @@ def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
     - the extracted file set equals ``ls-tree -r`` exactly;
     - every file under the reused prefixes hash-matches its blob.
     """
-    git_dir = PB_PINNED_CHECKOUT / ".git"
-    if not git_dir.is_dir():
-        raise NonQualified(
-            "pinned PB checkout absent",
-            detail={"checkout": str(PB_PINNED_CHECKOUT),
-                    "rev": PB_CANDIDATE_REV})
+    git_dir = _git_dir_of(PB_PINNED_CHECKOUT)
     done = _git(git_dir, "cat-file", "-t", PB_CANDIDATE_REV,
                 timeout_s=timeout_s)
     if done.returncode != 0 or done.stdout.strip() != "commit":
@@ -169,12 +186,31 @@ def record_snapshots(*, checkout: Path) -> dict:
                 f"PQ checkout at {checkout} is not readable")
         return done.stdout.strip()
     head = _run("rev-parse", "HEAD")
-    dirty = _run("status", "--porcelain")
-    if dirty:
+    tracked = _run("status", "--porcelain", "--untracked-files=no")
+    if tracked:
         raise NonQualified(
-            "PQ checkout has uncommitted changes; evidence would not name "
-            "the executed tree",
-            detail={"dirty": dirty.splitlines()[:10]})
+            "PQ checkout has uncommitted tracked changes; evidence would "
+            "not name the executed tree",
+            detail={"dirty": tracked.splitlines()[:10]})
+    ignored_prefixes = ("__pycache__/", ".pytest_cache/")
+    ignored_suffixes = (".pyc",)
+    ignored_names = (".coverage", "coverage.xml")
+    stray = []
+    for line in _run("status", "--porcelain",
+                     "--untracked-files=normal").splitlines():
+        if not line.startswith("?? "):
+            continue
+        name = line[3:]
+        if ("/__pycache__/" in f"/{name}" or name.startswith(ignored_prefixes)
+                or name.endswith(ignored_suffixes)
+                or Path(name).name in ignored_names):
+            continue
+        stray.append(name)
+    if stray:
+        raise NonQualified(
+            "PQ checkout has uncommitted executable files; evidence would "
+            "not name the executed tree",
+            detail={"dirty": stray[:10]})
     return {"pb_rev": PB_CANDIDATE_REV, "pq_head": head}
 
 
