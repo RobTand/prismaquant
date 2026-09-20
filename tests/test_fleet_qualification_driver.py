@@ -415,7 +415,7 @@ def test_sealed_command_rejects_unexecuted_text():
     # Shell comment carrying the filename inside the command line.
     commented, problem = driver._sealed_command(_action_with_script(
         "export PATH=/x:$PATH; /bin/python -m pytest " + PINS_FILE
-        + " # " + RUNNER_FILE + "\n2>&1 | tee log.txt; "
+        + " # " + RUNNER_FILE + " 2>&1 | tee log.txt; "
         "exit ${PIPESTATUS[0]}"))
     assert commented is not None, problem
     assert commented["files"] == [PINS_FILE]
