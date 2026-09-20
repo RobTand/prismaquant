@@ -74,10 +74,10 @@
   },
   {
    "id": "ID-07",
-   "status": "failing:R7-proof-bug",
+   "status": "qualified-now",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
+   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
+   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
   },
   {
    "id": "ID-08",
@@ -137,10 +137,10 @@
   },
   {
    "id": "SM-03",
-   "status": "failing:R7-proof-bug",
+   "status": "qualified-now",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
+   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
+   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
   },
   {
    "id": "INV-01",
@@ -165,10 +165,10 @@
   },
   {
    "id": "INV-04",
-   "status": "failing:R7-proof-bug",
+   "status": "qualified-now",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
+   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
+   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
   },
   {
    "id": "INV-05",
@@ -186,10 +186,10 @@
   },
   {
    "id": "INV-07",
-   "status": "failing:R7-proof-bug",
+   "status": "qualified-now",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
+   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
+   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
   },
   {
    "id": "INV-08",
@@ -256,10 +256,10 @@
   },
   {
    "id": "PRG-01",
-   "status": "failing:R7-proof-bug",
+   "status": "qualified-now",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
+   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
+   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
   },
   {
    "id": "PRG-02",
@@ -333,10 +333,10 @@
   },
   {
    "id": "SAFE-01",
-   "status": "failing:R7-proof-bug",
+   "status": "qualified-now",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
+   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
+   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
   },
   {
    "id": "SAFE-02",
@@ -368,10 +368,10 @@
   },
   {
    "id": "ACC-03",
-   "status": "failing:R7-proof-bug",
+   "status": "qualified-now",
    "scenario": "runner:sdk-first-release",
-   "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
+   "evidence": "fleet result JSON + admitted-action receipt (status qualified on R8; RED on R7 kept in /home/rob/tmp/pqfleet-r7red-20260920.json)",
+   "note": "connected GREEN on R8 0bf6fc81: DONE terminal, typed export proof, egress replay reclaims once, same-mover repeat idempotent; RED on R7 a9bb83e9 kept"
   },
   {
    "id": "ACC-04",
