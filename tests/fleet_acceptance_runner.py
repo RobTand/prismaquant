@@ -534,12 +534,6 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
                                   claim_snapshot=claim)
     assert terminal.is_file(), terminal
     evidence["terminal"] = str(terminal)
-    attestation = lease.read_scope_attestation(world.queue, KEY, NONCE)
-    assert attestation is not None and not isinstance(
-        attestation, Exception), (
-        "no persisted proof after finish: reclaim cannot verify")
-    assert attestation.get("scope_empty") is True, attestation
-    evidence["attestation_empty"] = True
     pmap = world.mod["pmap"]
     staged_paths = []
     for frag in pmap.read_fragments(world.queue.root / pool.RESIDENCY,
@@ -561,6 +555,12 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
     assert auto_reclaimed[0] == [ref_id], auto_reclaimed
     assert auto_reclaimed[1] == [], auto_reclaimed
     evidence["auto_reclaimed"] = auto_reclaimed
+    attestation = lease.read_scope_attestation(world.queue, KEY, NONCE)
+    assert attestation is not None and not isinstance(
+        attestation, Exception), (
+        "no persisted proof after finish+egress: reclaim cannot verify")
+    assert attestation.get("scope_empty") is True, attestation
+    evidence["attestation_empty"] = True
     pin_path = (lease.leases_root(world.queue) / KEY
                 / f"{acquired['pin_id']}.lease.json")
     assert not pin_path.exists(), "reclaimed pin file must unlink"
