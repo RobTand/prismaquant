@@ -698,9 +698,11 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
     seams = setup.setdefault("_orig_seams", {})
     if "install" not in seams:
         seams["install"] = runner.context.install
-        seams["load"] = qc.load_adjoint_checkpoint
+        import prismaquant.joint_adjoint_checkpoints as _chk
+        seams["load"] = _chk.load_adjoint_checkpoint
         seams["prefetch"] = pxc.prefetch_exact_activation_cache_entries
-        seams["rw_unbound"] = type(cache).retained_window
+        import prismaquant.production_weight_cache as _pwc
+        seams["rw_unbound"] = _pwc.ProductionWeightCache.retained_window
     orig_install = seams["install"]
     orig_load = seams["load"]
     orig_prefetch = seams["prefetch"]
@@ -719,6 +721,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
         events.append(("checkpoint-open",))
         return orig_load(space, checkpoint_record)
 
+    import prismaquant.joint_adjoint_checkpoints as _chk_mod
+    monkeypatch.setattr(_chk_mod, "load_adjoint_checkpoint", load_logged)
     monkeypatch.setattr(qc, "load_adjoint_checkpoint", load_logged)
 
     def prefetch_logged(references, **kwargs):
@@ -741,15 +745,18 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
 
     monkeypatch.setattr(
         pxc, "prefetch_exact_activation_cache_entries", prefetch_logged)
-    # Instance-level seam delegates to the stored class original.
+    # Class-level seam so every PWC instance (including the one the replay
+    # loop holds) logs; delegates to the stored original, never stacks.
 
     @contextlib.contextmanager
-    def rw_logged(*args, **kwargs):
+    def rw_logged(self, *args, **kwargs):
         events.append(("window-open",))
-        with orig_rw_unbound(cache, *args, **kwargs) as receipt_obj:
+        with orig_rw_unbound(self, *args, **kwargs) as receipt_obj:
             yield receipt_obj
 
-    monkeypatch.setattr(cache, "retained_window", rw_logged)
+    import prismaquant.production_weight_cache as _pwc_mod
+    monkeypatch.setattr(
+        _pwc_mod.ProductionWeightCache, "retained_window", rw_logged)
 
     execution = rt._execution(tmp_path / f"qexec-{layer}-{int(resume)}")
     retained = quantum_retained_state(execution)
