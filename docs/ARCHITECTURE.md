@@ -70,15 +70,16 @@ TIER-03 producer readset coverage, and TIER-04 legacy authorization stay
 named gaps. Gate: `tests/test_strict_reader_tier_enforcement.py` (plus
 `tests/test_joint_cost_quantum_runtime.py` offline isolation).
 
-Lease follow-on (PQ #850, same branch, unmerged): strict reads now pin
+Lease follow-on (PQ #850, same branch, unmerged): strict reads pin
 through the exact PB family (`injected_context`/`acquire_for`/
-`open_pinned`/`release` against pin `a6e6b310a1`) — one window per
-entry, SDK serving records (with pin IDs) at open, exact release on all
-paths, fork pid guard, corruption failing clear; RAM legs refuse for
-want of RAM-mover covers and re-acquire SSD honestly. Serving records
-now carry pin IDs where pinned; `lease_id: null` remains only where no
-lease was required. Capability/tag advertisement, containment, and
-campaign launch stay unclaimed.
+`open_pinned`/`release`/`covers_for_keys`, pin `d079ad33`) — RAM-first:
+live tmpfs copies pin at the announced epoch via resolved, cross-checked
+RAM covers and serve; one window per entry, SDK serving records (with pin
+IDs) at open, exact release on all paths, fork-loud reader/window guards
+(no inherited use past the parent release), corruption failing clear.
+Shared-state checkpoint payloads pin with a writer-to-loader regression.
+Serving records carry pin IDs where pinned. Capability/tag advertisement,
+containment, and campaign launch stay unclaimed.
 
 Re-stamped (2026-09-20, `flash/source-identity-portable-dev-20260920`) for
 **dev-portable source-identity reuse across hosts** (PQ #843). The six-field
