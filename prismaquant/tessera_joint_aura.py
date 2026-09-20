@@ -177,8 +177,14 @@ def _read_verified_wire_blob(cell):
                 last = str(refusal)
                 if half == "ram":
                     resolver.record_ram_fallback(wire, str(refusal))
-                    continue
-                resolver.record_fallback(wire, str(refusal))
+                else:
+                    resolver.record_fallback(wire, str(refusal))
+                if strict and isinstance(refusal, _StagedWireCorrupt):
+                    # Content corruption fails clear: the next copy is not
+                    # adopted as an unchecked alternate.
+                    raise refuse_pool_bulk_read(
+                        str(wire), f"content-corruption:{refusal}")
+                continue
             else:
                 # The open fence passed: serving tier recorded at open,
                 # before these payload bytes are trusted.
@@ -203,6 +209,15 @@ def _read_verified_wire_blob(cell):
 
 class _StagedWireRefused(Exception):
     """The staged wire failed its identity check; read the declared path."""
+
+
+class _StagedWireCorrupt(_StagedWireRefused):
+    """The staged wire's content compares corrupt (digest mismatch).
+
+    Availability failures (unreadable, resized, raced) may fall through to
+    the next permitted copy; content corruption fails clear under policy —
+    never a silent adoption of an unchecked alternate.
+    """
 
 
 def _read_wire_bytes(wire, size, *, expected, staged):
@@ -253,7 +268,7 @@ def _read_wire_bytes(wire, size, *, expected, staged):
           f"{wire}: wire changed during its content read")
     digest = hashlib.sha256(blob).hexdigest()
     if staged and digest != expected:
-        raise _StagedWireRefused('staged wire bytes differ from the receipt digest')
+        raise _StagedWireCorrupt('staged wire bytes differ from the receipt digest')
     _same(digest, expected, f"{wire}: wire checksum")
     return blob, digest
 

@@ -611,6 +611,54 @@ def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):
     return max(storages.values(), default=0) if device == 'meta' else sum(storages.values())
 
 
+def _require_staged_bulk_source(path, expected_sha256):
+    """Strict-policy staged source for a whole-file bulk input.
+
+    Returns ``(source Path, source os.stat_result)`` opened from a
+    permitted tier (RAM first when offered and allowed, SSD stage only
+    when the declaration permits), fenced as a regular file of exactly
+    the entry's bytes. Raises ``TierPolicyRefused`` before any pool
+    payload byte when unmapped, unfenced, or unpermitted. The caller
+    still verifies content against ``expected_sha256`` and re-checks the
+    declared file's binding — the digest check is what makes the
+    redirect safe rather than trusted.
+    """
+    from .residency_map import residency_resolver
+    from .staged_tier_policy import (
+        policy_is_active, refuse_pool_bulk_read, tier_is_allowed)
+    if not policy_is_active():
+        raise AssertionError("_require_staged_bulk_source needs the active policy")
+    resolver = residency_resolver()
+    if resolver is None:
+        raise refuse_pool_bulk_read(str(path), "readset-not-staged")
+    staged = resolver.staged_read(path, expected_sha256=expected_sha256)
+    if staged is None:
+        raise refuse_pool_bulk_read(str(path), "staged-not-serving")
+    candidates: list[tuple[str, str]] = []
+    if staged.get("ram_path") is not None and tier_is_allowed("ram"):
+        candidates.append(("ram", staged["ram_path"]))
+    if tier_is_allowed("ssd"):
+        candidates.append(("stage", staged["stage_path"]))
+    if not candidates:
+        raise refuse_pool_bulk_read(str(path), "no-permitted-tier")
+    last: str | None = None
+    for tier, copy in candidates:
+        try:
+            info = os.lstat(copy)
+        except OSError as error:
+            last = f"{tier} copy is unreadable: {error.strerror}"
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            last = f"{tier} copy is not a regular file"
+            continue
+        if info.st_size != staged["bytes"]:
+            last = f"{tier} copy size differs from the map"
+            continue
+        resolver.record_serving_tier(path, tier)
+        return Path(copy), info
+    raise refuse_pool_bulk_read(str(path), last or "staged-copy-unreadable")
+
+
 def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
                                          max_storage_bytes, validate=None,
                                          expected_stat=None, resource_check=None,
@@ -621,6 +669,11 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     before a real CPU reconstruction. Torch may stage one archive storage on
     CPU during that pass; the same S cap covers it. Neither pass rereads the
     source file, and no CUDA transfer is performed by this owner.
+
+    Under the active allowed-tier policy the payload bytes come from the
+    staged source (RAM first, declared SSD only) while every declared-file
+    identity fence still runs on the declared file; the post-read digest
+    against the exact receipt is what admits the bytes.
     """
     policy = normalize_verified_activation_load(policy)
     if policy is None or type(max_storage_bytes) is not int or max_storage_bytes <= 0:
@@ -637,14 +690,21 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     if before.st_size <= 0 or before.st_size > policy['max_buffer_bytes']:
         raise RuntimeError('verified activation file exceeds serialized buffer budget')
     scratch = policy['max_scratch_bytes']
+    from .staged_tier_policy import policy_is_active
+    strict = policy_is_active()
+    source, source_before = path, before
+    source_signature = signature
+    if strict:
+        source, source_before = _require_staged_bulk_source(path, expected_sha256)
+        source_signature = cache_file_stat_signature(source_before)
     def check(label, reserve_bytes=0):
         if resource_check is not None:
             resource_check(label + ':' + path.name, reserve_bytes=reserve_bytes)
     def unchanged(descriptor):
-        if (cache_file_stat_signature(os.fstat(descriptor)) != signature or
+        if (cache_file_stat_signature(os.fstat(descriptor)) != source_signature or
                 cache_file_stat_signature(path.lstat()) != signature):
             raise RuntimeError('verified activation file changed during loading')
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     raw = reader = value = payload = None
     try:
         unchanged(descriptor)
@@ -682,7 +742,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
                     page = os.sysconf('SC_PAGE_SIZE')
                     end = consumed // page * page
                     if end > advised:
-                        _advise_activation_descriptor(descriptor, path, before,
+                        _advise_activation_descriptor(descriptor, source, source_before,
                                                       offset=advised, length=end-advised)
                         advised = end
             if handle.read(1):
@@ -712,7 +772,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
             value = None
         unchanged(descriptor)
         if release_file_pages:
-            _advise_activation_descriptor(descriptor, path, before)
+            _advise_activation_descriptor(descriptor, source, source_before)
     except BaseException:
         value = payload = None
         raise
@@ -881,6 +941,8 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     window = _ExactActivationPrefetch()
     reserved = False
     payload = tensor = raw = reader = body = owned = None
+    from .staged_tier_policy import policy_is_active
+    strict = policy_is_active()
     try:
         if residency_check is not None:
             residency_check(nbytes)
@@ -900,10 +962,13 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             signature = _activation_file_signature(path)
             if signature[2] != ref.file_bytes:
                 raise RuntimeError("exact activation entry size changed")
+            source, source_before = path, prefetched_stat
+            if strict:
+                source, source_before = _require_staged_bulk_source(path, ref.sha256)
             raw = owned.buffer(ref.file_bytes)
             running = hashlib.sha256()
             consumed = 0
-            with path.open("rb", buffering=0) as handle:
+            with source.open("rb", buffering=0) as handle:
                 while consumed < ref.file_bytes:
                     view = memoryview(raw)[consumed:min(
                         ref.file_bytes, consumed + _ENTRY_READ_BLOCK_BYTES)]
@@ -942,7 +1007,8 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             window._tensors[ref] = tensor
             payload = tensor = None
             if release_file_pages:
-                release_activation_cache_file_pages(path, expected_stat=prefetched_stat)
+                release_activation_cache_file_pages(
+                    source, expected_stat=source_before)
             raw = None
         if scratch is None:
             owned.release()

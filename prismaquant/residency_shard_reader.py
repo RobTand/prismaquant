@@ -76,7 +76,6 @@ from .staged_tier_policy import (
     active_policy,
     policy_is_active,
     refuse_pool_bulk_read,
-    tier_is_allowed,
 )
 
 try:
@@ -334,6 +333,36 @@ def _read_span(fd: int, count: int, offset: int,
     return buffer
 
 
+class _StrictSliceProxy:
+    """Header-only slice metadata; payload materializes via the staged reader.
+
+    ``get_shape``/``get_dtype`` are served from the bounded header parse
+    (metadata, allowed). Any indexing materializes the full tensor through
+    the reader's staged path — the same fences, the same refusal, no pool
+    fallback — then applies the index. This is what keeps the shape
+    estimators working under policy without a payload exemption by naming.
+    """
+
+    def __init__(self, reader, name, dtype, shape):
+        self._reader = reader
+        self._name = name
+        self._dtype = dtype
+        self._shape = tuple(shape)
+
+    def get_shape(self):
+        return list(self._shape)
+
+    def get_dtype(self):
+        return self._dtype
+
+    def __getitem__(self, index):
+        tensor = self._reader._staged_tensor(self._name)
+        if tensor is None:
+            raise refuse_pool_bulk_read(
+                self._reader._declared, "pool-fallback")
+        return tensor[index]
+
+
 class StagedShardReader:
     """A ``safe_open`` handle whose payload comes off the stage when it can.
 
@@ -343,6 +372,11 @@ class StagedShardReader:
     declared path travels in the closure ``staged_shard_opener`` builds; the
     handed path is what is opened and what the header is read from, and the two
     are the same file.
+
+    Under the active allowed-tier policy no pool ``safe_open`` handle is
+    constructed at all — no pool mmap merely for header. Keys, metadata,
+    shapes and dtypes come from the existing bounded header reader
+    (``_read_shard_header``); payload comes from staged ranges or refuses.
     """
 
     def __init__(self, pool_open, path, declared, resolver, kwargs):
@@ -350,9 +384,19 @@ class StagedShardReader:
         self._path = os.fspath(path)
         self._resolver = resolver
         self._device = kwargs.get("device")
-        # First, so a ``safe_open`` that rejects the ``device`` kwarg raises
-        # where it raises today and the callers' retry without it still works.
-        self._handle = pool_open(path, **kwargs)
+        # Captured at construction (opener time): the entrypoints activate
+        # the process-global policy before any read, so every reader built
+        # afterwards — on any thread — sees the same verdict.
+        self._strict = policy_is_active()
+        # The allowed set beside the verdict: tier checks read the same
+        # snapshot the reader was built under, not a later global.
+        self._allowed = active_policy() if self._strict else None
+        if self._strict:
+            self._handle = None
+        else:
+            # First, so a ``safe_open`` that rejects the ``device`` kwarg raises
+            # where it raises today and the callers' retry without it still works.
+            self._handle = pool_open(path, **kwargs)
         self._header = None
         self._base = 0
         self._declared_size = 0
@@ -363,7 +407,8 @@ class StagedShardReader:
     # -- the handle interface --------------------------------------------
 
     def __enter__(self):
-        self._handle.__enter__()
+        if self._handle is not None:
+            self._handle.__enter__()
         return self
 
     def __exit__(self, *args):
@@ -373,28 +418,43 @@ class StagedShardReader:
                 os.close(row[2])
             except OSError:
                 pass
-        return self._handle.__exit__(*args)
+        if self._handle is not None:
+            return self._handle.__exit__(*args)
+        return False
 
     def keys(self):
-        return self._handle.keys()
+        if not self._strict:
+            return self._handle.keys()
+        self._parse()
+        if self._header is None:
+            raise refuse_pool_bulk_read(self._declared, "header-unreadable")
+        return [name for name in self._header if name != "__metadata__"]
 
     def metadata(self):
-        return self._handle.metadata()
+        if not self._strict:
+            return self._handle.metadata()
+        self._parse()
+        if self._header is None:
+            raise refuse_pool_bulk_read(self._declared, "header-unreadable")
+        meta = self._header.get("__metadata__")
+        return dict(meta) if type(meta) is dict else {}
 
     def get_slice(self, name):
-        """A payload-materializing call, gated as a data reader under policy.
+        """Shape/dtype metadata from the header; payload via the staged path.
 
-        Its historical callers (``streaming_model._estimate_layer_cache_bytes``)
-        read shape and dtype, not payload — but the returned slice can
-        materialize payload bytes, so TIER-02 admits no exemption by naming:
-        under the active allowed-tier policy a pool slice refuses with a
-        named reason instead of serving. Inactive policy delegates to the
-        pool handle as before.
+        The returned proxy serves ``get_shape``/``get_dtype`` without
+        touching payload bytes. Indexing it materializes through the
+        reader's staged tensor path — same fences, same refusal. No pool
+        fallback either way. Inactive policy delegates to the pool handle
+        as before.
         """
-        if policy_is_active():
-            raise refuse_pool_bulk_read(
-                self._declared, "get-slice-is-a-data-reader")
-        return self._handle.get_slice(name)
+        if not self._strict:
+            return self._handle.get_slice(name)
+        span = self._span(name)
+        if span is None:
+            raise refuse_pool_bulk_read(self._declared, "span-not-bound")
+        _, _, dtype, shape = span
+        return _StrictSliceProxy(self, name, dtype, shape)
 
     def get_tensor(self, name):
         """The tensor, off the stage when a staged range covers its whole span.
@@ -408,11 +468,12 @@ class StagedShardReader:
         Under the active allowed-tier policy there is no pool fallback:
         a span no staged range covers, or a fence the staged copy fails,
         raises ``TierPolicyRefused`` before a pool payload byte is read.
+        Zero-size tensors carry no payload bytes and are built locally.
         """
         served = self._staged_tensor(name)
         if served is not None:
             return served
-        if policy_is_active():
+        if self._strict:
             raise refuse_pool_bulk_read(self._declared, "pool-fallback")
         tensor = self._handle.get_tensor(name)
         if self._resolver is not None:
@@ -488,7 +549,7 @@ class StagedShardReader:
         for row in self._bound:
             if row[0] <= start and end <= row[1]:
                 return row
-        strict = policy_is_active()
+        strict = self._strict
         if self._resolver is None:
             if strict:
                 raise refuse_pool_bulk_read(self._declared, "readset-not-staged")
@@ -526,12 +587,12 @@ class StagedShardReader:
             return row
         candidates: list[tuple[str, str]] = []
         if entry.get("ram_path") is not None:
-            if tier_is_allowed("ram"):
+            if self._allowed is not None and "ram" in self._allowed:
                 candidates.append(("ram", entry["ram_path"]))
             else:
                 self._resolver.record_ram_fallback(
                     self._declared, "ram tier not in the allowed tiers")
-        if tier_is_allowed("ssd"):
+        if self._allowed is not None and "ssd" in self._allowed:
             candidates.append(("stage", entry["stage_path"]))
         else:
             self._resolver.record_fallback(
@@ -590,15 +651,19 @@ class StagedShardReader:
     def _staged_tensor(self, name):
         span = self._span(name)
         if span is None:
-            if policy_is_active():
+            if self._strict:
                 raise refuse_pool_bulk_read(self._declared, "span-not-bound")
             return None
         start, end, dtype, shape = span
         if end == start:
-            # No bytes to serve. The pool handle's empty tensor is read from
-            # the header alone (zero payload bytes cross any tier), so it is
-            # the answer with or without a policy.
-            return self._handle.get_tensor(name) if policy_is_active() else None
+            # No bytes to serve: an empty tensor is built locally rather
+            # than read from any tier, pool included.
+            if self._strict:
+                tensor = torch.empty(shape, dtype=dtype)
+                if self._device is not None:
+                    tensor = tensor.to(self._device)
+                return tensor
+            return None
         row = self._range_for(start, end)
         if row is None:
             return None
@@ -612,7 +677,7 @@ class StagedShardReader:
             reason = f"staged range {getattr(error, 'strerror', None) or error}"
             if self._resolver is not None:
                 self._resolver.record_fallback(self._declared, reason)
-            if policy_is_active():
+            if self._strict:
                 raise refuse_pool_bulk_read(self._declared, reason)
             return None
         tensor = torch.frombuffer(raw, dtype=torch.uint8).view(dtype).reshape(shape)

@@ -727,6 +727,12 @@ def main(argv=None) -> int:
     parser.add_argument("--read-manifest-sha256", default=None,
                         help="digest of the parent run's sealed data manifest")
     parser.add_argument("--data-manifest-sha256", default=None)
+    from .staged_tier_policy import DEFAULT_ALLOWED_TIERS
+    parser.add_argument("--allowed-tiers", default=DEFAULT_ALLOWED_TIERS,
+                        help="sealed staged-tier declaration for GPU-consumed "
+                             "bulk inputs: comma subset of {ram,ssd}, RAM "
+                             "first (default %(default)s). Pool/HDD bulk "
+                             "opens refuse under this declaration.")
     parser.add_argument("--prefetch-override", type=Path, default=None,
                         help="explicit source_prefetch override document "
                              "(schema %s): replaces the plan's sealed "
@@ -738,6 +744,13 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         require_dev_mode("joint_cost_stage_a")
+        from .staged_tier_policy import activate_staged_tier_policy
+        try:
+            allowed = activate_staged_tier_policy(args.allowed_tiers)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"[STAGED-TIER] bulk inputs serve from {','.join(sorted(allowed))}; "
+              f"pool/HDD bulk opens refuse", flush=True)
         from .tessera_joint_aura import _load_plan
 
         config = _load_plan(args.plan, args.plan_sha256)

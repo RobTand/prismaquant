@@ -1290,17 +1290,28 @@ class ProductionWeightCache:
                 raise RuntimeError('PWC load is outside the active resident window')
             limit = min(limit, window_entry[1]) if limit else window_entry[1]
         if not limit:
+            if policy_is_active():
+                # No digest is computed on this branch, so a staged copy
+                # would be admitted on the map's word alone — and the pool
+                # copy is a bulk HDD open either way. Refuse outright.
+                raise refuse_pool_bulk_read(
+                    str(path), "unbounded-read-has-no-digest-binding")
             return torch.load(path, map_location="cpu", weights_only=True), None
         from .residency_map import StagedReadRefused, residency_resolver
         from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
         resolver = residency_resolver()
+        strict = policy_is_active()
+        expected = getattr(self, "_expected_file_sha256", None)
+        binding = None if expected is None or key is None else expected.get(key)
+        if strict and binding is None:
+            # Without the digest the caller already requires, a staged
+            # copy would be admitted on the map's word alone. The run
+            # leg binds every render through ``require_file_load_sha256``;
+            # the digest-less prepare leg runs outside campaign scope.
+            raise refuse_pool_bulk_read(str(path), "missing-digest-binding")
         staged = None
         if resolver is not None:
-            expected = getattr(self, "_expected_file_sha256", None)
-            staged = resolver.staged_read(
-                path,
-                expected_sha256=None if expected is None or key is None
-                else expected.get(key))
+            staged = resolver.staged_read(path, expected_sha256=binding)
         if staged is not None:
             try:
                 tensor, observed = self._read_file_tensor(
@@ -1427,9 +1438,11 @@ class ProductionWeightCache:
             raise StagedReadRefused('declared file changed during the staged read')
         # The temporary serialized buffer is per loader worker and is released
         # before its result enters the existing LRU. No whole-cache byte store.
-        receipt = {"path": str(path), "bytes": len(raw),
-                   "sha256": hashlib.sha256(raw).hexdigest(),
-                   "serving_tier": serving_tier}
+        receipt = {"path": str(path), "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+        if staged is not None:
+            # Serving-tier provenance (ID-07) rides the staged receipt;
+            # the pool receipt keeps its pinned shape.
+            receipt["serving_tier"] = serving_tier
         if staged is not None and receipt["sha256"] != staged["sha256"]:
             # The read is already digested, so the staged bytes are held to the
             # digest the map published for them. This is the check that makes

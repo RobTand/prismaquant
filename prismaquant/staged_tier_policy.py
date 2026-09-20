@@ -7,13 +7,21 @@ miss/fence failure and record only counters. This module is the shared
 policy those readers enforce (principle 8: one abstraction, not per-callsite
 knobs).
 
-Inactive by default: ordinary offline/library paths keep their legacy
-fallback behavior (explicitly scoped, no automatic campaign waiver). The
-joint campaign entrypoints (``joint_cost_quantum``, ``joint_cost_stage_a``)
-activate it with their sealed ``--allowed-tiers`` declaration, so a
-campaign run cannot waive silently. Env ``PRISMAQUANT_ALLOWED_TIERS`` is a
-fallback for tests only; the sealed binding rides the payload flag through
-the container, never ambient env alone.
+Activation is explicit and process-global. The joint campaign entrypoints
+(``joint_cost_quantum``, ``joint_cost_stage_a``) activate it from their
+sealed ``--allowed-tiers`` flag — always, so a campaign run cannot waive
+silently. There is deliberately no ambient-environment fallback in the
+production path: tests use :func:`staged_tier_policy_context` (or the
+explicit setter), whose lifetime is explicit.
+
+Process-global (never ContextVar) is load-bearing, not incidental: tensor
+payloads are read on prefetch worker threads that inherit no context, and
+the policy must reach them deterministically. Reset happens only at
+explicit lifetimes (the context exit, or the test-only deactivator).
+
+Inactive by default: ordinary offline/library paths outside campaign scope
+keep their legacy fallback behavior (explicitly scoped, no automatic
+campaign waiver).
 
 Refusal semantics: :class:`TierPolicyRefused` is deliberately NOT a
 ``StagedReadRefused`` — existing ``except StagedReadRefused`` handlers read
@@ -23,22 +31,21 @@ Callers that catch ``StagedReadRefused`` for pool fallback must let
 pool read).
 
 Lease posture: the PB reader-lease API (RNG-02/SM-03) is PB-owned and
-pending. This module enforces tier choice without leases and refuses
-clearly where staged/lease support is absent. Async prefetch and mmap pool
-reads are refused as bulk opens; the strict staged path itself avoids mmap
-(owned pread buffers), so no mapping outlives an unheld pin there. Full
-lease-pin integration follows once the PB API lands; this policy is not
-claimed complete without it.
+pending (window-level Lease/Pin handle per root direction; exact
+signatures come from the PB worker — this module proposes no stub).
+This module enforces tier choice without leases and refuses clearly where
+staged/lease support is absent. Owned pread buffers conceptually hold
+their lease from acquire through the last pread: async chunk futures are
+already joined before fd close/release on every path including
+cancellation/error (see ``_read_span``), CPU/GPU copies outlive fd close
+only after the owned buffer is fully read, and memory charge stays the
+normal action budget. Full lease-pin integration follows once the PB API
+lands; this policy is not claimed complete without it.
 """
 from __future__ import annotations
 
-import os
+from contextlib import contextmanager
 import threading
-
-#: The test-only ambient fallback. Production carries the declaration on the
-#: sealed payload flag (``--allowed-tiers``), threaded by the dispatcher
-#: through the container boundary.
-ENV_VAR = "PRISMAQUANT_ALLOWED_TIERS"
 
 #: The campaign default: RAM first, SSD stage when declared. Pool/HDD are
 #: never bulk tiers under this policy.
@@ -75,26 +82,39 @@ def parse_allowed_tiers(value: str) -> frozenset[str]:
     return tiers
 
 
-def activate_staged_tier_policy(value: str | None = None) -> frozenset[str]:
+def activate_staged_tier_policy(value: str) -> frozenset[str]:
     """Activate strict enforcement for this process. Returns the allowed set.
 
-    ``None`` resolves the test-only env fallback, else the campaign default.
-    The joint entrypoints always pass their parsed flag explicitly.
+    ``value`` is the sealed ``--allowed-tiers`` declaration the campaign
+    entrypoints always pass explicitly. No ambient fallback: callers that
+    have no sealed declaration have no policy.
     """
-    global _ACTIVE
-    if value is None:
-        value = os.environ.get(ENV_VAR, DEFAULT_ALLOWED_TIERS)
     allowed = parse_allowed_tiers(value)
     with _LOCK:
+        global _ACTIVE
         _ACTIVE = allowed
     return allowed
 
 
 def deactivate_staged_tier_policy_for_tests() -> None:
-    """Restore legacy fallback behavior (tests only)."""
-    global _ACTIVE
+    """Restore legacy fallback behavior (tests only, explicit lifetime)."""
     with _LOCK:
+        global _ACTIVE
         _ACTIVE = None
+
+
+@contextmanager
+def staged_tier_policy_context(value: str):
+    """Explicit-lifetime strict policy for tests and scoped library use.
+
+    Activates on entry, restores inactive on exit, even on error. The
+    process-global cell is what reaches prefetch worker threads.
+    """
+    activate_staged_tier_policy(value)
+    try:
+        yield active_policy()
+    finally:
+        deactivate_staged_tier_policy_for_tests()
 
 
 def active_policy() -> frozenset[str] | None:
@@ -120,6 +140,7 @@ def refuse_pool_bulk_read(path: str, reason: str) -> TierPolicyRefused:
 
     Callers raise it (never catch it into a pool read). ``reason`` is one
     of the named causes: missing/stale-epoch/corrupt/wrong-digest/
-    wrong-size/partial-span/readset-not-staged/ssd-not-allowed.
+    wrong-size/partial-span/readset-not-staged/ssd-not-allowed/
+    missing-digest-binding/get-slice-is-a-data-reader.
     """
     return TierPolicyRefused(f"staged-tier-forbidden: {reason}: {path}")
