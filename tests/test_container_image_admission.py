@@ -92,21 +92,49 @@ def _joint_campaign(tmp_path: Path) -> dict:
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({"output_root": str(tmp_path / "campaign-root")}))
     return {"plan_sha256": "1" * 64, "prepared_sha256": "2" * 64,
+            "read_manifest_sha256": "4" * 64,
             "plan_path": str(plan), "prepared_path": "/fixture/prepared.json"}
 
 
+def _joint_manifest(tmp_path: Path, campaign: dict) -> Path:
+    """A minimal valid stage-A manifest for the campaign: the dispatcher's
+    manifest gate (PQ #835) refuses an absent one before the image
+    declaration is even reached."""
+    import hashlib
+    path = tmp_path / "adjoint.manifest"
+    path.write_text(json.dumps({
+        "schema": "prismaquant.prismabuild.data_manifest.v1",
+        "mount_prefix": "/mnt/shared",
+        "entries": [],
+        "entry_count": 0,
+        "total_bytes": 0,
+        "annotations": {
+            "phases": [{"name": "head", "bytes": 0, "cumulative_bytes": 0}],
+            "parent_manifest_sha256": campaign["read_manifest_sha256"],
+            "plan_sha256": campaign["plan_sha256"],
+            "prepared_sha256": campaign["prepared_sha256"],
+        },
+    }))
+    return path
+
+
 def _quantum_record(tmp_path: Path) -> Path:
+    import hashlib
     record_path = tmp_path / "layer-001.json"
+    slice_path = tmp_path / "layer-001.data-manifest.json"
+    slice_path.write_bytes(json.dumps({"slice": "layer-001"}).encode())
     record_path.write_text(json.dumps({
         "schema": joint.RECORD_SCHEMA, "quantum_id": "layer-001", "layer": 1,
         "identity_sha256": "3" * 64,
-        "read_set": {"manifest_path": "manifests/layer-001.data-manifest.json.gz"},
+        "read_set": {"manifest_path": str(slice_path),
+                     "manifest_sha256": hashlib.sha256(
+                         slice_path.read_bytes()).hexdigest()},
         "chunks": [{"name": "layer-001-chunk-000"}]}))
     return record_path
 
 
 def test_stage_a_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec):
-    argv = joint.stage_a_argv(tmp_path / "adjoint.manifest", _joint_campaign(tmp_path))
+    argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     embedded = _embedded_spec(argv)
     assert _pbrun_option(argv, IMAGE_FLAG) == embedded["container"]["image"]
 
@@ -141,7 +169,7 @@ def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
         return real_read_text(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", two_faced)
-    argv = joint.stage_a_argv(tmp_path / "adjoint.manifest", _joint_campaign(tmp_path))
+    argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     embedded = _embedded_spec(argv)
     assert reads["spec"] == 1
     assert embedded["container"]["image"] == IMAGE
@@ -151,7 +179,7 @@ def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
 def test_a_repository_manifest_digest_is_declared_exactly(tmp_path, monkeypatch):
     spec = _write_spec(tmp_path / "spec.json", {"image": REPO_IMAGE})
     monkeypatch.setattr(joint, "SPEC_PATH", spec)
-    argv = joint.stage_a_argv(tmp_path / "adjoint.manifest", _joint_campaign(tmp_path))
+    argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     assert _pbrun_option(argv, IMAGE_FLAG) == REPO_IMAGE
 
 
@@ -163,7 +191,7 @@ def test_an_archive_backed_spec_declares_no_image(tmp_path, monkeypatch):
                              "sha256": ARCHIVE_SHA}}
     spec = _write_spec(tmp_path / "spec.json", container)
     monkeypatch.setattr(joint, "SPEC_PATH", spec)
-    argv = joint.stage_a_argv(tmp_path / "adjoint.manifest", _joint_campaign(tmp_path))
+    argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     assert IMAGE_FLAG not in argv
     embedded = _embedded_spec(argv)
     assert embedded["container"]["archive"] == container["archive"]
@@ -178,7 +206,7 @@ def test_a_malformed_archive_is_refused_not_silently_undeclared(tmp_path, monkey
     spec = _write_spec(tmp_path / "spec.json", container)
     monkeypatch.setattr(joint, "SPEC_PATH", spec)
     with pytest.raises(RuntimeError, match="archive"):
-        joint.stage_a_argv(tmp_path / "adjoint.manifest", _joint_campaign(tmp_path))
+        joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
 
 
 def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsys):
@@ -192,12 +220,16 @@ def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsy
     record = json.loads(record_path.read_text())
     record["campaign"] = {"plan_path": str(plan), "plan_sha256": "1" * 64,
                           "prepared_path": "/fixture/prepared.json",
-                          "prepared_sha256": "2" * 64}
+                          "prepared_sha256": "2" * 64,
+                          "read_manifest_sha256": "4" * 64}
     record["adjoint"] = {"receipt_sha256": None}
     (records / record_path.name).write_text(json.dumps(record))
+    manifest = _joint_manifest(tmp_path, {"plan_sha256": "1" * 64,
+                                          "prepared_sha256": "2" * 64,
+                                          "read_manifest_sha256": "4" * 64})
     code = joint.main(["--records", str(records),
                        "--output-root", str(tmp_path / "out"),
-                       "--adjoint-manifest", str(tmp_path / "adjoint.manifest"),
+                       "--adjoint-manifest", str(manifest),
                        "--dry-run"])
     assert code == 0
     plan_out = json.loads(capsys.readouterr().out)
