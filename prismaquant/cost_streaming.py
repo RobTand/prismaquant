@@ -1541,10 +1541,22 @@ def build_source_checkpoint_identity(
         digests.append(str(cached["sha256"]) if cached is not None else None)
     misses = [index for index, digest in enumerate(digests) if digest is None]
     if misses and dev_mode_enabled() and digest_cache_path is not None:
-        total = sum(int(fingerprints[index]["bytes"]) for index in misses)
+        uncovered: list[tuple[str, int]] = []
+        for path, fingerprint, digest in zip(
+                ordered, fingerprints, digests, strict=True):
+            if digest is not None:
+                continue
+            size = fingerprint.get("bytes") if isinstance(
+                fingerprint, dict) else None
+            if not isinstance(size, int) or isinstance(size, bool):
+                raise RuntimeError(
+                    "dev mode refuses: cannot price the unannounced seal, "
+                    f"no byte size recorded for {path}")
+            uncovered.append((str(path), size))
+        total = sum(size for _, size in uncovered)
         raise RuntimeError(
             "dev mode refuses an unannounced source rehash of "
-            f"{total} bytes across {len(misses)} shard(s): the declared "
+            f"{total} bytes across {len(uncovered)} shard(s): the declared "
             f"digest cache {digest_cache_path} does not cover them; "
             "initialize it with an explicit certified run instead "
             "(certified mode would hash them here)"
@@ -1810,10 +1822,13 @@ def build_streamed_model_identity(
             "certified mode would rehash): uncertified")
     if cache_path is not None and dev_mode_enabled():
         if not cache_path.is_file():
+            total_live = sum(
+                int(fingerprint["size"]) for fingerprint in fingerprints)
             raise RuntimeError(
-                "dev mode refuses an unannounced source rehash: no identity "
-                f"cache at the declared {cache_path}; initialize it with an "
-                "explicit certified run instead"
+                "dev mode refuses an unannounced source rehash of "
+                f"{total_live} bytes: no identity cache at the declared "
+                f"{cache_path}; initialize it with an explicit certified "
+                "run instead"
             )
         uncovered = [
             (str(fingerprint["path"]), int(fingerprint["size"]))
