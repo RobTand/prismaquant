@@ -32,6 +32,7 @@ call after the runtime's cutover check; this tool's tests use fixtures.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import subprocess
@@ -116,6 +117,18 @@ EXIT_SUBMIT_FAILED = 1
 
 class DispatchRefused(Exception):
     """Fail closed: no receipt, a stale receipt, or a mixed campaign."""
+
+
+class ExecutableBindingUnsupported(DispatchRefused):
+    """An executable quantum row names no acceptable output binding.
+
+    No PB produced-output binding validator is accepted yet (the PB732/735
+    stacks are still unaccepted), so no executable manifest -- however
+    plausible its ``render_prerequisite`` dictionary looks -- can be
+    admitted for production dispatch. Sequencing/phase artifacts remain
+    useful for read-plan qualification; production dispatch of the legacy
+    slice rows is unchanged.
+    """
 
 
 def _sha_bytes(data: bytes) -> str:
@@ -305,6 +318,79 @@ def _stage_manifest_binding(adjoint_manifest: Path, campaign: Mapping) -> dict:
             "read_manifest_sha256": parent, "phases": phases}
 
 
+def _executable_row_parts(record: dict, *, output_root: Path,
+                            head_grace_s: int):
+    """Pure executable-row construction from sealed inputs (no gate).
+
+    Resolves the row's executable manifest, verifies its wire bytes hash to
+    the sealed digest, and derives the read-phase progress declarations in
+    manifest order. Consults no output binding and bypasses no production
+    gate: production dispatch (:func:`quantum_argv`) refuses every
+    executable row with :class:`ExecutableBindingUnsupported` before
+    reaching here. Tests exercise manifest/phase propagation through this
+    helper directly.
+    """
+    quantum_id = record["quantum_id"]
+    executable = record.get("executable_readset")
+    manifest = Path(executable.get("manifest_path", ""))
+    if not manifest.is_absolute():
+        manifest = output_root / manifest
+    staged_sha256 = _executable_manifest_digest(
+        record, output_root=output_root)
+    phases = executable.get("phases")
+    if not isinstance(phases, list) or not phases or any(
+            type(name) is not str or not name for name in phases):
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} seals no executable phase list")
+    progress = [("head", head_grace_s)]
+    for name in phases:
+        if name == "head":
+            continue
+        grace = (HEAD_PROGRESS_GRACE_S if name == "checkpoint-load"
+                 else CHUNK_PROGRESS_GRACE_S)
+        progress.append((name, grace))
+    return manifest, staged_sha256, progress
+
+
+def _executable_manifest_digest(record: dict, *, output_root: Path) -> str:
+    """The sealed executable-manifest digest a bound quantum row binds.
+
+    Mirrors :func:`_slice_manifest_digest` for the post-capture executable
+    readset: the row's ``executable_readset.manifest_sha256`` names the one
+    manifest pbrun stages for this row, and its wire bytes must hash to the
+    sealed digest; a drifted or absent manifest refuses before anything
+    publishes. Records without the block keep the legacy slice path.
+    """
+    block = record.get("executable_readset")
+    if not isinstance(block, dict):
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} carries no executable "
+            "readset")
+    manifest = block.get("manifest_path")
+    if not isinstance(manifest, str) or not manifest:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} names no executable "
+            "manifest")
+    path = Path(manifest)
+    if not path.is_absolute():
+        path = Path(output_root) / path
+    declared = block.get("manifest_sha256")
+    if not _is_hex64(declared):
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} seals no executable digest")
+    try:
+        actual = _sha_bytes(path.read_bytes())
+    except OSError as exc:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} executable manifest "
+            f"unreadable at {path}: {exc}") from exc
+    if actual != declared:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} executable manifest at "
+            f"{path} does not hash to the sealed digest")
+    return actual
+
+
 def _slice_manifest_digest(record: dict, *, output_root: Path) -> str:
     """The sealed slice digest a quantum row actually binds.
 
@@ -389,14 +475,37 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     plan/prepared paths+digests from the record's campaign block, the record
     file's own wire digest as ``--quantum-sha256`` (the consumer checks raw
     bytes first; the canonical body check inside stays), the receipt file's
-    wire digest as ``--adjoint-sha256``, the verified slice digest, and
-    ``--resume``. Files are read where the row reads them; an unreadable or
-    drifting file refuses before anything publishes (#838)."""
+    wire digest as ``--adjoint-sha256``, the verified staged-manifest
+    digest, and ``--resume``. Files are read where the row reads them; an
+    unreadable or drifting file refuses before anything publishes (#838).
+    A record carrying ``executable_readset`` is refused with
+    :class:`ExecutableBindingUnsupported`: no PB produced-output binding
+    validator is accepted yet, so executable rows are sequencing/phase
+    artifacts only, never production-runnable. Without the block the row
+    keeps the legacy slice manifest with head/chunk progress. Tier flags,
+    tags, demand and environment are identical in both lanes.
+    """
     quantum_id = record["quantum_id"]
-    manifest = Path(record["read_set"]["manifest_path"])
-    if not manifest.is_absolute():
-        manifest = output_root / manifest
-    slice_sha256 = _slice_manifest_digest(record, output_root=output_root)
+    executable = record.get("executable_readset")
+    if executable is not None:
+        # R3: no invented admission. No accepted PB output-binding validator
+        # exists (PB732/735 are still unaccepted stacks), so even a
+        # plausible-looking render-prerequisite dictionary proves no
+        # capability. Refuse before any staged read. Manifest/phase
+        # propagation is exercised through _executable_row_parts directly.
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} carries an executable readset, but no "
+            "accepted PB produced-output binding validator exists "
+            "(PB732/735 stacks unaccepted): executable plans are "
+            "sequencing-only and not production-runnable -- refusing")
+    else:
+        manifest = Path(record["read_set"]["manifest_path"])
+        if not manifest.is_absolute():
+            manifest = output_root / manifest
+        staged_sha256 = _slice_manifest_digest(record, output_root=output_root)
+        progress = [("head", head_grace_s)]
+        for chunk in record.get("chunks", []):
+            progress.append((chunk["name"], CHUNK_PROGRESS_GRACE_S))
     campaign = record.get("campaign")
     if not isinstance(campaign, dict):
         raise DispatchRefused(
@@ -428,7 +537,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--prepared-sha256", str(campaign["prepared_sha256"]),
         "--adjoint", str(adjoint_path),
         "--adjoint-sha256", receipt_sha256,
-        "--data-manifest-sha256", slice_sha256,
+        "--data-manifest-sha256", staged_sha256,
         "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
         "--output-root", str(output_root)])
@@ -436,11 +545,9 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     for tag in consumer_tags:
         argv += ["--tag", str(tag)]
     argv += ["--data-manifest", str(manifest),
-             "--residency", "stage", "--residency-ram", "auto",
-             "--progress-phase", f"head={head_grace_s}"]
-    for chunk in record.get("chunks", []):
-        argv += ["--progress-phase",
-                 f"{chunk['name']}={CHUNK_PROGRESS_GRACE_S}"]
+             "--residency", "stage", "--residency-ram", "auto"]
+    for name, grace in progress:
+        argv += ["--progress-phase", f"{name}={grace}"]
     argv += ["--priority", str(priority),
              "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
              "--cpus", "10"]
