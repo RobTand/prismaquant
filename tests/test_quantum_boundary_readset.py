@@ -741,6 +741,8 @@ def test_binder_refuses_mutated_entry_consistent_rehash(tmp_path):
     import copy
     record, receipt = _fixture(tmp_path)
     manifest = _build(record, receipt)
+    record["adjoint"]["receipt_sha256"] = manifest["annotations"][
+        "receipt_sha256"]
     forged = copy.deepcopy(manifest)
     forged["entries"][0]["bytes"] += 8
     forged["entries"][0]["sha256"] = "c" * 64
@@ -766,6 +768,8 @@ def test_binder_refuses_mutated_entry_consistent_rehash(tmp_path):
 def test_binder_refuses_foreign_schema(tmp_path):
     record, receipt = _fixture(tmp_path)
     manifest = _build(record, receipt)
+    record["adjoint"]["receipt_sha256"] = manifest["annotations"][
+        "receipt_sha256"]
     manifest["schema"] = MANIFEST_SCHEMA_V1
     wire_sha = hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest()
     with pytest.raises(ValueError, match="foreign schema"):
