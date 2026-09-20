@@ -763,6 +763,9 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
     import prismaquant.production_weight_cache as _pwc_mod
     monkeypatch.setattr(
         _pwc_mod.ProductionWeightCache, "retained_window", rw_logged)
+    assert _pwc_mod.ProductionWeightCache is type(cache), (
+        f"class mismatch: {_pwc_mod.ProductionWeightCache!r} vs "
+        f"{type(cache)!r}")
     # Preflight runs once per window entry (retained_window.__enter__ calls
     # it first): log here too, since it is a plain method and cannot be
     # bypassed by a direct unbound contextmanager call.
