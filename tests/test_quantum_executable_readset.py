@@ -806,7 +806,10 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
     names = [p["name"] for p in manifest["read_plan"]["phases"]]
     reported = _reported(events)
     assert reported and reported[0] == "head"
-    assert reported == [n for n in names if n in reported]
+    # Same-phase repeats are unit advancements, not order violations.
+    deduped = [reported[0]] + [
+        phase for phase, prev in zip(reported[1:], reported) if phase != prev]
+    assert deduped == [n for n in names if n in deduped]
     _check_event_order(
         events, manifest, layer=record["layer"],
         chain=list(record["adjoint"]["chain_layers"]))
@@ -821,11 +824,11 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
     units = [u for kind, _phase, u in events if kind == "report"]
     assert all(b >= a for a, b in zip(units, units[1:]))
     plan_view = {"phases": [{"name": name} for name in names]}
-    for name in reported:
+    for name in deduped:
         assert plans.accepted(plan_view, name)
     remaining = [p["name"] for p in plans.remaining(
-        plan_view, reported[-1])]
-    assert remaining == names[names.index(reported[-1]) + 1:]
+        plan_view, deduped[-1])]
+    assert remaining == names[names.index(deduped[-1]) + 1:]
     replayed = {int(n.split("-")[1])
                 for n in reported if n.startswith("replay-")}
     if expect_replay_windows == "all":
