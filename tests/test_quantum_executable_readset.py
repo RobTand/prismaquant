@@ -909,8 +909,8 @@ def _expert_policy_budget(linears):
     largest_delta = max(
         4 * tuple(mod.weight.shape)[0] * tuple(mod.weight.shape)[1]
         for mod in linears.values())
-    policy = operator_policy(max_statistics_bytes=1 << 20,
-                             max_candidate_bytes=1 << 20)
+    policy = dict(operator_policy(), max_statistics_bytes=1 << 20,
+                  max_candidate_bytes=1 << 20)
     budget = dataclasses.replace(
         rt._budget(), statistics_cap_bytes=max_single,
         candidate_delta_bytes=largest_delta, max_windows_per_layer=8)
