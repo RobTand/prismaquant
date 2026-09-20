@@ -6,10 +6,12 @@ family (`injected_context` / `acquire_for` / `open_pinned` / `release`,
 capability `reader-lease-v1`). The PB worker owns that implementation —
 nothing here re-implements, shadows, or diverges from it:
 
-- The SDK is imported only from an explicit sealed ``helper_root``
-  (``.../src`` added to ``sys.path``); the imported tree is verified to
-  be that root, and a divergent pre-import refuses. No ambient fallback,
-  no mutable active ``/repo`` resolution, no vendoring.
+- The SDK is imported only from a sealed root: the explicit override
+  (tests/wiring) else the authoritative PB-injected
+  ``PRISMABUILD_READER_HELPER_ROOT`` (sealed generation path, forwarded
+  read-only) — never a user knob, never mutable active ``/repo``
+  resolution, no vendoring. The imported tree is verified to be that
+  root, and a divergent pre-import refuses.
 - Identity comes only from the SDK's ``injected_context`` (PB-owned
   env + live claim row); anything missing refuses, nothing guessed.
 - One :class:`LeaseWindow` per bounded read window — one composed-map
@@ -62,6 +64,12 @@ _AVAILABILITY_REFUSALS = ("unpublished", "stale-epoch", "retiring",
 _HELPER_LOCK = threading.Lock()
 _HELPER_ROOT: str | None = None
 
+#: Authoritative PB-injected helper root: the sealed generation path PB
+#: forwards core+container read-only. Read automatically as the production
+#: discovery — never a user knob, never mutable-`/repo` resolution, never
+#: a test fallback. The explicit setter above wins when set (tests).
+HELPER_ROOT_ENV_VAR = "PRISMABUILD_READER_HELPER_ROOT"
+
 #: Caller-owned pre-check cache shared process-wide (mirrors the SDK's
 #: ``context`` argument): fragment/material/epoch reads cached across
 #: calls so a window batch does not re-stat over NFS per tensor. Successes
@@ -107,8 +115,14 @@ def set_lease_helper_root(path: str | Path | None) -> None:
 
 
 def lease_helper_root() -> str | None:
+    """The sealed helper root: explicit override, else the authoritative
+    PB-injected ``PRISMABUILD_READER_HELPER_ROOT`` (sealed generation
+    path, forwarded read-only). Anything else — including a missing
+    variable — means no helper, and strict lifetime refuses."""
     with _HELPER_LOCK:
-        return _HELPER_ROOT
+        if _HELPER_ROOT is not None:
+            return _HELPER_ROOT
+    return os.environ.get(HELPER_ROOT_ENV_VAR)
 
 
 def _sdk():
@@ -145,7 +159,13 @@ def _sdk():
 
 
 def resolve_context(*, env=None):
-    """The SDK's injected identity, or a clear availability refusal."""
+    """The SDK's injected identity, or a clear availability refusal.
+
+    Strict context requires a launch-env positive claim match: the
+    identity comes only from ``injected_context`` (PB-owned env + the
+    live claim row), refusals propagate as-is, and nothing here ever
+    synthesizes, guesses, or falls back to a map-derived identity.
+    """
     sdk = _sdk()
     try:
         answer = sdk.injected_context(env=env)

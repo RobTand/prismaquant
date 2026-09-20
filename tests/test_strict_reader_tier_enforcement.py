@@ -1021,3 +1021,150 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
 def test_lease_pin_module_reports_approved_commit():
     from prismaquant.staged_lease import PINNED_SDK_COMMIT
     assert PINNED_SDK_COMMIT.startswith("a6e6b310a1")
+
+
+def test_lease_helper_reads_authoritative_env_automatically(tmp_path, monkeypatch):
+    """Production discovery: the PB-injected PRISMABUILD_READER_HELPER_ROOT
+    is read with no explicit setter and no user knob."""
+    from prismaquant.staged_lease import (
+        HELPER_ROOT_ENV_VAR, lease_helper_root)
+    _pb()
+    assert lease_helper_root() is None
+    monkeypatch.setenv(HELPER_ROOT_ENV_VAR, str(PB_PIN_ROOT))
+    assert lease_helper_root() == str(PB_PIN_ROOT)
+    monkeypatch.setenv(HELPER_ROOT_ENV_VAR, "/nonexistent-root")
+    assert lease_helper_root() == "/nonexistent-root"
+
+
+def test_lease_helper_env_without_helper_refuses(tmp_path, monkeypatch):
+    """An authoritatively-named root that names nothing usable refuses
+    instead of importing whatever happens to be around."""
+    from prismaquant.staged_lease import HELPER_ROOT_ENV_VAR
+    _pb()
+    path, _ = _shard(tmp_path)
+    root = _stage_root(tmp_path)
+    staged = _stage_whole(root, path)
+    resolver = _strict(monkeypatch, _write_map(
+        tmp_path, {'s': (path, staged, None)}))
+    monkeypatch.setenv(HELPER_ROOT_ENV_VAR, str(tmp_path / 'no-such-root'))
+    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
+        with pytest.raises(LeaseRefused, match="lease-helper-unavailable"):
+            reader.get_tensor('f32')
+    assert resolver.report()['bytes_from_pool'] == 0
+
+
+def test_stage_epoch_convention_is_exact_absence(tmp_path, monkeypatch):
+    """A stage-tier fragment carrying an epoch does NOT match epoch "":
+    the empty string is absence, never a wildcard (Q4)."""
+    from prismaquant.staged_lease import (
+        LeaseRefused, LeaseWindow, covers_for_leads)
+    rl, pool_mod, map_mod = _pb()
+    consumer = _hex64(f"consumer-{tmp_path}")
+    mover = _hex64(f"mover-{tmp_path}")
+    queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
+    blob = b"epoch-convention-bytes-0123456789"
+    declared = tmp_path / 'pool' / 'd.bin'
+    declared.parent.mkdir(parents=True, exist_ok=True)
+    declared.write_bytes(blob)
+    staged = stage / 'd.bin'
+    staged.write_bytes(blob)
+    digest = hashlib.sha256(blob).hexdigest()
+    root = tmp_path / 'residency'
+    key = residency_map_key(str(declared), 0)
+    map_mod.write_fragment(root, {
+        "schema": map_mod.RESIDENCY_MAP_FRAGMENT_SCHEMA_V1,
+        "consumer_action_key": consumer, "mover_action_key": mover,
+        "tier_id": STAGE_TIER, "stage_root": str(stage),
+        "manifest_sha256": MANIFEST, "epoch": "stage-epoch-01",
+        "entries": {key: {"stage_path": str(staged), "bytes": len(blob),
+                          "sha256": digest, "offset": 0}}})
+    rl.write_material(
+        root, consumer_action_key=consumer, mover_action_key=mover,
+        tier_id=STAGE_TIER, stage_root=str(stage), manifest_sha256=MANIFEST,
+        generation=rl.mint_generation(),
+        entries={key: {"stage_path": str(staged), "bytes": len(blob),
+                       "sha256": digest, "file_id": rl.stat_identity(str(staged))}})
+    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
+    set_lease_helper_root(PB_PIN_ROOT)
+    spec = {"tier_id": STAGE_TIER, "epoch": "",
+            "covers": covers_for_leads([mover], MANIFEST),
+            "expected": {key: {"bytes": len(blob), "sha256": digest}},
+            "span": {"start_bytes": 0, "end_bytes": len(blob)}}
+    window = LeaseWindow(spec, acquire_token="token-epoch")
+    with pytest.raises(LeaseRefused) as excinfo:
+        with window:
+            pass
+    assert excinfo.value.kind == "availability"
+    assert "stale-epoch" in str(excinfo.value)
+
+
+def test_equal_sized_files_never_serve_each_others_bytes(tmp_path, monkeypatch):
+    """Known PB pin-ID collision (two equal-sized files, same covers,
+    offset 0): PQ must serve byte-correct data or refuse with integrity —
+    never wrong bytes, never pool. Holds before and after the PB fix."""
+    from prismaquant.staged_lease import LeaseRefused, LeaseWindow, covers_for_leads
+    rl, pool_mod, map_mod = _pb()
+    consumer = _hex64(f"consumer-{tmp_path}")
+    mover = _hex64(f"mover-{tmp_path}")
+    queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
+    pool = tmp_path / 'pool'
+    pool.mkdir(parents=True, exist_ok=True)
+    blobs = {name: bytes([seed]) * 32 for name, seed in (("a", 7), ("b", 9))}
+    keys = {}
+    staged_of = {}
+    for name, blob in blobs.items():
+        declared = pool / f"{name}.bin"
+        declared.write_bytes(blob)
+        staged = stage / f"{name}.bin"
+        staged.write_bytes(blob)
+        staged_of[name] = staged
+        keys[name] = (residency_map_key(str(declared), 0), declared, blob)
+    root = tmp_path / 'residency'
+    frag_entries, mat_entries = {}, {}
+    for name, (key, _declared, blob) in keys.items():
+        digest = hashlib.sha256(blob).hexdigest()
+        frag_entries[key] = {"stage_path": str(staged_of[name]),
+                             "bytes": len(blob), "sha256": digest, "offset": 0}
+        mat_entries[key] = dict(frag_entries[key],
+                                file_id=rl.stat_identity(str(staged_of[name])))
+    map_mod.write_fragment(root, {
+        "schema": map_mod.RESIDENCY_MAP_FRAGMENT_SCHEMA_V1,
+        "consumer_action_key": consumer, "mover_action_key": mover,
+        "tier_id": STAGE_TIER, "stage_root": str(stage),
+        "manifest_sha256": MANIFEST, "entries": frag_entries})
+    rl.write_material(
+        root, consumer_action_key=consumer, mover_action_key=mover,
+        tier_id=STAGE_TIER, stage_root=str(stage), manifest_sha256=MANIFEST,
+        generation=rl.mint_generation(), entries=mat_entries)
+    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
+    set_lease_helper_root(PB_PIN_ROOT)
+
+    def read_all(name):
+        key, _declared, blob = keys[name]
+        digest = hashlib.sha256(blob).hexdigest()
+        window = LeaseWindow(
+            {"tier_id": STAGE_TIER, "epoch": "",
+             "covers": covers_for_leads([mover], MANIFEST),
+             "expected": {key: {"bytes": len(blob), "sha256": digest}},
+             "span": {"start_bytes": 0, "end_bytes": len(blob)}},
+            acquire_token=f"token-{name}")
+        with window:
+            fd, _serving = window.open(key)
+            try:
+                got = os.pread(fd, len(blob), 0)
+            finally:
+                window.close_fd(fd)
+        return got
+
+    first = read_all("a")
+    assert first == blobs["a"]
+    try:
+        second = read_all("b")
+    except LeaseRefused as refusal:
+        # Pre-fix collision: the adopted pin lacks this key — fail closed.
+        assert refusal.kind == "integrity"
+    else:
+        # Post-fix: distinct pins serve byte-correct data.
+        assert second == blobs["b"]
