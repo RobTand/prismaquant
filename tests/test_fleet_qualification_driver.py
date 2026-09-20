@@ -54,7 +54,7 @@ def _declared(head="d" * 40, generation=GEN, python=REAL_PYTHON):
 def _tmp_cas(driver, tmp_path, tag):
     """Real filed artifacts materialized as a tmp CAS tree (read-only)."""
     src = FIXTURES / tag
-    key = {"A": KEY_A, "B": KEY_B, "C": KEY_C}[tag]
+    key = {"A": KEY_A, "B": KEY_B, "C": KEY_C, "D": KEY_D}[tag]
     root = tmp_path / f"cas-{tag}"
     (root / "requests" / key[:2]).mkdir(parents=True)
     (root / "actions" / "v3" / key[:2]).mkdir(parents=True)
@@ -288,7 +288,8 @@ def test_malformed_records_and_replays_rejected(monkeypatch):
     replay = driver.verify_shard(
         shard={"files": ["tests/test_x.py"], "output": "2 passed in 1s",
                "returncode": 0, "shard": 0, "summary": "2 passed in 1s"},
-        host="sparky", declared=declared)
+        host="sparky", expected_file=PINS_FILE,
+        declared=declared)
     assert replay["status"] == "nonqualified"
 
 
@@ -316,13 +317,13 @@ def test_completeness_regression_flags_a_dropped_case():
     plan = _plan(driver)
     verdicts = []
     for host in ("sparky", "sparklina"):
-        for name, files in driver.COMPONENT_CASES:
+        for idx, (name, files) in enumerate(driver.COMPONENT_CASES):
             if (name, host) == ("matrix", "sparklina"):
                 continue
             verdicts.append({"host": host, "file": files[0],
                              "status": "qualified", "reason": "",
                              "passed": 2, "failed": 0, "skipped": 0,
-                             "action_key": "a" * 64,
+                             "action_key": f"{idx:02x}" + host[0] * 62,
                              "terminal": "/tmp/t.json",
                              "snapshot_commit": "f" * 40,
                              "snapshot_parent": "d" * 40,
