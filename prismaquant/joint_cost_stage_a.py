@@ -346,13 +346,17 @@ def run_adjoint_capture_core(
                 for probe in range(n_probes) for batch in range(len(batches))}
             shared_pass = {batch: batches[batch].shared_pass_state
                            for batch in range(len(batches))}
+            # The checkpoint files land beside (not inside) the owner's entry
+            # directory, so the owner budgets them explicitly: the whole
+            # attempt is admitted against max_artifact_bytes before it writes,
+            # and the receipt's actual bytes commit on success.
             record = write_adjoint_checkpoint(
                 space, boundary=boundary,
                 session={"generation": storage.session["generation"],
                          "kind": "adjoint_checkpoint",
                          "run_identity_sha256": storage.session["run_identity_sha256"]},
                 cotangents=plane, shared_adjoint=shared_adjoint,
-                shared_pass=shared_pass)
+                shared_pass=shared_pass, owner=storage)
             checkpoints.append(record)
             log(f"checkpoint published at boundary {boundary} "
                 f"({len(plane)} cotangent entries)")
