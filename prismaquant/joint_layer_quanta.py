@@ -1120,7 +1120,10 @@ def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
 
     Derived post-capture from the completed adjoint receipt, the record's
     sealed ``chain_layers``/``layer``/``checkpoint_boundary``/``windows``,
-    and the sealed probe count: the checkpoint plane (activation +
+    and ``n_probes`` -- which is caller-responsible: the post-capture regen
+    passes the sealed plan value, never a knob, and the binder requires
+    that same trusted count independently rather than trusting the
+    manifest's attestation. The checkpoint plane (activation +
     shared-state entries -- file lease: one whole-plane load, released
     after decoded buffers exist; decoded tensors stay RAM-resident for the
     action), then each chain layer's boundary entries once per probe in
@@ -1308,7 +1311,8 @@ def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
 def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
                                   manifest: Mapping, manifest_path: str,
                                   manifest_sha256: str, output_root: str,
-                                  strided_boundaries: Sequence[int]) -> dict:
+                                  strided_boundaries: Sequence[int],
+                                  n_probes: int) -> dict:
     """Bind a sealed boundary readset manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying a ``boundary_readset`` block
@@ -1319,11 +1323,18 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     the input record is never mutated.
 
     Refuses unless every identity binds exactly: the completed-capture
-    receipt, the record's schema, layer, producer-constrained quantum id,
-    campaign digests/scope, and its already bound adjoint receipt (another
-    receipt for the same layer refuses); the manifest path is exactly the
+    receipt; the input record itself, reverified through the existing
+    ``check_quantum_for_campaign`` owner against its own sealed campaign
+    and bound receipt BEFORE any mutation (a tampered field with a stale
+    identity refuses -- binding never blesses edits by recomputing); the
+    record's schema, layer, producer-constrained quantum id, campaign
+    digests/scope, and its already bound adjoint receipt (another receipt
+    for the same layer refuses); the manifest path is exactly the
     producer-named bound path under the output root (the quantum id enters
-    no free-form pathname). The manifest itself is proven, not trusted:
+    no free-form pathname). ``n_probes`` is an explicit trusted input --
+    the regen passes the sealed plan value, and the manifest must attest
+    that same count (never the manifest attesting to itself). The manifest
+    itself is proven, not trusted:
     its schema, entries, phases, counts and schedule must equal what
     :func:`build_quantum_boundary_readset` derives from this record and
     receipt -- a different path/bytes/digest set with matching annotations
@@ -1361,6 +1372,10 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
         if not campaign.get(key):
             raise ValueError(f"a quantum record seals no campaign {key}: "
                              "refusing")
+    if type(n_probes) is not int or isinstance(n_probes, bool) \
+            or n_probes < 1:
+        raise ValueError("a boundary readset needs a trusted sealed probe "
+                         f"count, not {n_probes!r}")
     if type(output_root) is not str or not output_root.startswith("/"):
         raise ValueError("an output root must be absolute: refusing")
     expected_path = (f"{output_root.rstrip('/')}/layer-quanta/adjoint/"
@@ -1371,6 +1386,11 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
         raise ValueError(
             f"a boundary readset path must be exactly {expected_path}: "
             "refusing")
+    # The input record is reverified through the existing owner BEFORE any
+    # mutation: a tampered field with a stale identity refuses here, and
+    # binding never blesses edits by recomputing.
+    check_quantum_for_campaign(
+        record, {**campaign, "adjoint_receipt_sha256": bound_receipt})
     if not isinstance(manifest, dict):
         raise ValueError("a boundary readset manifest must be an object: "
                          "refusing")
@@ -1385,10 +1405,14 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
         raise ValueError(
             f"quantum {record.get('quantum_id')!r} binds another stage-A "
             "receipt: refusing")
+    if annotations.get("n_probes") != n_probes:
+        raise ValueError(
+            f"the boundary readset attests another probe count "
+            f"{annotations.get('n_probes')!r}: refusing")
     try:
         expected = build_quantum_boundary_readset(
             record, receipt, strided_boundaries=strided_boundaries,
-            n_probes=annotations.get("n_probes"))
+            n_probes=n_probes)
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         raise ValueError("the boundary readset does not derive from its "
                          f"record and receipt: refusing ({exc})") from exc
@@ -1461,7 +1485,8 @@ def emit_quantum_boundary_readsets(receipt: Mapping,
                 manifest_path=manifest_path,
                 manifest_sha256=manifest_sha256,
                 output_root=output_root,
-                strided_boundaries=strided_boundaries),
+                strided_boundaries=strided_boundaries,
+                n_probes=n_probes),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,

@@ -29,10 +29,11 @@ Three gates, all fail closed with exit 3:
   old root is explicit rather than inferred.
 * Gate 2: ``--adjoint-receipt`` must exist and load; the bound set is
   regenerated with the receipt mapping (every ``adjoint.receipt_sha256``
-  binds, every ``identity_sha256`` moves). With a receipt, each record
-  additionally gets a new ``boundary_readset`` generation bound to its
-  sealed bulk manifest (PQ #848; probe count from the sealed plan), whose
-  files land under the new tree's ``bound-readsets/`` directory.
+  binds, every ``identity_sha256`` moves). Only with the opt-in
+  ``--boundary-readsets`` flag does each record additionally get a new
+  ``boundary_readset`` generation bound to its sealed bulk manifest
+  (PQ #848; probe count from the sealed plan), whose files land under
+  the new tree's ``bound-readsets/`` directory.
   ``--check-only`` runs the gates and writes nothing, mirroring the
   external binder's dry run.
 
