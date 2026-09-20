@@ -1038,7 +1038,9 @@ def test_lease_helper_reads_authoritative_env_automatically(tmp_path, monkeypatc
 
 def test_lease_helper_env_without_helper_refuses(tmp_path, monkeypatch):
     """An authoritatively-named root that names nothing usable refuses
-    instead of importing whatever happens to be around."""
+    instead of importing whatever happens to be around — unavailable on a
+    fresh interpreter, divergent when another tree is already imported
+    (two trees must never mix). Either way: clear refusal, zero pool."""
     from prismaquant.staged_lease import HELPER_ROOT_ENV_VAR
     _pb()
     path, _ = _shard(tmp_path)
@@ -1048,7 +1050,8 @@ def test_lease_helper_env_without_helper_refuses(tmp_path, monkeypatch):
         tmp_path, {'s': (path, staged, None)}))
     monkeypatch.setenv(HELPER_ROOT_ENV_VAR, str(tmp_path / 'no-such-root'))
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        with pytest.raises(LeaseRefused, match="lease-helper-unavailable"):
+        with pytest.raises(LeaseRefused,
+                           match="lease-helper-(unavailable|divergent)"):
             reader.get_tensor('f32')
     assert resolver.report()['bytes_from_pool'] == 0
 
