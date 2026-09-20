@@ -9,15 +9,14 @@ knobs).
 
 Activation is explicit and process-global. The joint campaign entrypoints
 (``joint_cost_quantum``, ``joint_cost_stage_a``) activate it from their
-sealed ``--allowed-tiers`` flag — always, so a campaign run cannot waive
-silently. There is deliberately no ambient-environment fallback in the
-production path: tests use :func:`staged_tier_policy_context` (or the
-explicit setter), whose lifetime is explicit.
+sealed ``--allowed-tiers`` flag — always, after the identity gates and
+before any bulk byte, so a campaign run cannot waive silently. There is
+deliberately no ambient-environment fallback in the production path.
+Tests use the explicitly test-only :func:`staged_tier_policy_test_context`.
 
 Process-global (never ContextVar) is load-bearing, not incidental: tensor
 payloads are read on prefetch worker threads that inherit no context, and
-the policy must reach them deterministically. Reset happens only at
-explicit lifetimes (the context exit, or the test-only deactivator).
+the policy must reach them deterministically.
 
 Inactive by default: ordinary offline/library paths outside campaign scope
 keep their legacy fallback behavior (explicitly scoped, no automatic
@@ -30,17 +29,16 @@ Callers that catch ``StagedReadRefused`` for pool fallback must let
 ``TierPolicyRefused`` propagate (or convert it explicitly, never into a
 pool read).
 
-Lease posture: the PB reader-lease API (RNG-02/SM-03) is PB-owned and
-pending (window-level Lease/Pin handle per root direction; exact
-signatures come from the PB worker — this module proposes no stub).
-This module enforces tier choice without leases and refuses clearly where
-staged/lease support is absent. Owned pread buffers conceptually hold
-their lease from acquire through the last pread: async chunk futures are
-already joined before fd close/release on every path including
-cancellation/error (see ``_read_span``), CPU/GPU copies outlive fd close
-only after the owned buffer is fully read, and memory charge stays the
-normal action budget. Full lease-pin integration follows once the PB API
-lands; this policy is not claimed complete without it.
+Lease posture, stated accurately: this module enforces tier *choice* today
+— which staged tier a bulk open may come from — with no lease API
+involved. What awaits the PB reader-lease SDK is lifetime *pinning*
+(acquire/hold/release across prefetch and mappings, eviction guards).
+Strict lifetime is not claimed complete: until the SDK is wired, the
+posture is tier refusal plus owned-buffer discipline (async chunk futures
+joined before fd close/release on every path including
+cancellation/error, CPU/GPU copies outliving fd close only after the
+owned buffer is fully read, memory charge on the normal action budget),
+and every serving-tier record carries an explicit null lease.
 """
 from __future__ import annotations
 
@@ -60,6 +58,11 @@ class TierPolicyRefused(Exception):
 
 _LOCK = threading.Lock()
 _ACTIVE: frozenset[str] | None = None
+#: Thread ident holding test-only scopes, plus the stack of priors they
+#: must restore LIFO. Production never takes a scope (it activates), so a
+#: set owner always means test code is inside.
+_OWNER: int | None = None
+_STACK: list[frozenset[str] | None] = []
 
 
 def parse_allowed_tiers(value: str) -> frozenset[str]:
@@ -89,41 +92,79 @@ def activate_staged_tier_policy(value: str) -> frozenset[str]:
     entrypoints always pass explicitly. No ambient fallback: callers that
     have no sealed declaration have no policy.
     """
+def activate_staged_tier_policy(value: str) -> frozenset[str]:
+    """Activate strict enforcement for this process. Returns the allowed set.
+
+    ``value`` is the sealed ``--allowed-tiers`` declaration the campaign
+    entrypoints always pass explicitly. No ambient fallback: callers that
+    have no sealed declaration have no policy. The explicit production
+    install wins over any test-only scope state.
+    """
     allowed = parse_allowed_tiers(value)
     with _LOCK:
-        global _ACTIVE
+        global _ACTIVE, _OWNER
         _ACTIVE = allowed
+        _OWNER = None
+        _STACK.clear()
     return allowed
 
 
 def deactivate_staged_tier_policy_for_tests() -> None:
     """Restore legacy fallback behavior (tests only, explicit lifetime)."""
     with _LOCK:
-        global _ACTIVE
+        global _ACTIVE, _OWNER
         _ACTIVE = None
+        _OWNER = None
+        _STACK.clear()
 
 
 @contextmanager
-def staged_tier_policy_context(value: str):
-    """Explicit-lifetime strict policy for tests and scoped library use.
+def staged_tier_policy_test_context(value: str):
+    """Explicitly TEST-ONLY scoped strict policy. No production library use.
 
-    Saves the prior policy on entry and restores it on exit — even on
-    error — so a nested context can never clear (or permanently weaken)
-    an outer campaign's enforcement: the inner policy governs only
-    inside, and the outer verdict is intact afterwards. Production
-    campaign entrypoints never use this helper; they activate explicitly
-    from sealed args once at startup. The process-global cell is what
-    reaches prefetch worker threads.
+    Monotonic narrowing, atomically installed: the scope's tiers intersect
+    the currently active set (an outer campaign's or an outer test's), so
+    an inner scope can only narrow enforcement, never widen it — an empty
+    intersection refuses instead of installing. The prior verdict is
+    restored on exit, even on error. Scopes are thread-exclusive: entering
+    while another thread holds a scope refuses, so overlapping contexts
+    can never restore inactive underneath a live reader. Same-thread
+    ``with`` nesting is the only supported overlap (LIFO by construction).
+
+    The lock is held only for the atomic capture/install and restore —
+    never across the yield — so prefetch threads calling
+    :func:`active_policy` cannot deadlock against a live scope.
     """
-    global _ACTIVE
+    requested = parse_allowed_tiers(value)
+    me = threading.get_ident()
     with _LOCK:
+        global _ACTIVE, _OWNER
+        if _OWNER is not None and _OWNER != me:
+            raise RuntimeError(
+                "overlapping staged-tier scopes on multiple threads are "
+                "unsupported; production activates once from sealed args")
         prior = _ACTIVE
-    activate_staged_tier_policy(value)
+        narrowed = requested if prior is None else (requested & prior)
+        if not narrowed:
+            raise RuntimeError(
+                "staged-tier scope "
+                f"{sorted(requested)} is incompatible with the active "
+                f"{sorted(prior) if prior is not None else prior}: "
+                "scopes narrow, never widen")
+        _OWNER = me
+        _STACK.append(prior)
+        _ACTIVE = narrowed
     try:
         yield active_policy()
     finally:
         with _LOCK:
-            _ACTIVE = prior
+            if _OWNER != me:
+                raise RuntimeError(
+                    "staged-tier scope exited from a different thread "
+                    "than entered")
+            _ACTIVE = _STACK.pop()
+            if not _STACK:
+                _OWNER = None
 
 
 def active_policy() -> frozenset[str] | None:

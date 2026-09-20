@@ -32,7 +32,7 @@ from prismaquant.residency_map import (
 from prismaquant.staged_tier_policy import (
     DEFAULT_ALLOWED_TIERS, TierPolicyRefused, activate_staged_tier_policy,
     active_policy, deactivate_staged_tier_policy_for_tests,
-    parse_allowed_tiers, staged_tier_policy_context,
+    parse_allowed_tiers, staged_tier_policy_test_context,
 )
 
 MANIFEST = 'e' * 64
@@ -159,14 +159,15 @@ def test_parse_allowed_tiers_grammar():
 def test_policy_context_lifetime_is_explicit_and_thread_global():
     assert active_policy() is None
     seen = {}
-    with staged_tier_policy_context("ram,ssd") as allowed:
+    with staged_tier_policy_test_context("ram,ssd") as allowed:
         assert allowed == frozenset({"ram", "ssd"})
         worker = threading.Thread(
             target=lambda: seen.setdefault("active", active_policy()))
         worker.start()
         worker.join()
         # Prefetch threads inherit no context: the process-global cell is
-        # what reaches them deterministically (never ContextVar).
+        # what reaches them deterministically (never ContextVar), and the
+        # lock is never held across the yield, so this join cannot deadlock.
         assert seen["active"] == frozenset({"ram", "ssd"})
         with pytest.raises(TierPolicyRefused):
             raise TierPolicyRefused("sentinel")
@@ -174,27 +175,64 @@ def test_policy_context_lifetime_is_explicit_and_thread_global():
     assert seen["active"] == frozenset({"ram", "ssd"})
     # Error paths restore too.
     with pytest.raises(RuntimeError, match="boom"):
-        with staged_tier_policy_context("ram"):
+        with staged_tier_policy_test_context("ram"):
             raise RuntimeError("boom")
     assert active_policy() is None
 
 
-def test_nested_context_restores_outer_enforcement():
-    """An inner context never clears or permanently weakens the outer one."""
-    with staged_tier_policy_context("ram"):
-        assert active_policy() == frozenset({"ram"})
-        with staged_tier_policy_context("ram,ssd"):
-            assert active_policy() == frozenset({"ram", "ssd"})
-        assert active_policy() == frozenset({"ram"})
+def test_nested_scope_narrows_never_widens_and_restores():
+    """An inner scope intersects the outer verdict: it can narrow, never
+    widen, and the outer enforcement is intact afterwards. An incompatible
+    inner scope refuses without changing anything."""
+    with staged_tier_policy_test_context("ram,ssd"):
+        assert active_policy() == frozenset({"ram", "ssd"})
+        with staged_tier_policy_test_context("ram"):
+            assert active_policy() == frozenset({"ram"})
+        assert active_policy() == frozenset({"ram", "ssd"})
+        # Inner "ram,ssd" inside outer "ram" narrows to the intersection.
+        with staged_tier_policy_test_context("ram"):
+            with staged_tier_policy_test_context("ram,ssd"):
+                assert active_policy() == frozenset({"ram"})
+            assert active_policy() == frozenset({"ram"})
+            # Disjoint tiers refuse without changing anything.
+            with pytest.raises(RuntimeError, match="incompatible"):
+                with staged_tier_policy_test_context("ssd"):
+                    pass
+            assert active_policy() == frozenset({"ram"})
+        # The refused entry installed nothing.
+        assert active_policy() == frozenset({"ram", "ssd"})
     assert active_policy() is None
-    # An explicitly activated outer verdict survives a nested test scope.
+    # An explicitly activated outer verdict is narrowed, never cleared.
     activate_staged_tier_policy("ram")
     try:
-        with staged_tier_policy_context("ram,ssd"):
-            assert active_policy() == frozenset({"ram", "ssd"})
+        with staged_tier_policy_test_context("ram,ssd"):
+            assert active_policy() == frozenset({"ram"})
         assert active_policy() == frozenset({"ram"})
     finally:
         deactivate_staged_tier_policy_for_tests()
+    assert active_policy() is None
+
+
+def test_overlapping_scopes_on_threads_refuse():
+    """A scope entered on one thread blocks scopes on any other thread, so
+    overlapping contexts can never restore inactive underneath a live
+    reader. Same-thread `with` nesting is the only supported overlap."""
+    with staged_tier_policy_test_context("ram,ssd"):
+        outcome = {}
+
+        def enter_elsewhere():
+            try:
+                with staged_tier_policy_test_context("ram"):
+                    outcome["entered"] = True
+            except RuntimeError as exc:
+                outcome["refused"] = str(exc)
+
+        worker = threading.Thread(target=enter_elsewhere)
+        worker.start()
+        worker.join()
+        assert "entered" not in outcome
+        assert "unsupported" in outcome["refused"]
+        assert active_policy() == frozenset({"ram", "ssd"})
     assert active_policy() is None
 
 
