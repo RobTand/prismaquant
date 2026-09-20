@@ -597,6 +597,7 @@ def _tiny_receipt(campaign, space):
             "policy": {"prefetch_batches": 2}},
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
+        "status": "complete",
     }
     write_adjoint_receipt(space, receipt)
     return receipt

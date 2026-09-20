@@ -1375,13 +1375,16 @@ def bind_quantum_boundary_readset(record: Mapping, *, manifest: Mapping,
             ("quantum_id", record.get("quantum_id")),
             ("quantum_layer", layer),
             ("checkpoint_boundary", adjoint.get("checkpoint_boundary")),
-            ("receipt_sha256", bound_receipt),
             ("plan_sha256", campaign["plan_sha256"]),
             ("prepared_sha256", campaign["prepared_sha256"]),
             ("parent_manifest_sha256", campaign["read_manifest_sha256"])):
         if annotations.get(key) != expected:
             raise ValueError(
                 f"the boundary readset answers for another {key}: refusing")
+    if annotations.get("receipt_sha256") != bound_receipt:
+        raise ValueError(
+            f"quantum {record.get('quantum_id')!r} binds another stage-A "
+            "receipt: refusing")
     if annotations.get("chain_layers") != adjoint.get("chain_layers"):
         raise ValueError("the boundary readset answers for another chain: "
                          "refusing")
