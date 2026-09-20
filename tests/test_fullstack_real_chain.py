@@ -240,7 +240,7 @@ def test_pb_validates_producer_slices(pb, produced, campaign) -> None:
                               "resources": {"cpu": 1, "mem_gb": 1}}}
               for chunk in record["chunks"]]
     plan = plans.build_plan(
-        consumer_action_key="ef" * 64, tier_id="prismabuild-stage:dl380g10",
+        consumer_action_key="ef" * 32, tier_id="prismabuild-stage:dl380g10",
         stage_root="/stage/prewarm",
         manifest_sha256=record["read_set"]["manifest_sha256"],
         manifest_bytes=1 << 20, phases=phases)
@@ -275,7 +275,7 @@ def staged(pb, produced, campaign):
             "--pool-root", str(tmp / "pb-queue"),
             "--cas-root", str(tmp / "pb-queue" / "cas"),
             "--action-key", mover,
-            "--consumer-action-key", "cc" * 64,
+            "--consumer-action-key", "cc" * 32,
             "--tier-id", "prismabuild-stage:dl380g10",
             "--stage-root", str(stage),
             "--manifest-sha256", campaign["parent_sha"],
@@ -293,7 +293,7 @@ def staged(pb, produced, campaign):
     prom = ram_promote.build_parser().parse_args([
         "--pool-root", str(tmp / "pb-queue"),
         "--action-key", "bb" * 32,
-        "--consumer-action-key", "cc" * 64,
+        "--consumer-action-key", "cc" * 32,
         "--tier-id", "ram:dl380g10",
         "--ram-root", str(ram),
         "--source-stage-root", str(stage),
@@ -330,7 +330,7 @@ def test_movers_stage_whole_and_split_byte_identical(staged, campaign) -> None:
 
 def _pq_read_fragments(queue):
     from prismaquant import residency_map as pqmap  # noqa: E402
-    root = Path(queue.root) / "residency" / ("cc" * 64)
+    root = Path(queue.root) / "residency" / ("cc" * 32)
     return [json.loads(p.read_text()) for p in sorted(root.glob("*.json"))]
 
 
