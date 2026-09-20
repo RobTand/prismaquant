@@ -564,6 +564,13 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
         "no persisted proof after finish+egress: reclaim cannot verify")
     assert attestation.get("scope_empty") is True, attestation
     evidence["attestation_empty"] = True
+    evidence["attestation"] = (
+        json.loads(json.dumps(attestation, sort_keys=True, default=str)))
+    scope_id = control["scope_id"]
+    evidence["scope_id"] = scope_id
+    proves, _ = lease.attestation_proves_empty(
+        world.queue, KEY, NONCE, scope_id)
+    evidence["proves_empty_pre_evict"] = bool(proves)
     pin_path = (lease.leases_root(world.queue) / KEY
                 / f"{acquired['pin_id']}.lease.json")
     assert not pin_path.exists(), "reclaimed pin file must unlink"
