@@ -215,9 +215,16 @@ class StreamedBoundaryArtifacts:
         self._cotangents = None
         self._status = "unused"
         self._scratch = None
+        self._checkpoint_reservations = {}
+        self._checkpoint_committed = {}
+        self._checkpoint_active = None
+        self._next_checkpoint_reservation = 1
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
+            "live_checkpoint_bytes": 0, "peak_checkpoint_bytes": 0,
+            "checkpoint_reservations": 0, "checkpoint_refusals": 0,
+            "checkpoint_envelope_unused_bytes": 0,
             "written_tensor_bytes": 0, "read_tensor_bytes": 0,
             "written_entries": 0, "retired_entries": 0, "prefetch_windows": 0,
             "hot_read_misses": 0}
@@ -422,6 +429,333 @@ class StreamedBoundaryArtifacts:
         del self._slots[identity["slot"]]
         self._retire(reference)
 
+    # ------------------------------------------------------------------
+    # Checkpoint artifact budget: strided-checkpoint files counted in the
+    # same max_artifact_bytes ceiling as ordinary boundary/cotangent files.
+    #
+    # The stage-A checkpoint writer serializes outside this owner's entry
+    # directory, so write()'s pre-write check never sees those bytes. The
+    # contract here is reserve-before-write: the writer computes its exact
+    # file plan (tensor envelopes, serialized shared-state payloads,
+    # manifest envelope, in-progress temp overlap), this owner admits the
+    # whole envelope against live ordinary bytes plus live checkpoint bytes
+    # plus every active/retained envelope, and only then does the writer
+    # create its directory. A post-write register call could not enforce
+    # the ceiling, so anything that does not fit refuses with its counts
+    # before a single file lands.
+    #
+    # Single-owner serial writer: stage A checkpoints one boundary at a
+    # time on its owning thread. At most one reservation is active; a
+    # second concurrent reservation refuses rather than racing. No locks.
+    # ------------------------------------------------------------------
+
+    def check_transient_buffer(self, label):
+        """Invoke the bound memory-owner hook for a transient serialization buffer.
+
+        Durable checkpoint bytes are reserved in the artifact budget below;
+        the transient pickle/manifest buffers live in RAM and are reported
+        through the same hook ordinary allocations use. Unbound owners keep
+        today's behavior byte for byte.
+        """
+        if self._check_memory is not None:
+            self._check_memory(str(label))
+
+    def _checkpoint_accounted_bytes(self):
+        return (self.telemetry["live_artifact_bytes"]
+                + self.telemetry["live_checkpoint_bytes"]
+                + sum(record["envelope_bytes"]
+                      for record in self._checkpoint_reservations.values()
+                      if record["state"] in ("active", "retained")))
+
+    def checkpoint_remaining_bytes(self):
+        """Uncommitted headroom under max_artifact_bytes across both ledgers."""
+        return self.config["max_artifact_bytes"] - self._checkpoint_accounted_bytes()
+
+    @staticmethod
+    def _validate_checkpoint_file_plan(file_plan):
+        if not isinstance(file_plan, dict):
+            raise RuntimeError("exact boundary checkpoint file plan is not a mapping")
+        files = file_plan.get("files")
+        manifest_bytes = file_plan.get("manifest_bytes")
+        temp_overlap_bytes = file_plan.get("temp_overlap_bytes")
+        envelope_bytes = file_plan.get("envelope_bytes")
+        if (not isinstance(files, list) or not files
+                or type(manifest_bytes) is not int or manifest_bytes <= 0
+                or type(temp_overlap_bytes) is not int or temp_overlap_bytes < 0
+                or type(envelope_bytes) is not int or envelope_bytes <= 0):
+            raise RuntimeError("exact boundary checkpoint file plan is malformed")
+        total = int(manifest_bytes) + int(temp_overlap_bytes)
+        for entry in files:
+            if (not isinstance(entry, dict) or type(entry.get("name")) is not str
+                    or not entry["name"]
+                    or type(entry.get("envelope_bytes")) is not int
+                    or entry["envelope_bytes"] <= 0):
+                raise RuntimeError("exact boundary checkpoint file plan is malformed")
+            total += entry["envelope_bytes"]
+        if total != envelope_bytes:
+            raise RuntimeError(
+                "exact boundary checkpoint envelope does not match its file plan")
+        return files
+
+    def reserve_checkpoint_artifact(self, *, label, envelope_bytes, file_plan,
+                                    checkpoint_dir):
+        """Admit one checkpoint attempt's whole envelope before it writes.
+
+        Returns an integer reservation id. Refuses (counting a refusal) when
+        the envelope does not fit the remaining ceiling, when another
+        reservation is already active, or when the owner is not a running
+        writer. Nothing is created by this call.
+        """
+        if self._readonly:
+            raise RuntimeError(
+                "an attached read-only generation cannot reserve checkpoint artifacts")
+        if self._status != "running":
+            raise RuntimeError("exact boundary generation is not running")
+        if self._checkpoint_active is not None:
+            raise RuntimeError(
+                "exact boundary checkpoint reservation already active: single-owner writer")
+        files = self._validate_checkpoint_file_plan(file_plan)
+        if file_plan["envelope_bytes"] != envelope_bytes:
+            raise RuntimeError(
+                "exact boundary checkpoint envelope does not match its file plan")
+        if type(envelope_bytes) is not int or envelope_bytes <= 0:
+            raise RuntimeError(
+                "exact boundary checkpoint envelope must be a positive byte count")
+        try:
+            directory = Path(checkpoint_dir)
+        except TypeError as exc:
+            raise RuntimeError(
+                "exact boundary checkpoint directory is not a path") from exc
+        if not directory.is_absolute():
+            raise RuntimeError(
+                "exact boundary checkpoint directory must be absolute")
+        remaining = self.checkpoint_remaining_bytes()
+        if envelope_bytes > remaining:
+            self.telemetry["checkpoint_refusals"] += 1
+            raise RuntimeError(
+                "exact boundary checkpoint artifact budget exceeded: "
+                f"{label} needs {envelope_bytes} bytes, {remaining} remain of "
+                f"{self.config['max_artifact_bytes']}")
+        reservation = self._next_checkpoint_reservation
+        self._next_checkpoint_reservation += 1
+        self._checkpoint_reservations[reservation] = {
+            "envelope_bytes": envelope_bytes, "files": files,
+            "manifest_bytes": file_plan["manifest_bytes"],
+            "dir": str(directory), "label": str(label), "state": "active",
+            "receipt_digest": None,
+        }
+        self._checkpoint_active = reservation
+        self.telemetry["checkpoint_reservations"] += 1
+        return reservation
+
+    def commit_checkpoint_artifact(self, reservation_id, record):
+        """Commit a writer receipt's ACTUAL bytes/digests against its reservation.
+
+        Verifies every receipt-listed file exists at its receipted size plus
+        the manifest, requires actuals within the reserved envelope, then
+        moves the envelope into live checkpoint bytes and returns the
+        commitment (envelope, actual, unused, receipt digest). The same
+        reservation with an equal receipt commits idempotently; a different
+        receipt, an unknown id, or a non-active reservation refuses. Failure
+        verification retains the envelope (files may exist) instead of
+        releasing it; reclaim explicitly.
+        """
+        if type(reservation_id) is not int:
+            raise RuntimeError("exact boundary checkpoint reservation is not an integer")
+        entry = self._checkpoint_reservations.get(reservation_id)
+        if entry is None:
+            raise RuntimeError("exact boundary checkpoint reservation is unknown")
+        if not isinstance(record, dict):
+            raise RuntimeError("exact boundary checkpoint record is not a mapping")
+        digest = record.get("cotangent_sha256")
+        if type(digest) is not str or not digest:
+            raise RuntimeError("exact boundary checkpoint record carries no receipt digest")
+        if entry["state"] == "committed":
+            if entry["receipt_digest"] == digest:
+                return dict(self._checkpoint_committed[reservation_id])
+            raise RuntimeError(
+                "exact boundary checkpoint reservation already committed a "
+                "different receipt")
+        if entry["state"] != "active":
+            raise RuntimeError(
+                "exact boundary checkpoint reservation is not active; "
+                "reclaim it before any new attempt")
+
+        def _fail(message):
+            entry["state"] = "retained"
+            if self._checkpoint_active == reservation_id:
+                self._checkpoint_active = None
+            raise RuntimeError(message)
+
+        actual = 0
+        for field in ("activation_entries", "shared_state_entries"):
+            entries = record.get(field)
+            if not isinstance(entries, list):
+                _fail("exact boundary checkpoint record has no entry list "
+                      f"{field!r}")
+            for row in entries:
+                if (not isinstance(row, dict) or type(row.get("path")) is not str
+                        or type(row.get("file_bytes")) is not int):
+                    _fail("exact boundary checkpoint record entry is malformed")
+                try:
+                    observed = Path(row["path"]).stat().st_size
+                except OSError:
+                    _fail("exact boundary checkpoint receipt file is missing: "
+                          f"{row.get('name')}")
+                if observed != row["file_bytes"]:
+                    _fail("exact boundary checkpoint receipt file size drifted: "
+                          f"{row.get('name')}")
+                actual += row["file_bytes"]
+        manifest_path = Path(entry["dir"]) / "checkpoint.json"
+        try:
+            manifest_bytes = manifest_path.stat().st_size
+        except OSError:
+            _fail("exact boundary checkpoint manifest is missing at commit")
+        actual += manifest_bytes
+        if actual > entry["envelope_bytes"]:
+            _fail("exact boundary checkpoint actual bytes exceed the reserved "
+                  f"envelope ({actual} > {entry['envelope_bytes']})")
+        unused = entry["envelope_bytes"] - actual
+        entry["state"] = "committed"
+        entry["receipt_digest"] = digest
+        if self._checkpoint_active == reservation_id:
+            self._checkpoint_active = None
+        self.telemetry["live_checkpoint_bytes"] += actual
+        self.telemetry["peak_checkpoint_bytes"] = max(
+            self.telemetry["live_checkpoint_bytes"],
+            self.telemetry["peak_checkpoint_bytes"])
+        self.telemetry["checkpoint_envelope_unused_bytes"] += unused
+        commitment = {"reservation": reservation_id,
+                      "envelope_bytes": entry["envelope_bytes"],
+                      "actual_bytes": actual, "unused_bytes": unused,
+                      "receipt_digest": digest,
+                      "checkpoint_dir": entry["dir"]}
+        self._checkpoint_committed[reservation_id] = commitment
+        if self._check_memory is not None:
+            self._check_memory("checkpoint artifact publication")
+        return dict(commitment)
+
+    def abandon_checkpoint_artifact(self, reservation_id):
+        """Retain a failed attempt's envelope: files may exist, so its bytes
+        stay counted until an explicit reclaim disposes its directory."""
+        if type(reservation_id) is not int:
+            raise RuntimeError("exact boundary checkpoint reservation is not an integer")
+        entry = self._checkpoint_reservations.get(reservation_id)
+        if entry is None:
+            raise RuntimeError("exact boundary checkpoint reservation is unknown")
+        if entry["state"] == "committed":
+            raise RuntimeError(
+                "exact boundary checkpoint reservation is committed; "
+                "committed bytes are final")
+        entry["state"] = "retained"
+        if self._checkpoint_active == reservation_id:
+            self._checkpoint_active = None
+        return None
+
+    def cancel_checkpoint_artifact(self, reservation_id):
+        """Release a reservation that created nothing (pre-write failure).
+
+        Only an active reservation cancels: the attempt directory was never
+        created, so no bytes can exist and the full envelope is released.
+        Anything that may have written must abandon (retain) instead.
+        """
+        if type(reservation_id) is not int:
+            raise RuntimeError("exact boundary checkpoint reservation is not an integer")
+        entry = self._checkpoint_reservations.get(reservation_id)
+        if entry is None:
+            raise RuntimeError("exact boundary checkpoint reservation is unknown")
+        if entry["state"] != "active":
+            raise RuntimeError(
+                "exact boundary checkpoint reservation is not active; "
+                "only a pre-write attempt cancels cleanly")
+        del self._checkpoint_reservations[reservation_id]
+        if self._checkpoint_active == reservation_id:
+            self._checkpoint_active = None
+        return None
+
+    def reclaim_checkpoint_artifact(self, space, boundary):
+        """Dispose a retained attempt's own new directory, then release it.
+
+        Refuses when no retained reservation names that checkpoint directory:
+        nothing is ever deleted blindly. Committed (durable published)
+        checkpoints are never reclaimed through this path.
+        """
+        from .joint_adjoint_checkpoints import checkpoint_directory
+
+        directory = checkpoint_directory(space, int(boundary))
+        target = str(directory)
+        reservation = None
+        for reservation_id, entry in self._checkpoint_reservations.items():
+            if entry["state"] == "retained" and entry["dir"] == target:
+                reservation = reservation_id
+                break
+        if reservation is None:
+            raise RuntimeError(
+                "exact boundary checkpoint reclaim found no retained attempt at "
+                f"{target}")
+        import shutil
+
+        if directory.is_dir():
+            shutil.rmtree(directory)
+        del self._checkpoint_reservations[reservation]
+        if self._checkpoint_active == reservation:
+            self._checkpoint_active = None
+        return {"reservation": reservation, "checkpoint_dir": target,
+                "reclaimed": True}
+
+    def checkpoint_commitment(self, receipt_digest):
+        """Return the stored commitment for a receipt digest, if committed."""
+        for commitment in self._checkpoint_committed.values():
+            if commitment["receipt_digest"] == receipt_digest:
+                return dict(commitment)
+        return None
+
+    def checkpoint_output_descriptor(self):
+        """Application-budget output descriptor for a future PB output lane.
+
+        Reports this owner's exact-artifact ceiling, live ordinary bytes,
+        live checkpoint bytes, and reserved bytes in bytes. This enforces
+        the APPLICATION artifact budget only: it is not a PrismaBuild
+        shared SSD/RAM reservation and it stages no outputs. A future PB
+        output descriptor (the PB732/liveness scope) may consume these
+        counts and must fund movement separately; no admission is bypassed
+        from here.
+        """
+        reserved = sum(record["envelope_bytes"]
+                       for record in self._checkpoint_reservations.values()
+                       if record["state"] in ("active", "retained"))
+        return {
+            "schema": "prismaquant.boundary_artifact_output.v1",
+            "unit": "bytes",
+            "scope": "application artifact budget",
+            "ceiling_bytes": self.config["max_artifact_bytes"],
+            "live_ordinary_bytes": self.telemetry["live_artifact_bytes"],
+            "live_checkpoint_bytes": self.telemetry["live_checkpoint_bytes"],
+            "reserved_bytes": reserved,
+            "note": ("Application-level accounting only: not a PrismaBuild "
+                     "shared SSD/RAM reservation and not staged output."),
+        }
+
+    def _reclaim_retained_checkpoints(self):
+        """Dispose every retained attempt directory at close and release it.
+
+        Committed checkpoints are durable published state and survive close
+        either way. Retained attempts never held a receipt, so their brand-new
+        attempt directory (created only after a successful reservation) is
+        safe to dispose here; anything else refuses loudly instead.
+        """
+        import shutil
+
+        for reservation_id, entry in list(self._checkpoint_reservations.items()):
+            if entry["state"] != "retained":
+                continue
+            directory = Path(entry["dir"])
+            if directory.is_dir():
+                shutil.rmtree(directory)
+            del self._checkpoint_reservations[reservation_id]
+            if self._checkpoint_active == reservation_id:
+                self._checkpoint_active = None
+
     @contextmanager
     def prefetch(self, references):
         from .perturbed_x_cache import prefetch_exact_activation_cache_entries
@@ -466,16 +800,24 @@ class StreamedBoundaryArtifacts:
             if not self._readonly and (
                     self._active_window is not None or self.telemetry["resident_tensor_bytes"]):
                 raise RuntimeError("exact boundary generation closed with a live window")
+            if self._checkpoint_active is not None:
+                raise RuntimeError(
+                    "exact boundary generation closed with an active checkpoint "
+                    "reservation: commit, abandon, or cancel it first")
             if self._published:
                 # A published generation's entries belong to its receipt; the
                 # quanta read them back, so closing the owner must not unlink
                 # them. Deliberate retirements already happened above.
+                # Committed checkpoints are durable for the same reason and
+                # survive here too; only retained (never receipted) attempts
+                # are disposed below.
                 self._references.clear()
                 self._slots.clear()
             else:
                 for reference in list(self._references.values()):
                     self._retire(reference, missing_ok=True)
                 self._slots.clear()
+            self._reclaim_retained_checkpoints()
         except BaseException:
             self._status = "failed"
             raise
