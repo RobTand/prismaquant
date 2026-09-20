@@ -1,0 +1,26 @@
+{
+  "scope": "Standalone admitted reader diagnostic; not full campaign qualification",
+  "source": "7d66cadf71",
+  "issue": "https://github.com/RobTand/prismaquant/issues/868",
+  "pr": "https://github.com/RobTand/prismaquant/pull/869",
+  "behavior": "Actual strict calibration read, serving-tier check and exact lease hold/release; census follows the injected queue. Explicit --functional-only changes only the final optional mount-IO qualification gate, preserving truthful unobserved/nonzero results and all functional checks. Default qualification verdict is unchanged.",
+  "validation": {
+    "r6": "21 passed, zero skips across ca96b400bf4a,569a1dfdcb4b,624815edadf5,d3b1a736e1bb; ca96 result reused from CAS, not a fresh execution. Six-test positive fixture uses actual isolated PoolQueue/broker/SDK with simulated mount observations.",
+    "r6_red": "efb19c15f9e6: actual calibration read succeeds but hardcoded census queue makes six tests fail. Submitted source contains test-only hygiene adjustments and an unexecuted patch artifact; tool remains pre-fix.",
+    "r7": "19 affected tests passed, zero skips:9ce82db0f60c(11positive) and1d61c6a76d56(8main), including successful functional mode with unknown I/O, retained wrong-draw/lease refusals, and unchanged full-mode refusal on unknown I/O. Earlier seven pure/helper tests are reused; counts overlap.",
+    "root_check": "Actual terminal logs, CAS result/receipt and submitted snapshots checked against final source. Green snapshots differ only by checkout metadata.",
+    "warnings": "14\u201315 dependency/test-environment warnings per shard; no skips."
+  },
+  "live_evidence": {
+    "runtime": "00ff716f4151-1789915735-d8182a4286a9",
+    "cold_reader": "69d8bccd91acf9488776599bc11a68a4592a1db04a9d38a14e56b94ba3fe8996",
+    "result": "SSD calibration bytes/draw and exact lease lifetime succeed on Sparky; old full qualifier exits2 only for unobserved mount I/O. New explicit functional-mode run pending.",
+    "stale_reader": "5a12fdadcffd: inherited old file identity refuses; PB755 repair is a separate change."
+  },
+  "remaining": [
+    "Both-Spark native/container positive live matrix",
+    "Live RAM-first read",
+    "Direct fault injection into post-release pin-read error branch",
+    "Payload-specific origin-IO measurement and full workload/performance qualification"
+  ]
+}
