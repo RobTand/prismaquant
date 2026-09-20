@@ -126,6 +126,10 @@ def _quantum_record(tmp_path: Path) -> Path:
     record_path.write_text(json.dumps({
         "schema": joint.RECORD_SCHEMA, "quantum_id": "layer-001", "layer": 1,
         "identity_sha256": "3" * 64,
+        "campaign": {"plan_path": str(tmp_path / "plan.json"),
+                     "plan_sha256": "1" * 64,
+                     "prepared_path": "/fixture/prepared.json",
+                     "prepared_sha256": "2" * 64},
         "read_set": {"manifest_path": str(slice_path),
                      "manifest_sha256": hashlib.sha256(
                          slice_path.read_bytes()).hexdigest()},
