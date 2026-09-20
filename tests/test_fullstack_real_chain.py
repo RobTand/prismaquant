@@ -146,7 +146,8 @@ def campaign(tmp_path_factory):
     }
     units = [f"model.layers.{layer}.mlp.gate_proj" for layer in (0, 1)]
     prepared = {"formats_by_qname": {name: {} for name in units}}
-    plan = {"output_root": str(tmp / "campaign"), "model": "fixture",
+    plan = {"output_root": str(tmp / "campaign"),
+            "model": str(tmp / "pool" / "model"),
             "distributed_campaign": {}}
     sealed = {}
     for name, payload in (("plan.json", plan), ("prepared.json", prepared),
