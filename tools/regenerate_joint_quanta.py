@@ -40,11 +40,10 @@ and cannot be captured), then submit from its outputs.
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
-import io
 import json
 import sys
+import zlib
 from pathlib import Path
 
 if __package__:
@@ -81,18 +80,21 @@ def _load_json(path: Path, *, digest: str | None, where: str):
     if digest is not None and hashlib.sha256(raw).hexdigest() != digest:
         raise ValueError(f"{where} digest mismatch at {path}")
     if raw[:2] == _GZIP_MAGIC:
+        # wbits=31 decodes the gzip wrapper; the decompressor -- not a
+        # filename or member count -- reports truncation (eof) and trailing
+        # bytes (unused_data), and output past the bound refuses.
+        decompressor = zlib.decompressobj(31)
         try:
-            with gzip.GzipFile(fileobj=io.BytesIO(raw)) as member:
-                raw = member.read(MAX_DECODED_MANIFEST_BYTES + 1)
-                trailing = member.unused_data
-        except (OSError, EOFError) as exc:
+            raw = decompressor.decompress(raw, MAX_DECODED_MANIFEST_BYTES + 1)
+        except zlib.error as exc:
             raise ValueError(f"{where} is not valid gzip at {path}: "
                              f"{exc}") from exc
-        if trailing:
+        if decompressor.unused_data:
             raise ValueError(f"{where} has trailing bytes after its gzip "
                              f"member at {path}: refusing")
-        if len(raw) > MAX_DECODED_MANIFEST_BYTES:
-            raise ValueError(f"{where} decoded document exceeds "
+        if not decompressor.eof or len(raw) > MAX_DECODED_MANIFEST_BYTES:
+            raise ValueError(f"{where} gzip member is truncated or its "
+                             f"decoded document exceeds "
                              f"{MAX_DECODED_MANIFEST_BYTES} bytes at {path}")
     try:
         return json.loads(raw.decode("utf-8"))
@@ -202,7 +204,9 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
     if json.dumps(old_body, sort_keys=True) != json.dumps(new_body, sort_keys=True):
         raise ValueError(f"Gate 1 {where}: {qid} differs outside the moved "
                          f"paths")
-    if canonical_sha256(new, where=f"Gate 1 {where} {qid}") != new.get(
+    body = {key: value for key, value in new.items()
+            if key != "identity_sha256"}
+    if canonical_sha256(body, where=f"Gate 1 {where} {qid}") != new.get(
             "identity_sha256"):
         raise ValueError(f"Gate 1 {where}: {qid} identity does not recompute")
 
