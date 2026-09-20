@@ -338,9 +338,11 @@ def _regen_argv(tmp_path: Path, campaign: dict) -> list[str]:
 
 
 def test_regenerate_writes_new_roots_and_binds_receipt(tmp_path):
-    """Defect 4 path: the repo CLI regenerates records/slices/manifests
-    with the authoritative output root (never its own directory) and
-    re-seals against the receipt -- old files untouched, nothing copied."""
+    """Defect 4 path: the repo CLI regenerates records with the authoritative
+    output root (never its own directory), writes slices at the
+    producer-named paths the records bind (verified to resolve), and
+    re-seals against the receipt -- old files untouched, nothing copied,
+    no adjoint manifest written (the phase worker owns that file)."""
     import regenerate_joint_quanta as regen
     campaign = _campaign(tmp_path)
     base = _regen_argv(tmp_path, campaign)
@@ -353,13 +355,24 @@ def test_regenerate_writes_new_roots_and_binds_receipt(tmp_path):
     for record in records:
         assert record["output_space"]["root"].startswith(str(campaign["root"]))
         assert record["adjoint"]["receipt_sha256"] is None
+        slice_path = Path(record["read_set"]["manifest_path"])
+        assert slice_path.is_file(), f"bound slice missing at {slice_path}"
+        assert hashlib.sha256(slice_path.read_bytes()).hexdigest() == \
+            record["read_set"]["manifest_sha256"]
     assert (out / "records.json").is_file()
-    assert (out / "adjoint-manifest.json").is_file()
-    assert sorted((out / "manifests").glob("*.json.gz"))
-    # Gate 1: the same inputs reproduce the fresh files exactly.
+    assert not (out / "adjoint-manifest.json").exists()
+    assert not (out / "manifests").exists()
+    # Gate 1 without the original root refuses (reproducing against
+    # known-bad originals can never match by definition).
     assert regen.main(base + ["--output-root", str(campaign["root"]),
                               "--records-out", str(out),
                               "--expect-existing", str(out),
+                              "--check-only"]) == 3
+    # Gate 1 with the original root: reproduce, then authorized move.
+    assert regen.main(base + ["--output-root", str(campaign["root"]),
+                              "--records-out", str(out),
+                              "--expect-existing", str(out),
+                              "--original-root", str(campaign["root"]),
                               "--check-only"]) == 0
     # Gate 2: binding re-seals every record against the receipt.
     space = tmp_path / "adjoint-space"
@@ -384,3 +397,58 @@ def test_regenerate_writes_new_roots_and_binds_receipt(tmp_path):
                               "--records-out", str(bound_out),
                               "--adjoint-receipt",
                               str(space / "adjoint-capture.json")]) == 3
+
+
+def test_regenerate_gate1_reproduces_old_root_then_moves(tmp_path):
+    """The live shape: originals rooted at the binder's nested directory
+    reproduce exactly at that root (input fidelity), then move to the
+    authoritative root with only the authorized path fields changed --
+    against a realistic gzip parent, with records-out split from the
+    output root."""
+    import gzip as _gzip
+    import regenerate_joint_quanta as regen
+    campaign = _campaign(tmp_path)
+    # Realistic parent: gzipped wire bytes, digest over the compressed form.
+    parent_path = tmp_path / "parent.json"
+    wire = _gzip.compress(parent_path.read_bytes(), mtime=0)
+    parent_gz = tmp_path / "parent.json.gz"
+    parent_gz.write_bytes(wire)
+    campaign = dict(campaign, parent_sha=hashlib.sha256(wire).hexdigest())
+    base = _regen_argv(tmp_path, campaign)
+    base[base.index("--parent-manifest") + 1] = str(parent_gz)
+    base[base.index("--parent-manifest-sha256") + 1] = campaign["parent_sha"]
+    old_root = tmp_path / "layer-quanta"
+    old_records = tmp_path / "old-records"
+    old_records.mkdir()
+    assert regen.main(base + ["--output-root", str(old_root),
+                              "--records-out", str(old_records)]) == 0
+    assert json.loads((old_records / "layer-000.json").read_text())[
+        "output_space"]["root"].startswith(str(old_root))
+    new_out = tmp_path / "new-records"
+    # Gate 1 dry run: reproduce at the old root, validate the authorized
+    # move to the new root, write nothing.
+    assert regen.main(base + ["--output-root", str(campaign["root"]),
+                              "--records-out", str(new_out),
+                              "--expect-existing", str(old_records),
+                              "--original-root", str(old_root),
+                              "--check-only"]) == 0
+    assert not new_out.exists()
+    # Edited originals refuse at the fidelity step with the reason named.
+    tampered = json.loads((old_records / "layer-001.json").read_text())
+    tampered["layer"] = 99
+    (old_records / "layer-001.json").write_text(json.dumps(tampered))
+    assert regen.main(base + ["--output-root", str(campaign["root"]),
+                              "--records-out", str(new_out),
+                              "--expect-existing", str(old_records),
+                              "--original-root", str(old_root),
+                              "--check-only"]) == 3
+    # The real move: new roots, slices resolving to exact sealed bytes.
+    assert regen.main(base + ["--output-root", str(campaign["root"]),
+                              "--records-out", str(new_out)]) == 0
+    for record in [json.loads(path.read_text())
+                   for path in sorted(new_out.glob("layer-*.json"))]:
+        assert record["output_space"]["root"].startswith(str(campaign["root"]))
+        slice_path = Path(record["read_set"]["manifest_path"])
+        assert slice_path.is_file()
+        assert hashlib.sha256(slice_path.read_bytes()).hexdigest() == \
+            record["read_set"]["manifest_sha256"]

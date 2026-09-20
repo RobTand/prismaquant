@@ -485,12 +485,16 @@ flags bind wire on both files, and the wire checks stay where they were.
 Quantum records are produced, never edited (producer D3). The reviewed
 regeneration path is `tools/regenerate_joint_quanta.py`: it replays the
 `layer_quanta()` producer call from digest-verified plan/prepared/parent
-inputs with the authoritative output root (never the tool's own directory),
-writes records, slice manifests and the adjoint manifest into a reviewed
-directory (absent-or-identical, refused if different), reproduces receipt-less
-against on-disk records under `--expect-existing`/`--check-only` (Gate 1),
-and re-seals against `--adjoint-receipt` (Gate 2). Old records and history
-stay where they are; boundary payloads are never copied.
+inputs (gzip-transparent, digest over wire bytes) with the authoritative
+output root (never the tool's own directory), writes record files into a
+reviewed directory and slice manifests at the producer-named absolute
+paths the records bind (verified to resolve after writing), reproduces
+receipt-less at the original root against on-disk records under
+`--expect-existing`/`--original-root` (Gate 1a), validates that a root move
+touches only the authorized path fields (Gate 1b), and re-seals against
+`--adjoint-receipt` (Gate 2). Old records and history stay where they are;
+boundary payloads are never copied. The adjoint manifest itself is the
+phase worker's file and is never written here.
 
 - `PRISMAQUANT_DEV_MODE=1` (PR #776) is the interim lane: submissions run
   from any checkout with no campaign branch, no transition receipts, and the
