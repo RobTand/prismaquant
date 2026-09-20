@@ -447,9 +447,10 @@ def _progress_dev_source_sha256():
     """The executing package's actual tree digest, for the dev stamps.
 
     Lazy so importing this module never pulls ``aura_cost``; only a dev-mode
-    progress commit pays for the hash -- and it pays it **once**: the digest
-    is memoized after the first commit because a progress line fires per
-    durable unit and a walk commits tens of thousands of them. Measured live
+    progress commit that opted into the stamp pays for the hash -- and it pays
+    it **once**: the digest is memoized after the first commit because a
+    progress line fires per durable unit and a walk commits tens of thousands
+    of them. Measured live
     on stage A (2026-09-20, action 398c81b4): the un-memoized form re-walked
     and re-hashed the whole package tree on every unit, holding the head
     walk to ~0.3 units/s of pure pathlib with zero IO -- the dev stamp is an
@@ -471,10 +472,17 @@ def _pb_commit(units, phase, unit=None):
     no-op when the action was not admitted under the progress contract, so it
     is called unconditionally rather than by testing how we were launched.
 
-    Under ``PRISMAQUANT_DEV_MODE=1`` the record carries the dev stamp in its
-    metadata: the worker's ``ProgressWatch`` reads the fields it knows and
-    ignores the rest, so the stamp rides along on every progress line a dev
-    run commits and a certified run's record stays byte-identical.
+    Under ``PRISMAQUANT_DEV_MODE=1`` the record may carry the dev stamp in
+    its metadata -- **opt-in** via ``PRISMAQUANT_DEV_PROGRESS_STAMP=1``.
+    The stamp is provenance ceremony; Rob's standing campaign directive
+    (2026-09-13) is that dev-mode campaign runs incur no sealing overhead,
+    and the per-line stamp measurably did: before the memo it re-hashed the
+    whole executing tree on every durable unit (2026-09-20, #826). The
+    run's identity is already recorded where it belongs -- once, in the
+    results record's top-level dev stamp and the startup implementation
+    line -- so the default progress record stays byte-identical to the
+    certified shape. The worker's ``ProgressWatch`` reads the fields it
+    knows and ignores the rest either way.
     """
     path = os.environ.get("PRISMABUILD_ACTION_PROGRESS_PATH")
     token = os.environ.get("PRISMABUILD_ACTION_PROGRESS_TOKEN")
@@ -483,7 +491,8 @@ def _pb_commit(units, phase, unit=None):
     record = {"schema": "prismabuild.action_progress.v1", "token": token,
               "phase": phase, "units_completed": units, "unit": unit,
               "reported_unix": time.time()}
-    if dev_mode_enabled():
+    if (dev_mode_enabled()
+            and os.environ.get("PRISMAQUANT_DEV_PROGRESS_STAMP") == "1"):
         record.update(dev_stamp(_progress_dev_source_sha256()))
     temporary = f"{path}.{os.getpid()}.tmp"
     with open(temporary, "w") as handle:

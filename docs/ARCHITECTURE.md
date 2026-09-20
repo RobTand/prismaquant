@@ -10,14 +10,29 @@ pin or ship-gate verdict changes. Under `PRISMAQUANT_DEV_MODE=1`
 `canonical_json_sha256_normalized(identity)` over the merged campaign
 checkpoint; it requires the manifest's declared `identity_sha256` to be a full
 64-hex string, prints the `[DEV-MODE]` record naming the digest it used, and
-hands that digest to the existing per-unit envelope binding. The measured cost
-of the skipped encode is 302.653 s of a 765.6 s in-process profile (action
-`282c61140ba7`, 2026-09-20, `run/profile.pstats`) on the 7.2 GB checkpoint.
-Certified mode is byte-identical; the raw input `_bound` digests, roster /
-model / calibration geometry, per-unit mutation fences, PB
-action/progress/containment, mover inline integrity and the model
-source-identity cache are untouched. Tests: `tests/test_dev_anchor_seal_skip.py`
-plus the certified cases in `tests/test_tessera_joint_aura.py`.
+hands that digest to the existing per-unit envelope binding. The declared
+digest is recorded, not verified. The measured cost of the skipped encode is
+302.653 s of a 765.6 s in-process profile (action `282c61140ba7`, 2026-09-20,
+`run/profile.pstats`) on the 7.2 GB checkpoint. Certified mode is
+byte-identical; the raw input `_bound` digests, roster / model / calibration
+geometry, per-unit mutation fences, PB action/progress/containment, mover
+inline integrity and the model source-identity cache are untouched. Tests:
+`tests/test_dev_anchor_seal_skip.py` plus the certified cases in
+`tests/test_tessera_joint_aura.py`.
+
+Re-stamped (2026-09-20, `flash/dev-progress-stamp-optin`) for **the dev
+progress-stamp opt-out** (§3.4; PQ #826, #828, follow-through on #771). No
+default, stage, format, lane, pin or ship gate changes. Under
+`PRISMAQUANT_DEV_MODE=1` the `dev_uncertified` stamp stays top-level in
+`results.json` — the run identity is recorded once, where it belongs — but
+the per-progress-record stamp is now **opt-in** via
+`PRISMAQUANT_DEV_PROGRESS_STAMP=1`: the default dev progress record is the
+certified six-field shape, so a dev campaign's durable-unit commits pay no
+per-line sealing ceremony (Rob's 2026-09-13 directive). #827's memo made the
+stamp cheap; this makes it absent. Certified mode is byte-identical either
+way, and PrismaBuild's sealed actions and the v1/v2 proofs are untouched.
+Gates: `tests/test_dev_mode_provenance_gates.py`,
+`tests/test_pb_commit_source_memo_826.py`.
 
 Re-stamped (2026-09-19, `flash/tessera-pin-bump-20260919`) for **runtime
 contract v32** (#760, the coordinated post-#560-lineage bump: the pin names
@@ -10275,14 +10290,18 @@ source-proof family, the prepared-record digest comparisons and the
 checkpoint-lineage identity mismatch become stamps — loudly recorded, never
 silently reused: a mismatched checkpoint lineage is archived
 (`<dir>.dev-archived-<iso>`) and recomputed fresh, and every dev run carries a
-top-level `dev_uncertified` stamp in `results.json` and its progress records.
-The merged campaign checkpoint's canonical seal is skipped rather than
+top-level `dev_uncertified` stamp in `results.json` — always; per-progress-record
+stamps are opt-in via `PRISMAQUANT_DEV_PROGRESS_STAMP=1`, so the default
+durable-unit commit is the certified six-field record and runs no source hash
+(#828). The merged campaign checkpoint's canonical seal is skipped rather than
 recomputed: the loader binds the walk to the manifest's declared
 `identity_sha256` after a 64-hex syntactic check and prints the `[DEV-MODE]`
 record (measured 302.653 s of a 765.6 s profile on action `282c61140ba7`,
-2026-09-20), while every per-unit envelope fence still refuses a mismatch.
+2026-09-20), while every per-unit envelope fence still refuses a mismatch. The
+raw checkpoint file keeps its `_bound` SHA-256 check above the gate, and the
+declared seal itself is recorded, not verified.
 With the variable unset, every one of these guards refuses exactly as before
-(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-19 stamp above.
+(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-20 stamps above.
 
 **The key set is `pipeline.py`'s job; the values are the shell's.** `STAGE_SETTINGS_KEYS`
 (`pipeline.py`) declares, per artifact, which settings that artifact's identity depends on.
