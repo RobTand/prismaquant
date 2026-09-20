@@ -903,7 +903,7 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
         assert plans.accepted(plan_view, name)
     remaining = [p["name"] for p in plans.remaining(
         plan_view, deduped[-1])]
-    assert remaining == names[names.index(deduped[-1]) + 1:]
+    assert remaining == names[names.index(deduped[-1]):]
     replayed = {int(n.split("-")[1])
                 for n in reported if n.startswith("replay-")}
     if expect_replay_windows == "all":
