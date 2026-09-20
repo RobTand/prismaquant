@@ -216,25 +216,27 @@ def test_dev_missing_cache_still_hashes_fresh_iteration(
 
 
 def test_dev_top_up_hashes_only_new_shards_and_records_host_stats(
-        monkeypatch, checkpoint):
-    root, shards = checkpoint
+        monkeypatch, tmp_path):
+    root = tmp_path / "model"
+    root.mkdir()
+    shard_a = root / "a.safetensors"
+    shard_a.write_bytes(b"a" * 65536)
     cache = root / "identity-cache.json"
-    first = _build_cache(root, shards)
-    payload = json.loads(cache.read_text())
-    dropped = payload["fingerprints"].pop()
-    payload["identity"]["shards"] = [
-        row for row in payload["identity"]["shards"]
-        if row["path"] != dropped["path"]]
-    cache.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    cs.build_streamed_model_identity(
+        _runner({"a": shard_a}), str(root), identity_cache_path=cache)
+    shard_b = root / "b.safetensors"
+    shard_b.write_bytes(b"b" * 131072)
     _dev_on(monkeypatch)
     calls = _counting_hash(monkeypatch)
     identity = cs.build_streamed_model_identity(
-        _runner(shards), str(root), identity_cache_path=cache)
+        _runner({"a": shard_a, "b": shard_b}), str(root),
+        identity_cache_path=cache)
     assert len(calls) == 1
-    assert identity["content_sha256"] == first["content_sha256"]
+    assert [row["path"] for row in identity["shards"]] == [
+        str(shard_a.resolve()), str(shard_b.resolve())]
     refreshed = json.loads(cache.read_text())["fingerprints"]
-    live = {str(path): None for path in shards.values()}
-    assert {row["path"] for row in refreshed} == set(live)
+    assert {row["path"] for row in refreshed} == {
+        str(shard_a.resolve()), str(shard_b.resolve())}
 
 
 def test_dev_portable_reuse_is_stamped_uncertified(
