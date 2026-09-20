@@ -693,6 +693,96 @@ def _shared_state_by_name(shared_adjoint, shared_pass, name: str):
         f"exact boundary checkpoint has no shared state {name!r}")
 
 
+def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
+    """One shared-state pickle payload, staged-pinned under policy.
+
+    Under the active allowed-tier policy the bytes come from a
+    lifetime-pinned window (RAM leg refused fast for want of RAM-mover
+    covers, SSD re-acquired honestly): exact length plus one probe byte
+    through the held descriptor, the SDK serving record registered at the
+    successful actual open, the descriptor closed and the exact ref
+    released before the caller deserializes. Unmapped/unfenced refuses
+    before a pool bulk byte. Inactive policy reads the declared path
+    exactly as before. No cache, no re-read: the owned buffer is hashed
+    once by the caller.
+    """
+    from .staged_tier_policy import policy_is_active
+    if not policy_is_active():
+        return Path(path).read_bytes()
+    from .residency_map import residency_resolver
+    from .staged_lease import LeaseRefused, acquire_entry_window
+    size = entry.get("file_bytes")
+    if type(size) is not int or isinstance(size, bool) or size <= 0:
+        raise RuntimeError(
+            "adjoint checkpoint shared-state entry has no byte size: "
+            f"{entry.get('name')}")
+    sha = entry.get("sha256")
+    if not isinstance(sha, str) or len(sha) != 64:
+        raise RuntimeError(
+            "adjoint checkpoint shared-state entry has no digest: "
+            f"{entry.get('name')}")
+    resolver = residency_resolver()
+    if resolver is None:
+        raise LeaseRefused("readset-not-staged", kind="availability")
+    staged = resolver.staged_read(path, expected_sha256=sha)
+    if staged is None:
+        raise LeaseRefused("staged-not-serving", kind="availability")
+    window, key = acquire_entry_window(resolver, path, staged)
+    with window:
+        try:
+            fd, serving = window.open(key)
+        except LeaseRefused as refusal:
+            resolver.record_fallback(path, str(refusal))
+            raise
+        tier = window.serving_tier or "stage"
+        resolver.record_serving_tier(
+            path, tier, pin_id=str(serving.get("pin_id") or ""),
+            range_ref=str(serving.get("range_ref") or ""))
+        # Sealed bounds before allocation: the manifest size must equal
+        # the staged entry's, and the held descriptor's size must match
+        # both — no unbounded allocation, no read-then-check.
+        if size != staged["bytes"]:
+            raise LeaseRefused("shared-state-size-divergent",
+                               kind="integrity")
+        first = os.fstat(fd)
+        if first.st_size != size:
+            raise LeaseRefused("shared-state-changed-under-pin",
+                               kind="integrity")
+        # One owned buffer, filled in place: no parts list, no joined
+        # copy, no second pass. The caller's digest hashes these bytes.
+        raw = bytearray(size)
+        view = memoryview(raw)
+        remaining = size
+        offset = 0
+        while remaining > 0:
+            try:
+                moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
+            except OSError as exc:
+                raise LeaseRefused(
+                    f"shared-state-unreadable: {exc.strerror}",
+                    kind="availability") from None
+            if moved <= 0:
+                break
+            offset += moved
+            remaining -= moved
+        view.release()
+        if remaining:
+            raise LeaseRefused("shared-state-truncated", kind="integrity")
+        if os.pread(fd, 1, size):
+            raise LeaseRefused("shared-state-grew-during-read",
+                               kind="integrity")
+        last = os.fstat(fd)
+        if (last.st_ino, last.st_size, last.st_mtime_ns) != (
+                first.st_ino, first.st_size, first.st_mtime_ns):
+            raise LeaseRefused("shared-state-changed-under-pin",
+                               kind="integrity")
+    if tier == "ram":
+        resolver.record_ram_read(path, len(raw))
+    else:
+        resolver.record_stage_read(path, len(raw))
+    return raw
+
+
 def load_adjoint_checkpoint(
     space: str | os.PathLike, record: dict,
 ) -> tuple[dict, dict, dict]:
@@ -732,7 +822,7 @@ def load_adjoint_checkpoint(
     shared_adjoint, shared_pass = {}, {}
     for entry in stored["shared_state_entries"]:
         path = Path(entry["path"])
-        payload = path.read_bytes()
+        payload = _read_shared_state_payload(path, entry)
         digest = hashlib.sha256(payload).hexdigest()
         if digest != entry["sha256"] or len(payload) != entry["file_bytes"]:
             raise RuntimeError(

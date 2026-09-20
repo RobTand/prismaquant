@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/stagea-adjoint-manifest-20260920`.
+As of: 2026-09-20 · `flash/strict-reader-tier-enforcement-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-20, `flash/stagea-adjoint-manifest-20260920`) for
@@ -46,22 +46,22 @@ no broker token or socket crosses. Gates:
 `tests/test_tessera_campaign_container.py` regression-green).
 
 Re-stamped (2026-09-20, `flash/checkpoint-artifact-budget-858`) for
-**checkpoint artifact budget hardening** (PQ #858 R5). Ordinary writes
+**checkpoint artifact budget hardening** (PQ #858 R6). Ordinary writes
 admit against the aggregate artifact total, so committed or retained
 checkpoint bytes narrow them too. Transient serialization holds bound the
 peak per entry: tensor copies in the resident budget mirroring exact
 writes, pickle/manifest buffers in an auxiliary hold aggregated with live
 plus promised auxiliary usage through the one shared check_auxiliary
 calculation (a hold fitting live usage but exceeding the per-probe
-reservation refuses). Stage A snapshots shared adjoints borrowed when
-proven safe, never whole-plane CPU copies: quiescent accumulators already
-CPU contiguous are referenced with zero new backing, while any layout
-needing CPU pinning/contiguity refuses the borrowed view before copying
-and takes an owner-budgeted fallback (precomputed whole-owner copy bytes
-held across the synchronous snapshot plus write, copies released before
-the hold releases). Production Gemma4 accumulators are CPU via capture to
-CPU with graft/harvest preserving device; non-contiguous CPU exercises
-the same fallback path as any non-pinned device. Shared-state estimates count per-leaf serialized
+reservation refuses). Stage A snapshots shared adjoints through one
+snapshot-plus-hold-plus-writer operation: quiescent accumulators already
+CPU contiguous are borrowed with zero new backing, while only owners
+needing CPU pinning/contiguity copy inside the precomputed hold (mixed
+contiguous plus transposed owners hold exactly the exceptional bytes),
+copies cleared before the hold releases. Production Gemma4 accumulators
+are CPU via capture to CPU with graft/harvest preserving device;
+non-contiguous CPU exercises the same fallback path as any non-pinned
+device. Shared-state estimates count per-leaf serialized
 backing (measured: pickle emits per-view backing, no cross-view memo)
 with bit-length integer sizing; shared payloads stream through the
 digest sink with admitted per-file bounds instead of aggregate bytes
@@ -109,6 +109,57 @@ only the nonempty chunk phases in `annotations.phases`. A zero-byte
 table. Startup/head remains a separately declared payload progress phase;
 it does not create a zero-byte storage phase. The published-PB parser
 interoperability gate is `tests/test_slice_manifest_pb_staging.py`.
+
+Re-stamped (2026-09-20, `flash/strict-reader-tier-enforcement-20260920`)
+for **strict staged-tier enforcement on GPU-consumed bulk inputs** (PQ
+#845; staged-read INV-03/INV-04/INV-06, TIER-01/TIER-02, SAFE-02). Campaign
+bulk reads no longer fall back to pool/HDD: `prismaquant/staged_tier_policy.py`
+is the one shared policy (explicit sealed `--allowed-tiers`, comma subset
+of `{ram,ssd}`, default `ram,ssd`; no ambient fallback; process-global so
+prefetch threads see it; explicitly test-only monotonic scopes). The joint entrypoints (`joint_cost_quantum`,
+`joint_cost_stage_a`) activate it from sealed args and the dispatcher
+threads the flag as a payload binding on quantum and Stage A rows
+(`tools/dispatch_joint_quanta.py:STAGED_ALLOWED_TIERS`, part of the action
+key). Under policy the source-shard reader builds no pool `safe_open`
+handle (keys/metadata/shapes/dtypes from the bounded header parse;
+`get_slice` is a header-only proxy whose indexing materializes staged;
+empty tensors built locally), PWC bounded loads require the caller's
+digest binding (unbounded and digest-less legs refuse), wire blobs pin
+with content-corruption failing clear (never adopting the next copy),
+and verified/exact activation loads serve staged bytes with the
+pool file never opened. Every staged open records its serving tier at
+open time (SDK pin IDs where pinned); RAM legs refuse for want of
+RAM-mover covers and re-acquire SSD honestly. Inactive (offline
+library scope) behavior is byte-identical. Boundary bulk reads need no
+`cost_streaming.py` change: `ExactBoundaryStorage.prefetch` already
+delegates to the gated exact-entry seam. RNG-02/SM-03 lease pinning,
+TIER-03 producer readset coverage, and TIER-04 legacy authorization stay
+named gaps. Gate: `tests/test_strict_reader_tier_enforcement.py` (plus
+`tests/test_joint_cost_quantum_runtime.py` offline isolation).
+
+Lease follow-on (PQ #850, same branch, unmerged): strict reads pin
+through the exact PB family (`injected_context`/`acquire_for`/
+`open_pinned`/`release`/`covers_for_keys`, candidate integration pin
+`2637a9d0f7` as an installed dependency — NOT accepted or deployed; the
+final accepted merged PB pin update lands at integration, with no
+capability assertion) — RAM-first: live tmpfs copies pin at the
+announced epoch via resolved, cross-checked RAM covers; one window per
+entry with a single-shot enter/exit contract
+(reuse and nesting refuse, never silent reacquisition); provenance (SDK
+plus every preimported `prismabuild.*` under one immutable package root,
+component-wise) is checked BEFORE any acquire so a divergent preimport
+cannot strand a pin, and post-acquire bind failures release exactly
+without reporting entry; release requires the SDK's exact `True`
+(`False` retains retry state); production resolves the sealed source
+tree or refuses fail-closed (tests bind the install only through
+explicit test-only injection); checkpoint
+payloads read into one owned buffer with sealed bounds checked before
+allocation; SDK serving records (with pin IDs) at open, exact release on
+all paths, fork-loud reader/window guards (supported readers use
+threads/owned buffers and reject inherited handle operations; raw escape
+is unsupported), corruption failing clear. Serving records carry pin IDs
+where pinned. Capability/tag advertisement, containment, and campaign
+launch stay unclaimed.
 
 Re-stamped (2026-09-20, `flash/source-identity-portable-dev-20260920`) for
 **dev-portable source-identity reuse across hosts** (PQ #843). The six-field
