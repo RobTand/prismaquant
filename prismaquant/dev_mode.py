@@ -15,16 +15,26 @@ The contract, in one paragraph:
 * Certified mode is byte-identical to the behavior before this module
   existed. Every gate that reads this module refuses under exactly the same
   fixtures with the variable off; that is proven by tests, not by intention.
-* Dev mode never weakens a proof. It bypasses AT THE GATE: the check still
-  runs, its findings are still computed, and what it would have refused is
-  RECORDED instead -- a loud, grep-able warning line and a
-  ``dev_uncertified`` stamp carrying the actual digests of what executed.
+* Dev mode never weakens a proof. It bypasses AT THE GATE -- with the one
+  explicit exception in the last bullet below, the skipped campaign-checkpoint
+  seal: every other check still runs, its findings are still computed, and what
+  it would have refused is RECORDED instead -- a loud, grep-able warning line
+  and a ``dev_uncertified`` stamp carrying the actual digests of what executed.
   A dev result can therefore never masquerade as a certified one: the stamp
   is top-level in results.json, and in progress records only under the
   ``PRISMAQUANT_DEV_PROGRESS_STAMP=1`` opt-in (PR #828).
 * Recording is not optional in dev mode. Even a dev run records what ran:
   the executing package's actual tree digest is computed and stamped. A
   record, never a gate.
+* One run-gate computation is skipped rather than suspended: the merged
+  campaign checkpoint's canonical seal in ``load_measured_anchor_input``
+  (302.653 s measured on the real 7.2 GB input, action ``282c61140ba7``).
+  Dev mode does not recompute the seal and does NOT verify the manifest's
+  declared ``identity_sha256``: it requires a full 64-hex shape, records the
+  digest it used in the ``[DEV-MODE]`` line, and hands it to the existing
+  per-unit envelope fences, which still refuse an envelope banked under
+  another identity. The raw checkpoint file keeps its ``_bound`` SHA-256
+  check above the gate. (2026-09-20, #833.)
 
 Nothing in this module decides policy. It answers "is dev mode on?", builds
 the stamp, and prints the warning; the gates themselves stay in the modules

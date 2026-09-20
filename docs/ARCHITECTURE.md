@@ -13,7 +13,9 @@ callers now declare it through PB's admission contract:
 
 - `tools/dispatch_joint_quanta.py` (stage A and quanta) adds
   `pbrun --container-image REF` before the payload separator, read from the
-  same parsed spec that is serialized into `--spec`.
+  same parsed spec that is serialized into `--spec`. It composes with the
+  §5.1 placement policy: every effective `consumer_tags` entry is emitted as
+  its own `--tag` and the image declaration is a separate envelope option.
 - `tools/dispatch_tessera_campaign.py` adds `container_images: [REF]` to every
   generated manifest row from the row's resolved container class (a class
   override declares its own image) and the same flag to its direct
@@ -35,6 +37,40 @@ callers now declare it through PB's admission contract:
   stage order, format menu, plugin contract, serving-lane default or ship
   gate changes. Gate: `tests/test_container_image_admission.py` plus the
   dispatcher, launcher and image-content suites.
+
+Re-stamped (2026-09-20, `flash/dev-anchor-seal-bypass-20260920`) for **the
+dev-mode merged-checkpoint seal skip** (#833). No default, stage, format, lane,
+pin or ship-gate verdict changes. Under `PRISMAQUANT_DEV_MODE=1`
+`load_measured_anchor_input` no longer recomputes
+`canonical_json_sha256_normalized(identity)` over the merged campaign
+checkpoint; it requires the manifest's declared `identity_sha256` to be a full
+64-hex string, prints the `[DEV-MODE]` record naming the digest it used, and
+hands that digest to the existing per-unit envelope binding. The declared
+digest is recorded, not verified. The measured cost of the skipped encode is
+302.653 s of a 765.6 s in-process profile (action `282c61140ba7`, 2026-09-20,
+`run/profile.pstats`) on the 7.2 GB checkpoint. Certified mode is
+byte-identical; the raw input `_bound` digests, roster / model / calibration
+geometry, per-unit mutation fences, PB action/progress/containment, mover
+inline integrity and the model source-identity cache are untouched. Tests:
+`tests/test_dev_anchor_seal_skip.py` plus the certified cases in
+`tests/test_tessera_joint_aura.py`.
+
+Re-stamped (2026-09-20, `fix/joint-quanta-gb10-placement-20260920`) for **the
+distributed campaign's placement policy: one shared `gb10` class tag, never a
+host pair** (`docs/design/distributed_campaign_2026-09-19.md` §5; PQ #831).
+PrismaBuild admits a worker only when it offers *every* tag a row lists
+(`wanted.issubset(offer.tags)`, `src/prismabuild/pool.py:2847`), and each live
+Spark offers `gb10` plus its own host name, so `tools/dispatch_joint_quanta.py`'s
+shipped `--tag sparky --tag sparklina` — carried by both the module default and
+the design's §5.1 example — admitted neither box: the 45 per-layer quantum rows
+could not be claimed on either Spark. The dispatcher now defaults to
+`CONSUMER_TAGS = ("gb10",)`, emits one `--tag` per effective tag, and threads
+the plan's `distributed_campaign.consumer_tags` override — previously read but
+never passed to `quantum_argv` — through one validating helper that refuses an
+empty or ill-typed list at dispatch. Stage A keeps its explicit `adjoint.tag`
+pin (one monolithic capture by construction). No pipeline default, stage graph,
+format menu, plugin contract, serving lane, ship gate or published byte
+changes. Gate: `tests/test_dispatch_shared_tag_placement.py`.
 
 Re-stamped (2026-09-20, `flash/dev-progress-stamp-optin`) for **the dev
 progress-stamp opt-out** (§3.4; PQ #826, #828, follow-through on #771). No
@@ -10309,9 +10345,15 @@ silently reused: a mismatched checkpoint lineage is archived
 top-level `dev_uncertified` stamp in `results.json` — always; per-progress-record
 stamps are opt-in via `PRISMAQUANT_DEV_PROGRESS_STAMP=1`, so the default
 durable-unit commit is the certified six-field record and runs no source hash
-(#828).
+(#828). The merged campaign checkpoint's canonical seal is skipped rather than
+recomputed: the loader binds the walk to the manifest's declared
+`identity_sha256` after a 64-hex syntactic check and prints the `[DEV-MODE]`
+record (measured 302.653 s of a 765.6 s profile on action `282c61140ba7`,
+2026-09-20), while every per-unit envelope fence still refuses a mismatch. The
+raw checkpoint file keeps its `_bound` SHA-256 check above the gate, and the
+declared seal itself is recorded, not verified.
 With the variable unset, every one of these guards refuses exactly as before
-(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-20 stamp above.
+(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-20 stamps above.
 
 **The key set is `pipeline.py`'s job; the values are the shell's.** `STAGE_SETTINGS_KEYS`
 (`pipeline.py`) declares, per artifact, which settings that artifact's identity depends on.
