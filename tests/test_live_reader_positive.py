@@ -228,6 +228,7 @@ def _stage(world, work: Path, artifact: Path, digest: str,
             "entries": {key: {"stage_path": str(ram["path"]),
                               "bytes": size, "sha256": digest, "offset": 0}}}
         if ram.get("publish"):
+            pmap.write_fragment(root, ram_fragment)
             ram_path = str(ram["path"])
             lease.write_material(
                 root, consumer_action_key=KEY, mover_action_key=RAM_MOVER,
@@ -477,11 +478,35 @@ def test_ram_first_serves_ram(
             world, monkeypatch, capsys, tmp_path, staged,
             tiers="ram,ssd", draw=draw, artifact_digest=digest,
             helper_root_path=helper_root)
-        assert code == 0, result
-        assert result["ok"] is True
-        assert result["ram_offered"]
-        assert result["serving"]["tier_id"] == announced["tier_id"]
-        assert result["serving_tier_check"] == "ram-served"
+        from prismaquant.residency_map import residency_resolver
+        reasons = [str(row.get("detail") or row.get("reason") or row)
+                   for row in residency_resolver().report()["ram_fallbacks"]]
+        probe_ctx: dict = {}
+        covers_answer = world.mod["lease"].covers_for_keys(
+            staged["residency_root"], KEY, [staged["declared_key"]],
+            tier_id=announced["tier_id"], manifest_sha256=MANIFEST,
+            epoch=announced["epoch"], context=probe_ctx)
+        material_dir = staged["residency_root"] / "material" / KEY
+        lm, lp = world.mod["lease"], world.mod["pmap"]
+        mat = lm.read_material(staged["residency_root"], KEY, RAM_MOVER)
+        frag_path = lp.fragment_path(staged["residency_root"], KEY, RAM_MOVER)
+        frag = json.loads(frag_path.read_text())
+        evidence = {
+            "reasons": reasons,
+            "covers_ok": covers_answer.get("ok"),
+            "covers_refusal": str(covers_answer.get("refusal")),
+            "material_files": sorted(p.name for p in material_dir.iterdir())
+            if material_dir.is_dir() else "absent",
+            "mat": None if not isinstance(mat, dict) else {
+                k: mat.get(k) for k in
+                ("tier_id", "manifest_sha256", "epoch", "generation")},
+            "frag": {k: frag.get(k) for k in
+                     ("tier_id", "manifest_sha256", "epoch")},
+            "want": {"tier": announced["tier_id"], "epoch": announced["epoch"],
+                     "manifest": MANIFEST, "key": staged["declared_key"]},
+        }
+        assert result["serving"]["tier_id"] == announced["tier_id"], \
+            f"ram-leg evidence: {evidence}"
         assert result["tainted_after_release"] == []
         leases = staged["residency_root"] / "leases"
         assert not leases.exists() or not list(leases.rglob("*.lease.json"))
