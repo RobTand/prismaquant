@@ -24,6 +24,43 @@ pool read byte for byte. Gate:
 `tests/test_calibration_staged_tier.py` (with
 `tests/test_native_panel_calibration.py` regression-green).
 
+Re-stamped (2026-09-20, `flash/executable-quantum-readplan-20260920`)
+for **one executable quantum read plan** (PQ #862, R3).
+`build_quantum_executable_manifest` seals a single v2 manifest per
+quantum row covering the true consumption corpus in order: calibration
+head, the checkpoint plane once, per chain layer its source extents then
+its boundary entries, the own source extents, then per retained window
+and probe the replay boundary reads (own-boundary corpus repeats across
+windows; resume reads a subset). Entries deduplicate exact
+path/offset/bytes/sha triples and refuse contradictions; rendered-weight
+bytes are not staged here. The annotation names the missing PB732
+produced-output dependency (production pickle digest plus roster digest);
+it implements no staging and proves no capability. No accepted PB
+produced-output binding validator exists (PB732/735 stacks unaccepted),
+so every sealed manifest carries `binding: None` (a non-None binding
+input refuses rather than sealing fiction) and is sequencing-only, never
+production-runnable: the dispatcher refuses all executable rows with the
+typed `ExecutableBindingUnsupported` refusal -- even for a
+plausible-looking prerequisite dictionary -- while manifest/phase
+propagation is exercised through the private `_executable_row_parts`
+helper without bypassing that production gate. `bind_quantum_executable`
+attaches the rebuild-anchored digest/path to a new record generation with
+recomputed identity; `--executable-readsets` wires the regen path. Rows
+without the block keep the legacy slice contract with strict tiers. The
+runtime enters each staged read phase through the existing semantic
+reporter BEFORE its first payload access (checkpoint-load before the
+checkpoint plane load, chain/own source before install, chain-bound
+before the chain roll, replay before the boundary prefetch inside the
+already-open retained_window; read transitions change phase with
+unchanged units; chunk names are not staging phases, so durable units
+commit under the read phase in effect).
+Gate: `tests/test_quantum_executable_readset.py` (real tiny-CPU
+`run_layer_quantum_core` sequencing; a dense single-window case plus an
+expert multi-window case with partial/complete resume; source-file opens
+explicitly unqualified under the fake streaming context and the
+calibration head explicitly torch.save fixture bytes, not the production
+calibration loader).
+
 Re-stamped (2026-09-20, `flash/stagea-adjoint-manifest-20260920`) for
 **quantum boundary readset binding** (PQ #848).
 `build_quantum_boundary_readset` derives a quantum's real bulk readset as

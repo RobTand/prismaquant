@@ -30,10 +30,10 @@ Three gates, all fail closed with exit 3:
 * Gate 2: ``--adjoint-receipt`` must exist and load; the bound set is
   regenerated with the receipt mapping (every ``adjoint.receipt_sha256``
   binds, every ``identity_sha256`` moves). Only with the opt-in
-  ``--boundary-readsets`` flag does each record additionally get a new
-  ``boundary_readset`` generation bound to its sealed bulk manifest
-  (PQ #848; probe count from the sealed plan), whose files land under
-  the new tree's ``bound-readsets/`` directory.
+  ``--boundary-readsets`` / ``--executable-readsets`` flags does each
+  record additionally get new bound generations (bulk readset, PQ #848;
+  single executable manifest, PQ #862) whose files land under the new
+  tree's ``bound-readsets/`` directory.
   ``--check-only`` runs the gates and writes nothing, mirroring the
   external binder's dry run.
 
@@ -53,12 +53,14 @@ from pathlib import Path
 
 if __package__:
     from prismaquant.joint_layer_quanta import (
-        derive_stride, emit_quantum_boundary_readsets, layer_quanta,
+        derive_stride, emit_quantum_boundary_readsets,
+        emit_quantum_executable_readsets, layer_quanta,
         seal_manifest_bytes)
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from prismaquant.joint_layer_quanta import (
-        derive_stride, emit_quantum_boundary_readsets, layer_quanta,
+        derive_stride, emit_quantum_boundary_readsets,
+        emit_quantum_executable_readsets, layer_quanta,
         seal_manifest_bytes)
 
 EXIT_REFUSED = 3
@@ -277,6 +279,12 @@ def main(argv=None) -> int:
                          "bound-readsets/ directory and bind it to a new "
                          "record generation (probe count from the sealed "
                          "plan); needs --adjoint-receipt")
+    ap.add_argument("--executable-readsets", action="store_true",
+                    help="with Gate 2: derive each record's single "
+                         "executable read manifest (PQ #862: checkpoint, "
+                         "chain and own source extents plus boundary/probe/"
+                         "replay reads) into bound-readsets/ and bind it to "
+                         "a new record generation; needs --adjoint-receipt")
     ap.add_argument("--check-only", action="store_true",
                     help="Gate 1 alone; write nothing")
     args = ap.parse_args(argv)
@@ -377,11 +385,14 @@ def main(argv=None) -> int:
     bound_manifests: list = []
     if args.boundary_readsets and receipt is None:
         return _fail("--boundary-readsets needs --adjoint-receipt")
-    if receipt is not None and args.boundary_readsets:
-        # Post-capture readset binding (PQ #848): each record gets a new
-        # generation carrying its boundary readset manifest. Derivation is
-        # pure (no writes); the probe count comes from the sealed plan,
-        # never a knob. Refusal writes nothing.
+    if args.executable_readsets and receipt is None:
+        return _fail("--executable-readsets needs --adjoint-receipt")
+    if receipt is not None and (
+            args.boundary_readsets or args.executable_readsets):
+        # Post-capture readset binding (PQ #848/#862): each record gets a
+        # new generation carrying its sealed manifests. Derivation is pure
+        # (no writes); the probe count comes from the sealed plan, never a
+        # knob. Refusal writes nothing.
         try:
             execution = plan.get("execution", {})
             n_probes = execution.get("n_probes") \
@@ -393,15 +404,58 @@ def main(argv=None) -> int:
             layers = parent.get("annotations", {}).get("layers", [])
             checkpoints = derive_stride(
                 len(layers), derivation.get("stride"))["checkpoints"]
-            emitted = emit_quantum_boundary_readsets(
-                receipt, produced["records"],
-                strided_boundaries=checkpoints, n_probes=n_probes,
-                output_root=output_root)
+            if args.boundary_readsets:
+                emitted = emit_quantum_boundary_readsets(
+                    receipt, produced["records"],
+                    strided_boundaries=checkpoints, n_probes=n_probes,
+                    output_root=output_root)
+                produced["records"] = [row["record"] for row in emitted]
+                bound_manifests = [(row["manifest_path"], row["manifest"],
+                                    row["manifest_sha256"]) for row in emitted]
+            if args.executable_readsets:
+                calib_input = plan.get("calibration_input", {})
+                calib_path = calib_input.get("path") \
+                    if isinstance(calib_input, dict) else None
+                calib_sha256 = calib_input.get("sha256") \
+                    if isinstance(calib_input, dict) else None
+                if type(calib_path) is not str or not calib_path:
+                    raise ValueError(
+                        "the sealed plan names no calibration input path: "
+                        "refusing")
+                try:
+                    calib_bytes = Path(calib_path).stat().st_size
+                except OSError as exc:
+                    raise ValueError(
+                        f"calibration input unreadable at {calib_path}: "
+                        f"{exc}") from exc
+                production = prepared.get("production_cache", {})
+                production_sha = production.get("sha256") \
+                    if isinstance(production, dict) else None
+                if not production_sha:
+                    raise ValueError(
+                        "the prepared completion names no production pickle "
+                        "digest: refusing (render prerequisite unbound)")
+                roster = produced["records"][0]["campaign"].get(
+                    "unit_roster_sha256")
+                if not roster:
+                    raise ValueError(
+                        "the record campaign seals no unit roster: refusing")
+                emitted = emit_quantum_executable_readsets(
+                    receipt, produced["records"], parent,
+                    strided_boundaries=checkpoints, n_probes=n_probes,
+                    calib={"path": calib_path, "bytes": calib_bytes,
+                           "sha256": calib_sha256},
+                    render_prerequisite={
+                        "scope": "pb732",
+                        "production_pkl_sha256": production_sha,
+                        "unit_roster_sha256": roster},
+                    output_root=output_root)
+                produced["records"] = [row["record"] for row in emitted]
+                bound_manifests.extend(
+                    (row["manifest_path"], row["manifest"],
+                     row["manifest_sha256"]) for row in emitted)
         except (ValueError, KeyError, TypeError) as exc:
-            return _fail(f"boundary readset binding: {exc}")
-        produced["records"] = [row["record"] for row in emitted]
-        bound_manifests = [(row["manifest_path"], row["manifest"],
-                            row["manifest_sha256"]) for row in emitted]
+            return _fail(f"readset binding: {exc}")
     if args.check_only:
         return 0
     out = args.records_out
@@ -461,7 +515,7 @@ def main(argv=None) -> int:
     bound = ("unbound (pre-stage-A)" if receipt is None else
              f"bound to receipt {produced['records'][0]['adjoint']['receipt_sha256'][:16]}…")
     if bound_manifests:
-        bound += f" with {len(bound_manifests)} boundary readsets"
+        bound += f" with {len(bound_manifests)} bound readsets"
     print(f"regenerate_joint_quanta: wrote {len(produced['records'])} records "
           f"{bound} under {out}")
     return 0

@@ -53,6 +53,13 @@ from .joint_adjoint_checkpoints import (
     load_adjoint_receipt,
     require_dev_mode,
 )
+from .joint_layer_quanta import (
+    CHECKPOINT_LOAD_PHASE,
+    executable_bound_phase_name,
+    executable_own_source_phase_name,
+    executable_replay_phase_name,
+    executable_source_phase_name,
+)
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
 #: the clean gap (status.json says gapped; PB retries the sealed action key).
@@ -304,6 +311,17 @@ class QuantumProgress:
     def enter_head(self, units: int) -> None:
         self._enter("head")
         self.priced(units)
+        self.commit()
+
+    def enter_read_phase(self, name: str) -> None:
+        """Report a staging read phase without pricing new units.
+
+        Read transitions (checkpoint load, layer install, probe passes)
+        advance the phase the tier loop stages ahead of, while the
+        committed durable-unit count only moves when journalled work
+        lands. Undeclared names commit nothing, as everywhere here.
+        """
+        self._enter(name)
         self.commit()
 
     def units(self) -> int:
@@ -959,6 +977,10 @@ def run_layer_quantum_core(
     progress.enter_head(len(completed_units))
 
     # ---- checkpoint + chain (§6.2 step 3) --------------------------------
+    # Read-phase reporting follows the executable readset contract only:
+    # legacy slice rows keep byte-identical progress (head/chunks), while
+    # bound rows report each staged phase as its bytes are consumed.
+    executable = isinstance(record.get("executable_readset"), dict)
     checkpoint_record = next(
         (entry for entry in receipt["checkpoints"]
          if int(entry["boundary"]) == int(record["adjoint"]["checkpoint_boundary"])),
@@ -967,6 +989,8 @@ def run_layer_quantum_core(
         raise RuntimeError(
             "adjoint receipt does not carry the record's checkpoint boundary "
             f"{record['adjoint']['checkpoint_boundary']}")
+    if executable:
+        progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
     cotangent_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
         adjusted_space(output_root), checkpoint_record)
     grad_plane: dict[tuple[int, int], torch.Tensor] = dict(cotangent_plane)
@@ -998,8 +1022,14 @@ def run_layer_quantum_core(
         try:
             for chain_layer in (int(c) for c in record["adjoint"]["chain_layers"]):
                 try:
+                    if executable:
+                        progress.enter_read_phase(
+                            executable_source_phase_name(chain_layer))
                     _install_with_settlement(runner, chain_layer,
                                              operator_windows=operator_windows)
+                    if executable:
+                        progress.enter_read_phase(
+                            executable_bound_phase_name(chain_layer))
                     backwards = render_free_layer_roll(
                         runner, storage=storage, batches=batches, layer=chain_layer,
                         cotangents=cotangent_owners, n_probes=n_probes,
@@ -1060,6 +1090,9 @@ def run_layer_quantum_core(
             retained_budget.require_physical_guard(guard)
         retained_source_phase("source_loading")
 
+        if executable:
+            progress.enter_read_phase(
+                executable_own_source_phase_name(layer))
         _install_with_settlement(runner, layer, operator_windows=operator_windows)
         if packed_members:
             from .production_weight_cache import PackedExpertProjection
@@ -1268,16 +1301,33 @@ def run_layer_quantum_core(
 
         window_kernel: KernelTimeProfiler | None = None
         window_started = time.time()
+        replay_window: int | None = None
 
         def before_window(window_index, window_names):
-            nonlocal window_kernel, window_started
+            nonlocal window_kernel, window_started, replay_window
             del window_names
+            replay_window = int(window_index)
             window_kernel = KernelTimeProfiler()
             window_kernel.__enter__()
             window_started = time.time()
             counters.enter_phase()
             counters.open_window(window_index,
                                  resolved_windows[window_index])
+
+        def backward_reporting(*, probe_index, final, lease):
+            # Report each replay probe pass under the executable contract.
+            # A complete resume uses the last visited window's phases;
+            # before any window is visited, None denotes window zero.
+            # Ordering: observe_and_project_retained_windows opens the
+            # candidate retained_window before invoking this callback, so
+            # the retained PWC lifetime already holds when the replay phase
+            # is entered here and the boundary prefetch inside
+            # replay_backward runs under the already-reported phase.
+            if executable:
+                progress.enter_read_phase(
+                    executable_replay_phase_name(replay_window, probe_index))
+            return replay_backward(
+                final=final, lease=lease, probe=probe_index)
 
         def after_window(window_index, window_names):
             nonlocal window_kernel
@@ -1308,8 +1358,7 @@ def run_layer_quantum_core(
                 production_cache, operator_windows,
                 retained_budget=retained_budget, n_probes=n_probes,
                 source_bytes=retained_operator_windows["source_reserve_bytes"],
-                backward=lambda *, probe_index, final, lease: replay_backward(
-                    final=final, lease=lease, probe=probe_index),
+                backward=backward_reporting,
                 record_operator=_record_joint_operator,
                 consume_probe=consume_window_probe,
                 collect_col_energy=False, backend=projection_backend,
