@@ -296,6 +296,45 @@ def _stage_manifest_binding(adjoint_manifest: Path, campaign: Mapping) -> dict:
             "read_manifest_sha256": parent, "phases": phases}
 
 
+def _executable_manifest_digest(record: dict, *, output_root: Path) -> str:
+    """The sealed executable-manifest digest a bound quantum row binds.
+
+    Mirrors :func:`_slice_manifest_digest` for the post-capture executable
+    readset: the row's ``executable_readset.manifest_sha256`` names the one
+    manifest pbrun stages for this row, and its wire bytes must hash to the
+    sealed digest; a drifted or absent manifest refuses before anything
+    publishes. Records without the block keep the legacy slice path.
+    """
+    block = record.get("executable_readset")
+    if not isinstance(block, dict):
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} carries no executable "
+            "readset")
+    manifest = block.get("manifest_path")
+    if not isinstance(manifest, str) or not manifest:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} names no executable "
+            "manifest")
+    path = Path(manifest)
+    if not path.is_absolute():
+        path = Path(output_root) / path
+    declared = block.get("manifest_sha256")
+    if not _is_hex64(declared):
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} seals no executable digest")
+    try:
+        actual = _sha_bytes(path.read_bytes())
+    except OSError as exc:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} executable manifest "
+            f"unreadable at {path}: {exc}") from exc
+    if actual != declared:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} executable manifest at "
+            f"{path} does not hash to the sealed digest")
+    return actual
+
+
 def _slice_manifest_digest(record: dict, *, output_root: Path) -> str:
     """The sealed slice digest a quantum row actually binds.
 
@@ -380,14 +419,46 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     plan/prepared paths+digests from the record's campaign block, the record
     file's own wire digest as ``--quantum-sha256`` (the consumer checks raw
     bytes first; the canonical body check inside stays), the receipt file's
-    wire digest as ``--adjoint-sha256``, the verified slice digest, and
-    ``--resume``. Files are read where the row reads them; an unreadable or
-    drifting file refuses before anything publishes (#838)."""
+    wire digest as ``--adjoint-sha256``, the verified staged-manifest
+    digest, and ``--resume``. Files are read where the row reads them; an
+    unreadable or drifting file refuses before anything publishes (#838).
+    A record carrying ``executable_readset`` stages that one executable
+    manifest and declares its read phases (PQ #862); without the block the
+    row keeps the legacy slice manifest with head/chunk progress. Tier
+    flags, tags, demand and environment are identical in both lanes.
+    """
     quantum_id = record["quantum_id"]
-    manifest = Path(record["read_set"]["manifest_path"])
-    if not manifest.is_absolute():
-        manifest = output_root / manifest
-    slice_sha256 = _slice_manifest_digest(record, output_root=output_root)
+    executable = record.get("executable_readset")
+    if executable is not None:
+        # Post-capture executable contract (PQ #862): the row stages the
+        # one executable manifest and declares its read phases. Slice
+        # partition metadata stays on the record untouched; tier flags,
+        # tags, demand and environment below are identical in both lanes.
+        manifest = Path(executable.get("manifest_path", ""))
+        if not manifest.is_absolute():
+            manifest = output_root / manifest
+        staged_sha256 = _executable_manifest_digest(
+            record, output_root=output_root)
+        phases = executable.get("phases")
+        if not isinstance(phases, list) or not phases or any(
+                type(name) is not str or not name for name in phases):
+            raise DispatchRefused(
+                f"quantum {quantum_id!r} seals no executable phase list")
+        progress = [("head", head_grace_s)]
+        for name in phases:
+            if name == "head":
+                continue
+            grace = (HEAD_PROGRESS_GRACE_S if name == "checkpoint-load"
+                     else CHUNK_PROGRESS_GRACE_S)
+            progress.append((name, grace))
+    else:
+        manifest = Path(record["read_set"]["manifest_path"])
+        if not manifest.is_absolute():
+            manifest = output_root / manifest
+        staged_sha256 = _slice_manifest_digest(record, output_root=output_root)
+        progress = [("head", head_grace_s)]
+        for chunk in record.get("chunks", []):
+            progress.append((chunk["name"], CHUNK_PROGRESS_GRACE_S))
     campaign = record.get("campaign")
     if not isinstance(campaign, dict):
         raise DispatchRefused(
@@ -419,18 +490,16 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--prepared-sha256", str(campaign["prepared_sha256"]),
         "--adjoint", str(adjoint_path),
         "--adjoint-sha256", receipt_sha256,
-        "--data-manifest-sha256", slice_sha256,
+        "--data-manifest-sha256", staged_sha256,
         "--resume",
         "--output-root", str(output_root)])
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
         argv += ["--tag", str(tag)]
     argv += ["--data-manifest", str(manifest),
-             "--residency", "stage", "--residency-ram", "auto",
-             "--progress-phase", f"head={head_grace_s}"]
-    for chunk in record.get("chunks", []):
-        argv += ["--progress-phase",
-                 f"{chunk['name']}={CHUNK_PROGRESS_GRACE_S}"]
+             "--residency", "stage", "--residency-ram", "auto"]
+    for name, grace in progress:
+        argv += ["--progress-phase", f"{name}={grace}"]
     argv += ["--priority", str(priority),
              "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
              "--cpus", "10"]
