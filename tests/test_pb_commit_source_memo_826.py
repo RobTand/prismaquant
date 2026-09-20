@@ -46,6 +46,7 @@ def test_dev_source_sha256_computed_once_across_many_commits(monkeypatch):
 def test_pb_commit_dev_stamp_reuses_the_memo(monkeypatch, tmp_path):
     monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(tmp_path / "progress.json"))
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    monkeypatch.setenv("PRISMAQUANT_DEV_PROGRESS_STAMP", "1")
     monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "tok")
 
     calls = []
