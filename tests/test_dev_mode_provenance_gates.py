@@ -511,8 +511,15 @@ def test_progress_records_have_no_dev_keys_without_the_flag(tmp_path, monkeypatc
                            "reported_unix"}
 
 
-def test_progress_records_carry_the_dev_stamp(tmp_path, monkeypatch):
+def test_progress_records_carry_the_dev_stamp_only_when_opted_in(tmp_path, monkeypatch):
     monkeypatch.setenv(DEV_ENV, "1")
+    # Default: Rob's campaign directive -- no sealing ceremony on progress
+    # lines; the certified seven-field shape stands even in dev mode.
+    record = _progress_record(tmp_path, monkeypatch)
+    assert set(record) == {"schema", "token", "phase", "units_completed", "unit",
+                           "reported_unix"}
+    # Opt-in: the stamp rides along for whoever wants per-line provenance.
+    monkeypatch.setenv("PRISMAQUANT_DEV_PROGRESS_STAMP", "1")
     record = _progress_record(tmp_path, monkeypatch)
     assert record[dev_mode.DEV_UNCERTIFIED_KEY] is True
     stamp = record[dev_mode.DEV_MODE_KEY]
