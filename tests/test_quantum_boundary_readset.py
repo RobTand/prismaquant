@@ -657,6 +657,42 @@ def _regen_argv(tmp_path, campaign):
             "--partition", str(partition)]
 
 
+@pytest.mark.parametrize("changed_field", ["windows", "plan_path"])
+def test_binder_refuses_stale_record_even_with_matching_manifest(tmp_path, changed_field):
+    """An internally consistent new manifest cannot authorize an edited record."""
+    record, receipt = _fixture(tmp_path)
+    record, _ = _bind_receipt(record, receipt)
+    if changed_field == "windows":
+        record["windows"] = record["windows"] + [{"window_index": 2}]
+    else:
+        record["campaign"] = dict(record["campaign"], plan_path="/mnt/shared/other-plan.json")
+    manifest = _build(record, receipt)
+    with pytest.raises(ValueError, match="identity does not recompute"):
+        bind_quantum_boundary_readset(
+            record, receipt, manifest=manifest,
+            manifest_path="/mnt/shared/run/layer-quanta/adjoint/"
+                          "bound-readsets/layer-003.boundary-readset.json.gz",
+            manifest_sha256=hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest(),
+            output_root="/mnt/shared/run", strided_boundaries=STRIDED,
+            n_probes=N_PROBES)
+
+
+def test_binder_refuses_consistent_manifest_for_another_probe_count(tmp_path):
+    """The caller's sealed count must dominate a self-consistent manifest."""
+    record, receipt = _fixture(tmp_path)
+    record, _ = _bind_receipt(record, receipt)
+    manifest = build_quantum_boundary_readset(
+        record, receipt, strided_boundaries=STRIDED, n_probes=N_PROBES + 1)
+    with pytest.raises(ValueError, match="another probe count"):
+        bind_quantum_boundary_readset(
+            record, receipt, manifest=manifest,
+            manifest_path="/mnt/shared/run/layer-quanta/adjoint/"
+                          "bound-readsets/layer-003.boundary-readset.json.gz",
+            manifest_sha256=hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest(),
+            output_root="/mnt/shared/run", strided_boundaries=STRIDED,
+            n_probes=N_PROBES)
+
+
 def test_cli_binds_readsets_through_real_validators(tmp_path):
     """The complete bounded unit: real CLI output passes the real
     record/wire/receipt validation, including the consumer's own
