@@ -149,23 +149,52 @@ def _read_verified_wire_blob(cell):
         # the stat and the open, or bytes that do not hash to the receipt --
         # is a miss on the ram half alone: the stage copy the map vouches for
         # serves next, and only its refusal reads the declared path.
+        #
+        # Under the active allowed-tier policy the chain ends at the last
+        # permitted copy: no permitted copy, or every permitted copy
+        # refused, raises before a declared-path byte is read, and the SSD
+        # stage copy serves only when the declaration permits it.
+        from .staged_tier_policy import (
+            policy_is_active, refuse_pool_bulk_read, tier_is_allowed)
+        strict = policy_is_active()
         copies = ([("ram", staged["ram_path"])] if "ram_path" in staged else []) \
             + [("stage", staged["stage_path"])]
+        if strict:
+            if "ram_path" in staged and not tier_is_allowed("ram"):
+                resolver.record_ram_fallback(wire, "ram tier not in the allowed tiers")
+                copies = [row for row in copies if row[0] != "ram"]
+            if not tier_is_allowed("ssd"):
+                resolver.record_fallback(wire, "ssd tier not in the allowed tiers")
+                copies = [row for row in copies if row[0] != "stage"]
+            if not copies:
+                raise refuse_pool_bulk_read(str(wire), "no-permitted-tier")
+        last: str | None = None
         for half, copy in copies:
             try:
                 blob, digest = _read_wire_bytes(Path(copy), size,
                                                 expected=expected, staged=True)
             except _StagedWireRefused as refusal:
+                last = str(refusal)
                 if half == "ram":
                     resolver.record_ram_fallback(wire, str(refusal))
                     continue
                 resolver.record_fallback(wire, str(refusal))
             else:
+                # The open fence passed: serving tier recorded at open,
+                # before these payload bytes are trusted.
+                resolver.record_serving_tier(wire, half)
                 if half == "ram":
                     resolver.record_ram_read(wire, len(blob))
                 else:
                     resolver.record_stage_read(wire, len(blob))
                 return blob, digest
+        if strict:
+            raise refuse_pool_bulk_read(str(wire), last or "staged-not-serving")
+    elif strict:
+        from .staged_tier_policy import refuse_pool_bulk_read
+        raise refuse_pool_bulk_read(
+            str(wire), "readset-not-staged" if resolver is None
+            else "staged-not-serving")
     blob, digest = _read_wire_bytes(wire, size, expected=expected, staged=False)
     if resolver is not None:
         resolver.record_pool_read(wire, len(blob))

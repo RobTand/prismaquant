@@ -72,6 +72,12 @@ import threading
 import torch
 
 from .residency_map import residency_resolver
+from .staged_tier_policy import (
+    active_policy,
+    policy_is_active,
+    refuse_pool_bulk_read,
+    tier_is_allowed,
+)
 
 try:
     # safetensors' own dtype table, so the reader reads the format's spelling
@@ -376,11 +382,18 @@ class StagedShardReader:
         return self._handle.metadata()
 
     def get_slice(self, name):
-        """The pool's slice. A slice is a partial read this reader does not serve.
+        """A payload-materializing call, gated as a data reader under policy.
 
-        Its callers (``streaming_model._estimate_layer_cache_bytes``) read
-        shape and dtype, not payload, so nothing is accounted for it either.
+        Its historical callers (``streaming_model._estimate_layer_cache_bytes``)
+        read shape and dtype, not payload — but the returned slice can
+        materialize payload bytes, so TIER-02 admits no exemption by naming:
+        under the active allowed-tier policy a pool slice refuses with a
+        named reason instead of serving. Inactive policy delegates to the
+        pool handle as before.
         """
+        if policy_is_active():
+            raise refuse_pool_bulk_read(
+                self._declared, "get-slice-is-a-data-reader")
         return self._handle.get_slice(name)
 
     def get_tensor(self, name):
@@ -391,12 +404,19 @@ class StagedShardReader:
         ``safe_open`` itself and no reader sees it. The stage-side count has no
         such gap, so read the two as "what the stage served" and "what this
         reader could not get from it", not as a partition of the run.
+
+        Under the active allowed-tier policy there is no pool fallback:
+        a span no staged range covers, or a fence the staged copy fails,
+        raises ``TierPolicyRefused`` before a pool payload byte is read.
         """
         served = self._staged_tensor(name)
         if served is not None:
             return served
+        if policy_is_active():
+            raise refuse_pool_bulk_read(self._declared, "pool-fallback")
         tensor = self._handle.get_tensor(name)
-        self._resolver.record_pool_read(self._declared, tensor.nbytes)
+        if self._resolver is not None:
+            self._resolver.record_pool_read(self._declared, tensor.nbytes)
         return tensor
 
     # -- the stage -------------------------------------------------------
@@ -411,16 +431,18 @@ class StagedShardReader:
             return
         self._parsed = True
         if _SAFETENSORS_DTYPES is None:
-            self._resolver.record_fallback(
-                self._declared,
-                "safetensors publishes no dtype table this reader can read")
+            if self._resolver is not None:
+                self._resolver.record_fallback(
+                    self._declared,
+                    "safetensors publishes no dtype table this reader can read")
             return
         try:
             self._header, self._base, self._declared_size = _read_shard_header(self._path)
         except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as error:
             self._header = None
-            self._resolver.record_fallback(
-                self._declared, f"source shard header is unreadable: {error}")
+            if self._resolver is not None:
+                self._resolver.record_fallback(
+                    self._declared, f"source shard header is unreadable: {error}")
 
     def _span(self, name):
         """``(start, end, dtype, shape)`` in the declared file, or None."""
@@ -455,38 +477,107 @@ class StagedShardReader:
         Bound ranges are held open for the reader's life, so a layer's several
         hundred tensors cost one resolver lookup and one open per staged range
         rather than one per tensor.
+
+        Under the active allowed-tier policy the open is RAM-first (the
+        offered ``ram_path`` when the tier is permitted), SSD stage only
+        when the declaration permits, and a refusal — never a pool read —
+        when no permitted copy opens. The serving tier is recorded at open,
+        before payload bytes are trusted (INV-04). Inactive policy keeps the
+        legacy stage-only open order.
         """
         for row in self._bound:
             if row[0] <= start and end <= row[1]:
                 return row
+        strict = policy_is_active()
+        if self._resolver is None:
+            if strict:
+                raise refuse_pool_bulk_read(self._declared, "readset-not-staged")
+            return None
         entry = self._resolver.staged_range(
             self._declared, start, end, declared_size=self._declared_size)
         if entry is None:
+            if strict:
+                raise refuse_pool_bulk_read(self._declared, "readset-not-staged")
             return None
-        try:
-            fd = os.open(entry["stage_path"], os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
-        except OSError as error:
+        if not strict:
+            try:
+                fd = os.open(entry["stage_path"], os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+            except OSError as error:
+                self._resolver.record_fallback(
+                    self._declared, f"staged range is unreadable: {error.strerror}")
+                return None
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError("staged range is not a regular file")
+                if info.st_size != entry["bytes"]:
+                    raise ValueError("staged range size differs from the map")
+            except (OSError, ValueError) as error:
+                os.close(fd)
+                self._resolver.record_fallback(self._declared, f"staged range {error}")
+                return None
+            if not self._bound:
+                # Every range of one declared shard is staged under the same root,
+                # so the mount's read shape is read once per reader, not per tensor.
+                self._shape = _read_shape(entry["stage_path"])
+            row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
+                   _signature(info), entry, "stage")
+            self._bound.append(row)
+            return row
+        candidates: list[tuple[str, str]] = []
+        if entry.get("ram_path") is not None:
+            if tier_is_allowed("ram"):
+                candidates.append(("ram", entry["ram_path"]))
+            else:
+                self._resolver.record_ram_fallback(
+                    self._declared, "ram tier not in the allowed tiers")
+        if tier_is_allowed("ssd"):
+            candidates.append(("stage", entry["stage_path"]))
+        else:
             self._resolver.record_fallback(
-                self._declared, f"staged range is unreadable: {error.strerror}")
-            return None
-        try:
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode):
-                raise ValueError("staged range is not a regular file")
-            if info.st_size != entry["bytes"]:
-                raise ValueError("staged range size differs from the map")
-        except (OSError, ValueError) as error:
-            os.close(fd)
-            self._resolver.record_fallback(self._declared, f"staged range {error}")
-            return None
-        if not self._bound:
-            # Every range of one declared shard is staged under the same root,
-            # so the mount's read shape is read once per reader, not per tensor.
-            self._shape = _read_shape(entry["stage_path"])
-        row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
-               _signature(info), entry)
-        self._bound.append(row)
-        return row
+                self._declared, "ssd tier not in the allowed tiers")
+        if not candidates:
+            raise refuse_pool_bulk_read(self._declared, "no-permitted-tier")
+        last_error: str | None = None
+        for tier, copy in candidates:
+            try:
+                fd = os.open(copy, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+            except OSError as error:
+                last_error = f"{tier} copy is unreadable: {error.strerror}"
+                if tier == "ram":
+                    self._resolver.record_ram_fallback(self._declared, last_error)
+                else:
+                    self._resolver.record_fallback(self._declared, last_error)
+                continue
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError(f"{tier} copy is not a regular file")
+                if info.st_size != entry["bytes"]:
+                    raise ValueError(f"{tier} copy size differs from the map")
+            except (OSError, ValueError) as error:
+                os.close(fd)
+                last_error = f"{tier} copy {error}"
+                if tier == "ram":
+                    self._resolver.record_ram_fallback(self._declared, last_error)
+                else:
+                    self._resolver.record_fallback(self._declared, last_error)
+                continue
+            # The open fence passed: the serving tier is recorded at open,
+            # before a payload byte is read.
+            self._resolver.record_serving_tier(self._declared, tier)
+            if not self._bound:
+                # Every range of one declared shard is staged under the same root,
+                # so the mount's read shape is read once per reader, not per tensor.
+                self._shape = _read_shape(copy)
+            row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
+                   _signature(info), entry, tier)
+            self._bound.append(row)
+            return row
+        if strict:
+            raise refuse_pool_bulk_read(
+                self._declared, last_error or "staged-copy-unreadable")
+        return None
 
     def _drop(self, row) -> None:
         if row in self._bound:
@@ -499,29 +590,42 @@ class StagedShardReader:
     def _staged_tensor(self, name):
         span = self._span(name)
         if span is None:
+            if policy_is_active():
+                raise refuse_pool_bulk_read(self._declared, "span-not-bound")
             return None
         start, end, dtype, shape = span
         if end == start:
-            # No bytes to serve; the pool handle's empty tensor is the answer.
-            return None
+            # No bytes to serve. The pool handle's empty tensor is read from
+            # the header alone (zero payload bytes cross any tier), so it is
+            # the answer with or without a policy.
+            return self._handle.get_tensor(name) if policy_is_active() else None
         row = self._range_for(start, end)
         if row is None:
             return None
-        fd, signature, entry = row[2], row[3], row[4]
+        fd, signature, entry, tier = row[2], row[3], row[4], row[5]
         try:
             raw = _read_span(fd, end - start, start - entry["offset"], self._shape)
             if _signature(os.fstat(fd)) != signature:
                 raise ValueError("changed during its content read")
         except (OSError, ValueError) as error:
             self._drop(row)
-            self._resolver.record_fallback(
-                self._declared,
-                f"staged range {getattr(error, 'strerror', None) or error}")
+            reason = f"staged range {getattr(error, 'strerror', None) or error}"
+            if self._resolver is not None:
+                self._resolver.record_fallback(self._declared, reason)
+            if policy_is_active():
+                raise refuse_pool_bulk_read(self._declared, reason)
             return None
         tensor = torch.frombuffer(raw, dtype=torch.uint8).view(dtype).reshape(shape)
         if self._device is not None:
             tensor = tensor.to(self._device)
-        self._resolver.record_stage_range_read(self._declared, end - start)
+        if self._resolver is not None:
+            if tier == "ram":
+                # A range read the ram tier served: ram bytes, not stage
+                # bytes. ``range_hits`` stays the stage-range count, so the
+                # two tiers never double-count the same bytes.
+                self._resolver.record_ram_read(self._declared, end - start)
+            else:
+                self._resolver.record_stage_range_read(self._declared, end - start)
         return tensor
 
 
@@ -532,9 +636,22 @@ def staged_shard_opener(declared, pool_open):
     identical -- same callable, same arguments, no wrapper and no extra
     syscall. A file the map never names takes that path too, so wrapping is
     paid for only where it can pay off.
+
+    Under the active allowed-tier policy there is no unwrapped path: a file
+    the map never names (or no map at all) still opens through a reader
+    whose header/keys/metadata come from the pool handle — bounded header
+    bytes, allowed — but whose payload reads refuse with
+    ``readset-not-staged`` instead of serving pool bytes.
     """
     resolver = residency_resolver()
     if resolver is None or not resolver.stages(declared):
+        if policy_is_active():
+            path = os.fspath(declared)
+
+            def strict_opener(handed, **kwargs):
+                return StagedShardReader(pool_open, handed, path, resolver, kwargs)
+
+            return strict_opener
         return pool_open
     path = os.fspath(declared)
 
