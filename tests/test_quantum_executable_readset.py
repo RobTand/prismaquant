@@ -621,7 +621,7 @@ def _check_event_order(events, manifest, *, layer, chain):
     and every replay boundary read requires both.
     """
     names = [p["name"] for p in manifest["read_plan"]["phases"]]
-    by_path = {e["path"]: e for e in manifest["entries"]}
+    by_path = {e["path"]: e for e in manifest.get("entries", [])}
     current = None
     seen_window_open = False
     for event in events:
@@ -888,7 +888,7 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
             assert Path(path).stat().st_size == staged[path]["bytes"]
             assert hashlib.sha256(
                 Path(path).read_bytes()).hexdigest() == staged[path]["sha256"]
-    installed = {layer for kind, layer, *_ in events if kind == "source-open"}
+    installed = {e[1] for e in events if e[0] == "source-open"}
     for layer in installed:
         for path in layer_files[layer]:
             assert path in staged, path
@@ -896,7 +896,7 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
             assert hashlib.sha256(
                 Path(path).read_bytes()).hexdigest() == staged[path][
                     "sha256"], path
-    units = [u for kind, _phase, u in events if kind == "report"]
+    units = [e[2] for e in events if e[0] == "report"]
     assert all(b >= a for a, b in zip(units, units[1:]))
     plan_view = {"phases": [{"name": name} for name in names]}
     for name in deduped:
