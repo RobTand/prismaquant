@@ -62,6 +62,47 @@ COVERAGE_SCHEMA = "prismaquant.joint_layer_quanta.coverage.v1"
 #: the records it digests cite one spelling.
 ADJOINT_CAPTURE_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 MANIFEST_SCHEMA_V1 = "prismaquant.prismabuild.data_manifest.v1"
+MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
+
+#: The tail phase of the stage-A read plan: the tail cotangents read no new
+#: manifest bytes (non-layer weights are build-resident), but the phase marks
+#: the forward-complete frontier so the tier can release the forward
+#: timeline while every reverse reference stays ahead of it.
+ADJOINT_TAIL_PHASE = "tail"
+
+
+def adjoint_forward_phase_name(layer: int) -> str:
+    """The read-plan phase staging layer ``layer``'s source extents for the
+    forward capture walk (ascending)."""
+    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
+        raise ValueError(f"a forward phase needs a nonnegative layer, not {layer!r}")
+    return f"forward-{layer:03d}"
+
+
+def adjoint_chain_phase_name(layer: int) -> str:
+    """The read-plan phase staging layer ``layer``'s source extents for the
+    reverse chain walk (descending). One spelling shared by the builder, the
+    capture's progress reports, and the tests -- two spellings of the chain
+    convention is how a consumer ends up committing a name the window cannot
+    match."""
+    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
+        raise ValueError(f"a chain phase needs a nonnegative layer, not {layer!r}")
+    return f"chain-{layer:03d}"
+
+
+def adjoint_read_plan_phase_names(num_layers: int) -> tuple[str, ...]:
+    """The frozen Stage A consumption order (PQ #837): head, forward
+    ascending, tail, reverse descending. The builder seals the manifest in
+    this order, the capture reports in this order, and the dispatch lane
+    declares progress in this order -- the published v2 linear-progress
+    rule refuses anything else."""
+    if type(num_layers) is not int or isinstance(num_layers, bool) or num_layers < 1:
+        raise ValueError(f"a read plan needs a positive layer count, not {num_layers!r}")
+    return (("head",)
+            + tuple(adjoint_forward_phase_name(layer) for layer in range(num_layers))
+            + (ADJOINT_TAIL_PHASE,)
+            + tuple(adjoint_chain_phase_name(layer)
+                    for layer in reversed(range(num_layers))))
 
 SLICE_ENTRY_POINT = "prismaquant.joint_cost_quantum"
 ADJOINT_ENTRY_POINT = "prismaquant.joint_adjoint_capture"
@@ -712,6 +753,13 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
     layer phase's source-extent entries only (paths under the plan's model
     dir); the shared head prefix is tiled verbatim. Renders never enter this
     manifest.
+
+    The phase table is the v2 ``read_plan`` in true consumption order --
+    head, forward ascending, tail, reverse descending -- with
+    ``entry_indices`` into the one entries list, so the repeated forward and
+    reverse reads reference the same entries twice instead of duplicating
+    bytes. v2 forbids ``annotations.phases``. The entries list, its digests,
+    and every record the producer seals are untouched by the table.
     """
     model = plan.get("model")
     if type(model) is not str or not model:
@@ -730,10 +778,11 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
     head_entries = entries[head["entry_begin"]:head["entry_end"]]
     layers = sorted(int(name.split("-", 1)[1]) for name in rows
                     if name.startswith("layer-"))
-    chain_entries: list[dict] = []
-    phases = [{"name": "head", "bytes": head["end_bytes"] - head["start_bytes"],
-               "cumulative_bytes": head["end_bytes"] - head["start_bytes"]}]
-    cumulative = phases[0]["cumulative_bytes"]
+    manifest_entries = [
+        dict(path=entry["path"], offset=entry["offset"],
+             bytes=entry["bytes"], sha256=entry.get("sha256"))
+        for entry in head_entries]
+    layer_index_runs: list[list[int]] = []
     for layer in layers:
         row = rows[f"layer-{layer}"]
         group = [entry for entry in entries[row["entry_begin"]:row["entry_end"]]
@@ -741,24 +790,42 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
         if not group:
             raise ValueError(
                 f"phase layer-{layer} holds no source extent: gap, refusing")
-        size = sum(entry["bytes"] for entry in group)
+        start = len(manifest_entries)
+        manifest_entries.extend(
+            dict(path=entry["path"], offset=entry["offset"],
+                 bytes=entry["bytes"], sha256=entry.get("sha256"))
+            for entry in group)
+        layer_index_runs.append(list(range(start, len(manifest_entries))))
+    read_phases: list[dict] = []
+    cumulative = 0
+
+    def _seal_phase(name: str, indices: list[int]) -> None:
+        nonlocal cumulative
+        size = sum(manifest_entries[index]["bytes"] for index in indices)
         cumulative += size
-        phases.append({"name": f"chain-{layer:03d}", "bytes": size,
-                       "cumulative_bytes": cumulative})
-        chain_entries.extend(dict(path=entry["path"], offset=entry["offset"],
-                                  bytes=entry["bytes"], sha256=entry.get("sha256"))
-                             for entry in group)
+        read_phases.append({"name": name, "entry_indices": list(indices),
+                            "bytes": size, "cumulative_bytes": cumulative})
+
+    _seal_phase("head", list(range(len(head_entries))))
+    for layer, run in zip(layers, layer_index_runs):
+        _seal_phase(adjoint_forward_phase_name(layer), run)
+    _seal_phase(ADJOINT_TAIL_PHASE, [])
+    for layer, run in zip(reversed(layers), reversed(layer_index_runs)):
+        _seal_phase(adjoint_chain_phase_name(layer), run)
+    names = [phase["name"] for phase in read_phases]
+    if names != list(adjoint_read_plan_phase_names(len(layers))):
+        raise ValueError(
+            "the adjoint read plan is not the frozen consumption order")
+    unique_bytes = sum(entry["bytes"] for entry in manifest_entries)
     return {
-        "schema": MANIFEST_SCHEMA_V1,
+        "schema": MANIFEST_SCHEMA_V2,
         "produced_by": {"tool": "prismaquant/joint_layer_quanta.py",
                         "entry_point": ADJOINT_ENTRY_POINT,
                         "plan": plan_path, "plan_sha256": plan_sha256},
         "mount_prefix": parent_manifest.get("mount_prefix", "/mnt/shared"),
-        "entries": [dict(path=entry["path"], offset=entry["offset"],
-                         bytes=entry["bytes"], sha256=entry.get("sha256"))
-                    for entry in head_entries] + chain_entries,
-        "entry_count": (head["entry_end"] - head["entry_begin"]) + len(chain_entries),
-        "total_bytes": cumulative,
+        "entries": manifest_entries,
+        "entry_count": len(manifest_entries),
+        "total_bytes": unique_bytes,
         "annotations": {
             "entry_point": ADJOINT_ENTRY_POINT,
             "plan_sha256": plan_sha256,
@@ -769,8 +836,8 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
                      "--plan-sha256", plan_sha256, "--prepared", prepared_path,
                      "--prepared-sha256", prepared_sha256,
                      "--output-root", output_root],
-            "phases": phases,
         },
+        "read_plan": {"phases": read_phases, "read_bytes": cumulative},
     }
 
 
