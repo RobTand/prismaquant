@@ -636,16 +636,23 @@ def _acquire_bulk_window(path, expected_sha256):
     return window, key, staged
 
 
-def _open_window_fd(resolver, window, key, path):
-    """Open one pinned key, recording the SDK serving record; exit window on failure."""
+def _enter_and_open_window(resolver, window, key, path):
+    """Enter exactly once, then open one pinned key with the SDK serving
+    record; exit the window on any failure so no pin leaks. The caller
+    owns the entered window from here (reads, then close-then-release)."""
     from .staged_lease import LeaseRefused
+    try:
+        window.__enter__()
+    except LeaseRefused as refusal:
+        resolver.record_fallback(path, str(refusal))
+        raise
     try:
         fd, serving = window.open(key)
     except LeaseRefused as refusal:
         resolver.record_fallback(path, str(refusal))
         try:
             window.__exit__(None, None, None)
-        except LeaseRefused:
+        except (LeaseRefused, RuntimeError):
             pass
         raise
     tier = window.serving_tier or "stage"
@@ -694,7 +701,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     if strict:
         from .residency_map import residency_resolver
         window, key, _staged = _acquire_bulk_window(path, expected_sha256)
-        descriptor, serving, _tier = _open_window_fd(
+        descriptor, serving, _tier = _enter_and_open_window(
             residency_resolver(), window, key, path)
         source_signature = cache_file_stat_signature(os.fstat(descriptor))
         source, source_before = Path(window.stage_path(key) or path), os.fstat(descriptor)
@@ -977,7 +984,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                 lease_window, lease_key, _staged = _acquire_bulk_window(
                     path, ref.sha256)
                 live_windows.append(lease_window)
-                lease_fd, _serving, _tier = _open_window_fd(
+                lease_fd, _serving, _tier = _enter_and_open_window(
                     residency_resolver(), lease_window, lease_key, path)
                 source = Path(lease_window.stage_path(lease_key) or path)
                 source_before = os.fstat(lease_fd)

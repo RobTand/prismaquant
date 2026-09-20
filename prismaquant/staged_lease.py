@@ -28,15 +28,16 @@ nothing here re-implements, shadows, or diverges from it:
   so a RAM leg refuses ``ram-covers-unresolved`` until the PB owner
   provides mover resolution (requested via root) — SSD leads are never
   pretended to identify a RAM mover.
-- Fork safety is enforced, not documented-only: the holder pid is
-  recorded at entry and every window operation (open, close, exit) plus
-  every reader payload/lifecycle operation refuses loudly in a forked
-  child, so inherited descriptors and mappings can never be used past
-  the parent's release. Normal PQ readers use threads, which share the
-  holder pid; no second process manager is invented.
-  ``register_inherited_ref`` is never used — unregistered inheritance is
-  unsupported, and the guards make that explicit rather than lucky. A
-  forked child must fork with no live window and `_exit` without I/O.
+- Fork safety: supported PQ readers use threads and owned pread
+  buffers, and every window operation (open, close, exit) plus every
+  reader payload/lifecycle operation rejects inherited handle
+  operations loudly in a forked child. Returned tensors ride owned
+  buffers, so they need no file-backed mapping lease once the buffer is
+  owned. Arbitrary raw descriptor escape (a dup'd fd read directly, an
+  unregistered mapping used past release) and unregistered fork are
+  unsupported; PB's explicitly registered inheritance remains its API.
+  No second process manager is invented. A forked child must fork with
+  no live window and `_exit` without I/O.
 """
 from __future__ import annotations
 
@@ -48,8 +49,11 @@ from pathlib import Path
 
 from .staged_tier_policy import TierPolicyRefused
 
-#: Approved PB candidate commit (pristine checkout; tests assert it).
-PINNED_SDK_COMMIT = "d079ad33f82976875a992cc68fd5c1bde6d7bd20"
+#: Approved PB candidate commit (installed reviewed dependency; the
+#: owning literal the test resolver reads — see
+#: tools/resolve_prismabuild_dev_pin.py).
+PB_READER_LEASE_PIN_COMMIT = "2637a9d0f7d31afbce7ad2e5735e8334fe37a40d"
+PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
 #: Names PQ actually calls. Anything else is not our protocol.
 _REQUIRED_NAMES = ("injected_context", "acquire_for", "open_pinned",
@@ -133,13 +137,32 @@ def lease_helper_root() -> str | None:
 def _sdk():
     """The pinned SDK module, or a clear availability refusal.
 
-    Imports ``prismabuild.reader_lease`` from the explicit sealed root
-    only, verifies the module lives under that root (no shadow, no
-    divergent pre-import), and requires the exact approved names.
+    Two attributable sources, in order. (1) A sealed tree: the explicit
+    override else the authoritative PB-injected ``PRISMABUILD_READER_HELPER_ROOT``
+    (generation root; ``src/`` appended per the agreed contract), verified
+    to actually serve the imported module — no shadow, no divergent
+    pre-import. (2) The reviewed installed dependency: a normal import,
+    whose commit, RECORD bytes, and shadow-freedom the pbtest pin guard
+    proves before pytest starts (see tools/resolve_prismabuild_dev_pin.py).
+    Required names are checked on both paths. Neither path vendors code.
     """
     root = lease_helper_root()
-    if root is None:
-        raise _refuse("lease-helper-unavailable", kind="availability")
+    if root is not None:
+        return _sdk_from_tree(root)
+    try:
+        import prismabuild.reader_lease as module  # noqa: PLC0415
+    except ImportError as exc:
+        raise _refuse(f"lease-helper-unavailable: {exc}",
+                      kind="availability") from None
+    for name in _REQUIRED_NAMES:
+        if not hasattr(module, name):
+            raise _refuse(f"lease-helper-unsupported: no {name}",
+                          kind="availability")
+    return module
+
+
+def _sdk_from_tree(root: str):
+    """Import the SDK from one sealed generation tree."""
     src = str(Path(root) / "src")
     with _HELPER_LOCK:
         present = sys.modules.get("prismabuild.reader_lease")
@@ -244,11 +267,11 @@ def resolve_ram_covers(resolver, declared, entry):
     return covers, key
 
 
-def _acquire_ram_window(resolver, declared, entry):
-    """Enter a RAM-tier lifetime window for one entry. Returns (window, key).
+def _select_ram_window(resolver, declared, entry):
+    """Build (unentered) a RAM-tier lifetime window for one entry.
 
-    Acquires at the announced RAM epoch with resolved RAM covers; the
-    payload then serves from the tmpfs copy. Any refusal carries its
+    Pins at the announced RAM epoch with resolved RAM covers; the payload
+    then serves from the tmpfs copy. Any refusal carries its
     integrity/availability kind for the caller to split.
     """
     covers, key = resolve_ram_covers(resolver, declared, entry)
@@ -262,11 +285,6 @@ def _acquire_ram_window(resolver, declared, entry):
         "span": {"start_bytes": entry["offset"],
                  "end_bytes": entry["offset"] + entry["bytes"]},
     })
-    try:
-        window.__enter__()
-    except LeaseRefused as refusal:
-        resolver.record_ram_fallback(declared, str(refusal))
-        raise
     return window, key
 
 
@@ -281,7 +299,13 @@ def ram_covers(map_entry: dict) -> list[dict[str, str]]:
 
 
 def acquire_entry_window(resolver, declared, entry: dict):
-    """Acquire a lifetime window for one composed-map entry.
+    """Build (but do not enter) a lifetime window for one composed-map entry.
+
+    One unambiguous contract: the returned window is fresh and unentered;
+    the caller enters exactly once (``with`` for function scope, manual
+    enter/exit for bound lifetimes) and exits exactly once on every path.
+    Entering an entered or released window refuses — reuse and nesting
+    are programming errors, never silent reacquisition.
 
     RAM first where offered and allowed: the RAM leg resolves real
     RAM-mover covers and pins at the announced epoch, so a live tmpfs
@@ -289,16 +313,18 @@ def acquire_entry_window(resolver, declared, entry: dict):
     a fallback. An availability refusal on the RAM leg records and falls
     through to SSD; an integrity refusal propagates with no alternate
     adoption. SSD acquires honestly with the map's leads. ``ssd`` outside
-    the allowed tiers refuses. Any ``LeaseRefused`` propagates with its
-    integrity/availability kind; the caller opens keys, reads through
-    held descriptors, and exits the window (close-then-release) on every
-    path. One window per entry, never per tensor.
+    the allowed tiers refuses.
+
+    Enter-time races (republish/retire between this selection and the
+    caller's single enter) fail clear by design — no hidden
+    reacquisition, no alternate adoption. PB-level retry mints a new
+    attempt; bytes are never wrong and the pool is never read.
     """
     from .residency_map import residency_map_key
     from .staged_tier_policy import tier_is_allowed
     if entry.get("ram_path") is not None and tier_is_allowed("ram"):
         try:
-            return _acquire_ram_window(resolver, declared, entry)
+            return _select_ram_window(resolver, declared, entry)
         except LeaseRefused as refusal:
             if refusal.kind != "availability":
                 raise
@@ -317,11 +343,6 @@ def acquire_entry_window(resolver, declared, entry: dict):
         "span": {"start_bytes": entry["offset"],
                  "end_bytes": entry["offset"] + entry["bytes"]},
     })
-    try:
-        window.__enter__()
-    except LeaseRefused as refusal:
-        resolver.record_fallback(declared, str(refusal))
-        raise
     return window, key
 
 
@@ -333,6 +354,11 @@ class LeaseWindow:
     (``{start_bytes, end_bytes}`` in entry coordinates), and optional
     ``ram`` passthrough. ``acquire_token`` defaults to a fresh uuid4;
     pass it back to retry idempotently onto the same ref.
+
+    Single-shot lifetime: enter exactly once, exit exactly once.
+    Re-entering (nested or after exit) and re-exiting refuse as
+    programming errors — reuse is never silent reacquisition. Exiting a
+    never-entered window is a finally-safe no-op.
 
     Use as a context manager: ``__enter__`` acquires (one
     ``generation-changed`` re-resolve, then fail clear),
@@ -357,28 +383,39 @@ class LeaseWindow:
         self._pool_mod = None
         self._pid: int | None = None
         self._owner_pid: int | None = None
+        self._entered = False
+        self._exited = False
         self._fds: dict[int, str] = {}
         self._released = False
 
     def _require_owner(self, operation: str) -> None:
-        """Refuse forked-child use loudly: only the acquiring process may
-        open, close, or release. Inherited descriptors and mappings stay
-        the parent's: the child must not perform I/O on them — use
-        threads, or fork with no live window and `_exit` without I/O.
-        Unregistered inheritance is unsupported, and this (not a
-        docstring) enforces it on every state-changing operation."""
+        """Reject inherited handle operations in a forked child.
+
+        Supported readers use threads and owned buffers; an operation
+        issued from another pid would act on inherited handles outside
+        the holder's lifecycle, so it fails loudly instead. Raw
+        descriptor escape past these operations is unsupported (not
+        policed here): fork with no live window and `_exit` without I/O.
+        """
         if self._owner_pid is not None and os.getpid() != self._owner_pid:
             raise RuntimeError(
                 f"LeaseWindow.{operation} from a forked child is "
-                "unsupported: fork with a live window must not use "
-                "inherited descriptors, mappings, or refs — the parent "
-                "releases them on its own lifecycle and the child must "
-                "not outlive that protection. Use threads, which share "
-                "the holder pid, or fork with no live window.")
+                "unsupported: inherited handles must not be operated "
+                "past the holder's lifecycle — the parent releases them "
+                "on its own schedule. Use threads, which share the "
+                "holder pid, or fork with no live window.")
 
     # -- acquire ------------------------------------------------------
 
     def __enter__(self) -> "LeaseWindow":
+        if self._exited:
+            raise RuntimeError(
+                "LeaseWindow re-enter after exit is refused: a released "
+                "manager is never reused — acquire a fresh window per read.")
+        if self._entered:
+            raise RuntimeError(
+                "LeaseWindow nested/reentrant enter is refused: one enter "
+                "per window, no silent reacquisition.")
         if self._helper_root is not None:
             set_lease_helper_root(self._helper_root)
         if self._owner_pid is not None and os.getpid() != self._owner_pid:
@@ -409,6 +446,7 @@ class LeaseWindow:
         self._queue_root = str(ctx["queue_root"])
         self._pid = os.getpid()
         self._owner_pid = os.getpid()
+        self._entered = True
         import prismabuild.pool as pool_mod  # noqa: PLC0415, sealed tree
         self._pool_mod = pool_mod
         return self
@@ -482,9 +520,17 @@ class LeaseWindow:
     # -- release --------------------------------------------------------
 
     def __exit__(self, *args) -> bool:
-        # Forked-child teardown is refused loudly by close_fds below: a
-        # child unwinding a parent's window must not close inherited
-        # descriptors or release the parent's ref.
+        # Exiting a never-entered window is a finally-safe no-op;
+        # re-exiting a released window refuses (no reuse). A forked-child
+        # teardown is refused loudly by close_fds below: a child unwinding
+        # a parent's window must not close inherited descriptors or
+        # release the parent's ref.
+        if not self._entered:
+            return False
+        if self._exited:
+            raise RuntimeError(
+                "LeaseWindow re-exit is refused: a released manager is "
+                "never reused.")
         failure = None
         try:
             self.close_fds()
@@ -495,6 +541,7 @@ class LeaseWindow:
         except LeaseRefused as exc:
             if failure is None:
                 failure = exc
+        self._exited = True
         if failure is not None:
             raise failure
         return False

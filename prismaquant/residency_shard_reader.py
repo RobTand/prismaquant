@@ -380,12 +380,14 @@ class StagedShardReader:
     (``_read_shard_header``); payload comes from staged ranges or refuses.
 
     Concurrency is threads, never fork: payload and lifecycle operations
-    (``get_tensor``, ``get_slice``, ``__enter__``, ``__exit__``) refuse
-    loudly in a forked child, so inherited bound descriptors can never be
-    read past the parent's release. ``keys``/``metadata`` stay available:
-    stateless bounded-header metadata with no retained descriptor. A
-    forked child must not perform I/O on any inherited descriptor or
-    mapping and should ``_exit`` without it.
+    (``get_tensor``, ``get_slice``, ``__enter__``, ``__exit__``) reject
+    inherited handle operations in a forked child, so a child cannot
+    drive reads through state the parent's release retires. ``keys``/
+    ``metadata`` stay available: stateless bounded-header metadata with
+    no retained descriptor. Raw descriptor escape past these operations
+    is unsupported (not policed here): a forked child must not perform
+    I/O on any inherited descriptor or mapping and should ``_exit``
+    without it.
     """
 
     def __init__(self, pool_open, path, declared, resolver, kwargs):
@@ -418,8 +420,8 @@ class StagedShardReader:
         if os.getpid() != self._owner_pid:
             raise RuntimeError(
                 f"StagedShardReader.{operation} from a forked child is "
-                "unsupported: inherited bound descriptors must not be read "
-                "past the parent's release. Use threads, which share the "
+                "unsupported: inherited bound handles must not be driven "
+                "past the holder's lifecycle. Use threads, which share the "
                 "holder pid, or fork with no live reader.")
 
     # -- the handle interface --------------------------------------------
@@ -644,6 +646,11 @@ class StagedShardReader:
         window, key = acquire_entry_window(
             self._resolver, self._declared, entry)
         try:
+            window.__enter__()
+        except LeaseRefused as refusal:
+            self._resolver.record_fallback(self._declared, str(refusal))
+            raise
+        try:
             fd, serving = window.open(key)
             info = os.fstat(fd)
             if info.st_size != entry["bytes"]:
@@ -651,7 +658,7 @@ class StagedShardReader:
         except (OSError, LeaseRefused) as error:
             try:
                 window.__exit__(None, None, None)
-            except LeaseRefused:
+            except (LeaseRefused, RuntimeError):
                 pass
             if isinstance(error, LeaseRefused):
                 self._resolver.record_fallback(self._declared, str(error))
@@ -667,9 +674,12 @@ class StagedShardReader:
             pin_id=str(serving.get("pin_id") or ""),
             range_ref=str(serving.get("range_ref") or ""))
         if not self._bound:
-            # Every range of one declared shard is staged under the same root,
-            # so the mount's read shape is read once per reader, not per tensor.
-            self._shape = _read_shape(entry["stage_path"])
+            # Every range of one declared shard is staged under the same
+            # root, so the mount's read shape is read once per reader, not
+            # per tensor — from the path actually opened (the RAM copy for
+            # a RAM window), never an assumed tier.
+            self._shape = _read_shape(window.stage_path(key)
+                                      or entry["stage_path"])
         row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
                _signature(info), entry, tier, window)
         self._bound.append(row)

@@ -1399,12 +1399,17 @@ class ProductionWeightCache:
                     raise StagedReadRefused("readset-not-staged")
                 window, key = acquire_entry_window(recorder, path, staged)
                 try:
+                    window.__enter__()
+                except LeaseRefused as refusal:
+                    recorder.record_fallback(path, str(refusal))
+                    raise
+                try:
                     fd, serving = window.open(key)
                 except LeaseRefused as refusal:
                     recorder.record_fallback(path, str(refusal))
                     try:
                         window.__exit__(None, None, None)
-                    except LeaseRefused:
+                    except (LeaseRefused, RuntimeError):
                         pass
                     raise
                 serving_tier = window.serving_tier or "stage"

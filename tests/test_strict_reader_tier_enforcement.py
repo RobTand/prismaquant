@@ -49,10 +49,10 @@ EPOCH = '1789771929-aba6e46e41fb03ef'
 STALE_EPOCH = '1789788888-9c1d2e3f4a5b'
 STAGE_TIER = 'prismabuild-stage:dl380g10'
 
-PB_PIN_ROOT = Path("/home/rob/tmp/pb-reader-lease-pin2-20260920")
-PB_SRC = PB_PIN_ROOT / "src"
-PINNED_READER_LEASE_SHA256 = (
-    "b4428c5b898a0225a0b9dca5822ff9aab72538db6e80722c0b0c9e9326050d14")
+PB_PIN_NOTE = (
+    "portable reviewed install: tests import the pbtest-pinned "
+    "prismabuild distribution (tools/resolve_prismabuild_dev_pin.py), "
+    "never a private worktree")
 
 
 @pytest.fixture(autouse=True)
@@ -93,18 +93,22 @@ def _launch_env(monkeypatch, consumer):
 # -- pinned PB SDK + queue fixtures (real writers, real formats) ------------
 
 def _pb():
-    """The pristine pinned SDK; refuses on any drift (declared artifact)."""
-    blob = (PB_SRC / "prismabuild" / "reader_lease.py").read_bytes()
-    assert hashlib.sha256(blob).hexdigest() == PINNED_READER_LEASE_SHA256, (
-        "PB pin drifted: refusing instead of integrating against a "
-        "different SDK")
-    assert PINNED_SDK_COMMIT.startswith("d079ad33")
-    if str(PB_SRC) not in sys.path:
-        sys.path.insert(0, str(PB_SRC))
+    """The reviewed installed SDK; refuses private-worktree shadows.
+
+    Commit, RECORD bytes, and shadow-freedom are proved by the pbtest pin
+    guard before pytest starts; here the origin is attributed and the
+    exact API surface re-checked, so a passing suite always names what
+    it ran against.
+    """
     import prismabuild.reader_lease as rl
     import prismabuild.pool as pool_mod
     import prismabuild.residency_map as map_mod
-    assert str(Path(rl.__file__).resolve()).startswith(str(PB_SRC) + os.sep)
+    origin = str(Path(rl.__file__).resolve())
+    assert "/pb-reader-lease-pin" not in origin, (
+        f"must use the reviewed install, not a private worktree: {origin}")
+    for name in ("acquire_for", "open_pinned", "release", "covers_for_keys",
+                 "injected_context", "register_inherited_ref"):
+        assert hasattr(rl, name), f"SDK surface missing {name} at {origin}"
     return rl, pool_mod, map_mod
 
 
@@ -213,7 +217,6 @@ def _leased_fixture(tmp_path, monkeypatch, staged_files):
     _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
-    set_lease_helper_root(PB_PIN_ROOT)
     activate_staged_tier_policy("ram,ssd")
     return residency_resolver(), consumer, mover
 
@@ -483,7 +486,6 @@ def test_strict_source_ram_serves_first_pinned(tmp_path, monkeypatch):
     _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
-    set_lease_helper_root(PB_PIN_ROOT)
     activate_staged_tier_policy("ram,ssd")
     resolver = residency_resolver()
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
@@ -512,7 +514,6 @@ def test_strict_source_unmapped_refuses_without_pool_bytes(tmp_path, monkeypatch
     staged = _stage_whole(root, other)
     resolver = _strict(monkeypatch, _write_map(
         tmp_path, {'o': (other, staged, None)}))
-    set_lease_helper_root(PB_PIN_ROOT)
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
         assert 'f32' in reader.keys()
         with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
@@ -531,25 +532,21 @@ def test_strict_source_without_any_map_refuses(tmp_path, monkeypatch):
             reader.get_tensor('f32')
 
 
-def test_strict_source_without_helper_refuses_lease_required(tmp_path, monkeypatch):
-    """No helper, no pin: strict lifetime requires real support and
-    refuses instead of serving staged bytes unpinned or falling open."""
+def test_strict_source_unpublished_material_refuses(tmp_path, monkeypatch):
+    """A map entry with no published material behind it refuses at
+    acquisition (unpublished) instead of serving staged bytes unpinned
+    or falling open to the pool."""
     path, _ = _shard(tmp_path)
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
     resolver = _strict(monkeypatch, _write_map(
         tmp_path, {'s': (path, staged, None)}))
-    assert lease_helper_root_is_unset()
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        with pytest.raises(LeaseRefused, match="lease-helper-unavailable"):
+        with pytest.raises(LeaseRefused, match="unpublished"):
             reader.get_tensor('f32')
-    assert resolver.report()['bytes_from_pool'] == 0
-    assert resolver.report()['bytes_from_stage'] == 0
-
-
-def lease_helper_root_is_unset():
-    from prismaquant.staged_lease import lease_helper_root
-    return lease_helper_root() is None
+    report = resolver.report()
+    assert report['bytes_from_pool'] == 0
+    assert report['bytes_from_stage'] == 0
 
 
 def test_strict_source_without_context_refuses(tmp_path, monkeypatch):
@@ -585,7 +582,6 @@ def test_strict_source_stale_ram_falls_to_allowed_stage(tmp_path, monkeypatch):
     _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
-    set_lease_helper_root(PB_PIN_ROOT)
     activate_staged_tier_policy("ram,ssd")
     resolver = residency_resolver()
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
@@ -608,7 +604,6 @@ def test_strict_ram_only_with_dead_epoch_refuses(tmp_path, monkeypatch):
     resolver = _strict(monkeypatch, _write_map(
         tmp_path, {'s': (path, staged, ram['s'])}, ram_root=ram_root, epoch=EPOCH),
         tiers="ram")
-    set_lease_helper_root(PB_PIN_ROOT)
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
         with pytest.raises(TierPolicyRefused, match="ssd-not-allowed"):
             reader.get_tensor('f32')
@@ -622,7 +617,6 @@ def test_strict_source_corrupt_range_refuses(tmp_path, monkeypatch):
     staged.write_bytes(staged.read_bytes()[:-8])
     resolver = _strict(monkeypatch, _write_map(
         tmp_path, {'s': (path, staged, None)}))
-    set_lease_helper_root(PB_PIN_ROOT)
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
         with pytest.raises(TierPolicyRefused):
             reader.get_tensor('f32')
@@ -652,7 +646,6 @@ def test_strict_empty_tensor_built_locally(tmp_path, monkeypatch):
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
     _strict(monkeypatch, _write_map(tmp_path, {'s': (path, staged, None)}))
-    set_lease_helper_root(PB_PIN_ROOT)
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
         got = reader.get_tensor('empty')
         assert got.shape == tensors['empty'].shape
@@ -698,7 +691,6 @@ def test_strict_pwc_missing_digest_refuses(tmp_path, monkeypatch):
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
     _strict(monkeypatch, _write_map(tmp_path, {'p': (path, staged, None)}))
-    set_lease_helper_root(PB_PIN_ROOT)
     with pytest.raises(TierPolicyRefused, match="missing-digest-binding"):
         cache.prefetch([key], max_workers=1)
 
@@ -708,7 +700,6 @@ def test_strict_pwc_unbounded_refuses_without_fallthrough(tmp_path, monkeypatch)
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
     _strict(monkeypatch, _write_map(tmp_path, {'p': (path, staged, None)}))
-    set_lease_helper_root(PB_PIN_ROOT)
     with pytest.raises(TierPolicyRefused, match="unbounded-read"):
         cache.prefetch([key], max_workers=1)
 
@@ -787,7 +778,6 @@ def test_strict_ram_corrupt_fails_clear_without_stage_adoption(tmp_path, monkeyp
     _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
-    set_lease_helper_root(PB_PIN_ROOT)
     activate_staged_tier_policy("ram,ssd")
     resolver = residency_resolver()
     with pytest.raises(LeaseRefused) as excinfo:
@@ -823,7 +813,6 @@ def test_strict_wire_ram_corrupt_serves_checked_stage(tmp_path, monkeypatch):
     _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
-    set_lease_helper_root(PB_PIN_ROOT)
     activate_staged_tier_policy("ram,ssd")
     resolver = residency_resolver()
     read, digest = _read_verified_wire_blob(cell)
@@ -882,7 +871,6 @@ def test_strict_verified_activation_unmapped_refuses(tmp_path, monkeypatch):
     root = _stage_root(tmp_path)
     _strict(monkeypatch, _write_map(
         tmp_path, {'o': (other, _stage_whole(root, other), None)}))
-    set_lease_helper_root(PB_PIN_ROOT)
     with pytest.raises(TierPolicyRefused, match="staged-not-serving"):
         load_verified_activation_cache_entry(
             path, expected_sha256=digest, policy=_activation_policy(),
@@ -931,7 +919,6 @@ def test_strict_exact_entry_unmapped_refuses(tmp_path, monkeypatch):
     other.write_bytes(Path(ref.path).read_bytes())
     _strict(monkeypatch, _write_map(
         tmp_path, {'o': (other, _stage_whole(root, other), None)}))
-    set_lease_helper_root(PB_PIN_ROOT)
     with pytest.raises(TierPolicyRefused, match="staged-not-serving"):
         with prefetch_exact_activation_cache_entries(
                 [ref], max_tensor_bytes=nbytes,
@@ -965,7 +952,6 @@ def test_duplicate_acquire_token_adopts_one_ref(tmp_path, monkeypatch):
                 {key: (declared, staged)})
     _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
-    set_lease_helper_root(PB_PIN_ROOT)
     spec = {"tier_id": STAGE_TIER, "epoch": "",
             "covers": covers_for_leads([mover], MANIFEST),
             "expected": {key: {"bytes": len(blob), "sha256": digest}},
@@ -1012,7 +998,6 @@ def test_forked_child_window_use_refused_loudly(tmp_path, monkeypatch):
                 {key: (declared, staged)})
     _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
-    set_lease_helper_root(PB_PIN_ROOT)
     spec = {"tier_id": STAGE_TIER, "epoch": "",
             "covers": covers_for_leads([mover], MANIFEST),
             "expected": {key: {"bytes": len(blob), "sha256": digest}},
@@ -1148,7 +1133,70 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
 
 def test_lease_pin_module_reports_approved_commit():
     from prismaquant.staged_lease import PINNED_SDK_COMMIT
-    assert PINNED_SDK_COMMIT.startswith("d079ad33")
+    assert PINNED_SDK_COMMIT == "2637a9d0f7d31afbce7ad2e5735e8334fe37a40d"
+
+
+# -- window enter/exit contract: single-shot, no leaks ------------------------
+
+def _window_fixture(tmp_path, monkeypatch, blob=b"window-contract-bytes-00112233"):
+    from prismaquant.staged_lease import LeaseWindow, covers_for_leads
+    _pb()
+    consumer = _hex64(f"consumer-{tmp_path}")
+    import prismabuild.pool as pool_mod
+    import prismabuild.residency_map as map_mod
+    import prismabuild.reader_lease as rl
+    queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
+    declared = tmp_path / 'pool' / 'd.bin'
+    declared.parent.mkdir(parents=True, exist_ok=True)
+    declared.write_bytes(blob)
+    staged = stage / 'd.bin'
+    staged.write_bytes(blob)
+    digest = hashlib.sha256(blob).hexdigest()
+    mover = _hex64(f"mover-{tmp_path}")
+    root = tmp_path / 'residency'
+    key = residency_map_key(str(declared), 0)
+    _pb_publish(rl, map_mod, root, stage, consumer, mover, MANIFEST,
+                {key: (declared, staged)})
+    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    monkeypatch.setenv("PRISMABUILD_ACTION_NONCE", LAUNCH_NONCE)
+    monkeypatch.setenv("PRISMABUILD_ACTION_SCOPE", LAUNCH_SCOPE)
+    monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
+    spec = {"tier_id": STAGE_TIER, "epoch": "",
+            "covers": covers_for_leads([mover], MANIFEST),
+            "expected": {key: {"bytes": len(blob), "sha256": digest}},
+            "span": {"start_bytes": 0, "end_bytes": len(blob)}}
+    return spec, key, consumer, staged, blob
+
+
+def test_open_refusal_after_acquire_releases_exactly(tmp_path, monkeypatch):
+    """Refusal between acquisition and payload setup leaks nothing: the
+    acquired pin releases exactly and no pool byte is read."""
+    from prismaquant.staged_lease import LeaseWindow
+    spec, key, consumer, staged, blob = _window_fixture(tmp_path, monkeypatch)
+    window = LeaseWindow(spec, acquire_token="token-open-fail")
+    with window:
+        staged.unlink()  # released between acquire and open
+        with pytest.raises(LeaseRefused) as excinfo:
+            window.open(key)
+        assert excinfo.value.kind == "integrity"
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_released_window_reuse_and_nesting_refuse(tmp_path, monkeypatch):
+    """A released manager is never reused and a live one never nests:
+    both refuse as programming errors instead of silent reacquisition."""
+    from prismaquant.staged_lease import LeaseWindow
+    spec, key, consumer, _staged, _blob = _window_fixture(tmp_path, monkeypatch)
+    window = LeaseWindow(spec, acquire_token="token-reuse")
+    with window:
+        with pytest.raises(RuntimeError, match="nested|reentrant|already entered"):
+            with window:
+                pass
+    assert _pins_live(tmp_path, consumer) == []
+    with pytest.raises(RuntimeError, match="re-enter|released|reuse"):
+        with window:
+            pass
+    assert _pins_live(tmp_path, consumer) == []
 
 
 # -- strict checkpoint shared-state payloads, pinned -------------------------
@@ -1206,7 +1254,6 @@ def _stage_checkpoint_entries(tmp_path, monkeypatch, record):
     _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
-    set_lease_helper_root(PB_PIN_ROOT)
     activate_staged_tier_policy("ram,ssd")
     return residency_resolver(), consumer, paths
 
@@ -1259,7 +1306,6 @@ def test_strict_checkpoint_shared_state_unmapped_refuses(tmp_path, monkeypatch):
         adjoint_space, load_adjoint_checkpoint)
     record, _tensor, _state = _write_checkpoint(tmp_path)
     _strict(monkeypatch, _write_map(tmp_path, {}))
-    set_lease_helper_root(PB_PIN_ROOT)
     activate_staged_tier_policy("ram,ssd")
     with pytest.raises(TierPolicyRefused):
         load_adjoint_checkpoint(adjoint_space(tmp_path), record)
@@ -1270,19 +1316,15 @@ def test_lease_helper_reads_authoritative_env_automatically(tmp_path, monkeypatc
     is read with no explicit setter and no user knob."""
     from prismaquant.staged_lease import (
         HELPER_ROOT_ENV_VAR, lease_helper_root)
-    _pb()
     assert lease_helper_root() is None
-    monkeypatch.setenv(HELPER_ROOT_ENV_VAR, str(PB_PIN_ROOT))
-    assert lease_helper_root() == str(PB_PIN_ROOT)
-    monkeypatch.setenv(HELPER_ROOT_ENV_VAR, "/nonexistent-root")
-    assert lease_helper_root() == "/nonexistent-root"
+    monkeypatch.setenv(HELPER_ROOT_ENV_VAR, str(tmp_path / 'gen-root'))
+    assert lease_helper_root() == str(tmp_path / 'gen-root')
 
 
 def test_lease_helper_env_without_helper_refuses(tmp_path, monkeypatch):
-    """An authoritatively-named root that names nothing usable refuses
-    instead of importing whatever happens to be around — unavailable on a
-    fresh interpreter, divergent when another tree is already imported
-    (two trees must never mix). Either way: clear refusal, zero pool."""
+    """An authoritatively-named root that disagrees with the loaded SDK
+    refuses as divergent: two trees must never mix. Clear refusal, zero
+    pool — the installed reviewed dependency stays the only servant."""
     from prismaquant.staged_lease import HELPER_ROOT_ENV_VAR
     _pb()
     path, _ = _shard(tmp_path)
@@ -1292,8 +1334,7 @@ def test_lease_helper_env_without_helper_refuses(tmp_path, monkeypatch):
         tmp_path, {'s': (path, staged, None)}))
     monkeypatch.setenv(HELPER_ROOT_ENV_VAR, str(tmp_path / 'no-such-root'))
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        with pytest.raises(LeaseRefused,
-                           match="lease-helper-(unavailable|divergent)"):
+        with pytest.raises(LeaseRefused, match="lease-helper-divergent"):
             reader.get_tensor('f32')
     assert resolver.report()['bytes_from_pool'] == 0
 
@@ -1331,7 +1372,6 @@ def test_stage_epoch_convention_is_exact_absence(tmp_path, monkeypatch):
                        "sha256": digest, "file_id": rl.stat_identity(str(staged))}})
     _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
-    set_lease_helper_root(PB_PIN_ROOT)
     spec = {"tier_id": STAGE_TIER, "epoch": "",
             "covers": covers_for_leads([mover], MANIFEST),
             "expected": {key: {"bytes": len(blob), "sha256": digest}},
@@ -1384,7 +1424,6 @@ def test_equal_sized_files_never_serve_each_others_bytes(tmp_path, monkeypatch):
         generation=rl.mint_generation(), entries=mat_entries)
     _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
-    set_lease_helper_root(PB_PIN_ROOT)
 
     def read_all(name):
         key, _declared, blob = keys[name]
