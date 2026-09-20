@@ -94,27 +94,68 @@ def eval_pool_delta(before, after, mount):
     return True, second - first
 
 
-def expect_serving_tier(*, ram_offered, allowed, lease_tier_id, serving):
+#: Tier families the probe accepts as staged service. ``ram`` serves the
+#: live tmpfs copy; ``prismabuild-stage`` (the SDK's ``STAGE_POOL_PREFIX``)
+#: serves the stage-pool copy. Any other family (arc/pool/unknown) never
+#: passes, even when it textually equals the lease tier: the lease tier
+#: proves which acquire this serving claims, the family proves it is a
+#: tier the readers lane actually serves.
+_STAGE_FAMILIES = ("ram", "prismabuild-stage")
+
+
+def expect_serving_tier(*, ram_offered, allowed, lease_tier_id, serving,
+                        ram_fallback_recorded=False):
     """(ok, reason) for the observed serving tier (pure).
 
-    A valid offered RAM leg serves first when allowed; an explicitly
-    SSD-only run serves exactly the lease tier it acquired. Anything
-    else -- arc/pool/unknown families, RAM without a recorded offer,
-    RAM served while disallowed -- fails. A missing offer or tier
-    never passes.
+    RAM serves first when offered and allowed. An SSD-family tier serves
+    only when explicitly allowed, exactly equal to the lease tier the
+    window acquired, and -- when RAM was offered -- only with recorded
+    typed RAM-availability fallback evidence from the resolver (a bare
+    ``ram_path`` string never proves availability, and a RAM integrity
+    refusal never falls back: ``acquire_entry_window`` propagates those
+    with no alternate adoption). Anything else -- arc/pool/unknown
+    families even under a matching lease id, RAM without offer plus
+    allowance, RAM served while disallowed, SSD served over a validly
+    offered RAM leg -- fails. A missing offer or tier never passes.
     """
 
     tier = serving.get("tier_id") if isinstance(serving, dict) else None
     if not isinstance(tier, str) or not tier:
         return False, "serving names no tier"
-    if tier.split(":")[0] == "ram":
+    family = tier.split(":")[0]
+    if family == "ram":
         if ram_offered and "ram" in allowed:
             return True, "ram-served"
         return False, f"ram served without offer+allowance: {tier}"
-    if "ssd" in allowed and isinstance(lease_tier_id, str) \
-            and lease_tier_id and tier == lease_tier_id:
-        return True, "ssd-served"
-    return False, f"tier not served as allowed: {tier}"
+    if family not in _STAGE_FAMILIES:
+        return False, f"unsupported serving family: {tier}"
+    if ("ssd" not in allowed or not isinstance(lease_tier_id, str)
+            or not lease_tier_id or tier != lease_tier_id):
+        return False, f"tier not served as allowed: {tier}"
+    if ram_offered and not ram_fallback_recorded:
+        return False, (f"ssd served while ram offered with no recorded "
+                       f"availability fallback (ram-first violated): {tier}")
+    return True, "ssd-served"
+
+
+def ram_availability_fallback_recorded(resolver, declared) -> bool:
+    """Whether the resolver recorded a typed RAM-availability fallback.
+
+    Reads the resolver's own ``ram_fallbacks`` evidence (written only on
+    the availability leg of ``acquire_entry_window``; integrity refusals
+    propagate without recording). A bare ``ram_path`` string is never
+    consulted here, so map-offered-but-unproven RAM cannot pass.
+    """
+
+    try:
+        fallbacks = resolver.report().get("ram_fallbacks", [])
+    except Exception:  # noqa: BLE001 -- no evidence is no fallback
+        return False
+    if not isinstance(fallbacks, list):
+        return False
+    want = os.path.normpath(str(declared))
+    return any(isinstance(row, dict) and os.path.normpath(
+        str(row.get("path") or "")) == want for row in fallbacks)
 
 
 def _read_pin_record(sdk, queue, pin_id):
@@ -173,7 +214,6 @@ def main() -> int:
     from prismaquant.staged_lease import (
         LeaseRefused, acquire_entry_window, lease_helper_root,
     )
-    from prismaquant.residency_map import residency_map_key
 
     result: dict = {
         "schema": "pq.live_reader_qual.v1",
@@ -188,13 +228,13 @@ def main() -> int:
     }
     try:
         result["allowed_tiers"] = sorted(activate_staged_tier_policy(ns.allowed_tiers))
-        try:
-            import prismabuild.reader_lease as sdk
-            result["sdk_file"] = str(Path(getattr(sdk, "__file__", "")).resolve())
-            result["sdk_importable"] = True
-        except ImportError as exc:
-            sdk = None  # type: ignore[assignment]
-            result["sdk_importable"] = f"unavailable: {exc}"
+        # No direct ``prismabuild.reader_lease`` import here: in the scoped
+        # PQ venv that preimport resolves the installed package, and the
+        # sealed-tree coherence check then refuses the divergence the tool
+        # itself created. The strict reader below resolves the sealed SDK
+        # first; diagnostic access follows through that same runtime.
+        sdk = None
+        result["sdk_importable"] = "sealed SDK resolves at first strict read"
         result["helper_root_auto"] = lease_helper_root()
         map_path = os.environ.get("PRISMABUILD_RESIDENCY_MAP") or ""
         bound = json.load(open(map_path)).get("manifest_sha256", "") if map_path else ""
@@ -285,6 +325,18 @@ def main() -> int:
             return UNQUALIFIED
         result["ram_offered"] = entry.get("ram_path")
         result["stage_path"] = entry.get("stage_path")
+        # The SDK this run actually served: the module the strict read
+        # above resolved (sealed tree in production, injected install in
+        # tests) -- never a fresh environment import that could resolve
+        # elsewhere. Absent means the read path never bound, so the hold
+        # proof is blocked rather than forged.
+        sdk = sys.modules.get("prismabuild.reader_lease")
+        if sdk is not None:
+            result["sdk_file"] = str(
+                Path(getattr(sdk, "__file__", "")).resolve())
+            result["sdk_importable"] = True
+        else:
+            result["sdk_importable"] = "strict read bound no SDK module"
         if sdk is None or result.get("helper_root_auto") is None:
             result["finding"] = {
                 "blocked": "strict SDK unbindable in this run",
@@ -299,8 +351,14 @@ def main() -> int:
         except Exception:  # noqa: BLE001 -- diagnostic only
             lease_tier = None
         result["lease_tier_id"] = lease_tier
-        window = acquire_entry_window(resolver, ns.declared, entry)
+        # The public contract returns (window, key): unpack both and open
+        # the returned key. Storing the whole tuple as the window cannot
+        # enter.
+        window, map_key = acquire_entry_window(resolver, ns.declared, entry)
         try:
+            # Ordered after the strict read on purpose: the sealed tree's
+            # ``src`` sits on ``sys.path`` ahead of the install only once
+            # the SDK above resolved it, so this names the sealed pool.
             from prismabuild.pool import PoolQueue
         except ImportError as exc:
             result["finding"] = {
@@ -314,12 +372,14 @@ def main() -> int:
         nonce = os.environ.get("PRISMABUILD_ACTION_NONCE") or ""
         scope_id = os.environ.get("PRISMABUILD_ACTION_SCOPE") or ""
         with window as entered:
-            fd, serving = entered.open(residency_map_key(str(Path(ns.declared)), 0))
+            fd, serving = entered.open(map_key)
             result["serving"] = serving
             tier_ok, tier_reason = expect_serving_tier(
                 ram_offered=bool(entry.get("ram_path")),
                 allowed=allowed, lease_tier_id=lease_tier,
-                serving=serving)
+                serving=serving,
+                ram_fallback_recorded=ram_availability_fallback_recorded(
+                    resolver, ns.declared))
             result["serving_tier_check"] = tier_reason
             if not tier_ok:
                 result["finding"] = f"serving tier refused: {tier_reason}"

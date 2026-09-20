@@ -47,29 +47,43 @@ def test_serving_tier_enforces_ram_first() -> None:
     ssd = {"tier_id": stage, "epoch": "", "pin_id": "p", "range_ref": "k"}
     arc = {"tier_id": "arc:dl380g10", "epoch": "", "pin_id": "p",
            "range_ref": "k"}
+    pool = {"tier_id": "pool:dl380g10", "epoch": "", "pin_id": "p",
+            "range_ref": "k"}
     # Offered + allowed RAM serves RAM.
     assert expect_serving_tier(
         ram_offered=True, allowed={"ram", "ssd"}, lease_tier_id=stage,
         serving=ram) == (True, "ram-served")
-    # SSD lease tier with SSD allowed passes even when RAM was
-    # offered: RAM-first is enforced at acquire time, while serving
-    # must match an allowed appropriate tier (never arc/pool/unknown).
+    # SSD over a validly offered RAM leg with no recorded availability
+    # fallback violates RAM-first -- even when the lease tier matches.
     assert expect_serving_tier(
         ram_offered=True, allowed={"ram", "ssd"}, lease_tier_id=stage,
-        serving=ssd) == (True, "ssd-served")
+        serving=ssd)[0] is False
+    # The same SSD serving passes with the resolver's real typed
+    # availability fallback recorded (bare ram_path never suffices).
+    assert expect_serving_tier(
+        ram_offered=True, allowed={"ram", "ssd"}, lease_tier_id=stage,
+        serving=ssd, ram_fallback_recorded=True) == (True, "ssd-served")
     # Explicit SSD-only serves exactly the lease tier, offer or not.
     assert expect_serving_tier(
         ram_offered=False, allowed={"ssd"}, lease_tier_id=stage,
         serving=ssd) == (True, "ssd-served")
     assert expect_serving_tier(
         ram_offered=True, allowed={"ssd"}, lease_tier_id=stage,
-        serving=ssd) == (True, "ssd-served")
-    # arc/pool/unknown families never pass as SSD.
+        serving=ssd, ram_fallback_recorded=True) == (True, "ssd-served")
+    # arc/pool/unknown families never pass -- even when the lease id
+    # textually matches them.
     assert expect_serving_tier(
-        ram_offered=False, allowed={"ssd"}, lease_tier_id=stage,
+        ram_offered=False, allowed={"ssd"}, lease_tier_id="arc:dl380g10",
         serving=arc)[0] is False
     assert expect_serving_tier(
+        ram_offered=False, allowed={"ssd"}, lease_tier_id="pool:dl380g10",
+        serving=pool)[0] is False
+    assert expect_serving_tier(
         ram_offered=False, allowed=set(), lease_tier_id=stage,
+        serving=ssd)[0] is False
+    # A lease tier from another family never authorizes stage service.
+    assert expect_serving_tier(
+        ram_offered=False, allowed={"ssd"}, lease_tier_id="arc:dl380g10",
         serving=ssd)[0] is False
     assert expect_serving_tier(
         ram_offered=False, allowed={"ssd"}, lease_tier_id=stage,
