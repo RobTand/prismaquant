@@ -186,25 +186,16 @@ def _published():
     return pbcore, pbtest_mod
 
 
-def _sealed_command(action: object) -> tuple[dict | None, str]:
-    """Parse the sealed test command (closed published forms).
+def _canonical_script(action: object) -> tuple[str | None, str]:
+    """Rebuild task.argv[4] with the publisher expression.
 
-    Accepts exactly the two shapes the published generators seal for
-    test work, validated token by token after shell lexing (comments
-    stripped, quoting respected):
-
-    - pbtest suite form: ``export PATH=...:$PATH; env K=V... <interp>
-      -c <guard> -q --no-header -p no:cacheprovider <files>`` -- the
-      dependency-guard entry admitted since this checkout carries
-      ``resolve_*_dev_pin.py`` resolvers;
-    - pbrun-direct bare form: ``export PATH=...:$PATH; <interp> -m
-      pytest <files>``.
-
-    Returns ``({"interpreter", "files", "log", "entry"}, "")`` where
-    entry is ``"guard"`` or ``"plain"``. Anything else returns
-    ``(None, reason)``; callers treat shape drift as nonqualified,
-    never as proof. This is a small verifier for explicit versioned
-    forms, not a general Bash analyzer.
+    Replicates the pbrun sealing template byte-for-byte
+    (``export PATH=<quoted first entry>:$PATH; <joined command> 2>&1 |
+    tee <quoted log>; exit ${PIPESTATUS[0]}``) from the action's own
+    environment, params.command, and task result_path. Returns the
+    expected script, or ``(None, reason)`` when any piece is malformed.
+    Equality with the filed script proves canonical quoting: no extra
+    shell expansion, comments, branches, or operators can survive it.
     """
     if not isinstance(action, dict):
         return None, "sealed action malformed"
@@ -214,62 +205,92 @@ def _sealed_command(action: object) -> tuple[dict | None, str]:
             or argv[:4] != ["/bin/bash", "--noprofile", "--norc", "-c"]
             or not isinstance(argv[4], str)):
         return None, "sealed wrapper shape differs"
-    script = argv[4]
-    head, exit_sep, exit_tail = script.rpartition("; exit ${PIPESTATUS[0]}")
-    if not exit_sep or exit_tail != "":
-        return None, "sealed exit handling differs"
-    cmdline, tee_sep, log = head.rpartition(" 2>&1 | tee ")
-    if not tee_sep or not log or " " in log:
-        return None, "sealed log separator differs"
-    try:
-        tokens = shlex.split(cmdline, comments=True, posix=True)
-    except ValueError:
-        return None, "sealed command unlexable"
-    if (len(tokens) < 3 or tokens[0] != "export"
-            or not tokens[1].startswith("PATH=")):
-        return None, "sealed prefix differs"
-    path_token = tokens[1]
-    if path_token.endswith(";"):
-        path_token, index = path_token[:-1], 2
-    else:
-        if len(tokens) < 4 or tokens[2] != ";":
-            return None, "sealed prefix differs"
-        index = 3
-    if not path_token.endswith(":$PATH"):
-        return None, "sealed prefix differs"
-    rest = tokens[index:]
-    if rest[:1] == ["env"]:
+    environment = action.get("environment")
+    variables = environment.get("variables") if isinstance(
+        environment, dict) else None
+    path_var = variables.get("PATH") if isinstance(variables, dict) else None
+    params = action.get("params")
+    command = params.get("command") if isinstance(params, dict) else None
+    result_path = task.get("result_path") if isinstance(task, dict) else None
+    if (not isinstance(path_var, str) or not path_var
+            or not isinstance(command, list) or not command
+            or not all(isinstance(word, str) for word in command)
+            or not isinstance(result_path, str) or not result_path):
+        return None, "sealed action pieces malformed"
+    return ("export PATH=" + shlex.quote(path_var.split(":", 1)[0])
+            + ":$PATH; " + shlex.join(command)
+            + " 2>&1 | tee " + shlex.quote(result_path)
+            + "; exit ${PIPESTATUS[0]}"), ""
+
+
+def _command_operands(action: object) -> tuple[dict | None, str]:
+    """Structured operands straight from sealed params.command.
+
+    No shell lexing: the filed command is already a word list. Two
+    closed forms: the pbtest suite entry (``env`` assignments, guard
+    ``-c`` program, fixed pytest flags, file operands) and the bare
+    pbrun-direct entry (interpreter, ``-m pytest``, file operands, with
+    only an explicit collect-only pair admitted beyond bare files).
+    Returns ``({"interpreter", "files", "entry"}, "")`` or
+    ``(None, reason)``.
+    """
+    if not isinstance(action, dict):
+        return None, "sealed action malformed"
+    params = action.get("params")
+    command = params.get("command") if isinstance(params, dict) else None
+    if (not isinstance(command, list) or not command
+            or not all(isinstance(word, str) for word in command)):
+        return None, "sealed command malformed"
+    if command[0] == "env":
         index = 1
-        while index < len(rest) and re.fullmatch(
-                r"[A-Za-z_][A-Za-z0-9_]*=.*", rest[index]):
+        while index < len(command) and re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]*=.*", command[index]):
             index += 1
         if index == 1:
             return None, "sealed env assignments differ"
-        body = rest[index:]
+        body = command[index:]
         if (len(body) < 7 or not body[0] or body[1] != "-c"
                 or not body[2]
                 or body[3:7] != ["-q", "--no-header", "-p",
                                  "no:cacheprovider"]):
             return None, "sealed pytest entry differs"
         files = body[7:]
+        if not files or any(not f.endswith(".py") for f in files):
+            return None, "sealed test operands differ"
         entry = "guard"
     else:
-        if (len(rest) < 4 or not rest[0]
-                or rest[1:3] != ["-m", "pytest"]):
+        if (len(command) < 4 or not command[0]
+                or command[1:3] != ["-m", "pytest"]):
             return None, "sealed pytest entry differs"
-        operands = rest[3:]
-        # Bare pbrun-direct form carries no options except an explicit
-        # collect-only pair (used by real collection probes); anything
-        # else is shape drift.
-        flags = [t for t in operands if not t.endswith(".py")]
-        if any(t not in ("--collect-only", "-q") for t in flags):
+        operands = command[3:]
+        flags = [word for word in operands if not word.endswith(".py")]
+        if any(word not in ("--collect-only", "-q") for word in flags):
             return None, "sealed test operands differ"
-        files = [t for t in operands if t.endswith(".py")]
+        files = [word for word in operands if word.endswith(".py")]
         entry = "plain"
-    if not files or any(not f.endswith(".py") for f in files):
+    if not files or any(not f for f in files):
         return None, "sealed test operands differ"
-    return {"interpreter": rest[0] if entry == "plain" else body[0],
-            "files": files, "log": log, "entry": entry}, ""
+    interpreter = command[0] if entry == "plain" else body[0]
+    return {"interpreter": interpreter, "files": files,
+            "entry": entry,
+            "guard": body[2] if entry == "guard" else ""}, ""
+
+
+def _guard_bytes_ok(guard: str, generation: str) -> bool:
+    """The guard entry is byte-identical to the bound generation's file.
+
+    Reads the deployed ``pbtest_pins.py`` for the declared generation;
+    any substitution (including a program that merely prints a fake
+    pytest summary) fails the comparison. Missing file reads as False.
+    """
+    try:
+        published = (Path("/mnt/shared/prismabuild-fleet")
+                     / "runtime-generations" / generation
+                     / "tools" / "pbtest_pins.py").read_text(
+                         encoding="utf-8")
+    except (OSError, ValueError):
+        return False
+    return guard == published
 
 
 def _snapshot_agreement(action: object,
@@ -459,24 +480,35 @@ def verify_shard(*, shard: object, host: str, declared: dict,
         return nope("failed", "no CAS receipt for filed action",
                     action_key=key)
     receipt_sha = str(receipt.get("receipt_sha256", ""))
-    command, problem = _sealed_command(action)
+    task = action.get("task") if isinstance(action, dict) else None
+    script = (task.get("argv")[4] if isinstance(task, dict)
+              and isinstance(task.get("argv"), list)
+              and len(task.get("argv")) == 5
+              and all(isinstance(w, str) for w in task.get("argv"))
+              else None)
+    expected, problem = _canonical_script(action)
+    if problem or expected != script:
+        return nope("nonqualified",
+                    f"command shape differs: {problem or 'mismatch'}",
+                    action_key=key, receipt_sha256=receipt_sha)
+    operands, problem = _command_operands(action)
     if problem:
+        assert operands is None
         return nope("nonqualified",
                     f"command shape differs: {problem}",
                     action_key=key, receipt_sha256=receipt_sha)
-    assert command is not None
-    if command["files"] != [expected_file]:
+    assert operands is not None
+    if operands["files"] != [expected_file]:
         return nope("failed",
                     f"sealed command does not execute {expected_file}",
                     action_key=key, receipt_sha256=receipt_sha)
     python = declared.get("python")
-    if not isinstance(python, str) or command["interpreter"] != python:
+    if not isinstance(python, str) or operands["interpreter"] != python:
         return nope("failed", "sealed command interpreter mismatch",
                     action_key=key, receipt_sha256=receipt_sha)
-    task = action.get("task") if isinstance(action, dict) else None
-    result_path = task.get("result_path") if isinstance(task, dict) else None
-    if result_path != command["log"]:
-        return nope("failed", "sealed log differs from task result_path",
+    if operands["entry"] == "guard" and not _guard_bytes_ok(
+            operands["guard"], str(declared.get("generation") or "")):
+        return nope("failed", "pin-guard entry differs",
                     action_key=key, receipt_sha256=receipt_sha)
     try:
         result_path = cas.result_path(receipt, action)
@@ -486,9 +518,6 @@ def verify_shard(*, shard: object, host: str, declared: dict,
             "failed",
             f"result unreadable: {type(exc).__name__}: {str(exc)[:200]}",
             action_key=key, receipt_sha256=receipt_sha)
-    if command["entry"] == "guard" and "pbtest dependency pin:" not in text:
-        return nope("failed", "pin-guard evidence absent from result",
-                    action_key=key, receipt_sha256=receipt_sha)
     summary = pbtest_mod.pytest_summary(text.splitlines())
     if not summary:
         return nope("nonqualified",

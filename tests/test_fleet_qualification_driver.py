@@ -354,94 +354,117 @@ def _terminal_for(driver, tmp_path, monkeypatch, tag, key, host,
     return terminal
 
 
-def _script_of(tag):
+def _fixture_action(tag):
     import json as _json
-    action = _json.loads((FIXTURES / tag / "request.json").read_bytes())
-    return action["task"]["argv"][4]
+    return _json.loads((FIXTURES / tag / "request.json").read_bytes())
 
 
-def _action_with_script(script):
+def _action_with_script(script, command, path_var="/x/tools:/bin",
+                        log="log.txt"):
     return {"task": {"argv": ["/bin/bash", "--noprofile", "--norc", "-c",
-                              script]},
+                              script],
+                     "result_path": log},
+            "params": {"command": command},
+            "environment": {"variables": {"PATH": path_var}},
             "inputs": [{"id": "pbrun.checkout-snapshot",
-                        "sha256": "0" * 64}],
-            "result_path": "log.txt"}
+                        "sha256": "0" * 64}]}
 
 
-def test_sealed_command_accepts_both_published_forms():
-    """Real filed actions parse: plain probe and guarded suite shard."""
+def test_canonical_script_matches_filed_actions():
+    """Rebuilt publisher expression equals real sealed scripts byte-wise."""
     driver = _driver()
-    plain, problem = driver._sealed_command(
-        {"task": {"argv": ["/bin/bash", "--noprofile", "--norc", "-c",
-                           "x"]}, "inputs": [], "result_path": "l"})
-    assert plain is None and problem
-    for tag, expected, entry in (("A", PINS_FILE, "plain"),
-                                 ("B", PINS_FILE, "plain"),
-                                 ("C", PINS_FILE, "plain"),
-                                 ("D", LEVEL1_FILE, "guard")):
-        import json as _json
-        action = _json.loads(
-            (FIXTURES / tag / "request.json").read_bytes())
-        parsed, problem = driver._sealed_command(action)
+    for tag in ("A", "B", "C", "D"):
+        action = _fixture_action(tag)
+        expected, problem = driver._canonical_script(action)
         assert problem == "", (tag, problem)
-        assert parsed is not None
-        assert parsed["files"] == [expected], (tag, parsed)
-        assert parsed["entry"] == entry, (tag, parsed)
-        assert parsed["interpreter"] == REAL_PYTHON, (tag, parsed)
-        assert parsed["log"] == action["task"]["result_path"], tag
+        assert expected == action["task"]["argv"][4], tag
+    assert driver._canonical_script(None)[0] is None
+    assert driver._canonical_script({})[0] is None
 
 
-def test_sealed_command_rejects_unexecuted_text():
-    """Echoed/branched/unrelated text never parses as executed files."""
+def test_canonical_script_rejects_unexecuted_text():
+    """Echo/branch/substitution text breaks canonical equality."""
     driver = _driver()
-    base = _script_of("A")
-    head = base.rpartition(" 2>&1 | tee ")[0]
-    # Expected filename only echoed after the real command.
-    echoed, problem = driver._sealed_command(_action_with_script(
+    action = _fixture_action("A")
+    script = action["task"]["argv"][4]
+    head = script.rpartition(" 2>&1 | tee ")[0]
+    tampered = dict(action)
+    tampered["task"] = dict(action["task"])
+    tampered["task"]["argv"] = list(action["task"]["argv"])
+    # Appended echo is not part of the sealed command.
+    tampered["task"]["argv"][4] = (
         head + "; echo " + RUNNER_FILE + " 2>&1 | tee log.txt; "
-        "exit ${PIPESTATUS[0]}"))
-    assert echoed is None, echoed
-    # Real command inside a never-executed branch.
-    branched, problem = driver._sealed_command(_action_with_script(
-        "export PATH=/x:$PATH; "
-        "if false; then " + head + "; fi 2>&1 | tee log.txt; "
-        "exit ${PIPESTATUS[0]}"))
-    assert branched is None, branched
-    # Unrelated pytest command followed by an echo of the expected file.
-    other, problem = driver._sealed_command(_action_with_script(
-        "export PATH=/x:$PATH; /bin/python -m pytest tests/other.py "
-        "2>&1 | tee log.txt; exit ${PIPESTATUS[0]}"))
-    assert other is None or other["files"] == ["tests/other.py"], other
-    # Shell comment carrying the filename inside the command line.
-    commented, problem = driver._sealed_command(_action_with_script(
-        "export PATH=/x:$PATH; /bin/python -m pytest " + PINS_FILE
-        + " # " + RUNNER_FILE + " 2>&1 | tee log.txt; "
-        "exit ${PIPESTATUS[0]}"))
-    assert commented is not None, problem
-    assert commented["files"] == [PINS_FILE]
-    assert RUNNER_FILE not in commented["files"]
-    # Missing separators and exit relay.
-    assert driver._sealed_command(_action_with_script(
-        "export PATH=/x:$PATH; /bin/python -m pytest "
-        + PINS_FILE))[0] is None
-    assert driver._sealed_command(
-        {"task": {"argv": ["x"]}})[0] is None
-    assert driver._sealed_command(None)[0] is None
+        "exit ${PIPESTATUS[0]}")
+    expected, _ = driver._canonical_script(tampered)
+    assert expected != tampered["task"]["argv"][4]
+    # Command substitution where the canonical form has plain words.
+    substituted = dict(tampered["task"])
+    substituted["argv"] = list(tampered["task"]["argv"])
+    substituted["argv"][4] = head.replace(
+        "/home/rob/venvs/pq846-pb461728e4/bin/python",
+        "$(echo /home/rob/venvs/pq846-pb461728e4/bin/python)", 1) \
+        + " 2>&1 | tee log.txt; exit ${PIPESTATUS[0]}"
+    tampered2 = dict(action, task=substituted)
+    expected2, _ = driver._canonical_script(tampered2)
+    assert expected2 != substituted["argv"][4]
+    # A shell comment carrying the filename is not canonical either.
+    commented = dict(tampered["task"])
+    commented["argv"] = list(tampered["task"]["argv"])
+    commented["argv"][4] = (
+        head + " # " + RUNNER_FILE + " 2>&1 | tee log.txt; "
+        "exit ${PIPESTATUS[0]}")
+    tampered3 = dict(action, task=commented)
+    expected3, _ = driver._canonical_script(tampered3)
+    assert expected3 != commented["argv"][4]
 
 
-def test_sealed_command_rejects_extra_operands():
+def test_command_operands_accepts_both_published_forms():
+    """Structured operands from real filed actions, both entries."""
+    driver = _driver()
+    for tag, expected, entry in (("A", [PINS_FILE], "plain"),
+                                 ("B", [PINS_FILE], "plain"),
+                                 ("C", [PINS_FILE], "plain"),
+                                 ("D", [LEVEL1_FILE], "guard")):
+        operands, problem = driver._command_operands(
+            _fixture_action(tag))
+        assert problem == "", (tag, problem)
+        assert operands is not None
+        assert operands["files"] == expected, (tag, operands)
+        assert operands["entry"] == entry, (tag, operands)
+        assert operands["interpreter"] == REAL_PYTHON, (tag, operands)
+
+
+def test_command_operands_rejects_extra_operands():
     """Extra tests or options beyond the declared case never parse."""
     driver = _driver()
-    base = _script_of("A")
-    head = base.rpartition(" 2>&1 | tee ")[0]
-    extra_file, _ = driver._sealed_command(_action_with_script(
-        head + " " + RUNNER_FILE + " 2>&1 | tee log.txt; "
-        "exit ${PIPESTATUS[0]}"))
-    assert extra_file is not None
-    assert extra_file["files"] == [PINS_FILE, RUNNER_FILE]
-    extra_opt, _ = driver._sealed_command(_action_with_script(
-        head + " -k foo 2>&1 | tee log.txt; exit ${PIPESTATUS[0]}"))
-    assert extra_opt is None, extra_opt
+    action = _fixture_action("A")
+    command = list(action["params"]["command"])
+    extra = dict(action, params=dict(action["params"]))
+    extra["params"]["command"] = command + [RUNNER_FILE]
+    operands, problem = driver._command_operands(extra)
+    assert operands is not None
+    assert operands["files"] == [PINS_FILE, RUNNER_FILE]
+    flagged = dict(action, params=dict(action["params"]))
+    flagged["params"]["command"] = command + ["-k", "foo"]
+    assert driver._command_operands(flagged)[0] is None
+    assert driver._command_operands(
+        {"params": {"command": ["x"]}})[0] is None
+    assert driver._command_operands(None)[0] is None
+
+
+def test_guard_bytes_reject_fake_entry():
+    """Only the bound generation's exact guard program is admitted."""
+    driver = _driver()
+    action = _fixture_action("D")
+    operands, _ = driver._command_operands(action)
+    assert operands is not None
+    assert driver._guard_bytes_ok(operands["guard"], GEN_NEW) is True
+    fake = operands["guard"].replace(
+        "2 passed", "5 passed", 1) if "2 passed" in operands["guard"] \
+        else "print('5 passed in 1s')"
+    assert driver._guard_bytes_ok(fake, GEN_NEW) is False
+    assert driver._guard_bytes_ok("", GEN_NEW) is False
+    assert driver._guard_bytes_ok(operands["guard"], "no-such-gen") is False
 
 
 def test_relabeled_file_fails_binding(tmp_path, monkeypatch):
