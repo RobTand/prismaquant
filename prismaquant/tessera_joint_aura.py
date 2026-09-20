@@ -440,14 +440,26 @@ def _decode_wire(blob, *, reader, device="cpu"):
 SYNTHESIS_PHASE = "synthesize"
 
 
+_DEV_SOURCE_SHA256_MEMO: str | None = None
+
+
 def _progress_dev_source_sha256():
     """The executing package's actual tree digest, for the dev stamps.
 
     Lazy so importing this module never pulls ``aura_cost``; only a dev-mode
-    progress commit pays for the hash.
+    progress commit pays for the hash -- and it pays it **once**: the digest
+    is memoized after the first commit because a progress line fires per
+    durable unit and a walk commits tens of thousands of them. Measured live
+    on stage A (2026-09-20, action 398c81b4): the un-memoized form re-walked
+    and re-hashed the whole package tree on every unit, holding the head
+    walk to ~0.3 units/s of pure pathlib with zero IO -- the dev stamp is an
+    identity, and the executing tree's identity does not change mid-run.
     """
-    from .aura_cost import _aura_source_sha256
-    return _aura_source_sha256()
+    global _DEV_SOURCE_SHA256_MEMO
+    if _DEV_SOURCE_SHA256_MEMO is None:
+        from .aura_cost import _aura_source_sha256
+        _DEV_SOURCE_SHA256_MEMO = _aura_source_sha256()
+    return _DEV_SOURCE_SHA256_MEMO
 
 
 def _pb_commit(units, phase, unit=None):
