@@ -234,7 +234,7 @@ def _announce(tmp_path, epoch=EPOCH):
 
 
 def _write_map(tmp_path, rows, *, name='residency.json', manifest_sha256=MANIFEST,
-               ram_root=None, epoch=EPOCH, leads=None):
+               ram_root=None, epoch=EPOCH, leads=None, stage_root=None):
     """``rows``: {key: (declared Path, staged Path, ram Path|None)} whole-file."""
     entries = {}
     for key, (declared, staged, ram_path) in rows.items():
@@ -247,8 +247,10 @@ def _write_map(tmp_path, rows, *, name='residency.json', manifest_sha256=MANIFES
         if ram_path is not None:
             entry['ram_path'] = str(ram_path)
         entries[residency_map_key(str(declared), 0)] = entry
+        if stage_root is None:
+            stage_root = staged.parent
     body = {'schema': SCHEMA, 'tier_id': STAGE_TIER,
-            'stage_root': str(staged.parent),
+            'stage_root': str(stage_root or (tmp_path / 'stage' / 'prewarm')),
             'manifest_sha256': manifest_sha256,
             'leads': leads if leads is not None else [LEAD],
             'generation': 3, 'entries': entries}
@@ -1021,6 +1023,120 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
 def test_lease_pin_module_reports_approved_commit():
     from prismaquant.staged_lease import PINNED_SDK_COMMIT
     assert PINNED_SDK_COMMIT.startswith("a6e6b310a1")
+
+
+# -- strict checkpoint shared-state payloads, pinned -------------------------
+
+def _write_checkpoint(tmp_path):
+    from prismaquant.joint_adjoint_checkpoints import (
+        adjoint_space, write_adjoint_checkpoint)
+    from prismaquant.sensitivity_probe import SharedStateCotangents
+    tensor = torch.randn(3, 4)
+    state = SharedStateCotangents().state_dict()
+    record = write_adjoint_checkpoint(
+        adjoint_space(tmp_path), boundary=5,
+        session={"generation": "g" * 32, "kind": "adjoint_checkpoint"},
+        cotangents={(0, 0): tensor},
+        shared_adjoint={(0, 0): state},
+        shared_pass={0: {"captured": None}})
+    return record, tensor, state
+
+
+def _states_equal(left, right):
+    if set(left) != set(right):
+        return False
+    for key in left:
+        first, second = left[key], right[key]
+        if isinstance(first, torch.Tensor) or isinstance(second, torch.Tensor):
+            if not isinstance(first, torch.Tensor) or not isinstance(second, torch.Tensor):
+                return False
+            if not torch.equal(first, second):
+                return False
+        elif first != second:
+            return False
+    return True
+
+
+def _stage_checkpoint_entries(tmp_path, monkeypatch, record):
+    """Stage BOTH entry classes (activation + shared-state) with real PB
+    writers under one mover; returns (resolver, consumer, entry_paths)."""
+    rl, pool_mod, map_mod = _pb()
+    consumer = _hex64(f"consumer-{tmp_path}")
+    mover = _hex64(f"mover-{tmp_path}")
+    queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
+    root = tmp_path / 'residency'
+    entries, rows, paths = {}, {}, []
+    for entry in record["activation_entries"] + record["shared_state_entries"]:
+        declared = Path(entry["path"])
+        paths.append(str(declared))
+        staged = stage / declared.name
+        staged.write_bytes(declared.read_bytes())
+        key = residency_map_key(str(declared), 0)
+        entries[key] = (declared, staged)
+        rows[declared.name] = (declared, staged, None)
+    _pb_publish(rl, map_mod, root, stage, consumer, mover, MANIFEST, entries)
+    map_path = _write_map(tmp_path, rows, leads=[mover])
+    monkeypatch.setenv(ENV_VAR, str(map_path))
+    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    reset_residency_resolver_for_tests()
+    bind_residency_manifest(MANIFEST)
+    set_lease_helper_root(PB_PIN_ROOT)
+    activate_staged_tier_policy("ram,ssd")
+    return residency_resolver(), consumer, paths
+
+
+def test_strict_checkpoint_roundtrip_pinned_never_opens_pool(tmp_path, monkeypatch):
+    from prismaquant.joint_adjoint_checkpoints import (
+        adjoint_space, load_adjoint_checkpoint)
+    record, tensor, state = _write_checkpoint(tmp_path)
+    resolver, consumer, paths = _stage_checkpoint_entries(
+        tmp_path, monkeypatch, record)
+    opened = []
+    real_open = os.open
+
+    def counting(target, *args, **kwargs):
+        opened.append(os.fspath(target))
+        return real_open(target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", counting)
+    cotangents, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+        adjoint_space(tmp_path), record)
+    assert torch.equal(cotangents[(0, 0)], tensor)
+    assert _states_equal(shared_adjoint[(0, 0)], state)
+    assert shared_pass == {0: {"captured": None}}
+    assert not any(opened_path in paths for opened_path in opened)
+    report = resolver.report()
+    assert report['bytes_from_pool'] == 0
+    assert any(row.get('pin_id') for row in report['serving_tiers'])
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_strict_checkpoint_shared_state_altered_refuses(tmp_path, monkeypatch):
+    from prismaquant.joint_adjoint_checkpoints import (
+        adjoint_space, load_adjoint_checkpoint)
+    record, _tensor, _state = _write_checkpoint(tmp_path)
+    resolver, consumer, _paths = _stage_checkpoint_entries(
+        tmp_path, monkeypatch, record)
+    staged = tmp_path / 'stage' / 'prewarm' / [
+        Path(e["path"]).name for e in record["shared_state_entries"]][0]
+    blob = staged.read_bytes()
+    staged.write_bytes(blob[:-1] + bytes([blob[-1] ^ 0xFF]))
+    with pytest.raises(LeaseRefused) as excinfo:
+        load_adjoint_checkpoint(adjoint_space(tmp_path), record)
+    assert excinfo.value.kind == "integrity"
+    assert resolver.report()['bytes_from_pool'] == 0
+    assert resolver.report()['bytes_from_stage'] == 0
+
+
+def test_strict_checkpoint_shared_state_unmapped_refuses(tmp_path, monkeypatch):
+    from prismaquant.joint_adjoint_checkpoints import (
+        adjoint_space, load_adjoint_checkpoint)
+    record, _tensor, _state = _write_checkpoint(tmp_path)
+    _strict(monkeypatch, _write_map(tmp_path, {}))
+    set_lease_helper_root(PB_PIN_ROOT)
+    activate_staged_tier_policy("ram,ssd")
+    with pytest.raises(TierPolicyRefused):
+        load_adjoint_checkpoint(adjoint_space(tmp_path), record)
 
 
 def test_lease_helper_reads_authoritative_env_automatically(tmp_path, monkeypatch):
