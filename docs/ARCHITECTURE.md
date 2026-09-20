@@ -3,6 +3,24 @@
 As of: 2026-09-20 · `flash/slice-zero-head-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-20, `flash/checkpoint-artifact-budget-858`) for
+**checkpoint artifact budget enforcement** (PQ #858).
+`StreamedBoundaryArtifacts` enforced `max_artifact_bytes` on ordinary
+entries while `write_adjoint_checkpoint` serialized beside the owner's
+directory with no envelope reserved. The owner now admits each checkpoint
+attempt whole -- tensor envelopes, serialized shared-state payloads,
+manifest envelope, one in-progress temp overlap -- against live ordinary
+bytes plus live checkpoint bytes before the writer creates its directory,
+then commits the receipt's actual bytes/digests and returns unused
+envelope; failures retain bytes until an explicit reclaim disposes the
+attempt's own new directory, and committed checkpoints survive owner
+close. Shared-state sizes use a closed estimate grammar with exact
+post-serialization reservation; streaming-on-write hashing and in-memory
+digests are reused with no rehash pass. This enforces the application
+artifact budget only, not PB storage/RAM reservation or staged output;
+`checkpoint_output_descriptor` leaves the hook for that lane. Gate:
+`tests/test_checkpoint_artifact_budget.py`.
+
 Re-stamped (2026-09-20, `flash/validate-profile-gated-staging-854`) for
 **runner-equivalent validator config derivation** (PQ #854).
 `validate_cached_streamed_model_identity` derived its live config from a
