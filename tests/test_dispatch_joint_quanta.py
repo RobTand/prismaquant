@@ -62,14 +62,28 @@ def campaign(tmp_path):
         {"output_root": str(tmp_path / "campaign-root")}))
     return {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
             "manifest_sha256": "c" * 64, "scope": scope,
+            "read_manifest_sha256": "d" * 64,
             "plan_path": str(plan_path),
             "prepared_path": "/fixture/prepare/prepared.json",
             "roster_sha256": hashlib.sha256(b"roster\n").hexdigest()}
 
 
-def _record(campaign, layer, receipts_root="adjoint-receipt.json"):
+def _record(campaign, layer, receipts_root="adjoint-receipt.json",
+            slice_dir=None):
     quantum_id = f"layer-{layer:03d}"
     size = 1024 * (layer + 1)
+    if slice_dir is None:
+        manifest_path = f"manifests/{quantum_id}.data-manifest.json.gz"
+        manifest_sha256 = hashlib.sha256(quantum_id.encode()).hexdigest()
+    else:
+        # A real slice manifest the dispatcher reads back: the sealed
+        # digest covers these exact wire bytes, so a tampered slice is a
+        # dispatch-time refusal, not a launched row with an inert tier.
+        manifest_path = str(Path(slice_dir) / f"{quantum_id}.data-manifest.json")
+        Path(manifest_path).write_bytes(
+            json.dumps({"slice": quantum_id}).encode("utf-8"))
+        manifest_sha256 = hashlib.sha256(
+            Path(manifest_path).read_bytes()).hexdigest()
     record = {
         "schema": RECORD_SCHEMA, "quantum_id": quantum_id, "layer": layer,
         "campaign": {
@@ -82,8 +96,8 @@ def _record(campaign, layer, receipts_root="adjoint-receipt.json"):
             "unit_roster_sha256": campaign["roster_sha256"],
         },
         "read_set": {
-            "manifest_path": f"manifests/{quantum_id}.data-manifest.json.gz",
-            "manifest_sha256": hashlib.sha256(quantum_id.encode()).hexdigest(),
+            "manifest_path": manifest_path,
+            "manifest_sha256": manifest_sha256,
             "source_phase": {"name": f"layer-{layer}",
                              "start_bytes": 0, "end_bytes": size},
         },
@@ -103,8 +117,10 @@ def _record(campaign, layer, receipts_root="adjoint-receipt.json"):
 def records_dir(tmp_path, campaign):
     directory = tmp_path / "records"
     directory.mkdir()
+    slices = tmp_path / "slices"
+    slices.mkdir()
     for layer in range(N_LAYERS):
-        record = _record(campaign, layer)
+        record = _record(campaign, layer, slice_dir=slices)
         (directory / f"layer-{layer:03d}.json").write_text(json.dumps(record))
     return directory
 
@@ -144,7 +160,9 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     class tag (PB requires *every* tag a row lists, so a host pair would
     admit neither Spark), the slice manifest, stage residency, per-chunk
     progress phases, dev-mode env, detached. PB owns placement past that."""
-    record = _record(campaign, 1)
+    slices = tmp_path / "slices"
+    slices.mkdir()
+    record = _record(campaign, 1, slice_dir=slices)
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
     argv = quantum_argv(record, record_path=record_path,
@@ -156,7 +174,7 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     # PB can satisfy on neither box.
     assert not {"sparky", "sparklina"} <= set(tags)
     manifest = argv[argv.index("--data-manifest") + 1]
-    assert manifest.endswith("manifests/layer-001.data-manifest.json.gz")
+    assert manifest == str(Path(slices) / "layer-001.data-manifest.json")
     assert argv[argv.index("--residency") + 1] == "stage"
     assert argv[argv.index("--residency-ram") + 1] == "auto"
     phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
@@ -184,6 +202,7 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     assert inner[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]
     assert inner[inner.index("--quantum") + 1] == str(record_path)
     assert inner[inner.index("--quantum-sha256") + 1] == record["identity_sha256"]
+    assert inner[inner.index("--data-manifest-sha256") + 1] == record["read_set"]["manifest_sha256"]
     assert inner[inner.index("--output-root") + 1] == "/out/root"
 
 
@@ -398,26 +417,37 @@ def test_rerun_publishes_nothing_already_terminal(tmp_path, campaign, records_di
 
 
 def _adjoint_manifest(tmp_path, campaign, *, phases=("head", "chain-000", "chain-001"),
-                      parent="d" * 64, plan_sha256=None, prepared_sha256=None,
+                      parent=None, plan_sha256=None, prepared_sha256=None,
                       name="adjoint.data-manifest.json", gzip_bytes=False,
-                      entry_count=0):
+                      entry_count=0, schema="prismaquant.prismabuild.data_manifest.v1",
+                      read_plan=None):
     """A minimal stage-A data manifest: schema, entries, and the annotations
     the dispatcher derives the submission binding from (phase names in read
-    order, the parent read-set digest, the sealed plan/prepared digests)."""
+    order, the parent read-set digest, the sealed plan/prepared digests).
+
+    ``read_plan`` (a list of phase dicts) selects the v2 shape: phases move
+    to ``read_plan`` and ``annotations.phases`` must be absent.
+    """
+    if parent is None:
+        parent = campaign["read_manifest_sha256"]
+    annotations = {
+        "parent_manifest_sha256": parent,
+        "plan_sha256": campaign["plan_sha256"] if plan_sha256 is None else plan_sha256,
+        "prepared_sha256": campaign["prepared_sha256"] if prepared_sha256 is None else prepared_sha256,
+    }
     manifest = {
-        "schema": "prismaquant.prismabuild.data_manifest.v1",
+        "schema": schema,
         "mount_prefix": "/mnt/shared",
         "entries": [],
         "entry_count": entry_count,
         "total_bytes": 0,
-        "annotations": {
-            "phases": [{"name": name, "bytes": 0, "cumulative_bytes": 0}
-                       for name in phases],
-            "parent_manifest_sha256": parent,
-            "plan_sha256": campaign["plan_sha256"] if plan_sha256 is None else plan_sha256,
-            "prepared_sha256": campaign["prepared_sha256"] if prepared_sha256 is None else prepared_sha256,
-        },
+        "annotations": annotations,
     }
+    if read_plan is not None:
+        manifest["read_plan"] = {"phases": read_plan, "read_bytes": 0}
+    else:
+        annotations["phases"] = [{"name": name, "bytes": 0,
+                                  "cumulative_bytes": 0} for name in phases]
     path = tmp_path / name
     raw = json.dumps(manifest).encode("utf-8")
     if gzip_bytes:
@@ -559,3 +589,103 @@ def test_main_publishes_bound_stage_a_row(tmp_path, campaign, records_dir):
     assert events[0]["event"] == "stage-a-submitted"
     assert events[0]["data_manifest_sha256"] == data_id
     assert events[0]["read_manifest_sha256"] == "d" * 64
+
+
+# -- quantum slice binding + v2 read plans (#835, root extension) --------------
+
+
+def _quantum_payload(argv):
+    tail = argv[argv.index("--") + 1:]
+    inner = tail[tail.index("--", tail.index("--spec")) + 1:]
+    assert inner[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]
+    return inner
+
+
+def test_quantum_argv_binds_slice_digest_not_campaign_parent(tmp_path, campaign):
+    """The resolver binding is the slice manifest pbrun stages for this row,
+    not the campaign parent the record also carries. The fixture seals a
+    parent digest that differs from the slice file's, exactly the live shape
+    (parent ``71fd…`` vs per-slice digests): the payload must carry the
+    slice's actual bytes digest, or the map can never match."""
+    slices = tmp_path / "slices"
+    slices.mkdir()
+    record = _record(campaign, 1, slice_dir=slices)
+    assert record["campaign"]["read_manifest_sha256"] != record["read_set"]["manifest_sha256"]
+    record_path = tmp_path / "layer-001.json"
+    record_path.write_text(json.dumps(record))
+    inner = _quantum_payload(quantum_argv(
+        record, record_path=record_path, output_root=Path("/out/root")))
+    bound = inner[inner.index("--data-manifest-sha256") + 1]
+    assert bound == record["read_set"]["manifest_sha256"]
+    assert bound == hashlib.sha256(
+        Path(record["read_set"]["manifest_path"]).read_bytes()).hexdigest()
+
+
+def test_quantum_argv_refuses_drifted_slice(tmp_path, campaign):
+    """A slice whose bytes no longer hash to the sealed digest refuses at
+    dispatch time -- it would otherwise launch a row whose map matches
+    nothing."""
+    slices = tmp_path / "slices"
+    slices.mkdir()
+    record = _record(campaign, 1, slice_dir=slices)
+    Path(record["read_set"]["manifest_path"]).write_bytes(b"tampered")
+    record_path = tmp_path / "layer-001.json"
+    record_path.write_text(json.dumps(record))
+    with pytest.raises(DispatchRefused, match="do not hash to the sealed"):
+        quantum_argv(record, record_path=record_path,
+                     output_root=Path("/out/root"))
+
+
+def test_quantum_argv_refuses_absent_slice(tmp_path, campaign):
+    """A sealed digest over bytes the dispatcher cannot read is a producer
+    defect, refused before publishing -- never a row that binds blind."""
+    record = _record(campaign, 1)
+    record_path = tmp_path / "layer-001.json"
+    record_path.write_text(json.dumps(record))
+    with pytest.raises(DispatchRefused, match="unreadable"):
+        quantum_argv(record, record_path=record_path,
+                     output_root=Path("/out/root"))
+
+
+def test_stage_a_argv_accepts_v2_read_plan(tmp_path, campaign):
+    """The v2 shape carries phases in ``read_plan`` (``annotations.phases``
+    is forbidden there): the dispatcher derives declarations and the parent
+    binding from the v2 table, with the digest still covering wire bytes."""
+    read_plan = [
+        {"name": "head", "entry_indices": [], "bytes": 0, "cumulative_bytes": 0},
+        {"name": "layer-0", "entry_indices": [], "bytes": 0, "cumulative_bytes": 0},
+        {"name": "chain_000", "entry_indices": [], "bytes": 0, "cumulative_bytes": 0},
+    ]
+    manifest = _adjoint_manifest(
+        tmp_path, campaign, name="adjoint.data-manifest.json.gz", gzip_bytes=True,
+        schema="prismaquant.prismabuild.data_manifest.v2", read_plan=read_plan)
+    argv = stage_a_argv(manifest, campaign)
+    inner = _payload_inner(argv)
+    assert inner[inner.index("--data-manifest-sha256") + 1] == hashlib.sha256(
+        manifest.read_bytes()).hexdigest()
+    assert inner[inner.index("--read-manifest-sha256") + 1] == "d" * 64
+    phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
+              if word == "--progress-phase"]
+    assert phases == ["head=1800", "layer-0=900", "chain_000=900"]
+
+
+def test_stage_a_argv_refuses_v2_with_annotations_phases(tmp_path, campaign):
+    """v2 forbids ``annotations.phases`` (PB's ``core`` holds that rule);
+    a manifest carrying both tables refuses here, not at the worker."""
+    manifest = _adjoint_manifest(tmp_path, campaign,
+                                 schema="prismaquant.prismabuild.data_manifest.v2",
+                                 read_plan=[{"name": "head"}])
+    payload = json.loads(manifest.read_text())
+    payload["annotations"]["phases"] = [{"name": "head"}]
+    manifest.write_text(json.dumps(payload))
+    with pytest.raises(DispatchRefused, match="read_plan, not"):
+        stage_a_argv(manifest, campaign)
+
+
+def test_stage_a_argv_refuses_foreign_read_parent(tmp_path, campaign):
+    """A manifest from another lineage -- parent digest well-formed but not
+    the sealed campaign read parent -- would launch a run whose receipt
+    binds an incompatible identity. Refuse as a mixed campaign."""
+    manifest = _adjoint_manifest(tmp_path, campaign, parent="e" * 64)
+    with pytest.raises(DispatchRefused, match="mixed campaign"):
+        stage_a_argv(manifest, campaign)
