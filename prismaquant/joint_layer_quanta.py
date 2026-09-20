@@ -1620,14 +1620,17 @@ def build_quantum_executable_manifest(
     it). Resume only ever reads a subset.
 
     Rendered-weight bytes are NOT staged here: the PWC retained-window
-    reads that need them are bound through the PB732 produced-output scope
-    named in ``annotations.render_prerequisite`` (production pickle digest
-    plus roster digest, both sealed inputs) -- never a silent HDD read.
-    The annotation names the prerequisite; it does not implement staging.
-    A manifest whose prerequisite carries ``binding: None`` is sequencing
-    only and is NOT runnable: the dispatcher refuses it before any staged
-    read until the PB732 scope worker supplies a produced-output binding
-    (``{"scope": "pb732", "material": <hex64>}``). Only a receipt whose
+    reads that need them name the PB732 produced-output scope in
+    ``annotations.render_prerequisite`` (production pickle digest plus
+    roster digest, both sealed inputs) -- never a silent HDD read.
+    The annotation names the missing dependency; it does not implement
+    staging and proves no capability. No accepted PB produced-output
+    binding validator exists yet (the PB732/735 stacks are still
+    unaccepted), so every manifest this builder seals carries
+    ``binding: None`` and is sequencing-only: the dispatcher refuses all
+    executable rows with a typed unsupported-binding refusal, even for a
+    plausible-looking prerequisite dictionary. A non-None ``binding``
+    input refuses here rather than sealing fiction. Only a receipt whose
     status is ``complete`` derives anything here.
     """
     from .joint_adjoint_checkpoints import chain_layers_for
@@ -1694,19 +1697,17 @@ def build_quantum_executable_manifest(
             not render_prerequisite.get("unit_roster_sha256"):
         raise ValueError("an executable readset names no PB732 render "
                          "prerequisite: refusing")
-    binding = render_prerequisite.get("binding")
-    if binding is not None and (
-            not isinstance(binding, dict)
-            or binding.get("scope") != "pb732"
-            or type(binding.get("material")) is not str
-            or not re.fullmatch(r"[0-9a-f]{64}", binding["material"])):
-        raise ValueError("an executable readset names a malformed render "
-                         "binding: refusing")
+    if render_prerequisite.get("binding") is not None:
+        raise ValueError(
+            "an executable readset names a render binding, but no accepted "
+            "PB produced-output binding validator exists (PB732/735 stacks "
+            "unaccepted): refusing to seal fiction -- manifests are "
+            "sequencing-only with binding None")
     prerequisite = {
         "scope": "pb732",
         "production_pkl_sha256": render_prerequisite["production_pkl_sha256"],
         "unit_roster_sha256": render_prerequisite["unit_roster_sha256"],
-        "binding": binding,
+        "binding": None,
     }
     receipt_sha256 = bind_adjoint_receipt(
         receipt, plan_sha256=campaign["plan_sha256"],

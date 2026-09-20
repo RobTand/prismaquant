@@ -119,6 +119,18 @@ class DispatchRefused(Exception):
     """Fail closed: no receipt, a stale receipt, or a mixed campaign."""
 
 
+class ExecutableBindingUnsupported(DispatchRefused):
+    """An executable quantum row names no acceptable output binding.
+
+    No PB produced-output binding validator is accepted yet (the PB732/735
+    stacks are still unaccepted), so no executable manifest -- however
+    plausible its ``render_prerequisite`` dictionary looks -- can be
+    admitted for production dispatch. Sequencing/phase artifacts remain
+    useful for read-plan qualification; production dispatch of the legacy
+    slice rows is unchanged.
+    """
+
+
 def _sha_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -306,6 +318,40 @@ def _stage_manifest_binding(adjoint_manifest: Path, campaign: Mapping) -> dict:
             "read_manifest_sha256": parent, "phases": phases}
 
 
+def _executable_row_parts(record: dict, *, output_root: Path,
+                            head_grace_s: int):
+    """Pure executable-row construction from sealed inputs (no gate).
+
+    Resolves the row's executable manifest, verifies its wire bytes hash to
+    the sealed digest, and derives the read-phase progress declarations in
+    manifest order. Consults no output binding and bypasses no production
+    gate: production dispatch (:func:`quantum_argv`) refuses every
+    executable row with :class:`ExecutableBindingUnsupported` before
+    reaching here. Tests exercise manifest/phase propagation through this
+    helper directly.
+    """
+    quantum_id = record["quantum_id"]
+    executable = record.get("executable_readset")
+    manifest = Path(executable.get("manifest_path", ""))
+    if not manifest.is_absolute():
+        manifest = output_root / manifest
+    staged_sha256 = _executable_manifest_digest(
+        record, output_root=output_root)
+    phases = executable.get("phases")
+    if not isinstance(phases, list) or not phases or any(
+            type(name) is not str or not name for name in phases):
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} seals no executable phase list")
+    progress = [("head", head_grace_s)]
+    for name in phases:
+        if name == "head":
+            continue
+        grace = (HEAD_PROGRESS_GRACE_S if name == "checkpoint-load"
+                 else CHUNK_PROGRESS_GRACE_S)
+        progress.append((name, grace))
+    return manifest, staged_sha256, progress
+
+
 def _executable_manifest_digest(record: dict, *, output_root: Path) -> str:
     """The sealed executable-manifest digest a bound quantum row binds.
 
@@ -432,54 +478,26 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     wire digest as ``--adjoint-sha256``, the verified staged-manifest
     digest, and ``--resume``. Files are read where the row reads them; an
     unreadable or drifting file refuses before anything publishes (#838).
-    A record carrying ``executable_readset`` stages that one executable
-    manifest and declares its read phases (PQ #862); without the block the
-    row keeps the legacy slice manifest with head/chunk progress. Tier
-    flags, tags, demand and environment are identical in both lanes.
+    A record carrying ``executable_readset`` is refused with
+    :class:`ExecutableBindingUnsupported`: no PB produced-output binding
+    validator is accepted yet, so executable rows are sequencing/phase
+    artifacts only, never production-runnable. Without the block the row
+    keeps the legacy slice manifest with head/chunk progress. Tier flags,
+    tags, demand and environment are identical in both lanes.
     """
     quantum_id = record["quantum_id"]
     executable = record.get("executable_readset")
     if executable is not None:
-        # Post-capture executable contract (PQ #862): the row stages the
-        # one executable manifest and declares its read phases. Slice
-        # partition metadata stays on the record untouched; tier flags,
-        # tags, demand and environment below are identical in both lanes.
-        manifest = Path(executable.get("manifest_path", ""))
-        if not manifest.is_absolute():
-            manifest = output_root / manifest
-        staged_sha256 = _executable_manifest_digest(
-            record, output_root=output_root)
-        try:
-            _raw = Path(manifest).read_bytes()
-            if _raw[:2] == b"\x1f\x8b":
-                _raw = gzip.decompress(_raw)
-            _prereq = json.loads(_raw.decode("utf-8")).get(
-                "annotations", {}).get("render_prerequisite", {})
-        except (OSError, ValueError, UnicodeError) as exc:
-            raise DispatchRefused(
-                f"quantum {quantum_id!r} executable manifest unreadable: "
-                f"{exc}") from exc
-        _binding = _prereq.get("binding") if isinstance(_prereq, dict) else None
-        if not isinstance(_binding, dict) or _binding.get("scope") != "pb732" \
-                or not _is_hex64(_binding.get("material")):
-            raise DispatchRefused(
-                f"quantum {quantum_id!r} executable readset is not runnable: "
-                "its render prerequisite has no produced-output binding "
-                "(PB732 scope worker pending) -- refusing before any staged "
-                "read instead of discovering missing rendered cells after "
-                "expensive source/checkpoint work")
-        phases = executable.get("phases")
-        if not isinstance(phases, list) or not phases or any(
-                type(name) is not str or not name for name in phases):
-            raise DispatchRefused(
-                f"quantum {quantum_id!r} seals no executable phase list")
-        progress = [("head", head_grace_s)]
-        for name in phases:
-            if name == "head":
-                continue
-            grace = (HEAD_PROGRESS_GRACE_S if name == "checkpoint-load"
-                     else CHUNK_PROGRESS_GRACE_S)
-            progress.append((name, grace))
+        # R3: no invented admission. No accepted PB output-binding validator
+        # exists (PB732/735 are still unaccepted stacks), so even a
+        # plausible-looking render-prerequisite dictionary proves no
+        # capability. Refuse before any staged read. Manifest/phase
+        # propagation is exercised through _executable_row_parts directly.
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} carries an executable readset, but no "
+            "accepted PB produced-output binding validator exists "
+            "(PB732/735 stacks unaccepted): executable plans are "
+            "sequencing-only and not production-runnable -- refusing")
     else:
         manifest = Path(record["read_set"]["manifest_path"])
         if not manifest.is_absolute():
