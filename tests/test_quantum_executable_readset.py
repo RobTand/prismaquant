@@ -670,9 +670,6 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
     receipt = setup["receipt"]
     events = []
 
-    phases_env = None
-    manifest_holder = {}
-
     def _report(phase, units, **kwargs):
         events.append(("report", phase, units))
         return True
@@ -742,15 +739,29 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
         quantum_id=record["quantum_id"],
         identity_sha256=record["identity_sha256"],
         chunks=record["chunks"], frontier=frontier)
+    calib = {"path": str(setup["calib_path"]),
+             "bytes": setup["calib_path"].stat().st_size,
+             "sha256": hashlib.sha256(
+                 setup["calib_path"].read_bytes()).hexdigest()}
     manifest = build_quantum_executable_manifest(
         record, receipt, setup["parent"], strided_boundaries=[2],
-        n_probes=4,
-        calib={"path": str(setup["calib_path"]),
-               "bytes": setup["calib_path"].stat().st_size,
-               "sha256": hashlib.sha256(
-                   setup["calib_path"].read_bytes()).hexdigest()},
+        n_probes=4, calib=dict(calib),
         render_prerequisite=dict(setup["render_prerequisite"]))
-    manifest_holder["manifest"] = manifest
+    # Bind the executable block exactly as the post-capture regen does,
+    # and run the bound generation: the hooks follow the block.
+    from prismaquant.joint_layer_quanta import bind_quantum_executable
+    output_root = str(setup["output_root"])
+    manifest_path = (
+        f"{output_root}/layer-quanta/adjoint/bound-readsets/"
+        f"{record['quantum_id']}.executable.json.gz")
+    wire_sha256 = hashlib.sha256(
+        seal_manifest_bytes(manifest)).hexdigest()
+    record = bind_quantum_executable(
+        record, receipt, setup["parent"], manifest=manifest,
+        manifest_path=manifest_path, manifest_sha256=wire_sha256,
+        output_root=output_root, strided_boundaries=[2], n_probes=4,
+        calib=dict(calib),
+        render_prerequisite=dict(setup["render_prerequisite"]))
     monkeypatch.setenv(
         "PRISMABUILD_ACTION_PROGRESS_PHASES",
         json.dumps([p["name"] for p in manifest["read_plan"]["phases"]]))
