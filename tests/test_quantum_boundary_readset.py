@@ -131,18 +131,6 @@ def _build(record, receipt):
         record, receipt, strided_boundaries=STRIDED, n_probes=N_PROBES)
 
 
-def _reseal(record):
-    """Recompute record identity through the canonical owner, as the real
-    regen does after binding a receipt -- fixtures that move the adjoint
-    seal must reseal, or the input-identity check refuses them first."""
-    from prismaquant.joint_layer_quanta import canonical_sha256
-    record = dict(record)
-    body = {k: v for k, v in record.items() if k != "identity_sha256"}
-    record["identity_sha256"] = canonical_sha256(
-        body, where="fixture record")
-    return record
-
-
 def _bind_receipt(record, receipt):
     """Bind a fixture receipt the way the regen path does, then reseal."""
     from prismaquant.joint_layer_quanta import bind_adjoint_receipt
@@ -154,7 +142,7 @@ def _bind_receipt(record, receipt):
             entry["boundary"] for entry in receipt["checkpoints"]))
     record = dict(record,
                   adjoint=dict(record["adjoint"], receipt_sha256=digest))
-    return _reseal(record), digest
+    return _reseal_like_regen(record), digest
 
 
 def test_phase_names_freeze_repeated_reader_schedule():
@@ -299,6 +287,17 @@ def test_seal_deterministic_wire(tmp_path):
         scope=record["campaign"]["campaign_scope"], checkpoints=STRIDED)
 
 
+def _reseal_like_regen(record):
+    """Recompute identity the way layer_quanta does when it binds a
+    receipt -- fixtures that move the adjoint seal must reseal."""
+    from prismaquant.joint_layer_quanta import canonical_sha256
+    record = dict(record)
+    body = {k: v for k, v in record.items() if k != "identity_sha256"}
+    record["identity_sha256"] = canonical_sha256(
+        body, where="fixture record")
+    return record
+
+
 @needs_recovery
 def test_emit_binds_new_record_generations(tmp_path):
     """Actual layer_quanta records through the emission path: new
@@ -318,6 +317,10 @@ def test_emit_binds_new_record_generations(tmp_path):
         checkpoints=[8, 16, 24, 32, 40, 45])
     rec3 = dict(base3, adjoint=dict(base3["adjoint"], receipt_sha256=digest))
     rec4 = dict(base4, adjoint=dict(base4["adjoint"], receipt_sha256=digest))
+    # The regen path reseals identity when it binds the receipt; the
+    # binder reverifies that seal before deriving anything further.
+    rec3 = _reseal_like_regen(rec3)
+    rec4 = _reseal_like_regen(rec4)
     before = [json.dumps(r, sort_keys=True) for r in (rec3, rec4)]
     root = str(tmp_path / "run")
     emitted = emit_quantum_boundary_readsets(
@@ -521,7 +524,7 @@ def test_binder_rejects_foreign_receipt_for_same_layer(tmp_path):
     wire_sha256 = hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest()
     bound = dict(record["adjoint"])
     bound["receipt_sha256"] = "f" * 64
-    record = _reseal(dict(record, adjoint=bound))
+    record = _reseal_like_regen(dict(record, adjoint=bound))
     run_root = str(Path(
         record["output_space"]["root"]).resolve().parents[1])
     with pytest.raises(ValueError, match="another stage-A receipt"):
