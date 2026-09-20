@@ -351,13 +351,14 @@ def test_real_plan_slice_manifests_are_standalone_v1():
 
 @real_plan
 def test_real_plan_adjoint_manifest():
+    from prismaquant.joint_layer_quanta import adjoint_read_plan_phase_names
     built = _build_real()
     manifest = built["adjoint_manifest"]
-    assert manifest["schema"] == "prismaquant.prismabuild.data_manifest.v1"
+    assert manifest["schema"] == "prismaquant.prismabuild.data_manifest.v2"
+    assert "phases" not in manifest["annotations"]
     assert manifest["annotations"]["entry_point"] == "prismaquant.joint_adjoint_capture"
-    phases = manifest["annotations"]["phases"]
-    assert [p["name"] for p in phases] == (
-        ["head"] + [f"chain-{i:03d}" for i in range(45)])
+    names = [p["name"] for p in manifest["read_plan"]["phases"]]
+    assert names == list(adjoint_read_plan_phase_names(45))
     parent = _load_manifest()
     head_end = parent["annotations"]["phases"][0]["cumulative_bytes"]
     head_count = 0
@@ -369,14 +370,23 @@ def test_real_plan_adjoint_manifest():
             break
     assert running == head_end
     chain_entries = manifest["entries"][head_count:]
-    head_bytes = head_end
-    assert phases[0]["bytes"] == head_bytes
+    assert manifest["read_plan"]["phases"][0]["bytes"] == head_end
     model_prefix = _load_plan()["model"].rstrip("/") + "/"
     for entry in chain_entries:
         assert entry["path"].startswith(model_prefix), entry["path"]
     assert len(chain_entries) == parent["annotations"]["counts"]["source_extents"]
     assert sum(e["bytes"] for e in chain_entries) == parent["annotations"]["bytes"][
         "source_extents"]
+    # The repeated reverse reads reference the same entries, not copies.
+    by_name = {p["name"]: p["entry_indices"]
+               for p in manifest["read_plan"]["phases"]}
+    head_size = len(manifest["entries"][:head_count])
+    for layer in range(45):
+        forward = by_name[f"forward-{layer:03d}"]
+        assert by_name[f"chain-{layer:03d}"] == forward
+        assert all(index >= head_size for index in forward)
+    assert manifest["read_plan"]["read_bytes"] == sum(
+        p["bytes"] for p in manifest["read_plan"]["phases"])
     assert manifest["total_bytes"] == head_bytes + parent["annotations"]["bytes"][
         "source_extents"]
 
