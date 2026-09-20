@@ -76,6 +76,18 @@ def _hex64(seed: str) -> str:
     return hashlib.sha256(seed.encode()).hexdigest()
 
 
+LAUNCH_NONCE = "n" * 32
+LAUNCH_SCOPE = "unit-1"
+
+
+def _launch_env(monkeypatch, consumer):
+    """Launch-bound identity pair, matching the claim row exactly (the new
+    SDK binds pins from launch env + live claim, never a claim alone)."""
+    _launch_env(monkeypatch, consumer)
+    monkeypatch.setenv("PRISMABUILD_ACTION_NONCE", LAUNCH_NONCE)
+    monkeypatch.setenv("PRISMABUILD_ACTION_SCOPE", LAUNCH_SCOPE)
+
+
 # -- pinned PB SDK + queue fixtures (real writers, real formats) ------------
 
 def _pb():
@@ -95,17 +107,25 @@ def _pb():
 
 
 def _pb_queue(tmp_path, pool_mod, consumer):
-    """A real queue layout with a real claim row (PB's own test shape)."""
+    """A real queue layout with a real claim row (PB's own test shape).
+
+    The claim carries the launch-bound nonce/scope pair plus the holding
+    box, exactly what the strict SDK matches launch env against: no half
+    without the other binds.
+    """
+    import socket
     queue = pool_mod.PoolQueue(tmp_path)
     queue.ensure_layout()
     stage = tmp_path / 'stage' / 'prewarm'
     stage.mkdir(parents=True, exist_ok=True)
     claimed = queue.dir(pool_mod.CLAIMED)
     claimed.mkdir(parents=True, exist_ok=True)
+    host = socket.gethostname()
     (claimed / f"{consumer}.json").write_text(json.dumps({
-        "action_key": consumer, "claimed_by": "worker-7",
-        "resource_scope": {"action_key": consumer, "nonce": "n" * 32,
-                           "scope_id": "unit-1"}}))
+        "action_key": consumer, "claimed_by": f"{host}:4242:pbtest",
+        "claimed_host": host,
+        "resource_scope": {"action_key": consumer, "nonce": LAUNCH_NONCE,
+                           "scope_id": LAUNCH_SCOPE}}))
     return queue, stage
 
 
@@ -188,7 +208,7 @@ def _leased_fixture(tmp_path, monkeypatch, staged_files):
             for name, (declared, staged, ram) in staged_files.items()}
     map_path = _write_map(tmp_path, rows, leads=[mover])
     monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
     set_lease_helper_root(PB_PIN_ROOT)
@@ -458,7 +478,7 @@ def test_strict_source_ram_serves_first_pinned(tmp_path, monkeypatch):
                     MANIFEST, {key: (path, ram['s'])}, EPOCH)
     map_path = _write_map(tmp_path, rows, ram_root=ram_root, leads=[mover_ssd])
     monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
     set_lease_helper_root(PB_PIN_ROOT)
@@ -560,7 +580,7 @@ def test_strict_source_stale_ram_falls_to_allowed_stage(tmp_path, monkeypatch):
     map_path = _write_map(tmp_path, rows, ram_root=ram_root, epoch=EPOCH,
                           leads=[mover])
     monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
     set_lease_helper_root(PB_PIN_ROOT)
@@ -762,7 +782,7 @@ def test_strict_ram_corrupt_fails_clear_without_stage_adoption(tmp_path, monkeyp
     ram['w'].write_bytes(blob[:-1] + bytes([blob[-1] ^ 0xFF]))
     map_path = _write_map(tmp_path, rows, ram_root=ram_root, leads=[mover_ssd])
     monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
     set_lease_helper_root(PB_PIN_ROOT)
@@ -798,7 +818,7 @@ def test_strict_wire_ram_corrupt_serves_checked_stage(tmp_path, monkeypatch):
                 MANIFEST, {residency_map_key(str(wire), 0): (wire, staged)})
     map_path = _write_map(tmp_path, rows, ram_root=ram_root, leads=[mover])
     monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
     set_lease_helper_root(PB_PIN_ROOT)
@@ -941,7 +961,7 @@ def test_duplicate_acquire_token_adopts_one_ref(tmp_path, monkeypatch):
     key = residency_map_key(str(declared), 0)
     _pb_publish(rl, map_mod, root, stage, consumer, mover, MANIFEST,
                 {key: (declared, staged)})
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
     set_lease_helper_root(PB_PIN_ROOT)
     spec = {"tier_id": STAGE_TIER, "epoch": "",
@@ -988,7 +1008,7 @@ def test_forked_child_window_use_refused_loudly(tmp_path, monkeypatch):
     key = residency_map_key(str(declared), 0)
     _pb_publish(rl, map_mod, root, stage, consumer, mover, MANIFEST,
                 {key: (declared, staged)})
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
     set_lease_helper_root(PB_PIN_ROOT)
     spec = {"tier_id": STAGE_TIER, "epoch": "",
@@ -1181,7 +1201,7 @@ def _stage_checkpoint_entries(tmp_path, monkeypatch, record):
     _pb_publish(rl, map_mod, root, stage, consumer, mover, MANIFEST, entries)
     map_path = _write_map(tmp_path, rows, leads=[mover])
     monkeypatch.setenv(ENV_VAR, str(map_path))
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     reset_residency_resolver_for_tests()
     bind_residency_manifest(MANIFEST)
     set_lease_helper_root(PB_PIN_ROOT)
@@ -1307,7 +1327,7 @@ def test_stage_epoch_convention_is_exact_absence(tmp_path, monkeypatch):
         generation=rl.mint_generation(),
         entries={key: {"stage_path": str(staged), "bytes": len(blob),
                        "sha256": digest, "file_id": rl.stat_identity(str(staged))}})
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
     set_lease_helper_root(PB_PIN_ROOT)
     spec = {"tier_id": STAGE_TIER, "epoch": "",
@@ -1360,7 +1380,7 @@ def test_equal_sized_files_never_serve_each_others_bytes(tmp_path, monkeypatch):
         root, consumer_action_key=consumer, mover_action_key=mover,
         tier_id=STAGE_TIER, stage_root=str(stage), manifest_sha256=MANIFEST,
         generation=rl.mint_generation(), entries=mat_entries)
-    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
     set_lease_helper_root(PB_PIN_ROOT)
 
