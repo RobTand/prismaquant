@@ -103,7 +103,7 @@ def campaign(tmp_path_factory):
     head.write_bytes(hashlib.sha256(b"chain-head").digest() * 8)
     _write_shard(files / "shard-l0.safetensors", _tensors())
     _write_shard(files / "shard-l1.safetensors", _tensors())
-    l1_len = len((files / "shard-l1.safetensors").read_bytes())
+    l1_raw = (files / "shard-l1.safetensors").read_bytes()
     entries = [
         {"path": str(head), "offset": 0,
          "bytes": len(head.read_bytes()),
@@ -113,19 +113,14 @@ def campaign(tmp_path_factory):
          "sha256": hashlib.sha256(
              (files / "shard-l0.safetensors").read_bytes()).hexdigest()},
         {"path": str(files / "shard-l1.safetensors"), "offset": 0,
-         "bytes": l1_len // 2,
-         "sha256": hashlib.sha256(
-             (files / "shard-l1.safetensors").read_bytes()[:l1_len // 2]).hexdigest()},
-        {"path": str(files / "shard-l1.safetensors"), "offset": l1_len // 2,
-         "bytes": l1_len - l1_len // 2,
-         "sha256": hashlib.sha256(
-             (files / "shard-l1.safetensors").read_bytes()[l1_len // 2:]).hexdigest()},
+         "bytes": len(l1_raw),
+         "sha256": hashlib.sha256(l1_raw).hexdigest()},
     ]
     total = sum(e["bytes"] for e in entries)
     bounds, phases, running = [], [], 0
     for name, size in (("head", entries[0]["bytes"]),
                        ("layer-0", entries[1]["bytes"]),
-                       ("layer-1", entries[2]["bytes"] + entries[3]["bytes"])):
+                       ("layer-1", entries[2]["bytes"])):
         running += size
         bounds.append(running)
         phases.append({"name": name, "bytes": size,
@@ -145,7 +140,8 @@ def campaign(tmp_path_factory):
         },
     }
     units = [f"model.layers.{layer}.mlp.gate_proj" for layer in (0, 1)]
-    prepared = {"formats_by_qname": {name: {} for name in units}}
+    prepared = {"formats_by_qname": {
+        name: ["TESSERA_BF16_K1_R1792", "TESSERA_E4M3_K1_R896"] for name in units}}
     plan = {"output_root": str(tmp / "campaign"),
             "model": str(tmp / "pool" / "model"),
             "distributed_campaign": {}}
@@ -344,39 +340,30 @@ def test_movers_stage_whole_and_split_byte_identical(staged, campaign) -> None:
         assert hashlib.sha256(data).hexdigest() == entry["sha256"]
 
 
+CONSUMER = "cc" * 32
+STAGE_TIER = "prismabuild-stage:dl380g10"
+
+
 def _pq_read_fragments(queue):
-    from prismaquant import residency_map as pqmap  # noqa: E402
-    root = Path(queue.root) / "residency" / ("cc" * 32)
+    root = Path(queue.root) / "residency" / CONSUMER
     return [json.loads(p.read_text()) for p in sorted(root.glob("*.json"))]
 
 
-def _pq_map_from_mover_output(pb, staged, campaign) -> Path:
-    """PQ map whose entries ARE the real mover's staged files, re-hashed."""
-    tmp = campaign["tmp"]
-    queue = staged["queue"]
+def _write_pq_map(pb, staged, campaign, tmp):
+    """PQ map composed from the real PB stage-mover fragments."""
     pool, pb_map = pb["pool"], pb["pb_map"]
+    queue = staged["queue"]
     frags = [pb_map.validate_fragment(f) for f in
-             _pq_read_fragments(queue)]
-    stage_frags = [f for f in frags
-                   if f["tier_id"] == "prismabuild-stage:dl380g10"]
+             pb_map.read_fragments(queue.root / pool.RESIDENCY, CONSUMER)]
+    stage_frags = [f for f in frags if f["tier_id"] == STAGE_TIER]
     assert len(stage_frags) == 2, "both stage movers filed"
-    entries = {}
-    for frag in stage_frags:
-        for key, entry in frag["entries"].items():
-            data = Path(entry["stage_path"]).read_bytes()
-            assert hashlib.sha256(data).hexdigest() == entry["sha256"]
-            entries[key] = {
-                "stage_path": entry["stage_path"], "bytes": entry["bytes"],
-                "offset": entry["offset"],
-                "sha256": hashlib.sha256(data).hexdigest(),
-            }
-    body = {"schema": "prismaquant.prismabuild.residency_map.v1",
-            "tier_id": "prismabuild-stage:dl380g10",
-            "stage_root": str(staged["stage"]),
-            "manifest_sha256": campaign["parent_sha"],
-            "leads": ["dd" * 64], "generation": 1, "entries": entries}
+    composed = pb_map.compose(stage_frags)
+    assert composed["manifest_sha256"] == campaign["parent_sha"]
+    for key, entry in composed["entries"].items():
+        data = Path(entry["stage_path"]).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == entry["sha256"], key
     map_path = tmp / "residency.json"
-    map_path.write_text(json.dumps(body))
+    map_path.write_text(json.dumps(composed))
     return map_path
 
 
@@ -390,7 +377,7 @@ def test_real_reader_serves_staged_tensors_bit_identical(
     )
     from safetensors import safe_open  # noqa: E402
     tmp = campaign["tmp"]
-    map_path = _pq_map_from_mover_output(pb, staged, campaign)
+    map_path = _write_pq_map(pb, staged, campaign, tmp)
     monkeypatch.setenv(ENV_VAR, str(map_path))
     reset_residency_resolver_for_tests()
     bind_residency_manifest(campaign["parent_sha"])
@@ -415,7 +402,7 @@ def test_real_reader_serves_staged_tensors_bit_identical(
 
 
 def test_uncovered_span_fallback_is_recorded_gap_not_conformance(
-        staged, campaign, monkeypatch, capsys) -> None:
+        pb, staged, campaign, monkeypatch, capsys) -> None:
     """An uncovered span reads the pool with a recorded fallback: the gap."""
     from prismaquant import layer_streaming  # noqa: E402
     from prismaquant.residency_map import (  # noqa: E402
@@ -423,7 +410,8 @@ def test_uncovered_span_fallback_is_recorded_gap_not_conformance(
         reset_residency_resolver_for_tests,
     )
     tmp = campaign["tmp"]
-    monkeypatch.setenv(ENV_VAR, str(tmp / "residency.json"))
+    map_path = _write_pq_map(pb, staged, campaign, tmp)
+    monkeypatch.setenv(ENV_VAR, str(map_path))
     reset_residency_resolver_for_tests()
     bind_residency_manifest(campaign["parent_sha"])
     resolver = residency_resolver()
@@ -448,7 +436,8 @@ def test_strict_reader_refuses_uncovered_span(staged, campaign, monkeypatch) -> 
         reset_residency_resolver_for_tests,
     )
     tmp = campaign["tmp"]
-    monkeypatch.setenv(ENV_VAR, str(tmp / "residency.json"))
+    map_path = _write_pq_map(pb, staged, campaign, tmp)
+    monkeypatch.setenv(ENV_VAR, str(map_path))
     reset_residency_resolver_for_tests()
     bind_residency_manifest(campaign["parent_sha"])
     assert residency_resolver() is not None
