@@ -1044,3 +1044,453 @@ def bind_adjoint_receipt(receipt: Mapping, *, plan_sha256: str, prepared_sha256:
     return canonical_sha256(receipt, where="stage-A receipt")
 
 
+#: The quantum entry point consuming a boundary readset manifest.
+QUANTUM_ENTRY_POINT = "prismaquant.joint_cost_quantum"
+
+
+def quantum_boundary_read_phase_names(chain_layers: Sequence[int], layer: int,
+                                      *, batch_windows: int, n_probes: int,
+                                      replay_windows: int) -> tuple[str, ...]:
+    """The frozen quantum bulk-read order (PQ #848): the checkpoint plane
+    first (one whole-plane load, RAM-resident for the action), then each
+    chain layer's boundary entries once per probe in batch windows
+    (``render_free_layer_roll`` opens a fresh prefetch window set inside
+    every probe pass), then the quantum's own boundary entries once per
+    (replay window, probe) in batch windows (``replay_backward`` opens a
+    fresh boundary iterator per active probe per retained window).
+
+    Names are manifest-local: ``checkpoint``, ``chain-{boundary:03d}`` with
+    ``-p{probe}-w{window}`` suffixes, ``replay-{window:02d}`` with
+    ``-p{probe}-w{window}`` suffixes. Repeats across phases are the v2
+    repeated-read mechanism -- a staging contract declares exactly this
+    list, and resume only ever reads a subset of it (completed windows are
+    skipped), never more.
+    """
+    chain = [int(c) for c in chain_layers]
+    if any(type(c) is not int or isinstance(c, bool) for c in chain_layers):
+        raise ValueError("chain layers must be integers, "
+                         f"not {list(chain_layers)!r}")
+    if len(set(chain)) != len(chain):
+        raise ValueError("chain layers repeat: refusing")
+    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
+        raise ValueError(f"a boundary readset needs a layer, not {layer!r}")
+    for label, value in (("batch windows", batch_windows),
+                         ("probe count", n_probes),
+                         ("replay windows", replay_windows)):
+        if type(value) is not int or isinstance(value, bool) or value < 1:
+            raise ValueError(f"{label} must be positive, not {value!r}")
+    names = ["checkpoint"]
+    for boundary in chain:
+        for probe in range(n_probes):
+            names.extend(f"chain-{boundary:03d}-p{probe}-w{window:02d}"
+                         for window in range(batch_windows))
+    for window_index in range(replay_windows):
+        for probe in range(n_probes):
+            names.extend(
+                f"replay-{window_index:02d}-p{probe}-w{window:02d}"
+                for window in range(batch_windows))
+    return tuple(names)
+
+
+def _manifest_entry_from_exact(exact: Mapping, *, where: str) -> dict:
+    """A v2 data-manifest entry for one sealed exact record.
+
+    Carries the writer's path, wire byte length and digest -- the triple a
+    staging contract admits and verifies without rehashing payloads. Any
+    malformed record is a refusal, never a skipped file.
+    """
+    if not isinstance(exact, dict):
+        raise ValueError(f"{where} is not an exact entry record: refusing")
+    path = exact.get("path")
+    digest = exact.get("sha256")
+    size = exact.get("file_bytes")
+    if type(path) is not str or not path:
+        raise ValueError(f"{where} names no entry path: refusing")
+    if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError(f"{where} carries no entry digest: refusing")
+    if type(size) is not int or isinstance(size, bool) or size <= 0:
+        raise ValueError(f"{where} carries no entry byte length: refusing")
+    return {"path": path, "offset": 0, "bytes": size, "sha256": digest}
+
+
+def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
+                                   strided_boundaries: Sequence[int],
+                                   n_probes: int) -> dict:
+    """The quantum's real bulk readset as a NEW immutable v2 manifest.
+
+    Derived post-capture from the completed adjoint receipt, the record's
+    sealed ``chain_layers``/``layer``/``checkpoint_boundary``/``windows``,
+    and ``n_probes`` -- which is caller-responsible: the post-capture regen
+    passes the sealed plan value, never a knob, and the binder requires
+    that same trusted count independently rather than trusting the
+    manifest's attestation. The checkpoint plane (activation +
+    shared-state entries -- file lease: one whole-plane load, released
+    after decoded buffers exist; decoded tensors stay RAM-resident for the
+    action), then each chain layer's boundary entries once per probe in
+    batch windows (prefetch-lease per probe pass), then the quantum's own
+    boundary entries once per (replay window, probe) in batch windows.
+    Only a receipt whose status is ``complete`` derives anything here; a
+    missing, running or failed capture refuses before any derivation.
+    Every entry carries the sealed path/length/digest triple, so a staging
+    contract admits and verifies the corpus with no payload rehash and no
+    new cache. Repeats across phases are the v2 repeated-read mechanism;
+    resume only ever reads a subset (completed windows are skipped).
+
+    The receipt is validated through :func:`bind_adjoint_receipt` (campaign
+    scope, plan/prepared digests, stride marks) and its canonical digest is
+    sealed into the annotations; the record's chain is checked against the
+    single ``chain_layers_for`` owner. Old unbound records, slices and the
+    parent identity are untouched -- this manifest is a new generation with
+    a fresh digest, never a mutation of a sealed action.
+    """
+    from .joint_adjoint_checkpoints import chain_layers_for
+
+    if not isinstance(receipt, dict) or receipt.get("status") != "complete":
+        raise ValueError("the adjoint receipt is not a completed capture: "
+                         "this post-capture path derives nothing from a "
+                         "missing, running or failed capture, refusing")
+    if not isinstance(record, dict):
+        raise ValueError("a quantum record must be an object: refusing")
+    layer = record.get("layer")
+    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
+        raise ValueError("a quantum record names no layer: refusing")
+    adjoint = record.get("adjoint")
+    if not isinstance(adjoint, dict):
+        raise ValueError("a quantum record carries no adjoint block: refusing")
+    checkpoint_boundary = adjoint.get("checkpoint_boundary")
+    if type(checkpoint_boundary) is not int or isinstance(
+            checkpoint_boundary, bool):
+        raise ValueError("a quantum record names no checkpoint boundary: "
+                         "refusing")
+    chain = adjoint.get("chain_layers")
+    if not isinstance(chain, list) or any(
+            type(c) is not int or isinstance(c, bool) for c in chain):
+        raise ValueError("a quantum record names no chain layers: refusing")
+    if tuple(chain) != chain_layers_for(checkpoint_boundary, layer):
+        raise ValueError(
+            f"quantum {record.get('quantum_id')!r} chain {chain!r} is not the "
+            "sealed stride chain: refusing")
+    campaign = record.get("campaign")
+    if not isinstance(campaign, dict):
+        raise ValueError("a quantum record carries no campaign block: refusing")
+    for key in ("plan_path", "plan_sha256", "prepared_path", "prepared_sha256",
+                "read_manifest_sha256", "campaign_scope"):
+        if not campaign.get(key):
+            raise ValueError(f"a quantum record seals no campaign {key}: "
+                             "refusing")
+    receipt_sha256 = bind_adjoint_receipt(
+        receipt, plan_sha256=campaign["plan_sha256"],
+        prepared_sha256=campaign["prepared_sha256"],
+        scope=campaign["campaign_scope"], checkpoints=strided_boundaries)
+    checkpoint_record = None
+    for entry in receipt.get("checkpoints", []):
+        if isinstance(entry, dict) and int(entry.get("boundary", -1)) \
+                == checkpoint_boundary:
+            checkpoint_record = entry
+            break
+    if checkpoint_record is None:
+        raise ValueError(
+            "the adjoint receipt does not carry the record's checkpoint "
+            f"boundary {checkpoint_boundary}: refusing")
+    storage_block = receipt.get("boundary_storage")
+    policy = storage_block.get("policy", {}) \
+        if isinstance(storage_block, dict) else {}
+    prefetch_batches = policy.get("prefetch_batches")
+    if type(prefetch_batches) is not int or isinstance(
+            prefetch_batches, bool) or prefetch_batches < 1:
+        raise ValueError("the receipt seals no prefetch batch window: refusing")
+    if type(n_probes) is not int or isinstance(n_probes, bool) \
+            or n_probes < 1:
+        raise ValueError("a boundary readset needs a sealed probe count, "
+                         f"not {n_probes!r}")
+    replay_windows = record.get("windows")
+    if not isinstance(replay_windows, list) or not replay_windows:
+        raise ValueError("a quantum record seals no replay windows: refusing")
+    needed = sorted(set(chain) | {layer})
+    boundary_table = receipt.get("boundary_entries", {})
+    if not isinstance(boundary_table, dict):
+        raise ValueError("the adjoint receipt carries no boundary entries: "
+                         "refusing")
+    manifest_entries: list[dict] = []
+    seen_paths: set[str] = set()
+
+    def _take(exact: Mapping, *, where: str) -> int:
+        entry = _manifest_entry_from_exact(exact, where=where)
+        if entry["path"] in seen_paths:
+            raise ValueError(f"duplicate staged path {entry['path']}: refusing")
+        seen_paths.add(entry["path"])
+        manifest_entries.append(entry)
+        return len(manifest_entries) - 1
+
+    checkpoint_indices: list[int] = []
+    for exact in list(checkpoint_record.get("activation_entries", [])) \
+            + list(checkpoint_record.get("shared_state_entries", [])):
+        checkpoint_indices.append(_take(
+            exact, where=f"checkpoint boundary {checkpoint_boundary}"))
+    if not checkpoint_indices:
+        raise ValueError("the checkpoint plane is empty: refusing")
+    batch_counts = set()
+    boundary_runs: dict[int, list[int]] = {}
+    for boundary in needed:
+        rows = boundary_table.get(str(boundary))
+        if not isinstance(rows, list) or not rows:
+            raise ValueError(f"the receipt carries no boundary {boundary} "
+                             "entries: refusing")
+        run = [_take(exact, where=f"boundary {boundary} entry {index}")
+               for index, exact in enumerate(rows)]
+        boundary_runs[boundary] = run
+        batch_counts.add(len(run))
+    if len(batch_counts) != 1:
+        raise ValueError("needed boundaries hold different batch counts: "
+                         "mixed campaign, refusing")
+    batch_total = batch_counts.pop()
+    batch_windows = (batch_total + prefetch_batches - 1) // prefetch_batches
+    read_phases: list[dict] = []
+    cumulative = 0
+
+    def _seal_phase(name: str, indices: list[int]) -> None:
+        nonlocal cumulative
+        size = sum(manifest_entries[index]["bytes"] for index in indices)
+        if size <= 0:
+            raise ValueError(f"read phase {name} is empty: refusing")
+        cumulative += size
+        read_phases.append({"name": name, "entry_indices": list(indices),
+                            "bytes": size, "cumulative_bytes": cumulative})
+
+    _seal_phase("checkpoint", checkpoint_indices)
+    for boundary in chain:
+        run = boundary_runs[boundary]
+        for probe in range(n_probes):
+            for window in range(batch_windows):
+                _seal_phase(f"chain-{boundary:03d}-p{probe}-w{window:02d}",
+                            run[window * prefetch_batches:
+                                (window + 1) * prefetch_batches])
+    own_run = boundary_runs[layer]
+    for window_index in range(len(replay_windows)):
+        for probe in range(n_probes):
+            for window in range(batch_windows):
+                _seal_phase(f"replay-{window_index:02d}-p{probe}-w{window:02d}",
+                            own_run[window * prefetch_batches:
+                                    (window + 1) * prefetch_batches])
+    names = [phase["name"] for phase in read_phases]
+    if names != list(quantum_boundary_read_phase_names(
+            chain, layer, batch_windows=batch_windows, n_probes=n_probes,
+            replay_windows=len(replay_windows))):
+        raise ValueError("the boundary read plan is not the frozen reader "
+                         "order: refusing")
+    unique_bytes = sum(entry["bytes"] for entry in manifest_entries)
+    return {
+        "schema": MANIFEST_SCHEMA_V2,
+        "produced_by": {"tool": "prismaquant/joint_layer_quanta.py",
+                        "entry_point": QUANTUM_ENTRY_POINT,
+                        "plan": campaign["plan_path"],
+                        "plan_sha256": campaign["plan_sha256"]},
+        "mount_prefix": "/mnt/shared",
+        "entries": manifest_entries,
+        "entry_count": len(manifest_entries),
+        "total_bytes": unique_bytes,
+        "annotations": {
+            "entry_point": QUANTUM_ENTRY_POINT,
+            "quantum_id": record.get("quantum_id"),
+            "quantum_layer": layer,
+            "checkpoint_boundary": checkpoint_boundary,
+            "chain_layers": list(chain),
+            "n_probes": n_probes,
+            "batch_windows": batch_windows,
+            "replay_windows": len(replay_windows),
+            "receipt_sha256": receipt_sha256,
+            "plan_sha256": campaign["plan_sha256"],
+            "prepared_sha256": campaign["prepared_sha256"],
+            "parent_manifest_sha256": campaign["read_manifest_sha256"],
+            "campaign_scope": campaign["campaign_scope"],
+        },
+        "read_plan": {"phases": read_phases, "read_bytes": cumulative},
+    }
+
+
+def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
+                                  manifest: Mapping, manifest_path: str,
+                                  manifest_sha256: str, output_root: str,
+                                  strided_boundaries: Sequence[int],
+                                  n_probes: int) -> dict:
+    """Bind a sealed boundary readset manifest to a NEW record generation.
+
+    Returns a deep copy of ``record`` carrying a ``boundary_readset`` block
+    and a recomputed ``identity_sha256`` (the existing canonical owner, over
+    every top-level field but the identity itself -- the same recomputation
+    ``check_quantum_for_campaign`` and the consumer's
+    ``verify_quantum_identity`` enforce, so a bound record passes both);
+    the input record is never mutated.
+
+    Refuses unless every identity binds exactly: the completed-capture
+    receipt; the input record itself, reverified through the existing
+    ``check_quantum_for_campaign`` owner against its own sealed campaign
+    and bound receipt BEFORE any mutation (a tampered field with a stale
+    identity refuses -- binding never blesses edits by recomputing); the
+    record's schema, layer, producer-constrained quantum id, campaign
+    digests/scope, and its already bound adjoint receipt (another receipt
+    for the same layer refuses); the manifest path is exactly the
+    producer-named bound path under the output root (the quantum id enters
+    no free-form pathname). ``n_probes`` is an explicit trusted input --
+    the regen passes the sealed plan value, and the manifest must attest
+    that same count (never the manifest attesting to itself). The manifest
+    itself is proven, not trusted:
+    its schema, entries, phases, counts and schedule must equal what
+    :func:`build_quantum_boundary_readset` derives from this record and
+    receipt -- a different path/bytes/digest set with matching annotations
+    and a consistent rehash still refuses, because the triples must
+    originate from the bound receipt.
+    """
+    import copy
+    import os
+    if not isinstance(record, dict):
+        raise ValueError("a quantum record must be an object: refusing")
+    if record.get("schema") != LAYER_QUANTUM_SCHEMA:
+        raise ValueError("a quantum record has a foreign schema: refusing")
+    layer = record.get("layer")
+    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
+        raise ValueError("a quantum record names no layer: refusing")
+    if record.get("quantum_id") != quantum_id(layer):
+        raise ValueError(
+            f"quantum id {record.get('quantum_id')!r} does not name layer "
+            f"{layer}: refusing")
+    adjoint = record.get("adjoint")
+    if not isinstance(adjoint, dict):
+        raise ValueError("a quantum record carries no adjoint block: refusing")
+    bound_receipt = adjoint.get("receipt_sha256")
+    if type(bound_receipt) is not str or not re.fullmatch(
+            r"[0-9a-f]{64}", bound_receipt):
+        raise ValueError(
+            f"quantum {record.get('quantum_id')!r} is unbound (pre-A): "
+            "re-seal against the stage-A receipt before binding a readset, "
+            "refusing")
+    campaign = record.get("campaign")
+    if not isinstance(campaign, dict):
+        raise ValueError("a quantum record carries no campaign block: refusing")
+    for key in ("plan_path", "plan_sha256", "prepared_path", "prepared_sha256",
+                "read_manifest_sha256", "campaign_scope"):
+        if not campaign.get(key):
+            raise ValueError(f"a quantum record seals no campaign {key}: "
+                             "refusing")
+    if type(n_probes) is not int or isinstance(n_probes, bool) \
+            or n_probes < 1:
+        raise ValueError("a boundary readset needs a trusted sealed probe "
+                         f"count, not {n_probes!r}")
+    if type(output_root) is not str or not output_root.startswith("/"):
+        raise ValueError("an output root must be absolute: refusing")
+    expected_path = (f"{output_root.rstrip('/')}/layer-quanta/adjoint/"
+                     f"bound-readsets/{quantum_id(layer)}"
+                     ".boundary-readset.json.gz")
+    if manifest_path != expected_path or os.path.normpath(
+            manifest_path) != manifest_path or ".." in manifest_path.split("/"):
+        raise ValueError(
+            f"a boundary readset path must be exactly {expected_path}: "
+            "refusing")
+    # The input record is reverified through the existing owner BEFORE any
+    # mutation: a tampered field with a stale identity refuses here, and
+    # binding never blesses edits by recomputing.
+    check_quantum_for_campaign(
+        record, {**campaign, "adjoint_receipt_sha256": bound_receipt})
+    if not isinstance(manifest, dict):
+        raise ValueError("a boundary readset manifest must be an object: "
+                         "refusing")
+    if manifest.get("schema") != MANIFEST_SCHEMA_V2:
+        raise ValueError("a boundary readset manifest has a foreign schema: "
+                         "refusing")
+    annotations = manifest.get("annotations")
+    if not isinstance(annotations, dict):
+        raise ValueError("a boundary readset manifest has no annotations: "
+                         "refusing")
+    if annotations.get("receipt_sha256") != bound_receipt:
+        raise ValueError(
+            f"quantum {record.get('quantum_id')!r} binds another stage-A "
+            "receipt: refusing")
+    if annotations.get("n_probes") != n_probes:
+        raise ValueError(
+            f"the boundary readset attests another probe count "
+            f"{annotations.get('n_probes')!r}: refusing")
+    try:
+        expected = build_quantum_boundary_readset(
+            record, receipt, strided_boundaries=strided_boundaries,
+            n_probes=n_probes)
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        raise ValueError("the boundary readset does not derive from its "
+                         f"record and receipt: refusing ({exc})") from exc
+    if manifest != expected:
+        raise ValueError(
+            "the boundary readset entries, phases or counts do not "
+            "originate from the bound receipt: refusing")
+    wire = seal_manifest_bytes(manifest)
+    if hashlib.sha256(wire).hexdigest() != manifest_sha256:
+        raise ValueError("the boundary readset digest does not reproduce "
+                         "from its manifest wire: refusing")
+    fresh = copy.deepcopy(record)
+    fresh["boundary_readset"] = {
+        "manifest_path": manifest_path,
+        "manifest_sha256": manifest_sha256,
+        "entry_count": manifest["entry_count"],
+        "total_bytes": manifest["total_bytes"],
+        "read_bytes": manifest["read_plan"]["read_bytes"],
+        "phases": [phase["name"]
+                   for phase in manifest["read_plan"]["phases"]],
+        "receipt_sha256": bound_receipt,
+    }
+    body = {key: value for key, value in fresh.items()
+            if key != "identity_sha256"}
+    fresh["identity_sha256"] = canonical_sha256(
+        body, where=f"quantum record {fresh.get('quantum_id')}")
+    return fresh
+
+
+def emit_quantum_boundary_readsets(receipt: Mapping,
+                                   records: Sequence[Mapping], *,
+                                   strided_boundaries: Sequence[int],
+                                   n_probes: int,
+                                   output_root: str) -> list[dict]:
+    """The post-capture generation path: new records plus their manifests.
+
+    For every record, derives the boundary readset manifest, seals it, and
+    binds it to a new record generation under
+    ``{output_root}/layer-quanta/adjoint/bound-readsets/``. Returns one
+    ``{"record", "manifest", "manifest_path", "manifest_sha256"}`` per
+    quantum, in record order. Emits nothing to disk and mutates nothing:
+    the post-capture regen writes the returned bytes and adopts the
+    returned records. Duplicate quantum ids or manifest paths refuse whole
+    rather than binding half a campaign.
+    """
+    rows = list(records)
+    if not rows:
+        raise ValueError("no quantum records to bind: refusing")
+    if type(output_root) is not str or not output_root.startswith("/"):
+        raise ValueError("an output root must be absolute: refusing")
+    emitted: list[dict] = []
+    seen: set[str] = set()
+    for record in rows:
+        manifest = build_quantum_boundary_readset(
+            record, receipt, strided_boundaries=strided_boundaries,
+            n_probes=n_probes)
+        quantum_id = record.get("quantum_id")
+        manifest_path = (f"{output_root.rstrip('/')}/layer-quanta/adjoint/"
+                         f"bound-readsets/{quantum_id}.boundary-readset.json.gz")
+        if quantum_id in seen or manifest_path in seen:
+            raise ValueError(f"duplicate quantum binding {quantum_id!r}: "
+                             "refusing")
+        seen.add(quantum_id)
+        seen.add(manifest_path)
+        manifest_sha256 = hashlib.sha256(
+            seal_manifest_bytes(manifest)).hexdigest()
+        emitted.append({
+            "record": bind_quantum_boundary_readset(
+                record, receipt, manifest=manifest,
+                manifest_path=manifest_path,
+                manifest_sha256=manifest_sha256,
+                output_root=output_root,
+                strided_boundaries=strided_boundaries,
+                n_probes=n_probes),
+            "manifest": manifest,
+            "manifest_path": manifest_path,
+            "manifest_sha256": manifest_sha256,
+        })
+    return emitted
+
+
