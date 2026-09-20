@@ -119,13 +119,21 @@ def adjoint_receipt_path(space: str | os.PathLike) -> Path:
 
 def write_checkpoint_cotangent_entry(
     checkpoint_dir: Path, *, probe_index: int, batch_index: int, tensor: torch.Tensor,
-    session: dict,
+    session: dict, max_file_bytes: int | None = None,
 ) -> dict:
-    """Publish one activation cotangent as a digest-checked exact entry."""
+    """Publish one activation cotangent as a digest-checked exact entry.
+
+    ``max_file_bytes`` carries the reservation-admitted per-file envelope;
+    when omitted the legacy tensor-bytes-plus-header envelope applies. The
+    exact writer enforces whichever bound it receives and unlinks on
+    exceedance.
+    """
     from .perturbed_x_cache import write_exact_activation_cache_entry
 
     name = f"cotangent-{int(probe_index)}-{int(batch_index)}"
     nbytes = tensor.numel() * tensor.element_size()
+    if max_file_bytes is None:
+        max_file_bytes = nbytes + 65536
     identity = {
         "session": dict(session),
         "slot": name,
@@ -136,7 +144,7 @@ def write_checkpoint_cotangent_entry(
     }
     reference = write_exact_activation_cache_entry(
         checkpoint_dir / "entries", name, tensor,
-        identity=identity, max_tensor_bytes=nbytes, max_file_bytes=nbytes + 65536,
+        identity=identity, max_tensor_bytes=nbytes, max_file_bytes=max_file_bytes,
     )
     return exact_entry_record(reference)
 
@@ -216,6 +224,10 @@ def read_exact_entry_tensors(records, *, expected_session) -> dict:
 
 def _shared_state_entry(checkpoint_dir: Path, name: str, state) -> dict:
     payload = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
+    return _write_shared_state_payload(checkpoint_dir, name, payload)
+
+
+def _write_shared_state_payload(checkpoint_dir: Path, name: str, payload: bytes) -> dict:
     path = checkpoint_dir / "entries" / f"{name}.pkl"
     atomic_write_bytes(path, payload)
     return {
@@ -226,9 +238,253 @@ def _shared_state_entry(checkpoint_dir: Path, name: str, state) -> dict:
     }
 
 
+def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
+                                  *, max_file_bytes: int) -> dict:
+    """Stream one shared state to its pickle file with an admitted bound.
+
+    Standard ``pickle.dump`` into the existing ``SerializedEntryDigest``
+    sink over an atomic temp file: no aggregate payload object is ever
+    materialized, so the transient peak stays at the entry's own
+    serialization instead of the whole checkpoint. The digest covers
+    exactly the published bytes (no rehash pass); the admitted per-file
+    envelope is enforced on every sink write before the underlying handle
+    can cross it, and the temp is unlinked on exceedance, so an oversized
+    entry never publishes. Not a new serializer or cache: stdlib pickling
+    plus the activation owner's sink and atomic-publication shape.
+    """
+    import os
+
+    from .cost_stage_checkpoint import unique_temp_suffix
+    from .perturbed_x_cache import SerializedEntryDigest
+
+    if type(max_file_bytes) is not int or max_file_bytes <= 0:
+        raise RuntimeError(
+            "exact boundary checkpoint shared-state write needs an "
+            "admitted per-file envelope")
+    path = checkpoint_dir / "entries" / f"{name}.pkl"
+    if path.exists() or path.with_suffix(".pkl.tmp").exists():
+        raise RuntimeError("exact boundary checkpoint entry already exists")
+    sink = _BoundedDigestSink(SerializedEntryDigest(), max_file_bytes,
+                              label=f"shared state {name}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + unique_temp_suffix())
+    try:
+        with temporary.open("wb") as handle:
+            pickle.dump(state, sink.sink(handle),
+                        protocol=pickle.HIGHEST_PROTOCOL)
+            handle.flush()
+            os.fsync(handle.fileno())
+        published = temporary.stat().st_size
+        if published != sink.bytes_written:
+            raise RuntimeError(
+                "exact boundary checkpoint entry differs from its "
+                "serialized bytes")
+        if published > max_file_bytes:
+            raise RuntimeError(
+                "exact boundary checkpoint shared-state file exceeds its "
+                f"admitted envelope for {name}")
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return {
+        "name": name,
+        "path": str(path),
+        "sha256": sink.hexdigest(),
+        "file_bytes": published,
+    }
+
+
+class _BoundedDigestSink:
+    """Hash-while-writing sink that refuses before crossing an admitted ceiling.
+
+    Wraps ``SerializedEntryDigest`` (activation owner) without changing it:
+    every ``write`` is checked against the remaining admitted bytes first,
+    so the underlying handle -- and therefore the staged temp file -- never
+    holds more than admitted. Unbounded callers keep today's behavior by
+    passing no ceiling; the exact writer's own post-write check is untouched.
+    """
+
+    def __init__(self, digest, max_bytes: int | None, label: str):
+        self._digest = digest
+        self._label = str(label)
+        if max_bytes is not None and (
+                type(max_bytes) is not int or max_bytes <= 0):
+            raise RuntimeError(
+                "exact boundary bounded sink needs a positive byte ceiling")
+        self._ceiling = max_bytes
+        self._written = 0
+
+    def sink(self, handle):
+        self._digest.sink(handle)
+        return self
+
+    def write(self, data):
+        view = memoryview(data).cast("B")
+        try:
+            if (self._ceiling is not None
+                    and self._written + view.nbytes > self._ceiling):
+                raise RuntimeError(
+                    "exact boundary checkpoint entry exceeds its admitted "
+                    f"envelope for {self._label}")
+            self._digest.write(view)
+            self._written += view.nbytes
+            return view.nbytes
+        finally:
+            view.release()
+
+    def flush(self):
+        self._digest.flush()
+
+    def hexdigest(self):
+        return self._digest.hexdigest()
+
+    @property
+    def bytes_written(self):
+        return self._written
+
+
+#: Per-object framing bound for the shared-state pickle size estimate below.
+#: Admission-side upper bound only: the reservation commits exact serialized
+#: lengths, exactly like the exact-entry writer's small PyTorch zip header
+#: envelope (tensor bytes + 65536) that bounds each activation file.
+_PICKLE_ESTIMATE_FRAMING_BYTES = 65536
+
+
+def _shared_state_envelope_estimate(value) -> int:
+    """Upper-bound the pickle size of shared checkpoint state without serializing.
+
+    Closed grammar mirroring ``_state_tensors`` (cost_streaming): anything
+    else -- meta or non-strided tensors, sets, opaque objects -- refuses
+    instead of guessing. Two precision rules matter here:
+
+    - Tensors count their actual serialized backing ownership
+      (``untyped_storage().nbytes()``), once per leaf, because pickling a
+      small tensor view serializes its whole backing storage, which
+      ``numel`` would undercount. Measured on the pinned torch (PB
+      ``4bbc5f134a53``): two 2 MiB views sharing one 4 MiB backing dump
+      ~8.00 MB in one call, the same as separately -- pickle emits
+      per-view backing bytes rather than memoizing shared storage, so no
+      cross-leaf deduplication is sound. (Pickle memoizes only the
+      identical object, which per-leaf summation already covers as an
+      upper bound.) Each shared entry dumps separately, so ownership is
+      per entry, never across entries.
+    - Integers are sized by bit length: a short counter costs framing, but
+      an arbitrary-precision giant must count its digits, never a flat 128.
+
+    The estimate only admits the serialization attempt against the remaining
+    envelope; the reservation commits the exact dumped lengths.
+    """
+    if isinstance(value, torch.Tensor):
+        if value.is_meta or value.layout != torch.strided:
+            raise TypeError(
+                "exact boundary checkpoint cannot account this state tensor")
+        return (value.untyped_storage().nbytes()
+                + _PICKLE_ESTIMATE_FRAMING_BYTES)
+    if isinstance(value, str):
+        return len(value.encode("utf-8")) + 128
+    if isinstance(value, bytes):
+        return len(value) + 128
+    if value is None or isinstance(value, (bool, float, complex)):
+        return 128
+    if isinstance(value, int):
+        return (int(value).bit_length() + 7) // 8 + 32
+    if isinstance(value, dict):
+        total = 128
+        for key, item in value.items():
+            if not isinstance(key, (str, int)):
+                raise TypeError(
+                    "exact boundary checkpoint cannot account shared state "
+                    f"with {type(key).__name__} mapping keys")
+            total += _shared_state_envelope_estimate(key)
+            total += _shared_state_envelope_estimate(item)
+        return total
+    if isinstance(value, (list, tuple)):
+        total = 128
+        for item in value:
+            total += _shared_state_envelope_estimate(item)
+        return total
+    raise TypeError(
+        "exact boundary checkpoint cannot account opaque shared state "
+        f"{type(value).__name__}")
+
+
+def _checkpoint_coordinate_keys(mapping, *, arity: int, where: str) -> None:
+    """Require exact nonnegative-int coordinates on the budgeted path.
+
+    The legacy writer coerces coordinates with ``int()``; the budgeted path
+    refuses anything but exact integers first, so a malformed key can never
+    reach the envelope arithmetic.
+    """
+    if not isinstance(mapping, dict):
+        raise RuntimeError(f"exact boundary checkpoint {where} is not a mapping")
+    for key in mapping:
+        if (not isinstance(key, tuple) or len(key) != arity
+                or any(type(part) is not int or part < 0 for part in key)):
+            raise RuntimeError(
+                f"exact boundary checkpoint {where} keys must be "
+                f"{arity} nonnegative integers")
+
+
+def _checkpoint_manifest_envelope_bytes(*, boundary: int, session: dict,
+                                        activation_plan, shared_plan) -> int:
+    """Upper-bound the checkpoint manifest size before digests exist.
+
+    Builds the exact manifest shape with 64-character placeholder digests
+    and per-file envelope sizes. Every placeholder field is byte-identical
+    to the final manifest except ``file_bytes`` (envelope values, whose
+    decimal width can only shrink as actuals come in at or under envelope)
+    and ``sha256``/``cotangent_sha256`` (fixed 64 characters either way),
+    so the final manifest is never longer than this number.
+    """
+    from .perturbed_x_cache import EXACT_ACTIVATION_SCHEMA
+
+    canonical_session = canonical_json(dict(session), where="adjoint checkpoint session")
+
+    def _activation_row(plan):
+        return {
+            "name": plan["name"], "path": plan["path"], "sha256": "0" * 64,
+            "tensor_bytes": plan["tensor_bytes"], "file_bytes": plan["file_envelope"],
+            "shape": plan["shape"], "dtype": plan["dtype"],
+            "metadata": {
+                "schema": EXACT_ACTIVATION_SCHEMA,
+                "identity": {
+                    "session": canonical_session, "slot": plan["slot"],
+                    "kind": "adjoint_checkpoint_cotangent",
+                    "coordinates": {"probe": plan["probe_index"],
+                                    "batch": plan["batch_index"]},
+                },
+                "shape": plan["shape"], "dtype": plan["dtype"],
+                "tensor_bytes": plan["tensor_bytes"],
+            },
+        }
+
+    skeleton = {
+        "schema": ADJOINT_CHECKPOINT_SCHEMA,
+        "boundary": int(boundary),
+        "session": canonical_session,
+        "activation_entries": sorted(
+            (_activation_row(plan) for plan in activation_plan),
+            key=lambda row: row["name"]),
+        "shared_state_entries": sorted(
+            ({"name": plan["name"], "path": plan["path"], "sha256": "0" * 64,
+              "file_bytes": plan["file_envelope"]}
+             for plan in shared_plan),
+            key=lambda row: row["name"]),
+        "cotangent_sha256": "0" * 64,
+    }
+    return len((json.dumps(skeleton, sort_keys=True, indent=2, allow_nan=False)
+                + "\n").encode())
+
+
 def write_adjoint_checkpoint(
     space: str | os.PathLike, *, boundary: int, session: dict,
-    cotangents, shared_adjoint, shared_pass,
+    cotangents, shared_adjoint, shared_pass, owner=None,
 ) -> dict:
     """Serialize one strided checkpoint; returns its §3.3 record.
 
@@ -237,42 +493,204 @@ def write_adjoint_checkpoint(
     ``SharedStateCotangents.state_dict()`` carried beside it. ``shared_pass``
     maps ``batch`` -> the captured forward shared-pass state each chain layer
     and the layer quantum recompute from.
+
+    With ``owner=None`` the legacy unwatched path runs exactly as before.
+    With a ``StreamedBoundaryArtifacts`` owner, the whole attempt is admitted
+    against ``max_artifact_bytes`` first: tensor envelopes, estimated then
+    exact shared-state payloads, the manifest envelope, and one in-progress
+    temp overlap, counted alongside live ordinary entries. The writer then
+    commits the receipt's actual bytes/digests, returns unused envelope, and
+    retains (never silently releases) on failure. See the owner's
+    reserve-before-write contract.
     """
     checkpoint_dir = checkpoint_directory(space, boundary)
-    checkpoint_dir.mkdir(parents=True, exist_ok=False)
-    activation_entries = []
+    if owner is None:
+        checkpoint_dir.mkdir(parents=True, exist_ok=False)
+        activation_entries = []
+        for (probe_index, batch_index) in sorted(cotangents):
+            tensor = cotangents[(probe_index, batch_index)]
+            activation_entries.append(write_checkpoint_cotangent_entry(
+                checkpoint_dir, probe_index=probe_index, batch_index=batch_index,
+                tensor=tensor, session=session))
+        shared_state_entries = []
+        for (probe_index, batch_index) in sorted(shared_adjoint):
+            shared_state_entries.append(_shared_state_entry(
+                checkpoint_dir,
+                f"shared-adjoint-{int(probe_index)}-{int(batch_index)}",
+                shared_adjoint[(probe_index, batch_index)]))
+        for batch_index in sorted(shared_pass):
+            shared_state_entries.append(_shared_state_entry(
+                checkpoint_dir, f"shared-pass-{int(batch_index)}",
+                shared_pass[batch_index]))
+        record = {
+            "schema": ADJOINT_CHECKPOINT_SCHEMA,
+            "boundary": int(boundary),
+            "session": canonical_json(dict(session), where="adjoint checkpoint session"),
+            "activation_entries": sorted(activation_entries, key=lambda e: e["name"]),
+            "shared_state_entries": sorted(shared_state_entries, key=lambda e: e["name"]),
+        }
+        record["cotangent_sha256"] = canonical_json_sha256(
+            {key: record[key] for key in
+             ("schema", "boundary", "session", "activation_entries", "shared_state_entries")},
+            where="adjoint checkpoint",
+        )
+        atomic_write_bytes(
+            checkpoint_dir / "checkpoint.json",
+            (json.dumps(record, sort_keys=True, indent=2, allow_nan=False) + "\n").encode(),
+        )
+        return record
+
+    if type(boundary) is not int or boundary < 0:
+        raise RuntimeError("exact boundary checkpoint boundary must be a nonnegative integer")
+    _checkpoint_coordinate_keys(cotangents, arity=2, where="cotangents")
+    _checkpoint_coordinate_keys(shared_adjoint, arity=2, where="shared_adjoint")
+    if not isinstance(shared_pass, dict) or any(
+            type(part) is not int or part < 0 for part in shared_pass):
+        raise RuntimeError(
+            "exact boundary checkpoint shared_pass keys must be nonnegative integers")
+    for tensor in cotangents.values():
+        if (not isinstance(tensor, torch.Tensor) or tensor.layout != torch.strided
+                or tensor.is_meta):
+            raise TypeError(
+                "exact boundary checkpoint requires materialized strided tensors")
+    owner.check_transient_buffer("checkpoint shared-state serialization")
+    estimates = {}
+    for name, state in _iter_shared_states(shared_adjoint, shared_pass):
+        try:
+            estimates[name] = _shared_state_envelope_estimate(state)
+        except TypeError as exc:
+            raise RuntimeError(
+                "exact boundary checkpoint refuses unaccountable shared state "
+                f"for {name}: {exc}") from exc
+    from .perturbed_x_cache import activation_cache_filename
+
+    activation_plan = []
     for (probe_index, batch_index) in sorted(cotangents):
         tensor = cotangents[(probe_index, batch_index)]
-        activation_entries.append(write_checkpoint_cotangent_entry(
-            checkpoint_dir, probe_index=probe_index, batch_index=batch_index,
-            tensor=tensor, session=session))
-    shared_state_entries = []
-    for (probe_index, batch_index) in sorted(shared_adjoint):
-        shared_state_entries.append(_shared_state_entry(
-            checkpoint_dir,
-            f"shared-adjoint-{int(probe_index)}-{int(batch_index)}",
-            shared_adjoint[(probe_index, batch_index)]))
-    for batch_index in sorted(shared_pass):
-        shared_state_entries.append(_shared_state_entry(
-            checkpoint_dir, f"shared-pass-{int(batch_index)}",
-            shared_pass[batch_index]))
-    record = {
-        "schema": ADJOINT_CHECKPOINT_SCHEMA,
-        "boundary": int(boundary),
-        "session": canonical_json(dict(session), where="adjoint checkpoint session"),
-        "activation_entries": sorted(activation_entries, key=lambda e: e["name"]),
-        "shared_state_entries": sorted(shared_state_entries, key=lambda e: e["name"]),
+        nbytes = tensor.numel() * tensor.element_size()
+        name = f"cotangent-{probe_index}-{batch_index}"
+        activation_plan.append({
+            "probe_index": probe_index, "batch_index": batch_index,
+            "slot": name,
+            "name": name,
+            "path": str(checkpoint_dir / "entries" / activation_cache_filename(name)),
+            "tensor_bytes": nbytes, "file_envelope": nbytes + 65536,
+            "shape": [int(dim) for dim in tensor.shape],
+            "dtype": str(tensor.dtype),
+        })
+    shared_plan = [{"name": name,
+                    "path": str(checkpoint_dir / "entries" / f"{name}.pkl"),
+                    "file_envelope": estimates[name]} for name in sorted(estimates)]
+    manifest_envelope = _checkpoint_manifest_envelope_bytes(
+        boundary=boundary, session=session,
+        activation_plan=activation_plan, shared_plan=shared_plan)
+    file_envelopes = ([plan["file_envelope"] for plan in activation_plan]
+                      + [plan["file_envelope"] for plan in shared_plan])
+    temp_overlap = max(file_envelopes + [manifest_envelope])
+    envelope = sum(file_envelopes) + manifest_envelope + temp_overlap
+    file_plan = {
+        "files": [{"name": plan["name"], "path": plan["path"],
+                   "envelope_bytes": plan["file_envelope"]}
+                  for plan in activation_plan]
+        + [{"name": plan["name"], "path": plan["path"],
+            "envelope_bytes": plan["file_envelope"]}
+           for plan in shared_plan],
+        "manifest_bytes": manifest_envelope,
+        "temp_overlap_bytes": temp_overlap,
+        "envelope_bytes": envelope,
     }
-    record["cotangent_sha256"] = canonical_json_sha256(
-        {key: record[key] for key in
-         ("schema", "boundary", "session", "activation_entries", "shared_state_entries")},
-        where="adjoint checkpoint",
-    )
-    atomic_write_bytes(
-        checkpoint_dir / "checkpoint.json",
-        (json.dumps(record, sort_keys=True, indent=2, allow_nan=False) + "\n").encode(),
-    )
+    reservation = owner.reserve_checkpoint_artifact(
+        label=f"adjoint checkpoint boundary {boundary}",
+        envelope_bytes=envelope, file_plan=file_plan,
+        checkpoint_dir=checkpoint_dir)
+    created = False
+    try:
+        checkpoint_dir.mkdir(parents=True, exist_ok=False)
+        created = True
+    except BaseException:
+        owner.cancel_checkpoint_artifact(reservation)
+        raise
+    try:
+        # Shared states stream, write, and release one entry at a time: no
+        # aggregate payload object ever exists, so the transient peak is the
+        # largest single entry's serialization, never the whole checkpoint.
+        # An empty shared set simply skips the loop. Holds count live
+        # auxiliary usage plus transient bytes against the one auxiliary
+        # ceiling.
+        shared_state_entries = []
+        for plan in shared_plan:
+            state = _shared_state_by_name(
+                shared_adjoint, shared_pass, plan["name"])
+            with owner.hold_transient_metadata(
+                    estimates[plan["name"]],
+                    f"checkpoint shared state {plan['name']}"):
+                shared_state_entries.append(_write_shared_state_streaming(
+                    checkpoint_dir, plan["name"], state,
+                    max_file_bytes=plan["file_envelope"]))
+        activation_entries = []
+        for plan in activation_plan:
+            tensor = cotangents[(plan["probe_index"], plan["batch_index"])]
+            with owner.hold_transient_serialization(
+                    plan["tensor_bytes"],
+                    f"checkpoint tensor {plan['name']}"):
+                entry = write_checkpoint_cotangent_entry(
+                    checkpoint_dir, probe_index=plan["probe_index"],
+                    batch_index=plan["batch_index"], tensor=tensor,
+                    session=session, max_file_bytes=plan["file_envelope"])
+            if entry["file_bytes"] > plan["file_envelope"]:
+                raise RuntimeError(
+                    "exact boundary checkpoint tensor file exceeds its "
+                    f"admitted envelope for {plan['name']}")
+            activation_entries.append(entry)
+        record = {
+            "schema": ADJOINT_CHECKPOINT_SCHEMA,
+            "boundary": int(boundary),
+            "session": canonical_json(dict(session), where="adjoint checkpoint session"),
+            "activation_entries": sorted(activation_entries, key=lambda e: e["name"]),
+            "shared_state_entries": sorted(shared_state_entries, key=lambda e: e["name"]),
+        }
+        record["cotangent_sha256"] = canonical_json_sha256(
+            {key: record[key] for key in
+             ("schema", "boundary", "session", "activation_entries", "shared_state_entries")},
+            where="adjoint checkpoint",
+        )
+        with owner.hold_transient_metadata(
+                manifest_envelope, "checkpoint manifest"):
+            manifest_payload = (json.dumps(
+                record, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+            if len(manifest_payload) > manifest_envelope:
+                raise RuntimeError(
+                    "exact boundary checkpoint manifest exceeds its admitted envelope")
+            atomic_write_bytes(checkpoint_dir / "checkpoint.json", manifest_payload)
+        owner.commit_checkpoint_artifact(reservation, record)
+    except BaseException:
+        # Abandon only what is still active. A commit that already recorded
+        # the receipt (even one whose trailing memory hook then failed) is
+        # truthful committed state, and abandoning it would mask the
+        # original error; a retained attempt is already retained
+        # (abandon is idempotent there, so this simply skips it).
+        if owner.checkpoint_reservation_state(reservation) == "active":
+            owner.abandon_checkpoint_artifact(reservation)
+        raise
     return record
+
+
+def _iter_shared_states(shared_adjoint, shared_pass):
+    """Yield ``(entry name, state)`` in manifest order."""
+    for (probe_index, batch_index) in sorted(shared_adjoint):
+        yield (f"shared-adjoint-{probe_index}-{batch_index}",
+               shared_adjoint[(probe_index, batch_index)])
+    for batch_index in sorted(shared_pass):
+        yield f"shared-pass-{batch_index}", shared_pass[batch_index]
+
+
+def _shared_state_by_name(shared_adjoint, shared_pass, name: str):
+    """Recover one shared state by the entry name the writer assigned."""
+    for candidate, state in _iter_shared_states(shared_adjoint, shared_pass):
+        if candidate == name:
+            return state
+    raise RuntimeError(
+        f"exact boundary checkpoint has no shared state {name!r}")
 
 
 def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
