@@ -315,13 +315,16 @@ class StreamedBoundaryArtifacts:
         metadata, accumulators = self._auxiliary_owners(batches, cotangents)
         return _state_storage_bytes((metadata, accumulators, extra))
 
-    def check_auxiliary(self, batches, *, cotangents=(), extra=(), shared_extra=()):
-        """Bound retained metadata plus all potential per-probe shared adjoints.
+    def _auxiliary_accounted_bytes(self, batches, *, cotangents=(), extra=(),
+                                   shared_extra=(), transient_bytes=0):
+        """One shared auxiliary accounting for checks and transient holds.
 
-        Shared state remains under the profile's original ownership/precision.
-        We conservatively reserve one >=FP32 cotangent per captured occurrence
-        per probe, including aliases at different shared-state keys; actual
-        accumulators are checked too. No hidden tensor plane is called metadata.
+        Retained metadata plus the larger of actual accumulator storage and
+        the per-probe promised shared reservation, plus transient held
+        bytes. Both ``check_auxiliary`` and transient-hold admission read
+        this one calculation over watched-owner state, so a hold can never
+        consume headroom already promised to shared adjoints. Point-in-time
+        per-call extras belong to their own ``check_auxiliary`` admission.
         """
         metadata, actual_accumulators = self._auxiliary_owners(batches, cotangents)
         shared = [batch.shared_pass_state for batch in batches] + [shared_extra]
@@ -330,8 +333,21 @@ class StreamedBoundaryArtifacts:
             for tensor in _state_tensors(shared)
             if tensor.is_floating_point() or tensor.is_complex())
         actual_shared = _state_storage_bytes(actual_accumulators)
-        total = (_state_storage_bytes((metadata, extra)) + max(actual_shared, reserved_shared)
-                 + self._transient_hold_bytes)
+        return (_state_storage_bytes((metadata, extra))
+                + max(actual_shared, reserved_shared) + transient_bytes,
+                reserved_shared)
+
+    def check_auxiliary(self, batches, *, cotangents=(), extra=(), shared_extra=()):
+        """Bound retained metadata plus all potential per-probe shared adjoints.
+
+        Shared state remains under the profile's original ownership/precision.
+        We conservatively reserve one >=FP32 cotangent per captured occurrence
+        per probe, including aliases at different shared-state keys; actual
+        accumulators are checked too. No hidden tensor plane is called metadata.
+        """
+        total, reserved_shared = self._auxiliary_accounted_bytes(
+            batches, cotangents=cotangents, extra=extra,
+            shared_extra=shared_extra, transient_bytes=self._transient_hold_bytes)
         if total > self.config["max_auxiliary_bytes"]:
             raise RuntimeError("exact boundary auxiliary/shared-state residency budget exceeded")
         self.telemetry["peak_auxiliary_bytes"] = max(total, self.telemetry["peak_auxiliary_bytes"])
@@ -500,29 +516,28 @@ class StreamedBoundaryArtifacts:
     def hold_transient_metadata(self, estimate_bytes, label):
         """Hold transient serialized-metadata bytes in one aggregate ceiling.
 
-        Pickle/manifest buffers are metadata-adjacent staging bytes, but they
-        are bulk bytes, not free: admission counts live auxiliary usage (the
-        watched batch/cotangent owners recomputed through the existing
-        ``actual_auxiliary_bytes`` contract) plus every active transient hold
-        plus this estimate against ``max_auxiliary_bytes``. No second full
-        ceiling is granted beside the retained auxiliary state. Fires the
-        bound memory hook on the way in and releases on the way out; one
-        entry at a time keeps the peak at the largest single payload.
+        Admission reads the same accounted total ``check_auxiliary``
+        enforces -- retained metadata plus the larger of actual accumulator
+        storage and the per-probe promised shared reservation -- recomputed
+        over the watched owners with outstanding transient holds included,
+        plus this estimate. A hold that fits live-actual usage but exceeds
+        the promised reservation refuses before anything serializes. Fires
+        the bound memory hook on the way in and releases on the way out;
+        one entry at a time keeps the peak at the largest single payload.
         """
         if type(estimate_bytes) is not int or estimate_bytes <= 0:
             raise RuntimeError(
                 "exact boundary transient metadata hold needs a "
                 "positive byte estimate")
-        live = self._live_auxiliary_bytes()
-        held = self._transient_hold_bytes + int(estimate_bytes)
-        if held + live > self.config["max_auxiliary_bytes"]:
+        live_total, _ = self._auxiliary_accounted_bytes(
+            self._batches or (), cotangents=self._cotangents or (),
+            transient_bytes=self._transient_hold_bytes + int(estimate_bytes))
+        if live_total > self.config["max_auxiliary_bytes"]:
             raise RuntimeError(
                 "exact boundary transient serialization budget exceeded: "
-                f"{label} needs {estimate_bytes} bytes with {live} live "
-                f"auxiliary bytes and {self._transient_hold_bytes} already "
-                f"held against auxiliary ceiling "
-                f"{self.config['max_auxiliary_bytes']}")
-        self._transient_hold_bytes = held
+                f"{label} needs {estimate_bytes} bytes against accounted "
+                f"auxiliary usage, ceiling {self.config['max_auxiliary_bytes']}")
+        self._transient_hold_bytes += int(estimate_bytes)
         try:
             if self._check_memory is not None:
                 self._check_memory(str(label))
@@ -532,18 +547,6 @@ class StreamedBoundaryArtifacts:
             yield
         finally:
             self._transient_hold_bytes -= int(estimate_bytes)
-
-    def _live_auxiliary_bytes(self):
-        """Recompute live auxiliary backing bytes through the existing contract.
-
-        Zero when no batch owners are watched; otherwise the same backing
-        count ``check_auxiliary`` enforces, so transient holds and retained
-        auxiliary state share one ceiling instead of two.
-        """
-        if self._batches is None:
-            return 0
-        return int(self.actual_auxiliary_bytes(
-            self._batches, cotangents=self._cotangents or ()))
 
     def checkpoint_reservation_state(self, reservation_id):
         """Report one reservation's lifecycle state, refusing unknown ids."""
