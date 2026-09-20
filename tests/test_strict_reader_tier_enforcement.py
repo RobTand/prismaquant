@@ -2266,6 +2266,11 @@ def test_a_non_strict_layer_read_with_a_map_still_never_waits(
     with safe_open(str(path), framework='pt') as reference:
         assert torch.equal(served['layer.0.f32'].view(torch.uint8),
                            reference.get_tensor('f32').view(torch.uint8))
+    # bytes_from_pool stays 0 on purpose: with the policy inactive and the
+    # map naming no entry for this shard, staged_shard_opener hands the
+    # caller back its OWN opener, so no reader exists to count anything.
+    # That untouched path is exactly what this test is protecting.
     report = resolver.report()
-    assert report['bytes_from_pool'] > 0
+    assert report['bytes_from_pool'] == 0
     assert report['range_wait_polls'] == 0
+    assert report['declared_readset']['state'] == 'unread'
