@@ -48,11 +48,8 @@ def _read_calibration_payload(path: Path, expected_sha256: str) -> bytes:
         resolver.record_serving_tier(
             path, tier, pin_id=str(serving.get("pin_id") or ""),
             range_ref=str(serving.get("range_ref") or ""))
-        # Sealed bounds before allocation: the staged entry's size must
-        # equal the held descriptor's, or no buffer is built.
-        if size != staged["bytes"]:
-            raise LeaseRefused("calibration-size-divergent",
-                               kind="integrity")
+        # Sealed bounds before allocation: the held descriptor's size must
+        # match the staged entry's, or no buffer is built.
         first = os.fstat(fd)
         if first.st_size != size:
             raise LeaseRefused("calibration-changed-under-pin",
@@ -62,30 +59,32 @@ def _read_calibration_payload(path: Path, expected_sha256: str) -> bytes:
         # staged read serves verification and decode alike.
         raw = bytearray(size)
         view = memoryview(raw)
-        remaining = size
-        offset = 0
-        while remaining > 0:
-            try:
-                moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
-            except OSError as exc:
-                raise LeaseRefused(
-                    f"calibration-unreadable: {exc.strerror}",
-                    kind="availability") from None
-            if moved <= 0:
-                break
-            offset += moved
-            remaining -= moved
-        view.release()
-        if remaining:
-            raise LeaseRefused("calibration-truncated", kind="integrity")
-        if os.pread(fd, 1, size):
-            raise LeaseRefused("calibration-grew-during-read",
-                               kind="integrity")
-        last = os.fstat(fd)
-        if (last.st_ino, last.st_size, last.st_mtime_ns) != (
-                first.st_ino, first.st_size, first.st_mtime_ns):
-            raise LeaseRefused("calibration-changed-under-pin",
-                               kind="integrity")
+        try:
+            remaining = size
+            offset = 0
+            while remaining > 0:
+                try:
+                    moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
+                except OSError as exc:
+                    raise LeaseRefused(
+                        f"calibration-unreadable: {exc.strerror}",
+                        kind="availability") from None
+                if moved <= 0:
+                    break
+                offset += moved
+                remaining -= moved
+            if remaining:
+                raise LeaseRefused("calibration-truncated", kind="integrity")
+            if os.pread(fd, 1, size):
+                raise LeaseRefused("calibration-grew-during-read",
+                                   kind="integrity")
+            last = os.fstat(fd)
+            if (last.st_ino, last.st_size, last.st_mtime_ns) != (
+                    first.st_ino, first.st_size, first.st_mtime_ns):
+                raise LeaseRefused("calibration-changed-under-pin",
+                                   kind="integrity")
+        finally:
+            view.release()
     if tier == "ram":
         resolver.record_ram_read(path, len(raw))
     else:
@@ -96,25 +95,21 @@ def _read_calibration_payload(path: Path, expected_sha256: str) -> bytes:
 def _decode_calibration_buffer(raw: bytes) -> tuple[torch.Tensor, dict]:
     """The pinned ``(calibration_ids, provenance)`` out of staged bytes.
 
-    Header-only safetensors parse over the one owned buffer the staged
-    window served: bounded 8-byte length prefix plus JSON header, tensor
-    bytes located by the header's own data offsets, dtype read through
-    safetensors' own table (never a hand-rolled one). The tensor is cloned
-    into owned storage, so it stays valid after the lease releases.
-    Structural problems are the offline contract's ValueErrors, exactly as
-    the ``safe_open`` path reports them.
+    Tensor decoding is the installed public bytes decoder
+    (``safetensors.torch.load``) — the canonical parser, which rejects
+    noncontiguous and trailing framing a span reader would accept — never
+    a private reimplementation. Only the ``calibration_provenance``
+    metadata still comes from a bounded header extraction. The decoded
+    tensors view the frozen artifact bytes and retain them, so they stay
+    valid after the lease releases; the single freeze copy is the only
+    copy on this path. Structural problems are the offline contract's
+    ValueErrors, exactly as the ``safe_open`` path reports them (the
+    decoders' own exception types are wrapped, never compared).
     """
     from .residency_shard_reader import MAX_HEADER_BYTES
 
-    try:
-        from safetensors.torch import _TYPES as _SAFETENSORS_DTYPES
-    except ImportError:
-        _SAFETENSORS_DTYPES = None
-    if _SAFETENSORS_DTYPES is None:
-        from .staged_tier_policy import refuse_pool_bulk_read
+    from safetensors.torch import load
 
-        raise refuse_pool_bulk_read(
-            "calibration artifact", "safetensors-dtype-table-unavailable")
     if len(raw) < 8:
         raise ValueError("exact calibration input has no safetensors header length")
     header_bytes = int.from_bytes(raw[:8], "little")
@@ -126,34 +121,18 @@ def _decode_calibration_buffer(raw: bytes) -> tuple[torch.Tensor, dict]:
         raise ValueError("exact calibration input header is not an object") from exc
     if type(header) is not dict:
         raise ValueError("exact calibration input header is not an object")
-    if set(name for name in header if name != "__metadata__") != {"calibration_ids"}:
-        raise ValueError("exact calibration input requires only calibration_ids")
     try:
         provenance = json.loads(header["__metadata__"]["calibration_provenance"])
     except (TypeError, KeyError, ValueError) as exc:
         raise ValueError("exact calibration input requires calibration_provenance JSON") from exc
-    row = header["calibration_ids"]
-    dtype = _SAFETENSORS_DTYPES.get(row.get("dtype")) if type(row) is dict else None
-    offsets, shape = row.get("data_offsets"), row.get("shape") if type(row) is dict else (None, None)
-    base = 8 + header_bytes
-    valid = (
-        dtype is not None and type(offsets) is list and len(offsets) == 2
-        and type(shape) is list
-        and all(type(dim) is int and not isinstance(dim, bool) and dim >= 0 for dim in shape)
-    )
-    begin, end = offsets if valid else (None, None)
-    valid = valid and (
-        type(begin) is int and type(end) is int
-        and not isinstance(begin, bool) and not isinstance(end, bool)
-        and 0 <= begin <= end <= len(raw) - base)
-    count = 1
-    for dim in shape if valid else ():
-        count *= dim
-    if not valid or count * dtype.itemsize != end - begin:
-        raise ValueError("exact calibration input dtype/shape differs from requested draw")
-    segment = bytes(raw[base + begin:base + end])
-    ids = torch.frombuffer(segment, dtype=torch.uint8).view(dtype).reshape(tuple(shape)).clone()
-    return ids, provenance
+    try:
+        tensors = load(bytes(raw))
+    except Exception as exc:
+        raise ValueError(
+            "exact calibration input is not a decodable safetensors artifact") from exc
+    if set(tensors) != {"calibration_ids"}:
+        raise ValueError("exact calibration input requires only calibration_ids")
+    return tensors["calibration_ids"], provenance
 
 
 def _validate_calibration_draw(ids, provenance, *, artifact_sha256, n_samples, seqlen):

@@ -207,9 +207,9 @@ def test_strict_calibration_stage_serves_pinned_with_exact_release(tmp_path, mon
     assert receipt["artifact_sha256"] == sha
     assert receipt["calibration_sha256"] == hashlib.sha256(ids.numpy().tobytes()).hexdigest()
     assert receipt["provenance"]["fit_ids_sha256"] != receipt["calibration_sha256"]
-    # Owned storage: exact bytes, contiguous, valid after lease release.
+    # Lifetime: valid after lease release (pins already empty above); the
+    # decoded tensors view the frozen artifact bytes they retain.
     assert got_ids.is_contiguous()
-    assert got_ids.untyped_storage().nbytes() == got_ids.numel() * 8
     report = resolver.report()
     assert report['bytes_from_pool'] == 0
     assert report['bytes_from_stage'] == path.stat().st_size

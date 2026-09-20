@@ -1,9 +1,9 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `flash/calibration-staged-tier-reader-865`.
+As of: 2026-09-20 · `flash/calibration-staged-tier-reader-865`.
 Stamps follow, newest first, each recording its own branch and date.
 
-Re-stamped (2026-09-21, `flash/calibration-staged-tier-reader-865`) for
+Re-stamped (2026-09-20, `flash/calibration-staged-tier-reader-865`) for
 **the calibration staged-tier reader** (PQ #865).
 `load_calibration_input` honored no staged-tier policy: under an active
 allowed-tier declaration it hashed and `safe_open`ed the pool path while
@@ -12,10 +12,12 @@ active policy the whole artifact now comes off the stage through one
 lifetime-pinned window — RAM first where offered and allowed, honest
 SSD re-acquire otherwise, never the pool — with the sealed size/change
 fences before allocation; the independently pinned SHA256 is verified
-and the int64 draw decodes from the same owned bytes (header bounded,
-dtype through safetensors' own table, cloned into owned storage valid
-after release), then the unchanged draw contract (dtype/shape/domain,
-provenance, both `fit_ids_sha256`/`calibration_sha256` conventions).
+and the int64 draw decodes from the same frozen bytes via the installed
+public bytes decoder (bounded header extraction for provenance only;
+the decoded tensors view and retain those bytes, so one staged read
+serves verification and decode with a single freeze copy), then the
+unchanged draw contract (dtype/shape/domain, provenance, both
+`fit_ids_sha256`/`calibration_sha256` conventions).
 Unmapped/wrong-pin/forbidden-tier/corrupt-stage refuse fail-closed with
 zero pool bytes and exact pin release; inactive policy keeps the legacy
 pool read byte for byte. Gate:
