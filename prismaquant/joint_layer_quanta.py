@@ -593,7 +593,13 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                 "campaign_scope": scope,
                 "windows": windows,
                 "argv": argv_sealed,
-                "phases": [{"name": "head", "bytes": 0, "cumulative_bytes": 0}] + [
+                # No zero-byte head phase (PQ #849): PB's phase rule (#594)
+                # voids a table whose cumulative falls outside the entries'
+                # own prefix sums, and 0 is not one -- the whole slice then
+                # stages nothing. Startup/head progress stays separately
+                # declared by the dispatch lane (quantum_argv seals head=
+                # explicitly; the payload reports enter_head under it).
+                "phases": [
                     {"name": chunk["name"],
                      "bytes": chunk["end_bytes"] - chunk["start_bytes"],
                      "cumulative_bytes": chunk["end_bytes"]} for chunk in chunks],
@@ -687,8 +693,10 @@ def slice_layer_manifest(parent_manifest: Mapping, layer: int, *,
     """Build one layer's standalone slice manifest (§4.3).
 
     The entries are exactly the parent manifest's entries in the layer phase's
-    byte range, re-based to start at zero, order preserved. The phase table is
-    the zero-byte ``head`` (D1) followed by the chunk names tiling the slice.
+    byte range, re-based to start at zero, order preserved. The phase table
+    is the chunk names tiling the slice -- and nothing else: a zero-byte
+    ``head`` would void the whole table under PB's phase rule (#594, PQ
+    #849), so startup/head progress stays in the dispatch lane, never here.
     """
     if type(layer) is not int or isinstance(layer, bool) or layer < 0:
         raise ValueError(f"a slice needs a nonnegative layer, not {layer!r}")
@@ -736,7 +744,13 @@ def slice_layer_manifest(parent_manifest: Mapping, layer: int, *,
             "windows": windows,
             "argv": ["python3", "-m", SLICE_ENTRY_POINT, "--quantum",
                      record_path or "", "--output-root", output_root],
-            "phases": [{"name": "head", "bytes": 0, "cumulative_bytes": 0}] + [
+            # No zero-byte head phase (PQ #849): PB's phase rule (#594)
+            # voids a table whose cumulative falls outside the entries'
+            # own prefix sums, and 0 is not one -- the whole slice then
+            # stages nothing. Startup/head progress stays separately
+            # declared by the dispatch lane (quantum_argv seals head=
+            # explicitly; the payload reports enter_head under it).
+            "phases": [
                 {"name": chunk["name"],
                  "bytes": chunk["end_bytes"] - chunk["start_bytes"],
                  "cumulative_bytes": chunk["end_bytes"]} for chunk in chunks],

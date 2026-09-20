@@ -329,8 +329,12 @@ def test_real_plan_slice_manifests_are_standalone_v1():
         assert ann["plan_sha256"] == PLAN_SHA256
         assert ann["prepared_sha256"] == PREPARED_SHA256
         phases = ann["phases"]
-        assert phases[0]["name"] == "head"
-        assert phases[0]["bytes"] == 0 and phases[0]["cumulative_bytes"] == 0
+        # No zero-byte head phase (PQ #849): PB voids a table whose
+        # cumulative falls outside the entries' own prefix sums, so the
+        # table starts at the first chunk. Startup/head progress is
+        # declared separately by the dispatch lane, not here.
+        assert len(phases) > 0
+        assert phases[0]["bytes"] > 0 and phases[0]["cumulative_bytes"] > 0
         cumulative = 0
         names = set()
         for row in phases:
@@ -341,7 +345,7 @@ def test_real_plan_slice_manifests_are_standalone_v1():
             assert row["cumulative_bytes"] == cumulative
         assert cumulative == manifest["total_bytes"]
         record = next(r for r in built["records"] if r["quantum_id"] == quantum_id)
-        assert names == {"head"} | {c["name"] for c in record["chunks"]}
+        assert names == {c["name"] for c in record["chunks"]}
         blob = jl.seal_manifest_bytes(manifest)
         assert hashlib.sha256(blob).hexdigest() == [
             r for r in built["records"] if r["quantum_id"] == quantum_id][0][
