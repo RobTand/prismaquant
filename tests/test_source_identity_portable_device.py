@@ -377,15 +377,42 @@ def test_digest_cache_memo_miss_refuses_in_dev(monkeypatch, tmp_path):
             str(root), digest_cache_path=cache_path)
 
 
-def test_digest_cache_memo_none_path_hashes_in_dev(monkeypatch, tmp_path):
-    """Omitting the cache path is an explicit opt-out, not a hidden seal:
-    dev still hashes, exactly as before."""
+def test_digest_cache_memo_none_path_refuses_in_dev(monkeypatch, tmp_path):
+    """Omitting the cache path is not an escape hatch: dev still refuses
+    the hidden giant hash; certified preparation is the explicit path."""
     from prismaquant.cost_streaming import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     _dev_on(monkeypatch)
+    _refusing_hash(monkeypatch)
+    with pytest.raises(RuntimeError, match="[Bb]ytes"):
+        build_source_checkpoint_identity(str(root), digest_cache_path=None)
+
+
+def test_digest_cache_memo_none_path_hashes_in_certified(monkeypatch, tmp_path):
+    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    root = _memo_fixture(tmp_path)
+    _dev_off(monkeypatch)
     calls = _counting_hash(monkeypatch)
     build_source_checkpoint_identity(str(root), digest_cache_path=None)
     assert len(calls) == 2
+
+
+def test_build_none_path_refuses_in_dev(monkeypatch, checkpoint):
+    root, shards = checkpoint
+    _dev_on(monkeypatch)
+    _refusing_hash(monkeypatch)
+    with pytest.raises(RuntimeError, match="[Bb]ytes"):
+        cs.build_streamed_model_identity(
+            _runner(shards), str(root), identity_cache_path=None)
+
+
+def test_build_none_path_hashes_in_certified(monkeypatch, checkpoint):
+    root, shards = checkpoint
+    _dev_off(monkeypatch)
+    calls = _counting_hash(monkeypatch)
+    cs.build_streamed_model_identity(
+        _runner(shards), str(root), identity_cache_path=None)
+    assert len(calls) == len(shards)
 
 
 # -- seed path -----------------------------------------------------------
