@@ -744,6 +744,9 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         require_dev_mode("joint_cost_stage_a")
+        from .tessera_joint_aura import _load_plan
+
+        config = _load_plan(args.plan, args.plan_sha256)
         from .staged_tier_policy import activate_staged_tier_policy
         try:
             allowed = activate_staged_tier_policy(args.allowed_tiers)
@@ -751,9 +754,6 @@ def main(argv=None) -> int:
             parser.error(str(exc))
         print(f"[STAGED-TIER] bulk inputs serve from {','.join(sorted(allowed))}; "
               f"pool/HDD bulk opens refuse", flush=True)
-        from .tessera_joint_aura import _load_plan
-
-        config = _load_plan(args.plan, args.plan_sha256)
         result = run_adjoint_capture(
             config, plan_sha256=args.plan_sha256,
             prepared={"path": str(args.prepared), "sha256": args.prepared_sha256},
