@@ -17,6 +17,7 @@ def test_list_names_the_runnable_scenarios():
     names = done.stdout.split()
     assert "broker-roundtrip" in names
     assert "sdk-first-release" in names
+    assert "sdk-recovery-reaper" in names
     assert "sdk-pending-ticket" in names
     assert "sdk-namespace-separation" in names
     assert "sdk-failure-unwind" in names
