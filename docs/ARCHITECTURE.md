@@ -1,7 +1,21 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-19 · `flash/tessera-pin-bump-20260919`.
+As of: 2026-09-20 · `flash/dev-progress-stamp-optin`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/dev-progress-stamp-optin`) for **the dev
+progress-stamp opt-out** (§3.4; PQ #826, #828, follow-through on #771). No
+default, stage, format, lane, pin or ship gate changes. Under
+`PRISMAQUANT_DEV_MODE=1` the `dev_uncertified` stamp stays top-level in
+`results.json` — the run identity is recorded once, where it belongs — but
+the per-progress-record stamp is now **opt-in** via
+`PRISMAQUANT_DEV_PROGRESS_STAMP=1`: the default dev progress record is the
+certified six-field shape, so a dev campaign's durable-unit commits pay no
+per-line sealing ceremony (Rob's 2026-09-13 directive). #827's memo made the
+stamp cheap; this makes it absent. Certified mode is byte-identical either
+way, and PrismaBuild's sealed actions and the v1/v2 proofs are untouched.
+Gates: `tests/test_dev_mode_provenance_gates.py`,
+`tests/test_pb_commit_source_memo_826.py`.
 
 Re-stamped (2026-09-19, `flash/tessera-pin-bump-20260919`) for **runtime
 contract v32** (#760, the coordinated post-#560-lineage bump: the pin names
@@ -10259,9 +10273,12 @@ source-proof family, the prepared-record digest comparisons and the
 checkpoint-lineage identity mismatch become stamps — loudly recorded, never
 silently reused: a mismatched checkpoint lineage is archived
 (`<dir>.dev-archived-<iso>`) and recomputed fresh, and every dev run carries a
-top-level `dev_uncertified` stamp in `results.json` and its progress records.
+top-level `dev_uncertified` stamp in `results.json` — always; per-progress-record
+stamps are opt-in via `PRISMAQUANT_DEV_PROGRESS_STAMP=1`, so the default
+durable-unit commit is the certified six-field record and runs no source hash
+(#828).
 With the variable unset, every one of these guards refuses exactly as before
-(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-19 stamp above.
+(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-20 stamp above.
 
 **The key set is `pipeline.py`'s job; the values are the shell's.** `STAGE_SETTINGS_KEYS`
 (`pipeline.py`) declares, per artifact, which settings that artifact's identity depends on.
