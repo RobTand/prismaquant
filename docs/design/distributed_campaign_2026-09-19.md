@@ -389,7 +389,7 @@ single-consumer behavior, byte-identical):
 "distributed_campaign": {
   "schema": "prismaquant.joint_layer_quanta.plan.v1",
   "enabled": true,
-  "consumer_tags": ["sparky", "sparklina"],
+  "consumer_tags": ["gb10"],    /* conjoined tags PB matches; class, not host */
   "max_resident_consumers": 2,
   "ram_window_gib": 160,
   "chunk_target_bytes": null,   /* derived when null: §5.3 */
@@ -401,7 +401,11 @@ single-consumer behavior, byte-identical):
 }
 ```
 
-`max_resident_consumers` is the declared concurrency the ram window is
+`consumer_tags` names the placement tags PB **conjoins** when it matches a
+worker (every listed tag, never any one of them): the default is the shared
+`gb10` class tag that both Sparks offer, and the dispatcher refuses an empty
+or ill-typed list rather than publishing an unconstrained or unplaceable
+row. `max_resident_consumers` is the declared concurrency the ram window is
 double-buffered for, not a scheduler: it sizes chunks (§5.3) the way
 `prefetch_lookahead` sizes the streaming context.
 
@@ -432,7 +436,7 @@ repartition, the same freeze semantics `residency_stage_rows` already keeps):
 Per quantum:
 
 ```
-pbrun --tag sparky --tag sparklina \
+pbrun --tag gb10 \
       --data-manifest …/manifests/layer-013.data-manifest.json.gz \
       --residency stage --residency-ram auto \
       --progress-phase head=<head_grace> \
@@ -455,24 +459,32 @@ pbrun --tag sparky --tag sparklina \
 
 ### 5.3 Placement policy, chunk derivation, and failure modes
 
-**Placement: both GB10 tags on every row; PB owns which box claims.** A row
-tagged `sparky`+`sparklina` (and the GB10 class) is claimable by whichever
-Spark's worker loops reach it first; PB's ready-order (−priority, −passes,
-age), the boxes' own loop counts (5 vs 3) and the tier tokens do the
-balancing. The tool never reads capacity to choose a box. Failure modes,
-stated: (a) *straggler* — one box finishes its queue share early; PB assigns
-the remaining rows to it, which is the intended behavior and the reason not
-to pre-split layers by host; (b) *both tags refuse* (a box offline) — its
-loops claim nothing and the other box drains the rows; the campaign
-completes on one Spark, slower, with no action from anyone; (c) *a claimed
-quantum dies* — PB's retry policy applies per action (movers' `retry_safe`
-already true by construction; consumers declare `retry_safe` because the
-checkpoint journals re-verify), and a re-claim may land on the other box
-because the outputs are keyed per layer under the shared output root, not
-per host; (d) *the failure mode we refuse to have*: an agent or tool
-watching utilization and steering boxes at runtime. If the static policy
-starves a box, that is a PB placement capability gap to file, not a knob to
-turn here.
+**Placement: one shared `gb10` class tag on every quantum row; PB owns which
+box claims.** A row tagged `gb10` is claimable by whichever Spark's worker
+loops reach it first; PB's ready-order (−priority, −passes, age), the boxes'
+own loop counts (5 vs 3) and the tier tokens do the balancing. The tool
+never reads capacity to choose a box. The tag list is a **conjunction**, not
+a menu of boxes: PB admits a worker only when it offers *every* listed tag
+(`wanted.issubset(offer.tags)`, `src/prismabuild/pool.py:2847`), and each
+live Spark offers `gb10` plus its own host name — so the host pair this
+design originally shipped (`sparky`+`sparklina`, PQ #831) admitted neither
+box and every quantum row was unplaceable. The dispatcher defaults to the
+single class tag; a plan may declare `consumer_tags` for a genuine
+conjunction (for example a required capability tag), and the rows carry
+exactly that list. Failure modes, stated: (a) *straggler* — one box finishes
+its queue share early; PB assigns the remaining rows to it, which is the
+intended behavior and the reason not to pre-split layers by host;
+(b) *the class tag refuses* (both Sparks offline) — their loops claim
+nothing and the campaign waits; one Spark offline is the ordinary case and
+the other box drains the rows, slower, with no action from anyone;
+(c) *a claimed quantum dies* — PB's retry policy applies per action
+(movers' `retry_safe` already true by construction; consumers declare
+`retry_safe` because the checkpoint journals re-verify), and a re-claim may
+land on the other box because the outputs are keyed per layer under the
+shared output root, not per host; (d) *the failure mode we refuse to have*:
+an agent or tool watching utilization and steering boxes at runtime. If the
+static policy starves a box, that is a PB placement capability gap to file,
+not a knob to turn here.
 
 **Chunk derivation.** `chunk_target_bytes = floor(ram_window_gib × 2³⁰ /
 (2 × max_resident_consumers))` — a double-buffered window split across the

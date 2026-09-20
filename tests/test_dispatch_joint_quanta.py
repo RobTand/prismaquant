@@ -138,17 +138,21 @@ def _argv(records_dir, output_root, receipt=None, extra=()):
 
 
 def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
-    """Every quantum submits exactly the contract's argv: both GB10 tags,
-    the slice manifest, stage residency, per-chunk progress phases, dev-mode
-    env, detached. PB owns placement past that."""
+    """Every quantum submits exactly the contract's argv: the shared GB10
+    class tag (PB requires *every* tag a row lists, so a host pair would
+    admit neither Spark), the slice manifest, stage residency, per-chunk
+    progress phases, dev-mode env, detached. PB owns placement past that."""
     record = _record(campaign, 1)
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
     argv = quantum_argv(record, record_path=record_path,
                         output_root=Path("/out/root"))
     tags = [argv[i + 1] for i, word in enumerate(argv[:-1]) if word == "--tag"]
-    assert tags == ["sparky", "sparklina"]
-    assert CONSUMER_TAGS == ("sparky", "sparklina")
+    assert tags == ["gb10"]
+    assert CONSUMER_TAGS == ("gb10",)
+    # The regression, at the argv layer: naming both Sparks is a conjunction
+    # PB can satisfy on neither box.
+    assert not {"sparky", "sparklina"} <= set(tags)
     manifest = argv[argv.index("--data-manifest") + 1]
     assert manifest.endswith("manifests/layer-001.data-manifest.json.gz")
     assert argv[argv.index("--residency") + 1] == "stage"
@@ -179,6 +183,58 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     assert inner[inner.index("--quantum") + 1] == str(record_path)
     assert inner[inner.index("--quantum-sha256") + 1] == record["identity_sha256"]
     assert inner[inner.index("--output-root") + 1] == "/out/root"
+
+
+def test_plan_consumer_tags_override_reaches_every_quantum_row(
+        tmp_path, campaign, records_dir):
+    """§5.1: the plan block is the declared placement policy, and every row
+    carries it. Before the fix the block was read for the dry-run print only
+    while the rows kept the module default; the override is now the argv.
+
+    The two tags are a conjunction (PB matches every one), so this test also
+    pins that the plan's list is not silently reordered or truncated."""
+    receipt_path = tmp_path / "adjoint-capture.json"
+    digest = _write_receipt(receipt_path, _receipt(campaign))
+    _stamp_receipt(records_dir, digest)
+    gateway = FakeGateway(terminal=True)
+    gateway.mark_terminal("stage-a-action-key")
+    out = tmp_path / "out"
+    (out / "layer-quanta").mkdir(parents=True)
+    (out / "layer-quanta" / "campaign-state.json").write_text(
+        json.dumps({"event": "stage-a-submitted",
+                    "action_key": "stage-a-action-key"}) + "\n")
+    plan_path = tmp_path / "plan-with-block.json"
+    plan_path.write_text(json.dumps(
+        {"output_root": str(tmp_path / "campaign-root"),
+         "distributed_campaign": {"consumer_tags": ["gb10", "progress-v1"]}}))
+    assert main(_argv(records_dir, out, receipt_path,
+                      ("--plan", str(plan_path))), _gateway=gateway) == 0
+    quantum_rows = [row for row in gateway.submitted
+                    if row["kind"] == "quantum"]
+    assert len(quantum_rows) == N_LAYERS
+    for row in quantum_rows:
+        argv = row["argv"]
+        tags = [argv[i + 1] for i, word in enumerate(argv[:-1])
+                if word == "--tag"]
+        assert tags == ["gb10", "progress-v1"]
+
+
+@pytest.mark.parametrize("blocked_tags", [[], "gb10", ["gb10", 7], ["gb10", ""]])
+def test_ill_typed_plan_consumer_tags_refuse_before_publishing(
+        tmp_path, campaign, records_dir, blocked_tags):
+    """The placement policy is a non-empty list of tag strings or the
+    module default. An empty list would publish unconstrained rows, a bare
+    string is not a policy, and a non-string entry is a typo: all refuse at
+    dispatch time (exit 3) with nothing submitted."""
+    plan_path = tmp_path / "bad-plan.json"
+    plan_path.write_text(json.dumps(
+        {"output_root": str(tmp_path / "campaign-root"),
+         "distributed_campaign": {"consumer_tags": blocked_tags}}))
+    gateway = FakeGateway()
+    out = tmp_path / "out"
+    assert main(_argv(records_dir, out, None,
+                      ("--plan", str(plan_path))), _gateway=gateway) == 3
+    assert gateway.submitted == []
 
 
 def test_stage_a_argv_prefetch_override_is_payload_flagged(tmp_path, campaign):
