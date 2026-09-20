@@ -41,7 +41,6 @@ never green conformance. Do NOT run live membership/deploy here.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import shlex
@@ -55,6 +54,19 @@ from pathlib import Path
 HERE = Path(__file__).resolve()
 CHECKOUT = HERE.parents[1]
 PBTEST = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbtest.py")
+
+#: Published PB client sources, imported read-only for verification only:
+#: the CAS verifier (``prismabuild.core.PrismaBuildCAS``) and the anchored
+#: pytest summary grammar (``pbtest.pytest_summary``). Never the candidate
+#: tree under test; the driver process imports no candidate modules.
+_PB_SRC = Path("/mnt/shared/prismabuild-fleet/repo/src")
+_PB_TOOLS = Path("/mnt/shared/prismabuild-fleet/repo/tools")
+
+#: Content-addressed store and queue roots (PB-published defaults, the same
+#: roots ``pbwait``/``pbstatus`` read). Terminal and receipt paths below
+#: derive from action keys; nothing is written here.
+_CAS_ROOT = Path("/mnt/shared/prismabuild-fleet/cas")
+_QUEUE_ROOT = Path("/mnt/shared/prismabuild-fleet/pb-queue")
 
 #: Fresh exact-pin env (PQ846 strict PB reader SDK 461728e4). Never modify
 #: a shared active env; this path names the provisioned one. It must exist
@@ -159,58 +171,89 @@ def _is_hex(value: object, length: int) -> bool:
             and re.fullmatch(r"[0-9a-f]+", value) is not None)
 
 
-def _counts(summary: object) -> dict[str, int] | None:
-    """Pass/fail/skip/error counts, or None on malformed input."""
-    if not isinstance(summary, str):
-        return None
-    out = {"passed": 0, "failed": 0, "skipped": 0, "error": 0}
-    for match in re.finditer(r"(\d+)\s+(passed|failed|skipped|error)\b",
-                             summary):
-        out[match.group(2)] += int(match.group(1))
-    return out
+def _published():
+    """Published PB verification imports (read-only use).
+
+    The CAS verifier (``prismabuild.core.PrismaBuildCAS``) and the anchored
+    pytest summary grammar (``pbtest.pytest_summary``). Never the candidate
+    tree under test; the driver process imports no candidate modules.
+    """
+    for entry in (str(_PB_SRC), str(_PB_TOOLS)):
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
+    from prismabuild import core as pbcore
+    import pbtest as pbtest_mod
+    return pbcore, pbtest_mod
 
 
-def _balanced_objects(text: str) -> list[dict]:
-    """Top-level ``{...}`` JSON objects in order (brace matching)."""
-    found = []
-    depth, start = 0, -1
-    for pos, char in enumerate(text):
-        if char == "{":
-            if depth == 0:
-                start = pos
-            depth += 1
-        elif char == "}" and depth:
-            depth -= 1
-            if depth == 0 and start >= 0:
-                try:
-                    doc = json.loads(text[start:pos + 1])
-                except ValueError:
-                    pass
-                else:
-                    if isinstance(doc, dict):
-                        found.append(doc)
-                start = -1
-    return found
+def _candidate_keys(output: object) -> set[str] | None:
+    """Distinct 64-hex action keys named in console output.
 
-
-def _cas_blob(output: object) -> dict | None:
-    """The shard's CAS blob: receipt action key, payload, status.
-
-    Real blobs nest (``receipt.action_key``); the extractor brace-matches
-    instead of assuming a flat shape, and rejects anything malformed.
+    Console JSON only LOCATES a candidate key; nothing here authorizes
+    anything. None on malformed input.
     """
     if not isinstance(output, str):
         return None
-    for doc in _balanced_objects(output):
-        receipt = doc.get("receipt")
-        if (isinstance(receipt, dict)
-                and _is_hex(receipt.get("action_key"), 64)
-                and isinstance(doc.get("payload_path"), str)
-                and isinstance(doc.get("status"), str)):
-            return {"action_key": receipt["action_key"],
-                    "receipt_sha256": doc.get("receipt_sha256", ""),
-                    "payload_path": doc["payload_path"],
-                    "status": doc["status"]}
+    return set(re.findall(r'"action_key":\s*"([0-9a-f]{64})"', output))
+
+
+def _recorded_action(cas, key: str) -> dict | None:
+    """The sealed action PB filed for this key, or None.
+
+    Same path convention ``pbwait.recorded_action`` reads
+    (``requests/<xx>/<key>.json``); all validation happens in
+    ``cas.lookup``, never here.
+    """
+    try:
+        value = json.loads(
+            (Path(cas.root) / "requests" / key[:2]
+             / f"{key}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _summary_counts(line: str) -> dict[str, int]:
+    """Outcome counts from one anchored pytest summary line.
+
+    Stems cover singular and plural (``1 error`` / ``2 errors``);
+    collection words (warnings, xfailed, deselected, subtests-as-such)
+    never count as outcomes.
+    """
+    out = {"passed": 0, "failed": 0, "skipped": 0, "error": 0}
+    for match in re.finditer(r"(\d+)\s+([A-Za-z][\w-]*)", line):
+        stem = match.group(2).lower()
+        if stem.startswith("pass"):
+            out["passed"] += int(match.group(1))
+        elif stem.startswith("fail"):
+            out["failed"] += int(match.group(1))
+        elif stem.startswith("skip"):
+            out["skipped"] += int(match.group(1))
+        elif stem.startswith("error"):
+            out["error"] += int(match.group(1))
+    return out
+
+
+def _receipt_generation(receipt: object) -> str | None:
+    """Deployed generation from the authenticated receipt runtime evidence.
+
+    Reads ``producer.runtime`` (core/launcher paths) inside the receipt
+    ``cas.lookup`` already integrity-checked -- never argv text.
+    """
+    if not isinstance(receipt, dict):
+        return None
+    producer = receipt.get("producer")
+    runtime = producer.get("runtime") if isinstance(producer, dict) else None
+    if not isinstance(runtime, dict):
+        return None
+    for section in ("core", "launcher"):
+        part = runtime.get(section)
+        path = part.get("path") if isinstance(part, dict) else None
+        if not isinstance(path, str):
+            continue
+        match = re.search(r"runtime-generations/([^/\"'\s]+)", path)
+        if match:
+            return match.group(1)
     return None
 
 
@@ -222,60 +265,38 @@ def _read_json_file(path: str) -> dict | list | None:
         return None
 
 
-def _read_bytes(path: str) -> bytes | None:
-    try:
-        with open(path, "rb") as stream:
-            return stream.read()
-    except OSError:
-        return None
-
-
-def _cas_text(payload_path: object, key: str) -> tuple[str | None, str]:
-    """The CAS-stored shard result, validated by the existing protocol.
-
-    Content-address integrity (sha256(content) == basename), non-empty,
-    decodable text. Returns ``(text, "")`` or ``(None, reason)``.
-    """
-    if not isinstance(payload_path, str) or not payload_path:
-        return None, "CAS payload unreadable"
-    data = _read_bytes(payload_path)
-    if not data:
-        return None, "CAS payload unreadable"
-    if hashlib.sha256(data).hexdigest() != Path(payload_path).name:
-        return None, "CAS integrity mismatch"
-    try:
-        return data.decode("utf-8"), ""
-    except ValueError:
-        return None, "CAS payload unreadable"
-
-
-def _generation_of_terminal(doc: dict) -> str | None:
-    """Deployed generation id from the terminal's runtime paths."""
-    detail = doc.get("detail")
-    argv = detail.get("argv") if isinstance(detail, dict) else None
-    if not isinstance(argv, list):
-        return None
-    for word in argv:
-        if not isinstance(word, str):
+def _read_terminal(key: str) -> tuple[dict | None, str]:
+    """The queue terminal record for one action key, if any."""
+    for side in ("done", "failed"):
+        try:
+            with open(_QUEUE_ROOT / side / f"{key}.json") as stream:
+                doc = json.load(stream)
+        except (OSError, ValueError):
             continue
-        match = re.search(r"runtime-generations/([^/\"'\s]+)", word)
-        if match:
-            return match.group(1)
-    return None
+        if isinstance(doc, dict):
+            return doc, side
+    return None, ""
 
 
 def verify_shard(*, shard: object, host: str, declared: dict) -> dict:
     """qualified / nonqualified / failed for one shard on one host.
 
-    Every check reads existing PB artifacts; malformed objects are
-    rejected, never coerced. Only a fully attributed chain qualifies.
+    The chain, all through existing PB machinery: console output locates
+    the candidate action key; the filed action comes from the CAS
+    requests store; ``cas.lookup`` verifies the receipt, its manifest
+    binding, the producer attestation, and the result blob; the verified
+    result bytes carry the anchored pytest summary; the queue terminal
+    confirms executed status, host, and source; the generation comes
+    from the authenticated receipt runtime evidence. Malformed objects
+    are rejected, never coerced. Only a fully attributed chain
+    qualifies.
     """
     def nope(status: str, reason: str, **extra: object) -> dict:
         base: dict = {"host": host, "status": status, "reason": reason,
                       "passed": 0, "failed": 0, "skipped": 0,
                       "action_key": "", "terminal": "",
                       "snapshot_commit": "", "snapshot_parent": "",
-                      "generation": ""}
+                      "generation": "", "receipt_sha256": ""}
         base.update(extra)
         return base
 
@@ -289,70 +310,95 @@ def verify_shard(*, shard: object, host: str, declared: dict) -> dict:
         return nope("failed", "malformed shard record: files")
     if not isinstance(output, str) or not isinstance(returncode, int):
         return nope("failed", "malformed shard record: output/returncode")
-    counts = _counts(shard.get("summary"))
-    if counts is None:
+    if not isinstance(shard.get("summary"), str):
         return nope("failed", "malformed shard record: summary")
     # The submission record's returncode gates first; verdict counts come
-    # from the CAS-stored result text below, never console rendering.
+    # from the verified result bytes below, never console rendering.
     if returncode != 0:
         return nope("failed", f"returncode={returncode}")
-    blob = _cas_blob(output)
-    if blob is None:
+    keys = _candidate_keys(output)
+    assert keys is not None
+    if not keys:
         return nope("nonqualified",
-                    "unattributed cached replay: no CAS blob with action "
-                    "key; resubmission at a new snapshot required for "
-                    "fresh terminals")
-    key = blob["action_key"]
-    if blob.get("status") != "published":
-        return nope("failed", "CAS receipt not published",
+                    "unattributed cached replay: no action key in output; "
+                    "resubmission at a new snapshot required for fresh "
+                    "terminals")
+    if len(keys) != 1:
+        return nope("failed", "ambiguous candidate actions in output")
+    key = next(iter(keys))
+    try:
+        pbcore, pbtest_mod = _published()
+    except Exception as exc:  # noqa: BLE001 -- fail closed, name it
+        return nope("failed",
+                    f"published verifier unavailable: {exc!r}",
                     action_key=key)
-    text, problem = _cas_text(blob.get("payload_path"), key)
-    if problem:
-        return nope("failed", problem, action_key=key)
-    counts = _counts(text)
-    if counts is None:
-        return nope("failed", "CAS payload unreadable", action_key=key)
+    cas = pbcore.PrismaBuildCAS(_CAS_ROOT)
+    action = _recorded_action(cas, key)
+    if action is None:
+        return nope("failed", "no filed action for recorded key",
+                    action_key=key)
+    try:
+        receipt = cas.lookup(action)
+    except Exception as exc:  # noqa: BLE001 -- tamper reads as failure
+        return nope(
+            "failed",
+            f"receipt verification: {type(exc).__name__}: "
+            f"{str(exc)[:200]}",
+            action_key=key)
+    if receipt is None:
+        return nope("failed", "no CAS receipt for filed action",
+                    action_key=key)
+    receipt_sha = str(receipt.get("receipt_sha256", ""))
+    try:
+        result_path = cas.result_path(receipt, action)
+        text = Path(result_path).read_bytes().decode("utf-8")
+    except Exception as exc:  # noqa: BLE001 -- fail closed, name it
+        return nope(
+            "failed",
+            f"result unreadable: {type(exc).__name__}: {str(exc)[:200]}",
+            action_key=key, receipt_sha256=receipt_sha)
+    summary = pbtest_mod.pytest_summary(text.splitlines())
+    if not summary:
+        return nope("nonqualified",
+                    "no terminal summary in verified result",
+                    action_key=key, receipt_sha256=receipt_sha)
+    counts = _summary_counts(summary)
     if counts["failed"] or counts["error"]:
         return nope("failed",
                     f"failed={counts['failed']} errors={counts['error']}",
-                    action_key=key,
+                    action_key=key, receipt_sha256=receipt_sha,
                     passed=counts["passed"], failed=counts["failed"],
                     skipped=counts["skipped"])
     if not counts["passed"]:
         return nope("nonqualified", "no passing tests collected",
-                    action_key=key, skipped=counts["skipped"])
-    term = _read_json_file(
-        f"/mnt/shared/prismabuild-fleet/pb-queue/done/{key}.json")
-    side = "done"
-    if term is None:
-        term = _read_json_file(
-            f"/mnt/shared/prismabuild-fleet/pb-queue/failed/{key}.json")
-        side = "failed"
-    if not isinstance(term, dict):
-        return nope("failed", "no terminal for recorded action",
-                    action_key=key, passed=counts["passed"],
+                    action_key=key, receipt_sha256=receipt_sha,
                     skipped=counts["skipped"])
+    term, side = _read_terminal(key)
+    if term is None:
+        return nope("failed", "no terminal for recorded action",
+                    action_key=key, receipt_sha256=receipt_sha,
+                    passed=counts["passed"], skipped=counts["skipped"])
     if term.get("action_key") != key:
         return nope("failed", "stale unrelated terminal",
-                    action_key=key, passed=counts["passed"],
-                    skipped=counts["skipped"])
+                    action_key=key, receipt_sha256=receipt_sha,
+                    passed=counts["passed"], skipped=counts["skipped"])
     if side != "done" or term.get("status") != "executed":
         return nope("failed",
                     f"terminal side={side} status={term.get('status')}",
-                    action_key=key, passed=counts["passed"],
-                    skipped=counts["skipped"])
+                    action_key=key, receipt_sha256=receipt_sha,
+                    passed=counts["passed"], skipped=counts["skipped"])
     detail = term.get("detail")
     if (not isinstance(detail, dict)
             or detail.get("returncode") != 0):
         return nope("failed", "terminal returncode not zero",
-                    action_key=key, passed=counts["passed"],
-                    skipped=counts["skipped"])
+                    action_key=key, receipt_sha256=receipt_sha,
+                    passed=counts["passed"], skipped=counts["skipped"])
     if term.get("finished_host") != host:
         return nope("failed",
                     f"wrong host: terminal served by "
                     f"{term.get('finished_host')}",
-                    action_key=key, passed=counts["passed"],
-                    skipped=counts["skipped"])
+                    action_key=key, receipt_sha256=receipt_sha,
+                    passed=counts["passed"], skipped=counts["skipped"])
     snapshot = term.get("checkout_snapshot")
     parent = snapshot.get("parent") if isinstance(snapshot, dict) else None
     commit = snapshot.get("commit") if isinstance(snapshot, dict) else None
@@ -360,17 +406,31 @@ def verify_shard(*, shard: object, host: str, declared: dict) -> dict:
         return nope("failed",
                     f"source mismatch: declared {declared.get('pq_head')} "
                     f"vs executed parent {parent}",
-                    action_key=key, passed=counts["passed"],
-                    skipped=counts["skipped"],
+                    action_key=key, receipt_sha256=receipt_sha,
+                    passed=counts["passed"], skipped=counts["skipped"],
                     snapshot_commit=commit or "",
                     snapshot_parent=parent or "")
-    generation = _generation_of_terminal(term)
+    generation = _receipt_generation(receipt)
     if generation != declared.get("generation"):
         return nope("failed",
                     f"generation mismatch: declared "
                     f"{declared.get('generation')} vs {generation}",
-                    action_key=key, passed=counts["passed"],
-                    skipped=counts["skipped"],
+                    action_key=key, receipt_sha256=receipt_sha,
+                    passed=counts["passed"], skipped=counts["skipped"],
+                    snapshot_commit=commit or "",
+                    snapshot_parent=parent or "")
+    evidence_host = None
+    producer = receipt.get("producer")
+    if isinstance(producer, dict):
+        evidence = producer.get("evidence")
+        if isinstance(evidence, dict):
+            evidence_host = evidence.get("hostname")
+    if evidence_host != host:
+        return nope("failed",
+                    f"host evidence disagreement: receipt says "
+                    f"{evidence_host}",
+                    action_key=key, receipt_sha256=receipt_sha,
+                    passed=counts["passed"], skipped=counts["skipped"],
                     snapshot_commit=commit or "",
                     snapshot_parent=parent or "")
     return {"host": host, "status": "qualified",
@@ -382,7 +442,8 @@ def verify_shard(*, shard: object, host: str, declared: dict) -> dict:
                         f"{key}.json",
             "snapshot_commit": commit or "",
             "snapshot_parent": parent or "",
-            "generation": generation or ""}
+            "generation": generation or "",
+            "receipt_sha256": receipt_sha}
 
 
 def exit_code_for(report: dict) -> int:
@@ -400,14 +461,18 @@ def exit_code_for(report: dict) -> int:
 
 def assemble_report(*, plan: dict, verdicts: list[dict],
                     started_unix: float) -> dict:
-    """Report from verified cases; completeness never claimed here."""
-    by_host: dict[str, list[dict]] = {}
-    for verdict in verdicts:
-        by_host.setdefault(verdict["host"], []).append(verdict)
+    """Report from verified cases; completeness never claimed here.
+
+    A host is covered only when EVERY planned case file qualifies on it;
+    ``complete_cases`` turns dropped shards into explicit nonqualified
+    records first, so a shrinking denominator can never fake coverage.
+    """
+    qualified = {(str(v.get("file")), str(v.get("host")))
+                 for v in verdicts if v.get("status") == "qualified"}
     covered = sorted(
         host for host in plan["required_hosts"]
-        if host in by_host and by_host[host]
-        and all(v["status"] == "qualified" for v in by_host[host]))
+        if all((filename, host) in qualified
+               for filename in CASE_FILES))
     missing = [h for h in plan["required_hosts"] if h not in covered]
     incomplete = [f"unimplemented leg: {r['name']}"
                   for r in plan["unimplemented"]]
@@ -471,6 +536,69 @@ def check_clean_checkout(checkout: str, pins_doc: dict) -> dict:
             "generation": pins_doc["published_generation"]["generation"]}
 
 
+def _group_failure(host: str, filename: str, reason: str) -> dict:
+    return {"host": host, "file": filename, "status": "failed",
+            "reason": reason, "passed": 0, "failed": 0, "skipped": 0,
+            "action_key": "", "terminal": "",
+            "snapshot_commit": "", "snapshot_parent": "",
+            "generation": "", "receipt_sha256": ""}
+
+
+def group_shards(host: str, shards: object) -> tuple[list, list[dict]]:
+    """Split one host's shards into verifiable items and failures.
+
+    Pure: returns ``([(filename, shard)], [failure verdicts])``.
+    Unexpected files, duplicates, and malformed fanout fail here, so
+    only exactly-planned single-file shards reach verification.
+    """
+    if not isinstance(shards, list):
+        return [], [_group_failure(host, "?", "receipt unreadable")]
+    items: list = []
+    failures: list[dict] = []
+    seen: dict[str, int] = {}
+    for shard in shards:
+        files = shard.get("files") if isinstance(shard, dict) else None
+        if (not isinstance(files, list) or len(files) != 1
+                or not isinstance(files[0], str)):
+            failures.append(_group_failure(host, "?", "unexpected fanout"))
+            continue
+        filename = files[0]
+        if filename not in CASE_FILES:
+            failures.append(_group_failure(host, filename,
+                                           "unexpected case file"))
+            continue
+        seen[filename] = seen.get(filename, 0) + 1
+        if seen[filename] > 1:
+            failures.append(_group_failure(host, filename,
+                                           "duplicate case file"))
+            continue
+        items.append((filename, shard))
+    return items, failures
+
+
+def complete_cases(plan: dict, verdicts: list[dict]) -> list[dict]:
+    """Add explicit nonqualified records for missing planned files.
+
+    Expected coverage is the entire CASE_FILES x required-hosts matrix;
+    a dropped shard reports its host uncovered instead of silently
+    shrinking the denominator.
+    """
+    expected = {(filename, host)
+                for filename in CASE_FILES
+                for host in plan["required_hosts"]}
+    present = {(str(v.get("file")), str(v.get("host"))) for v in verdicts}
+    out = list(verdicts)
+    for filename, host in sorted(expected - present):
+        out.append({"host": host, "file": filename,
+                    "status": "nonqualified",
+                    "reason": "missing case file",
+                    "passed": 0, "failed": 0, "skipped": 0,
+                    "action_key": "", "terminal": "",
+                    "snapshot_commit": "", "snapshot_parent": "",
+                    "generation": "", "receipt_sha256": ""})
+    return out
+
+
 def submit(plan: dict, out_dir: str, declared: dict) -> tuple[dict, int]:
     """Execute one tagged suite per host together; write the report.
 
@@ -520,37 +648,14 @@ def submit(plan: dict, out_dir: str, declared: dict) -> tuple[dict, int]:
     verdicts: list[dict] = []
     for run in plan["runs"]:
         host = run["host"]
-        shards = receipts.get(host)
-        if not shards:
-            continue
-        by_file: dict[str, list[dict]] = {}
-        for shard in shards:
-            files = shard.get("files") if isinstance(shard, dict) else None
-            if (not isinstance(files, list) or len(files) != 1
-                    or not isinstance(files[0], str)):
-                verdicts.append({"host": host, "file": "?",
-                                 "status": "failed",
-                                 "reason": "unexpected fanout",
-                                 "passed": 0, "failed": 0, "skipped": 0,
-                                 "action_key": "", "terminal": "",
-                                 "snapshot_commit": "", "snapshot_parent": "",
-                                 "generation": ""})
-                continue
-            by_file.setdefault(files[0], []).append(shard)
-        for filename, group in sorted(by_file.items()):
-            if len(group) != 1:
-                verdicts.append({"host": host, "file": filename,
-                                 "status": "failed",
-                                 "reason": "unexpected fanout",
-                                 "passed": 0, "failed": 0, "skipped": 0,
-                                 "action_key": "", "terminal": "",
-                                 "snapshot_commit": "", "snapshot_parent": "",
-                                 "generation": ""})
-                continue
-            verdict = verify_shard(shard=group[0], host=host,
+        items, failures = group_shards(host, receipts.get(host))
+        verdicts.extend(failures)
+        for filename, shard in items:
+            verdict = verify_shard(shard=shard, host=host,
                                    declared=declared)
             verdict["file"] = filename
             verdicts.append(verdict)
+    verdicts = complete_cases(plan, verdicts)
     report = assemble_report(plan=plan, verdicts=verdicts,
                              started_unix=started)
     if errors:
