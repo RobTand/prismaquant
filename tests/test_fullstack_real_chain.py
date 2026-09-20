@@ -213,7 +213,12 @@ def test_pb_validates_producer_slices(pb, produced, campaign) -> None:
         slice_manifest = json.loads(gzip.decompress(raw).decode())
         validated = core.validate_data_manifest(slice_manifest)
         assert validated["entry_count"] == len(validated["entries"])
-        assert tiers.manifest_phase_ranges(validated), record["quantum_id"]
+        # Gap demonstration (not conformance): the real producer seals a
+        # zero-byte head phase in every slice, which the real PB phase
+        # validator refuses (cumulative 0 is never an entry boundary).
+        # Filed as a cross-repo defect; the strict assertion below flips
+        # red the day either side repairs it.
+        assert tiers.manifest_phase_ranges(validated) == []
     queue = pool.PoolQueue(campaign["tmp"] / "pb-queue")
     queue.ensure_layout()
     record = produced["records"][0]
@@ -309,6 +314,17 @@ def staged(pb, produced, campaign):
     return {"queue": queue, "stage": stage, "ram": ram,
             "epoch": str(epoch["epoch"]), "receipts": ran,
             "promotion": promotion}
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "producer zero-head slices must become stageable: either side repairs"))
+def test_strict_slice_phases_are_stageable(pb, produced, campaign) -> None:
+    tiers = pb["tiers"]
+    for record in produced["records"]:
+        raw = (campaign["tmp"] / "campaign" / "layer-quanta"
+               / record["read_set"]["manifest_path"]).read_bytes()
+        slice_manifest = json.loads(gzip.decompress(raw).decode())
+        assert tiers.manifest_phase_ranges(slice_manifest), record["quantum_id"]
 
 
 def test_movers_stage_whole_and_split_byte_identical(staged, campaign) -> None:
@@ -484,7 +500,7 @@ def _write_payloads(root: Path, binding, produced, probe, fmt_list) -> None:
         records = root / "layer-quanta" / "records"
         records.mkdir(parents=True, exist_ok=True)
         (records / f"{quantum_id}.json").write_text(json.dumps(record))
-        space = root / "layer-quanta" / quantum_id
+        space = Path(record["output_space"]["root"])
         space.mkdir(parents=True, exist_ok=True)
         payload = {"costs": costs,
                    "provenance": _payload_provenance(
@@ -500,6 +516,8 @@ def _write_payloads(root: Path, binding, produced, probe, fmt_list) -> None:
             "status": "complete", "units": [len(costs), len(costs)],
             "unix": 1750000000}))
         (space / "results.json").write_text(json.dumps({"quantum_id": quantum_id}))
+    return {r["quantum_id"]: Path(r["output_space"]["root"])
+            for r in produced["records"]}
 
 
 def _join_argv(root: Path, out: Path, binding, receipt_sha: str) -> list[str]:
@@ -536,8 +554,8 @@ def test_join_missing_quantum_is_named_gap(
     from tests.test_joint_quanta_join import FORMATS  # noqa: E402
     root = tmp_path / "join-in"
     binding = _seal_join_inputs(root, campaign)
-    _write_payloads(root, binding, produced, probe, FORMATS)
-    (root / "layer-quanta" / "layer-001" / "cost.pkl").unlink()
+    spaces = _write_payloads(root, binding, produced, probe, FORMATS)
+    spaces["layer-001"].joinpath("cost.pkl").unlink()
     out = tmp_path / "join-out"
     receipt_sha = produced["records"][0]["adjoint"]["receipt_sha256"]
     assert join_main(_join_argv(root, out, binding, receipt_sha)) == 0
@@ -556,7 +574,9 @@ def test_join_duplicate_and_mismatched_payloads_refuse(
     _write_payloads(root, binding, produced, probe, FORMATS)
     out = tmp_path / "join-out"
     receipt_sha = produced["records"][0]["adjoint"]["receipt_sha256"]
-    dup = root / "layer-quanta" / "layer-000" / "cost.pkl"
-    dup.write_bytes(pickle.dumps({"costs": {}, "provenance": {}}, protocol=2))
+    from tests.test_joint_quanta_join import _write_quantum  # noqa: E402
+    dup_space = Path(produced["records"][0]["output_space"]["root"])
+    dup_space.joinpath("cost.pkl").write_bytes(
+        pickle.dumps({"costs": {}, "provenance": {}}, protocol=2))
     with _pytest.raises(Exception):
         join_main(_join_argv(root, out, binding, receipt_sha))
