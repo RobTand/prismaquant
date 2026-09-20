@@ -109,18 +109,23 @@ def main() -> int:
                 load_calibration_input(
                     ns.declared, expected_sha256=ns.expect_sha256,
                     n_samples=ns.n_samples, seqlen=ns.seqlen)
-            except LeaseRefused as exc:
-                result["refusal"] = f"{exc.kind}: {exc}"
+            except Exception as exc:  # noqa: BLE001 -- refusal is the finding
+                from prismaquant.staged_lease import LeaseRefused as _LR
+                from prismaquant.staged_tier_policy import (
+                    TierPolicyRefused as _TR)
+                after = _mountstats()
+                delta = ((after.get(pool_mount, {}).get("client_read", 0)
+                          - before.get(pool_mount, {}).get("client_read", 0))
+                         if pool_mount else 0)
+                result["pool_client_read_delta"] = delta
+                if not isinstance(exc, (_LR, _TR)):
+                    raise
+                result["refusal"] = f"{type(exc).__name__}: {exc}"
             else:
                 result["refusal"] = "MISSING: forbidden read was served"
                 print(json.dumps(result, sort_keys=True), flush=True)
                 return 1
-            after = _mountstats()
-            delta = ((after.get(pool_mount, {}).get("client_read", 0)
-                      - before.get(pool_mount, {}).get("client_read", 0))
-                     if pool_mount else 0)
-            result["pool_client_read_delta"] = delta
-            if delta != 0:
+            if result.get("pool_client_read_delta", 0) != 0:
                 result["refusal"] += "; POOL WAS READ"
                 print(json.dumps(result, sort_keys=True), flush=True)
                 return 1
