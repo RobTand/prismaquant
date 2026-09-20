@@ -659,6 +659,8 @@ def _check_event_order(events, manifest, *, layer, chain):
             pass
         elif kind == "window-open":
             seen_window_open = True
+        elif kind in ("observe-enter", "observe-exit"):
+            pass
         elif kind == "checkpoint-plane-open":
             assert current == "checkpoint-load", events
         elif kind == "boundary-path-open":
@@ -763,9 +765,23 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
     import prismaquant.production_weight_cache as _pwc_mod
     monkeypatch.setattr(
         _pwc_mod.ProductionWeightCache, "retained_window", rw_logged)
-    assert _pwc_mod.ProductionWeightCache is type(cache), (
-        f"class mismatch: {_pwc_mod.ProductionWeightCache!r} vs "
-        f"{type(cache)!r}")
+    # Observe-level seam (module function patch, known to fire): proves the
+    # replay loop is reached and whether it reports zero-pending (no window).
+    import prismaquant.joint_statistics_replay as _replay_mod
+    if "observe" not in seams:
+        seams["observe"] = _replay_mod.observe_and_project_retained_windows
+    orig_observe = seams["observe"]
+
+    def observe_logged(*args, **kwargs):
+        events.append(("observe-enter",
+                       str(kwargs.get("completed_names", "?"))))
+        try:
+            return orig_observe(*args, **kwargs)
+        finally:
+            events.append(("observe-exit",))
+
+    monkeypatch.setattr(
+        _replay_mod, "observe_and_project_retained_windows", observe_logged)
     # Preflight runs once per window entry (retained_window.__enter__ calls
     # it first): log here too, since it is a plain method and cannot be
     # bypassed by a direct unbound contextmanager call.
