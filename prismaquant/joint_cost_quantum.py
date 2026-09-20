@@ -1625,7 +1625,9 @@ def run_layer_quantum(
     return result
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The layer-quantum CLI surface, shared by ``main`` and by tests that
+    prove a dispatcher payload parses before any gate runs."""
     parser = argparse.ArgumentParser(
         description="Run one layer quantum of the distributed joint-AURA "
                     "cost campaign (contract §6).")
@@ -1647,6 +1649,11 @@ def main(argv=None) -> int:
                              "of record, not every quantum)")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--data-manifest-sha256")
+    return parser
+
+
+def main(argv=None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.device != "cuda":
         parser.error("layer quanta are a GPU hot path; --device must be cuda")
