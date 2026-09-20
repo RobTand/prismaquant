@@ -89,6 +89,15 @@ HEAD_WALK_MAX_WORKERS = 16
 # unit: a crash loses at most one interval of verified work, and the cadence
 # matches the progress contract's own clock (#741).
 HEAD_WALK_BANK_INTERVAL_S = 60.0
+#: Freed-but-cached decode blocks a cuda head walk tolerates before the
+#: retained pool is returned to the driver. Synthesis keeps no decoded
+#: tensor by reference (the shard is written to the render file), but the
+#: caching allocator retains every freed block for reuse and per-cell shapes
+#: vary enough that the pool only grows across a long walk; on shared-system
+#: GPUs that retained pool is charged to the action's GPU budget and a long
+#: walk is reaped for memory it no longer uses (#823). The gap keeps a small
+#: steady walk from ever paying the reclaim.
+HEAD_WALK_RECLAIM_GAP_BYTES = 2 * 1024 ** 3
 # Synthesis decodes through the bound Tessera reader on the reserved device,
 # and that reader is proven single-threaded (the qualification walk's own
 # wire pool is max_workers=1), so the rare missing render is synthesized
@@ -661,6 +670,36 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
                                         fmt=fmt, shape=shape, reader=reader, device=device)
 
 
+def _reclaim_head_walk_allocator(synthesis_device, *, force=False):
+    """Return the cuda head walk's retained decode pool to the driver (#823).
+
+    Called at unit-commit boundaries, on the committing thread; a worker
+    mid-synthesis holds its live tensors as allocations, which the allocator
+    never frees, so a concurrent decode is unaffected. A reclaim that fails
+    for any reason is logged-not-raised: the walk's correctness does not
+    depend on it, only its memory charge does.
+    """
+    if synthesis_device != "cuda":
+        return
+    import torch
+
+    if not torch.cuda.is_available():
+        return
+    try:
+        reserved = torch.cuda.memory_reserved()
+        allocated = torch.cuda.memory_allocated()
+        if not force and reserved - allocated < HEAD_WALK_RECLAIM_GAP_BYTES:
+            return
+        torch.cuda.empty_cache()
+        after = torch.cuda.memory_reserved()
+        print(f"tessera_joint_aura: head-walk allocator reclaim: reserved "
+              f"{reserved // (1024 ** 2)} MiB -> {after // (1024 ** 2)} MiB "
+              f"(allocated {allocated // (1024 ** 2)} MiB)", flush=True)
+    except Exception as exc:  # noqa: BLE001 - never fail the walk on a reclaim
+        print(f"tessera_joint_aura: head-walk allocator reclaim skipped: {exc!r}",
+              flush=True)
+
+
 def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True,
                                defer_render_hashes=False, reader=None,
                                synthesis_device="cpu", unit_scope=None,
@@ -1158,6 +1197,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             if time.monotonic() - last_bank >= HEAD_WALK_BANK_INTERVAL_S:
                 _flush_bank()
                 last_bank = time.monotonic()
+        # Unit boundary: the decoded shards for this unit are durable and the
+        # tensors themselves are dead, so whatever the caching allocator is
+        # still holding for them is retention, not working set (#823).
+        _reclaim_head_walk_allocator(synthesis_device)
 
     walk_workers = _head_walk_worker_count(head_walk_workers)
     try:
