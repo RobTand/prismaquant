@@ -131,22 +131,19 @@ def test_rollback_retains_then_reclaims(tmp_path, monkeypatch):
     owner = _owner(tmp_path / "boundaries")
     space = adjoint_space(tmp_path / "out")
     real_atomic = checkpoints.atomic_write_bytes
-    calls = []
 
-    def fail_first_pickle(path, payload):
-        calls.append(str(path))
-        if len(calls) == 1:
-            raise RuntimeError("boom: simulated pickle failure")
-        return real_atomic(path, payload)
+    def fail_manifest(path, payload):
+        raise RuntimeError("boom: simulated manifest failure")
 
-    monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_first_pickle)
+    monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_manifest)
     with pytest.raises(RuntimeError, match="boom"):
         _write(owner, space)
     checkpoint_dir = Path(space) / "checkpoints" / "boundary-005"
     assert checkpoint_dir.is_dir()
-    # Shared states serialize first, so the very first pickle failure lands
-    # before any file exists: fail-fast ordering with nothing partial.
-    assert _space_files(space) == []
+    # Every entry landed before the manifest failed: a true partial.
+    assert list((checkpoint_dir / "entries").glob("*.pt"))
+    assert list((checkpoint_dir / "entries").glob("*.pkl"))
+    assert not (checkpoint_dir / "checkpoint.json").exists()
     retained = [entry for entry in owner._checkpoint_reservations.values()
                 if entry["state"] == "retained"]
     assert len(retained) == 1
@@ -211,13 +208,13 @@ def test_unknown_shared_state_refuses_before_dumps(tmp_path, monkeypatch):
     owner = _owner(tmp_path / "boundaries")
     space = adjoint_space(tmp_path / "out")
     dumps = []
-    real_dumps = pickle.dumps
+    real_dump = pickle.dump
 
-    def spy_dumps(state, *args, **kwargs):
+    def spy_dump(obj, file, *args, **kwargs):
         dumps.append(1)
-        return real_dumps(state, *args, **kwargs)
+        return real_dump(obj, file, *args, **kwargs)
 
-    monkeypatch.setattr(pickle, "dumps", spy_dumps)
+    monkeypatch.setattr(pickle, "dump", spy_dump)
     with pytest.raises(RuntimeError, match="unaccountable shared state"):
         write_adjoint_checkpoint(
             space, boundary=5, session=_session(), cotangents=_plane(),
@@ -234,13 +231,13 @@ def test_oversized_estimate_refuses_before_dumps(tmp_path, monkeypatch):
     owner = _owner(tmp_path / "boundaries", disk=4096)
     space = adjoint_space(tmp_path / "out")
     dumps = []
-    real_dumps = pickle.dumps
+    real_dump = pickle.dump
 
-    def spy_dumps(state, *args, **kwargs):
+    def spy_dump(obj, file, *args, **kwargs):
         dumps.append(1)
-        return real_dumps(state, *args, **kwargs)
+        return real_dump(obj, file, *args, **kwargs)
 
-    monkeypatch.setattr(pickle, "dumps", spy_dumps)
+    monkeypatch.setattr(pickle, "dump", spy_dump)
     with pytest.raises(RuntimeError, match="budget exceeded"):
         _write(owner, space)
     assert dumps == []
@@ -322,7 +319,7 @@ def _checkpoint_actual(owner, space, record):
 
 def test_checkpoint_then_ordinary_share_ceiling(tmp_path):
     """A committed checkpoint narrows later ordinary writes (aggregate)."""
-    owner = _owner(tmp_path / "boundaries", disk=2300000)
+    owner = _owner(tmp_path / "boundaries", disk=2600000)
     space = adjoint_space(tmp_path / "out")
     record = write_adjoint_checkpoint(
         space, boundary=5, session=_session(), cotangents=_big_plane(),
@@ -345,7 +342,7 @@ def test_retained_partial_blocks_ordinary_until_reclaimed(tmp_path, monkeypatch)
     """A retained envelope counts against ordinary writes until reclaimed."""
     import prismaquant.joint_adjoint_checkpoints as checkpoints
 
-    owner = _owner(tmp_path / "boundaries", disk=2300000)
+    owner = _owner(tmp_path / "boundaries", disk=2600000)
     space = adjoint_space(tmp_path / "out")
     real_atomic = checkpoints.atomic_write_bytes
     calls = []
@@ -376,7 +373,7 @@ def test_retained_partial_blocks_ordinary_until_reclaimed(tmp_path, monkeypatch)
 
 def test_cotangent_rollover_overlap_counts_checkpoints(tmp_path):
     """Rollover peak (old plus new) is admitted against the shared ceiling."""
-    owner = _owner(tmp_path / "boundaries", disk=2300000)
+    owner = _owner(tmp_path / "boundaries", disk=2600000)
     space = adjoint_space(tmp_path / "out")
     record = write_adjoint_checkpoint(
         space, boundary=5, session=_session(), cotangents=_big_plane(),
@@ -391,10 +388,10 @@ def test_cotangent_rollover_overlap_counts_checkpoints(tmp_path):
     assert owner.telemetry["live_artifact_bytes"] == rolled.file_bytes
     # A 700x700 rollover fits live-only headroom but overlaps the committed
     # checkpoint past the ceiling.
-    old2 = owner.write(torch.zeros(256, 256), batch_index=0, boundary_index=1,
+    old2 = owner.write(torch.zeros(256, 256), batch_index=1, boundary_index=1,
                        probe_index=0)
     with pytest.raises(RuntimeError, match="budget exceeded"):
-        owner.write(torch.zeros(700, 700), batch_index=0, boundary_index=0,
+        owner.write(torch.zeros(700, 700), batch_index=1, boundary_index=0,
                     probe_index=0, previous=old2)
     assert owner.telemetry["live_artifact_bytes"] == (
         rolled.file_bytes + old2.file_bytes)
@@ -450,24 +447,25 @@ def test_tensor_entry_receives_admitted_file_limit(tmp_path, monkeypatch):
 
 
 def test_oversized_shared_payload_refuses_pre_write(tmp_path, monkeypatch):
-    """A payload over its admitted envelope never reaches the file."""
+    """A payload over its admitted envelope never publishes its file."""
     import pickle
 
     owner = _owner(tmp_path / "boundaries")
     space = adjoint_space(tmp_path / "out")
-    real_dumps = pickle.dumps
+    real_dump = pickle.dump
 
-    def fat_dumps(state, *args, **kwargs):
-        payload = real_dumps(state, *args, **kwargs)
-        if isinstance(state, dict) and state.get("tag") == "a":
-            return payload + b"\x00" * (1 << 20)
-        return payload
+    def fat_dump(obj, file, *args, **kwargs):
+        real_dump(obj, file, *args, **kwargs)
+        if isinstance(obj, dict) and obj.get("tag") == "a":
+            file.write(b"\x00" * (1 << 20))
+            file.flush()
 
-    monkeypatch.setattr(pickle, "dumps", fat_dumps)
+    monkeypatch.setattr(pickle, "dump", fat_dump)
     with pytest.raises(RuntimeError, match="admitted envelope"):
         _write(owner, space)
     entries = Path(space) / "checkpoints" / "boundary-005" / "entries"
-    assert [path.name for path in entries.glob("shared-pass-*.pkl")] == []
+    # The oversized temp is unlinked, never renamed: no trace publishes.
+    assert [path.name for path in entries.glob("shared-pass-*")] == []
     assert list(entries.glob("shared-adjoint-*.pkl"))
     retained = [entry for entry in owner._checkpoint_reservations.values()
                 if entry["state"] == "retained"]
@@ -557,13 +555,48 @@ def test_close_disposes_retained_attempt(tmp_path, monkeypatch):
     space = adjoint_space(tmp_path / "out")
     real_atomic = checkpoints.atomic_write_bytes
 
-    def fail_first_pickle(path, payload):
-        raise RuntimeError("boom: simulated pickle failure")
+    def fail_manifest(path, payload):
+        raise RuntimeError("boom: simulated manifest failure")
 
-    monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_first_pickle)
+    monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_manifest)
     owner = StreamedBoundaryArtifacts(policy)
     owner.bind({"fixture": "checkpoint-budget"}, n_probes=2)
     with pytest.raises(RuntimeError, match="boom"):
         with owner:
             _write(owner, space)
     assert not (Path(space) / "checkpoints" / "boundary-005").exists()
+
+
+def test_pickle_serializes_each_view_backing(tmp_path):
+    """Pin measured torch behavior: views do not share serialized backing.
+
+    Two 2 MiB views sharing one 4 MiB backing dump ~8 MB together, the same
+    as separately, so the estimator counts per-leaf backing ownership with
+    no cross-leaf deduplication. The estimate must cover the real bytes.
+    """
+    import pickle
+
+    from prismaquant.joint_adjoint_checkpoints import _shared_state_envelope_estimate
+
+    base = torch.zeros(1_000_000)
+    first, second = base[:500_000], base[500_000:]
+    backing = base.untyped_storage().nbytes()
+    both = len(pickle.dumps([first, second], protocol=pickle.HIGHEST_PROTOCOL))
+    assert both > 1.5 * backing
+    estimate = _shared_state_envelope_estimate({"a": first, "b": second})
+    assert estimate >= both
+
+
+def test_meta_tensor_refuses_pre_write(tmp_path):
+    """Unsizable tensors refuse before reservation, with zero files."""
+    owner = _owner(tmp_path / "boundaries")
+    space = adjoint_space(tmp_path / "out")
+    meta = torch.zeros(4, 4, device="meta")
+    with pytest.raises(TypeError, match="materialized strided tensors"):
+        write_adjoint_checkpoint(
+            space, boundary=5, session=_session(),
+            cotangents={(0, 0): meta},
+            shared_adjoint=_shared_adjoint(), shared_pass=_shared_pass(),
+            owner=owner)
+    assert not (Path(space) / "checkpoints").exists()
+    assert owner._checkpoint_reservations == {}

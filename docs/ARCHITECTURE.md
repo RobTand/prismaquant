@@ -46,6 +46,21 @@ no broker token or socket crosses. Gates:
 `tests/test_tessera_campaign_container.py` regression-green).
 
 Re-stamped (2026-09-20, `flash/checkpoint-artifact-budget-858`) for
+**checkpoint artifact budget hardening** (PQ #858 R2). Ordinary writes
+admit against the aggregate artifact total, so committed or retained
+checkpoint bytes narrow them too. Transient serialization holds bound the
+peak per entry: tensor copies in the resident budget mirroring exact
+writes, pickle/manifest buffers in an auxiliary hold aggregated with
+live auxiliary usage. Shared-state estimates count per-leaf serialized
+backing (measured: pickle emits per-view backing, no cross-view memo)
+with bit-length integer sizing; shared payloads stream through the
+digest sink with admitted per-file bounds instead of aggregate bytes
+objects. Commit binds receipt names/paths/envelopes to the reserved plan
+plus a canonical receipt digest; reclaim and close disposal verify
+deletion or absence before release. Gate:
+`tests/test_checkpoint_artifact_budget.py`.
+
+Re-stamped (2026-09-20, `flash/checkpoint-artifact-budget-858`) for
 **checkpoint artifact budget enforcement** (PQ #858).
 `StreamedBoundaryArtifacts` enforced `max_artifact_bytes` on ordinary
 entries while `write_adjoint_checkpoint` serialized beside the owner's
