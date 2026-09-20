@@ -796,7 +796,8 @@ def test_event_order_checker_rejects_post_read_reports():
 
 
 def _reported(events):
-    return [phase for kind, phase, *_ in events if kind == "report"]
+    return [event[1] for event in events
+            if event[0] == "report" and len(event) >= 2]
 
 
 def _assert_acceptance_run(events, manifest, record, tmp_path,
