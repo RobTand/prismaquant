@@ -386,9 +386,18 @@ class StreamedBoundaryArtifacts:
         nbytes = tensor.numel() * tensor.element_size()
         # A bounded envelope for the exact writer's small PyTorch zip header.
         # Actual file length is checked before the entry can be published.
+        # Admission is aggregate: live ordinary bytes plus live checkpoint
+        # bytes plus every active/retained checkpoint envelope share the one
+        # max_artifact_bytes ceiling in both directions, so a committed (or
+        # retained) checkpoint narrows later ordinary writes exactly as live
+        # ordinary entries narrow later checkpoints.
         file_limit = nbytes + 65536
-        if self.telemetry["live_artifact_bytes"] + file_limit > self.config["max_artifact_bytes"]:
-            raise RuntimeError("exact boundary artifact budget exceeded")
+        remaining = self.checkpoint_remaining_bytes()
+        if file_limit > remaining:
+            raise RuntimeError(
+                "exact boundary artifact budget exceeded: "
+                f"entry needs {file_limit} bytes, {remaining} remain of "
+                f"{self.config['max_artifact_bytes']}")
         name = f"{slot}-at-{boundary_index}"
         identity = {"session": self.session, "slot": slot, "kind": kind, "coordinates": coordinates}
         self._reserve(nbytes)
@@ -460,6 +469,37 @@ class StreamedBoundaryArtifacts:
         if self._check_memory is not None:
             self._check_memory(str(label))
 
+    @contextmanager
+    def hold_transient_serialization(self, estimate_bytes, label):
+        """Hold estimate bytes in the resident budget around one serialization.
+
+        The existing resident contract bounds the transient peak: the hold
+        refuses (fail-closed, with counts) when live tensors plus this
+        estimate would exceed max_resident_bytes, fires the bound memory hook
+        on the way in, and releases on the way out. One entry at a time keeps
+        the peak at the largest single payload instead of the whole
+        checkpoint. Only the resident counter moves; durable bytes are a
+        separate reservation below.
+        """
+        if type(estimate_bytes) is not int or estimate_bytes <= 0:
+            raise RuntimeError(
+                "exact boundary transient serialization hold needs a "
+                "positive byte estimate")
+        self._reserve(int(estimate_bytes))
+        try:
+            yield
+        finally:
+            self._reserve(-int(estimate_bytes))
+
+    def checkpoint_reservation_state(self, reservation_id):
+        """Report one reservation's lifecycle state, refusing unknown ids."""
+        if type(reservation_id) is not int:
+            raise RuntimeError("exact boundary checkpoint reservation is not an integer")
+        entry = self._checkpoint_reservations.get(reservation_id)
+        if entry is None:
+            raise RuntimeError("exact boundary checkpoint reservation is unknown")
+        return entry["state"]
+
     def _checkpoint_accounted_bytes(self):
         return (self.telemetry["live_artifact_bytes"]
                 + self.telemetry["live_checkpoint_bytes"]
@@ -488,6 +528,8 @@ class StreamedBoundaryArtifacts:
         for entry in files:
             if (not isinstance(entry, dict) or type(entry.get("name")) is not str
                     or not entry["name"]
+                    or type(entry.get("path")) is not str
+                    or not entry["path"]
                     or type(entry.get("envelope_bytes")) is not int
                     or entry["envelope_bytes"] <= 0):
                 raise RuntimeError("exact boundary checkpoint file plan is malformed")
@@ -529,6 +571,15 @@ class StreamedBoundaryArtifacts:
         if not directory.is_absolute():
             raise RuntimeError(
                 "exact boundary checkpoint directory must be absolute")
+        for entry in files:
+            try:
+                inside = Path(entry["path"]).is_relative_to(directory)
+            except ValueError:
+                inside = False
+            if not inside:
+                raise RuntimeError(
+                    "exact boundary checkpoint file plan escapes its "
+                    f"attempt directory: {entry['name']}")
         remaining = self.checkpoint_remaining_bytes()
         if envelope_bytes > remaining:
             self.telemetry["checkpoint_refusals"] += 1
@@ -587,25 +638,54 @@ class StreamedBoundaryArtifacts:
                 self._checkpoint_active = None
             raise RuntimeError(message)
 
-        actual = 0
+        planned = {row["name"]: row for row in entry["files"]}
+        rows = []
         for field in ("activation_entries", "shared_state_entries"):
             entries = record.get(field)
             if not isinstance(entries, list):
                 _fail("exact boundary checkpoint record has no entry list "
                       f"{field!r}")
-            for row in entries:
-                if (not isinstance(row, dict) or type(row.get("path")) is not str
-                        or type(row.get("file_bytes")) is not int):
-                    _fail("exact boundary checkpoint record entry is malformed")
-                try:
-                    observed = Path(row["path"]).stat().st_size
-                except OSError:
-                    _fail("exact boundary checkpoint receipt file is missing: "
-                          f"{row.get('name')}")
-                if observed != row["file_bytes"]:
-                    _fail("exact boundary checkpoint receipt file size drifted: "
-                          f"{row.get('name')}")
-                actual += row["file_bytes"]
+            rows.extend(entries)
+        names = [row["name"] for row in rows
+                 if isinstance(row, dict) and type(row.get("name")) is str]
+        if (len(names) != len(rows) or sorted(names) != sorted(planned)
+                or len(set(names)) != len(names)):
+            missing = sorted(set(planned) - set(names))
+            extra = sorted(set(names) - set(planned))
+            _fail("exact boundary checkpoint receipt does not match its "
+                  f"reserved plan: missing={missing[:8]}, extra={extra[:8]}")
+        for row in rows:
+            expected = planned[row["name"]]
+            if (type(row.get("path")) is not str
+                    or row["path"] != expected["path"]):
+                _fail("exact boundary checkpoint receipt path is not its "
+                      f"reserved path: {row.get('name')}")
+            if (type(row.get("file_bytes")) is not int
+                    or row["file_bytes"] > expected["envelope_bytes"]):
+                _fail("exact boundary checkpoint receipt file exceeds its "
+                      f"reserved envelope: {row.get('name')}")
+        from .cost_stage_checkpoint import canonical_json_sha256
+
+        canonical_digest = canonical_json_sha256(
+            {key: record[key] for key in
+             ("schema", "boundary", "session", "activation_entries",
+              "shared_state_entries")},
+            where="adjoint checkpoint receipt",
+        )
+        if canonical_digest != digest:
+            _fail("exact boundary checkpoint receipt digest does not match "
+                  "its entry set")
+        actual = 0
+        for row in rows:
+            try:
+                observed = Path(row["path"]).stat().st_size
+            except OSError:
+                _fail("exact boundary checkpoint receipt file is missing: "
+                      f"{row.get('name')}")
+            if observed != row["file_bytes"]:
+                _fail("exact boundary checkpoint receipt file size drifted: "
+                      f"{row.get('name')}")
+            actual += row["file_bytes"]
         manifest_path = Path(entry["dir"]) / "checkpoint.json"
         try:
             manifest_bytes = manifest_path.stat().st_size
@@ -673,12 +753,43 @@ class StreamedBoundaryArtifacts:
             self._checkpoint_active = None
         return None
 
+    def _dispose_retained_entry(self, reservation_id, entry):
+        """Delete one retained attempt's own new directory, verified.
+
+        Returns "deleted" after an owned deletion and "already_absent" when
+        the directory is verifiably gone. Anything else -- a non-directory
+        in its place, or a directory that survives removal -- retains the
+        envelope and raises: bytes are only released against actual owned
+        deletion or verified absence, never on uncertainty.
+        """
+        import shutil
+
+        directory = Path(entry["dir"])
+        if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+            raise RuntimeError(
+                "exact boundary checkpoint reclaim refuses an unexpected "
+                f"non-directory at {entry['dir']}; retaining its bytes")
+        if not directory.exists():
+            outcome = "already_absent"
+        else:
+            shutil.rmtree(directory)
+            if directory.exists():
+                raise RuntimeError(
+                    "exact boundary checkpoint reclaim could not dispose "
+                    f"{entry['dir']}; retaining its bytes")
+            outcome = "deleted"
+        del self._checkpoint_reservations[reservation_id]
+        if self._checkpoint_active == reservation_id:
+            self._checkpoint_active = None
+        return outcome
+
     def reclaim_checkpoint_artifact(self, space, boundary):
         """Dispose a retained attempt's own new directory, then release it.
 
         Refuses when no retained reservation names that checkpoint directory:
         nothing is ever deleted blindly. Committed (durable published)
-        checkpoints are never reclaimed through this path.
+        checkpoints are never reclaimed through this path. Release follows
+        verified deletion or verified absence only.
         """
         from .joint_adjoint_checkpoints import checkpoint_directory
 
@@ -693,15 +804,10 @@ class StreamedBoundaryArtifacts:
             raise RuntimeError(
                 "exact boundary checkpoint reclaim found no retained attempt at "
                 f"{target}")
-        import shutil
-
-        if directory.is_dir():
-            shutil.rmtree(directory)
-        del self._checkpoint_reservations[reservation]
-        if self._checkpoint_active == reservation:
-            self._checkpoint_active = None
+        outcome = self._dispose_retained_entry(
+            reservation, self._checkpoint_reservations[reservation])
         return {"reservation": reservation, "checkpoint_dir": target,
-                "reclaimed": True}
+                "reclaimed": True, "disposition": outcome}
 
     def checkpoint_commitment(self, receipt_digest):
         """Return the stored commitment for a receipt digest, if committed."""
@@ -742,19 +848,14 @@ class StreamedBoundaryArtifacts:
         Committed checkpoints are durable published state and survive close
         either way. Retained attempts never held a receipt, so their brand-new
         attempt directory (created only after a successful reservation) is
-        safe to dispose here; anything else refuses loudly instead.
+        safe to dispose here; anything else refuses loudly instead. A
+        disposal that cannot verify absence fails close rather than leaking
+        silently or deleting blindly.
         """
-        import shutil
-
         for reservation_id, entry in list(self._checkpoint_reservations.items()):
             if entry["state"] != "retained":
                 continue
-            directory = Path(entry["dir"])
-            if directory.is_dir():
-                shutil.rmtree(directory)
-            del self._checkpoint_reservations[reservation_id]
-            if self._checkpoint_active == reservation_id:
-                self._checkpoint_active = None
+            self._dispose_retained_entry(reservation_id, entry)
 
     @contextmanager
     def prefetch(self, references):

@@ -119,13 +119,21 @@ def adjoint_receipt_path(space: str | os.PathLike) -> Path:
 
 def write_checkpoint_cotangent_entry(
     checkpoint_dir: Path, *, probe_index: int, batch_index: int, tensor: torch.Tensor,
-    session: dict,
+    session: dict, max_file_bytes: int | None = None,
 ) -> dict:
-    """Publish one activation cotangent as a digest-checked exact entry."""
+    """Publish one activation cotangent as a digest-checked exact entry.
+
+    ``max_file_bytes`` carries the reservation-admitted per-file envelope;
+    when omitted the legacy tensor-bytes-plus-header envelope applies. The
+    exact writer enforces whichever bound it receives and unlinks on
+    exceedance.
+    """
     from .perturbed_x_cache import write_exact_activation_cache_entry
 
     name = f"cotangent-{int(probe_index)}-{int(batch_index)}"
     nbytes = tensor.numel() * tensor.element_size()
+    if max_file_bytes is None:
+        max_file_bytes = nbytes + 65536
     identity = {
         "session": dict(session),
         "slot": name,
@@ -136,7 +144,7 @@ def write_checkpoint_cotangent_entry(
     }
     reference = write_exact_activation_cache_entry(
         checkpoint_dir / "entries", name, tensor,
-        identity=identity, max_tensor_bytes=nbytes, max_file_bytes=nbytes + 65536,
+        identity=identity, max_tensor_bytes=nbytes, max_file_bytes=max_file_bytes,
     )
     return exact_entry_record(reference)
 
@@ -240,24 +248,49 @@ _PICKLE_ESTIMATE_FRAMING_BYTES = 65536
 def _shared_state_envelope_estimate(value) -> int:
     """Upper-bound the pickle size of shared checkpoint state without serializing.
 
-    Closed grammar mirroring ``_state_tensors`` (cost_streaming): strided
-    materialized tensors count exact bytes plus framing; short scalars and
-    their containers count bounded lengths; anything else -- meta or
-    non-strided tensors, sets, opaque objects -- refuses instead of guessing.
+    Closed grammar mirroring ``_state_tensors`` (cost_streaming): anything
+    else -- meta or non-strided tensors, sets, opaque objects -- refuses
+    instead of guessing. Two precision rules matter here:
+
+    - Tensors count their actual serialized backing ownership
+      (``untyped_storage().nbytes()``), deduplicated within one state,
+      because pickling a small tensor view serializes its whole backing
+      storage, which ``numel`` would undercount. Pickle memoizes storage
+      references per dump, and each shared entry dumps separately, so
+      ownership is per entry, never across entries.
+    - Integers are sized by bit length: a short counter costs framing, but
+      an arbitrary-precision giant must count its digits, never a flat 128.
+
     The estimate only admits the serialization attempt against the remaining
     envelope; the reservation commits the exact dumped lengths.
     """
+    tensors: list = []
+    small = _shared_state_small_bytes(value, tensors)
+    storages = {}
+    for tensor in tensors:
+        storage = tensor.untyped_storage()
+        key = (str(tensor.device), storage.data_ptr(), storage.nbytes())
+        storages[key] = storage.nbytes()
+    return (sum(storages.values())
+            + _PICKLE_ESTIMATE_FRAMING_BYTES * len(tensors) + small)
+
+
+def _shared_state_small_bytes(value, tensors: list) -> int:
+    """Exact small-object bytes plus tensor collection for the estimate above."""
     if isinstance(value, torch.Tensor):
         if value.is_meta or value.layout != torch.strided:
             raise TypeError(
                 "exact boundary checkpoint cannot account this state tensor")
-        return value.numel() * value.element_size() + _PICKLE_ESTIMATE_FRAMING_BYTES
+        tensors.append(value)
+        return 0
     if isinstance(value, str):
         return len(value.encode("utf-8")) + 128
     if isinstance(value, bytes):
         return len(value) + 128
-    if value is None or isinstance(value, (bool, int, float, complex)):
+    if value is None or isinstance(value, (bool, float, complex)):
         return 128
+    if isinstance(value, int):
+        return (int(value).bit_length() + 7) // 8 + 32
     if isinstance(value, dict):
         total = 128
         for key, item in value.items():
@@ -265,13 +298,13 @@ def _shared_state_envelope_estimate(value) -> int:
                 raise TypeError(
                     "exact boundary checkpoint cannot account shared state "
                     f"with {type(key).__name__} mapping keys")
-            total += _shared_state_envelope_estimate(key)
-            total += _shared_state_envelope_estimate(item)
+            total += _shared_state_small_bytes(key, tensors)
+            total += _shared_state_small_bytes(item, tensors)
         return total
     if isinstance(value, (list, tuple)):
         total = 128
         for item in value:
-            total += _shared_state_envelope_estimate(item)
+            total += _shared_state_small_bytes(item, tensors)
         return total
     raise TypeError(
         "exact boundary checkpoint cannot account opaque shared state "
@@ -453,9 +486,11 @@ def write_adjoint_checkpoint(
     temp_overlap = max(file_envelopes + [manifest_envelope])
     envelope = sum(file_envelopes) + manifest_envelope + temp_overlap
     file_plan = {
-        "files": [{"name": plan["name"], "envelope_bytes": plan["file_envelope"]}
+        "files": [{"name": plan["name"], "path": plan["path"],
+                   "envelope_bytes": plan["file_envelope"]}
                   for plan in activation_plan]
-        + [{"name": plan["name"], "envelope_bytes": plan["file_envelope"]}
+        + [{"name": plan["name"], "path": plan["path"],
+            "envelope_bytes": plan["file_envelope"]}
            for plan in shared_plan],
         "manifest_bytes": manifest_envelope,
         "temp_overlap_bytes": temp_overlap,
@@ -473,26 +508,40 @@ def write_adjoint_checkpoint(
         owner.cancel_checkpoint_artifact(reservation)
         raise
     try:
-        payloads = {}
-        for name in sorted(estimates):
+        # Shared states serialize, write, and release one entry at a time:
+        # the transient peak is the largest single payload, never the whole
+        # checkpoint, and each hold refuses against the resident budget
+        # before its bytes materialize.
+        shared_state_entries = []
+        for plan in shared_plan:
             state = _shared_state_by_name(
-                shared_adjoint, shared_pass, name)
-            payload = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
-            if len(payload) > estimates[name]:
-                raise RuntimeError(
-                    "exact boundary checkpoint shared-state payload exceeds "
-                    f"its admitted estimate for {name}")
-            payloads[name] = payload
+                shared_adjoint, shared_pass, plan["name"])
+            with owner.hold_transient_serialization(
+                    estimates[plan["name"]],
+                    f"checkpoint shared state {plan['name']}"):
+                payload = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
+                if len(payload) > plan["file_envelope"]:
+                    raise RuntimeError(
+                        "exact boundary checkpoint shared-state payload exceeds "
+                        f"its admitted envelope for {plan['name']}")
+                shared_state_entries.append(_write_shared_state_payload(
+                    checkpoint_dir, plan["name"], payload))
+        del payload
         activation_entries = []
         for plan in activation_plan:
             tensor = cotangents[(plan["probe_index"], plan["batch_index"])]
-            activation_entries.append(write_checkpoint_cotangent_entry(
-                checkpoint_dir, probe_index=plan["probe_index"],
-                batch_index=plan["batch_index"], tensor=tensor,
-                session=session))
-        shared_state_entries = [
-            _write_shared_state_payload(checkpoint_dir, plan["name"], payloads[plan["name"]])
-            for plan in shared_plan]
+            with owner.hold_transient_serialization(
+                    plan["tensor_bytes"],
+                    f"checkpoint tensor {plan['name']}"):
+                entry = write_checkpoint_cotangent_entry(
+                    checkpoint_dir, probe_index=plan["probe_index"],
+                    batch_index=plan["batch_index"], tensor=tensor,
+                    session=session, max_file_bytes=plan["file_envelope"])
+            if entry["file_bytes"] > plan["file_envelope"]:
+                raise RuntimeError(
+                    "exact boundary checkpoint tensor file exceeds its "
+                    f"admitted envelope for {plan['name']}")
+            activation_entries.append(entry)
         record = {
             "schema": ADJOINT_CHECKPOINT_SCHEMA,
             "boundary": int(boundary),
@@ -505,15 +554,23 @@ def write_adjoint_checkpoint(
              ("schema", "boundary", "session", "activation_entries", "shared_state_entries")},
             where="adjoint checkpoint",
         )
-        manifest_payload = (json.dumps(
-            record, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
-        if len(manifest_payload) > manifest_envelope:
-            raise RuntimeError(
-                "exact boundary checkpoint manifest exceeds its admitted envelope")
-        atomic_write_bytes(checkpoint_dir / "checkpoint.json", manifest_payload)
+        with owner.hold_transient_serialization(
+                manifest_envelope, "checkpoint manifest"):
+            manifest_payload = (json.dumps(
+                record, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+            if len(manifest_payload) > manifest_envelope:
+                raise RuntimeError(
+                    "exact boundary checkpoint manifest exceeds its admitted envelope")
+            atomic_write_bytes(checkpoint_dir / "checkpoint.json", manifest_payload)
         owner.commit_checkpoint_artifact(reservation, record)
     except BaseException:
-        owner.abandon_checkpoint_artifact(reservation)
+        # Abandon only what is still active. A commit that already recorded
+        # the receipt (even one whose trailing memory hook then failed) is
+        # truthful committed state, and abandoning it would mask the
+        # original error; a retained attempt is already retained
+        # (abandon is idempotent there, so this simply skips it).
+        if owner.checkpoint_reservation_state(reservation) == "active":
+            owner.abandon_checkpoint_artifact(reservation)
         raise
     return record
 
