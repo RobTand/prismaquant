@@ -413,22 +413,29 @@ class StagedShardReader:
         return self
 
     def __exit__(self, *args):
-        # Close every bound descriptor first, then release each window's
-        # exact ref: release-before-close is forbidden, and a forked child
-        # never releases (the window's pid guard makes that explicit).
+        # The window owns every bound descriptor: close each through it,
+        # then release its exact ref. Release-before-close is forbidden,
+        # and a forked child never releases (the window's pid guard makes
+        # that explicit).
         failure = None
         while self._bound:
             row = self._bound.pop()
-            try:
-                os.close(row[2])
-            except OSError as exc:
-                if failure is None:
-                    failure = exc
             window = row[6] if len(row) > 6 else None
             if window is not None:
                 try:
+                    window.close_fd(row[2])
+                except OSError as exc:
+                    if failure is None:
+                        failure = exc
+                try:
                     window.__exit__(None, None, None)
                 except LeaseRefused as exc:
+                    if failure is None:
+                        failure = exc
+            else:
+                try:
+                    os.close(row[2])
+                except OSError as exc:
                     if failure is None:
                         failure = exc
         if self._handle is not None:
@@ -649,21 +656,27 @@ class StagedShardReader:
     def _drop(self, row) -> None:
         if row in self._bound:
             self._bound.remove(row)
-        try:
-            os.close(row[2])
-        except OSError:
-            pass
         window = row[6] if len(row) > 6 else None
         if window is not None:
-            # The window is dead: release its exact ref now (after the
-            # descriptor above) rather than lending it to a later tensor.
-            # A release failure is recorded, never silent; the caller's
-            # read error still raises.
+            # The window owns the descriptor: close through it, then
+            # release its exact ref now (after the descriptor above)
+            # rather than lending it to a later tensor. A release failure
+            # is recorded, never silent; the caller's read error still
+            # raises.
+            try:
+                window.close_fd(row[2])
+            except OSError:
+                pass
             try:
                 window.__exit__(None, None, None)
             except LeaseRefused as exc:
                 if self._resolver is not None:
                     self._resolver.record_fallback(self._declared, str(exc))
+            return
+        try:
+            os.close(row[2])
+        except OSError:
+            pass
 
     def _staged_tensor(self, name):
         span = self._span(name)

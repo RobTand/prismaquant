@@ -875,10 +875,16 @@ def test_duplicate_acquire_token_adopts_one_ref(tmp_path, monkeypatch):
     second = LeaseWindow(spec, acquire_token="token-1")
     with first as one:
         with second as two:
+            # Same token retries idempotently onto one shared ref.
             assert one._ref_id == two._ref_id
             fd, _serving = two.open(key)
             two.close_fd(fd)
-        assert len(_pins_live(tmp_path, consumer)) == 1
+            assert len(_pins_live(tmp_path, consumer)) == 1
+        # Exiting the second window drops the shared ref (duplicate
+        # adoption shares it; production mints one token per window, so
+        # live windows never share).
+    # The first window's exit is idempotent: the pin is already gone,
+    # released exactly once.
     assert _pins_live(tmp_path, consumer) == []
 
 
