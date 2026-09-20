@@ -565,9 +565,12 @@ class StreamingContext:
         self.device = device
         self.dtype = dtype
         self.offload_folder = offload_folder
-        # Populated when `_build_streaming_context(..., multimodal=True)`:
-        # full visual tower resident on `device`, requires_grad=True on
-        # Linear params so Fisher hooks fire in run_multimodal_visual_probe_pass.
+        # Populated only when the CALLER passed
+        # `_build_streaming_context(..., multimodal=True)`: full visual tower
+        # resident on `device`, requires_grad=True on Linear params so Fisher
+        # hooks fire in run_multimodal_visual_probe_pass. `self.multimodal`
+        # below is the *construction* axis and can be True with no tower, on a
+        # family that has no text-only skeleton route.
         # Also exposes `visual_prefix` so cost / probe code can iterate
         # over visual Linears under `model.visual.*` (or whatever the
         # declared multimodal arch calls it).
@@ -1474,7 +1477,8 @@ def _build_streaming_context(model_path: str, *,
     materialize only the always-resident head pieces. Decoder layers
     stay on meta until PrismaQuant streams them from safetensors.
 
-    When `multimodal=True`:
+    `multimodal` is the CALLER's declaration that this run drives visual
+    inputs. When it is True:
       - Stages via `stage_multimodal` (preserves vision_config).
       - Instantiates via `config.architectures[0]` (declared arch) so the
         visual tower actually materializes — bypasses
@@ -1492,8 +1496,16 @@ def _build_streaming_context(model_path: str, *,
     `AutoModelForCausalLM.from_config` exactly as before, except that a
     top-level config the auto class cannot resolve at all — a
     vision-language *wrapper* config — falls back to
-    `_resolve_text_only_skeleton` instead of raising. No visual tower is
-    materialized on this path either way.
+    `_resolve_text_only_skeleton` instead of raising.
+
+    A third case sits between them and is why the two axes are separate
+    locals. A family the pinned transformers gives no `<Arch>ForCausalLM`
+    route (`ModelProfile.requires_multimodal_skeleton()`, e.g. glm5_next)
+    cannot be CONSTRUCTED text-only, so the staging, skeleton class and
+    weight map flip to the multimodal ones below even for a text-only
+    caller. That flip says nothing about the run's inputs: the visual tower
+    stays on meta unless the caller asked for it. **No visual tensor is read
+    from the checkpoint unless `multimodal=True` was passed in.**
 
     ``source_snapshot_only`` requires authenticated source ownership. It keeps
     all nonbody state on meta and allows only a one-shot selected snapshot;
@@ -1519,6 +1531,21 @@ def _build_streaming_context(model_path: str, *,
 
     from .sensitivity_probe import stage_multimodal, stage_text_only
 
+    # `multimodal` answers two independent questions, and only the caller can
+    # answer the second. They are separated here and never re-merged:
+    #   * CONSTRUCTION - can this family be built text-only at the pinned
+    #     transformers? A property of the architecture, declared by the
+    #     profile and flipped just below. Governs staging, the skeleton class
+    #     and the weight map.
+    #   * MODALITY - will THIS run drive visual inputs? The caller's own
+    #     declaration, and the only thing that may materialize the tower.
+    # Letting the first imply the second asked the loader for the whole
+    # `model.visual.*` namespace on a token-ID-only cost run; the run's
+    # text-only staged readset refused the first range (PQ #872). The streamed exporter already keeps the two apart:
+    # `materialize_tensors_streaming` flips on the same profile fact and
+    # leaves the visual tower on meta.
+    materialize_visual = multimodal
+
     if not multimodal:
         # A family with no <Arch>ForCausalLM auto-route (e.g. glm5_next on
         # transformers 5.16) cannot build a text-only skeleton at all; the
@@ -1529,7 +1556,9 @@ def _build_streaming_context(model_path: str, *,
         _profile = detect_profile(model_path)
         if _profile.requires_multimodal_skeleton():
             print(f"{log_prefix} profile {_profile.name} has no text-only "
-                  "skeleton route; using the multimodal construction",
+                  "skeleton route; using the multimodal construction "
+                  "(skeleton only: the visual tower stays on meta unless the "
+                  "caller declares multimodal)",
                   flush=True)
             multimodal = True
 
@@ -1564,7 +1593,8 @@ def _build_streaming_context(model_path: str, *,
     t0 = time.time()
     print(f"{log_prefix} base_prefix={base_prefix!r}  layers={num_layers}  "
           f"head_resident_on={resident_device}  offload={offload_folder}  "
-          f"multimodal={multimodal}  visual_prefix={skel_visual_prefix or 'n/a'}",
+          f"multimodal={multimodal}  materialize_visual={materialize_visual}  "
+          f"visual_prefix={skel_visual_prefix or 'n/a'}",
           flush=True)
 
     model = skeleton
@@ -1653,12 +1683,15 @@ def _build_streaming_context(model_path: str, *,
             print(f"{log_prefix} materialized {_meta_fixed} non-persistent head "
                   f"buffer(s) off meta (e.g. embed_scale)", flush=True)
 
-    # Locate the visual module on the meta skeleton. When multimodal is
-    # set, fully materialize the visual tower onto `device`; body
-    # layers remain meta and stream per shard.
+    # Locate the visual module on the meta skeleton. When the CALLER declared
+    # visual inputs, fully materialize the visual tower onto `device`; body
+    # layers remain meta and stream per shard. A skeleton that is multimodal
+    # only because the family has no text-only construction route leaves the
+    # tower on meta - nothing on a token-ID path can reach it, and reading it
+    # would pull the vision shards into the run's readset.
     visual_module = None
     visual_prefix: str | None = None
-    if multimodal and not source_snapshot_only:
+    if materialize_visual and not source_snapshot_only:
         visual_module, visual_prefix = _find_visual_module(model)
         if visual_module is not None and visual_prefix:
             remove_hook_from_module(visual_module, recurse=True)

@@ -221,7 +221,9 @@ class Glm5NextProfile(ModelProfile):
         # mapping (verified against the real checkpoint 2026-08-26), so a
         # text-only skeleton is unresolvable. Every streaming construction
         # must instantiate the declared Glm5NextForConditionalGeneration
-        # via the multimodal path; text-only staging would fail closed.
+        # via the multimodal SKELETON; text-only staging would fail closed.
+        # Construction only: a text-only caller still leaves `model.visual`
+        # on meta, and only an explicit `multimodal=True` reads it (PQ #872).
         return True
 
     # ------------------------------------------------------------
