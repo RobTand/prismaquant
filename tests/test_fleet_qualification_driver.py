@@ -316,14 +316,14 @@ def test_completeness_regression_flags_a_dropped_case():
     driver = _driver()
     plan = _plan(driver)
     verdicts = []
-    for host in ("sparky", "sparklina"):
+    for host_idx, host in enumerate(("sparky", "sparklina")):
         for idx, (name, files) in enumerate(driver.COMPONENT_CASES):
             if (name, host) == ("matrix", "sparklina"):
                 continue
             verdicts.append({"host": host, "file": files[0],
                              "status": "qualified", "reason": "",
                              "passed": 2, "failed": 0, "skipped": 0,
-                             "action_key": f"{idx:02x}" + host[0] * 62,
+                             "action_key": f"{host_idx:x}{idx:x}" + "b" * 62,
                              "terminal": "/tmp/t.json",
                              "snapshot_commit": "f" * 40,
                              "snapshot_parent": "d" * 40,
