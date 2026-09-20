@@ -823,13 +823,18 @@ class ResidencyResolver:
             self._bytes_from_pool += int(nbytes)
 
     def record_serving_tier(self, declared: str | Path, tier: str,
-                            detail: str = "") -> None:
+                            detail: str = "", *, pin_id: str | None = None,
+                            range_ref: str | None = None) -> None:
         """Note where an open actually served from, before payload trust.
 
         ``tier`` is ``ram`` or ``stage``. The tier/epoch halves are the
         resolver's own; ``lease_id`` is None until the PB reader-lease API
         (RNG-02/SM-03) exists. Bounded like the fallback lists; the count
         is not. Counters observe — this record authorizes nothing.
+
+        Under a lifetime pin, callers pass the SDK serving record's
+        ``pin_id``/``range_ref``: the record is emitted at the successful
+        actual open, never when a path candidate merely passes ``lstat``.
         """
         path = _normal(declared)
         with self._lock:
@@ -842,9 +847,30 @@ class ResidencyResolver:
                     record["epoch"] = self._ram_epoch
                 else:
                     record["tier_id"] = self._tier_id
+                if pin_id is not None:
+                    record["pin_id"] = pin_id
+                    record["lease_id"] = pin_id
+                if range_ref is not None:
+                    record["range_ref"] = range_ref
                 if detail:
                     record["detail"] = detail
                 self._serving_tiers.append(record)
+
+    def lease_identity(self) -> dict:
+        """The composed map's own identity for lease covers.
+
+        Returns ``tier_id``, ``leads`` (the mover keys that vouched this
+        read set), ``manifest_sha256``, and the ram half's
+        ``ram_tier_id``/``ram_epoch``. A stage-tier acquire names every
+        lead as covers with this manifest; RAM movers are not in the
+        composed map (see ``staged_lease.ram_covers``).
+        """
+        with self._lock:
+            return {"tier_id": self._tier_id,
+                    "leads": list(self._leads),
+                    "manifest_sha256": self._manifest_sha256,
+                    "ram_tier_id": self._ram_tier_id,
+                    "ram_epoch": self._ram_epoch}
 
     def report(self) -> dict:
         """What each tier served this run, for ``results.json``."""

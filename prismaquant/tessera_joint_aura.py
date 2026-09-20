@@ -142,7 +142,7 @@ def _read_verified_wire_blob(cell):
               else resolver.staged_read(wire, expected_sha256=expected))
     from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
     strict = policy_is_active()
-    if staged is not None:
+    if staged is not None and not strict:
         # The ram copy first, the stage copy second, the declared path last.
         # PrismaBuild's ram tier (#640) promotes a staged range onto a tmpfs
         # and the resolver offers the copy only while the epoch the map dates
@@ -151,40 +151,17 @@ def _read_verified_wire_blob(cell):
         # the stat and the open, or bytes that do not hash to the receipt --
         # is a miss on the ram half alone: the stage copy the map vouches for
         # serves next, and only its refusal reads the declared path.
-        #
-        # Under the active allowed-tier policy the chain ends at the last
-        # permitted copy: no permitted copy, or every permitted copy
-        # refused, raises before a declared-path byte is read, and the SSD
-        # stage copy serves only when the declaration permits it.
-        from .staged_tier_policy import tier_is_allowed
         copies = ([("ram", staged["ram_path"])] if "ram_path" in staged else []) \
             + [("stage", staged["stage_path"])]
-        if strict:
-            if "ram_path" in staged and not tier_is_allowed("ram"):
-                resolver.record_ram_fallback(wire, "ram tier not in the allowed tiers")
-                copies = [row for row in copies if row[0] != "ram"]
-            if not tier_is_allowed("ssd"):
-                resolver.record_fallback(wire, "ssd tier not in the allowed tiers")
-                copies = [row for row in copies if row[0] != "stage"]
-            if not copies:
-                raise refuse_pool_bulk_read(str(wire), "no-permitted-tier")
-        last: str | None = None
         for half, copy in copies:
             try:
                 blob, digest = _read_wire_bytes(Path(copy), size,
                                                 expected=expected, staged=True)
             except _StagedWireRefused as refusal:
-                last = str(refusal)
                 if half == "ram":
                     resolver.record_ram_fallback(wire, str(refusal))
-                else:
-                    resolver.record_fallback(wire, str(refusal))
-                if strict and isinstance(refusal, _StagedWireCorrupt):
-                    # Content corruption fails clear: the next copy is not
-                    # adopted as an unchecked alternate.
-                    raise refuse_pool_bulk_read(
-                        str(wire), f"content-corruption:{refusal}")
-                continue
+                    continue
+                resolver.record_fallback(wire, str(refusal))
             else:
                 # The open fence passed: serving tier recorded at open,
                 # before these payload bytes are trusted.
@@ -194,8 +171,51 @@ def _read_verified_wire_blob(cell):
                 else:
                     resolver.record_stage_read(wire, len(blob))
                 return blob, digest
-        if strict:
-            raise refuse_pool_bulk_read(str(wire), last or "staged-not-serving")
+    elif staged is not None:
+        # Lifetime-pinned window (one per blob); see the shard reader for
+        # the RAM/SSD discipline shared here.
+        from .staged_lease import LeaseRefused, acquire_entry_window
+        window, key = acquire_entry_window(resolver, wire, staged)
+        with window:
+            try:
+                fd, serving = window.open(key)
+            except LeaseRefused as refusal:
+                resolver.record_fallback(wire, str(refusal))
+                raise
+            tier = window.serving_tier or "stage"
+            resolver.record_serving_tier(
+                wire, tier, pin_id=str(serving.get("pin_id") or ""),
+                range_ref=str(serving.get("range_ref") or ""))
+            first = os.fstat(fd)
+            parts = []
+            remaining = size + 1
+            offset = 0
+            while remaining > 0:
+                block = os.pread(fd, min(remaining, 8 << 20), offset)
+                if not block:
+                    break
+                parts.append(block)
+                offset += len(block)
+                remaining -= len(block)
+            blob = b"".join(parts)
+            last = os.fstat(fd)
+            if (len(blob) != size or first.st_size != size
+                    or (last.st_ino, last.st_size, last.st_mtime_ns)
+                    != (first.st_ino, first.st_size, first.st_mtime_ns)):
+                # Changed under its pin: integrity fails clear, no alternate.
+                raise LeaseRefused("lease-open-size-changed", kind="integrity")
+        # The window closed (descriptor shut, exact ref released) before
+        # these bytes are bound to the receipt.
+        digest = hashlib.sha256(blob).hexdigest()
+        if digest != expected:
+            raise refuse_pool_bulk_read(
+                str(wire), "content-corruption:staged wire bytes differ "
+                           "from the receipt digest")
+        if tier == "ram":
+            resolver.record_ram_read(wire, len(blob))
+        else:
+            resolver.record_stage_read(wire, len(blob))
+        return blob, digest
     elif strict:
         raise refuse_pool_bulk_read(
             str(wire), "readset-not-staged" if resolver is None

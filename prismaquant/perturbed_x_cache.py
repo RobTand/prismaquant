@@ -611,52 +611,48 @@ def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):
     return max(storages.values(), default=0) if device == 'meta' else sum(storages.values())
 
 
-def _require_staged_bulk_source(path, expected_sha256):
-    """Strict-policy staged source for a whole-file bulk input.
+def _acquire_bulk_window(path, expected_sha256):
+    """Strict-policy pinned window for a whole-file bulk input.
 
-    Returns ``(source Path, source os.stat_result)`` opened from a
-    permitted tier (RAM first when offered and allowed, SSD stage only
-    when the declaration permits), fenced as a regular file of exactly
-    the entry's bytes. Raises ``TierPolicyRefused`` before any pool
-    payload byte when unmapped, unfenced, or unpermitted. The caller
-    still verifies content against ``expected_sha256`` and re-checks the
-    declared file's binding — the digest check is what makes the
-    redirect safe rather than trusted.
+    Returns the entered ``(window, key, staged)``: the RAM leg refuses
+    fast (RAM-mover covers unresolved), the SSD copy acquires honestly
+    with the map's leads. Raises ``LeaseRefused`` before any pool payload
+    byte when unmapped, unfenced, or unpermitted. The caller opens keys,
+    reads through held descriptors, verifies content against
+    ``expected_sha256``, re-checks the declared file's binding, and exits
+    the window (close-then-release) on every path.
     """
     from .residency_map import residency_resolver
-    from .staged_tier_policy import (
-        policy_is_active, refuse_pool_bulk_read, tier_is_allowed)
-    if not policy_is_active():
-        raise AssertionError("_require_staged_bulk_source needs the active policy")
+    from .staged_lease import LeaseRefused, acquire_entry_window
     resolver = residency_resolver()
     if resolver is None:
-        raise refuse_pool_bulk_read(str(path), "readset-not-staged")
+        raise LeaseRefused("readset-not-staged", kind="availability")
     staged = resolver.staged_read(path, expected_sha256=expected_sha256)
     if staged is None:
-        raise refuse_pool_bulk_read(str(path), "staged-not-serving")
-    candidates: list[tuple[str, str]] = []
-    if staged.get("ram_path") is not None and tier_is_allowed("ram"):
-        candidates.append(("ram", staged["ram_path"]))
-    if tier_is_allowed("ssd"):
-        candidates.append(("stage", staged["stage_path"]))
-    if not candidates:
-        raise refuse_pool_bulk_read(str(path), "no-permitted-tier")
-    last: str | None = None
-    for tier, copy in candidates:
+        raise LeaseRefused("staged-not-serving", kind="availability")
+    # acquire_entry_window records its own acquire refusal; the LeaseRefused
+    # propagates with kind intact (never converted into a pool read).
+    window, key = acquire_entry_window(resolver, path, staged)
+    return window, key, staged
+
+
+def _open_window_fd(resolver, window, key, path):
+    """Open one pinned key, recording the SDK serving record; exit window on failure."""
+    from .staged_lease import LeaseRefused
+    try:
+        fd, serving = window.open(key)
+    except LeaseRefused as refusal:
+        resolver.record_fallback(path, str(refusal))
         try:
-            info = os.lstat(copy)
-        except OSError as error:
-            last = f"{tier} copy is unreadable: {error.strerror}"
-            continue
-        if not stat.S_ISREG(info.st_mode):
-            last = f"{tier} copy is not a regular file"
-            continue
-        if info.st_size != staged["bytes"]:
-            last = f"{tier} copy size differs from the map"
-            continue
-        resolver.record_serving_tier(path, tier)
-        return Path(copy), info
-    raise refuse_pool_bulk_read(str(path), last or "staged-copy-unreadable")
+            window.__exit__(None, None, None)
+        except LeaseRefused:
+            pass
+        raise
+    tier = window.serving_tier or "stage"
+    resolver.record_serving_tier(
+        path, tier, pin_id=str(serving.get("pin_id") or ""),
+        range_ref=str(serving.get("range_ref") or ""))
+    return fd, serving, tier
 
 
 def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
@@ -694,9 +690,14 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     strict = policy_is_active()
     source, source_before = path, before
     source_signature = signature
+    window = None
     if strict:
-        source, source_before = _require_staged_bulk_source(path, expected_sha256)
-        source_signature = cache_file_stat_signature(source_before)
+        from .residency_map import residency_resolver
+        window, key, _staged = _acquire_bulk_window(path, expected_sha256)
+        descriptor, serving, _tier = _open_window_fd(
+            residency_resolver(), window, key, path)
+        source_signature = cache_file_stat_signature(os.fstat(descriptor))
+        source, source_before = Path(window.stage_path(key) or path), os.fstat(descriptor)
     def check(label, reserve_bytes=0):
         if resource_check is not None:
             resource_check(label + ':' + path.name, reserve_bytes=reserve_bytes)
@@ -704,7 +705,8 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         if (cache_file_stat_signature(os.fstat(descriptor)) != source_signature or
                 cache_file_stat_signature(path.lstat()) != signature):
             raise RuntimeError('verified activation file changed during loading')
-    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    if window is None:
+        descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     raw = reader = value = payload = None
     try:
         unchanged(descriptor)
@@ -780,7 +782,12 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         if reader is not None:
             reader.close()
         raw = reader = None
-        os.close(descriptor)
+        if window is not None:
+            # The held descriptor closes and the exact ref releases here,
+            # after the owned buffer is fully read and verified above.
+            window.__exit__(None, None, None)
+        else:
+            os.close(descriptor)
     try:
         check('after_verified_capture_buffer_release')
     except BaseException:
@@ -941,6 +948,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     window = _ExactActivationPrefetch()
     reserved = False
     payload = tensor = raw = reader = body = owned = None
+    live_windows: list = []
     from .staged_tier_policy import policy_is_active
     strict = policy_is_active()
     try:
@@ -963,12 +971,22 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             if signature[2] != ref.file_bytes:
                 raise RuntimeError("exact activation entry size changed")
             source, source_before = path, prefetched_stat
+            lease_window = None
             if strict:
-                source, source_before = _require_staged_bulk_source(path, ref.sha256)
+                from .residency_map import residency_resolver
+                lease_window, lease_key, _staged = _acquire_bulk_window(
+                    path, ref.sha256)
+                live_windows.append(lease_window)
+                lease_fd, _serving, _tier = _open_window_fd(
+                    residency_resolver(), lease_window, lease_key, path)
+                source = Path(lease_window.stage_path(lease_key) or path)
+                source_before = os.fstat(lease_fd)
             raw = owned.buffer(ref.file_bytes)
             running = hashlib.sha256()
             consumed = 0
-            with source.open("rb", buffering=0) as handle:
+            opener = (source.open("rb", buffering=0) if lease_window is None
+                      else os.fdopen(lease_fd, "rb", buffering=0, closefd=False))
+            with opener as handle:
                 while consumed < ref.file_bytes:
                     view = memoryview(raw)[consumed:min(
                         ref.file_bytes, consumed + _ENTRY_READ_BLOCK_BYTES)]
@@ -1010,6 +1028,12 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                 release_activation_cache_file_pages(
                     source, expected_stat=source_before)
             raw = None
+            if lease_window is not None:
+                # Entry verified: descriptor closed, exact ref released
+                # before the next entry acquires.
+                lease_window.__exit__(None, None, None)
+                live_windows.remove(lease_window)
+                lease_window = None
         if scratch is None:
             owned.release()
         window.active = True
@@ -1018,6 +1042,10 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         window.active = False
         window._tensors.clear()
         payload = tensor = raw = reader = body = owned = None
+        while live_windows:
+            # Error paths must not strand pins: close descriptors and
+            # release exact refs, first failure raised last.
+            live_windows.pop().__exit__(None, None, None)
         if reserved:
             residency_check(-nbytes)
 

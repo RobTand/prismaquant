@@ -1353,14 +1353,17 @@ class ProductionWeightCache:
         path instead of failing the load — unless the allowed-tier policy is
         active, in which case the caller converts it into a refusal.
 
-        Under the active policy the open is RAM-first (the offered
-        ``ram_path`` when the tier is permitted) and SSD stage only when the
-        declaration permits. The serving tier is recorded at open, before
-        payload bytes are trusted, and rides the receipt. Inactive policy
-        keeps the legacy stage-only open order.
+        Under the active policy the staged copy is read through a
+        lifetime-pinned window (one per load): the RAM leg needs RAM-mover
+        covers the composed map does not carry and refuses fast, the SSD
+        copy acquires honestly with the map's leads, payload comes from the
+        held descriptor, and the SDK's own serving record is registered at
+        the successful actual open. Inactive policy keeps the legacy
+        stage-only open order.
         """
-        from .residency_map import StagedReadRefused, residency_resolver
-        from .staged_tier_policy import policy_is_active, tier_is_allowed
+        from .residency_map import (
+            StagedReadRefused, residency_map_key, residency_resolver)
+        from .staged_tier_policy import policy_is_active
         before = path.lstat()
         if not stat.S_ISREG(before.st_mode):
             raise RuntimeError("PWC file receipt requires a regular file, not a symlink")
@@ -1371,6 +1374,7 @@ class ProductionWeightCache:
             raise RuntimeError('PWC window file changed before its content read')
         source, source_before = path, before
         serving_tier = "pool"
+        pinned: tuple | None = None
         if staged is not None:
             # PrismaBuild recomposes the map after every egress, so a staged
             # copy can be released between the resolver's stat and this open.
@@ -1389,34 +1393,28 @@ class ProductionWeightCache:
                     raise StagedReadRefused('staged copy size differs from the declared file')
                 serving_tier = "stage"
             else:
-                candidates: list[tuple[str, Path]] = []
-                if staged.get("ram_path") is not None and tier_is_allowed("ram"):
-                    candidates.append(("ram", Path(staged["ram_path"])))
-                if tier_is_allowed("ssd"):
-                    candidates.append(("stage", Path(staged["stage_path"])))
-                if not candidates:
-                    raise StagedReadRefused("no permitted tier in the allowed tiers")
-                last: str | None = None
-                for tier, candidate in candidates:
+                from .staged_lease import LeaseRefused, acquire_entry_window
+                recorder = residency_resolver()
+                if recorder is None:
+                    raise StagedReadRefused("readset-not-staged")
+                window, key = acquire_entry_window(recorder, path, staged)
+                try:
+                    fd, serving = window.open(key)
+                except LeaseRefused as refusal:
+                    recorder.record_fallback(path, str(refusal))
                     try:
-                        candidate_before = candidate.lstat()
-                    except OSError as error:
-                        last = f'{tier} copy is unreadable: {error.strerror}'
-                        continue
-                    if not stat.S_ISREG(candidate_before.st_mode):
-                        last = f'{tier} copy is not a regular file'
-                        continue
-                    if candidate_before.st_size != before.st_size:
-                        last = f'{tier} copy size differs from the declared file'
-                        continue
-                    source, source_before = candidate, candidate_before
-                    serving_tier = tier
-                    last = None
-                    break
-                if last is not None:
-                    raise StagedReadRefused(last)
+                        window.__exit__(None, None, None)
+                    except LeaseRefused:
+                        pass
+                    raise
+                serving_tier = window.serving_tier or "stage"
+                recorder.record_serving_tier(
+                    path, serving_tier,
+                    pin_id=str(serving.get("pin_id") or ""),
+                    range_ref=str(serving.get("range_ref") or ""))
+                pinned = (window, fd, serving)
             recorder = residency_resolver()
-            if recorder is not None:
+            if recorder is not None and pinned is None:
                 recorder.record_serving_tier(path, serving_tier)
         source_signature = self._file_signature(source_before)
 
@@ -1424,20 +1422,46 @@ class ProductionWeightCache:
             return (StagedReadRefused(f'staged copy {message}') if staged is not None
                     else RuntimeError(f"PWC file {message}"))
 
-        try:
-            with source.open("rb") as handle:
-                if self._file_signature(os.fstat(handle.fileno())) != source_signature:
+        if pinned is None:
+            try:
+                with source.open("rb") as handle:
+                    if self._file_signature(os.fstat(handle.fileno())) != source_signature:
+                        raise changed("changed before its content read")
+                    raw = handle.read(source_before.st_size + 1)
+                    if (len(raw) != source_before.st_size
+                            or self._file_signature(os.fstat(handle.fileno())) != source_signature
+                            or self._file_signature(source.lstat()) != source_signature):
+                        raise changed("changed during its content read")
+            except OSError as error:
+                if staged is None:
+                    raise
+                raise StagedReadRefused(
+                    f'staged copy is unreadable: {error.strerror}') from None
+        else:
+            window, fd, serving = pinned
+            try:
+                first = os.fstat(fd)
+                if first.st_size != source_before.st_size:
                     raise changed("changed before its content read")
-                raw = handle.read(source_before.st_size + 1)
+                parts = []
+                remaining = source_before.st_size + 1
+                offset = 0
+                while remaining > 0:
+                    block = os.pread(fd, min(remaining, 8 << 20), offset)
+                    if not block:
+                        break
+                    parts.append(block)
+                    offset += len(block)
+                    remaining -= len(block)
+                raw = b"".join(parts)
                 if (len(raw) != source_before.st_size
-                        or self._file_signature(os.fstat(handle.fileno())) != source_signature
-                        or self._file_signature(source.lstat()) != source_signature):
+                        or self._file_signature(os.fstat(fd)) != self._file_signature(first)):
                     raise changed("changed during its content read")
-        except OSError as error:
-            if staged is None:
-                raise
-            raise StagedReadRefused(
-                f'staged copy is unreadable: {error.strerror}') from None
+            finally:
+                # The owned buffer is fully read above: the descriptor is
+                # closed and the exact ref released before deserialization,
+                # on success and on failure alike.
+                window.__exit__(None, None, None)
         if staged is not None and self._file_signature(path.lstat()) != signature:
             raise StagedReadRefused('declared file changed during the staged read')
         # The temporary serialized buffer is per loader worker and is released

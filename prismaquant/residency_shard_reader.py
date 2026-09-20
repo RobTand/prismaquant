@@ -77,6 +77,7 @@ from .staged_tier_policy import (
     policy_is_active,
     refuse_pool_bulk_read,
 )
+from .staged_lease import LeaseRefused, acquire_entry_window
 
 try:
     # safetensors' own dtype table, so the reader reads the format's spelling
@@ -412,14 +413,36 @@ class StagedShardReader:
         return self
 
     def __exit__(self, *args):
+        # Close every bound descriptor first, then release each window's
+        # exact ref: release-before-close is forbidden, and a forked child
+        # never releases (the window's pid guard makes that explicit).
+        failure = None
         while self._bound:
             row = self._bound.pop()
             try:
                 os.close(row[2])
-            except OSError:
-                pass
+            except OSError as exc:
+                if failure is None:
+                    failure = exc
+            window = row[6] if len(row) > 6 else None
+            if window is not None:
+                try:
+                    window.__exit__(None, None, None)
+                except LeaseRefused as exc:
+                    if failure is None:
+                        failure = exc
         if self._handle is not None:
-            return self._handle.__exit__(*args)
+            try:
+                result = self._handle.__exit__(*args)
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
+                result = False
+            if failure is not None:
+                raise failure
+            return result
+        if failure is not None:
+            raise failure
         return False
 
     def keys(self):
@@ -539,12 +562,15 @@ class StagedShardReader:
         hundred tensors cost one resolver lookup and one open per staged range
         rather than one per tensor.
 
-        Under the active allowed-tier policy the open is RAM-first (the
-        offered ``ram_path`` when the tier is permitted), SSD stage only
-        when the declaration permits, and a refusal — never a pool read —
-        when no permitted copy opens. The serving tier is recorded at open,
-        before payload bytes are trusted (INV-04). Inactive policy keeps the
-        legacy stage-only open order.
+        Under the active allowed-tier policy the range is pinned for the
+        reader's life: one lifetime window per staged entry (never per
+        tensor), payload read through the held descriptor, the SDK's own
+        serving record registered at the successful actual open, and the
+        exact ref released after the bound descriptors close. A RAM leg
+        needs RAM-mover covers the composed map does not carry, so it
+        refuses fast and the SSD copy acquires honestly with its own
+        material and lifetime. Any refusal — never a pool read. Inactive
+        policy keeps the legacy stage-only open order.
         """
         for row in self._bound:
             if row[0] <= start and end <= row[1]:
@@ -588,7 +614,15 @@ class StagedShardReader:
         candidates: list[tuple[str, str]] = []
         if entry.get("ram_path") is not None:
             if self._allowed is not None and "ram" in self._allowed:
-                candidates.append(("ram", entry["ram_path"]))
+                # A RAM leg needs RAM-mover covers, which the composed map
+                # does not carry: refuse the leg (availability) and fall
+                # through to the SSD copy with its own material+lifetime.
+                # SSD leads are never pretended to identify a RAM mover.
+                try:
+                    ram_covers(entry)
+                except LeaseRefused as refusal:
+                    self._resolver.record_ram_fallback(
+                        self._declared, str(refusal))
             else:
                 self._resolver.record_ram_fallback(
                     self._declared, "ram tier not in the allowed tiers")
@@ -599,46 +633,41 @@ class StagedShardReader:
                 self._declared, "ssd tier not in the allowed tiers")
         if not candidates:
             raise refuse_pool_bulk_read(self._declared, "no-permitted-tier")
-        last_error: str | None = None
-        for tier, copy in candidates:
+        key = residency_map_key(self._declared, entry["offset"])
+        from .staged_lease import LeaseRefused, acquire_entry_window
+        window, key = acquire_entry_window(
+            self._resolver, self._declared, entry)
+        try:
+            fd, serving = window.open(key)
+            info = os.fstat(fd)
+            if info.st_size != entry["bytes"]:
+                raise LeaseRefused("lease-open-size-changed", kind="integrity")
+        except (OSError, LeaseRefused) as error:
             try:
-                fd = os.open(copy, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
-            except OSError as error:
-                last_error = f"{tier} copy is unreadable: {error.strerror}"
-                if tier == "ram":
-                    self._resolver.record_ram_fallback(self._declared, last_error)
-                else:
-                    self._resolver.record_fallback(self._declared, last_error)
-                continue
-            try:
-                info = os.fstat(fd)
-                if not stat.S_ISREG(info.st_mode):
-                    raise ValueError(f"{tier} copy is not a regular file")
-                if info.st_size != entry["bytes"]:
-                    raise ValueError(f"{tier} copy size differs from the map")
-            except (OSError, ValueError) as error:
-                os.close(fd)
-                last_error = f"{tier} copy {error}"
-                if tier == "ram":
-                    self._resolver.record_ram_fallback(self._declared, last_error)
-                else:
-                    self._resolver.record_fallback(self._declared, last_error)
-                continue
-            # The open fence passed: the serving tier is recorded at open,
-            # before a payload byte is read.
-            self._resolver.record_serving_tier(self._declared, tier)
-            if not self._bound:
-                # Every range of one declared shard is staged under the same root,
-                # so the mount's read shape is read once per reader, not per tensor.
-                self._shape = _read_shape(copy)
-            row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
-                   _signature(info), entry, tier)
-            self._bound.append(row)
-            return row
-        if strict:
-            raise refuse_pool_bulk_read(
-                self._declared, last_error or "staged-copy-unreadable")
-        return None
+                window.__exit__(None, None, None)
+            except LeaseRefused:
+                pass
+            if isinstance(error, LeaseRefused):
+                self._resolver.record_fallback(self._declared, str(error))
+                raise
+            reason = f"staged range is unreadable: {error.strerror}"
+            self._resolver.record_fallback(self._declared, reason)
+            raise refuse_pool_bulk_read(self._declared, reason)
+        # The open fence passed on a held descriptor: the SDK's own
+        # serving record is registered at this successful actual open.
+        tier = window.serving_tier or "stage"
+        self._resolver.record_serving_tier(
+            self._declared, tier,
+            pin_id=str(serving.get("pin_id") or ""),
+            range_ref=str(serving.get("range_ref") or ""))
+        if not self._bound:
+            # Every range of one declared shard is staged under the same root,
+            # so the mount's read shape is read once per reader, not per tensor.
+            self._shape = _read_shape(entry["stage_path"])
+        row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
+               _signature(info), entry, tier, window)
+        self._bound.append(row)
+        return row
 
     def _drop(self, row) -> None:
         if row in self._bound:
@@ -647,6 +676,17 @@ class StagedShardReader:
             os.close(row[2])
         except OSError:
             pass
+        window = row[6] if len(row) > 6 else None
+        if window is not None:
+            # The window is dead: release its exact ref now (after the
+            # descriptor above) rather than lending it to a later tensor.
+            # A release failure is recorded, never silent; the caller's
+            # read error still raises.
+            try:
+                window.__exit__(None, None, None)
+            except LeaseRefused as exc:
+                if self._resolver is not None:
+                    self._resolver.record_fallback(self._declared, str(exc))
 
     def _staged_tensor(self, name):
         span = self._span(name)
