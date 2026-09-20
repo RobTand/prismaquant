@@ -1544,7 +1544,7 @@ def build_source_checkpoint_identity(
         total = sum(int(fingerprints[index]["size"]) for index in misses)
         raise RuntimeError(
             "dev mode refuses an unannounced source rehash of "
-            f"{total} bytes across {len(uncovered)} shard(s): the declared "
+            f"{total} bytes across {len(misses)} shard(s): the declared "
             f"digest cache {digest_cache_path} does not cover them; "
             "initialize it with an explicit certified run instead "
             "(certified mode would hash them here)"
