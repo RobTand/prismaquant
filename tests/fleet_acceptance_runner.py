@@ -69,6 +69,23 @@ def _write_result(path: Path, doc: dict) -> None:
     path.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
 
 
+def _note(world: World, **fields) -> None:
+    """Append milestone evidence to a sidecar the caller prints on failure.
+
+    Tracebacks name the failing line but not the values; the sidecar
+    carries the attestation bodies, reply shapes, and terminal facts the
+    RED/GREEN discriminator reads.
+    """
+    path = world.work / "notes.json"
+    try:
+        notes = json.loads(path.read_text())
+    except (OSError, ValueError):
+        notes = {}
+    notes.update(json.loads(json.dumps(fields, sort_keys=True,
+                                       default=str)))
+    path.write_text(json.dumps(notes, indent=1, sort_keys=True) + "\n")
+
+
 class ControlledBackend:
     """Deterministic process state for the real Authority (test-owned half).
 
@@ -559,6 +576,8 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
     assert auto_reclaimed[1] == [], auto_reclaimed
     evidence["auto_reclaimed"] = auto_reclaimed
     attestation = lease.read_scope_attestation(world.queue, KEY, NONCE)
+    _note(world, attestation=attestation if isinstance(attestation, dict)
+          else str(attestation))
     assert attestation is not None and not isinstance(
         attestation, Exception), (
         "no persisted proof after finish+egress: reclaim cannot verify")

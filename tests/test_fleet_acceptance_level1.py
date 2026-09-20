@@ -667,6 +667,7 @@ def _run_scenario(name: str, tmp_path: Path, scenario_dir: str,
     base = candidate_work if candidate_work is not None else tmp_path
     work = base / scenario_dir
     result = base / (scenario_dir + ".json")
+    notes = work / scenario_dir / "notes.json"
     done = subprocess.run(
         [sys.executable, str(RUNNER), name, "--work", str(work),
          "--result", str(result), "--checkout", str(ROOT)],
@@ -683,6 +684,8 @@ def _run_scenario(name: str, tmp_path: Path, scenario_dir: str,
     if doc["status"] != "qualified":
         print("EVIDENCE " + json.dumps(doc.get("evidence", {}),
                                        sort_keys=True)[:15000])
+        if notes.is_file():
+            print("NOTES " + notes.read_text()[:8000])
     assert doc["status"] == "qualified", doc["reason"]
     return doc
 
