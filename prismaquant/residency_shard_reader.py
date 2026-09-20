@@ -611,29 +611,6 @@ class StagedShardReader:
                    _signature(info), entry, "stage")
             self._bound.append(row)
             return row
-        candidates: list[tuple[str, str]] = []
-        if entry.get("ram_path") is not None:
-            if self._allowed is not None and "ram" in self._allowed:
-                # A RAM leg needs RAM-mover covers, which the composed map
-                # does not carry: refuse the leg (availability) and fall
-                # through to the SSD copy with its own material+lifetime.
-                # SSD leads are never pretended to identify a RAM mover.
-                try:
-                    ram_covers(entry)
-                except LeaseRefused as refusal:
-                    self._resolver.record_ram_fallback(
-                        self._declared, str(refusal))
-            else:
-                self._resolver.record_ram_fallback(
-                    self._declared, "ram tier not in the allowed tiers")
-        if self._allowed is not None and "ssd" in self._allowed:
-            candidates.append(("stage", entry["stage_path"]))
-        else:
-            self._resolver.record_fallback(
-                self._declared, "ssd tier not in the allowed tiers")
-        if not candidates:
-            raise refuse_pool_bulk_read(self._declared, "no-permitted-tier")
-        key = residency_map_key(self._declared, entry["offset"])
         from .staged_lease import LeaseRefused, acquire_entry_window
         window, key = acquire_entry_window(
             self._resolver, self._declared, entry)
