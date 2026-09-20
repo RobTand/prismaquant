@@ -63,8 +63,10 @@ def test_pb_commit_dev_stamp_reuses_the_memo(monkeypatch, tmp_path):
         assert calls == ["b" * 64, "b" * 64]
         import json
 
-        rows = [json.loads(line) for line in
-                (tmp_path / "progress.json").read_text().splitlines() if line]
-        assert [r["units_completed"] for r in rows[-2:]] == [1, 2]
+        # The progress record is atomically replaced per commit, so the file
+        # holds the latest line: the second commit's record.
+        row = json.loads((tmp_path / "progress.json").read_text())
+        assert row["units_completed"] == 2
+        assert row["unit"] == "layers.0.b"
     finally:
         tessera_joint_aura._DEV_SOURCE_SHA256_MEMO = None
