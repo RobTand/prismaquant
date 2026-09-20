@@ -94,48 +94,55 @@ def eval_pool_delta(before, after, mount):
     return True, second - first
 
 
-def expect_serving_tier(*, ram_offered, ram_allowed, ssd_allowed, serving):
+def expect_serving_tier(*, ram_offered, allowed, lease_tier_id, serving):
     """(ok, reason) for the observed serving tier (pure).
 
-    Valid offered RAM is selected first; SSD serves only when explicitly
-    allowed and no RAM was offered. A missing offer or tier never passes.
+    A valid offered RAM leg serves first when allowed; an explicitly
+    SSD-only run serves exactly the lease tier it acquired. Anything
+    else -- arc/pool/unknown families, RAM without a recorded offer,
+    RAM served while disallowed -- fails. A missing offer or tier
+    never passes.
     """
 
     tier = serving.get("tier_id") if isinstance(serving, dict) else None
     if not isinstance(tier, str) or not tier:
         return False, "serving names no tier"
-    family = tier.split(":")[0]
-    if ram_offered and ram_allowed:
-        if family == "ram":
+    if tier.split(":")[0] == "ram":
+        if ram_offered and "ram" in allowed:
             return True, "ram-served"
-        return False, f"ram offered but served {tier}"
-    if ssd_allowed and not ram_offered:
-        if family == "ram":
-            return False, "ram served without a recorded offer"
+        return False, f"ram served without offer+allowance: {tier}"
+    if "ssd" in allowed and isinstance(lease_tier_id, str) \
+            and lease_tier_id and tier == lease_tier_id:
         return True, "ssd-served"
-    return False, "no appropriate tier allowed for this offer"
+    return False, f"tier not served as allowed: {tier}"
 
 
-def _find_pin_refs(sdk, queue, pin_id):
-    """(owner, refs) for one pin id, or (None, None) when fully released.
+def _read_pin_record(sdk, queue, pin_id):
+    """(owner, pin) for one pin id, or (None, None) on clean absence.
 
-    Scans owner directories (pin ids are globally unique); reads through
-    the SDK's own pin validation. Unreadable pins raise -- unknown is
-    never an empty census here.
+    Error-visible reads: anything but ENOENT propagates, so unknown
+    census never reads as released. Only a fully missing file is
+    absence; a present-but-unreadable or unparseable pin is uncertainty.
     """
 
     import os as _os
     root = sdk.leases_root(queue)
-    for owner_dir in sorted(_os.scandir(root), key=lambda e: e.name):
-        if not owner_dir.is_dir():
+    try:
+        with _os.scandir(root) as entries:
+            owners = sorted(entry.name for entry in entries
+                            if entry.is_dir())
+    except FileNotFoundError:
+        return None, None
+    for owner in owners:
+        path = Path(root) / owner / f"{pin_id}.lease.json"
+        try:
+            raw = path.read_bytes()
+        except FileNotFoundError:
             continue
-        path = Path(owner_dir.path) / f"{pin_id}.lease.json"
-        if not path.is_file():
-            continue
-        pin = sdk.validate_pin(json.loads(path.read_text()))
+        pin = sdk.validate_pin(json.loads(raw))
         refs = pin["refs"]
         assert isinstance(refs, dict)
-        return str(pin.get("owner_action_key") or owner_dir.name), refs
+        return str(pin.get("owner_action_key") or owner), pin
     return None, None
 
 
@@ -231,7 +238,7 @@ def main() -> int:
             if not result.get("pool_reads_observed", False):
                 result["refusal"] += "; pool reads UNOBSERVED, not proven zero"
                 print(json.dumps(result, sort_keys=True), flush=True)
-                return 1
+                return UNQUALIFIED
             if result.get("pool_client_read_delta", 1) != 0:
                 result["refusal"] += "; POOL WAS READ"
                 print(json.dumps(result, sort_keys=True), flush=True)
@@ -287,8 +294,22 @@ def main() -> int:
             print(json.dumps(result, sort_keys=True), flush=True)
             return UNQUALIFIED
         allowed = set(ns.allowed_tiers.split(","))
+        try:
+            lease_tier = resolver.lease_identity().get("tier_id")
+        except Exception:  # noqa: BLE001 -- diagnostic only
+            lease_tier = None
+        result["lease_tier_id"] = lease_tier
         window = acquire_entry_window(resolver, ns.declared, entry)
-        from prismabuild.pool import PoolQueue
+        try:
+            from prismabuild.pool import PoolQueue
+        except ImportError as exc:
+            result["finding"] = {
+                "blocked": f"live queue unreachable: {exc}",
+                "identity_present": identity_presence(),
+            }
+            result["ok"] = False
+            print(json.dumps(result, sort_keys=True), flush=True)
+            return UNQUALIFIED
         queue = PoolQueue("/mnt/shared/prismabuild-fleet/pb-queue")
         nonce = os.environ.get("PRISMABUILD_ACTION_NONCE") or ""
         scope_id = os.environ.get("PRISMABUILD_ACTION_SCOPE") or ""
@@ -297,7 +318,7 @@ def main() -> int:
             result["serving"] = serving
             tier_ok, tier_reason = expect_serving_tier(
                 ram_offered=bool(entry.get("ram_path")),
-                ram_allowed="ram" in allowed, ssd_allowed="ssd" in allowed,
+                allowed=allowed, lease_tier_id=lease_tier,
                 serving=serving)
             result["serving_tier_check"] = tier_reason
             if not tier_ok:
@@ -306,31 +327,80 @@ def main() -> int:
                 entered.close_fd(fd)
                 print(json.dumps(result, sort_keys=True), flush=True)
                 return UNQUALIFIED
-            # Bind THIS exact attempt's refs: the pin must hold at least
-            # one ref for our (nonce, scope); another attempt's lease
-            # never counts.
-            _owner, refs = _find_pin_refs(
-                sdk, queue, str(serving.get("pin_id") or ""))
-            mine = attempt_refs(refs or {}, nonce, scope_id)
-            result["held_refs_for_attempt"] = mine
-            owners, tainted = sdk.live_for(
-                queue, {os.path.normpath(str(serving.get("stage_path", "")))})
-            result["pinned_while_open"] = owners
-            result["tainted_while_open"] = tainted
-            if not mine or not owners or tainted:
+            # Bind THIS exact attempt through public SDK shapes: the pin
+            # record for the served pin_id must name our (nonce, scope)
+            # among its refs, and its selected entry must be the composed
+            # path actually served. Another attempt's lease never counts.
+            pin_id = serving.get("pin_id")
+            if not isinstance(pin_id, str) or not pin_id:
+                result["finding"] = "serving names no pin"
+                result["ok"] = False
+                entered.close_fd(fd)
+                print(json.dumps(result, sort_keys=True), flush=True)
+                return UNQUALIFIED
+            try:
+                _owner, pin = _read_pin_record(sdk, queue, pin_id)
+            except Exception as exc:  # noqa: BLE001 -- unknown, not empty
                 result["finding"] = (
-                    "held proof incomplete: exact-attempt refs, live pin, "
-                    "and clean census all required")
+                    "pin record unreadable while open: "
+                    f"{type(exc).__name__}: {exc}")
+                result["ok"] = False
+                entered.close_fd(fd)
+                print(json.dumps(result, sort_keys=True), flush=True)
+                return UNQUALIFIED
+            if pin is None:
+                result["finding"] = "served pin has no record while open"
+                result["ok"] = False
+                entered.close_fd(fd)
+                print(json.dumps(result, sort_keys=True), flush=True)
+                return UNQUALIFIED
+            selected = [str(e.get("stage_path", ""))
+                        for e in pin.get("entries", [])
+                        if isinstance(e, dict)
+                        and str(e.get("key") or "")
+                        == str(serving.get("range_ref") or "")]
+            composed_paths = {os.path.normpath(str(entry.get("stage_path") or ""))}
+            if entry.get("ram_path"):
+                composed_paths.add(os.path.normpath(str(entry["ram_path"])))
+            result["selected_paths"] = selected
+            if len(selected) != 1 or os.path.normpath(
+                    selected[0]) not in composed_paths:
+                result["finding"] = "served pin entry is not the composed path"
+                result["ok"] = False
+                entered.close_fd(fd)
+                print(json.dumps(result, sort_keys=True), flush=True)
+                return UNQUALIFIED
+            refs = pin.get("refs", {})
+            mine = attempt_refs(
+                refs if isinstance(refs, dict) else {}, nonce, scope_id)
+            result["held_refs_for_attempt"] = mine
+            owners, tainted = sdk.live_for(queue, None)
+            pinned_here = owners.get(os.path.normpath(selected[0]), [])
+            result["pinned_while_open"] = {selected[0]: pinned_here}
+            result["tainted_while_open"] = tainted
+            if not mine or pin_id not in pinned_here or tainted:
+                result["finding"] = (
+                    "held proof incomplete: exact-attempt refs, live pin "
+                    "for the served path, and clean census all required")
                 result["ok"] = False
                 entered.close_fd(fd)
                 print(json.dumps(result, sort_keys=True), flush=True)
                 return UNQUALIFIED
             entered.close_fd(fd)
-        # After release THIS exact lease must be gone; unrelated readers
-        # may remain and are not disturbed.
-        _owner_after, refs_after = _find_pin_refs(
-            sdk, queue, str(serving.get("pin_id") or ""))
-        lingering = attempt_refs(refs_after or {}, nonce, scope_id)
+        # After release THIS exact lease must be gone: uncertainty fails,
+        # while unrelated healthy readers may remain undisturbed.
+        try:
+            _owner_after, pin_after = _read_pin_record(sdk, queue, pin_id)
+        except Exception as exc:  # noqa: BLE001
+            result["finding"] = (
+                f"post-release pin census uncertain: "
+                f"{type(exc).__name__}: {exc}")
+            result["ok"] = False
+            print(json.dumps(result, sort_keys=True), flush=True)
+            return UNQUALIFIED
+        lingering = attempt_refs(
+            (pin_after.get("refs", {}) if isinstance(pin_after, dict)
+             else {}), nonce, scope_id)
         result["lingering_refs_for_attempt"] = lingering
         if lingering:
             result["finding"] = "exact lease survived release"
@@ -340,6 +410,11 @@ def main() -> int:
         owners_after, tainted_after = sdk.live_for(queue, None)
         result["pins_after_release"] = owners_after
         result["tainted_after_release"] = tainted_after
+        if tainted_after:
+            result["finding"] = "post-release census tainted: release unproven"
+            result["ok"] = False
+            print(json.dumps(result, sort_keys=True), flush=True)
+            return UNQUALIFIED
         after = _mountstats()
         observed, delta = eval_pool_delta(before, after, pool_mount)
         result["pool_reads_observed"] = observed
