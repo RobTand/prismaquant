@@ -26,7 +26,9 @@ from dispatch_joint_quanta import (  # noqa: E402
     ADJOINT_SCHEMA,
     CHUNK_PROGRESS_GRACE_S,
     CONSUMER_TAGS,
+    HEAD_PROGRESS_GRACE_S,
     SUBMISSION_PRIORITY,
+    DispatchRefused,
     FakeGateway,
     main,
     quantum_argv,
@@ -243,7 +245,8 @@ def test_stage_a_argv_prefetch_override_is_payload_flagged(tmp_path, campaign):
     carries ``--prefetch-override`` -- the channel that crosses the container
     boundary, since the launcher forwards no ambient action environment into
     the payload -- and nothing else in the argv moves."""
-    manifest = tmp_path / "adjoint.data-manifest.json.gz"
+    manifest = _adjoint_manifest(tmp_path, campaign,
+                                   name="adjoint.data-manifest.json.gz")
     plain = stage_a_argv(manifest, campaign)
     assert "--prefetch-override" not in plain
     assert plain[-1] == "--resume"
@@ -389,3 +392,170 @@ def test_rerun_publishes_nothing_already_terminal(tmp_path, campaign, records_di
     gateway.submitted.clear()
     assert main(_argv(records_dir, out, receipt_path), _gateway=gateway) == 0
     assert gateway.submitted == []
+
+
+# -- stage-A manifest binding: payload digests + progress phases (#835) -------
+
+
+def _adjoint_manifest(tmp_path, campaign, *, phases=("head", "chain-000", "chain-001"),
+                      parent="d" * 64, plan_sha256=None, prepared_sha256=None,
+                      name="adjoint.data-manifest.json", gzip_bytes=False,
+                      entry_count=0):
+    """A minimal stage-A data manifest: schema, entries, and the annotations
+    the dispatcher derives the submission binding from (phase names in read
+    order, the parent read-set digest, the sealed plan/prepared digests)."""
+    manifest = {
+        "schema": "prismaquant.prismabuild.data_manifest.v1",
+        "mount_prefix": "/mnt/shared",
+        "entries": [],
+        "entry_count": entry_count,
+        "total_bytes": 0,
+        "annotations": {
+            "phases": [{"name": name, "bytes": 0, "cumulative_bytes": 0}
+                       for name in phases],
+            "parent_manifest_sha256": parent,
+            "plan_sha256": campaign["plan_sha256"] if plan_sha256 is None else plan_sha256,
+            "prepared_sha256": campaign["prepared_sha256"] if prepared_sha256 is None else prepared_sha256,
+        },
+    }
+    path = tmp_path / name
+    raw = json.dumps(manifest).encode("utf-8")
+    if gzip_bytes:
+        import gzip
+        raw = gzip.compress(raw)
+    path.write_bytes(raw)
+    return path
+
+
+def _payload_inner(argv):
+    tail = argv[argv.index("--") + 1:]
+    inner = tail[tail.index("--", tail.index("--spec")) + 1:]
+    assert inner[:3] == ["python3", "-m", "prismaquant.joint_adjoint_capture"]
+    return inner
+
+
+def test_stage_a_argv_binds_manifest_digests_into_payload(tmp_path, campaign):
+    """The tier redirect needs the manifest digest *inside* the payload:
+    ``bind_residency_manifest`` refuses a run that bound nothing, and the
+    wrapper forwards no digest flag the dispatcher does not thread. The
+    payload therefore carries ``--data-manifest-sha256`` (the submitted
+    manifest bytes) and ``--read-manifest-sha256`` (the annotated parent
+    read-set digest); the pbrun envelope keeps naming the file."""
+    manifest = _adjoint_manifest(tmp_path, campaign)
+    argv = stage_a_argv(manifest, campaign)
+    inner = _payload_inner(argv)
+    assert inner[inner.index("--data-manifest-sha256") + 1] == hashlib.sha256(
+        manifest.read_bytes()).hexdigest()
+    assert inner[inner.index("--read-manifest-sha256") + 1] == "d" * 64
+    assert argv[argv.index("--data-manifest") + 1] == str(manifest)
+
+
+def test_stage_a_argv_declares_manifest_phases_as_progress(tmp_path, campaign):
+    """Progress declarations come from the validated manifest annotations, in
+    manifest order -- never a hardcoded list. The worker refuses undeclared
+    names, so a stale or invented list would silence the run's window."""
+    manifest = _adjoint_manifest(tmp_path, campaign)
+    argv = stage_a_argv(manifest, campaign)
+    phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
+              if word == "--progress-phase"]
+    assert phases == ["head=1800", "chain-000=900", "chain-001=900"]
+    assert HEAD_PROGRESS_GRACE_S == 1800
+    assert CHUNK_PROGRESS_GRACE_S == 900
+
+
+def test_stage_a_argv_reads_gzip_manifest_bytes(tmp_path, campaign):
+    """The default manifest filename is ``.json.gz``; the bound digest covers
+    the wire bytes pbrun ingests either way."""
+    manifest = _adjoint_manifest(tmp_path, campaign, gzip_bytes=True,
+                                 name="adjoint.data-manifest.json.gz")
+    argv = stage_a_argv(manifest, campaign)
+    inner = _payload_inner(argv)
+    assert inner[inner.index("--data-manifest-sha256") + 1] == hashlib.sha256(
+        manifest.read_bytes()).hexdigest()
+    phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
+              if word == "--progress-phase"]
+    assert phases[0] == "head=1800"
+
+
+def test_stage_a_argv_refuses_manifest_plan_mismatch(tmp_path, campaign):
+    """A manifest built against another plan/prepared pair is a mixed
+    campaign: refuse before publishing, exit 3 downstream."""
+    manifest = _adjoint_manifest(tmp_path, campaign, plan_sha256="f" * 64)
+    with pytest.raises(DispatchRefused, match="plan"):
+        stage_a_argv(manifest, campaign)
+
+
+@pytest.mark.parametrize("defect", [
+    "missing-annotations", "empty-phases", "dup-phase", "blank-phase",
+    "bad-parent", "bad-schema", "count-drift", "unreadable",
+])
+def test_stage_a_argv_refuses_malformed_manifest(tmp_path, campaign, defect):
+    """Every malformed manifest shape refuses at dispatch time, never as a
+    launched action with an inert tier path."""
+    manifest = tmp_path / "adjoint.data-manifest.json"
+    if defect == "unreadable":
+        pass
+    else:
+        phases = ("head", "chain-000")
+        parent = "d" * 64
+        schema = "prismaquant.prismabuild.data_manifest.v1"
+        count = 0
+        annotations = True
+        if defect == "empty-phases":
+            phases = ()
+        elif defect == "dup-phase":
+            phases = ("head", "head")
+        elif defect == "blank-phase":
+            phases = ("head", "")
+        elif defect == "bad-parent":
+            parent = "not-a-digest"
+        elif defect == "bad-schema":
+            schema = "prismaquant.prismabuild.data_manifest.v9"
+        elif defect == "count-drift":
+            count = 7
+        manifest.write_text(json.dumps({
+            "schema": schema,
+            "mount_prefix": "/mnt/shared",
+            "entries": [],
+            "entry_count": count,
+            "total_bytes": 0,
+            **({"annotations": {
+                "phases": [{"name": name} for name in phases],
+                "parent_manifest_sha256": parent,
+                "plan_sha256": campaign["plan_sha256"],
+                "prepared_sha256": campaign["prepared_sha256"],
+            }} if annotations else {}),
+        }))
+        if defect == "missing-annotations":
+            payload = json.loads(manifest.read_text())
+            del payload["annotations"]
+            manifest.write_text(json.dumps(payload))
+    with pytest.raises(DispatchRefused):
+        stage_a_argv(manifest, campaign)
+
+
+def test_main_publishes_bound_stage_a_row(tmp_path, campaign, records_dir):
+    """The published stage-A row carries the manifest binding end to end:
+    pbrun envelope (file + residency + phases), payload digests, and the
+    state event recording both digests for the launch record."""
+    manifest = _adjoint_manifest(tmp_path, campaign)
+    gateway = FakeGateway()
+    out = tmp_path / "out"
+    assert main(_argv(records_dir, out) + ["--adjoint-manifest", str(manifest)],
+                _gateway=gateway) == 0
+    rows = [row for row in gateway.submitted if row["kind"] == "stage-a"]
+    assert len(rows) == 1
+    argv = rows[0]["argv"]
+    inner = _payload_inner(argv)
+    data_id = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert inner[inner.index("--data-manifest-sha256") + 1] == data_id
+    assert inner[inner.index("--read-manifest-sha256") + 1] == "d" * 64
+    phases = [argv[i + 1] for i, word in enumerate(argv[:-1])
+              if word == "--progress-phase"]
+    assert phases == ["head=1800", "chain-000=900", "chain-001=900"]
+    events = [json.loads(line) for line
+              in (out / "layer-quanta" / "campaign-state.json").read_text().splitlines()
+              if line]
+    assert events[0]["event"] == "stage-a-submitted"
+    assert events[0]["data_manifest_sha256"] == data_id
+    assert events[0]["read_manifest_sha256"] == "d" * 64
