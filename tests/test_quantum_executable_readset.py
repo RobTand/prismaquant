@@ -704,7 +704,7 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
             parts = ref.name.split("-")
             if parts[0] == "boundary":
                 plane = False
-                bounds.add(int(parts[3]))
+                bounds.add(int(parts[2]))
             events.append(("boundary-path-open", ref.path))
         if plane:
             events.append(("checkpoint-plane-open", len(references)))
