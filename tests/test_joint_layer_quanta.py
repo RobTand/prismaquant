@@ -387,7 +387,7 @@ def test_real_plan_adjoint_manifest():
         assert all(index >= head_size for index in forward)
     assert manifest["read_plan"]["read_bytes"] == sum(
         p["bytes"] for p in manifest["read_plan"]["phases"])
-    assert manifest["total_bytes"] == head_bytes + parent["annotations"]["bytes"][
+    assert manifest["total_bytes"] == head_end + parent["annotations"]["bytes"][
         "source_extents"]
 
 
