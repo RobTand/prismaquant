@@ -15,10 +15,10 @@ exact six-field shape first -- missing or extra fields never match, in
 either mode. Portable acceptance emits the `[DEV-MODE]` trust line and rides
 the existing uncertified stamp; the returned identity bytes are unchanged so
 the prepared `_same` wall still holds. In dev only, there is no automatic
-hidden giant hash: a declared cache path with no file, a cache that
-recognizes nothing, mutated rows, or new rows without an initialization
-contract each refuse fast with the byte count (initialize explicitly with a
-certified run); omitting the cache path hashes exactly as before, and
+hidden giant hash in either entry point: a missing, unrecognized, mutated,
+or contract-less top-up cache each refuses fast with the byte count, and so
+does a call with no cache path at all (initialize explicitly with a
+certified run, which remains the existing explicit preparation path);
 certified rehash behavior is unchanged. Gate:
 `tests/test_source_identity_portable_device.py`.
 Stamps follow, newest first, each recording its own branch and date.
@@ -2444,11 +2444,11 @@ cache. A cache proven on another host's NFS mount is portable in dev mode
 only, and only when every mutation-sensitive field matches and the sole
 difference is the client-local `st_dev` (same export, two mounts): certified
 mode still refuses it, and dev records the `[DEV-MODE]` trust line on every
-portable acceptance. A dev run whose declared cache path has no file, whose
-cache recognizes nothing, carries mutated rows, or meets new rows without an
-initialization contract refuses fast with the byte count instead of sealing
-silently -- initialize explicitly with a certified run; omitting the path
-hashes exactly as before.
+portable acceptance. A dev run with no cache path at all, a path with no
+file, a cache that recognizes nothing, mutated rows, or new rows without
+an initialization contract refuses fast with the byte count instead of
+sealing silently -- initialize explicitly with a certified run, which
+remains the existing explicit preparation path.
 Manifest construction and owner adoption otherwise refuse a cross-device
 cache as before. A reuse request has a real host-local
 dependency until a separately qualified cross-host source proof exists; the

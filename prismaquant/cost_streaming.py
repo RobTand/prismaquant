@@ -1540,12 +1540,14 @@ def build_source_checkpoint_identity(
             cached = portable_index.get(portable_fingerprint_key(fingerprint))
         digests.append(str(cached["sha256"]) if cached is not None else None)
     misses = [index for index, digest in enumerate(digests) if digest is None]
-    if misses and dev_mode_enabled() and digest_cache_path is not None:
+    if misses and dev_mode_enabled():
         total = sum(int(fingerprints[index]["size"]) for index in misses)
+        where = (f"the declared digest cache {digest_cache_path} does not "
+                 "cover them" if digest_cache_path is not None
+                 else "no digest cache is declared")
         raise RuntimeError(
             "dev mode refuses an unannounced source rehash of "
-            f"{total} bytes across {len(misses)} shard(s): the declared "
-            f"digest cache {digest_cache_path} does not cover them; "
+            f"{total} bytes across {len(misses)} shard(s): {where}; "
             "initialize it with an explicit certified run instead "
             "(certified mode would hash them here)"
         )
@@ -1808,15 +1810,16 @@ def build_streamed_model_identity(
             f"{len(portable_paths)} recorded shard digests across a "
             "client device-number difference (dev-only portable reuse; "
             "certified mode would rehash): uncertified")
-    if cache_path is not None and dev_mode_enabled():
-        if not cache_path.is_file():
+    if dev_mode_enabled():
+        if cache_path is None or not cache_path.is_file():
             total_live = sum(
                 int(fingerprint["size"]) for fingerprint in fingerprints)
+            where = (f"at the declared {cache_path}" if cache_path is not None
+                     else "with none declared")
             raise RuntimeError(
                 "dev mode refuses an unannounced source rehash of "
-                f"{total_live} bytes: no identity cache at the declared "
-                f"{cache_path}; initialize it with an explicit certified "
-                "run instead"
+                f"{total_live} bytes: no usable identity cache {where}; "
+                "initialize one with an explicit certified run instead"
             )
         uncovered = [
             (str(fingerprint["path"]), int(fingerprint["size"]))
