@@ -622,14 +622,28 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     wire_path = _wire_path(wire_dir, qname, format_name)
 
     def _publish():
-        _store_rendered_weight_entry(
-            weights=cache.weights,
-            qname=qname,
-            fmt=format_name,
-            tensor=staged,
-            cache_dir_path=Path(cache.cache_dir) if cache.cache_dir else None,
-            weight_dtype=torch.bfloat16,
-        )
+        publication = getattr(cache, "produced_render_publication", None)
+        if publication is not None and cache.cache_dir:
+            # The connected produced-render path: PB prewrite budget
+            # admission BEFORE any byte (a refusal leaves no file), the
+            # same atomic tensor writer underneath, then prepaid batch
+            # publication funded from the producer's reserved window; a
+            # render already filed in the cache is reused inside without
+            # a fresh charge or rewrite.
+            cache.store_rendered_weight_published(
+                qname=qname, fmt=format_name, tensor=staged,
+                weight_dtype=torch.bfloat16,
+                command_extra=getattr(publication, "command_extra", ()),
+            )
+        else:
+            _store_rendered_weight_entry(
+                weights=cache.weights,
+                qname=qname,
+                fmt=format_name,
+                tensor=staged,
+                cache_dir_path=Path(cache.cache_dir) if cache.cache_dir else None,
+                weight_dtype=torch.bfloat16,
+            )
         tmp = wire_path.with_suffix(".tessera.tmp")
         tmp.write_bytes(blob)
         os.replace(tmp, wire_path)
@@ -5092,6 +5106,22 @@ def _main(argv, *, source_scope) -> int:
     ap.add_argument("--model", required=True)
     ap.add_argument("--out", required=True, help="cost payload (.pkl)")
     ap.add_argument("--cache-dir", required=True)
+    ap.add_argument("--produced-render-publication", action="store_true",
+                    help="opt-in: publish the campaign's rendered weights "
+                         "through PrismaBuild's prepaid produced-output "
+                         "lifecycle (prewrite admission before bytes, "
+                         "prepaid batch publication from this admitted "
+                         "owner's reserved window).  Requires running as "
+                         "an admitted PB owner action whose submission "
+                         "declared the produced-output template")
+    ap.add_argument("--produced-output-pool-root", default=None,
+                    help="PrismaBuild pool root for the produced-render "
+                         "publication (required with "
+                         "--produced-render-publication)")
+    ap.add_argument("--produced-output-tier", default=None,
+                    help="produced-output tier id for the rendered-weight "
+                         "batches (required with "
+                         "--produced-render-publication)")
     ap.add_argument("--checkpoint", default=None,
                     help="identity-bound JSON manifest with sibling .parts "
                          "unit shards; defaults beside --out")
@@ -5807,6 +5837,35 @@ def _main(argv, *, source_scope) -> int:
         metadata={"schema": SCHEMA, "menu_mode": mode,
                   **({'release_completed_anchor_file_pages': True} if selected_source else {})},
     )
+    if getattr(args, "produced_render_publication", None):
+        # The connected produced-render path (opt-in): bind the PB prepaid
+        # publication from THIS admitted owner's request -- the submission's
+        # own --produced-output-template declaration, the launch env's
+        # action identity, the live claim -- and admit the funded window
+        # once.  The renderer's anchor writes then flow through
+        # store_rendered_weight_published (prewrite BEFORE bytes, the
+        # existing atomic writer, prepaid batch publication); the release
+        # at the end closes the instance.  No operator template
+        # dictionary, no per-batch source re-seal.
+        from prismaquant.produced_render_publication import (
+            ProducedRenderPublication)
+        try:
+            render_publication = ProducedRenderPublication.bind_from_admitted_owner(
+                queue_root=str(args.produced_output_pool_root),
+                tier=str(args.produced_output_tier), env=os.environ)
+            window = render_publication.admit_window()
+            render_publication.command_extra = tuple(
+                getattr(args, "produced_output_command_extra", ()) or ())
+        except Exception as exc:
+            raise SystemExit(
+                f"produced-render publication could not bind: {exc}") from exc
+        cache.produced_render_publication = render_publication
+        print(f"[campaign] produced-render publication bound: owner "
+              f"{window.get('owner_action_key', '')[:12]} mode "
+              f"{window.get('mode', '')} authority "
+              f"{window.get('authority', '')}", flush=True)
+    else:
+        render_publication = None
     menus = expand_menus_for_targets(
         weights, targets, mode=mode, tp_degree=args.tp_degree,
         parallel_kind=PARALLEL_NONE,
@@ -6998,6 +7057,17 @@ def _main(argv, *, source_scope) -> int:
     print(f"[campaign] wrote {args.out}: {len(payload['costs'])} units, "
           f"{total} priced rungs, {len(payload['formats'])} distinct formats",
           flush=True)
+    if render_publication is not None:
+        # Close the instance; committed batches stay published and are
+        # retired by their own lifetime (retire_batch), not here.  A
+        # failure to release is reported, never fatal to the finished
+        # campaign -- recovery (recover_batches/safe_release_instance)
+        # is idempotent.
+        try:
+            render_publication.release()
+        except Exception as exc:  # pragma: no cover - environment-dependent
+            print(f"[campaign] produced-render instance release deferred "
+                  f"(recoverable): {exc}", flush=True)
     return 0
 
 

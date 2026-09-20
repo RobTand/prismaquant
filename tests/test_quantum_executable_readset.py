@@ -1558,11 +1558,12 @@ def _gate_manifest(tmp_path, manifest, binding):
 
 
 def test_dispatcher_refuses_plausible_render_binding(tmp_path, monkeypatch):
-    """R3: even a plausible-looking binding dictionary is unsupported.
+    """Even a plausible-looking binding dictionary is not admission.
 
     The old positive test passed f*64 and expected admission; that shape
-    check was invented acceptance, not the PB732/735 protocol (both stacks
-    still unaccepted). Production refuses with the typed error.
+    check was invented acceptance, not the queue's closed validator.
+    Production refuses with the typed error unless the real validator
+    accepted the reference.
     """
     import dispatch_joint_quanta as dispatch
     spec = tmp_path / "spec.json"
@@ -1598,8 +1599,11 @@ def test_dispatcher_refuses_plausible_render_binding(tmp_path, monkeypatch):
     (tmp_path / "slice.gz").write_bytes(b"slice")
     assert issubclass(dispatch.ExecutableBindingUnsupported,
                       dispatch.DispatchRefused)
+    # A plausible-looking binding with no validator (and, with one, a
+    # reference the real queue refuses) keeps the typed gate: invented
+    # acceptance is still not admission.
     with pytest.raises(dispatch.ExecutableBindingUnsupported,
-                       match="no accepted PB produced-output binding"):
+                       match="no binding validator"):
         dispatch.quantum_argv(
             record, record_path=record_path, output_root=tmp_path,
             adjoint_path=adjoint_path)
@@ -1641,22 +1645,23 @@ def test_dispatcher_refuses_unbound_render_prerequisite(tmp_path,
                              for p in manifest["read_plan"]["phases"]]}}
     (tmp_path / "slice.gz").write_bytes(b"slice")
     with pytest.raises(dispatch.ExecutableBindingUnsupported,
-                       match="no accepted PB produced-output binding"):
+                       match="sequencing-only"):
         dispatch.quantum_argv(
             record, record_path=record_path, output_root=tmp_path,
             adjoint_path=adjoint_path)
 
 
 def test_build_refuses_render_binding_fiction(tmp_path):
-    """R3: the builder seals sequencing-only manifests (binding None).
+    """The builder seals a binding only through a real validator.
 
-    A non-None binding input refuses rather than sealing a capability the
-    unaccepted PB732/735 stacks cannot honor.
+    A non-None binding input without a validator still refuses: an
+    unvalidated dictionary is never sealed as capability (the accepted
+    validator is PrismaBuild's validate_produced_output_batch, injected).
     """
     record, receipt, parent = _layer2(tmp_path)
     prereq = dict(RENDER_PREREQ)
     prereq["binding"] = {"scope": "pb732", "material": "f" * 64}
-    with pytest.raises(ValueError, match="no accepted"):
+    with pytest.raises(ValueError, match="binding validator"):
         build_quantum_executable_manifest(
             record, receipt, parent, strided_boundaries=STRIDED,
             n_probes=N_PROBES, calib=dict(CALIB),

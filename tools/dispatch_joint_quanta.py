@@ -461,11 +461,53 @@ def _container_wrap(spec_path: Path,
             "--", *payload]
     return argv, admission_image_reference(spec)
 
+def _executable_binding(record: dict, *, output_root: Path):
+    """The sealed render binding an executable row carries, or None.
+
+    Loads the row's sealed executable manifest (its wire bytes already
+    hash-verified by :func:`_executable_manifest_digest`), and returns
+    ``annotations.render_prerequisite.binding`` -- None for a
+    sequencing-only manifest.
+    """
+
+    import gzip
+    quantum_id = record.get("quantum_id")
+    manifest, _staged, _progress = _executable_row_parts(
+        record, output_root=output_root,
+        head_grace_s=HEAD_PROGRESS_GRACE_S)
+    try:
+        raw = Path(manifest).read_bytes()
+    except OSError as exc:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} executable manifest unreadable at "
+            f"{manifest}: {exc}") from exc
+    if raw.startswith(b"\x1f\x8b"):
+        try:
+            raw = gzip.decompress(raw)
+        except gzip.BadGzipFile as exc:
+            raise DispatchRefused(
+                f"quantum {quantum_id!r} executable manifest is not "
+                f"readable gzip: {exc}") from exc
+    try:
+        body = json.loads(raw)
+    except ValueError as exc:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} executable manifest is not JSON: "
+            f"{exc}") from exc
+    annotations = body.get("annotations") if isinstance(body, dict) else None
+    prerequisite = (annotations.get("render_prerequisite")
+                    if isinstance(annotations, dict) else None)
+    binding = (prerequisite.get("binding")
+               if isinstance(prerequisite, dict) else None)
+    return binding if isinstance(binding, dict) else None
+
+
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S,
                  consumer_tags: Sequence[str] = CONSUMER_TAGS,
-                 adjoint_path: Path) -> list[str]:
+                 adjoint_path: Path,
+                 binding_validator=None) -> list[str]:
     """The exact §5.2 submission argv for one quantum. Pinned by tests: a
     drift here breaks placement.  ``consumer_tags`` is the effective §5.1
     placement policy, a conjunction PB matches against a worker's offered
@@ -478,26 +520,44 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     wire digest as ``--adjoint-sha256``, the verified staged-manifest
     digest, and ``--resume``. Files are read where the row reads them; an
     unreadable or drifting file refuses before anything publishes (#838).
-    A record carrying ``executable_readset`` is refused with
-    :class:`ExecutableBindingUnsupported`: no PB produced-output binding
-    validator is accepted yet, so executable rows are sequencing/phase
-    artifacts only, never production-runnable. Without the block the row
-    keeps the legacy slice manifest with head/chunk progress. Tier flags,
-    tags, demand and environment are identical in both lanes.
+    A record carrying ``executable_readset`` is admitted ONLY when its
+    sealed manifest carries a render binding the real queue validator
+    accepts (PrismaBuild's ``validate_produced_output_batch`` through the
+    injected ``binding_validator``); a sequencing-only manifest
+    (``binding: None``), a missing validator, or a refused reference still
+    raises :class:`ExecutableBindingUnsupported` -- no invented admission.
+    Without the block the row keeps the legacy slice manifest with
+    head/chunk progress. Tier flags, tags, demand and environment are
+    identical in both lanes.
     """
     quantum_id = record["quantum_id"]
     executable = record.get("executable_readset")
     if executable is not None:
-        # R3: no invented admission. No accepted PB output-binding validator
-        # exists (PB732/735 are still unaccepted stacks), so even a
-        # plausible-looking render-prerequisite dictionary proves no
-        # capability. Refuse before any staged read. Manifest/phase
-        # propagation is exercised through _executable_row_parts directly.
-        raise ExecutableBindingUnsupported(
-            f"quantum {quantum_id!r} carries an executable readset, but no "
-            "accepted PB produced-output binding validator exists "
-            "(PB732/735 stacks unaccepted): executable plans are "
-            "sequencing-only and not production-runnable -- refusing")
+        binding = _executable_binding(record, output_root=output_root)
+        if binding is None:
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} seals a sequencing-only "
+                "executable readset (binding None): no produced-output "
+                "batch backs its rendered weights -- refusing")
+        if not callable(binding_validator):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} seals a render binding, but this "
+                "dispatcher was given no binding validator (PrismaBuild's "
+                "validate_produced_output_batch): refusing to admit an "
+                "unvalidated binding")
+        try:
+            checked = binding_validator(binding)
+        except Exception as exc:
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} render binding is not an "
+                f"accepted produced-output batch reference: {exc}"
+            ) from exc
+        if not isinstance(checked, dict):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} binding validator returned no "
+                "checked reference: refusing")
+        manifest, staged_sha256, progress = _executable_row_parts(
+            record, output_root=output_root, head_grace_s=head_grace_s)
     else:
         manifest = Path(record["read_set"]["manifest_path"])
         if not manifest.is_absolute():

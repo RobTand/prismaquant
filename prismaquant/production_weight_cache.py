@@ -349,6 +349,14 @@ class ProductionWeightCache:
     _file_load_max_bytes: int = 0
     _file_load_receipts: dict | None = None
     _expected_file_sha256: dict[tuple[str, str], str] | None = None
+    # Opt-in produced-render publication (the PB prepaid produced-output
+    # lifecycle).  None keeps the legacy direct-write behaviour everywhere;
+    # when attached, the renderer's anchor publication routes new rendered
+    # weights through ``store_rendered_weight_published`` (prewrite budget
+    # admission BEFORE bytes, the existing atomic writer, PB batch
+    # publication from the producer's reserved window) while already-filed
+    # renders are reused without a fresh charge or rewrite.
+    produced_render_publication: object = None
 
     def __post_init__(self) -> None:
         # Normalize to ``activation_max_abs`` if a caller used the legacy
@@ -357,6 +365,97 @@ class ProductionWeightCache:
             self.activation_max_abs = self.activation_scales
         elif self.activation_scales is None and self.activation_max_abs is not None:
             self.activation_scales = self.activation_max_abs
+
+    def store_rendered_weight_published(
+            self, *, qname: str, fmt: str, tensor, weight_dtype,
+            publication=None, slot: str = "rendered-weights",
+            artifact_class: str = "payload",
+            producer_generation: str | None = None,
+            command_extra: tuple[str, ...] = (),
+            durable: bool = False) -> dict:
+        """Store one rendered weight through a produced-output publication.
+
+        The publication-aware spelling of the renderer's anchor write.
+        Reuse first: an entry already filed for ``(qname, fmt)`` whose file
+        is present is returned untouched -- a valid cached render never
+        incurs a fresh producer charge or a rewrite merely to exercise the
+        API.  Otherwise the PB prepaid sequence wraps the EXISTING atomic
+        writer: ``require_prewrite`` with the exact serialized size BEFORE
+        any byte exists (a refusal raises and leaves no file), then
+        ``_store_rendered_weight_entry`` (torch.save temporary ->
+        ``os.replace`` -> weights entry), then one validated payload
+        descriptor and ``publish_prepaid_batch`` -- which seals the mover
+        off the owner's own sealed request, funds the batch by exact
+        transfer from the producer's reserved window, and commits.  A
+        failed publish raises with the typed step/refusal; the file is on
+        disk and a retry with identical inputs re-derives the same
+        content-addressed mover and meets typed duplicates.
+        """
+
+        from .produced_render_publication import (
+            ProducedRenderBindingError, ProducedRenderPrewriteRefused,
+            ProducedRenderPublicationFailed)
+
+        bound = publication if publication is not None \
+            else self.produced_render_publication
+        if bound is None:
+            raise ProducedRenderBindingError(
+                "store_rendered_weight_published needs a bound produced "
+                "render publication (attach one, or keep the legacy "
+                "direct write)")
+        if not self.cache_dir:
+            raise ProducedRenderBindingError(
+                "a published rendered weight needs the disk-streaming "
+                "cache (cache_dir set): a produced-output batch publishes "
+                "files, not in-memory tensors")
+        cache_dir = Path(self.cache_dir)
+        fname = _cache_weight_filename(qname, fmt)
+        final_path = cache_dir / fname
+        prefix = str(bound.template["output_prefix"])
+        try:
+            final_path.relative_to(prefix)
+        except ValueError as exc:
+            raise ProducedRenderBindingError(
+                f"the cache dir {cache_dir} is not under the declared "
+                f"produced-output prefix {prefix}: renders cannot be "
+                "published from here") from exc
+        # Reuse: filed entry with its file present charges nothing.
+        existing = self.weights.get((qname, fmt))
+        if isinstance(existing, str) and (cache_dir / existing).exists():
+            return {"ok": True, "reused": True, "batch_id": None,
+                    "path": str(cache_dir / existing), "publish": None}
+        staged = _canonical_rendered_weight_tensor(
+            tensor, weight_dtype=weight_dtype)
+        # The exact bytes the writer will serialize, measured without a
+        # file: the prewrite names the true payload size before it exists.
+        import io
+        measure = io.BytesIO()
+        torch.save(staged, measure)
+        payload_bytes = measure.tell()
+        batch_id = bound.batch_id_for(qname, fmt)
+        prewrite = bound.require_prewrite(
+            batch_id=batch_id,
+            class_bytes={"payload": payload_bytes, "checkpoint": 0,
+                         "temp": 0},
+            paths=[str(final_path)])
+        if not prewrite.get("ok"):
+            raise ProducedRenderPrewriteRefused(
+                batch_id=batch_id, refusal=prewrite)
+        _store_rendered_weight_entry(
+            weights=self.weights, qname=qname, fmt=fmt, tensor=staged,
+            cache_dir_path=cache_dir, weight_dtype=weight_dtype,
+            durable=durable)
+        descriptor = bound.descriptor_for(
+            final_path, slot=slot, artifact_class=artifact_class,
+            producer_generation=producer_generation)
+        published = bound.publish(batch_id=batch_id, descriptors=[descriptor],
+                                  command_extra=tuple(command_extra))
+        if not published.get("ok"):
+            raise ProducedRenderPublicationFailed(
+                batch_id=batch_id, refusal=published)
+        return {"ok": True, "reused": False, "batch_id": batch_id,
+                "mover_key": published.get("mover_key"),
+                "path": str(final_path), "publish": published}
 
     def validate_cb_render_identity(
         self,
