@@ -1023,8 +1023,14 @@ class ModelProfile(ABC):
     def requires_multimodal_skeleton(self) -> bool:
         """True when the family has NO `<Arch>ForCausalLM` auto-route at
         the pinned transformers, so a text-only skeleton is unresolvable
-        and every streaming construction must go through the multimodal
-        path (`_build_streaming_context(..., multimodal=True)`)."""
+        and every streaming construction must build the multimodal
+        *skeleton* (`stage_multimodal` + the declared arch class + a
+        multimodal weight map).
+
+        This is a construction fact only. It says nothing about the run's
+        inputs and never materializes the visual tower: that stays a
+        caller declaration (`_build_streaming_context(..., multimodal=True)`,
+        `materialize_tensors_streaming`'s meta tower)."""
         return False
 
     def stage_text_only_promote_inner_model_type(self) -> bool:

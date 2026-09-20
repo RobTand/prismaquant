@@ -1,7 +1,32 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/calibration-staged-tier-reader-865`.
+As of: 2026-09-20 · `fix/glm5next-visual-materialization-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `fix/glm5next-visual-materialization-20260920`) for
+**the streaming visual-materialization split** (PQ #871).
+`_build_streaming_context` let one `multimodal` flag answer two independent
+questions: whether the family can be CONSTRUCTED text-only -- a property of the
+pinned transformers, declared by `ModelProfile.requires_multimodal_skeleton()`
+-- and whether THIS run drives visual inputs, which only the caller knows. A
+forced skeleton therefore also materialized the visual tower, so a
+token-ID-only joint-AURA stage-A cost run read the checkpoint's entire vision
+namespace and its text-only staged readset refused the shard
+(`TierPolicyRefused: staged-tier-forbidden: readset-not-staged:
+GLM-5.3-Flash-BF16/model-00120-of-00120.safetensors`; PB action
+`dae1474a406e`, 2026-09-20). The refusal was correct and the read was not:
+`StreamedCausalLM._prepare` consumes calibrated token IDs through
+`base_model.embed_tokens` alone, so nothing on that path can execute the tower.
+The two axes are now separate locals. The profile flip still selects
+`stage_multimodal`, the declared-arch skeleton class and the multimodal weight
+map; the tower is materialized only for a caller that passed `multimodal=True`
+-- the same contract the streamed exporter already states ("the visual tower
+stays on meta", below). **No visual tensor is read from the checkpoint on a
+text-only call.** Explicit `multimodal=True` is unchanged in both shape and
+bytes, including `visual_requires_grad`, so the visual Fisher probe
+(`run_multimodal_visual_probe_pass`) and the visual cost shard
+(`_run_visual_cost_shard`) keep their resident towers. Gate:
+`tests/test_streaming_visual_materialization_scope.py`.
 
 Re-stamped (2026-09-20, `flash/calibration-staged-tier-reader-865`) for
 **the calibration staged-tier reader** (PQ #865).
@@ -17275,7 +17300,12 @@ does and the forward-fidelity gate re-checks per checkpoint. transformers 5.16 s
 the profile declares this via `requires_multimodal_skeleton()` and
 `_build_streaming_context` flips itself, so probe/cost/validation call sites need no
 per-family threading (`multimodal=True` explicit still works). The path yields the `model.language_model` base
-prefix and root `lm_head` the spec already describes.
+prefix and root `lm_head` the spec already describes. That flip is **construction
+only** (2026-09-20, PQ #871): it selects `stage_multimodal`, the declared-arch class and
+a multimodal weight map, and leaves `model.visual` on meta, exactly as the streamed
+exporter does. Materializing the tower remains the caller's declaration --
+`multimodal=True` -- because a text-only run's staged readset does not contain the
+vision shards, and reading them refuses fail-closed.
 
 `_resolve` also **refuses to hand back a profile whose vendored-modelling override is known
 dead** (`_refuse_dead_vendored_override`, added by #19 / `29f3cff`). Its `except Exception:
