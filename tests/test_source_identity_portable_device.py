@@ -397,6 +397,66 @@ def test_digest_cache_memo_none_path_hashes_in_certified(monkeypatch, tmp_path):
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize("mutation", [
+    "missing-device",
+    "wrong-typed-device",
+    "extra-unknown-field",
+])
+def test_digest_cache_memo_malformed_rows_refuse_in_dev(
+        monkeypatch, tmp_path, mutation):
+    """A stored row without the exact six-field shape must never reuse --
+    without the gate a device-less row would match every host's portable
+    key. Refusal, no payload hash; certified behavior covered beside."""
+    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    root = _memo_fixture(tmp_path)
+    cache_path = tmp_path / "digest-cache.json"
+    live = [cs._streamed_identity_stat_fingerprint(root / name)
+            for name in ("a.safetensors", "b.safetensors")]
+    real = {str(root / name): hashlib.sha256(
+        (root / name).read_bytes()).hexdigest()
+        for name in ("a.safetensors", "b.safetensors")}
+    entries = []
+    for fingerprint in live:
+        stored = dict(fingerprint)
+        if mutation == "missing-device":
+            del stored["device"]
+        elif mutation == "wrong-typed-device":
+            stored["device"] = str(stored["device"])
+        else:
+            stored["provenance"] = "elsewhere"
+        entries.append({"fingerprint": stored,
+                        "sha256": real[str(Path(stored["path"]))]})
+    cache_path.write_text(json.dumps(
+        {"schema": "prismaquant.source_checkpoint.digest_cache.v1",
+         "entries": entries}))
+    _dev_on(monkeypatch)
+    _refusing_hash(monkeypatch)
+    with pytest.raises(RuntimeError, match="[Bb]ytes"):
+        build_source_checkpoint_identity(
+            str(root), digest_cache_path=cache_path)
+
+
+def test_digest_cache_memo_malformed_rows_hash_in_certified(
+        monkeypatch, tmp_path):
+    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    root = _memo_fixture(tmp_path)
+    cache_path = tmp_path / "digest-cache.json"
+    live = [cs._streamed_identity_stat_fingerprint(root / name)
+            for name in ("a.safetensors", "b.safetensors")]
+    entries = []
+    for fingerprint in live:
+        stored = dict(fingerprint)
+        del stored["device"]
+        entries.append({"fingerprint": stored, "sha256": "0" * 64})
+    cache_path.write_text(json.dumps(
+        {"schema": "prismaquant.source_checkpoint.digest_cache.v1",
+         "entries": entries}))
+    _dev_off(monkeypatch)
+    calls = _counting_hash(monkeypatch)
+    build_source_checkpoint_identity(str(root), digest_cache_path=cache_path)
+    assert len(calls) == 2
+
+
 def test_build_none_path_refuses_in_dev(monkeypatch, checkpoint):
     root, shards = checkpoint
     _dev_on(monkeypatch)
