@@ -82,8 +82,7 @@ def _produced_output_module() -> Any:
                  "declare_instance", "admit_instance", "admit_funded_window",
                  "require_prewrite", "publish_prepaid_batch", "commit_batch",
                  "retire_batch", "safe_release_instance",
-                 "validate_descriptor", "mint_generation",
-                 "owner_demand_terms"):
+                 "validate_descriptor", "owner_demand_terms"):
         if not callable(getattr(po, name, None)):
             raise ProducedRenderBindingError(
                 "the installed prismabuild.produced_output lacks "
@@ -180,12 +179,16 @@ class ProducedRenderPublication:
     """
 
     def __init__(self, *, queue, template, instance, tier: str,
-                 env: Mapping[str, str] | None = None,
+                 cas_root: str, env: Mapping[str, str] | None = None,
                  command_extra: tuple[str, ...] = ()) -> None:
         self.queue = queue
         self.template = template
         self.instance = instance
         self.tier = str(tier)
+        # The CAS root the admitted owner's own row files (its request, its
+        # inputs, its batches' manifests live there).  Never guessed from
+        # queue topology: the live layout is a sibling CAS, not a child.
+        self.cas_root = str(cas_root)
         self.env = dict(os.environ) if env is None else dict(env)
         # Dev/fixture-only passthrough for the mover argv (e.g.
         # ``--unpaced`` where no pacer exists); production stays empty.
@@ -232,6 +235,12 @@ class ProducedRenderPublication:
             raise ProducedRenderBindingError(
                 "the owner action is not claimed: a produced-render "
                 "publication binds to the live admitted owner only")
+        cas_root = claim_snapshot.get("cas_root")
+        if not isinstance(cas_root, str) or not cas_root:
+            raise ProducedRenderBindingError(
+                "the admitted owner's row files no cas_root: the "
+                "publication refuses to guess the CAS topology (the live "
+                "CAS is a sibling of the queue, not a child)")
         try:
             instance = po.bind_declared_instance(
                 queue, owner_action_key=owner,
@@ -246,7 +255,7 @@ class ProducedRenderPublication:
                 f"the produced-output instance was not admitted: "
                 f"{admitted}")
         return cls(queue=queue, template=template, instance=instance,
-                   tier=tier, env=env)
+                   tier=tier, cas_root=cas_root, env=env)
 
     # -- window ------------------------------------------------------------
 
@@ -289,18 +298,36 @@ class ProducedRenderPublication:
                        artifact_class: str,
                        producer_generation: str | None = None,
                        ) -> dict:
-        """One validated payload descriptor for an already-written file."""
+        """One validated descriptor for an already-written file.
 
-        import hashlib
+        DEV contract: NO payload reread or hash.  The digest is JSON null
+        (the produced-output DEV path -- identity is path+size+order
+        through the manifest digest over the descriptor list, plus the
+        mover's own necessary-copy/material evidence); the byte count is
+        the file's current size, read from its stat.  ``producer_generation``
+        must be STABLE across retries: pass the batch id (the default
+        caller spelling), never a fresh mint.
+        """
+
         file_path = Path(path)
-        payload = file_path.read_bytes()
+        try:
+            size = file_path.stat().st_size
+        except OSError as exc:
+            raise ProducedRenderBindingError(
+                f"cannot describe {file_path}: {exc}") from exc
+        if size <= 0:
+            raise ProducedRenderBindingError(
+                f"cannot describe {file_path}: empty or missing")
+        if producer_generation is None:
+            raise ProducedRenderBindingError(
+                "a descriptor needs a retry-stable producer_generation "
+                "(the batch id), never a fresh mint")
         return self._po.validate_descriptor({
             "schema": self._po.DESCRIPTOR_SCHEMA_V2,
             "slot": slot, "artifact_class": artifact_class,
-            "path": str(file_path), "bytes": len(payload),
-            "sha256": hashlib.sha256(payload).hexdigest(),
-            "producer_generation": (producer_generation
-                                    or self._po.mint_generation()),
+            "path": str(file_path), "bytes": int(size),
+            "sha256": None,
+            "producer_generation": str(producer_generation),
             "owner_action_key": self.instance["owner_action_key"],
             "owner_attempt": dict(self.instance["owner_attempt"]),
         }, self.template, self.instance)
@@ -309,12 +336,13 @@ class ProducedRenderPublication:
                 command_extra: tuple[str, ...] = ()) -> dict:
         """Publish one finished batch; the mover derives from the owner's
         own sealed request (``producer_action_key``), never from a
-        caller-supplied template."""
+        caller-supplied template.  The CAS is the one the owner's row
+        files, never a guessed queue topology."""
 
         out = self._po.publish_prepaid_batch(
             self.queue, self.instance, self.template, descriptors,
             batch_id=batch_id, tier=self.tier,
-            cas_root=Path(self.queue.root) / "cas",
+            cas_root=self.cas_root,
             producer_action_key=str(self.instance["owner_action_key"]),
             command_extra=tuple(command_extra))
         return dict(out)

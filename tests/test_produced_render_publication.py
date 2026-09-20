@@ -272,7 +272,11 @@ def _bound_publication(tmp_path: Path, *, gib: int = 4,
     template = _template(str(tmp_path / "outputs"),
                          payload_max_bytes=payload_max_bytes)
     terms = po.owner_demand_terms(template)
-    q.publish(action_key=owner, cas_root="/cas", worker_script="/w.py",
+    # The owner's row files the REAL cas_root; the publication binds to
+    # that filed value (the live CAS is a sibling of the queue, not a
+    # child, so topology is never guessed).
+    q.publish(action_key=owner, cas_root=str(cas_root),
+              worker_script="/w.py",
               checkout_root="/co", resources={"cpu": 1, "mem_gb": 1, **terms},
               produced_output_template=template)
     claimed = q.claim(owner="w-owner")
@@ -327,7 +331,7 @@ def test_prewrite_refusal_leaves_no_file(tmp_path: Path) -> None:
 
 
 def test_published_render_roundtrip_with_real_mover(tmp_path: Path) -> None:
-    """Write -> prewrite -> atomic store -> publish -> mover -> reader."""
+    """Write -> bound-admitted prewrite -> atomic store -> publish -> mover."""
     publication, q, cas_root, pb_repo = _bound_publication(tmp_path)
     cache = _cache(publication)
     ledger = q.tier_ledger(TIER)
@@ -341,6 +345,10 @@ def test_published_render_roundtrip_with_real_mover(tmp_path: Path) -> None:
     assert out["ok"] is True and out["reused"] is False, out
     render_path = Path(out["path"])
     assert render_path.is_file()
+    # The budget was admitted from a storage-metadata BOUND (never a full
+    # serialization pass to count bytes) and covers the actual write.
+    assert out["admitted_bytes"] >= out["actual_bytes"] > 0
+    assert render_path.stat().st_size == out["actual_bytes"]
     # The written bytes are the PWC's canonical tensor, readable back.
     stored = torch.load(render_path, weights_only=True)
     assert torch.equal(stored, tensor.to(torch.bfloat16))
@@ -360,8 +368,24 @@ def test_published_render_roundtrip_with_real_mover(tmp_path: Path) -> None:
     assert torch.load(staged[0], weights_only=True).equal(stored)
 
 
+def test_size_bound_covers_real_serialization(tmp_path: Path) -> None:
+    """The admitted bound is honest: >= torch.save's actual output."""
+    from prismaquant.production_weight_cache import _torch_save_size_bound
+    for shape, dtype in (((4, 16), torch.float32),
+                         ((7, 3, 64), torch.bfloat16),
+                         ((1, 1), torch.float16),
+                         ((257, 91), torch.bfloat16)):
+        tensor = torch.arange(
+            int(torch.tensor(shape).prod().item()),
+            dtype=torch.float32).reshape(shape).to(dtype)
+        path = tmp_path / f"{shape}-{dtype}.pt"
+        torch.save(tensor, path)
+        assert _torch_save_size_bound(tensor) >= path.stat().st_size, (
+            shape, dtype, path.stat().st_size)
+
+
 def test_cache_hit_reuses_without_charge_or_rewrite(tmp_path: Path) -> None:
-    """A valid filed render is reused: no prewrite, no publish, no rewrite."""
+    """A PROVEN publication is a clean hit: no prewrite, publish, rewrite."""
     publication, q, _cas, _repo = _bound_publication(tmp_path)
     cache = _cache(publication)
     tensor = torch.arange(32, dtype=torch.float32).reshape(2, 16)
@@ -373,16 +397,100 @@ def test_cache_hit_reuses_without_charge_or_rewrite(tmp_path: Path) -> None:
     render_path = Path(first["path"])
     stat_before = render_path.stat()
     prewrites_before = sorted(Path(q.root).rglob("*.prewrite.json"))
+    # Clean hit: this process proved the publication, and the file's stat
+    # signature still matches -- no publish, no charge, no rewrite.
     second = cache.store_rendered_weight_published(
         qname=qname, fmt="NVFP4", tensor=tensor,
         weight_dtype=torch.bfloat16)
     assert second["ok"] is True and second["reused"] is True, second
+    assert second["reconciled"] is False and second["publish"] is None
     stat_after = render_path.stat()
     assert (stat_before.st_ino, stat_before.st_mtime_ns) == (
         stat_after.st_ino, stat_after.st_mtime_ns), \
         "a cache hit rewrote the render file"
     assert sorted(Path(q.root).rglob("*.prewrite.json")) == prewrites_before, \
         "a cache hit filed a fresh prewrite charge"
+
+
+def test_unproven_publication_reconciles_never_guesses(tmp_path: Path) -> None:
+    """A filed render with unproven publication reconciles or refuses.
+
+    Existence is not proof: with the recorded success dropped (a crash
+    between write and record, or an earlier failed publication), the next
+    store re-publishes the SAME batch id with the descriptor the file's
+    current size derives -- a typed duplicate on success -- and a file
+    whose bytes changed under the same batch id refuses loudly instead of
+    answering a bogus cache-hit success.
+    """
+    publication, q, _cas, _repo = _bound_publication(tmp_path)
+    cache = _cache(publication)
+    tensor = torch.arange(24, dtype=torch.float32).reshape(2, 12)
+    qname = "model.layers.2.mlp.up_proj"
+    first = cache.store_rendered_weight_published(
+        qname=qname, fmt="NVFP4", tensor=tensor,
+        weight_dtype=torch.bfloat16)
+    render_path = Path(first["path"])
+    # Drop the proven-success record: the next store must reconcile.
+    cache.metadata["produced_render_batches"].clear()
+    reconciled = cache.store_rendered_weight_published(
+        qname=qname, fmt="NVFP4", tensor=tensor,
+        weight_dtype=torch.bfloat16)
+    assert reconciled["reused"] is True and reconciled["reconciled"] is True
+    assert reconciled["publish"].get("ok") is True
+    assert reconciled["publish"].get("duplicate") is True, reconciled
+    assert str(reconciled["publish"]["mover_key"]) == str(first["mover_key"])
+    # Bytes changed under the same batch id: loud refusal, never a hit.
+    cache.metadata["produced_render_batches"].clear()
+    render_path.write_bytes(b"tampered-bytes")
+    from prismaquant.produced_render_publication import (
+        ProducedRenderPublicationFailed)
+    with pytest.raises(ProducedRenderPublicationFailed):
+        cache.store_rendered_weight_published(
+            qname=qname, fmt="NVFP4", tensor=tensor,
+            weight_dtype=torch.bfloat16)
+
+
+def test_failed_publication_retry_reconciles(tmp_path: Path) -> None:
+    """A durable write whose publish failed retries to reconciliation.
+
+    The write is on disk; the publication refused (here: the tier record
+    the movement resolution needs is gone).  The retry re-derives the
+    same batch, descriptor and mover from existing state and completes.
+    """
+    from prismaquant.produced_render_publication import (
+        ProducedRenderPublicationFailed)
+    publication, q, _cas, _repo = _bound_publication(tmp_path)
+    cache = _cache(publication)
+    tensor = torch.arange(20, dtype=torch.float32).reshape(2, 10)
+    qname = "model.layers.3.mlp.down_proj"
+    tiers_path = Path(q.root) / "tiers" / f"{TIER}.json"
+    filed_tier = tiers_path.read_bytes()
+    tiers_path.unlink()
+    with pytest.raises(ProducedRenderPublicationFailed) as caught:
+        cache.store_rendered_weight_published(
+            qname=qname, fmt="NVFP4", tensor=tensor,
+            weight_dtype=torch.bfloat16)
+    assert caught.value.refusal.get("ok") is False
+    render_path = Path(cache.cache_dir) / cache.weights[(qname, "NVFP4")]
+    assert render_path.is_file(), "the durable write must survive"
+    # The fault clears: the retry re-derives the same batch and descriptor
+    # from existing state and completes.  The tier-not-announced refusal
+    # filed nothing, so this reconciliation is a fresh publish; the
+    # follow-up with identical inputs answers a typed duplicate carrying
+    # the same content-addressed mover key.
+    tiers_path.write_bytes(filed_tier)
+    retry = cache.store_rendered_weight_published(
+        qname=qname, fmt="NVFP4", tensor=tensor,
+        weight_dtype=torch.bfloat16)
+    assert retry["reused"] is True and retry["reconciled"] is True, retry
+    assert retry["publish"].get("ok") is True, retry
+    descriptor = publication.descriptor_for(
+        retry["path"], slot="rendered-weights", artifact_class="payload",
+        producer_generation=retry["batch_id"])
+    again = publication.publish(batch_id=retry["batch_id"],
+                                descriptors=[descriptor])
+    assert again.get("duplicate") is True, again
+    assert str(again["mover_key"]) == str(retry["publish"]["mover_key"])
 
 
 def test_retry_publish_is_idempotent(tmp_path: Path) -> None:
@@ -395,7 +503,8 @@ def test_retry_publish_is_idempotent(tmp_path: Path) -> None:
         tensor=tensor, weight_dtype=torch.bfloat16)
     batch_id = out["batch_id"]
     descriptor = publication.descriptor_for(
-        out["path"], slot="rendered-weights", artifact_class="payload")
+        out["path"], slot="rendered-weights", artifact_class="payload",
+        producer_generation=out["batch_id"])
     again = publication.publish(batch_id=batch_id,
                                 descriptors=[descriptor])
     assert again.get("ok") is True, again
@@ -428,7 +537,8 @@ def _validated_ref(publication, q, qname: str) -> dict:
         qname=qname, fmt="NVFP4", tensor=tensor,
         weight_dtype=torch.bfloat16)
     descriptor = publication.descriptor_for(
-        out["path"], slot="rendered-weights", artifact_class="payload")
+        out["path"], slot="rendered-weights", artifact_class="payload",
+        producer_generation=out["batch_id"])
     return q.build_produced_output_batch_ref(
         instance=publication.instance, template=publication.template,
         batch_id=out["batch_id"], descriptors=[descriptor], tier_id=TIER)

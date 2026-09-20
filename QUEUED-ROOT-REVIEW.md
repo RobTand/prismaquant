@@ -27,11 +27,12 @@ item when root resumes this branch; nothing below is done yet.
    followed by a publication failure must retry/reconcile publication,
    never answer a bogus cache-hit success. Keep stable
    batch/generation/descriptors across retry via existing state.
-5. **SDK source preference.** The installed-distribution preference in
-   `staged_lease` is not accepted: PQ869 removed early imports to use the
-   injected published SDK coherently; a candidate test pin must not make
-   production ignore its injected runtime. Inspect actual context
-   semantics and remove the preference change if it breaks that contract.
+5. **~~SDK source preference~~ — WITHDRAWN by root (16:08).** The actual
+   `staged_lease.py` diff is a candidate PIN/comment change only, NOT an
+   installed-SDK preference change. No repair is owed or invented here.
+   Preserve PQ869's injected-runtime selection; replace the candidate pin
+   with the final reviewed API commit when provisioning the scoped test
+   environment.
 
 Owed from the checkpoint itself: pq870 venv provisioning and the
 produced-render validation re-run against the updated PB API once root

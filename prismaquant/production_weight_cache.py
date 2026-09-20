@@ -370,26 +370,37 @@ class ProductionWeightCache:
             self, *, qname: str, fmt: str, tensor, weight_dtype,
             publication=None, slot: str = "rendered-weights",
             artifact_class: str = "payload",
-            producer_generation: str | None = None,
             command_extra: tuple[str, ...] = (),
             durable: bool = False) -> dict:
         """Store one rendered weight through a produced-output publication.
 
         The publication-aware spelling of the renderer's anchor write.
-        Reuse first: an entry already filed for ``(qname, fmt)`` whose file
-        is present is returned untouched -- a valid cached render never
-        incurs a fresh producer charge or a rewrite merely to exercise the
-        API.  Otherwise the PB prepaid sequence wraps the EXISTING atomic
-        writer: ``require_prewrite`` with the exact serialized size BEFORE
-        any byte exists (a refusal raises and leaves no file), then
-        ``_store_rendered_weight_entry`` (torch.save temporary ->
-        ``os.replace`` -> weights entry), then one validated payload
-        descriptor and ``publish_prepaid_batch`` -- which seals the mover
-        off the owner's own sealed request, funds the batch by exact
-        transfer from the producer's reserved window, and commits.  A
-        failed publish raises with the typed step/refusal; the file is on
-        disk and a retry with identical inputs re-derives the same
-        content-addressed mover and meets typed duplicates.
+
+        Reuse is PROVEN, not assumed: an entry filed for ``(qname, fmt)``
+        whose file passes the cache's existing stat-signature identity and
+        whose batch this process already published successfully is a clean
+        hit (no prewrite, no publish, no rewrite, no charge).  An entry
+        whose publication state is unknown -- a crash between write and
+        record, or an earlier failed publication -- RECONCILES through the
+        idempotent publish with the stable batch id and the descriptor the
+        file's current size derives; a changed file refuses loudly
+        (batch-id-in-use / manifest mismatch), never a bogus cache-hit
+        success.
+
+        A new render admits its budget BEFORE the one actual write with a
+        conservative serialization bound from the canonical tensor's
+        storage metadata -- never a full serialization pass just to count
+        bytes -- and the bound covers BOTH lifetimes the existing atomic
+        writer creates (the temporary file during the write and the final
+        path after the rename), so ``class_bytes`` describes the actual
+        footprint instead of pretending ``temp: 0``.  The write itself is
+        the existing ``_store_rendered_weight_entry`` (torch.save temporary
+        -> ``os.replace`` -> weights entry); the descriptor afterwards
+        carries the ACTUAL size (reconciled against the admitted bound,
+        fail-closed) and the DEV null digest -- no payload reread or hash.
+        A failed publish raises with the typed step/refusal; the file is
+        durable and the retry re-derives the same content-addressed mover,
+        descriptors and batch id, meeting typed duplicates.
         """
 
         from .produced_render_publication import (
@@ -419,24 +430,54 @@ class ProductionWeightCache:
                 f"the cache dir {cache_dir} is not under the declared "
                 f"produced-output prefix {prefix}: renders cannot be "
                 "published from here") from exc
-        # Reuse: filed entry with its file present charges nothing.
-        existing = self.weights.get((qname, fmt))
-        if isinstance(existing, str) and (cache_dir / existing).exists():
-            return {"ok": True, "reused": True, "batch_id": None,
-                    "path": str(cache_dir / existing), "publish": None}
+        key = (qname, fmt)
+        batch_id = bound.batch_id_for(qname, fmt)
+        recorded = ((self.metadata or {}).get("produced_render_batches")
+                    or {}).get(f"{qname}\x00{fmt}")
+
+        existing = self.weights.get(key)
+        if isinstance(existing, str):
+            existing_path = cache_dir / existing
+            try:
+                signature = self._file_signature(existing_path)
+            except OSError:
+                signature = None
+            if signature is not None:
+                if (isinstance(recorded, dict)
+                        and recorded.get("ok")
+                        and recorded.get("file_signature") == signature):
+                    return {"ok": True, "reused": True, "reconciled": False,
+                            "batch_id": batch_id, "path": str(existing_path),
+                            "publish": None}
+                # Filed file, unproven publication: reconcile through the
+                # idempotent publish.  A file that changed since its
+                # failed publication refuses loudly instead of hitting.
+                descriptor = bound.descriptor_for(
+                    existing_path, slot=slot, artifact_class=artifact_class,
+                    producer_generation=batch_id)
+                published = bound.publish(batch_id=batch_id,
+                                          descriptors=[descriptor],
+                                          command_extra=tuple(command_extra))
+                if not published.get("ok"):
+                    raise ProducedRenderPublicationFailed(
+                        batch_id=batch_id, refusal=published)
+                self._record_published_render(
+                    qname, fmt, batch_id, signature, published)
+                return {"ok": True, "reused": True, "reconciled": True,
+                        "batch_id": batch_id, "path": str(existing_path),
+                        "publish": published}
+
         staged = _canonical_rendered_weight_tensor(
             tensor, weight_dtype=weight_dtype)
-        # The exact bytes the writer will serialize, measured without a
-        # file: the prewrite names the true payload size before it exists.
-        import io
-        measure = io.BytesIO()
-        torch.save(staged, measure)
-        payload_bytes = measure.tell()
-        batch_id = bound.batch_id_for(qname, fmt)
+        # The admitted budget: a conservative bound from storage metadata
+        # (serializer container, pickle header and alignment included),
+        # covering the temporary file's lifetime AND the final path's --
+        # one write, two lifetimes, both admitted before the first byte.
+        admitted = _torch_save_size_bound(staged)
         prewrite = bound.require_prewrite(
             batch_id=batch_id,
-            class_bytes={"payload": payload_bytes, "checkpoint": 0,
-                         "temp": 0},
+            class_bytes={"payload": admitted, "checkpoint": 0,
+                         "temp": admitted},
             paths=[str(final_path)])
         if not prewrite.get("ok"):
             raise ProducedRenderPrewriteRefused(
@@ -447,15 +488,44 @@ class ProductionWeightCache:
             durable=durable)
         descriptor = bound.descriptor_for(
             final_path, slot=slot, artifact_class=artifact_class,
-            producer_generation=producer_generation)
+            producer_generation=batch_id)
+        actual = int(descriptor["bytes"])
+        if actual > admitted:
+            # The bound under-covered the real serialization: a defect in
+            # the bound, not a license to exceed the admitted budget.
+            raise ProducedRenderBindingError(
+                f"serialized render {final_path} ({actual} bytes) exceeded "
+                f"its admitted bound ({admitted}): refusing to publish "
+                "beyond the prewrite budget")
         published = bound.publish(batch_id=batch_id, descriptors=[descriptor],
                                   command_extra=tuple(command_extra))
         if not published.get("ok"):
             raise ProducedRenderPublicationFailed(
                 batch_id=batch_id, refusal=published)
+        try:
+            signature = self._file_signature(final_path)
+        except OSError:
+            signature = None
+        self._record_published_render(qname, fmt, batch_id, signature,
+                                      published)
         return {"ok": True, "reused": False, "batch_id": batch_id,
                 "mover_key": published.get("mover_key"),
-                "path": str(final_path), "publish": published}
+                "path": str(final_path), "admitted_bytes": admitted,
+                "actual_bytes": actual, "publish": published}
+
+    def _record_published_render(self, qname: str, fmt: str, batch_id: str,
+                                 signature, published: Mapping) -> None:
+        """Remember a proven publication for later clean cache hits."""
+
+        if self.metadata is None:
+            self.metadata = {}
+        batches = self.metadata.setdefault("produced_render_batches", {})
+        batches[f"{qname}\x00{fmt}"] = {
+            "ok": True, "batch_id": batch_id,
+            "file_signature": signature,
+            "mover_key": published.get("mover_key"),
+            "generation": batch_id,
+        }
 
     def validate_cb_render_identity(
         self,
@@ -2176,6 +2246,27 @@ def _temporary_nvfp4_scale_rule(rule: str):
         yield
     finally:
         enc._NVFP4_SCALE_RULE = previous
+
+def _torch_save_size_bound(tensor) -> int:
+    """A conservative torch.save output-size bound from storage metadata.
+
+    Never serializes: the bound derives from the tensor's storage byte
+    count plus a container allowance that covers torch.save's zip wrapper
+    (fixed header/footer, per-storage pickle, alignment and zip64 fields).
+    The margins -- 64 KiB fixed plus 1/16 of the payload -- are far above
+    the serializer's real overhead (<1% plus a couple of KiB), so a
+    prewrite admitted on this bound covers the actual write; the store
+    path reconciles the real size afterwards and fails closed if the
+    bound ever under-covers.  A bound, not a measurement: exact length is
+    not known before the one actual write, and nothing pretends it is.
+    """
+
+    try:
+        storage_bytes = int(tensor.untyped_storage().nbytes())
+    except (AttributeError, RuntimeError, TypeError):
+        storage_bytes = int(tensor.numel()) * int(tensor.element_size())
+    return storage_bytes + (storage_bytes >> 4) + (1 << 16)
+
 
 def _store_rendered_weight_entry(
     *,

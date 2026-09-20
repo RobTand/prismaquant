@@ -9,19 +9,27 @@ executable binding.
 
 `ProductionWeightCache.store_rendered_weight_published` is the
 publication-aware spelling of the renderer's anchor write
-(`tessera_campaign._finish_anchor`): an already-filed render whose file
-is present is REUSED (no prewrite, no publish, no rewrite — a cache hit
-never incurs a fresh producer charge); otherwise PrismaBuild's prepaid
-produced-output lifecycle wraps the existing atomic tensor writer —
-`require_prewrite` with the exact serialized size BEFORE any byte exists
-(a refusal raises and leaves no file), `_store_rendered_weight_entry`
-(torch.save temporary -> `os.replace` -> weights entry), one validated
-payload descriptor, then `publish_prepaid_batch`, which seals the mover
-off the owner's OWN sealed request (`producer_action_key`), funds the
-batch by exact transfer from the producer's reserved window (no second
-acquisition), and commits; identical retries re-derive the
-content-addressed mover and answer typed duplicates. `retire_batch` and
-`safe_release_instance` close the lifetime and return capacity.
+(`tessera_campaign._finish_anchor`).  Reuse is PROVEN, not assumed: a
+filed render is a clean hit only when this process recorded a successful
+publication AND the file's stat signature still matches; a filed render
+whose publication state is unknown (crash between write and record, or
+an earlier failed publication) reconciles through the idempotent publish
+with the stable batch id and the descriptor the file's current size
+derives, and bytes that changed under a batch id refuse loudly.  A new
+render admits its budget BEFORE the one actual write from a conservative
+storage-metadata bound (no serialization pass just to count bytes),
+covering BOTH lifetimes the existing atomic writer creates (the
+temporary file during the write and the final path after the rename);
+the write itself is the existing `_store_rendered_weight_entry`, and the
+descriptor afterwards carries the actual size (reconciled against the
+admitted bound, fail-closed) with the DEV null digest -- no payload
+reread or hash.  `publish_prepaid_batch` seals the mover off the owner's
+OWN sealed request (`producer_action_key`), funds the batch by exact
+transfer from the producer's reserved window, and commits through the
+CAS root the owner's row files (never a guessed queue topology);
+identical retries re-derive the content-addressed mover and answer typed
+duplicates.  `retire_batch` and `safe_release_instance` close the
+lifetime and return capacity.
 
 `prismaquant.produced_render_publication.ProducedRenderPublication`
 binds everything from the admitted owner's request — owner key, nonce

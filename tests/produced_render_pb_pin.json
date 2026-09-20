@@ -1,21 +1,21 @@
 {
   "schema": "prismaquant.produced_render.pb_candidate_pin.v1",
-  "note": "The PB produced-output API is a candidate under active integration (feat/prepaid-output-pool-api-20260920); no published runtime generation carries it yet. These tests pin the candidate by file digest and skip loudly until a qualified generation is published (root's pin). When the qualified generation lands, add its runtime-generations path to search_paths and update files to its digests.",
-  "candidate_commit": "02d2dea9d45cc84ec04e9b5403df9467954d2879",
+  "note": "The PB produced-output API is a candidate under active integration (feat/prepaid-output-pool-api-20260920); no published runtime generation carries it yet. These tests pin the candidate by file digest and skip loudly until a qualified generation is published (root's pin). The final reviewed API commit replaces this pin when provisioning the scoped test environment. Current candidate carries the DEV null-digest descriptor path (sha256: JSON null; identity is path+size+order plus the mover's material evidence).",
+  "candidate_commit": "1c9fb1bbea4311c7f51c505ea85ebee8e31631d2",
   "search_paths": [
     {"env": "PRISMAQUANT_PRODUCED_PB_SRC"},
-    {"path": "/mnt/shared/agent-worktrees/pb-produced-candidate-02d2dea9d45c"},
+    {"path": "/mnt/shared/agent-worktrees/pb-produced-candidate-1c9fb1bbea4"},
     {"path": "/home/rob/tmp/pb-prepaid-output-pool-api-20260920"},
     {"glob": "/mnt/shared/prismabuild-fleet/runtime-generations/*"}
   ],
   "files": {
-    "src/prismabuild/produced_output.py": "ba07025fef389bcc0a226e7edd13a3260d324f68d4421ea192821d1f775ca7ce",
+    "src/prismabuild/produced_output.py": "4882414ed3870d0640235cb9ef4bbdc221dd4e053914f9ccb67378cfbbf59de6",
     "src/prismabuild/pool.py": "de26c80c19eee841dd7f18d19a73b096396ded9cc56f0016b6f7173a9fe704b0",
     "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
     "src/prismabuild/movement_actions.py": "fd3a76883033c4e955a9e6e5a939536390671064ed44132fd90835003683d2af",
     "src/prismabuild/storage_tiers.py": "a33faa564893f9c745a105bc9d6cfd84eba26cd7732a18375a08ffacfaced294",
     "src/prismabuild/resource_scope.py": "f9a85dd277042031ae42a234d947c5abcdf20790e491610961e380445e6503e0",
-    "tools/fleet/stage_move.py": "c4033cf09a5630099bdcfd0d4134ba4a439e97329294636ee423990ae89b2988",
+    "tools/fleet/stage_move.py": "519dee6fe8604c1115fe1297b3da70ea8a56a82727396c2e748317770f7d575f",
     "tools/fleet/stage_release.py": "eed7a22ed26d1fe8dba1991be5cbc482ccb9a50050ebec3c717c95728453d9d6",
     "tools/fleet/prewarm_loop.py": "638f2aeda817037df4c2ea99c557ab9104172823351553849ad0cc3244b9634f"
   }
