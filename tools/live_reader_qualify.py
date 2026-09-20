@@ -212,7 +212,7 @@ def main() -> int:
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.residency_map import residency_resolver, bind_residency_manifest
     from prismaquant.staged_lease import (
-        LeaseRefused, acquire_entry_window, lease_helper_root,
+        LeaseRefused, acquire_entry_window, lease_helper_root, resolve_context,
     )
 
     result: dict = {
@@ -368,7 +368,13 @@ def main() -> int:
             result["ok"] = False
             print(json.dumps(result, sort_keys=True), flush=True)
             return UNQUALIFIED
-        queue = PoolQueue("/mnt/shared/prismabuild-fleet/pb-queue")
+        # The hold/release census reads the queue the claim actually lives
+        # on: the SDK's own injected context names it (queue_root), the same
+        # identity the window above acquired under. A hardcoded fleet path
+        # read the wrong (live) queue from any other queue root.
+        _sdk_mod, lease_ctx = resolve_context()
+        result["census_queue_root"] = str(lease_ctx["queue_root"])
+        queue = PoolQueue(str(lease_ctx["queue_root"]))
         nonce = os.environ.get("PRISMABUILD_ACTION_NONCE") or ""
         scope_id = os.environ.get("PRISMABUILD_ACTION_SCOPE") or ""
         with window as entered:
