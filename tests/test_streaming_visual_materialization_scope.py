@@ -32,8 +32,12 @@ the visual tower.  It was loaded anyway because one `multimodal` flag inside
     at `streaming_model.py:1661` to materialize the tower onto the device.
 
 The first was allowed to imply the second, so a construction-compatibility fact
-pulled a 120-shard vision namespace into a text-only readset.  This is the same
-contract the streamed *exporter* already states correctly: its own flip on
+put the `model.visual.*` namespace into a text-only run's readset.  What the
+campaign actually measured is one `_read_layer_to_device("model.visual.", ...)`
+call, whose first tensor range fell in a shard the run had not staged; the
+shard's name carries the checkpoint's total shard count (120) and says nothing
+about how much vision was read.  This is the same contract the streamed
+*exporter* already states correctly: its own flip on
 `requires_multimodal_skeleton()` builds the multimodal skeleton and leaves "the
 visual tower ... on meta" (`docs/ARCHITECTURE.md`, "Multimodal-forced export
 skeleton").
@@ -286,14 +290,17 @@ def test_visual_requires_grad_default_still_reaches_the_visual_linears(
         context.shutdown()
 
 
-def test_unforced_text_only_caller_is_unchanged(tmp_path, monkeypatch):
-    """Control: a family that CAN build text-only never saw a visual read
-    before this change and must not gain one."""
+def test_the_construction_half_of_the_flip_is_load_bearing(tmp_path, monkeypatch):
+    """Control on the OTHER axis: without the profile flip this very
+    checkpoint cannot be constructed at all at the pinned transformers.
+
+    So the fix cannot be "stop taking the multimodal construction" -- only the
+    materialization is separable. Measured on the fixture by the RED run of
+    this file (PB action `2964064574d8`): `Qwen2VLTextConfig` is absent from
+    `AutoModelForCausalLM`'s mapping and no `Qwen2VLForCausalLM` is importable,
+    which is the same shape as glm5_next's declared
+    `requires_multimodal_skeleton()`.
+    """
     path = _write_vl_ckpt(tmp_path, "vl_textonly")
-    context, reads = _build(tmp_path, monkeypatch, path,
-                            force_multimodal_skeleton=False)
-    try:
-        assert _visual_reads(reads) == []
-        assert context.visual_module is None
-    finally:
-        context.shutdown()
+    with pytest.raises(RuntimeError, match="cannot build a text-only skeleton"):
+        _build(tmp_path, monkeypatch, path, force_multimodal_skeleton=False)
