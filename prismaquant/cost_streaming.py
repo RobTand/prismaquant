@@ -1278,8 +1278,10 @@ def _read_source_checkpoint_digest_cache(
 ) -> dict[str, dict[str, object]]:
     """Digests keyed by the six-field stat fingerprint of the file they cover.
 
-    A corrupt or foreign cache is not an error: it simply reuses nothing, and
-    every shard is hashed. The cache can only ever make the identity CHEAPER,
+    A corrupt or foreign cache is not an error: it simply reuses nothing.
+    Certified mode then hashes every shard; dev mode refuses the
+    unannounced seal fast with the byte count instead (see the portable
+    reuse policy). The cache can only ever make the identity CHEAPER,
     never different -- the fingerprint it keys on includes ``ctime_ns``, which
     ``utime`` cannot restore after an in-place same-size rewrite.
     """
@@ -1515,11 +1517,14 @@ def build_source_checkpoint_identity(
         # every entry under that host's device number. Re-index by the
         # portable key without touching the file format; two entries that
         # agree on everything but bytes taint the key instead of reusing.
+        # Malformed stored rows are skipped outright: without the exact
+        # six-field shape a row must never match, or a cache missing
+        # `device` would reuse against every host.
         portable_index = {}
         tainted: set[str] = set()
         for entry in reusable.values():
             stored = entry.get("fingerprint") if isinstance(entry, dict) else None
-            if not isinstance(stored, dict):
+            if not _well_formed_fingerprint(stored):
                 continue
             try:
                 key = portable_fingerprint_key(stored)
@@ -1536,7 +1541,8 @@ def build_source_checkpoint_identity(
     digests: list[str | None] = []
     for fingerprint in fingerprints:
         cached = reusable.get(canonical_fingerprint_key(fingerprint))
-        if cached is None and portable_index is not None:
+        if (cached is None and portable_index is not None
+                and _well_formed_fingerprint(fingerprint)):
             cached = portable_index.get(portable_fingerprint_key(fingerprint))
         digests.append(str(cached["sha256"]) if cached is not None else None)
     misses = [index for index, digest in enumerate(digests) if digest is None]
