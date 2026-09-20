@@ -182,6 +182,13 @@ class ResidencyResolver:
         self._bytes_from_pool = 0
         self._fallbacks: list[dict] = []
         self._fallback_count = 0
+        # The serving-tier record (ID-07/INV-04): where bytes were actually
+        # served from, under which tier/epoch, noted at open time before
+        # payload trust. Counters observe; this record authorizes nothing.
+        # ``lease_id`` is None until the PB reader-lease API (RNG-02/SM-03)
+        # lands — the gap is explicit, not hidden.
+        self._serving_tiers: list[dict] = []
+        self._serving_tier_count = 0
 
     # -- binding ---------------------------------------------------------
 
@@ -815,6 +822,57 @@ class ResidencyResolver:
         with self._lock:
             self._bytes_from_pool += int(nbytes)
 
+    def record_serving_tier(self, declared: str | Path, tier: str,
+                            detail: str = "", *, pin_id: str | None = None,
+                            range_ref: str | None = None) -> None:
+        """Note where an open actually served from, before payload trust.
+
+        ``tier`` is ``ram`` or ``stage``. The tier/epoch halves are the
+        resolver's own; ``lease_id`` is None until the PB reader-lease API
+        (RNG-02/SM-03) exists. Bounded like the fallback lists; the count
+        is not. Counters observe — this record authorizes nothing.
+
+        Under a lifetime pin, callers pass the SDK serving record's
+        ``pin_id``/``range_ref``: the record is emitted at the successful
+        actual open, never when a path candidate merely passes ``lstat``.
+        """
+        path = _normal(declared)
+        with self._lock:
+            self._serving_tier_count += 1
+            if len(self._serving_tiers) < MAX_RECORDED_FALLBACKS:
+                record: dict = {"path": path, "serving_tier": tier,
+                                "lease_id": None}
+                if tier == "ram":
+                    record["tier_id"] = self._ram_tier_id
+                    record["epoch"] = self._ram_epoch
+                else:
+                    record["tier_id"] = self._tier_id
+                if pin_id is not None:
+                    record["pin_id"] = pin_id
+                    record["lease_id"] = pin_id
+                if range_ref is not None:
+                    record["range_ref"] = range_ref
+                if detail:
+                    record["detail"] = detail
+                self._serving_tiers.append(record)
+
+    def lease_identity(self) -> dict:
+        """The composed map's own identity for lease covers.
+
+        Returns ``tier_id``, ``leads`` (the mover keys that vouched this
+        read set), ``manifest_sha256``, and the ram half's
+        ``ram_tier_id``/``ram_epoch``. A stage-tier acquire names every
+        lead as covers with this manifest; RAM movers are not in the
+        composed map (see ``staged_lease.ram_covers``).
+        """
+        with self._lock:
+            return {"tier_id": self._tier_id,
+                    "leads": list(self._leads),
+                    "manifest_sha256": self._manifest_sha256,
+                    "ram_tier_id": self._ram_tier_id,
+                    "ram_epoch": self._ram_epoch,
+                    "residency_root": str(Path(self._map_path).parent)}
+
     def report(self) -> dict:
         """What each tier served this run, for ``results.json``."""
         with self._lock:
@@ -839,6 +897,8 @@ class ResidencyResolver:
                 "ram_fallback_count": self._ram_fallback_count,
                 "bytes_from_ram": self._bytes_from_ram,
                 "bytes_from_pool": self._bytes_from_pool,
+                "serving_tiers": [dict(row) for row in self._serving_tiers],
+                "serving_tier_count": self._serving_tier_count,
             }
             if self._ram_tier_id is not None:
                 # The ram half's own header and verdict, present only when a

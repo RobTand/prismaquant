@@ -140,7 +140,9 @@ def _read_verified_wire_blob(cell):
     resolver = residency_resolver()
     staged = (None if resolver is None
               else resolver.staged_read(wire, expected_sha256=expected))
-    if staged is not None:
+    from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
+    strict = policy_is_active()
+    if staged is not None and not strict:
         # The ram copy first, the stage copy second, the declared path last.
         # PrismaBuild's ram tier (#640) promotes a staged range onto a tmpfs
         # and the resolver offers the copy only while the epoch the map dates
@@ -161,11 +163,63 @@ def _read_verified_wire_blob(cell):
                     continue
                 resolver.record_fallback(wire, str(refusal))
             else:
+                # The open fence passed: serving tier recorded at open,
+                # before these payload bytes are trusted.
+                resolver.record_serving_tier(wire, half)
                 if half == "ram":
                     resolver.record_ram_read(wire, len(blob))
                 else:
                     resolver.record_stage_read(wire, len(blob))
                 return blob, digest
+    elif staged is not None:
+        # Lifetime-pinned window (one per blob); see the shard reader for
+        # the RAM/SSD discipline shared here.
+        from .staged_lease import LeaseRefused, acquire_entry_window
+        window, key = acquire_entry_window(resolver, wire, staged)
+        with window:
+            try:
+                fd, serving = window.open(key)
+            except LeaseRefused as refusal:
+                resolver.record_fallback(wire, str(refusal))
+                raise
+            tier = window.serving_tier or "stage"
+            resolver.record_serving_tier(
+                wire, tier, pin_id=str(serving.get("pin_id") or ""),
+                range_ref=str(serving.get("range_ref") or ""))
+            first = os.fstat(fd)
+            parts = []
+            remaining = size + 1
+            offset = 0
+            while remaining > 0:
+                block = os.pread(fd, min(remaining, 8 << 20), offset)
+                if not block:
+                    break
+                parts.append(block)
+                offset += len(block)
+                remaining -= len(block)
+            blob = b"".join(parts)
+            last = os.fstat(fd)
+            if (len(blob) != size or first.st_size != size
+                    or (last.st_ino, last.st_size, last.st_mtime_ns)
+                    != (first.st_ino, first.st_size, first.st_mtime_ns)):
+                # Changed under its pin: integrity fails clear, no alternate.
+                raise LeaseRefused("lease-open-size-changed", kind="integrity")
+        # The window closed (descriptor shut, exact ref released) before
+        # these bytes are bound to the receipt.
+        digest = hashlib.sha256(blob).hexdigest()
+        if digest != expected:
+            raise refuse_pool_bulk_read(
+                str(wire), "content-corruption:staged wire bytes differ "
+                           "from the receipt digest")
+        if tier == "ram":
+            resolver.record_ram_read(wire, len(blob))
+        else:
+            resolver.record_stage_read(wire, len(blob))
+        return blob, digest
+    elif strict:
+        raise refuse_pool_bulk_read(
+            str(wire), "readset-not-staged" if resolver is None
+            else "staged-not-serving")
     blob, digest = _read_wire_bytes(wire, size, expected=expected, staged=False)
     if resolver is not None:
         resolver.record_pool_read(wire, len(blob))
@@ -174,6 +228,15 @@ def _read_verified_wire_blob(cell):
 
 class _StagedWireRefused(Exception):
     """The staged wire failed its identity check; read the declared path."""
+
+
+class _StagedWireCorrupt(_StagedWireRefused):
+    """The staged wire's content compares corrupt (digest mismatch).
+
+    Availability failures (unreadable, resized, raced) may fall through to
+    the next permitted copy; content corruption fails clear under policy —
+    never a silent adoption of an unchecked alternate.
+    """
 
 
 def _read_wire_bytes(wire, size, *, expected, staged):
@@ -224,7 +287,7 @@ def _read_wire_bytes(wire, size, *, expected, staged):
           f"{wire}: wire changed during its content read")
     digest = hashlib.sha256(blob).hexdigest()
     if staged and digest != expected:
-        raise _StagedWireRefused('staged wire bytes differ from the receipt digest')
+        raise _StagedWireCorrupt('staged wire bytes differ from the receipt digest')
     _same(digest, expected, f"{wire}: wire checksum")
     return blob, digest
 

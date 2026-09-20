@@ -1705,6 +1705,12 @@ def build_parser() -> argparse.ArgumentParser:
                              "of record, not every quantum)")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--data-manifest-sha256")
+    from .staged_tier_policy import DEFAULT_ALLOWED_TIERS
+    parser.add_argument("--allowed-tiers", default=DEFAULT_ALLOWED_TIERS,
+                        help="sealed staged-tier declaration for GPU-consumed "
+                             "bulk inputs: comma subset of {ram,ssd}, RAM "
+                             "first (default %(default)s). Pool/HDD bulk "
+                             "opens refuse under this declaration.")
     return parser
 
 
@@ -1732,6 +1738,13 @@ def main(argv=None) -> int:
               f"{config['output_root']} is not --output-root {args.output_root}",
               flush=True)
         return EXIT_IDENTITY_REFUSED
+    from .staged_tier_policy import activate_staged_tier_policy
+    try:
+        allowed = activate_staged_tier_policy(args.allowed_tiers)
+    except ValueError as exc:
+        parser.error(str(exc))
+    print(f"[STAGED-TIER] bulk inputs serve from {','.join(sorted(allowed))}; "
+          f"pool/HDD bulk opens refuse", flush=True)
     profiler = None
     if args.profile_tool == "cprofile":
         import cProfile

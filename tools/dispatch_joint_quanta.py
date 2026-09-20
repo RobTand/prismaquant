@@ -72,6 +72,15 @@ SUBMISSION_PRIORITY = -5
 ADJOINT_TAG = "sparky"
 DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE=1"
 
+#: The sealed staged-tier declaration every campaign row carries as the
+#: payload ``--allowed-tiers`` flag (never ambient env: the container
+#: forwards no ambient action environment into the payload). RAM first,
+#: SSD explicitly emitted; pool/HDD bulk opens refuse under it. The value
+#: must equal ``prismaquant.staged_tier_policy.DEFAULT_ALLOWED_TIERS``
+#: and the joint entrypoints' parser default — pinned by
+#: ``tests/test_dispatch_joint_quanta.py``.
+STAGED_ALLOWED_TIERS = "ram,ssd"
+
 #: §5.2: each chunk's progress phase seals a 900-second stall allowance.
 CHUNK_PROGRESS_GRACE_S = 900
 #: The head phase's stall allowance. Not pinned by the contract (only the
@@ -511,6 +520,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--adjoint", str(adjoint_path),
         "--adjoint-sha256", receipt_sha256,
         "--data-manifest-sha256", staged_sha256,
+        "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
         "--output-root", str(output_root)])
     argv = [sys.executable, str(PBRUN)]
@@ -570,6 +580,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         "--prepared-sha256", str(campaign["prepared_sha256"]),
         "--data-manifest-sha256", binding["data_manifest_sha256"],
         "--read-manifest-sha256", binding["read_manifest_sha256"],
+        "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--output-root", str(_plan_output_root(campaign)),
         "--resume"]
     if prefetch_override is not None:
