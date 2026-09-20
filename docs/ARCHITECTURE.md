@@ -14,8 +14,8 @@ SSD re-acquire otherwise, never the pool — with the sealed size/change
 fences before allocation; the independently pinned SHA256 is verified
 and the int64 draw decodes from the same frozen bytes via the installed
 public bytes decoder (bounded header extraction for provenance only;
-the decoded tensors view and retain those bytes, so one staged read
-serves verification and decode with a single freeze copy), then the
+one staged read serves verification and decode, and decoder-owned storage
+remains valid after pin release; no zero-copy guarantee), then the
 unchanged draw contract (dtype/shape/domain, provenance, both
 `fit_ids_sha256`/`calibration_sha256` conventions).
 Unmapped/wrong-pin/forbidden-tier/corrupt-stage refuse fail-closed with

@@ -100,9 +100,10 @@ def _decode_calibration_buffer(raw: bytes) -> tuple[torch.Tensor, dict]:
     noncontiguous and trailing framing a span reader would accept — never
     a private reimplementation. Only the ``calibration_provenance``
     metadata still comes from a bounded header extraction. The decoded
-    tensors view the frozen artifact bytes and retain them, so they stay
-    valid after the lease releases; the single freeze copy is the only
-    copy on this path. Structural problems are the offline contract's
+    tensors retain decoder-owned storage and stay valid after the lease
+    releases. The reader freezes its bytearray once; the public decoder
+    manages its own allocations, so this is not a zero-copy guarantee.
+    Structural problems are the offline contract's
     ValueErrors, exactly as the ``safe_open`` path reports them (the
     decoders' own exception types are wrapped, never compared).
     """
