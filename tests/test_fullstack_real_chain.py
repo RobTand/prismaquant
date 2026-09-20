@@ -44,6 +44,7 @@ for _entry in (ROOT, ROOT / "tools"):
 import fullstack_pb_generation as pbgen  # noqa: E402
 from prismaquant.joint_layer_quanta import (  # noqa: E402
     layer_quanta,
+    seal_manifest_bytes,
     verify_quanta_coverage,
 )
 from prismaquant.joint_quanta_join import main as join_main  # noqa: E402
@@ -156,8 +157,10 @@ def campaign(tmp_path_factory):
     receipt = {
         "schema": "prismaquant.joint_adjoint_capture.v1",
         "plan_sha256": sealed["plan.json"],
-        "adjoint_checkpoints": [],
-        "boundary_storage": {"session": "fullstack-chain"},
+        "prepared_sha256": sealed["prepared.json"],
+        "campaign_scope": parent["annotations"]["campaign_scope"],
+        "checkpoints": [{"boundary": mark} for mark in (1, 2)],
+        "status": "complete",
     }
     return {"tmp": tmp, "plan": plan, "prepared": prepared,
             "parent": parent, "units": units,
@@ -191,9 +194,8 @@ def produced(campaign):
         (root / "records" / f"{quantum_id}.json").write_text(json.dumps(record))
         manifest_path = root / record["read_set"]["manifest_path"]
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        raw = json.dumps(
-            built["slice_manifests"][quantum_id], sort_keys=True).encode()
-        manifest_path.write_bytes(gzip.compress(raw, mtime=0))
+        manifest_path.write_bytes(seal_manifest_bytes(
+            built["slice_manifests"][quantum_id]))
         assert hashlib.sha256(manifest_path.read_bytes()).hexdigest() == \
             record["read_set"]["manifest_sha256"]
     return built
