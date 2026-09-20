@@ -186,50 +186,75 @@ def _published():
     return pbcore, pbtest_mod
 
 
-def _sealed_tokens(action: object) -> list[str] | None:
-    """Shell words of the sealed bash/pytest command (comments stripped).
+def _sealed_command(action: object) -> tuple[dict | None, str]:
+    """Parse the sealed test command (closed published forms).
 
-    The pbtest/pbrun contract seals ``bash -c '<command> 2>&1 | tee log;
-    exit ${PIPESTATUS[0]}'`` with the inner command built by
-    ``shlex.join``; reading it back with ``shlex.split`` yields the real
-    operands. A filename merely echoed in a shell comment never appears:
-    comments lex away. None on any shape deviation -- callers fail
-    closed.
+    Accepts exactly the two shapes the published generators seal for
+    test work, validated token by token after shell lexing (comments
+    stripped, quoting respected):
+
+    - pbtest suite form: ``export PATH=...:$PATH; env K=V... <interp>
+      -c <guard> -q --no-header -p no:cacheprovider <files>`` -- the
+      dependency-guard entry admitted since this checkout carries
+      ``resolve_*_dev_pin.py`` resolvers;
+    - pbrun-direct bare form: ``export PATH=...:$PATH; <interp> -m
+      pytest <files>``.
+
+    Returns ``({"interpreter", "files", "log", "entry"}, "")`` where
+    entry is ``"guard"`` or ``"plain"``. Anything else returns
+    ``(None, reason)``; callers treat shape drift as nonqualified,
+    never as proof. This is a small verifier for explicit versioned
+    forms, not a general Bash analyzer.
     """
     if not isinstance(action, dict):
-        return None
+        return None, "sealed action malformed"
     task = action.get("task")
     argv = task.get("argv") if isinstance(task, dict) else None
     if (not isinstance(argv, list) or len(argv) != 5
             or argv[:4] != ["/bin/bash", "--noprofile", "--norc", "-c"]
             or not isinstance(argv[4], str)):
-        return None
+        return None, "sealed wrapper shape differs"
     script = argv[4]
-    if "| tee " not in script or "exit ${PIPESTATUS[0]}" not in script:
-        return None
+    head, exit_sep, exit_tail = script.rpartition("; exit ${PIPESTATUS[0]}")
+    if not exit_sep or exit_tail != "":
+        return None, "sealed exit handling differs"
+    cmdline, tee_sep, log = head.rpartition(" 2>&1 | tee ")
+    if not tee_sep or not log or " " in log:
+        return None, "sealed log separator differs"
     try:
-        return shlex.split(script, comments=True, posix=True)
+        tokens = shlex.split(cmdline, comments=True, posix=True)
     except ValueError:
-        return None
-
-
-def _action_files(action: object) -> set[str] | None:
-    """Test-file operands of the sealed command, or None if malformed."""
-    tokens = _sealed_tokens(action)
-    if tokens is None:
-        return None
-    return {token for token in tokens if token.endswith(".py")}
-
-
-def _candidate_keys(output: object) -> set[str] | None:
-    """Distinct 64-hex action keys named in console output.
-
-    Console JSON only LOCATES a candidate key; nothing here authorizes
-    anything. None on malformed input.
-    """
-    if not isinstance(output, str):
-        return None
-    return set(re.findall(r'"action_key":\s*"([0-9a-f]{64})"', output))
+        return None, "sealed command unlexable"
+    if (len(tokens) < 4 or tokens[0] != "export"
+            or not tokens[1].startswith("PATH=")
+            or not tokens[1].endswith(":$PATH") or tokens[2] != ";"):
+        return None, "sealed prefix differs"
+    rest = tokens[3:]
+    if rest[:1] == ["env"]:
+        index = 1
+        while index < len(rest) and re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]*=.*", rest[index]):
+            index += 1
+        if index == 1:
+            return None, "sealed env assignments differ"
+        body = rest[index:]
+        if (len(body) < 7 or not body[0] or body[1] != "-c"
+                or not body[2]
+                or body[3:7] != ["-q", "--no-header", "-p",
+                                 "no:cacheprovider"]):
+            return None, "sealed pytest entry differs"
+        files = body[7:]
+        entry = "guard"
+    else:
+        if (len(rest) < 4 or not rest[0]
+                or rest[1:3] != ["-m", "pytest"]):
+            return None, "sealed pytest entry differs"
+        files = rest[3:]
+        entry = "plain"
+    if not files or any(not f.endswith(".py") for f in files):
+        return None, "sealed test operands differ"
+    return {"interpreter": rest[0] if entry == "plain" else body[0],
+            "files": files, "log": log, "entry": entry}, ""
 
 
 def _snapshot_agreement(action: object,
@@ -416,17 +441,24 @@ def verify_shard(*, shard: object, host: str, declared: dict,
         return nope("failed", "no CAS receipt for filed action",
                     action_key=key)
     receipt_sha = str(receipt.get("receipt_sha256", ""))
-    tokens = _sealed_tokens(action)
-    if tokens is None:
-        return nope("failed", "sealed command malformed",
+    command, problem = _sealed_command(action)
+    if problem:
+        return nope("nonqualified",
+                    f"command shape differs: {problem}",
                     action_key=key, receipt_sha256=receipt_sha)
-    if expected_file not in {t for t in tokens if t.endswith(".py")}:
+    assert command is not None
+    if command["files"] != [expected_file]:
         return nope("failed",
                     f"sealed command does not execute {expected_file}",
                     action_key=key, receipt_sha256=receipt_sha)
     python = declared.get("python")
-    if not isinstance(python, str) or python not in tokens:
+    if not isinstance(python, str) or command["interpreter"] != python:
         return nope("failed", "sealed command interpreter mismatch",
+                    action_key=key, receipt_sha256=receipt_sha)
+    task = action.get("task") if isinstance(action, dict) else None
+    result_path = task.get("result_path") if isinstance(task, dict) else None
+    if result_path != command["log"]:
+        return nope("failed", "sealed log differs from task result_path",
                     action_key=key, receipt_sha256=receipt_sha)
     try:
         result_path = cas.result_path(receipt, action)
@@ -436,6 +468,9 @@ def verify_shard(*, shard: object, host: str, declared: dict,
             "failed",
             f"result unreadable: {type(exc).__name__}: {str(exc)[:200]}",
             action_key=key, receipt_sha256=receipt_sha)
+    if command["entry"] == "guard" and "pbtest dependency pin:" not in text:
+        return nope("failed", "pin-guard evidence absent from result",
+                    action_key=key, receipt_sha256=receipt_sha)
     summary = pbtest_mod.pytest_summary(text.splitlines())
     if not summary:
         return nope("nonqualified",

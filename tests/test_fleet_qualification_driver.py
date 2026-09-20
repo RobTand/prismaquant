@@ -354,23 +354,94 @@ def _terminal_for(driver, tmp_path, monkeypatch, tag, key, host,
     return terminal
 
 
-def test_sealed_command_names_the_executed_file():
-    """Filed action operands come from the sealed argv, not comments."""
+def _script_of(tag):
     import json as _json
+    action = _json.loads((FIXTURES / tag / "request.json").read_bytes())
+    return action["task"]["argv"][4]
+
+
+def _action_with_script(script):
+    return {"task": {"argv": ["/bin/bash", "--noprofile", "--norc", "-c",
+                              script]},
+            "inputs": [{"id": "pbrun.checkout-snapshot",
+                        "sha256": "0" * 64}],
+            "result_path": "log.txt"}
+
+
+def test_sealed_command_accepts_both_published_forms():
+    """Real filed actions parse: plain probe and guarded suite shard."""
     driver = _driver()
-    action = _json.loads(
-        (FIXTURES / "A" / "request.json").read_bytes())
-    files = driver._action_files(action)
-    assert files == {PINS_FILE}, files
-    commented = {"task": {"argv": [
-        "/bin/bash", "--noprofile", "--norc", "-c",
-        "true # " + RUNNER_FILE + "\n"
-        "python -m pytest " + PINS_FILE + " 2>&1 | tee log.txt; "
-        "exit ${PIPESTATUS[0]}"]}}
-    assert RUNNER_FILE not in (driver._action_files(commented) or set())
-    assert PINS_FILE in (driver._action_files(commented) or set())
-    assert driver._action_files({"task": {"argv": ["x"]}}) is None
-    assert driver._action_files(None) is None
+    plain, problem = driver._sealed_command(
+        {"task": {"argv": ["/bin/bash", "--noprofile", "--norc", "-c",
+                           "x"]}, "inputs": [], "result_path": "l"})
+    assert plain is None and problem
+    for tag, expected, entry in (("A", PINS_FILE, "plain"),
+                                 ("B", PINS_FILE, "plain"),
+                                 ("C", PINS_FILE, "plain"),
+                                 ("D", LEVEL1_FILE, "guard")):
+        import json as _json
+        action = _json.loads(
+            (FIXTURES / tag / "request.json").read_bytes())
+        parsed, problem = driver._sealed_command(action)
+        assert problem == "", (tag, problem)
+        assert parsed is not None
+        assert parsed["files"] == [expected], (tag, parsed)
+        assert parsed["entry"] == entry, (tag, parsed)
+        assert parsed["interpreter"] == REAL_PYTHON, (tag, parsed)
+        assert parsed["log"] == action["task"]["result_path"], tag
+
+
+def test_sealed_command_rejects_unexecuted_text():
+    """Echoed/branched/unrelated text never parses as executed files."""
+    driver = _driver()
+    base = _script_of("A")
+    head = base.rpartition(" 2>&1 | tee ")[0]
+    # Expected filename only echoed after the real command.
+    echoed, problem = driver._sealed_command(_action_with_script(
+        head + "; echo " + RUNNER_FILE + " 2>&1 | tee log.txt; "
+        "exit ${PIPESTATUS[0]}"))
+    assert echoed is None, echoed
+    # Real command inside a never-executed branch.
+    branched, problem = driver._sealed_command(_action_with_script(
+        "export PATH=/x:$PATH; "
+        "if false; then " + head + "; fi 2>&1 | tee log.txt; "
+        "exit ${PIPESTATUS[0]}"))
+    assert branched is None, branched
+    # Unrelated pytest command followed by an echo of the expected file.
+    other, problem = driver._sealed_command(_action_with_script(
+        "export PATH=/x:$PATH; /bin/python -m pytest tests/other.py "
+        "2>&1 | tee log.txt; exit ${PIPESTATUS[0]}"))
+    assert other is None or other["files"] == ["tests/other.py"], other
+    # printf-style comment carrying the filename.
+    commented, problem = driver._sealed_command(_action_with_script(
+        "export PATH=/x:$PATH; true # " + RUNNER_FILE + "\n"
+        "/bin/python -m pytest " + PINS_FILE + " 2>&1 | tee log.txt; "
+        "exit ${PIPESTATUS[0]}"))
+    assert commented is not None
+    assert commented["files"] == [PINS_FILE]
+    assert RUNNER_FILE not in commented["files"]
+    # Missing separators and exit relay.
+    assert driver._sealed_command(_action_with_script(
+        "export PATH=/x:$PATH; /bin/python -m pytest "
+        + PINS_FILE))[0] is None
+    assert driver._sealed_command(
+        {"task": {"argv": ["x"]}})[0] is None
+    assert driver._sealed_command(None)[0] is None
+
+
+def test_sealed_command_rejects_extra_operands():
+    """Extra tests or options beyond the declared case never parse."""
+    driver = _driver()
+    base = _script_of("A")
+    head = base.rpartition(" 2>&1 | tee ")[0]
+    extra_file, _ = driver._sealed_command(_action_with_script(
+        head + " " + RUNNER_FILE + " 2>&1 | tee log.txt; "
+        "exit ${PIPESTATUS[0]}"))
+    assert extra_file is not None
+    assert extra_file["files"] == [PINS_FILE, RUNNER_FILE]
+    extra_opt, _ = driver._sealed_command(_action_with_script(
+        head + " -k foo 2>&1 | tee log.txt; exit ${PIPESTATUS[0]}"))
+    assert extra_opt is None, extra_opt
 
 
 def test_relabeled_file_fails_binding(tmp_path, monkeypatch):
