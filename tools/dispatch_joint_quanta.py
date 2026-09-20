@@ -32,6 +32,7 @@ call after the runtime's cutover check; this tool's tests use fixtures.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import subprocess
@@ -439,6 +440,25 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             manifest = output_root / manifest
         staged_sha256 = _executable_manifest_digest(
             record, output_root=output_root)
+        try:
+            _raw = Path(manifest).read_bytes()
+            if _raw[:2] == b"\x1f\x8b":
+                _raw = gzip.decompress(_raw)
+            _prereq = json.loads(_raw.decode("utf-8")).get(
+                "annotations", {}).get("render_prerequisite", {})
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise DispatchRefused(
+                f"quantum {quantum_id!r} executable manifest unreadable: "
+                f"{exc}") from exc
+        _binding = _prereq.get("binding") if isinstance(_prereq, dict) else None
+        if not isinstance(_binding, dict) or _binding.get("scope") != "pb732" \
+                or not _is_hex64(_binding.get("material")):
+            raise DispatchRefused(
+                f"quantum {quantum_id!r} executable readset is not runnable: "
+                "its render prerequisite has no produced-output binding "
+                "(PB732 scope worker pending) -- refusing before any staged "
+                "read instead of discovering missing rendered cells after "
+                "expensive source/checkpoint work")
         phases = executable.get("phases")
         if not isinstance(phases, list) or not phases or any(
                 type(name) is not str or not name for name in phases):

@@ -615,13 +615,23 @@ def _check_event_order(events, manifest, *, layer, chain):
     """Fail-closed order checker: every bulk read occurs under its
     already-reported owning phase. A hook moved after its read flips an
     event pair and fails here -- that is the mutation sensitivity.
+
+    The candidate retained_window must already hold when a replay phase
+    is entered: the first replay report requires a preceding window-open,
+    and every replay boundary read requires both.
     """
     names = [p["name"] for p in manifest["read_plan"]["phases"]]
+    by_path = {e["path"]: e for e in manifest["entries"]}
     current = None
+    seen_window_open = False
     for event in events:
         kind = event[0]
         if kind == "report":
             assert event[1] in names, event[1]
+            if event[1].startswith("replay-"):
+                assert seen_window_open, (
+                    f"replay phase {event[1]!r} entered before any "
+                    "retained_window opened")
             current = event[1]
         elif kind == "checkpoint-open":
             assert current == "checkpoint-load", events
@@ -638,15 +648,22 @@ def _check_event_order(events, manifest, *, layer, chain):
                 assert current == f"chain-{opened:03d}-bound", events
             else:
                 assert opened == layer, events
+                assert seen_window_open, events
                 assert current is not None and current.startswith(
                     "replay-"), events
-        elif kind in ("setup-open", "window-open"):
+        elif kind == "setup-open":
             pass
+        elif kind == "window-open":
+            seen_window_open = True
         elif kind == "checkpoint-plane-open":
             assert current == "checkpoint-load", events
         elif kind == "boundary-path-open":
-            staged = {entry["path"] for entry in manifest["entries"]}
-            assert event[1] in staged, event[1]
+            _, path, file_bytes, sha256 = event
+            assert path in by_path, path
+            entry = by_path[path]
+            assert entry["offset"] == 0, (path, entry)
+            assert entry["bytes"] == file_bytes, (path, entry, file_bytes)
+            assert entry["sha256"] == sha256, (path, entry)
         else:
             raise AssertionError(f"unknown event {event!r}")
 
@@ -702,7 +719,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
             if parts[0] == "boundary":
                 plane = False
                 bounds.add(int(parts[2]))
-            events.append(("boundary-path-open", ref.path))
+            events.append(("boundary-path-open", ref.path,
+                           int(ref.file_bytes), str(ref.sha256)))
         if plane:
             events.append(("checkpoint-plane-open", len(references)))
         else:
@@ -781,13 +799,34 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
 
 
 def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
+    """Real tiny-CPU quantum sequencing: phase before first payload read.
+
+    Reuses the existing tiny runner fixture (``test_layer_major_boundary_
+    capture.fixture``), the prepared cache helper and ``run_layer_quantum_
+    core`` from ``test_joint_cost_quantum_runtime`` -- no pretend execution.
+    Layer 0 carries a nonempty chain ([1]); every run uses 4 probes; the
+    replay corpus repeats per (window, probe); one resume run exercises the
+    zero-pending window-zero convention. The actual ``QuantumProgress``
+    reporter is instrumented (not hand-appended phase names); the actual PB
+    ``residency_plan.accepted/remaining`` reader stages the manifest-derived
+    phases. Every observed bulk path/bytes/digest must match the manifest,
+    and moving a hook after its read fails the order checker.
+    """
     setup = _acceptance_setup(tmp_path, monkeypatch)
+    record0 = setup["records"]["layer-000"]
+    assert list(record0["adjoint"]["chain_layers"]) == [1]
+    assert len(record0["windows"]) >= 1
+    assert setup["receipt"].get("status") == "complete"
     events, manifest = _drive_quantum(
         tmp_path, monkeypatch, setup, layer=0, resume=False)
     record = setup["records"]["layer-000"]
     _assert_acceptance_run(events, manifest, record, tmp_path,
                            expect_replay_windows="all",
                            layer_files=setup["layer_files"])
+    # Four probes => four replay phases per window at minimum.
+    replayed = [n for n in _reported(events) if n.startswith("replay-")]
+    assert len(replayed) >= 4, replayed
+    assert {n.split("-")[2] for n in replayed} == {"p0", "p1", "p2", "p3"}
     # Resume: all windows complete, zero-pending replay under window zero.
     events2, _ = _drive_quantum(
         tmp_path, monkeypatch, setup, layer=0, resume=True)
@@ -839,11 +878,24 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
     staged = {e["path"]: e for e in manifest["entries"]}
     for kind, *rest in events:
         if kind == "boundary-path-open":
-            assert rest[0] in staged, rest[0]
+            path, file_bytes, sha256 = rest
+            assert path in staged, path
+            assert staged[path]["bytes"] == file_bytes, (path, staged[path])
+            assert staged[path]["sha256"] == sha256, (path, staged[path])
+        elif kind == "setup-open":
+            (path,) = rest
+            assert path in staged, path
+            assert Path(path).stat().st_size == staged[path]["bytes"]
+            assert hashlib.sha256(
+                Path(path).read_bytes()).hexdigest() == staged[path]["sha256"]
     installed = {layer for kind, layer, *_ in events if kind == "source-open"}
     for layer in installed:
         for path in layer_files[layer]:
             assert path in staged, path
+            assert Path(path).stat().st_size == staged[path]["bytes"], path
+            assert hashlib.sha256(
+                Path(path).read_bytes()).hexdigest() == staged[path][
+                    "sha256"], path
     units = [u for kind, _phase, u in events if kind == "report"]
     assert all(b >= a for a, b in zip(units, units[1:]))
     plan_view = {"phases": [{"name": name} for name in names]}

@@ -12,18 +12,26 @@ its boundary entries, the own source extents, then per retained window
 and probe the replay boundary reads (own-boundary corpus repeats across
 windows; resume reads a subset). Entries deduplicate exact
 path/offset/bytes/sha triples and refuse contradictions; rendered-weight
-bytes are not staged here but bound through the named PB732
-produced-output prerequisite. `bind_quantum_executable` attaches the
+bytes are not staged here but named through the PB732 produced-output
+prerequisite in annotations (production pickle digest plus roster digest).
+The annotation names the prerequisite and does not implement staging: a
+manifest with `binding: None` is sequencing only and NOT runnable, and the
+dispatcher refuses it before any staged read until the PB732 scope worker
+supplies a produced-output binding. `bind_quantum_executable` attaches the
 rebuild-anchored digest/path to a new record generation with recomputed
 identity; `--executable-readsets` wires the regen path. The dispatcher
 submits that one manifest and declares exactly its phases (startup class
 keeps the head grace, read phases the chunk grace); tier flags, tags,
 demand and environment are identical in both lanes, and rows without the
-block keep the legacy slice contract. The runtime reports each staged
-phase through the existing semantic reporter as its bytes are consumed
-(read transitions change phase with unchanged units; chunk names are not
-staging phases, so durable units commit under the read phase in effect).
-Gate: `tests/test_quantum_executable_readset.py`.
+block keep the legacy slice contract. The runtime enters each staged read
+phase through the existing semantic reporter BEFORE its first payload
+access (checkpoint-load before the checkpoint plane load, chain/own source
+before install, chain-bound before the chain roll, replay before the
+boundary prefetch inside the already-open retained_window; read transitions
+change phase with unchanged units; chunk names are not staging phases, so
+durable units commit under the read phase in effect).
+Gate: `tests/test_quantum_executable_readset.py` (real tiny-CPU
+`run_layer_quantum_core` sequencing, not scripted helper calls).
 
 Re-stamped (2026-09-20, `flash/stagea-adjoint-manifest-20260920`) for
 **quantum boundary readset binding** (PQ #848).

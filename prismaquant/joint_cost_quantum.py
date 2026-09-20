@@ -989,10 +989,10 @@ def run_layer_quantum_core(
         raise RuntimeError(
             "adjoint receipt does not carry the record's checkpoint boundary "
             f"{record['adjoint']['checkpoint_boundary']}")
-    cotangent_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-        adjusted_space(output_root), checkpoint_record)
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
+    cotangent_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+        adjusted_space(output_root), checkpoint_record)
     grad_plane: dict[tuple[int, int], torch.Tensor] = dict(cotangent_plane)
     cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
                          for _ in row_offsets] for _ in range(n_probes)]
@@ -1090,10 +1090,10 @@ def run_layer_quantum_core(
             retained_budget.require_physical_guard(guard)
         retained_source_phase("source_loading")
 
-        _install_with_settlement(runner, layer, operator_windows=operator_windows)
         if executable:
             progress.enter_read_phase(
                 executable_own_source_phase_name(layer))
+        _install_with_settlement(runner, layer, operator_windows=operator_windows)
         if packed_members:
             from .production_weight_cache import PackedExpertProjection
 
@@ -1318,6 +1318,11 @@ def run_layer_quantum_core(
             # Report each replay probe pass under the executable contract.
             # With no window loop running (zero-pending resume) the reads
             # stage under the window-zero phases by convention.
+            # Ordering: observe_and_project_retained_windows opens the
+            # candidate retained_window before invoking this callback, so
+            # the retained PWC lifetime already holds when the replay phase
+            # is entered here and the boundary prefetch inside
+            # replay_backward runs under the already-reported phase.
             if executable:
                 progress.enter_read_phase(
                     executable_replay_phase_name(replay_window, probe_index))
