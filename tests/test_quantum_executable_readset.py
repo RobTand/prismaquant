@@ -672,15 +672,16 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
         return True
 
     monkeypatch.setattr(pbprog, "report", _report)
-    orig_ensure = runner.context.ensure_loaded
+    orig_install = runner.context.install
 
-    def ensure_logged(L, *, require_prefetched=False):
-        tensors, status = orig_ensure(
-            L, require_prefetched=require_prefetched)
-        events.append(("source-open", int(L), status))
-        return tensors, status
+    def install_logged(layer, *, require_prefetched=False,
+                       prefetch_following=True):
+        events.append(("source-open", int(layer), "installed"))
+        return orig_install(
+            layer, require_prefetched=require_prefetched,
+            prefetch_following=prefetch_following)
 
-    runner.context.ensure_loaded = ensure_logged
+    runner.context.install = install_logged
     orig_load = qc.load_adjoint_checkpoint
 
     def load_logged(space, checkpoint_record):
@@ -761,18 +762,21 @@ def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
         tmp_path, monkeypatch, setup, layer=0, resume=False)
     record = setup["records"]["layer-000"]
     _assert_acceptance_run(events, manifest, record, tmp_path,
-                           expect_replay_windows="all")
+                           expect_replay_windows="all",
+                           layer_files=setup["layer_files"])
     # Resume: all windows complete, zero-pending replay under window zero.
     events2, _ = _drive_quantum(
         tmp_path, monkeypatch, setup, layer=0, resume=True)
     _assert_acceptance_run(events2, manifest, record, tmp_path,
-                           expect_replay_windows={0})
+                           expect_replay_windows={0},
+                           layer_files=setup["layer_files"])
     # No-chain path still works.
     events3, manifest1 = _drive_quantum(
         tmp_path, monkeypatch, setup, layer=1, resume=False)
     _assert_acceptance_run(
         events3, manifest1, setup["records"]["layer-001"], tmp_path,
-        expect_replay_windows="all")
+        expect_replay_windows="all",
+        layer_files=setup["layer_files"])
     assert not [n for n in _reported(events3) if n.startswith("chain-")]
 
 
@@ -795,7 +799,7 @@ def _reported(events):
 
 
 def _assert_acceptance_run(events, manifest, record, tmp_path,
-                           expect_replay_windows):
+                           expect_replay_windows, layer_files):
     import prismabuild.residency_plan as plans
     names = [p["name"] for p in manifest["read_plan"]["phases"]]
     reported = _reported(events)
@@ -808,6 +812,10 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
     for kind, *rest in events:
         if kind == "boundary-path-open":
             assert rest[0] in staged, rest[0]
+    installed = {layer for kind, layer, *_ in events if kind == "source-open"}
+    for layer in installed:
+        for path in layer_files[layer]:
+            assert path in staged, path
     units = [u for kind, _phase, u in events if kind == "report"]
     assert all(b >= a for a, b in zip(units, units[1:]))
     plan_view = {"phases": [{"name": name} for name in names]}
