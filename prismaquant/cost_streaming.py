@@ -1541,22 +1541,7 @@ def build_source_checkpoint_identity(
         digests.append(str(cached["sha256"]) if cached is not None else None)
     misses = [index for index, digest in enumerate(digests) if digest is None]
     if misses and dev_mode_enabled() and digest_cache_path is not None:
-        uncovered: list[tuple[str, int]] = []
-        for path, fingerprint, digest in zip(
-                ordered, fingerprints, digests, strict=True):
-            if digest is not None:
-                continue
-            size = fingerprint.get("bytes") if isinstance(
-                fingerprint, dict) else None
-            if not isinstance(size, int) or isinstance(size, bool):
-                raise RuntimeError(
-                    "dev mode refuses: cannot price the unannounced seal, "
-                    f"no byte size recorded for {path} "
-                    f"(fingerprint keys: "
-                    f"{sorted(fingerprint) if isinstance(fingerprint, dict) else type(fingerprint).__name__})"
-                )
-            uncovered.append((str(path), size))
-        total = sum(size for _, size in uncovered)
+        total = sum(int(fingerprints[index]["size"]) for index in misses)
         raise RuntimeError(
             "dev mode refuses an unannounced source rehash of "
             f"{total} bytes across {len(uncovered)} shard(s): the declared "
