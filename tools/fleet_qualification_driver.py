@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import shlex
 import socket
@@ -241,6 +242,18 @@ def _command_operands(action: object) -> tuple[dict | None, str]:
     if (not isinstance(command, list) or not command
             or not all(isinstance(word, str) for word in command)):
         return None, "sealed command malformed"
+    environment = action.get("environment")
+    variables = environment.get("variables") if isinstance(environment, dict) else None
+    if not isinstance(variables, dict):
+        return None, "sealed environment malformed"
+    # Selection and import controls outside argv still change the case run.
+    # The driver declares whole files without filters or interpreter overrides.
+    if (any(name.startswith("PYTEST_") and value
+            for name, value in variables.items())
+            or variables.get("PYTHONPATH", "") not in ("", "src:experiments")
+            or variables.get("PYTHONOPTIMIZE", "") not in ("", "0")
+            or any(variables.get(name) for name in ("PYTHONHOME", "PYTHONSTARTUP"))):
+        return None, "sealed test environment differs"
     if command[0] == "env":
         index = 1
         while index < len(command) and re.fullmatch(
@@ -248,6 +261,23 @@ def _command_operands(action: object) -> tuple[dict | None, str]:
             index += 1
         if index == 1:
             return None, "sealed env assignments differ"
+        assignments = [word.split("=", 1) for word in command[1:index]]
+        inner = dict(assignments)
+        expected_env = {"TMPDIR": "/home/rob/tmp", "PYTHONPATH": "src:experiments",
+                        "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+                        "OPENBLAS_NUM_THREADS": "1", "TORCH_NUM_THREADS": "1"}
+        # The timeout is chosen from live worker ceilings by pbtest; all other
+        # assignments are fixed by this driver's one-worker/one-thread plan.
+        if (len(inner) != len(assignments)
+                or set(inner) != set(expected_env) | {"PRISMABUILD_TEST_TIMEOUT_S"}
+                or any(inner.get(name) != value for name, value in expected_env.items())):
+            return None, "sealed env assignments differ"
+        try:
+            bound = float(inner["PRISMABUILD_TEST_TIMEOUT_S"])
+        except ValueError:
+            return None, "sealed test bound malformed"
+        if not math.isfinite(bound) or bound <= 0:
+            return None, "sealed test bound malformed"
         body = command[index:]
         if (len(body) < 7 or not body[0] or body[1] != "-c"
                 or not body[2]

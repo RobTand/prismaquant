@@ -7,6 +7,8 @@ import os
 import shutil
 from pathlib import Path
 
+import pytest
+
 HERE = Path(__file__).resolve().parent
 DRIVER = HERE.parent / "tools" / "fleet_qualification_driver.py"
 FIXTURES = HERE / "fixtures" / "cas-r5"
@@ -454,6 +456,39 @@ def test_guard_bytes_reject_fake_entry():
     assert driver._guard_bytes_ok(fake, GEN_NEW) is False
     assert driver._guard_bytes_ok("", GEN_NEW) is False
     assert driver._guard_bytes_ok(operands["guard"], "no-such-gen") is False
+
+
+@pytest.mark.parametrize("where,assignment", [
+    ("inner", "PYTEST_ADDOPTS=-k one_test"),
+    ("sealed", "PYTEST_ADDOPTS=-k one_test"),
+    ("inner", "PYTHONPATH=/unrelated/source"),
+    ("sealed", "PYTHONOPTIMIZE=1"),
+    ("inner", "OMP_NUM_THREADS=8"),
+    ("inner", "PRISMABUILD_TEST_TIMEOUT_S=nan"),
+])
+def test_environment_cannot_reduce_declared_case(where, assignment):
+    """A matching file operand does not authorize a different test scope."""
+    driver = _driver()
+    action = _fixture_action("D")
+    if where == "inner":
+        command = action["params"]["command"]
+        name = assignment.split("=", 1)[0] + "="
+        found = next((i for i, word in enumerate(command)
+                      if word.startswith(name)), None)
+        if found is None:
+            command.insert(1, assignment)
+        else:
+            command[found] = assignment
+    else:
+        name, value = assignment.split("=", 1)
+        action["environment"]["variables"][name] = value
+    # Canonical quoting is satisfied; the environment must still be checked.
+    script, problem = driver._canonical_script(action)
+    assert not problem
+    action["task"]["argv"][4] = script
+    operands, problem = driver._command_operands(action)
+    assert operands is None, "altered selection/import/thread environment qualified"
+    assert problem
 
 
 def test_relabeled_file_fails_binding(tmp_path, monkeypatch):
