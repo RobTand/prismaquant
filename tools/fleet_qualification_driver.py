@@ -225,11 +225,19 @@ def _sealed_command(action: object) -> tuple[dict | None, str]:
         tokens = shlex.split(cmdline, comments=True, posix=True)
     except ValueError:
         return None, "sealed command unlexable"
-    if (len(tokens) < 4 or tokens[0] != "export"
-            or not tokens[1].startswith("PATH=")
-            or not tokens[1].endswith(":$PATH") or tokens[2] != ";"):
+    if (len(tokens) < 3 or tokens[0] != "export"
+            or not tokens[1].startswith("PATH=")):
         return None, "sealed prefix differs"
-    rest = tokens[3:]
+    path_token = tokens[1]
+    if path_token.endswith(";"):
+        path_token, index = path_token[:-1], 2
+    else:
+        if len(tokens) < 4 or tokens[2] != ";":
+            return None, "sealed prefix differs"
+        index = 3
+    if not path_token.endswith(":$PATH"):
+        return None, "sealed prefix differs"
+    rest = tokens[index:]
     if rest[:1] == ["env"]:
         index = 1
         while index < len(rest) and re.fullmatch(
@@ -249,7 +257,14 @@ def _sealed_command(action: object) -> tuple[dict | None, str]:
         if (len(rest) < 4 or not rest[0]
                 or rest[1:3] != ["-m", "pytest"]):
             return None, "sealed pytest entry differs"
-        files = rest[3:]
+        operands = rest[3:]
+        # Bare pbrun-direct form carries no options except an explicit
+        # collect-only pair (used by real collection probes); anything
+        # else is shape drift.
+        flags = [t for t in operands if not t.endswith(".py")]
+        if any(t not in ("--collect-only", "-q") for t in flags):
+            return None, "sealed test operands differ"
+        files = [t for t in operands if t.endswith(".py")]
         entry = "plain"
     if not files or any(not f.endswith(".py") for f in files):
         return None, "sealed test operands differ"
@@ -278,6 +293,9 @@ def _snapshot_agreement(action: object,
     if digest != snaps[0]["sha256"]:
         return None, "snapshot input disagrees with terminal descriptor"
     return str(digest), ""
+
+
+def _candidate_keys(output: object) -> set[str] | None:
     """Distinct 64-hex action keys named in console output.
 
     Console JSON only LOCATES a candidate key; nothing here authorizes
