@@ -267,13 +267,23 @@ def _record_scope(world: World, key: str, control: dict,
              snapshot.get(f) if isinstance(snapshot, dict) else None)
          for f in ("claimed_by", "claimed_unix", "published_unix",
                    "attempts")})
-    block = {"action_key": key, "nonce": control["nonce"],
-             "memory_max_bytes": control["memory_max_bytes"],
-             "socket_path": str(control.get("socket_path") or ""),
-             "scope_id": control["scope_id"]}
-    assert block["scope_id"] and block["nonce"], control
+    # The live claim must carry the broker-minted control verbatim:
+    # _scope_from_record validates token/cgroup/socket/scope identity.
+    # A subset (no token) reads as "invalid resource scope recovery
+    # identity" and finish correctly refuses DONE. Values come only from
+    # the validated create reply; the intent is the pre-create subset.
+    assert control.get("scope_id") and control.get("nonce"), control
+    assert control.get("token") and control.get("cgroup_path"), control
+    block = {k: control[k] for k in
+             ("action_key", "nonce", "scope_id", "cgroup_path", "token",
+              "socket_path", "memory_max_bytes", "gpu_memory_max_bytes")
+             if k in control}
+    assert block["action_key"] == key, control
+    intent = {"action_key": key, "nonce": control["nonce"],
+              "memory_max_bytes": control["memory_max_bytes"],
+              "socket_path": str(control.get("socket_path") or "")}
     live["resource_scope"] = block
-    live["resource_scope_intent"] = dict(block)
+    live["resource_scope_intent"] = intent
     pool._write_json_atomic(path, live)
     reread = pool._read_json(path)
     assert reread["resource_scope"] == block, "scope block not verbatim"
