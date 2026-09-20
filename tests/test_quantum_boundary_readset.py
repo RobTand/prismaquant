@@ -195,6 +195,13 @@ def test_pb_validation_admits_repeated_schedule(tmp_path):
     core, tiers = _pb()
     record, receipt = _fixture(tmp_path)
     manifest = _build(record, receipt)
+    # PB admits only paths under the sealed mount prefix; production
+    # entries always live there, so the test re-roots the fixture paths
+    # (test-only scaffolding) and reseals before validating.
+    root = str(tmp_path)
+    for entry in manifest["entries"]:
+        assert entry["path"].startswith(root)
+        entry["path"] = "/mnt/shared/fixture" + entry["path"][len(root):]
     normalized = core.validate_data_manifest(manifest)
     ranges = tiers.manifest_phase_ranges(normalized)
     assert ranges, "published PB stages nothing for the bound readset"
@@ -311,7 +318,7 @@ def test_refuses_mixed_batch_counts(tmp_path):
 
 def test_refuses_foreign_campaign(tmp_path):
     record, receipt = _fixture(tmp_path)
-    receipt["run_identity"]["plan_sha256"] = "0" * 64
+    receipt["run_identity"]["plan_sha256"] = "f" * 64
     with pytest.raises(ValueError, match="another plan_sha256"):
         _build(record, receipt)
 
