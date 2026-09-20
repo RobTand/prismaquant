@@ -1316,8 +1316,8 @@ def run_layer_quantum_core(
 
         def backward_reporting(*, probe_index, final, lease):
             # Report each replay probe pass under the executable contract.
-            # With no window loop running (zero-pending resume) the reads
-            # stage under the window-zero phases by convention.
+            # A complete resume uses the last visited window's phases;
+            # before any window is visited, None denotes window zero.
             # Ordering: observe_and_project_retained_windows opens the
             # candidate retained_window before invoking this callback, so
             # the retained PWC lifetime already holds when the replay phase
