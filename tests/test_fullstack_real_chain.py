@@ -554,7 +554,7 @@ def test_join_missing_quantum_is_named_gap(
     receipt_sha = produced["records"][0]["adjoint"]["receipt_sha256"]
     assert join_main(_join_argv(root, out, binding, receipt_sha)) == 0
     results = json.loads((out / "results.json").read_text())
-    assert results["distributed"]["status"] == "gapped"
+    assert results["status"] == "gapped"
     assert [g["quantum_id"] for g in
             results["distributed"]["gaps"]] == ["layer-001"]
 
