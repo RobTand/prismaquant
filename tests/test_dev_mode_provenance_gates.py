@@ -6,10 +6,11 @@ variable, ``PRISMAQUANT_DEV_MODE=1``, read at the gates:
 
 * without it, every gate below refuses under the same fixtures it refused
   under before the switch existed -- certified behavior is byte-identical;
-* with it, the gate accepts and RECORDS: a loud ``[DEV-MODE]`` warning, the
-  actual digests of what executed, and a top-level ``dev_uncertified`` stamp
-  in results.json and every progress record, so a dev result can never
-  masquerade as a certified one.
+* with it, the gate accepts and RECORDS: a loud ``[DEV-MODE]`` warning and a
+  top-level ``dev_uncertified`` stamp in results.json, so a dev result can
+  never masquerade as a certified one. Progress records carry the stamp only
+  when ``PRISMAQUANT_DEV_PROGRESS_STAMP=1`` opts in (PR #828): the default
+  per-unit commit is the certified six-field record and pays no hash.
 
 CPU-only; no external checkpoint is touched.
 """
@@ -446,7 +447,7 @@ def test_a_hand_sealed_spec_carries_dev_mode_to_the_container(monkeypatch):
 
 
 # ----------------------------------------------------------------- gate 6: the
-# dev stamp is top-level in results.json and in every progress record
+# dev stamp is top-level in results.json (progress records: opt-in)
 
 def _refusing_prepare(tmp_path, monkeypatch):
     from prismaquant import calibration_data, cost_streaming, gpu_guard
@@ -506,13 +507,20 @@ def _progress_record(tmp_path, monkeypatch):
 
 def test_progress_records_have_no_dev_keys_without_the_flag(tmp_path, monkeypatch):
     record = _progress_record(tmp_path, monkeypatch)
-    # Byte-identical certified shape: exactly the seven fields the worker reads.
+    # Byte-identical certified shape: exactly the six fields the worker reads.
     assert set(record) == {"schema", "token", "phase", "units_completed", "unit",
                            "reported_unix"}
 
 
-def test_progress_records_carry_the_dev_stamp(tmp_path, monkeypatch):
+def test_progress_records_carry_the_dev_stamp_only_when_opted_in(tmp_path, monkeypatch):
     monkeypatch.setenv(DEV_ENV, "1")
+    # Default: Rob's campaign directive -- no sealing ceremony on progress
+    # lines; the certified six-field shape stands even in dev mode.
+    record = _progress_record(tmp_path, monkeypatch)
+    assert set(record) == {"schema", "token", "phase", "units_completed", "unit",
+                           "reported_unix"}
+    # Opt-in: the stamp rides along for whoever wants per-line provenance.
+    monkeypatch.setenv("PRISMAQUANT_DEV_PROGRESS_STAMP", "1")
     record = _progress_record(tmp_path, monkeypatch)
     assert record[dev_mode.DEV_UNCERTIFIED_KEY] is True
     stamp = record[dev_mode.DEV_MODE_KEY]
