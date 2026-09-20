@@ -761,6 +761,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
             yield receipt_obj
 
     monkeypatch.setattr(cache, "retained_window", rw_logged)
+    assert cache.retained_window is rw_logged, (
+        f"instance patch did not take: {cache.retained_window!r}")
     # Observe-level seam (module function patch, known to fire): proves the
     # replay loop is reached and whether it reports zero-pending (no window).
     import prismaquant.joint_statistics_replay as _replay_mod
