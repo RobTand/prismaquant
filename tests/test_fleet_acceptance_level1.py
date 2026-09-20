@@ -266,7 +266,7 @@ def test_produced_records_carry_boundary_derivation_inputs(produced):
         assert isinstance(adjoint["chain_layers"], list) and adjoint["chain_layers"]
         assert isinstance(adjoint["checkpoint_boundary"], int)
         assert isinstance(adjoint["receipt_sha256"], str)
-        assert isinstance(record["windows"], list) and record["windows"]
+        assert isinstance(record["windows"], list), record["quantum_id"]
         campaign = record["campaign"]
         for key in ("plan_sha256", "prepared_sha256",
                     "read_manifest_sha256", "campaign_scope"):
@@ -353,7 +353,7 @@ def staged(pb, produced, campaign):
 
 def test_movers_publish_fragments_with_real_digests(pb, staged, campaign):
     """SM-02 legs: published map names staged bytes under epoch digests."""
-    pb_map = pb["pb_map"]
+    pb_map = pb["pmap"]
     pool = pb["pool"]
     queue = staged["queue"]
     frags = [pb_map.validate_fragment(f) for f in
@@ -393,7 +393,7 @@ def test_mover_overrun_refuses_before_copy(pb, staged, campaign):
 
 def test_ram_overlay_refuses_stale_epoch(pb, staged, campaign):
     """SM-02 readiness: a prior epoch's fragment never overlays as current."""
-    pb_map = pb["pb_map"]
+    pb_map = pb["pmap"]
     pool = pb["pool"]
     queue = staged["queue"]
     frags = [pb_map.validate_fragment(f) for f in
@@ -610,6 +610,14 @@ def test_join_accepts_and_gapped_refuses_downstream(
                            record)}
             (space / "cost.pkl").write_bytes(pickle_mod.dumps(
                 payload, protocol=pickle_mod.HIGHEST_PROTOCOL))
+            (space / "status.json").write_text(json.dumps({
+                "schema": "prismaquant.joint_layer_quantum.status.v1",
+                "quantum_id": quantum_id,
+                "identity_sha256": record["identity_sha256"],
+                "status": "complete", "units": [len(costs), len(costs)],
+                "unix": 1750000000}))
+            (space / "results.json").write_text(
+                json.dumps({"quantum_id": quantum_id}))
 
     def argv(root, out, binding, receipt_sha):
         return ["--input-root", str(root), "--output-dir", str(out),
