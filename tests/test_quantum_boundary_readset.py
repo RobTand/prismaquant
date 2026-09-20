@@ -1,13 +1,15 @@
 """Producer tests: quantum boundary/checkpoint bulk readset binding.
 
-PQ #848, root review R2. Fixtures are built by the REAL producer at tiny
-CPU scale (`write_adjoint_checkpoint` + the exact activation owner +
-`exact_entry_record`) -- no handbuilt receipt shapes, no payloads. Proves
-the manifest freezes the reader's exact repeated schedule (checkpoint
-once, chain boundaries once per probe, own boundary once per
-replay-window per probe), seals byte-exact accounting, binds new record
-generations through the existing binder, and refuses malformed input.
-Full-chain staging tests belong to the integration worker, not this file.
+PQ #848, root reviews R2/R3 (post-capture bound metadata generation --
+runtime staging/phase consumption stays a concrete follow-up). Fixtures
+are built by the REAL producer at tiny CPU scale
+(`write_adjoint_checkpoint` + the exact activation owner +
+`exact_entry_record`, real `layer_quanta` records, the real regen CLI) --
+no handbuilt receipt shapes, no payloads. Proves the manifest freezes the
+reader's exact repeated schedule, seals byte-exact accounting, binds new
+record generations with recomputed identity through the existing binder,
+and refuses malformed input. Full-chain staging tests belong to the
+integration worker, not this file.
 """
 
 import hashlib
@@ -19,8 +21,15 @@ from pathlib import Path
 import pytest
 import torch
 
-from prismaquant.joint_adjoint_checkpoints import exact_entry_record
-from prismaquant.joint_adjoint_checkpoints import write_adjoint_checkpoint
+ROOT = Path(__file__).resolve().parents[1]
+for _entry in (ROOT, ROOT / "tools"):
+    if str(_entry) not in sys.path:
+        sys.path.insert(0, str(_entry))
+
+import regenerate_joint_quanta as regen  # noqa: E402
+from prismaquant.joint_adjoint_checkpoints import exact_entry_record  # noqa: E402
+from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
+    write_adjoint_checkpoint, write_adjoint_receipt)
 from prismaquant.joint_layer_quanta import (
     ADJOINT_CAPTURE_SCHEMA,
     MANIFEST_SCHEMA_V2,
@@ -140,7 +149,15 @@ def test_tail_quantum_chains_nothing_but_replays():
     assert names == ("checkpoint", "replay-00-p0-w00", "replay-00-p1-w00")
 
 
-def test_repeat_counts_match_reader_iteration(tmp_path):
+def test_declared_repeat_arithmetic(tmp_path):
+    """The frozen phase list repeats exactly what the reader schedule
+    declares -- checked as metadata arithmetic here, not runtime cursor
+    enforcement. Counts trace to their owners: per-probe chain passes to
+    ``render_free_layer_roll``'s probe loop
+    (joint_adjoint_checkpoints.py:391), per-(window, probe) replay passes
+    to ``replay_backward`` via ``observe_and_project_retained_windows``
+    (joint_statistics_replay.py:410-452), batch windows to the sealed
+    prefetch_batches."""
     record, receipt = _fixture(tmp_path)
     manifest = _build(record, receipt)
     phases = {p["name"]: p["entry_indices"]
@@ -251,26 +268,55 @@ def test_seal_deterministic_wire(tmp_path):
         scope=record["campaign"]["campaign_scope"], checkpoints=STRIDED)
 
 
+@needs_recovery
 def test_emit_binds_new_record_generations(tmp_path):
-    record, receipt = _fixture(tmp_path)
-    before = json.dumps(record, sort_keys=True)
+    """Actual layer_quanta records through the emission path: new
+    generations bound, inputs byte-identical, digests reproducing."""
+    from prismaquant.joint_layer_quanta import (
+        check_quantum_for_campaign, canonical_sha256)
+    base3 = json.load(open(f"{RECOVERY_RECORDS}/layer-003.json"))
+    base4 = json.load(open(f"{RECOVERY_RECORDS}/layer-004.json"))
+    assert base3["campaign"] == base4["campaign"]
+    _, receipt = _real_record_receipt(tmp_path)
+    assert receipt["run_identity"]["plan_sha256"] == base3["campaign"][
+        "plan_sha256"]
+    digest = bind_adjoint_receipt(
+        receipt, plan_sha256=base3["campaign"]["plan_sha256"],
+        prepared_sha256=base3["campaign"]["prepared_sha256"],
+        scope=base3["campaign"]["campaign_scope"],
+        checkpoints=[8, 16, 24, 32, 40, 45])
+    rec3 = dict(base3, adjoint=dict(base3["adjoint"], receipt_sha256=digest))
+    rec4 = dict(base4, adjoint=dict(base4["adjoint"], receipt_sha256=digest))
+    before = [json.dumps(r, sort_keys=True) for r in (rec3, rec4)]
+    root = str(tmp_path / "run")
     emitted = emit_quantum_boundary_readsets(
-        receipt, [record], strided_boundaries=STRIDED, n_probes=N_PROBES,
-        output_root="/mnt/shared/run")
-    assert json.dumps(record, sort_keys=True) == before
-    assert len(emitted) == 1
-    row = emitted[0]
-    assert row["manifest_path"] == (
-        "/mnt/shared/run/layer-quanta/adjoint/bound-readsets/"
-        "layer-003.boundary-readset.json.gz")
-    assert row["manifest_sha256"] == hashlib.sha256(
-        seal_manifest_bytes(row["manifest"])).hexdigest()
-    bound = row["record"]["boundary_readset"]
-    assert bound["manifest_path"] == row["manifest_path"]
-    assert bound["manifest_sha256"] == row["manifest_sha256"]
-    assert bound["receipt_sha256"] == row["manifest"]["annotations"][
-        "receipt_sha256"]
-    assert "boundary_readset" not in record
+        receipt, [rec3, rec4],
+        strided_boundaries=[8, 16, 24, 32, 40, 45], n_probes=N_PROBES,
+        output_root=root)
+    assert [json.dumps(r, sort_keys=True) for r in (rec3, rec4)] == before
+    assert len(emitted) == 2
+    paths = set()
+    for row, source in zip(emitted, (rec3, rec4)):
+        assert row["manifest_path"] == (
+            f"{root}/layer-quanta/adjoint/bound-readsets/"
+            f"{source['quantum_id']}.boundary-readset.json.gz")
+        assert row["manifest_path"] not in paths
+        paths.add(row["manifest_path"])
+        assert row["manifest_sha256"] == hashlib.sha256(
+            seal_manifest_bytes(row["manifest"])).hexdigest()
+        bound = row["record"]["boundary_readset"]
+        assert bound["manifest_path"] == row["manifest_path"]
+        assert bound["manifest_sha256"] == row["manifest_sha256"]
+        assert bound["receipt_sha256"] == digest
+        body = {k: v for k, v in row["record"].items()
+                if k != "identity_sha256"}
+        assert canonical_sha256(body, where="quantum record") == row[
+            "record"]["identity_sha256"]
+        campaign = dict(source["campaign"],
+                        adjoint_receipt_sha256=digest)
+        check_quantum_for_campaign(row["record"], campaign)
+    assert "boundary_readset" not in rec3
+    assert "boundary_readset" not in rec4
 
 
 def test_refuses_chain_outside_stride_owner(tmp_path):
@@ -350,3 +396,316 @@ def test_real_campaign_metadata_phase_shape():
     assert names[0] == "checkpoint"
     assert names[1] == "chain-007-p0-w00"
     assert names[-1] == "replay-12-p3-w07"
+
+
+def _real_record_receipt(tmp_path):
+    """Actual layer-003 record with a campaign-bound fixture receipt."""
+    from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+    record = json.load(open(f"{RECOVERY_RECORDS}/layer-003.json"))
+    campaign = record["campaign"]
+    space = tmp_path / "adjoint"
+    (space / "entries").mkdir(parents=True)
+    boundary_entries = {}
+    for boundary in (3, 4, 5, 6, 7):
+        rows = []
+        for batch in range(N_BATCHES):
+            ref = write_exact_activation_cache_entry(
+                space / "entries",
+                f"boundary-{batch}-{boundary}-at-{boundary}",
+                torch.zeros(2, 4),
+                identity={"session": dict(SESSION),
+                          "slot": f"boundary-{batch}-{boundary}",
+                          "kind": "boundary",
+                          "coordinates": {"batch": batch,
+                                          "boundary": boundary,
+                                          "probe": None}},
+                max_tensor_bytes=1 << 20, max_file_bytes=1 << 20)
+            rows.append(exact_entry_record(ref))
+        boundary_entries[str(boundary)] = rows
+    cotangents = {(p, b): torch.zeros(2, 4) for p in range(N_PROBES)
+                  for b in range(N_BATCHES)}
+    full = write_adjoint_checkpoint(
+        space, boundary=8,
+        session={"generation": SESSION["generation"],
+                 "kind": "adjoint_checkpoint",
+                 "run_identity_sha256": SESSION["run_identity_sha256"]},
+        cotangents=cotangents,
+        shared_adjoint={(p, b): {"scale": 1.0} for p in range(N_PROBES)
+                        for b in range(N_BATCHES)},
+        shared_pass={b: {"mask": [0, 1]} for b in range(N_BATCHES)})
+    checkpoints = [full] + [{"boundary": b} for b in (16, 24, 32, 40, 45)]
+    receipt = {
+        "schema": ADJOINT_CAPTURE_SCHEMA,
+        "run_identity": {"plan_sha256": campaign["plan_sha256"],
+                         "prepared_sha256": campaign["prepared_sha256"],
+                         "campaign_scope": campaign["campaign_scope"]},
+        "boundary_storage": {
+            "session": dict(SESSION),
+            "policy": {"prefetch_batches": PREFETCH_BATCHES}},
+        "boundary_entries": boundary_entries,
+        "checkpoints": checkpoints,
+    }
+    return record, receipt
+
+
+@needs_recovery
+def test_bound_record_passes_real_campaign_validator(tmp_path):
+    """RED for R3: the bound generation must recompute identity through
+    the existing canonical owner, or both real validators refuse it."""
+    from prismaquant.joint_layer_quanta import (
+        check_quantum_for_campaign, canonical_sha256)
+    record, receipt = _real_record_receipt(tmp_path)
+    manifest = build_quantum_boundary_readset(
+        record, receipt, strided_boundaries=[8, 16, 24, 32, 40, 45],
+        n_probes=4)
+    wire_sha256 = hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest()
+    bound = dict(record["adjoint"])
+    bound["receipt_sha256"] = manifest["annotations"]["receipt_sha256"]
+    record = dict(record, adjoint=bound)
+    run_root = str(Path(
+        record["output_space"]["root"]).resolve().parents[1])
+    new = bind_quantum_boundary_readset(
+        record, manifest=manifest,
+        manifest_path=f"{run_root}/layer-quanta/adjoint/bound-readsets/"
+                      "layer-003.boundary-readset.json.gz",
+        manifest_sha256=wire_sha256, output_root=run_root)
+    campaign = dict(record["campaign"],
+                    unit_roster_sha256=record["campaign"].get(
+                        "unit_roster_sha256"),
+                    adjoint_receipt_sha256=manifest["annotations"][
+                        "receipt_sha256"])
+    check_quantum_for_campaign(new, campaign)
+    body = {k: v for k, v in new.items() if k != "identity_sha256"}
+    assert canonical_sha256(body, where="quantum record") == new[
+        "identity_sha256"]
+
+
+@needs_recovery
+def test_binder_rejects_foreign_receipt_for_same_layer(tmp_path):
+    record, receipt = _real_record_receipt(tmp_path)
+    manifest = build_quantum_boundary_readset(
+        record, receipt, strided_boundaries=[8, 16, 24, 32, 40, 45],
+        n_probes=4)
+    wire_sha256 = hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest()
+    bound = dict(record["adjoint"])
+    bound["receipt_sha256"] = "f" * 64
+    record = dict(record, adjoint=bound)
+    run_root = str(Path(
+        record["output_space"]["root"]).resolve().parents[1])
+    with pytest.raises(ValueError, match="another stage-A receipt"):
+        bind_quantum_boundary_readset(
+            record, manifest=manifest,
+            manifest_path=f"{run_root}/layer-quanta/adjoint/bound-readsets/"
+                          "layer-003.boundary-readset.json.gz",
+            manifest_sha256=wire_sha256, output_root=run_root)
+
+
+def _tiny_campaign(tmp_path):
+    """Two-layer plan + prepared + parent files the real producer binds."""
+    root = tmp_path / "campaign"
+    plan = {"output_root": str(root), "model": "/fixture/model",
+            "distributed_campaign": {},
+            "execution": {"n_probes": 2}}
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(plan, sort_keys=True))
+    prepared = {"formats_by_qname": {
+        "model.layers.0.mlp.gate_proj": {},
+        "model.layers.1.mlp.gate_proj": {}}}
+    prepared_path = tmp_path / "prepared.json"
+    prepared_path.write_text(json.dumps(prepared, sort_keys=True))
+    prepared_sha = hashlib.sha256(prepared_path.read_bytes()).hexdigest()
+    entries = [
+        {"path": "/fixture/model/shard-h0.pt", "offset": 0, "bytes": 100,
+         "sha256": None},
+        {"path": "/fixture/model/shard-h1.pt", "offset": 0, "bytes": 100,
+         "sha256": None},
+        {"path": "/fixture/model/shard-l0.pt", "offset": 0, "bytes": 200,
+         "sha256": None},
+        {"path": "/fixture/model/shard-l1.pt", "offset": 0, "bytes": 300,
+         "sha256": None},
+    ]
+    parent = {
+        "schema": "prismaquant.prismabuild.data_manifest.v1",
+        "produced_by": {"plan": str(plan_path)},
+        "mount_prefix": "/mnt/shared",
+        "entries": entries, "entry_count": 4, "total_bytes": 700,
+        "annotations": {
+            "campaign_scope": {"campaign": "readset-r3-fixture"},
+            "argv": ["python3", "-m", "prismaquant.joint_adjoint_capture",
+                     "--prepared", str(prepared_path),
+                     "--prepared-sha256", prepared_sha],
+            "layers": [0, 1],
+            "phases": [
+                {"name": "head", "bytes": 200, "cumulative_bytes": 200},
+                {"name": "layer-0", "bytes": 200, "cumulative_bytes": 400},
+                {"name": "layer-1", "bytes": 300, "cumulative_bytes": 700},
+            ],
+        },
+    }
+    parent_path = tmp_path / "parent.json"
+    parent_path.write_text(json.dumps(parent, sort_keys=True))
+
+    def _sha(path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    return {"root": root, "plan_path": plan_path, "plan_sha": _sha(plan_path),
+            "prepared_path": prepared_path, "prepared_sha": _sha(prepared_path),
+            "parent_path": parent_path, "parent_sha": _sha(parent_path)}
+
+
+def _tiny_receipt(campaign, space):
+    """A completed capture at tiny scale, sealed by the real writer."""
+    from prismaquant.perturbed_x_cache import (
+        write_exact_activation_cache_entry)
+    session = {"generation": "fixture-gen-r3",
+               "run_identity_sha256": "cd" * 32}
+    entries_dir = space / "entries"
+    entries_dir.mkdir(parents=True, exist_ok=True)
+    boundary_entries = {}
+    for boundary in (0, 1):
+        rows = []
+        for batch in range(3):
+            ref = write_exact_activation_cache_entry(
+                entries_dir,
+                f"boundary-{batch}-{boundary}-at-{boundary}",
+                torch.zeros(2, 4),
+                identity={"session": dict(session),
+                          "slot": f"boundary-{batch}-{boundary}",
+                          "kind": "boundary",
+                          "coordinates": {"batch": batch,
+                                          "boundary": boundary,
+                                          "probe": None}},
+                max_tensor_bytes=1 << 20, max_file_bytes=1 << 20)
+            rows.append(exact_entry_record(ref))
+        boundary_entries[str(boundary)] = rows
+    checkpoints = []
+    for boundary in (1, 2):
+        checkpoints.append(write_adjoint_checkpoint(
+            space, boundary=boundary, session=dict(
+                session, kind="adjoint_checkpoint"),
+            cotangents={(p, b): torch.zeros(2, 4) for p in range(2)
+                        for b in range(3)},
+            shared_adjoint={(p, b): {"scale": 1.0} for p in range(2)
+                            for b in range(3)},
+            shared_pass={b: {"mask": [0, 1]} for b in range(3)}))
+    receipt = {
+        "schema": ADJOINT_CAPTURE_SCHEMA,
+        "run_identity": {"plan_sha256": campaign["plan_sha"],
+                         "prepared_sha256": campaign["prepared_sha"],
+                         "campaign_scope": {"campaign": "readset-r3-fixture"}},
+        "boundary_storage": {
+            "session": dict(session),
+            "policy": {"prefetch_batches": 2}},
+        "boundary_entries": boundary_entries,
+        "checkpoints": checkpoints,
+    }
+    write_adjoint_receipt(space, receipt)
+    return receipt
+
+
+def _regen_argv(tmp_path, campaign):
+    derivation = tmp_path / "derivation.json"
+    derivation.write_text(json.dumps(
+        {"chunk_target_bytes": 400, "stride": 1, "ram_window_gib": 160,
+         "max_resident_consumers": 2}, sort_keys=True))
+    partition = tmp_path / "partition.json"
+    partition.write_text(json.dumps(
+        {"windows_by_layer": {"0": 2, "1": 1}}, sort_keys=True))
+    return ["--plan", str(campaign["plan_path"]),
+            "--plan-sha256", campaign["plan_sha"],
+            "--prepared", str(campaign["prepared_path"]),
+            "--prepared-sha256", campaign["prepared_sha"],
+            "--parent-manifest", str(campaign["parent_path"]),
+            "--parent-manifest-sha256", campaign["parent_sha"],
+            "--derivation", str(derivation),
+            "--partition", str(partition)]
+
+
+def test_cli_binds_readsets_through_real_validators(tmp_path):
+    """The complete bounded unit: real CLI output passes the real
+    record/wire/receipt validation, including the consumer's own
+    verify_quantum_identity on files."""
+    from prismaquant import joint_cost_quantum as quantum
+    from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+    campaign = _tiny_campaign(tmp_path)
+    space = tmp_path / "adjoint-space"
+    space.mkdir()
+    receipt = _tiny_receipt(campaign, space)
+    receipt_path = space / "adjoint-capture.json"
+    out = tmp_path / "reviewed"
+    assert regen.main(
+        _regen_argv(tmp_path, campaign)
+        + ["--output-root", str(campaign["root"]),
+           "--records-out", str(out),
+           "--adjoint-receipt", str(receipt_path),
+           "--boundary-readsets"]) == 0
+    receipt_sha = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    canonical = bind_adjoint_receipt(
+        receipt, plan_sha256=campaign["plan_sha"],
+        prepared_sha256=campaign["prepared_sha"],
+        scope={"campaign": "readset-r3-fixture"}, checkpoints=[1, 2])
+    records = [json.loads(path.read_text())
+               for path in sorted(out.glob("layer-*.json"))]
+    assert len(records) == 2
+    assert (out / "records.json").is_file()
+    for record in records:
+        assert record["adjoint"]["receipt_sha256"] == canonical
+        bound = record["boundary_readset"]
+        manifest_path = Path(bound["manifest_path"])
+        assert manifest_path.is_file()
+        assert hashlib.sha256(
+            manifest_path.read_bytes()).hexdigest() == bound[
+            "manifest_sha256"]
+        assert bound["receipt_sha256"] == canonical
+        assert manifest_path.parent.name == "bound-readsets"
+        campaign_binding = {
+            "plan_sha256": campaign["plan_sha"],
+            "prepared_sha256": campaign["prepared_sha"],
+            "read_manifest_sha256": campaign["parent_sha"],
+            "unit_roster_sha256": record["campaign"][
+                "unit_roster_sha256"],
+            "campaign_scope": {"campaign": "readset-r3-fixture"},
+            "adjoint_receipt_sha256": canonical,
+        }
+        check_quantum_for_campaign(record, campaign_binding)
+        quantum_path = out / f"{record['quantum_id']}.json"
+        quantum.verify_quantum_identity(
+            quantum_path=quantum_path,
+            quantum_sha256=hashlib.sha256(
+                quantum_path.read_bytes()).hexdigest(),
+            plan_path=campaign["plan_path"],
+            plan_sha256=campaign["plan_sha"],
+            prepared_path=campaign["prepared_path"],
+            prepared_sha256=campaign["prepared_sha"],
+            adjoint_path=receipt_path, adjoint_sha256=receipt_sha,
+            output_root=Path(str(campaign["root"])))
+
+
+def test_cli_refusal_writes_no_partial_generation(tmp_path):
+    campaign = _tiny_campaign(tmp_path)
+    space = tmp_path / "adjoint-space"
+    space.mkdir()
+    receipt = _tiny_receipt(campaign, space)
+    del receipt["boundary_entries"]["1"]
+    bad = space / "bad-receipt.json"
+    bad.write_text(json.dumps(receipt, sort_keys=True))
+    out = tmp_path / "reviewed"
+    assert regen.main(
+        _regen_argv(tmp_path, campaign)
+        + ["--output-root", str(campaign["root"]),
+           "--records-out", str(out),
+           "--adjoint-receipt", str(bad),
+           "--boundary-readsets"]) == 3
+    assert not out.exists()
+    assert not (Path(str(campaign["root"])) / "layer-quanta" / "adjoint" /
+                "bound-readsets").exists()
+
+
+def test_cli_readsets_need_a_receipt(tmp_path):
+    campaign = _tiny_campaign(tmp_path)
+    out = tmp_path / "reviewed"
+    assert regen.main(
+        _regen_argv(tmp_path, campaign)
+        + ["--output-root", str(campaign["root"]),
+           "--records-out", str(out),
+           "--boundary-readsets"]) == 3
+    assert not out.exists()
