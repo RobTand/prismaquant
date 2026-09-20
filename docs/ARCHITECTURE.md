@@ -10,10 +10,11 @@ with no forward lifetimes while the capture consumes head → forward 0..44 →
 tail → reverse 44..0: no movers staged ahead of the forward pass, and the
 first reverse report released the whole window while layers 43..0 were still
 unread. The manifest is now `data_manifest.v2` with `read_plan.phases` in
-the frozen order `head, forward-000..044, tail, chain-044..000`,
+the frozen order `head, forward-000..044, chain-044..000`,
 `entry_indices` into the unchanged entries list (repeats across phases are
-the mechanism, not duplicated bytes); the capture reports `forward-L` on the
-runner's `source_phase` hook and `tail` before the tail cotangents through
+the mechanism, not duplicated bytes; no standalone tail phase -- the tail
+checkpoint work commits under forward-last); the capture reports `forward-L`
+on the runner's `source_phase` hook through
 shared name helpers, with durable-unit counting untouched. Records, entry
 bytes/digests, and plan/prepared/capture identities unchanged; the live
 `adjoint-manifest.json` regenerates later from this builder. Gate:

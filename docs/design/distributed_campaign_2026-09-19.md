@@ -332,8 +332,9 @@ keeps). Pure, deterministic, testable: same inputs → byte-identical records.
   stride, output_root)` → `{"records": […45 records…],
   "slice_manifests": {quantum_id: manifest_dict},
   "adjoint_manifest": <the stage-A read manifest, v2 `read_plan` in true
-  consumption order -- `head`, per-layer `forward_{L:03d}` ascending, `tail`,
-  per-layer `chain_{L:03d}` descending -- with `entry_indices` into one
+  consumption order -- `head`, per-layer `forward_{L:03d}` ascending,
+  per-layer `chain_{L:03d}` descending (no tail phase; tail work commits
+  under forward-last) -- with `entry_indices` into one
   entries list (no duplication for the repeated reads) and
   `entry_point: "prismaquant.joint_adjoint_capture"`>,
   "coverage": <the proof object>}`. Reads the plan, the prepared

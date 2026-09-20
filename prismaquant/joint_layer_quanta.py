@@ -64,10 +64,12 @@ ADJOINT_CAPTURE_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 MANIFEST_SCHEMA_V1 = "prismaquant.prismabuild.data_manifest.v1"
 MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
 
-#: The tail phase of the stage-A read plan: the tail cotangents read no new
-#: manifest bytes (non-layer weights are build-resident), but the phase marks
-#: the forward-complete frontier so the tier can release the forward
-#: timeline while every reverse reference stays ahead of it.
+#: The tail leg's telemetry name. It is NOT a read-plan phase: published
+#: ``manifest_phase_ranges`` drops cumulative==previous phases, so a
+#: zero-byte tail would be absent from the sealed residency plan -- and
+#: reporting a name the plan does not carry resets ``remaining`` to start.
+#: The tail checkpoint work commits durable units under forward-last
+#: instead; this string survives only for explicit runtime log lines.
 ADJOINT_TAIL_PHASE = "tail"
 
 
@@ -92,15 +94,15 @@ def adjoint_chain_phase_name(layer: int) -> str:
 
 def adjoint_read_plan_phase_names(num_layers: int) -> tuple[str, ...]:
     """The frozen Stage A consumption order (PQ #837): head, forward
-    ascending, tail, reverse descending. The builder seals the manifest in
-    this order, the capture reports in this order, and the dispatch lane
+    ascending, reverse descending. The builder seals the manifest in this
+    order, the capture reports in this order, and the dispatch lane
     declares progress in this order -- the published v2 linear-progress
-    rule refuses anything else."""
+    rule refuses anything else. There is deliberately no tail phase (see
+    ``ADJOINT_TAIL_PHASE``)."""
     if type(num_layers) is not int or isinstance(num_layers, bool) or num_layers < 1:
         raise ValueError(f"a read plan needs a positive layer count, not {num_layers!r}")
     return (("head",)
             + tuple(adjoint_forward_phase_name(layer) for layer in range(num_layers))
-            + (ADJOINT_TAIL_PHASE,)
             + tuple(adjoint_chain_phase_name(layer)
                     for layer in reversed(range(num_layers))))
 
@@ -755,11 +757,13 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
     manifest.
 
     The phase table is the v2 ``read_plan`` in true consumption order --
-    head, forward ascending, tail, reverse descending -- with
-    ``entry_indices`` into the one entries list, so the repeated forward and
-    reverse reads reference the same entries twice instead of duplicating
-    bytes. v2 forbids ``annotations.phases``. The entries list, its digests,
-    and every record the producer seals are untouched by the table.
+    head, forward ascending, reverse descending -- with ``entry_indices``
+    into the one entries list, so the repeated forward and reverse reads
+    reference the same entries twice instead of duplicating bytes. v2
+    forbids ``annotations.phases``. There is no tail phase: the tail
+    checkpoint work commits under forward-last (see ``ADJOINT_TAIL_PHASE``).
+    The entries list, its digests, and every record the producer seals are
+    untouched by the table.
     """
     model = plan.get("model")
     if type(model) is not str or not model:
@@ -809,7 +813,6 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
     _seal_phase("head", list(range(len(head_entries))))
     for layer, run in zip(layers, layer_index_runs):
         _seal_phase(adjoint_forward_phase_name(layer), run)
-    _seal_phase(ADJOINT_TAIL_PHASE, [])
     for layer, run in zip(reversed(layers), reversed(layer_index_runs)):
         _seal_phase(adjoint_chain_phase_name(layer), run)
     names = [phase["name"] for phase in read_phases]

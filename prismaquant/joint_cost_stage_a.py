@@ -305,9 +305,6 @@ def run_adjoint_capture_core(
         storage.watch_auxiliary(batches, cotangents)
         storage.check_auxiliary(batches, cotangents=cotangents)
         tail_started = time.time()
-        if progress is not None:
-            progress.enter(ADJOINT_TAIL_PHASE)
-            progress.flush(force=True)
         with prefetched_boundary_batches(storage, batches, num_layers) as tail_batches:
             for batch_index, batch, tail_cpu, _unused in tail_batches:
                 try:
@@ -364,6 +361,18 @@ def run_adjoint_capture_core(
         # chains nothing (§3.1).
         serialize_checkpoint(num_layers, tail_plane)
         tail_plane.clear()
+        if progress is not None:
+            # The tail checkpoint is durable work landed while the read plan
+            # stays on forward-last: count it without leaving the phase the
+            # tier still holds. There is deliberately no tail progress phase
+            # (a name the sealed plan does not carry would reset its
+            # tracking); the phase name survives only in the log line below.
+            progress.entry(layer=num_layers, partition=0,
+                           kind="tail_checkpoint")
+            progress.flush(force=True)
+            log(f"{ADJOINT_TAIL_PHASE} checkpoint published at boundary "
+                f"{num_layers}; read plan stays on "
+                f"{adjoint_forward_phase_name(num_layers - 1)}")
 
         chain_started = time.time()
         for layer in reversed(range(num_layers)):
