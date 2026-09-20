@@ -40,6 +40,8 @@ nothing here re-implements, shadows, or diverges from it:
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sys
 import threading
@@ -69,6 +71,9 @@ _AVAILABILITY_REFUSALS = ("unpublished", "stale-epoch", "retiring",
                           "file-missing", "no-file-identity",
                           "ram-covers-unresolved", "lease-helper-unavailable",
                           "lease-context-unavailable")
+
+#: A pool row is small structured JSON; this only bounds a pathological read.
+_MAX_POOL_ROW_BYTES = 8 * 1024 * 1024
 
 _HELPER_LOCK = threading.Lock()
 _HELPER_ROOT: str | None = None
@@ -332,6 +337,167 @@ def resolve_context(*, env=None):
         refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
         raise _refuse(f"lease-context-unavailable: {refusal}", kind="availability")
     return sdk, answer["ctx"]
+
+
+class ReadsetUnbound(Exception):
+    """PB's sealed readset could not be reached. Never a refusal to read.
+
+    Callers treat this as "this process cannot tell a declared range from
+    an undeclared one" and fall back to the conservative behaviour, which
+    is to do nothing extra. It is deliberately NOT a ``TierPolicyRefused``:
+    not knowing the readset never makes a range unreadable.
+    """
+
+
+def resolve_sealed_readset(*, env=None):
+    """``(cas_root, manifest_sha256, manifest_bytes)`` for this action.
+
+    PB publishes both halves into the action's own pool row at publish
+    time (``pool.py`` ``"cas_root"`` and the ``"residency"`` block), the
+    row moves ready -> claimed unchanged, and the sealed data manifest is
+    an ordinary CAS blob under ``<cas_root>/blobs/<d[:2]>/<d>``. So the
+    authority for "is this range declared" is PB's own request context,
+    reached from the identity the SDK already vouches: this reads the
+    claim row that :func:`resolve_context` has just matched against the
+    launch env, and nothing else.
+
+    **This is a protocol extension.** ``_REQUIRED_NAMES`` is the SDK
+    surface PQ calls; ``queue_root`` is an exported ``ctx`` field but the
+    row's ``cas_root``/``residency`` keys are read directly rather than
+    handed over by an SDK call. The clean shape is a PB-side ``ctx``
+    field carrying the sealed readset, and until that exists this reads
+    PB's own published row and nothing derived from it -- no sibling-path
+    guess at the CAS root, no manifest path assembled from a convention.
+
+    Raises :class:`ReadsetUnbound` with a reason whenever any hop is
+    missing or disagrees. It never returns a partial answer.
+    """
+    try:
+        _sdk_module, ctx = resolve_context(env=env)
+    except TierPolicyRefused as refusal:
+        raise ReadsetUnbound(f"lease context: {refusal}") from None
+    queue_root = str(ctx.get("queue_root") or "")
+    action_key = str(ctx.get("action_key") or "")
+    if not queue_root or len(action_key) != 64:
+        raise ReadsetUnbound("lease context names no queue row")
+    row_path = Path(queue_root) / "claimed" / f"{action_key}.json"
+    try:
+        with open(row_path, "rb") as handle:
+            row = json.loads(handle.read(_MAX_POOL_ROW_BYTES + 1).decode("utf-8"))
+    except FileNotFoundError:
+        raise ReadsetUnbound(f"no claim row at {row_path}") from None
+    except (OSError, UnicodeError, ValueError) as error:
+        raise ReadsetUnbound(f"claim row is unreadable: {error}") from None
+    if not isinstance(row, dict) or row.get("action_key") != action_key:
+        raise ReadsetUnbound("claim row names another action")
+    cas_root = row.get("cas_root")
+    residency = row.get("residency")
+    if not isinstance(cas_root, str) or not cas_root:
+        raise ReadsetUnbound("claim row publishes no cas_root")
+    if not isinstance(residency, dict):
+        raise ReadsetUnbound("claim row publishes no residency block")
+    digest = residency.get("manifest_sha256")
+    size = residency.get("manifest_bytes")
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise ReadsetUnbound("residency block names no manifest digest")
+    if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+        raise ReadsetUnbound("residency block names no manifest size")
+    return cas_root, digest, size
+
+
+def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int, int]]]:
+    """PB's sealed readset as ``{declared path: merged [start, end) spans}``.
+
+    The declared-range authority, read from PrismaBuild's own request
+    context and decoded by PrismaBuild's own validator:
+
+    1. :func:`resolve_sealed_readset` gives the ``cas_root`` and manifest
+       digest PB published into this action's pool row.
+    2. That row's digest must equal ``bound_manifest_sha256`` -- the digest
+       this run was submitted with. A readset for another submission is
+       not this run's readset.
+    3. Both the row's stated size and the blob's actual size are checked
+       against ``core.DATA_MANIFEST_MAX_BYTES`` -- PB's own fixed bound --
+       **before the blob is opened**, and only then is it read and hashed.
+       The row's ``manifest_bytes`` is an input, not an established size:
+       the same record carries ``detail.prewarm.manifest_bytes``, which is
+       1,244,988,662,830 on the GLM-5.3-Flash campaign because it measures
+       the payload those entries *describe*. What is hashed here is the
+       small metadata -- ``residency.manifest_bytes``, 1.5 MB on that same
+       campaign -- and the fixed ceiling is what keeps it that way.
+       Content addressing is then what makes the manifest self-attesting:
+       the bytes prove themselves or nothing is adopted.
+    4. ``prismabuild.core.read_data_manifest`` decodes and validates it --
+       gzip detected by header rather than suffix, stored and decoded bytes
+       bounded independently before JSON parsing, trailing bytes and
+       concatenated members refused, then PB's own schema validation. PQ
+       does not re-implement any of that: a second, more permissive parser
+       is a second contract.
+
+    ``entries`` carry ``{path, offset, bytes}`` in **file offsets** -- the
+    read-order caveat in ``core.residency_descriptor`` is about a
+    descriptor's ``range_start_bytes``/``range_end_bytes``, not about
+    entries, and the live campaign's entries 36447-36448 for
+    ``model-00087-of-00120`` end at exactly that file's 5,354,098,040
+    bytes. ``sha256`` may be null and is not read here.
+
+    Raises :class:`ReadsetUnbound` on any missing or disagreeing hop.
+    """
+    cas_root, digest, size = resolve_sealed_readset()
+    if digest != bound_manifest_sha256:
+        raise ReadsetUnbound(
+            f"the claim row names manifest {digest[:12]}, this run reads "
+            f"{str(bound_manifest_sha256)[:12]}")
+    try:
+        from prismabuild.core import DATA_MANIFEST_MAX_BYTES, read_data_manifest
+    except ImportError as error:
+        raise ReadsetUnbound(f"PB manifest reader unavailable: {error}") from None
+    # The ceiling is PB's own fixed bound, applied BEFORE anything is opened.
+    # ``size`` came off the claim row: it is an input, not an established
+    # fact, and the same record carries ``detail.prewarm.manifest_bytes`` --
+    # 1,244,988,662,830 on the live campaign, the payload those entries
+    # describe. A wrong field or a wrong value must not be able to spend a
+    # read and a hash on a terabyte. Small metadata is what is hashed here,
+    # and this is what keeps it small. (One bound, PB's: a second constant
+    # here would be a second contract, free to drift from the reader that
+    # enforces it.)
+    if size > DATA_MANIFEST_MAX_BYTES:
+        raise ReadsetUnbound(
+            f"the claim row says the sealed manifest is {size} bytes, past "
+            f"PrismaBuild's own {DATA_MANIFEST_MAX_BYTES}-byte manifest bound")
+    blob = Path(cas_root) / "blobs" / digest[:2] / digest
+    try:
+        actual = os.lstat(blob).st_size
+    except OSError as error:
+        raise ReadsetUnbound(
+            f"sealed manifest is unstatable: {error.strerror}") from None
+    if actual > DATA_MANIFEST_MAX_BYTES:
+        raise ReadsetUnbound(
+            f"sealed manifest is {actual} bytes, past PrismaBuild's own "
+            f"{DATA_MANIFEST_MAX_BYTES}-byte manifest bound")
+    try:
+        with open(blob, "rb") as handle:
+            raw = handle.read(size + 1)
+    except OSError as error:
+        raise ReadsetUnbound(
+            f"sealed manifest is unreadable: {error.strerror}") from None
+    if len(raw) != size:
+        raise ReadsetUnbound(
+            f"sealed manifest is {len(raw)} bytes, the claim row says {size}")
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise ReadsetUnbound("sealed manifest does not hash to its digest")
+    try:
+        payload, _encoding = read_data_manifest(blob)
+    except Exception as error:
+        raise ReadsetUnbound(f"PB refused the sealed manifest: {error}") from None
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        raise ReadsetUnbound("sealed manifest declares no entries")
+    spans: dict[str, list[tuple[int, int]]] = {}
+    for row in entries:
+        path, offset, count = row["path"], row["offset"], row["bytes"]
+        spans.setdefault(str(path), []).append((int(offset), int(offset) + int(count)))
+    return spans
 
 
 def covers_for_leads(leads, manifest_sha256) -> list[dict[str, str]]:

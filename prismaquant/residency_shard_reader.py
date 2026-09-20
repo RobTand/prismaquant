@@ -64,20 +64,132 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import errno
 import json
+import math
 import os
 import re
 import stat
 import threading
+import time
 
 import torch
 
-from .residency_map import residency_resolver
+from .residency_map import RANGE_HIT, RANGE_UNCOVERED, residency_resolver
 from .staged_tier_policy import (
     active_policy,
     policy_is_active,
     refuse_pool_bulk_read,
 )
 from .staged_lease import LeaseRefused, acquire_entry_window
+
+
+#: How long a strict read waits for a range the sealed manifest declares and
+#: PrismaBuild has published a mover for, but has not moved yet.
+#:
+#: A policy bound, not a derived threshold: the consumer cannot see
+#: PrismaBuild's mover queue, so nothing in this process can compute when a
+#: published range will land. It is set from what movers on this fleet
+#: measurably take. On the Stage A run behind PQ #874 the stage mover for one
+#: 14.8 GB forward phase ran 16:55:57 -> 16:56:41 (44 s), another finished its
+#: RAM leg 96 s after its stage leg, and the phase the consumer refused was
+#: claimed by its own mover 7 s after the consumer had already died. Five
+#: minutes covers that class of lag and is still a bound: a range that never
+#: arrives refuses exactly as it did before.
+#:
+#: ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` overrides it; ``0`` restores the
+#: pre-#874 behaviour of refusing on the first uncovered span.
+STAGED_RANGE_WAIT_ENV = "PRISMAQUANT_STAGED_RANGE_WAIT_S"
+STAGED_RANGE_WAIT_S = 300.0
+#: Between polls. ``ResidencyResolver._read_map`` is identity-gated, so a poll
+#: that finds the map unchanged costs one ``lstat`` and no parse.
+STAGED_RANGE_POLL_S = 1.0
+
+
+def await_staged_spans(resolver, wanted, *, deadline) -> str:
+    """Give PrismaBuild's movers until ``deadline`` to land ``wanted``.
+
+    ``wanted`` is ``[(declared path, start, end, declared size), ...]`` --
+    every span one read is about to need, across every shard it touches,
+    each with the size the caller's own header parse already produced.
+    Returns the verdict the read should expect: ``RANGE_HIT`` when every
+    span is covered, or the first non-covered outcome otherwise.
+
+    **One deadline for the whole call, not one per span.** A read touching
+    four cold shards waits the bound once; per-span budgets would multiply
+    it, and choosing an order and a share per span would be a scheduler --
+    which is PrismaBuild's job, not this reader's. Nothing here moves
+    anything or asks for anything to be moved: it re-reads the map PB's
+    movers publish into, and that map is the only thing that changes.
+
+    Stops early, without waiting, on anything that is neither a covered
+    span nor a mid-flight miss: ``RANGE_UNDECLARED`` (PB's sealed readset
+    never named these bytes, so no mover will ever produce them) and
+    ``RANGE_REFUSED`` (an entry covers the span and failed a check --
+    evidence in hand, which re-asking cannot improve). Waiting on either
+    would be the same conflation this exists to fix, pointed the other way.
+
+    Cheap to poll: an uncovered span returns before ``staged_range``
+    stats anything, and ``ResidencyResolver._read_map`` is identity-gated,
+    so a poll that finds the map unchanged costs one ``lstat``.
+    """
+    started = time.monotonic()
+    polls = 0
+    pending = list(wanted)
+    verdict = RANGE_HIT
+    while pending:
+        still = []
+        for row in pending:
+            declared, start, end, size = row
+            _entry, outcome = resolver.staged_range_outcome(
+                declared, start, end, declared_size=size)
+            if outcome == RANGE_HIT:
+                continue
+            if outcome != RANGE_UNCOVERED:
+                verdict = outcome
+                still = []
+                break
+            still.append(row)
+        else:
+            pending = still
+            if not pending:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                verdict = RANGE_UNCOVERED
+                break
+            time.sleep(min(STAGED_RANGE_POLL_S, remaining))
+            polls += 1
+            continue
+        break
+    if polls:
+        resolver.record_range_wait(
+            pending[0][0] if pending else wanted[0][0], polls=polls,
+            seconds=time.monotonic() - started, served=verdict == RANGE_HIT)
+    return verdict
+
+
+def staged_range_wait_s() -> float:
+    """The configured wait bound in seconds: finite and not negative.
+
+    ``math.isfinite`` rather than a ``>= 0`` test alone, because the one
+    property this design rests on is that the wait *ends*: ``float("inf")``
+    is neither negative nor NaN, and a deadline of ``started + inf`` never
+    expires. An unbounded wait is not a longer bound, it is no bound.
+    """
+    raw = os.environ.get(STAGED_RANGE_WAIT_ENV)
+    if raw is None or not str(raw).strip():
+        return STAGED_RANGE_WAIT_S
+    try:
+        value = float(str(raw).strip())
+    except ValueError:
+        raise ValueError(
+            f"{STAGED_RANGE_WAIT_ENV} must be a number of seconds, "
+            f"not {raw!r}") from None
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(
+            f"{STAGED_RANGE_WAIT_ENV} must be a finite number of seconds "
+            f">= 0, not {raw!r}")
+    return value
+
 
 try:
     # safetensors' own dtype table, so the reader reads the format's spelling
@@ -613,6 +725,12 @@ class StagedShardReader:
             return None
         entry = self._resolver.staged_range(
             self._declared, start, end, declared_size=self._declared_size)
+        # Nothing waits here. This runs on a worker of the shared, bounded
+        # ``layer_streaming._LAYER_READ_POOL``, and a worker sleeping on a
+        # cold future range is a worker the current layer's already-staged
+        # reads queue behind. Readiness is decided one level up, before
+        # these slots are occupied: ``layer_streaming._await_layer_readset``
+        # (PQ #874). By the time a chunk asks, the answer is final.
         if entry is None:
             if strict:
                 raise refuse_pool_bulk_read(self._declared, "readset-not-staged")

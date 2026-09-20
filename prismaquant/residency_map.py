@@ -66,6 +66,7 @@ entry; the resolver never waits for the map to be complete.
 """
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import os
@@ -89,6 +90,44 @@ TIER_RECORD_SCHEMA = "prismabuild.storage_tier.v1"
 # path cannot be read without limit, not to describe an expected size.
 MAX_MAP_BYTES = 256 * 1024 * 1024
 MAX_RECORDED_FALLBACKS = 256
+
+#: ``ResidencyResolver.staged_range_outcome`` verdicts. An entry covering the
+#: span that passed every check; no entry covering it (the map's ordinary
+#: mid-flight state, which says nothing about whether the span is declared);
+#: an entry covering it that then failed a check, already recorded as a
+#: fallback. Named rather than spelled inline so a caller's branch reads as
+#: the distinction it is making.
+#: Larger than any byte offset a declared file can hold, so a bisect key of
+#: ``(start, _INFINITE_OFFSET)`` orders after every real span beginning at
+#: ``start``. Not a magic constant: 2**64 is past the addressable range of
+#: any file the manifest can name.
+_INFINITE_OFFSET = 1 << 64
+
+
+def _merge_spans(rows: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Sorted, non-overlapping ``[start, end)`` spans.
+
+    The manifest may declare one path at several offsets, and adjacent
+    declarations are common (a shard's header entry abutting its payload
+    entry). Merging keeps membership a single bisect rather than a scan,
+    and makes a read that spans two abutting declarations declared -- which
+    it is: the bytes are all named.
+    """
+    merged: list[tuple[int, int]] = []
+    for low, high in sorted(rows):
+        if merged and low <= merged[-1][1]:
+            if high > merged[-1][1]:
+                merged[-1] = (merged[-1][0], high)
+        else:
+            merged.append((low, high))
+    return merged
+
+
+RANGE_HIT = "hit"
+RANGE_UNCOVERED = "uncovered"
+RANGE_UNDECLARED = "undeclared"
+RANGE_REFUSED = "refused"
+
 
 _ROOT_KEYS = {"schema", "tier_id", "stage_root", "manifest_sha256", "leads",
               "generation", "entries"}
@@ -171,6 +210,28 @@ class ResidencyResolver:
         self._misses = 0
         self._range_hits = 0
         self._range_misses = 0
+        # Polls a strict reader spent waiting for a DECLARED range PrismaBuild
+        # had published but not yet moved. Each poll is a real uncovered-span
+        # lookup and is counted in ``range_misses`` like any other, so the true
+        # number of distinct reads that found nothing is
+        # ``range_misses - range_wait_polls``. Kept separate rather than
+        # excluded so neither number is quietly redefined.
+        # PB's sealed readset, read once, lazily, from the action's own pool
+        # row (see _load_declared_readset). None until read; a dict of
+        # {normalized path: sorted merged [start, end) spans} once bound.
+        # A FAILED read is cached too, deliberately: the claim row and the
+        # CAS blob live as long as the action does, so a failure is a
+        # standing fact about this run, not a transient one, and retrying
+        # it per uncovered span would re-walk the pool queue under the
+        # resolver's lock. The cache is bounded by the binding it belongs
+        # to -- bind_manifest_sha256 drops all three on a digest change.
+        self._declared: dict[str, list[tuple[int, int]]] | None = None
+        self._declared_reason: str | None = None
+        self._declared_attempted = False
+        self._range_wait_polls = 0
+        self._range_wait_seconds = 0.0
+        self._range_waits_served = 0
+        self._range_waits_refused = 0
         self._intervals: dict[str, list[dict]] = {}
         self._real_intervals: dict[str, list[dict]] = {}
         self._intervals_for: dict[str, dict] | None = None
@@ -198,6 +259,13 @@ class ResidencyResolver:
         A map is a statement about one manifest. Until this is called the
         resolver refuses every map, so a launcher that injected the wrong
         action's map cannot redirect a single read.
+
+        The sealed readset is a statement about one manifest too, so it is
+        dropped here with the map identity. Keeping it would be worse than
+        a stale cache: membership from manifest A, consulted for manifest
+        B's paths, answers "not declared" for every one of them -- a clean,
+        deliberate-looking immediate refusal that is exactly the failure
+        this binding was added to prevent.
         """
         if not _is_hex64(digest):
             raise ValueError("a data manifest digest is 64 lowercase hex characters")
@@ -206,6 +274,9 @@ class ResidencyResolver:
                 self._manifest_sha256 = digest
                 self._identity = None
                 self._refused = None
+                self._declared = None
+                self._declared_reason = None
+                self._declared_attempted = False
 
     # -- the map ---------------------------------------------------------
 
@@ -686,9 +757,141 @@ class ResidencyResolver:
             index, real = self._interval_index()
             return bool(index.get(path) or real.get(path))
 
+    # -- PB's sealed readset ---------------------------------------------
+
+    def _load_declared_readset(self) -> None:
+        """Read the sealed readset PrismaBuild published for this action.
+
+        Caller holds the lock. Sets ``self._declared`` on success and
+        ``self._declared_reason`` on every failure; runs at most once.
+
+        All the PB-facing work -- resolving the action's claim row, the
+        ``cas_root`` and manifest digest on it, reading and hashing the CAS
+        blob, and decoding it through PB's own validating reader -- lives in
+        :func:`staged_lease.load_sealed_readset`, next to the lease
+        context it is resolved from. This holds the result and answers
+        questions about spans.
+
+        Every failure is silent about the range and loud once in the log.
+        An unbound readset means this process cannot tell a declared range
+        from an undeclared one, which is a reason to do nothing extra --
+        never a reason to refuse a read, and never a licence to wait.
+
+        Cost, stated because it is paid under the resolver's lock: one
+        claim-row read, one bounded blob read and SHA-256, and PB's own
+        validation of the entry list -- 36,600 entries on the
+        GLM-5.3-Flash campaign. It happens once per binding, before any
+        wait it might authorize, and concurrent ``staged_range`` callers
+        wait behind it for that one pass. Loading outside the lock would
+        trade that for several threads each doing the same work.
+        """
+        self._declared_attempted = True
+        if self._manifest_sha256 is None:
+            self._declared_reason = "no data manifest digest is bound"
+            return
+        try:
+            from .staged_lease import ReadsetUnbound, load_sealed_readset
+        except ImportError as error:  # pragma: no cover - import-time only
+            self._declared_reason = f"lease module unavailable: {error}"
+            return
+        try:
+            spans = load_sealed_readset(self._manifest_sha256)
+        except ReadsetUnbound as unbound:
+            self._declared_reason = str(unbound)
+            return
+        except Exception as error:  # never let this path fail a read
+            self._declared_reason = f"sealed readset error: {error}"
+            return
+        self._declared = {_normal(path): _merge_spans(rows)
+                          for path, rows in spans.items()}
+        self._declared_reason = None
+        print(f"[residency] sealed readset bound: {len(self._declared)} "
+              f"declared path(s), manifest {self._manifest_sha256[:12]}",
+              flush=True)
+
+    def _declares(self, path: str, start: int, end: int) -> bool | None:
+        """Does PB's sealed readset declare ``[start, end)`` of ``path``?
+
+        ``None`` when the readset is not bound -- *unknown*, which is not
+        the same answer as False and must never be spelled as one.
+        Caller holds the lock.
+        """
+        if not self._declared_attempted:
+            self._load_declared_readset()
+        if self._declared is None:
+            return None
+        rows = self._declared.get(path)
+        if not rows:
+            return False
+        index = bisect.bisect_right(rows, (start, _INFINITE_OFFSET)) - 1
+        if index < 0:
+            return False
+        low, high = rows[index]
+        return low <= start and end <= high
+
+    def declared_readset(self) -> dict:
+        """Whether the sealed readset is bound, and why not when it is not."""
+        with self._lock:
+            if not self._declared_attempted:
+                self._load_declared_readset()
+            if self._declared is None:
+                return {"state": "unbound", "reason": self._declared_reason}
+            return {"state": "bound", "paths": len(self._declared)}
+
     def staged_range(self, declared: str | Path, start: int, end: int, *,
                      declared_size: int | None = None) -> dict | None:
         """Where to open the staged copy of ``declared``'s ``[start, end)``.
+
+        The entry alone, which is all most callers need.
+        :meth:`staged_range_outcome` carries the same answer plus *why* a
+        None is a None -- a different question, with a different right
+        response. This spelling and its ``dict | None`` contract are
+        unchanged for every existing caller.
+        """
+        return self.staged_range_outcome(
+            declared, start, end, declared_size=declared_size)[0]
+
+    def staged_range_outcome(
+            self, declared: str | Path, start: int, end: int, *,
+            declared_size: int | None = None) -> tuple[dict | None, str]:
+        """``(entry, outcome)`` for ``declared``'s ``[start, end)``.
+
+        ``outcome`` is one of:
+
+        ``RANGE_HIT``
+            an entry covers the span and passed every pre-open check.
+        ``RANGE_UNCOVERED``
+            no entry covers the span, and PrismaBuild's sealed readset
+            declares it. The map holds only what a mover has already
+            written, so a range PB published but has not moved yet lands
+            here: it is *not staged yet*, which is not *not staged*.
+            Counted in ``range_misses``, silent.
+        ``RANGE_UNDECLARED``
+            no entry covers the span and the sealed readset does not
+            declare it -- nothing was ever asked to stage these bytes, so
+            no amount of waiting will produce them. Counted in
+            ``range_misses`` like any other uncovered span.
+
+            When the sealed readset is not bound at all (see
+            :meth:`declared_readset`) the two are indistinguishable and
+            every uncovered span reports ``RANGE_UNCOVERED``. Unknown is
+            reported as unknown; callers decide what to do with it, and
+            the reader's pre-flight declines to wait on one.
+        ``RANGE_REFUSED``
+            an entry covers the span and then failed a check: the declared
+            file is unstatable, the entry runs past it, or the staged copy
+            is unreadable, not a regular file, or a different size than the
+            map says, with no RAM offer. Counted and printed as a fallback.
+
+        The kinds exist because the right response differs. Re-asking can
+        turn ``RANGE_UNCOVERED`` into a hit, because the map changes under
+        its readers; it cannot improve ``RANGE_REFUSED``, which is evidence
+        already in hand -- an entry that runs past the declared file runs
+        past it on every look.
+
+        This method reports the kind and never waits. Re-asking belongs to
+        the caller -- ``layer_streaming._await_layer_readset``, before a
+        layer's gather is submitted -- which does not hold this lock.
 
         ``staged_read``'s pre-open checks, asked of a byte range. One entry has
         to cover the span outright; the staged copy has to be a regular file of
@@ -721,17 +924,19 @@ class ResidencyResolver:
                     break
             if entry is None:
                 self._range_misses += 1
-                return None
+                if self._declares(path, start, end) is False:
+                    return None, RANGE_UNDECLARED
+                return None, RANGE_UNCOVERED
             if declared_size is None:
                 try:
                     declared_size = os.lstat(path).st_size
                 except OSError:
                     self._record_fallback(
                         path, "declared file is unstatable, cannot bind the entry to it")
-                    return None
+                    return None, RANGE_REFUSED
             if entry["offset"] + entry["bytes"] > declared_size:
                 self._record_fallback(path, "map entry runs past the declared file")
-                return None
+                return None, RANGE_REFUSED
             ram_path = self._ram_offer(entry, path)
             stage_path = entry["stage_path"]
             try:
@@ -748,16 +953,17 @@ class ResidencyResolver:
             if stage_refusal is not None:
                 if ram_path is None:
                     self._record_fallback(path, stage_refusal)
-                    return None
-                return {"declared_path": path, "stage_path": stage_path,
-                        "ram_path": ram_path, "bytes": entry["bytes"],
-                        "offset": entry["offset"], "sha256": entry["sha256"]}
+                    return None, RANGE_REFUSED
+                return ({"declared_path": path, "stage_path": stage_path,
+                         "ram_path": ram_path, "bytes": entry["bytes"],
+                         "offset": entry["offset"],
+                         "sha256": entry["sha256"]}, RANGE_HIT)
             answer = {"declared_path": path, "stage_path": stage_path,
                       "bytes": entry["bytes"], "offset": entry["offset"],
                       "sha256": entry["sha256"]}
             if ram_path is not None:
                 answer["ram_path"] = ram_path
-            return answer
+            return answer, RANGE_HIT
 
     # -- the accounting --------------------------------------------------
 
@@ -778,6 +984,31 @@ class ResidencyResolver:
     def record_fallback(self, declared: str | Path, reason: str) -> None:
         with self._lock:
             self._record_fallback(_normal(declared), reason)
+
+    def record_range_wait(self, declared: str | Path, *, polls: int,
+                          seconds: float, served: bool) -> None:
+        """One strict read that waited for a range the map did not hold yet.
+
+        The resolver itself still never waits (module docstring): this only
+        records what a reader chose to do with an ordinary mid-flight miss,
+        so ``results.json`` shows the waiting as waiting instead of leaving it
+        inside ``range_misses`` as a burst of failed lookups.
+        """
+        if type(polls) is not int or isinstance(polls, bool) or polls < 0:
+            raise ValueError("a range wait polls a non-negative number of times")
+        if type(seconds) not in (int, float) or seconds < 0:
+            raise ValueError("a range wait lasts a non-negative number of seconds")
+        with self._lock:
+            self._range_wait_polls += polls
+            self._range_wait_seconds += float(seconds)
+            if served:
+                self._range_waits_served += 1
+            else:
+                self._range_waits_refused += 1
+            print(f"[residency] range wait {_normal(declared)}: "
+                  f"{polls} poll(s) over {seconds:.1f}s -> "
+                  f"{'staged' if served else 'still not staged, refusing'}",
+                  flush=True)
 
     def record_ram_fallback(self, declared: str | Path, reason: str) -> None:
         """One ram copy that did not serve the read it was offered for.
@@ -889,6 +1120,17 @@ class ResidencyResolver:
                 "misses": self._misses,
                 "range_hits": self._range_hits,
                 "range_misses": self._range_misses,
+                "range_wait_polls": self._range_wait_polls,
+                "range_wait_seconds": round(self._range_wait_seconds, 3),
+                "range_waits_served": self._range_waits_served,
+                "range_waits_refused": self._range_waits_refused,
+                "declared_readset": (
+                    {"state": "bound", "paths": len(self._declared)}
+                    if self._declared is not None else
+                    {"state": "unbound", "reason": self._declared_reason}
+                    if self._declared_attempted else
+                    {"state": "unread",
+                     "reason": "no read asked whether a range was declared"}),
                 "fallbacks": [dict(row) for row in self._fallbacks],
                 "fallback_count": self._fallback_count,
                 "bytes_from_stage": self._bytes_from_stage,

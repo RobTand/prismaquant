@@ -17,15 +17,18 @@ No PB behavior is stubbed or re-implemented here. Where the composed map
 cannot name covers (RAM movers), the tests prove the fast refusal and the
 honest SSD re-acquire — never a pretended identity.
 """
+import gzip
 import hashlib
 import json
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
 import torch
+from concurrent.futures import ThreadPoolExecutor
 from safetensors.torch import save_file
 
 from prismaquant import layer_streaming
@@ -40,6 +43,9 @@ from prismaquant.staged_tier_policy import (
 )
 from prismaquant.staged_lease import (
     LeaseRefused, PINNED_SDK_COMMIT, set_lease_helper_root,
+)
+from prismaquant.residency_shard_reader import (
+    STAGED_RANGE_WAIT_ENV, STAGED_RANGE_WAIT_S, staged_range_wait_s,
 )
 
 MANIFEST = 'e' * 64
@@ -1666,3 +1672,605 @@ def test_equal_sized_files_never_serve_each_others_bytes(tmp_path, monkeypatch):
     else:
         # Post-fix: distinct pins serve byte-correct data.
         assert second == blobs["b"]
+
+
+# -- a declared range PrismaBuild has not moved YET (PQ #874) ----------------
+#
+# Measured failure these pin: PrismaBuild consumer action
+# 2fd0de4dbefc50580448a883635fcba2a151c3a5dc743c1fd0b881cb61772d21, Stage A of
+# the GLM-5.3-Flash joint-AURA campaign on sparklina, rc 1 after 574 s with no
+# OOM, refusing in a gather worker at `residency_shard_reader.py:618`:
+#
+#   TierPolicyRefused: staged-tier-forbidden: readset-not-staged:
+#     /mnt/shared/models/GLM-5.3-Flash-BF16/model-00087-of-00120.safetensors
+#
+# The refused range was declared and in flight, measured from the sealed
+# artifacts (all times UTC; timeline at /home/rob/tmp/claude-main-20260920/
+# pq-874-evidence/mover-timeline.md, which is a per-consumer SUBSET):
+#
+#   * PB's sealed data manifest for that action (43f40d18..., 36,600 entries,
+#     gzipped in the CAS) declares that shard at entry indices 36447-36448,
+#     in read-plan phase `forward-004`;
+#   * its stage mover 6f4d3fa5097aeef7f47886d41d4578ff3a2a89167ac8642548919
+#     638f27fcef4 was PUBLISHED at 20:55:57, 180 s BEFORE the refusal, and
+#     claimed 7.832 s AFTER the consumer had died (root-verified, MCP451).
+#
+# So publication was not the lag -- the move was. The range was declared and
+# unmoved, which is what `RANGE_UNCOVERED` now means, and the reader was
+# flattening it into a terminal refusal on a *speculative* prefetch of layer 4
+# whose failure then killed layer 0, the layer the run was working on.
+#
+# Two things are being pinned, and they are separate guards:
+#
+#   1. The resolver separates its four `None` returns, so an entry that covers
+#      a span and fails a check never enters a wait -- re-asking cannot improve
+#      evidence already in hand.
+#   2. Declared-versus-undeclared is bound to PrismaBuild's own request
+#      context: the claim row's `cas_root` plus its `residency.manifest_sha256`
+#      name the sealed manifest blob, whose bytes are hashed and checked
+#      against the digest this process bound before a single entry is adopted.
+#      When that binding is unavailable the two are indistinguishable and
+#      NOTHING waits -- not knowing is not a licence to wait.
+#
+# And where the waiting happens is itself part of the contract: in the thread
+# that is about to submit the gather, never in a gather worker, so a ready
+# current-layer read never queues behind workers sleeping on cold future
+# layers.
+
+
+def _seal_manifest(tmp_path, entries):
+    """A real sealed data manifest in a real CAS, addressed by its digest.
+
+    ``entries`` is ``[(declared Path, offset, bytes)]``. PrismaBuild gzips the
+    manifest and addresses the blob by the digest of the COMPRESSED bytes
+    (checked against the live campaign blob 43f40d18..., 1,576,940 stored,
+    10,667,784 inflated, magic 1f8b), so this seals it the same way -- and it
+    is a manifest ``prismabuild.core.validate_data_manifest`` accepts, v2
+    ``read_plan`` and all, because that validator is what reads it back. A
+    hand-shaped payload the real reader would refuse would make this whole
+    fixture a fiction.
+
+    Returns ``(cas_root, digest, size)``.
+    """
+    rows = [{"path": str(path), "offset": offset, "bytes": count,
+             "sha256": None} for path, offset, count in entries]
+    total = sum(row["bytes"] for row in rows)
+    body = {
+        "schema": "prismaquant.prismabuild.data_manifest.v2",
+        "produced_by": {"tool": "tests/test_strict_reader_tier_enforcement.py"},
+        "annotations": {},
+        "mount_prefix": str(tmp_path),
+        "entries": rows,
+        "entry_count": len(rows),
+        "total_bytes": total,
+        "read_plan": {
+            "phases": [{"name": "head", "entry_indices": list(range(len(rows))),
+                        "bytes": total, "cumulative_bytes": total}],
+            "read_bytes": total,
+        },
+    }
+    raw = gzip.compress(json.dumps(body).encode("utf-8"), mtime=0)
+    digest = hashlib.sha256(raw).hexdigest()
+    cas_root = tmp_path / 'cas'
+    blob = cas_root / 'blobs' / digest[:2] / digest
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(raw)
+    return cas_root, digest, len(raw)
+
+
+def _publish_readset_on_the_claim(tmp_path, consumer, cas_root, digest, size):
+    """Add what PB publishes at publish time to the claim row this run reads.
+
+    ``pool.py`` writes ``cas_root`` and the ``residency`` block into the pool
+    item when the action is published, and the item moves ready -> claimed
+    unchanged, so a live claim row carries both. ``_pb_queue`` writes only the
+    identity fields the lease SDK matches; this adds the two the sealed
+    readset is resolved from, leaving those fields exactly as they were.
+    """
+    path = tmp_path / 'claimed' / f'{consumer}.json'
+    row = json.loads(path.read_text())
+    row["cas_root"] = str(cas_root)
+    row["residency"] = {"schema": "prismabuild.residency.v1",
+                        "tier_id": STAGE_TIER,
+                        "manifest_sha256": digest, "manifest_bytes": size}
+    path.write_text(json.dumps(row))
+
+
+def _mid_flight_fixture(tmp_path, monkeypatch, *, declared=None, seal=True):
+    """The live shape: policy, lease context and claim live, the map empty.
+
+    ``declared`` is what the SEALED MANIFEST names, ``[(path, offset, bytes)]``
+    -- independently of what is staged, which is the whole point. ``seal=False``
+    publishes no manifest blob at all, which is how an unbound readset is
+    reached.
+
+    Returns ``(resolver, consumer, digest, publish)``. ``publish(rows)`` does
+    what a mover does when its leg lands: the REAL PB fragment and material
+    writers, then the composed map replaced atomically (``os.replace``, so a
+    poll never reads a torn map). ``rows`` is ``{name: (declared, staged)}``.
+    """
+    rl, pool_mod, map_mod = _pb()
+    consumer = _hex64(f"consumer-{tmp_path}")
+    mover = _hex64(f"mover-{tmp_path}")
+    _queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
+    cas_root, digest, size = _seal_manifest(tmp_path, declared or [])
+    if seal:
+        _publish_readset_on_the_claim(tmp_path, consumer, cas_root, digest, size)
+    root = tmp_path / 'residency'
+    live = root / 'residency.json'
+
+    def publish(rows):
+        _pb_publish(rl, map_mod, root, stage, consumer, mover, digest,
+                    {residency_map_key(str(dec), 0): (dec, staged)
+                     for dec, staged in rows.values()})
+        fresh = _write_map(
+            tmp_path, {name: (dec, staged, None)
+                       for name, (dec, staged) in rows.items()},
+            name='residency.next.json', manifest_sha256=digest,
+            leads=[mover], stage_root=stage)
+        os.replace(fresh, live)
+
+    map_path = _write_map(tmp_path, {}, manifest_sha256=digest, leads=[mover],
+                          stage_root=stage)
+    assert map_path == live
+    monkeypatch.setenv(ENV_VAR, str(map_path))
+    _launch_env(monkeypatch, consumer)
+    reset_residency_resolver_for_tests()
+    bind_residency_manifest(digest)
+    activate_staged_tier_policy("ram,ssd")
+    return residency_resolver(), consumer, digest, publish
+
+
+def _layer(path, names=('f32',)):
+    """``_read_layer_to_device`` arguments for one shard, prefix ``layer.``."""
+    model_to_shard = {f'layer.{name}': str(path) for name in names}
+    model_to_ckpt = {f'layer.{name}': name for name in names}
+    return model_to_shard, model_to_ckpt
+
+
+def _read_layer(*shards):
+    """Read one streamed layer spanning ``shards`` on the CPU."""
+    model_to_shard, model_to_ckpt = {}, {}
+    for index, path in enumerate(shards):
+        for name in ('f32',):
+            key = f'layer.{index}.{name}'
+            model_to_shard[key] = str(path)
+            model_to_ckpt[key] = name
+    return layer_streaming._read_layer_to_device(
+        'layer.', model_to_shard, model_to_ckpt, torch.float32,
+        torch.device('cpu'))
+
+
+def _whole_file(path):
+    return [(path, 0, path.stat().st_size)]
+
+
+def test_a_layer_read_waits_for_a_declared_range_staged_after_it_began(
+        tmp_path, monkeypatch):
+    """The campaign's shape: the read starts before the mover's leg lands."""
+    path, _tensors = _shard(tmp_path)
+    staged = _stage_whole(_stage_root(tmp_path), path)
+    resolver, consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "90")
+    assert resolver.declared_readset()['state'] == 'bound'
+
+    def mover_leg():
+        time.sleep(2.0)
+        publish({'s': (path, staged)})
+
+    thread = threading.Thread(target=mover_leg, name='late-mover')
+    thread.start()
+    try:
+        served = _read_layer(path)
+    finally:
+        thread.join(timeout=120)
+        assert not thread.is_alive()
+
+    from safetensors import safe_open
+    with safe_open(str(path), framework='pt') as reference:
+        want = reference.get_tensor('f32')
+    got = served['layer.0.f32']
+    assert got.dtype == want.dtype and got.shape == want.shape
+    assert torch.equal(got.view(torch.uint8), want.view(torch.uint8))
+
+    report = resolver.report()
+    assert report['bytes_from_pool'] == 0
+    assert report['range_waits_served'] == 1
+    assert report['range_waits_refused'] == 0
+    assert report['range_wait_polls'] >= 1
+    assert report['declared_readset']['state'] == 'bound'
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_layer_read_does_not_wait_on_a_span_the_readset_never_declared(
+        tmp_path, monkeypatch):
+    """A span PB was never asked to stage refuses at once, whatever the bound.
+
+    The manifest here declares only the shard's first 8 bytes -- its header
+    length field -- so the tensor's own span is inside a declared FILE and
+    still undeclared. Without the manifest binding this is indistinguishable
+    from a mover that has not run, and would burn the whole bound.
+    """
+    path, _ = _shard(tmp_path)
+    resolver, _consumer, _digest, _publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=[(path, 0, 8)])
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    assert time.monotonic() - started < 30.0
+
+    report = resolver.report()
+    assert report['range_wait_polls'] == 0
+    assert report['range_waits_served'] == 0
+    assert report['range_waits_refused'] == 0
+    assert report['bytes_from_pool'] == 0
+
+
+def test_a_layer_read_does_not_wait_on_a_shard_the_readset_never_named(
+        tmp_path, monkeypatch):
+    """File-level: the manifest names another file entirely."""
+    path, _ = _shard(tmp_path)
+    other = path.with_name('model-00002-of-00002.safetensors')
+    other.write_bytes(path.read_bytes())
+    resolver, _consumer, _digest, _publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(other))
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    assert time.monotonic() - started < 30.0
+    assert resolver.report()['range_wait_polls'] == 0
+
+
+def test_a_layer_read_does_not_wait_when_the_sealed_readset_is_unbound(
+        tmp_path, monkeypatch):
+    """No claim-row readset, no waiting -- and the report says why.
+
+    Not knowing whether a range is declared is exactly the state in which
+    waiting would be guessing. This keeps the pre-#874 behaviour and records
+    the reason rather than silently doing either thing.
+    """
+    path, _ = _shard(tmp_path)
+    resolver, _consumer, _digest, _publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path), seal=False)
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    assert time.monotonic() - started < 30.0
+
+    state = resolver.report()['declared_readset']
+    assert state['state'] == 'unbound'
+    assert 'cas_root' in str(state['reason']) or 'claim row' in str(state['reason'])
+    assert resolver.report()['range_wait_polls'] == 0
+
+
+def test_a_layer_read_does_not_wait_on_an_entry_that_fails_a_check(
+        tmp_path, monkeypatch):
+    """Evidence in hand is not absence.
+
+    A covered span whose staged copy is the wrong size refuses at once,
+    however long the bound is. Without this guard every corrupt, stale or
+    out-of-range entry would enter the wait -- the same conflation pointed
+    the other way, since re-polling cannot improve any of them.
+    """
+    path, _ = _shard(tmp_path)
+    staged = _stage_whole(_stage_root(tmp_path), path)
+    resolver, _consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    publish({'s': (path, staged)})
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+    staged.write_bytes(staged.read_bytes()[:-16])
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    assert time.monotonic() - started < 30.0
+
+    report = resolver.report()
+    assert report['range_wait_polls'] == 0
+    assert report['range_waits_refused'] == 0
+    assert report['fallback_count'] >= 1
+    assert report['bytes_from_pool'] == 0
+
+
+def test_a_layer_read_wait_ends_at_its_bound(tmp_path, monkeypatch):
+    """A declared range nothing ever stages still refuses, and on time."""
+    path, _ = _shard(tmp_path)
+    resolver, _consumer, _digest, _publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "3")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    waited = time.monotonic() - started
+    assert 2.0 <= waited < 60.0, f"waited {waited:.1f}s against a 3s bound"
+
+    report = resolver.report()
+    assert report['range_waits_refused'] == 1
+    assert report['range_waits_served'] == 0
+    assert report['range_wait_polls'] >= 1
+    assert report['bytes_from_pool'] == 0
+
+
+def test_a_zero_bound_refuses_on_the_first_uncovered_span(tmp_path, monkeypatch):
+    """The pre-#874 behaviour stays reachable, and costs no poll."""
+    path, _ = _shard(tmp_path)
+    resolver, _consumer, _digest, _publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "0")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    assert time.monotonic() - started < 5.0
+    assert resolver.report()['range_wait_polls'] == 0
+
+
+def test_one_deadline_covers_a_layer_that_spans_several_cold_shards(
+        tmp_path, monkeypatch):
+    """Four cold shards wait the bound ONCE, not four times over.
+
+    Per-span budgets would multiply the bound by the shard count and would be
+    this reader choosing an order and a share -- a scheduler, which is
+    PrismaBuild's job.
+    """
+    path, _ = _shard(tmp_path)
+    shards = [path]
+    for index in range(2, 5):
+        extra = path.with_name(f'model-0000{index}-of-00004.safetensors')
+        extra.write_bytes(path.read_bytes())
+        shards.append(extra)
+    declared = [row for shard in shards for row in _whole_file(shard)]
+    resolver, _consumer, _digest, _publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=declared)
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "4")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(*shards)
+    waited = time.monotonic() - started
+    assert 3.0 <= waited < 14.0, (
+        f"{len(shards)} cold shards waited {waited:.1f}s against one 4s bound")
+    assert resolver.report()['range_waits_refused'] == 1
+
+
+def _wide_shard(tmp_path, name):
+    """A shard with enough tensors to take the intra-layer fanout branch.
+
+    ``_read_layer_to_device`` only uses ``_LAYER_READ_POOL`` when
+    ``threads > 1 and total_tensors >= _LAYER_READ_MIN_TENSORS``. A test that
+    misses either condition runs the serial path, never touches the pool, and
+    would pass identically under an implementation that blocks inside a pool
+    worker -- which is the property it exists to check.
+    """
+    pool = tmp_path / 'pool'
+    pool.mkdir(parents=True, exist_ok=True)
+    count = layer_streaming._LAYER_READ_MIN_TENSORS + 4
+    tensors = {f't{index:02d}': torch.linspace(-1, 1, 64, dtype=torch.float32)
+               .reshape(8, 8) + index for index in range(count)}
+    path = pool / name
+    save_file(tensors, str(path))
+    return path, sorted(tensors)
+
+
+def _read_wide_layer(path, names):
+    model_to_shard = {f'layer.{n}': str(path) for n in names}
+    model_to_ckpt = {f'layer.{n}': n for n in names}
+    return layer_streaming._read_layer_to_device(
+        'layer.', model_to_shard, model_to_ckpt, torch.float32,
+        torch.device('cpu'))
+
+
+def test_a_waiting_layer_read_holds_no_gather_worker(tmp_path, monkeypatch):
+    """A cold layer read must not occupy the shared gather pool.
+
+    ``_LAYER_READ_POOL`` is module-global, bounded and shared by every
+    streamed layer read, so a worker sleeping on a cold future range is a
+    worker the current layer's already-staged reads queue behind. Readiness
+    is therefore decided in the submitting thread, before any slot is taken.
+
+    Built so it can actually fail: both shards carry enough tensors to take
+    the fanout branch, the pool is sized to exactly the number of chunks one
+    cold layer splits into, and the executor is wrapped so the test can
+    assert the submissions really happened. Under an implementation that
+    waits inside a gather worker, every worker is asleep for the whole bound
+    and the ready read cannot finish first.
+    """
+    cold, cold_names = _wide_shard(tmp_path, 'model-00001-of-00002.safetensors')
+    ready, ready_names = _wide_shard(tmp_path, 'model-00002-of-00002.safetensors')
+    staged_ready = _stage_whole(_stage_root(tmp_path), ready)
+    resolver, _consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch,
+        declared=_whole_file(cold) + _whole_file(ready))
+    publish({'r': (ready, staged_ready)})
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "30")
+    monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '2')
+
+    submissions = []
+    real_pool = ThreadPoolExecutor(max_workers=2,
+                                   thread_name_prefix='gather-under-test')
+
+    class _Counting:
+        def submit(self, fn, *args, **kwargs):
+            submissions.append(getattr(fn, '__name__', str(fn)))
+            return real_pool.submit(fn, *args, **kwargs)
+
+    monkeypatch.setattr(layer_streaming, '_layer_read_pool',
+                        lambda threads: _Counting())
+
+    results = []
+
+    def cold_reader():
+        with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+            _read_wide_layer(cold, cold_names)
+        results.append(True)
+
+    waiter = threading.Thread(target=cold_reader, name='cold-layer')
+    waiter.start()
+    try:
+        time.sleep(2.0)
+        began = time.monotonic()
+        served = _read_wide_layer(ready, ready_names)
+        elapsed = time.monotonic() - began
+    finally:
+        waiter.join(timeout=120)
+        real_pool.shutdown(wait=False)
+
+    assert results == [True]
+    # The fanout branch really ran: without this a serial-path regression
+    # would leave the assertion below passing for the wrong reason.
+    assert len(submissions) >= 2, submissions
+    assert elapsed < 10.0, (
+        f"a staged layer read took {elapsed:.1f}s while a cold one waited "
+        "its 30s bound: the wait is holding a gather worker")
+
+    from safetensors import safe_open
+    with safe_open(str(ready), framework='pt') as reference:
+        for name in ready_names:
+            assert torch.equal(served[f'layer.{name}'].view(torch.uint8),
+                               reference.get_tensor(name).view(torch.uint8))
+    assert resolver.report()['bytes_from_pool'] == 0
+
+
+def test_the_sealed_readset_refuses_an_oversize_manifest_without_reading_it(
+        tmp_path, monkeypatch):
+    """A claim row may state any size; the ceiling is PrismaBuild's own.
+
+    The row's ``manifest_bytes`` is an input. The same pool record carries
+    ``detail.prewarm.manifest_bytes`` -- 1,244,988,662,830 on the live
+    campaign, because it measures the payload the entries describe -- so a
+    wrong field must not be able to spend a read and a hash on a terabyte.
+    The blob here is tiny and is never opened: the refusal happens on the
+    stated size, before any read.
+    """
+    from prismabuild.core import DATA_MANIFEST_MAX_BYTES
+
+    path, _ = _shard(tmp_path)
+    resolver, consumer, digest, _publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    assert resolver.declared_readset()['state'] == 'bound'
+
+    opened = []
+    real_open = open
+
+    def watched(target, *args, **kwargs):
+        opened.append(str(target))
+        return real_open(target, *args, **kwargs)
+
+    _publish_readset_on_the_claim(
+        tmp_path, consumer, tmp_path / 'cas', digest,
+        DATA_MANIFEST_MAX_BYTES + 1)
+    bind_residency_manifest('0' * 63 + '1')      # drop the cached answer
+    bind_residency_manifest(digest)
+    import builtins
+    builtins.open = watched                  # restored in the finally below
+    try:
+        state = resolver.declared_readset()
+    finally:
+        builtins.open = real_open
+
+    assert state['state'] == 'unbound'
+    assert str(DATA_MANIFEST_MAX_BYTES) in str(state['reason'])
+    assert not [row for row in opened if digest in row], opened
+
+
+def test_the_staged_range_wait_bound_must_be_finite(monkeypatch):
+    """``inf`` is neither negative nor NaN and would remove the bound.
+
+    A wait whose deadline never expires is not a longer bound, it is none,
+    and the containment argument for this whole path rests on it ending.
+    """
+    monkeypatch.delenv(STAGED_RANGE_WAIT_ENV, raising=False)
+    assert staged_range_wait_s() == STAGED_RANGE_WAIT_S
+    for good, want in (("0", 0.0), ("12.5", 12.5), ("  7 ", 7.0)):
+        monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, good)
+        assert staged_range_wait_s() == want
+    for bad in ("-1", "-0.5", "nan", "NaN", "inf", "Infinity", "-inf",
+                "1e400", "abc", "5s"):
+        monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, bad)
+        with pytest.raises(ValueError, match=STAGED_RANGE_WAIT_ENV):
+            staged_range_wait_s()
+
+
+def test_the_sealed_readset_is_refused_when_it_is_not_the_bound_manifest(
+        tmp_path, monkeypatch):
+    """A claim row naming another manifest binds nothing.
+
+    The blob is content-addressed and the digest is checked twice: against
+    the row's own value and against the digest this run bound. A readset for
+    a different submission is not this run's readset.
+    """
+    path, _ = _shard(tmp_path)
+    resolver, consumer, digest, _publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    assert resolver.declared_readset()['state'] == 'bound'
+
+    # A different, equally valid manifest in the same CAS: same paths, one
+    # byte less declared, so only its digest differs.
+    size = path.stat().st_size
+    other_cas, other_digest, other_size = _seal_manifest(
+        tmp_path, [(path, 0, size - 1)])
+    assert other_digest != digest
+    _publish_readset_on_the_claim(
+        tmp_path, consumer, other_cas, other_digest, other_size)
+
+    # Rebound IN PLACE, on the resolver that already answered "bound": the
+    # declaration cache belongs to the binding, so it must go with it.
+    # Keeping it would answer manifest A's membership for manifest B's
+    # paths -- "not declared" for every one, an immediate refusal that
+    # looks deliberate. That is #874 again under a new cause.
+    bind_residency_manifest(other_digest)
+    state = resolver.declared_readset()
+    assert state['state'] == 'bound'
+    bind_residency_manifest(digest)
+    state = resolver.declared_readset()
+    assert state['state'] == 'unbound'
+    assert digest[:12] in str(state['reason'])
+
+
+def test_a_non_strict_layer_read_with_a_map_still_never_waits(
+        tmp_path, monkeypatch):
+    """The wait is scoped by the POLICY, not by "a resolver exists".
+
+    An inactive-policy reader serves pool bytes for an uncovered span and
+    always could, so it has nothing to wait for. Entering the wait on the
+    mere presence of a resolver would change a path this fix has no
+    business touching.
+    """
+    _pb()
+    path, _ = _shard(tmp_path)
+    consumer = _hex64(f"consumer-{tmp_path}")
+    import prismabuild.pool as pool_mod
+    _pb_queue(tmp_path, pool_mod, consumer)
+    cas_root, digest, size = _seal_manifest(tmp_path, _whole_file(path))
+    _publish_readset_on_the_claim(tmp_path, consumer, cas_root, digest, size)
+    _launch_env(monkeypatch, consumer)
+    map_path = _write_map(tmp_path, {}, manifest_sha256=digest,
+                          stage_root=_stage_root(tmp_path))
+    resolver = _bind(monkeypatch, map_path, digest)      # bound, NOT active
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+    assert not active_policy()
+
+    started = time.monotonic()
+    served = _read_layer(path)
+    assert time.monotonic() - started < 10.0
+
+    from safetensors import safe_open
+    with safe_open(str(path), framework='pt') as reference:
+        assert torch.equal(served['layer.0.f32'].view(torch.uint8),
+                           reference.get_tensor('f32').view(torch.uint8))
+    # bytes_from_pool stays 0 on purpose: with the policy inactive and the
+    # map naming no entry for this shard, staged_shard_opener hands the
+    # caller back its OWN opener, so no reader exists to count anything.
+    # That untouched path is exactly what this test is protecting.
+    report = resolver.report()
+    assert report['bytes_from_pool'] == 0
+    assert report['range_wait_polls'] == 0
+    assert report['declared_readset']['state'] == 'unread'
