@@ -414,10 +414,12 @@ repartition, the same freeze semantics `residency_stage_rows` already keeps):
 1. Seal (or verify) all 46 artifacts: 45 records + slice manifests, coverage
    proof green. Nothing is submitted if the proof refuses.
 2. **Stage A first:** submit the adjoint action — `pbrun --tag <adjoint.tag>
-   --data-manifest <adjoint read set> --residency stage --detach -- python3
-   -m prismaquant.joint_adjoint_capture …` — and record its action key in
-   `<output_root>/layer-quanta/campaign-state.json` (the campaign's own
-   machine-readable state; atomic append of submission events, never edits).
+   --data-manifest <adjoint read set> --residency stage --container-image
+   <spec image> --detach -- python3 -m tools.tessera_campaign_container --spec
+   <spec> -- python3 -m prismaquant.joint_adjoint_capture …` — and record its
+   action key in `<output_root>/layer-quanta/campaign-state.json` (the
+   campaign's own machine-readable state; atomic append of submission events,
+   never edits).
 3. **Then quanta, when their inputs exist:** a layer-L quantum is publishable
    once stage A's terminal record says `executed` AND
    `adjoint-capture.json` validates (digests match the state file). The tool
@@ -435,9 +437,11 @@ Per quantum:
 pbrun --tag sparky --tag sparklina \
       --data-manifest …/manifests/layer-013.data-manifest.json.gz \
       --residency stage --residency-ram auto \
+      --container-image <spec image> \
       --progress-phase head=<head_grace> \
       --progress-phase layer-013-chunk-000=900 … (one per chunk) \
       --priority -5 --env PRISMAQUANT_DEV_MODE=1 --detach -- \
+      python3 -m tools.tessera_campaign_container --spec <spec> -- \
       python3 -m prismaquant.joint_cost_quantum \
         --quantum …/layer-quanta/records/layer-013.json \
         --quantum-sha256 <identity_sha256> \
@@ -452,6 +456,10 @@ pbrun --tag sparky --tag sparklina \
 - The quantum record itself is passed by path+digest and sealed into the
   action key via the slice manifest's `argv` annotation; the CLI re-verifies
   both digests before doing anything (fail closed, exit 3, §6.4).
+- `--container-image <spec image>` is the campaign container declared to
+  PrismaBuild *before* it claims the row (PB #714, §14). It is read from the
+  same parsed spec that is serialized into `--spec`, so the image the action
+  runs is the image PB admitted it against.
 
 ### 5.3 Placement policy, chunk derivation, and failure modes
 
@@ -936,3 +944,66 @@ instead of a new seal:
 This is a recorded per-run deviation, not a new default: the next plan
 seal adopts measured numbers through `recommend_source_prefetch` (#737),
 and the override retires with the campaign that needed it.
+
+## 14. Addendum (2026-09-20): the container image is declared to PrismaBuild before claim admission
+
+RobTand/prismaquant#825, paired with RobTand/prismabuild#714. A GB10-class
+action (`dd23c05a3a4b…`) was claimed by sparklina, which did not hold its
+pinned image (`sha256:c0e532d28a78…`, installed on sparky), and died inside
+`tools.tessera_campaign_container.inspect_or_load` after the attempt was
+spent: the image lived only inside the `--spec` JSON, so PB had no placement
+declaration to enforce before claiming. The paired PB change adds
+`pbrun --container-image REF` (repeatable, immutable refs only) and the
+campaign row field `container_images: [REF]`, requiring the
+`container-image-v1` worker capability: a box that cannot positively show the
+reference leaves the item `ready` for a box that can, and dispatches refuse
+when no recorded eligible worker reports it. PB still neither pulls nor
+transfers an image.
+
+The PrismaQuant caller half, in this addendum:
+
+- `tools/dispatch_joint_quanta.py` (stage A and quanta) adds
+  `--container-image <ref>` to the pbrun envelope, before the payload
+  separator. The reference comes from the same parsed spec that is
+  serialized into `--spec`, so the sealed spec and the admission declaration
+  cannot disagree (a second read could race a spec rewrite).
+- `tools/dispatch_tessera_campaign.py` declares `container_images: [ref]` on
+  every generated manifest row, from the row's *resolved* container class —
+  a class override declares its own image, and `_pbrun_argv` (submit-joint /
+  submit-aqua / submit-allocation / submit-export) adds the same
+  `--container-image` flag from the same parsed spec it seals.
+- **Archive-backed specs declare nothing.** A spec whose `container.archive`
+  passes `validate_container` (canonical path, SHA-256, and the
+  `content_sha256` seal) has its image established *inside* the action by
+  the launcher's digest-verifying `inspect_or_load` on whichever worker
+  claims it; a local-presence prerequisite would refuse the claim before the
+  loader ran. The loader remains the responsible party and its
+  bytes-then-content checks are unchanged. A malformed archive refuses at
+  submission rather than silently skipping the declaration.
+- No-container rows are byte-identical to before and declare nothing. Rows
+  declared with `container_images` (and commands with `--container-image`)
+  are **new actions**: the reference is sealed into the action key, so an
+  image-pinned submission is a different action from its undeclared twin.
+  Existing sealed requests are untouched and are not re-sealed by this
+  change; a declaration is only carried by newly built rows and commands.
+- A mutable tag is declared exactly as the spec spells it and is refused by
+  PB's immutable-only admission: pin the spec's image to `sha256:<64 hex>` or
+  `repository@sha256:<64 hex>`, or bind an archive.
+
+**Deployment gate.** The published PB client must carry the flag and the row
+field before any new image-declaring submission can succeed. Until it does,
+submissions fail closed by construction: `pbrun` exits 2 on the unrecognized
+`--container-image` before sealing anything, and `pbcampaign` refuses an
+unknown `container_images` row field at manifest load (verified against the
+2026-09-20 published client, recorded in the #825 result). There is no
+compatibility branch that drops the declaration and no silent fallback;
+rollout waits on the paired PB runtime.
+
+Gates: `tests/test_container_image_admission.py` (same-parse identity, direct
+payload boundary, manifest field, class override, archive-backed omission and
+malformed-archive refusal, non-container rows unchanged) plus the existing
+dispatcher, launcher and image-content suites. The red run on
+`164db9148f` (PB `cd5d723dec5a…`, 14 failed / 6 passed) is the original
+omission; the green runs (PB `afe712fb79b5…`, 20 passed; caller-regression
+batch `cec95d11c972…` 5/5 shards, submission-path batch `5d5b9f3e189a…` 7/7
+shards) are the corrected direct and manifest paths.

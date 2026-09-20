@@ -1,7 +1,41 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-19 · `flash/tessera-pin-bump-20260919`.
+As of: 2026-09-20 · `fix/pb714-container-image-declaration-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `fix/pb714-container-image-declaration-20260920`) for
+**the campaign container image declared to PrismaBuild before claim
+admission** (RobTand/prismaquant#825; RobTand/prismabuild#714). A GB10-class
+campaign action was claimed by the Spark that did not hold its pinned image
+and died inside `tools/tessera_campaign_container` after the attempt was
+spent, because the image lived only inside the `--spec` JSON. The dispatch
+callers now declare it through PB's admission contract:
+
+- `tools/dispatch_joint_quanta.py` (stage A and quanta) adds
+  `pbrun --container-image REF` before the payload separator, read from the
+  same parsed spec that is serialized into `--spec`.
+- `tools/dispatch_tessera_campaign.py` adds `container_images: [REF]` to every
+  generated manifest row from the row's resolved container class (a class
+  override declares its own image) and the same flag to its direct
+  submit-joint/submit-aqua commands.
+- `tools/tessera_campaign_container.admission_image_reference` is the one
+  reader: it validates the spec with the launcher's `validate_container` and
+  returns the image, or `None` for a spec that runs no container or binds a
+  validated `container.archive` — the archive's digest-verifying
+  `inspect_or_load` establishes the image inside the action, so no
+  local-presence prerequisite may gate placement.
+- **Required PB runtime:** a published client carrying `--container-image` and
+  the `container_images` row field, with the `container-image-v1` worker
+  capability. The published client at this stamp does not carry them; new
+  image-declaring submissions fail closed against it (pbrun exits 2 on the
+  unrecognized flag; pbcampaign refuses the unknown row field at manifest
+  load), and rollout waits on the paired PB release. Image-declaring
+  submissions are new action identities because the reference is sealed; no
+  existing sealed request is touched. Full contract:
+  `docs/design/distributed_campaign_2026-09-19.md` §14. No pipeline default,
+  stage order, format menu, plugin contract, serving-lane default or ship
+  gate changes. Gate: `tests/test_container_image_admission.py` plus the
+  dispatcher, launcher and image-content suites.
 
 Re-stamped (2026-09-19, `flash/tessera-pin-bump-20260919`) for **runtime
 contract v32** (#760, the coordinated post-#560-lineage bump: the pin names

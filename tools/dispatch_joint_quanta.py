@@ -38,6 +38,18 @@ import sys
 import time
 from pathlib import Path
 
+if __package__:
+    from tools.tessera_campaign_container import (
+        CONTAINER_IMAGE_FLAG,
+        admission_image_reference,
+    )
+else:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tessera_campaign_container import (
+        CONTAINER_IMAGE_FLAG,
+        admission_image_reference,
+    )
+
 PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
 PBWAIT = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbwait.py")
 
@@ -135,7 +147,8 @@ def _plan_output_root(campaign: Mapping) -> Path:
     return Path(plan["output_root"])
 
 
-def _container_wrap(spec_path: Path, payload: list[str]) -> list[str]:
+def _container_wrap(spec_path: Path,
+                    payload: list[str]) -> tuple[list[str], str | None]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -143,11 +156,19 @@ def _container_wrap(spec_path: Path, payload: list[str]) -> list[str]:
     executes unidentified and refuses.  The single-run path wraps every
     command in ``tools.tessera_campaign_container`` with the campaign spec;
     the distributed rows are the same workload and take the same wrapper.
+
+    Returns the wrapped payload and the image reference PrismaBuild must
+    admit the row against, derived from ONE parse of the spec -- the same
+    parse whose bytes are serialized into ``--spec``.  A second read could
+    race a spec rewrite and seal one image while declaring another; the
+    caller adds the reference to the pbrun envelope (``--container-image``
+    before the payload separator), never inside the payload.
     """
     spec = json.loads(Path(spec_path).read_text())
-    return ["python3", "-m", "tools.tessera_campaign_container",
+    argv = ["python3", "-m", "tools.tessera_campaign_container",
             "--spec", json.dumps(spec, sort_keys=True),
             "--", *payload]
+    return argv, admission_image_reference(spec)
 
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
@@ -158,6 +179,11 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     manifest = Path(record["read_set"]["manifest_path"])
     if not manifest.is_absolute():
         manifest = output_root / manifest
+    wrapped, container_image = _container_wrap(SPEC_PATH, [
+        "python3", "-m", "prismaquant.joint_cost_quantum",
+        "--quantum", str(record_path),
+        "--quantum-sha256", record["identity_sha256"],
+        "--output-root", str(output_root)])
     argv = [sys.executable, str(PBRUN),
             "--tag", CONSUMER_TAGS[0], "--tag", CONSUMER_TAGS[1],
             "--data-manifest", str(manifest),
@@ -168,13 +194,13 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  f"{chunk['name']}={CHUNK_PROGRESS_GRACE_S}"]
     argv += ["--priority", str(priority),
              "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
-             "--cpus", "10",
-             "--env", DEV_MODE_ENV, "--detach", "--",
-             *_container_wrap(SPEC_PATH, [
-                 "python3", "-m", "prismaquant.joint_cost_quantum",
-                 "--quantum", str(record_path),
-                 "--quantum-sha256", record["identity_sha256"],
-                 "--output-root", str(output_root)])]
+             "--cpus", "10"]
+    if container_image is not None:
+        # A pbrun option, so it precedes the separator like the manifest: PB
+        # must admit the row only where this image is already present, or
+        # leave it ready for a box that has it (RobTand/prismabuild#714).
+        argv += [CONTAINER_IMAGE_FLAG, container_image]
+    argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
     return argv
 
 
@@ -204,14 +230,19 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         "--resume"]
     if prefetch_override is not None:
         payload += ["--prefetch-override", str(prefetch_override)]
-    return [sys.executable, str(PBRUN),
+    wrapped, container_image = _container_wrap(SPEC_PATH, payload)
+    argv = [sys.executable, str(PBRUN),
             "--tag", tag,
             "--data-manifest", str(adjoint_manifest),
             "--residency", "stage",
             "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
-            "--cpus", "10",
-            "--env", DEV_MODE_ENV, "--detach", "--",
-            *_container_wrap(SPEC_PATH, payload)]
+            "--cpus", "10"]
+    if container_image is not None:
+        # Before the separator, like every other pbrun option; see the
+        # quantum row above and RobTand/prismabuild#714.
+        argv += [CONTAINER_IMAGE_FLAG, container_image]
+    argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
+    return argv
 
 
 def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) -> dict:
