@@ -242,6 +242,29 @@ def test_gzip_member_parses_and_tamper_refuses(produced, campaign):
             json.loads(gzip_mod.decompress(bytes(tampered)).decode())
 
 
+def test_produced_records_carry_boundary_derivation_inputs(produced):
+    """Accepted PQ853 metadata: records hold the boundary-readset inputs.
+
+    The derivation itself (``build_quantum_boundary_readset``) needs the
+    completed capture receipt plus the new lane's combined plan, so its
+    execution stays nonqualified until that runtime exists. What this
+    harness CAN assert now: every produced record carries the sealed
+    fields the derivation reads (chain, boundary, windows, campaign
+    binding, adjoint receipt digest).
+    """
+    for record in produced["records"]:
+        assert isinstance(record["layer"], int)
+        adjoint = record["adjoint"]
+        assert isinstance(adjoint["chain_layers"], list) and adjoint["chain_layers"]
+        assert isinstance(adjoint["checkpoint_boundary"], int)
+        assert isinstance(adjoint["receipt_sha256"], str)
+        assert isinstance(record["windows"], list) and record["windows"]
+        campaign = record["campaign"]
+        for key in ("plan_sha256", "prepared_sha256",
+                    "read_manifest_sha256", "campaign_scope"):
+            assert campaign.get(key), (record["quantum_id"], key)
+
+
 # -- published PB: validate, stage, promote, map -----------------------------
 
 
@@ -613,10 +636,18 @@ def test_join_accepts_and_gapped_refuses_downstream(
 # -- candidate-gated scenarios: machine nonqualified output, never green ----
 
 
-def _run_scenario(name: str, tmp_path: Path, scenario_dir: str) -> dict:
+@pytest.fixture(scope="module")
+def candidate_work(tmp_path_factory):
+    """One shared resolution dir; scenarios run in fresh subdirs below it."""
+    return tmp_path_factory.mktemp("candidate")
+
+
+def _run_scenario(name: str, tmp_path: Path, scenario_dir: str,
+                  candidate_work=None) -> dict:
     """Run one runner scenario; skip on named nonqualification."""
-    work = tmp_path / scenario_dir
-    result = tmp_path / f"{scenario_dir}.json"
+    base = candidate_work if candidate_work is not None else tmp_path
+    work = base / scenario_dir
+    result = base / (scenario_dir + ".json")
     done = subprocess.run(
         [sys.executable, str(RUNNER), name, "--work", str(work),
          "--result", str(result), "--checkout", str(ROOT)],
@@ -633,46 +664,46 @@ def _run_scenario(name: str, tmp_path: Path, scenario_dir: str) -> dict:
     return doc
 
 
-def test_resolve_names_the_verified_tree(tmp_path):
+def test_resolve_names_the_verified_tree(tmp_path, candidate_work):
     """The pin resolves to a verified tree or skips with the reason."""
-    doc = _run_scenario("resolve", tmp_path, "resolve")
+    doc = _run_scenario("resolve", tmp_path, "resolve", candidate_work)
     assert doc["evidence"]["rev"] == pins.PB_CANDIDATE_REV
     assert len(doc["evidence"]["tree_sha256"]) == 64
 
 
-def test_broker_roundtrip_is_real_client_and_authority(tmp_path):
+def test_broker_roundtrip_is_real_client_and_authority(tmp_path, candidate_work):
     """Broker ops go through the real client, socket, and Authority."""
-    doc = _run_scenario("broker-roundtrip", tmp_path, "broker")
+    doc = _run_scenario("broker-roundtrip", tmp_path, "broker", candidate_work)
     assert doc["evidence"]["export"]["stopped"] is True
 
 
-def test_sdk_first_release_reclaims_once(tmp_path):
+def test_sdk_first_release_reclaims_once(tmp_path, candidate_work):
     """R8 core: export proof, reclaim-once, finish, egress (RED on R7)."""
-    doc = _run_scenario("sdk-first-release", tmp_path, "first-release")
+    doc = _run_scenario("sdk-first-release", tmp_path, "first-release", candidate_work)
     assert doc["evidence"]["reclaimed_once"] is True
     assert doc["evidence"]["export"]["stopped"] is True
     assert isinstance(doc["evidence"]["export"]["empty"], bool)
 
 
-def test_sdk_pending_ticket_flows_or_names_its_gate(tmp_path):
+def test_sdk_pending_ticket_flows_or_names_its_gate(tmp_path, candidate_work):
     """Ticket settle flow; cgroup-gated begin is a named nonqualification."""
-    doc = _run_scenario("sdk-pending-ticket", tmp_path, "pending-ticket")
+    doc = _run_scenario("sdk-pending-ticket", tmp_path, "pending-ticket", candidate_work)
     assert doc["evidence"]["retired"] is True
 
 
-def test_sdk_namespace_separation_holds(tmp_path):
+def test_sdk_namespace_separation_holds(tmp_path, candidate_work):
     """Two owners pin separately; one release keeps the other's pin."""
-    doc = _run_scenario("sdk-namespace-separation", tmp_path, "namespaces")
+    doc = _run_scenario("sdk-namespace-separation", tmp_path, "namespaces", candidate_work)
     assert len(doc["evidence"]["owner_dirs"]) == 2
 
 
-def test_sdk_failure_unwind_releases(tmp_path):
+def test_sdk_failure_unwind_releases(tmp_path, candidate_work):
     """Mid-hold errors unwind exactly; a fresh acquire still works."""
-    doc = _run_scenario("sdk-failure-unwind", tmp_path, "unwind")
+    doc = _run_scenario("sdk-failure-unwind", tmp_path, "unwind", candidate_work)
     assert doc["evidence"]["unwound_once"] is True
 
 
-def test_sdk_alias_host_derives_on_real_records(tmp_path):
+def test_sdk_alias_host_derives_on_real_records(tmp_path, candidate_work):
     """Holder derivation runs on the live claim; evidence names both."""
-    doc = _run_scenario("sdk-alias-host", tmp_path, "alias")
+    doc = _run_scenario("sdk-alias-host", tmp_path, "alias", candidate_work)
     assert doc["evidence"]["derived_host"]
