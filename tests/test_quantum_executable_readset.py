@@ -642,6 +642,9 @@ def _check_event_order(events, manifest, *, layer, chain):
                     "replay-"), events
         elif kind in ("setup-open", "window-open"):
             pass
+        elif kind == "boundary-path-open":
+            staged = {entry["path"] for entry in manifest["entries"]}
+            assert event[1] in staged, event[1]
         else:
             raise AssertionError(f"unknown event {event!r}")
 
