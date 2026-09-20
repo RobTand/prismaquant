@@ -1,7 +1,167 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-19 · `flash/tessera-pin-bump-20260919`.
+As of: 2026-09-20 · `flash/slice-zero-head-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/slice-zero-head-20260920`) for
+**stageable quantum slice phases** (PQ #851). Both slice producers seal
+only the nonempty chunk phases in `annotations.phases`. A zero-byte
+`head` has no entry boundary and causes PB to reject the entire phase
+table. Startup/head remains a separately declared payload progress phase;
+it does not create a zero-byte storage phase. The published-PB parser
+interoperability gate is `tests/test_slice_manifest_pb_staging.py`.
+
+Re-stamped (2026-09-20, `flash/source-identity-portable-dev-20260920`) for
+**dev-portable source-identity reuse across hosts** (PQ #843). The six-field
+shard fingerprint still keys cached digests, but one shared predicate now
+owns every seed/validate/build comparison: certified mode keeps exact
+six-field equality (cross-host reuse still refused, rehash as today); dev
+mode additionally accepts fingerprints that agree on path/inode/size/mtime/
+ctime and differ only in the client-local `st_dev` (both Sparks NFS-mount
+one export, so identical shards stat 64 vs 75). Both sides must carry the
+exact six-field shape first -- missing or extra fields never match, in
+either mode. Portable acceptance emits the `[DEV-MODE]` trust line and rides
+the existing uncertified stamp; the returned identity bytes are unchanged so
+the prepared `_same` wall still holds. In dev only, there is no automatic
+hidden giant hash in either entry point: a missing, unrecognized, mutated,
+or contract-less top-up cache each refuses fast with the byte count, and so
+does a call with no cache path at all (initialize explicitly with a
+certified run, which remains the existing explicit preparation path);
+certified rehash behavior is unchanged. Gate:
+`tests/test_source_identity_portable_device.py`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/stagea-forward-read-plan-20260920`) for **the
+Stage A read manifest's forward lifetimes in true consumption order** (PQ
+#837). `build_adjoint_manifest` sealed v1 `head, chain-000..044` ascending
+with no forward lifetimes while the capture consumes head → forward 0..44 →
+tail → reverse 44..0: no movers staged ahead of the forward pass, and the
+first reverse report released the whole window while layers 43..0 were still
+unread. The manifest is now `data_manifest.v2` with `read_plan.phases` in
+the frozen order `head, forward-000..044, chain-044..000`,
+`entry_indices` into the unchanged entries list (repeats across phases are
+the mechanism, not duplicated bytes; no standalone tail phase -- the tail
+checkpoint work commits under forward-last); the capture reports `forward-L`
+on the runner's `source_phase` hook through
+shared name helpers, with durable-unit counting untouched. Records, entry
+bytes/digests, and plan/prepared/capture identities unchanged; the live
+`adjoint-manifest.json` regenerates later from this builder. Gate:
+`tests/test_stagea_forward_read_plan.py`.
+
+Re-stamped (2026-09-20, `flash/quantum-launch-contract-20260920`) for **the
+quantum launch contract** (#838). The quanta rows the dispatcher published
+could not survive the consumer's gates: the payload missed the required
+plan/prepared/adjoint bindings (argparse before compute), `--quantum-sha256`
+carried the canonical body digest the consumer checks raw bytes against, the
+record's canonical receipt digest was compared to the writer's pretty wire
+bytes, and the live records rooted outputs at the binder's directory instead
+of the plan root. `quantum_argv` now threads every consumer binding from
+sealed sources (record wire digest, receipt wire digest read where read,
+verified slice digest, `--resume`); both receipt checks compare canonical
+against canonical while the CLI binds wire; `tools/regenerate_joint_quanta.py`
+replays the producer with the authoritative output root and re-seals against
+the receipt without touching old files. No producer, budget, plan or
+`--residency` changes. Gates: `tests/test_quantum_launch_contract_838.py`.
+
+Re-stamped (2026-09-20, `flash/stage-a-dispatch-manifest-binding`) for **the
+Stage A/quanta submission binding its data manifest** (#835). The dispatcher
+built the Stage A row with PB-level `--data-manifest` but never forwarded the
+manifest identity into the payload, and declared no progress phases — so the
+capture bound nothing and got no tier redirect, and its reports could advance
+no PB window; quantum rows bound the campaign parent instead of their staged
+slice. `tools/dispatch_joint_quanta.py` now derives the binding from the
+validated manifest: the Stage A payload carries `--data-manifest-sha256`
+(wire bytes) and `--read-manifest-sha256` (annotated parent, equality-checked
+against the sealed campaign read parent), the envelope declares one
+`--progress-phase` per manifest read phase in manifest order (v1
+`annotations.phases` or v2 `read_plan.phases`), and each quantum payload
+carries its slice digest after the dispatcher verifies the slice file hashes
+to it. Malformed manifests, plan/prepared/parent mismatch and drifted slices
+refuse before anything publishes. No payload, plan, prepared, budget or
+`--residency stage` changes. Gate: `tests/test_dispatch_joint_quanta.py`.
+
+Re-stamped (2026-09-20, `fix/pb714-container-image-declaration-20260920`) for
+**the campaign container image declared to PrismaBuild before claim
+admission** (RobTand/prismaquant#825; RobTand/prismabuild#714). A GB10-class
+campaign action was claimed by the Spark that did not hold its pinned image
+and died inside `tools/tessera_campaign_container` after the attempt was
+spent, because the image lived only inside the `--spec` JSON. The dispatch
+callers now declare it through PB's admission contract:
+
+- `tools/dispatch_joint_quanta.py` (stage A and quanta) adds
+  `pbrun --container-image REF` before the payload separator, read from the
+  same parsed spec that is serialized into `--spec`. It composes with the
+  §5.1 placement policy: every effective `consumer_tags` entry is emitted as
+  its own `--tag` and the image declaration is a separate envelope option.
+- `tools/dispatch_tessera_campaign.py` adds `container_images: [REF]` to every
+  generated manifest row from the row's resolved container class (a class
+  override declares its own image) and the same flag to its direct
+  submit-joint/submit-aqua commands.
+- `tools/tessera_campaign_container.admission_image_reference` is the one
+  reader: it validates the spec with the launcher's `validate_container` and
+  returns the image, or `None` for a spec that runs no container or binds a
+  validated `container.archive` — the archive's digest-verifying
+  `inspect_or_load` establishes the image inside the action, so no
+  local-presence prerequisite may gate placement.
+- **Required PB runtime:** a published client carrying `--container-image` and
+  the `container_images` row field, with the `container-image-v1` worker
+  capability. The paired PB release has since landed (RobTand/prismabuild#714)
+  and the published client now carries both; before it, new image-declaring
+  submissions failed closed on the unrecognized flag or unknown row field.
+  Image-declaring submissions are new action identities because the reference
+  is sealed; no existing sealed request is touched. Full contract:
+  `docs/design/distributed_campaign_2026-09-19.md` §14. No pipeline default,
+  stage order, format menu, plugin contract, serving-lane default or ship
+  gate changes. Gate: `tests/test_container_image_admission.py` plus the
+  dispatcher, launcher and image-content suites.
+
+Re-stamped (2026-09-20, `flash/dev-anchor-seal-bypass-20260920`) for **the
+dev-mode merged-checkpoint seal skip** (#833). No default, stage, format, lane,
+pin or ship-gate verdict changes. Under `PRISMAQUANT_DEV_MODE=1`
+`load_measured_anchor_input` no longer recomputes
+`canonical_json_sha256_normalized(identity)` over the merged campaign
+checkpoint; it requires the manifest's declared `identity_sha256` to be a full
+64-hex string, prints the `[DEV-MODE]` record naming the digest it used, and
+hands that digest to the existing per-unit envelope binding. The declared
+digest is recorded, not verified. The measured cost of the skipped encode is
+302.653 s of a 765.6 s in-process profile (action `282c61140ba7`, 2026-09-20,
+`run/profile.pstats`) on the 7.2 GB checkpoint. Certified mode is
+byte-identical; the raw input `_bound` digests, roster / model / calibration
+geometry, per-unit mutation fences, PB action/progress/containment, mover
+inline integrity and the model source-identity cache are untouched. Tests:
+`tests/test_dev_anchor_seal_skip.py` plus the certified cases in
+`tests/test_tessera_joint_aura.py`.
+
+Re-stamped (2026-09-20, `fix/joint-quanta-gb10-placement-20260920`) for **the
+distributed campaign's placement policy: one shared `gb10` class tag, never a
+host pair** (`docs/design/distributed_campaign_2026-09-19.md` §5; PQ #831).
+PrismaBuild admits a worker only when it offers *every* tag a row lists
+(`wanted.issubset(offer.tags)`, `src/prismabuild/pool.py:2847`), and each live
+Spark offers `gb10` plus its own host name, so `tools/dispatch_joint_quanta.py`'s
+shipped `--tag sparky --tag sparklina` — carried by both the module default and
+the design's §5.1 example — admitted neither box: the 45 per-layer quantum rows
+could not be claimed on either Spark. The dispatcher now defaults to
+`CONSUMER_TAGS = ("gb10",)`, emits one `--tag` per effective tag, and threads
+the plan's `distributed_campaign.consumer_tags` override — previously read but
+never passed to `quantum_argv` — through one validating helper that refuses an
+empty or ill-typed list at dispatch. Stage A keeps its explicit `adjoint.tag`
+pin (one monolithic capture by construction). No pipeline default, stage graph,
+format menu, plugin contract, serving lane, ship gate or published byte
+changes. Gate: `tests/test_dispatch_shared_tag_placement.py`.
+
+Re-stamped (2026-09-20, `flash/dev-progress-stamp-optin`) for **the dev
+progress-stamp opt-out** (§3.4; PQ #826, #828, follow-through on #771). No
+default, stage, format, lane, pin or ship gate changes. Under
+`PRISMAQUANT_DEV_MODE=1` the `dev_uncertified` stamp stays top-level in
+`results.json` — the run identity is recorded once, where it belongs — but
+the per-progress-record stamp is now **opt-in** via
+`PRISMAQUANT_DEV_PROGRESS_STAMP=1`: the default dev progress record is the
+certified six-field shape, so a dev campaign's durable-unit commits pay no
+per-line sealing ceremony (Rob's 2026-09-13 directive). #827's memo made the
+stamp cheap; this makes it absent. Certified mode is byte-identical either
+way, and PrismaBuild's sealed actions and the v1/v2 proofs are untouched.
+Gates: `tests/test_dev_mode_provenance_gates.py`,
+`tests/test_pb_commit_source_memo_826.py`.
 
 Re-stamped (2026-09-19, `flash/tessera-pin-bump-20260919`) for **runtime
 contract v32** (#760, the coordinated post-#560-lineage bump: the pin names
@@ -388,6 +548,21 @@ says exactly that.
   `--residency stage`, so a submission that asks for no stage keeps the argv,
   and therefore the action key, it has today. A pass told nothing binds
   nothing and gets no redirect.
+- **Stage A and the quanta are told by `tools/dispatch_joint_quanta.py`.**
+  The Stage A row's payload carries `--data-manifest-sha256` — the sha256 of
+  the submitted adjoint-manifest wire bytes (compressed when compressed) —
+  and `--read-manifest-sha256` — the annotated parent read-set digest,
+  equality-checked against the sealed campaign read parent before anything
+  publishes — and its envelope declares one `--progress-phase` per manifest
+  read phase in manifest order, v1 (`annotations.phases`) or v2
+  (`read_plan.phases`), so the capture's durable head/forward/chain reports
+  name phases the worker accepts. Each quantum payload carries its slice
+  digest (`read_set.manifest_sha256`), verified against the slice file at
+  dispatch: the row binds the bytes pbrun stages for it, never the campaign
+  parent it also carries. Full contract: `docs/design/
+  distributed_campaign_2026-09-19.md` §5.2. PB-side validity of a submitted
+  row — map composition, mover delivery, window advancement — is established
+  by that row's own receipt, never by these submission-shape tests.
   A map that is missing, unreadable, of another schema, or carrying a field
   this reader does not know is refused **whole**, with a reason, and every read
   falls back to the pool. The variable arrives at claim time while movers are
@@ -2287,10 +2462,17 @@ because the loader reads tensors after authenticating their shard.
 An optional plan binding `source_identity_cache: {path, sha256}` seeds the
 existing per-pass `source-identity.json` slot in a new output root, with an
 exact checksum and conflict refusal; it does not create a weight or activation
-cache. A cache proven on another host's NFS mount is not portable merely
-because the paths and SHA rows match: the current six-field fingerprint includes
-the host-local `st_dev`. Manifest construction and owner adoption therefore
-refuse it on a different mount device. A reuse request has a real host-local
+cache. A cache proven on another host's NFS mount is portable in dev mode
+only, and only when every mutation-sensitive field matches and the sole
+difference is the client-local `st_dev` (same export, two mounts): certified
+mode still refuses it, and dev records the `[DEV-MODE]` trust line on every
+portable acceptance. A dev run with no cache path at all, a path with no
+file, a cache that recognizes nothing, mutated rows, or new rows without
+an initialization contract refuses fast with the byte count instead of
+sealing silently -- initialize explicitly with a certified run, which
+remains the existing explicit preparation path.
+Manifest construction and owner adoption otherwise refuse a cross-device
+cache as before. A reuse request has a real host-local
 dependency until a separately qualified cross-host source proof exists; the
 manifest names its proof host, and `submit-joint` refuses a broader placement
 tag before publication.
@@ -10259,9 +10441,18 @@ source-proof family, the prepared-record digest comparisons and the
 checkpoint-lineage identity mismatch become stamps — loudly recorded, never
 silently reused: a mismatched checkpoint lineage is archived
 (`<dir>.dev-archived-<iso>`) and recomputed fresh, and every dev run carries a
-top-level `dev_uncertified` stamp in `results.json` and its progress records.
+top-level `dev_uncertified` stamp in `results.json` — always; per-progress-record
+stamps are opt-in via `PRISMAQUANT_DEV_PROGRESS_STAMP=1`, so the default
+durable-unit commit is the certified six-field record and runs no source hash
+(#828). The merged campaign checkpoint's canonical seal is skipped rather than
+recomputed: the loader binds the walk to the manifest's declared
+`identity_sha256` after a 64-hex syntactic check and prints the `[DEV-MODE]`
+record (measured 302.653 s of a 765.6 s profile on action `282c61140ba7`,
+2026-09-20), while every per-unit envelope fence still refuses a mismatch. The
+raw checkpoint file keeps its `_bound` SHA-256 check above the gate, and the
+declared seal itself is recorded, not verified.
 With the variable unset, every one of these guards refuses exactly as before
-(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-19 stamp above.
+(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-20 stamps above.
 
 **The key set is `pipeline.py`'s job; the values are the shell's.** `STAGE_SETTINGS_KEYS`
 (`pipeline.py`) declares, per artifact, which settings that artifact's identity depends on.

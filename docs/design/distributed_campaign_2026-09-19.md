@@ -331,8 +331,11 @@ keeps). Pure, deterministic, testable: same inputs → byte-identical records.
 - `layer_quanta(plan, prepared, parent_manifest, *, chunk_target_bytes,
   stride, output_root)` → `{"records": […45 records…],
   "slice_manifests": {quantum_id: manifest_dict},
-  "adjoint_manifest": <the stage-A read manifest, same v1 shape with
-  `head` + per-layer `chain_{L:03d}` phases and
+  "adjoint_manifest": <the stage-A read manifest, v2 `read_plan` in true
+  consumption order -- `head`, per-layer `forward-{L:03d}` ascending,
+  per-layer `chain-{L:03d}` descending (no tail phase; tail work commits
+  under forward-last) -- with `entry_indices` into one
+  entries list (no duplication for the repeated reads) and
   `entry_point: "prismaquant.joint_adjoint_capture"`>,
   "coverage": <the proof object>}`. Reads the plan, the prepared
   completion, the sealed run manifest and the campaign scope; cuts per §3;
@@ -389,7 +392,7 @@ single-consumer behavior, byte-identical):
 "distributed_campaign": {
   "schema": "prismaquant.joint_layer_quanta.plan.v1",
   "enabled": true,
-  "consumer_tags": ["sparky", "sparklina"],
+  "consumer_tags": ["gb10"],    /* conjoined tags PB matches; class, not host */
   "max_resident_consumers": 2,
   "ram_window_gib": 160,
   "chunk_target_bytes": null,   /* derived when null: §5.3 */
@@ -401,7 +404,11 @@ single-consumer behavior, byte-identical):
 }
 ```
 
-`max_resident_consumers` is the declared concurrency the ram window is
+`consumer_tags` names the placement tags PB **conjoins** when it matches a
+worker (every listed tag, never any one of them): the default is the shared
+`gb10` class tag that both Sparks offer, and the dispatcher refuses an empty
+or ill-typed list rather than publishing an unconstrained or unplaceable
+row. `max_resident_consumers` is the declared concurrency the ram window is
 double-buffered for, not a scheduler: it sizes chunks (§5.3) the way
 `prefetch_lookahead` sizes the streaming context.
 
@@ -414,10 +421,18 @@ repartition, the same freeze semantics `residency_stage_rows` already keeps):
 1. Seal (or verify) all 46 artifacts: 45 records + slice manifests, coverage
    proof green. Nothing is submitted if the proof refuses.
 2. **Stage A first:** submit the adjoint action — `pbrun --tag <adjoint.tag>
-   --data-manifest <adjoint read set> --residency stage --detach -- python3
-   -m prismaquant.joint_adjoint_capture …` — and record its action key in
-   `<output_root>/layer-quanta/campaign-state.json` (the campaign's own
-   machine-readable state; atomic append of submission events, never edits).
+   --data-manifest <adjoint read set> --residency stage
+   --progress-phase head=<head_grace> --progress-phase <phase>=900 … (one per
+   manifest read phase, in manifest order) --container-image
+   <spec image> --detach -- python3 -m tools.tessera_campaign_container --spec
+   <spec> -- python3 -m prismaquant.joint_adjoint_capture …` — and record its
+   action key in `<output_root>/layer-quanta/campaign-state.json` (the
+   campaign's own machine-readable state; atomic append of submission events,
+   never edits). The payload carries `--data-manifest-sha256` (the submitted
+   manifest bytes) and `--read-manifest-sha256` (the annotated parent
+   read-set digest): a pass that seals no read schedule is told its manifest
+   by the submitter, and a pass told nothing binds nothing and gets no
+   redirect (PQ #835).
 3. **Then quanta, when their inputs exist:** a layer-L quantum is publishable
    once stage A's terminal record says `executed` AND
    `adjoint-capture.json` validates (digests match the state file). The tool
@@ -432,17 +447,54 @@ repartition, the same freeze semantics `residency_stage_rows` already keeps):
 Per quantum:
 
 ```
-pbrun --tag sparky --tag sparklina \
+pbrun --tag gb10 \
       --data-manifest …/manifests/layer-013.data-manifest.json.gz \
       --residency stage --residency-ram auto \
+      --container-image <spec image> \
       --progress-phase head=<head_grace> \
       --progress-phase layer-013-chunk-000=900 … (one per chunk) \
       --priority -5 --env PRISMAQUANT_DEV_MODE=1 --detach -- \
+      python3 -m tools.tessera_campaign_container --spec <spec> -- \
       python3 -m prismaquant.joint_cost_quantum \
         --quantum …/layer-quanta/records/layer-013.json \
-        --quantum-sha256 <identity_sha256> \
+        --quantum-sha256 <record file wire digest> \
+        --plan <plan> --plan-sha256 <plan digest> \
+        --prepared <prepared> --prepared-sha256 <prepared digest> \
+        --adjoint <adjoint-capture.json> --adjoint-sha256 <receipt wire digest> \
+        --data-manifest-sha256 <slice manifest bytes digest> \
+        --resume \
         --output-root …/complete-512-seed237….encoder-reuse-02
 ```
+
+The slice digest is the row's own read-set digest (`read_set.manifest_sha256`),
+verified against the slice file at dispatch: the quantum binds the bytes pbrun
+stages for it, never the campaign parent it also carries (PQ #835). The
+record digest is the record file's wire bytes (the consumer checks raw bytes
+first; its canonical body check inside stays), and the receipt digest is the
+receipt file's wire bytes (PQ #838: earlier rows bound the canonical digests
+and died in argparse or at the first gate).
+
+Wire and document identity stay distinct end to end. The producer seals the
+canonical digest of the decoded receipt (`bind_adjoint_receipt`); the writer
+persists pretty JSON plus a newline (`write_adjoint_receipt`). The dispatcher
+receipt gate and the consumer's record-vs-argv check therefore compare the
+record's canonical digest against the canonical digest of the decoded file --
+never raw bytes against the seal, which valid writer output fails. The CLI
+flags bind wire on both files, and the wire checks stay where they were.
+
+Quantum records are produced, never edited (producer D3). The reviewed
+regeneration path is `tools/regenerate_joint_quanta.py`: it replays the
+`layer_quanta()` producer call from digest-verified plan/prepared/parent
+inputs (gzip-transparent, digest over wire bytes) with the authoritative
+output root (never the tool's own directory), writes record files into a
+reviewed directory and slice manifests at the producer-named absolute
+paths the records bind (verified to resolve after writing), reproduces
+receipt-less at the original root against on-disk records under
+`--expect-existing`/`--original-root` (Gate 1a), validates that a root move
+touches only the authorized path fields (Gate 1b), and re-seals against
+`--adjoint-receipt` (Gate 2). Old records and history stay where they are;
+boundary payloads are never copied. The adjoint manifest itself is the
+phase worker's file and is never written here.
 
 - `PRISMAQUANT_DEV_MODE=1` (PR #776) is the interim lane: submissions run
   from any checkout with no campaign branch, no transition receipts, and the
@@ -452,27 +504,39 @@ pbrun --tag sparky --tag sparklina \
 - The quantum record itself is passed by path+digest and sealed into the
   action key via the slice manifest's `argv` annotation; the CLI re-verifies
   both digests before doing anything (fail closed, exit 3, §6.4).
+- `--container-image <spec image>` is the campaign container declared to
+  PrismaBuild *before* it claims the row (PB #714, §14). It is read from the
+  same parsed spec that is serialized into `--spec`, so the image the action
+  runs is the image PB admitted it against.
 
 ### 5.3 Placement policy, chunk derivation, and failure modes
 
-**Placement: both GB10 tags on every row; PB owns which box claims.** A row
-tagged `sparky`+`sparklina` (and the GB10 class) is claimable by whichever
-Spark's worker loops reach it first; PB's ready-order (−priority, −passes,
-age), the boxes' own loop counts (5 vs 3) and the tier tokens do the
-balancing. The tool never reads capacity to choose a box. Failure modes,
-stated: (a) *straggler* — one box finishes its queue share early; PB assigns
-the remaining rows to it, which is the intended behavior and the reason not
-to pre-split layers by host; (b) *both tags refuse* (a box offline) — its
-loops claim nothing and the other box drains the rows; the campaign
-completes on one Spark, slower, with no action from anyone; (c) *a claimed
-quantum dies* — PB's retry policy applies per action (movers' `retry_safe`
-already true by construction; consumers declare `retry_safe` because the
-checkpoint journals re-verify), and a re-claim may land on the other box
-because the outputs are keyed per layer under the shared output root, not
-per host; (d) *the failure mode we refuse to have*: an agent or tool
-watching utilization and steering boxes at runtime. If the static policy
-starves a box, that is a PB placement capability gap to file, not a knob to
-turn here.
+**Placement: one shared `gb10` class tag on every quantum row; PB owns which
+box claims.** A row tagged `gb10` is claimable by whichever Spark's worker
+loops reach it first; PB's ready-order (−priority, −passes, age), the boxes'
+own loop counts (5 vs 3) and the tier tokens do the balancing. The tool
+never reads capacity to choose a box. The tag list is a **conjunction**, not
+a menu of boxes: PB admits a worker only when it offers *every* listed tag
+(`wanted.issubset(offer.tags)`, `src/prismabuild/pool.py:2847`), and each
+live Spark offers `gb10` plus its own host name — so the host pair this
+design originally shipped (`sparky`+`sparklina`, PQ #831) admitted neither
+box and every quantum row was unplaceable. The dispatcher defaults to the
+single class tag; a plan may declare `consumer_tags` for a genuine
+conjunction (for example a required capability tag), and the rows carry
+exactly that list. Failure modes, stated: (a) *straggler* — one box finishes
+its queue share early; PB assigns the remaining rows to it, which is the
+intended behavior and the reason not to pre-split layers by host;
+(b) *the class tag refuses* (both Sparks offline) — their loops claim
+nothing and the campaign waits; one Spark offline is the ordinary case and
+the other box drains the rows, slower, with no action from anyone;
+(c) *a claimed quantum dies* — PB's retry policy applies per action
+(movers' `retry_safe` already true by construction; consumers declare
+`retry_safe` because the checkpoint journals re-verify), and a re-claim may
+land on the other box because the outputs are keyed per layer under the
+shared output root, not per host; (d) *the failure mode we refuse to have*:
+an agent or tool watching utilization and steering boxes at runtime. If the
+static policy starves a box, that is a PB placement capability gap to file,
+not a knob to turn here.
 
 **Chunk derivation.** `chunk_target_bytes = floor(ram_window_gib × 2³⁰ /
 (2 × max_resident_consumers))` — a double-buffered window split across the
@@ -936,3 +1000,66 @@ instead of a new seal:
 This is a recorded per-run deviation, not a new default: the next plan
 seal adopts measured numbers through `recommend_source_prefetch` (#737),
 and the override retires with the campaign that needed it.
+
+## 14. Addendum (2026-09-20): the container image is declared to PrismaBuild before claim admission
+
+RobTand/prismaquant#825, paired with RobTand/prismabuild#714. A GB10-class
+action (`dd23c05a3a4b…`) was claimed by sparklina, which did not hold its
+pinned image (`sha256:c0e532d28a78…`, installed on sparky), and died inside
+`tools.tessera_campaign_container.inspect_or_load` after the attempt was
+spent: the image lived only inside the `--spec` JSON, so PB had no placement
+declaration to enforce before claiming. The paired PB change adds
+`pbrun --container-image REF` (repeatable, immutable refs only) and the
+campaign row field `container_images: [REF]`, requiring the
+`container-image-v1` worker capability: a box that cannot positively show the
+reference leaves the item `ready` for a box that can, and dispatches refuse
+when no recorded eligible worker reports it. PB still neither pulls nor
+transfers an image.
+
+The PrismaQuant caller half, in this addendum:
+
+- `tools/dispatch_joint_quanta.py` (stage A and quanta) adds
+  `--container-image <ref>` to the pbrun envelope, before the payload
+  separator. The reference comes from the same parsed spec that is
+  serialized into `--spec`, so the sealed spec and the admission declaration
+  cannot disagree (a second read could race a spec rewrite).
+- `tools/dispatch_tessera_campaign.py` declares `container_images: [ref]` on
+  every generated manifest row, from the row's *resolved* container class —
+  a class override declares its own image, and `_pbrun_argv` (submit-joint /
+  submit-aqua / submit-allocation / submit-export) adds the same
+  `--container-image` flag from the same parsed spec it seals.
+- **Archive-backed specs declare nothing.** A spec whose `container.archive`
+  passes `validate_container` (canonical path, SHA-256, and the
+  `content_sha256` seal) has its image established *inside* the action by
+  the launcher's digest-verifying `inspect_or_load` on whichever worker
+  claims it; a local-presence prerequisite would refuse the claim before the
+  loader ran. The loader remains the responsible party and its
+  bytes-then-content checks are unchanged. A malformed archive refuses at
+  submission rather than silently skipping the declaration.
+- No-container rows are byte-identical to before and declare nothing. Rows
+  declared with `container_images` (and commands with `--container-image`)
+  are **new actions**: the reference is sealed into the action key, so an
+  image-pinned submission is a different action from its undeclared twin.
+  Existing sealed requests are untouched and are not re-sealed by this
+  change; a declaration is only carried by newly built rows and commands.
+- A mutable tag is declared exactly as the spec spells it and is refused by
+  PB's immutable-only admission: pin the spec's image to `sha256:<64 hex>` or
+  `repository@sha256:<64 hex>`, or bind an archive.
+
+**Deployment gate.** The published PB client must carry the flag and the row
+field before any new image-declaring submission can succeed. Until it does,
+submissions fail closed by construction: `pbrun` exits 2 on the unrecognized
+`--container-image` before sealing anything, and `pbcampaign` refuses an
+unknown `container_images` row field at manifest load (verified against the
+2026-09-20 published client, recorded in the #825 result). There is no
+compatibility branch that drops the declaration and no silent fallback;
+rollout waits on the paired PB runtime.
+
+Gates: `tests/test_container_image_admission.py` (same-parse identity, direct
+payload boundary, manifest field, class override, archive-backed omission and
+malformed-archive refusal, non-container rows unchanged) plus the existing
+dispatcher, launcher and image-content suites. The red run on
+`164db9148f` (PB `cd5d723dec5a…`, 14 failed / 6 passed) is the original
+omission; the green runs (PB `afe712fb79b5…`, 20 passed; caller-regression
+batch `cec95d11c972…` 5/5 shards, submission-path batch `5d5b9f3e189a…` 7/7
+shards) are the corrected direct and manifest paths.
