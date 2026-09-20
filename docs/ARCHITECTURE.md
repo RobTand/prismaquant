@@ -1,7 +1,15 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/source-identity-portable-dev-20260920`.
+As of: 2026-09-20 · `flash/slice-zero-head-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/slice-zero-head-20260920`) for
+**stageable quantum slice phases** (PQ #851). Both slice producers seal
+only the nonempty chunk phases in `annotations.phases`. A zero-byte
+`head` has no entry boundary and causes PB to reject the entire phase
+table. Startup/head remains a separately declared payload progress phase;
+it does not create a zero-byte storage phase. The published-PB parser
+interoperability gate is `tests/test_slice_manifest_pb_staging.py`.
 
 Re-stamped (2026-09-20, `flash/source-identity-portable-dev-20260920`) for
 **dev-portable source-identity reuse across hosts** (PQ #843). The six-field
