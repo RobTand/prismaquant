@@ -219,10 +219,12 @@ class StreamedBoundaryArtifacts:
         self._checkpoint_committed = {}
         self._checkpoint_active = None
         self._next_checkpoint_reservation = 1
+        self._transient_hold_bytes = 0
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
             "live_checkpoint_bytes": 0, "peak_checkpoint_bytes": 0,
+            "peak_transient_serialization_bytes": 0,
             "checkpoint_reservations": 0, "checkpoint_refusals": 0,
             "checkpoint_envelope_unused_bytes": 0,
             "written_tensor_bytes": 0, "read_tensor_bytes": 0,
@@ -328,7 +330,8 @@ class StreamedBoundaryArtifacts:
             for tensor in _state_tensors(shared)
             if tensor.is_floating_point() or tensor.is_complex())
         actual_shared = _state_storage_bytes(actual_accumulators)
-        total = _state_storage_bytes((metadata, extra)) + max(actual_shared, reserved_shared)
+        total = (_state_storage_bytes((metadata, extra)) + max(actual_shared, reserved_shared)
+                 + self._transient_hold_bytes)
         if total > self.config["max_auxiliary_bytes"]:
             raise RuntimeError("exact boundary auxiliary/shared-state residency budget exceeded")
         self.telemetry["peak_auxiliary_bytes"] = max(total, self.telemetry["peak_auxiliary_bytes"])
@@ -479,7 +482,9 @@ class StreamedBoundaryArtifacts:
         on the way in, and releases on the way out. One entry at a time keeps
         the peak at the largest single payload instead of the whole
         checkpoint. Only the resident counter moves; durable bytes are a
-        separate reservation below.
+        separate reservation below. Tensor compact copies use this hold,
+        mirroring how write() reserves each exact entry; serialized metadata
+        buffers use hold_transient_metadata against the auxiliary ceiling.
         """
         if type(estimate_bytes) is not int or estimate_bytes <= 0:
             raise RuntimeError(
@@ -490,6 +495,55 @@ class StreamedBoundaryArtifacts:
             yield
         finally:
             self._reserve(-int(estimate_bytes))
+
+    @contextmanager
+    def hold_transient_metadata(self, estimate_bytes, label):
+        """Hold transient serialized-metadata bytes in one aggregate ceiling.
+
+        Pickle/manifest buffers are metadata-adjacent staging bytes, but they
+        are bulk bytes, not free: admission counts live auxiliary usage (the
+        watched batch/cotangent owners recomputed through the existing
+        ``actual_auxiliary_bytes`` contract) plus every active transient hold
+        plus this estimate against ``max_auxiliary_bytes``. No second full
+        ceiling is granted beside the retained auxiliary state. Fires the
+        bound memory hook on the way in and releases on the way out; one
+        entry at a time keeps the peak at the largest single payload.
+        """
+        if type(estimate_bytes) is not int or estimate_bytes <= 0:
+            raise RuntimeError(
+                "exact boundary transient metadata hold needs a "
+                "positive byte estimate")
+        live = self._live_auxiliary_bytes()
+        held = self._transient_hold_bytes + int(estimate_bytes)
+        if held + live > self.config["max_auxiliary_bytes"]:
+            raise RuntimeError(
+                "exact boundary transient serialization budget exceeded: "
+                f"{label} needs {estimate_bytes} bytes with {live} live "
+                f"auxiliary bytes and {self._transient_hold_bytes} already "
+                f"held against auxiliary ceiling "
+                f"{self.config['max_auxiliary_bytes']}")
+        self._transient_hold_bytes = held
+        try:
+            if self._check_memory is not None:
+                self._check_memory(str(label))
+            self.telemetry["peak_transient_serialization_bytes"] = max(
+                self._transient_hold_bytes,
+                self.telemetry["peak_transient_serialization_bytes"])
+            yield
+        finally:
+            self._transient_hold_bytes -= int(estimate_bytes)
+
+    def _live_auxiliary_bytes(self):
+        """Recompute live auxiliary backing bytes through the existing contract.
+
+        Zero when no batch owners are watched; otherwise the same backing
+        count ``check_auxiliary`` enforces, so transient holds and retained
+        auxiliary state share one ceiling instead of two.
+        """
+        if self._batches is None:
+            return 0
+        return int(self.actual_auxiliary_bytes(
+            self._batches, cotangents=self._cotangents or ()))
 
     def checkpoint_reservation_state(self, reservation_id):
         """Report one reservation's lifecycle state, refusing unknown ids."""
