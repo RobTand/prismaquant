@@ -1,0 +1,430 @@
+{
+ "schema": "prismaquant.fleet_acceptance.matrix.v1",
+ "contract": "docs/staged_read_contract_2026-09-20.md (PB worktree, read-only)",
+ "ledger": "docs/staged_read_requirements_2026-09-20.json schema pb.staged_read_requirements.v3",
+ "pins": {
+  "pb_candidate_rev": "a9bb83e9abd2aeffe22af7d0b51238158954a909",
+  "pq_base": "origin/main 61ec9fcb8a37c4a171771f7574e147bc5f0593e2"
+ },
+ "requirements": [
+  {
+   "id": "SC-01",
+   "status": "nonqualified:needs live admission evidence",
+   "scenario": "",
+   "evidence": "",
+   "note": "harness uses PB decisions, never steers placement"
+  },
+  {
+   "id": "SC-02",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_matrix.py::test_harness_adds_no_parallel_paths",
+   "evidence": "import-surface scan of harness files",
+   "note": "absence proven structurally, not by review prose"
+  },
+  {
+   "id": "SC-03",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_matrix.py::test_every_requirement_names_evidence",
+   "evidence": "matrix enforcement",
+   "note": "exact test paths or named nonqualification; no uncited suites"
+  },
+  {
+   "id": "ID-01",
+   "status": "nonqualified:seal-to-key check not performed by harness",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "ID-02",
+   "status": "nonqualified:attempt/terminal lifecycle needs live machinery",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "ID-03",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_slice_wire_digests_cover_sealed_bytes",
+   "evidence": "wire digests over sealed slice bytes",
+   "note": ""
+  },
+  {
+   "id": "ID-04",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_canonical_record_digest_is_stable_and_rejects_nonfinite",
+   "evidence": "canonical digest stability + nonfinite refusal",
+   "note": ""
+  },
+  {
+   "id": "ID-05",
+   "status": "nonqualified:release-gate lane owns provenance/certification carriers",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "ID-06",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_movers_publish_fragments_with_real_digests",
+   "evidence": "fragment digest+epoch evidence",
+   "note": "new every-payload wire fields remain target-only"
+  },
+  {
+   "id": "ID-07",
+   "status": "nonqualified:serving record asserted only in runner first-release flow",
+   "scenario": "runner:sdk-first-release",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "ID-08",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_pins.py::test_recorded_snapshots_name_exact_trees",
+   "evidence": "PB rev + tree digest + PQ HEAD in every result",
+   "note": ""
+  },
+  {
+   "id": "ID-09",
+   "status": "nonqualified:application-validity half needs application gates",
+   "scenario": "",
+   "evidence": "",
+   "note": "submit/terminal/CAS legs green in lifecycle test; validity stays consumer-side"
+  },
+  {
+   "id": "RNG-01",
+   "status": "nonqualified:no overlapping-entry case exercised",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "RNG-02",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_movers_publish_fragments_with_real_digests",
+   "evidence": "tier/epoch/path/length/digest per entry + generation recorded",
+   "note": "ABA-republish coverage pending"
+  },
+  {
+   "id": "RNG-03",
+   "status": "nonqualified:logical-repeat coverage not exercised",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "RNG-04",
+   "status": "nonqualified:planner lane owns gather-set refusals",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "SM-01",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_publish_claim_finish_lifecycle",
+   "evidence": "publish/claim/finish + terminal record on tmp queue",
+   "note": "withdrawal/containment/retry legs pending"
+  },
+  {
+   "id": "SM-02",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_movers_publish_fragments_with_real_digests+test_fleet_acceptance_level1.py::test_mover_overrun_refuses_before_copy",
+   "evidence": "copy-to-published + overrun refusal",
+   "note": "retiring/eviction ordering pending"
+  },
+  {
+   "id": "SM-03",
+   "status": "nonqualified:lease states need SDK pins",
+   "scenario": "runner:sdk-first-release",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "INV-01",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_tier_ledger_concludes_both_sides_once",
+   "evidence": "mint/acquire/holder/release/available on real ledger",
+   "note": ""
+  },
+  {
+   "id": "INV-02",
+   "status": "nonqualified:lead-gated claim needs admitted mover rows",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "INV-03",
+   "status": "nonqualified:strict-reader lane PQ846 owns bulk-open gating",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "INV-04",
+   "status": "nonqualified:strict-reader lane PQ846 owns open-time serving records",
+   "scenario": "",
+   "evidence": "",
+   "note": "SDK serving record asserted in runner flow once qualified"
+  },
+  {
+   "id": "INV-05",
+   "status": "nonqualified:RAM-preference rule untested (promotion runs, preference does not)",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "INV-06",
+   "status": "nonqualified:corrupt-digest/missing-range legs pending",
+   "scenario": "",
+   "evidence": "",
+   "note": "stale-epoch overlay refusal green; never-fallback needs strict readers"
+  },
+  {
+   "id": "INV-07",
+   "status": "nonqualified:eviction serialization needs live tier loop",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "INV-08",
+   "status": "nonqualified:retry/adoption accounting needs live retries",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "INV-09",
+   "status": "nonqualified:durable progress counters not exercised here",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "INV-10",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_join_accepts_and_gapped_refuses_downstream",
+   "evidence": "coverage accepted + allocation accepts; gapped refused downstream",
+   "note": ""
+  },
+  {
+   "id": "INV-11",
+   "status": "nonqualified:class-tag admission needs live admission",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "INV-12",
+   "status": "nonqualified:checkpoint lane owns adoption caps",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "TIER-01",
+   "status": "nonqualified:readiness-vs-enforcement audit needs strict readers + live tiers",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "TIER-02",
+   "status": "nonqualified:metadata-allowance boundary untested",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "TIER-03",
+   "status": "nonqualified:boundary/activation read-set coverage pending (planner lane)",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "TIER-04",
+   "status": "nonqualified:waiver path untested (no waiver claimed)",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "PRG-01",
+   "status": "nonqualified:safe-frontier accounting needs lease-state queries",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "PRG-02",
+   "status": "nonqualified:planner lane owns read-plan fit proofs",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "PRG-03",
+   "status": "nonqualified:typed waits need live admission",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "PRG-04",
+   "status": "nonqualified:formal inequality unproven; no scheduler invented for it",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "PRG-05",
+   "status": "nonqualified:window fit accounting not exercised",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "LIVE-01",
+   "status": "nonqualified:conditional liveness needs both-Spark hardware phase",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "DEV-01",
+   "status": "nonqualified:dev-mode producer paths not exercised",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "DEV-02",
+   "status": "nonqualified:reuse-lineage paths not exercised",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "DEV-03",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_movers_publish_fragments_with_real_digests",
+   "evidence": "integrity-on-copy digests asserted",
+   "note": "distinct from expensive sealing by construction"
+  },
+  {
+   "id": "DEV-04",
+   "status": "nonqualified:dev-result marking not exercised",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "DEV-05",
+   "status": "nonqualified:cross-host identity lane owns proof; same-host only here",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "SAFE-01",
+   "status": "nonqualified:live-lease eviction needs live leases + tier loop",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "SAFE-02",
+   "status": "nonqualified:strict-reader lane owns forbidden-tier refusal",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "SAFE-03",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_publish_claim_finish_lifecycle",
+   "evidence": "terminal record filed on real finish",
+   "note": "payload-identity verification stays consumer-side"
+  },
+  {
+   "id": "ACC-01",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_level1.py::test_gzip_member_parses_and_tamper_refuses",
+   "evidence": "valid gzip parses; tampered bytes refuse + digest mismatch",
+   "note": ""
+  },
+  {
+   "id": "ACC-02",
+   "status": "nonqualified:staged-lease races need live lease machinery",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "ACC-03",
+   "status": "nonqualified:source/render/activation chain with forbidden-open negatives needs strict readers",
+   "scenario": "runner:sdk-first-release",
+   "evidence": "",
+   "note": "published-path reads green in level-1; negatives pending"
+  },
+  {
+   "id": "ACC-04",
+   "status": "nonqualified:restart/retry incl. lease-crash needs live attempts",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "ACC-05",
+   "status": "nonqualified:both-Spark concurrency is the hardware phase",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "ACC-06",
+   "status": "nonqualified:staged-only campaign + bytes_from_pool==0 is the hardware phase",
+   "scenario": "",
+   "evidence": "",
+   "note": ""
+  },
+  {
+   "id": "VER-01",
+   "status": "qualified-now",
+   "scenario": "test_fleet_acceptance_matrix.py::test_every_requirement_names_evidence",
+   "evidence": "bounded-evidence discipline enforced mechanically",
+   "note": "authoritative indexes (ledger JSON) read first; no counts-as-proof"
+  }
+ ],
+ "explicit_gates": [
+  {
+   "scope": "full campaign + performance gates",
+   "owner": "application lanes",
+   "note": "toy fixtures prove legs, never campaign completeness or perf"
+  },
+  {
+   "scope": "output-scope / funded-window gates",
+   "owner": "PB732 / window-liveness",
+   "note": "unimplemented here; matrix rows needing them stay nonqualified"
+  },
+  {
+   "scope": "membership JOIN/RESIGN/chained handoff",
+   "owner": "PB728",
+   "note": "level-2 plan only; no live membership mutation in this task"
+  },
+  {
+   "scope": "checkpoint adoption writer + budget",
+   "owner": "checkpoint lane",
+   "note": "INV-12 stays nonqualified until that lane lands"
+  },
+  {
+   "scope": "produced-output metadata",
+   "owner": "PQ853 / PB732",
+   "note": "not exercised by this harness"
+  }
+ ]
+}
