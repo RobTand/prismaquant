@@ -37,6 +37,7 @@ PREPARED_SHA256 = "962207a3385e9531adaf951b823871a2fb7ff4684320e7a8e19a1d0aa85d8
 
 PARTITION_SOURCE_PATH = os.path.join(
     JOINT_PANEL, "complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.hostcap32.plan.json")
+PARTITION_SOURCE_SHA256 = "eff2f7fb421aeadf8cde591b515ef6db4b68b1d4d9062c5f3a3a0c0a2c048cc5"
 
 
 def _live_manifest_sha256():
@@ -95,8 +96,10 @@ def _sealed_window_partition():
     block -- the same tiling the accepted banked output reflects -- read here
     as data (issue #839).
     """
-    with open(PARTITION_SOURCE_PATH, "r", encoding="utf-8") as handle:
-        return json.load(handle)["retained_window_budget_derivation"]
+    with open(PARTITION_SOURCE_PATH, "rb") as handle:
+        raw = handle.read()
+    assert hashlib.sha256(raw).hexdigest() == PARTITION_SOURCE_SHA256
+    return json.loads(raw)["retained_window_budget_derivation"]
 
 
 def _synthetic_inputs():
