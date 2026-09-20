@@ -56,6 +56,99 @@ def _mount_of(path: str) -> str | None:
     return best
 
 
+#: Exit status: 0 qualified full pass; 1 infrastructure error; 2 the
+#: action executed but is NOT qualified (findings preserved in JSON).
+#: Only --refuse mode may exit 0 on an intended typed refusal.
+UNQUALIFIED = 2
+
+IDENTITY_NAMES = ("PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
+                  "PRISMABUILD_ACTION_SCOPE",
+                  "PRISMABUILD_READER_HELPER_ROOT")
+
+
+def identity_presence(env=None) -> dict:
+    """Which identity names the environment actually carries (pure)."""
+
+    source = os.environ if env is None else env
+    get = source.get if hasattr(source, "get") else {}.get
+    return {name: bool(get(name)) for name in IDENTITY_NAMES}
+
+
+def eval_pool_delta(before, after, mount):
+    """(observed, delta) for pool client reads (pure).
+
+    Unknown evidence never proves zero reads: observed is False unless
+    both snapshots exist and the mount's client_read field is present
+    in both.
+    """
+
+    if not isinstance(before, dict) or not isinstance(after, dict) \
+            or not mount:
+        return False, None
+    first = before.get(mount, {}).get("client_read") \
+        if isinstance(before.get(mount), dict) else None
+    second = after.get(mount, {}).get("client_read") \
+        if isinstance(after.get(mount), dict) else None
+    if not isinstance(first, int) or not isinstance(second, int):
+        return False, None
+    return True, second - first
+
+
+def expect_serving_tier(*, ram_offered, ram_allowed, ssd_allowed, serving):
+    """(ok, reason) for the observed serving tier (pure).
+
+    Valid offered RAM is selected first; SSD serves only when explicitly
+    allowed and no RAM was offered. A missing offer or tier never passes.
+    """
+
+    tier = serving.get("tier_id") if isinstance(serving, dict) else None
+    if not isinstance(tier, str) or not tier:
+        return False, "serving names no tier"
+    family = tier.split(":")[0]
+    if ram_offered and ram_allowed:
+        if family == "ram":
+            return True, "ram-served"
+        return False, f"ram offered but served {tier}"
+    if ssd_allowed and not ram_offered:
+        if family == "ram":
+            return False, "ram served without a recorded offer"
+        return True, "ssd-served"
+    return False, "no appropriate tier allowed for this offer"
+
+
+def _find_pin_refs(sdk, queue, pin_id):
+    """(owner, refs) for one pin id, or (None, None) when fully released.
+
+    Scans owner directories (pin ids are globally unique); reads through
+    the SDK's own pin validation. Unreadable pins raise -- unknown is
+    never an empty census here.
+    """
+
+    import os as _os
+    root = sdk.leases_root(queue)
+    for owner_dir in sorted(_os.scandir(root), key=lambda e: e.name):
+        if not owner_dir.is_dir():
+            continue
+        path = Path(owner_dir.path) / f"{pin_id}.lease.json"
+        if not path.is_file():
+            continue
+        pin = sdk.validate_pin(json.loads(path.read_text()))
+        refs = pin["refs"]
+        assert isinstance(refs, dict)
+        return str(pin.get("owner_action_key") or owner_dir.name), refs
+    return None, None
+
+
+def attempt_refs(refs, nonce, scope_id):
+    """Ref ids in a pin refs map bound to exactly this attempt (pure)."""
+
+    return [ref_id for ref_id, ref in refs.items()
+            if isinstance(ref, dict)
+            and isinstance(ref.get("attempt"), dict)
+            and str(ref["attempt"].get("nonce") or "") == nonce
+            and str(ref["attempt"].get("scope_id") or "") == scope_id]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--allowed-tiers", required=True)
@@ -125,9 +218,8 @@ def main() -> int:
                 from prismaquant.staged_tier_policy import (
                     TierPolicyRefused as _TR)
                 after = _mountstats()
-                delta = ((after.get(pool_mount, {}).get("client_read", 0)
-                          - before.get(pool_mount, {}).get("client_read", 0))
-                         if pool_mount else 0)
+                observed, delta = eval_pool_delta(before, after, pool_mount)
+                result["pool_reads_observed"] = observed
                 result["pool_client_read_delta"] = delta
                 if not isinstance(exc, (_LR, _TR)):
                     raise
@@ -136,7 +228,11 @@ def main() -> int:
                 result["refusal"] = "MISSING: forbidden read was served"
                 print(json.dumps(result, sort_keys=True), flush=True)
                 return 1
-            if result.get("pool_client_read_delta", 0) != 0:
+            if not result.get("pool_reads_observed", False):
+                result["refusal"] += "; pool reads UNOBSERVED, not proven zero"
+                print(json.dumps(result, sort_keys=True), flush=True)
+                return 1
+            if result.get("pool_client_read_delta", 1) != 0:
                 result["refusal"] += "; POOL WAS READ"
                 print(json.dumps(result, sort_keys=True), flush=True)
                 return 1
@@ -146,22 +242,25 @@ def main() -> int:
             ids, _provenance = load_calibration_input(
                 ns.declared, expected_sha256=ns.expect_sha256,
                 n_samples=ns.n_samples, seqlen=ns.seqlen)
-        except Exception as exc:  # noqa: BLE001 -- LeaseRefused is the finding
+        except Exception as exc:  # noqa: BLE001 -- refusal is evidence
             from prismaquant.staged_lease import LeaseRefused as _LR
+            from prismaquant.staged_tier_policy import (
+                TierPolicyRefused as _TR)
             after = _mountstats()
-            delta = ((after.get(pool_mount, {}).get("client_read", 0)
-                      - before.get(pool_mount, {}).get("client_read", 0))
-                     if pool_mount else 0)
+            observed, delta = eval_pool_delta(before, after, pool_mount)
+            result["pool_reads_observed"] = observed
             result["pool_client_read_delta"] = delta
-            if isinstance(exc, _LR):
-                result["finding"] = (
-                    f"strict read refused fail-closed ({exc.kind}: {exc}); "
-                    "no injected nonce/scope/helper in live run-local env; "
-                    "pins/leases/capture unexercised, pool unread")
-                result["ok"] = False
-                print(json.dumps(result, sort_keys=True), flush=True)
-                return 0
-            raise
+            if not isinstance(exc, (_LR, _TR)):
+                raise
+            # Report the actual refusal and the actual identity present;
+            # never a hardcoded cause.
+            result["finding"] = {
+                "refusal": f"{type(exc).__name__}: {exc}",
+                "identity_present": identity_presence(),
+            }
+            result["ok"] = False
+            print(json.dumps(result, sort_keys=True), flush=True)
+            return UNQUALIFIED
         import torch
         draw = hashlib.sha256(ids.to(torch.int32).numpy().tobytes()).hexdigest()
         result["draw_sha256"] = draw
@@ -173,44 +272,88 @@ def main() -> int:
         resolver = residency_resolver()
         entry = resolver.staged_read(ns.declared, expected_sha256=ns.expect_sha256)
         if entry is None:
-            result["error"] = "composed entry vanished after strict read"
+            result["finding"] = "composed entry vanished after strict read"
+            result["ok"] = False
             print(json.dumps(result, sort_keys=True), flush=True)
-            return 1
+            return UNQUALIFIED
         result["ram_offered"] = entry.get("ram_path")
         result["stage_path"] = entry.get("stage_path")
         if sdk is None or result.get("helper_root_auto") is None:
-            result["finding"] = (
-                "strict SDK unbindable: no injected nonce/scope/helper; "
-                "live run-local actions receive key+map only "
-                "(core._residency_environment); pins/leases unexercised")
+            result["finding"] = {
+                "blocked": "strict SDK unbindable in this run",
+                "identity_present": identity_presence(),
+            }
             result["ok"] = False
             print(json.dumps(result, sort_keys=True), flush=True)
-            return 0
+            return UNQUALIFIED
+        allowed = set(ns.allowed_tiers.split(","))
         window = acquire_entry_window(resolver, ns.declared, entry)
         from prismabuild.pool import PoolQueue
         queue = PoolQueue("/mnt/shared/prismabuild-fleet/pb-queue")
+        nonce = os.environ.get("PRISMABUILD_ACTION_NONCE") or ""
+        scope_id = os.environ.get("PRISMABUILD_ACTION_SCOPE") or ""
         with window as entered:
             fd, serving = entered.open(residency_map_key(str(Path(ns.declared)), 0))
             result["serving"] = serving
+            tier_ok, tier_reason = expect_serving_tier(
+                ram_offered=bool(entry.get("ram_path")),
+                ram_allowed="ram" in allowed, ssd_allowed="ssd" in allowed,
+                serving=serving)
+            result["serving_tier_check"] = tier_reason
+            if not tier_ok:
+                result["finding"] = f"serving tier refused: {tier_reason}"
+                result["ok"] = False
+                entered.close_fd(fd)
+                print(json.dumps(result, sort_keys=True), flush=True)
+                return UNQUALIFIED
+            # Bind THIS exact attempt's refs: the pin must hold at least
+            # one ref for our (nonce, scope); another attempt's lease
+            # never counts.
+            _owner, refs = _find_pin_refs(
+                sdk, queue, str(serving.get("pin_id") or ""))
+            mine = attempt_refs(refs or {}, nonce, scope_id)
+            result["held_refs_for_attempt"] = mine
             owners, tainted = sdk.live_for(
                 queue, {os.path.normpath(str(serving.get("stage_path", "")))})
             result["pinned_while_open"] = owners
             result["tainted_while_open"] = tainted
+            if not mine or not owners or tainted:
+                result["finding"] = (
+                    "held proof incomplete: exact-attempt refs, live pin, "
+                    "and clean census all required")
+                result["ok"] = False
+                entered.close_fd(fd)
+                print(json.dumps(result, sort_keys=True), flush=True)
+                return UNQUALIFIED
             entered.close_fd(fd)
+        # After release THIS exact lease must be gone; unrelated readers
+        # may remain and are not disturbed.
+        _owner_after, refs_after = _find_pin_refs(
+            sdk, queue, str(serving.get("pin_id") or ""))
+        lingering = attempt_refs(refs_after or {}, nonce, scope_id)
+        result["lingering_refs_for_attempt"] = lingering
+        if lingering:
+            result["finding"] = "exact lease survived release"
+            result["ok"] = False
+            print(json.dumps(result, sort_keys=True), flush=True)
+            return UNQUALIFIED
         owners_after, tainted_after = sdk.live_for(queue, None)
         result["pins_after_release"] = owners_after
         result["tainted_after_release"] = tainted_after
         after = _mountstats()
-        deltas = {m: (after.get(m, {}).get("client_read", 0)
-                      - before.get(m, {}).get("client_read", 0)) for m in after}
-        result["mount_deltas"] = deltas
-        result["pool_client_read_delta"] = deltas.get(pool_mount, 0) if pool_mount else 0
-        ok = (result["draw_match"] and result["pinned_while_open"]
-              and not result["tainted_while_open"]
-              and result["pool_client_read_delta"] == 0)
+        observed, delta = eval_pool_delta(before, after, pool_mount)
+        result["pool_reads_observed"] = observed
+        result["pool_client_read_delta"] = delta
+        result["mount_deltas"] = {
+            m: ((after.get(m, {}).get("client_read", 0)
+                 - before.get(m, {}).get("client_read", 0))
+                if observed else None) for m in after} if observed else None
+        ok = (result["draw_match"] and observed and delta == 0)
         result["ok"] = bool(ok)
+        if not ok:
+            result["finding"] = "draw, observed pool accounting, or both failed"
         print(json.dumps(result, sort_keys=True), flush=True)
-        return 0 if ok else 1
+        return 0 if ok else UNQUALIFIED
     except Exception as exc:  # noqa: BLE001 -- scenario reports, never hides
         result["error"] = f"{type(exc).__name__}: {exc}"
         print(json.dumps(result, sort_keys=True), flush=True)
