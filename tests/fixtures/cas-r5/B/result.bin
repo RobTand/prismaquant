@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0
+rootdir: /home/rob/tmp/prismabuild-checkouts/554fa0c61f34.vrula9x1/checkout
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.13.0
+collected 2 items
+
+tests/test_fleet_acceptance_pins.py ..                                   [100%]
+
+=============================== warnings summary ===============================
+tests/test_fleet_acceptance_pins.py: 14 warnings
+  /home/rob/venvs/pq846-pb461728e4/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+tests/test_fleet_acceptance_pins.py::test_resolution_verifies_the_whole_tree
+  /usr/lib/python3.12/tarfile.py:2301: DeprecationWarning: Python 3.14 will, by default, filter extracted tar archives and reject files or modify their metadata. Use the filter argument to control this behavior.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 2 passed, 15 warnings in 2.98s ========================

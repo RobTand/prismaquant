@@ -1,0 +1,4 @@
+tests/test_fleet_acceptance_pins.py::test_recorded_snapshots_name_exact_trees
+tests/test_fleet_acceptance_pins.py::test_resolution_verifies_the_whole_tree
+
+2 tests collected in 0.05s
