@@ -519,10 +519,12 @@ def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]"
     nowhere here; only the public nonce/scope pair the SDK checks the live
     claim against crosses the boundary.
 
-    Both are empty on the legacy path: no action key in the launcher
+    Both are empty on the legacy path: no strict signal in the launcher
     environment means an action outside the reader contract (or predating
     it), which keeps a byte-identical ``docker run`` -- documented absence,
-    never a claim of strict support.
+    never a claim of strict support.  The public action key alone is not a
+    strict signal: published PrismaBuild has long set it on every action
+    environment, so key-only is the legacy shape, not a partial bundle.
     """
 
     declared = spec.get("env", {}) if isinstance(spec, dict) else {}
@@ -532,7 +534,8 @@ def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]"
                 f'spec env {name} is forged or conflicting: reader identity '
                 'is supplied by the launcher, not by a spec')
     present = {name: environ.get(name) for name in READER_CONTEXT_ENV}
-    if not any(present.values()):
+    if not any(present[name] for name in
+               (ACTION_NONCE_ENV, ACTION_SCOPE_ENV, READER_HELPER_ROOT_ENV)):
         return {}, []
     missing = sorted(name for name, value in present.items() if not value)
     if missing:

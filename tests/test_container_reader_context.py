@@ -110,7 +110,7 @@ def test_complete_bundle_is_forwarded_with_its_generation_mounted_read_only(tmp_
 
 
 def test_legacy_absence_keeps_a_byte_identical_argv(tmp_path):
-    """No action key in the launcher env: no identity, no helper mount."""
+    """No strict signal in the launcher env: no identity, no helper mount."""
     spec = _spec(tmp_path)
     assert _argv(spec, {}) == _argv(spec, None)
     argv = _argv(spec, {})
@@ -118,6 +118,14 @@ def test_legacy_absence_keeps_a_byte_identical_argv(tmp_path):
     assert not any(name in env for name in NAMES)
     assert not any("prismabuild-fleet" in mount and "readonly" in mount
                    for mount in _mounts(argv))
+
+
+def test_key_only_launcher_env_is_the_legacy_shape_not_a_partial_bundle(tmp_path):
+    """Published PB sets the public key on every action env without the rest."""
+    spec = _spec(tmp_path)
+    argv = _argv(spec, {"PRISMABUILD_ACTION_KEY": KEY})
+    env = _forwarded_env(argv)
+    assert not any(name in env for name in NAMES)
 
 
 def test_module_names_match_the_pb_producer_contract():
@@ -139,8 +147,12 @@ def test_module_names_match_the_pb_producer_contract():
     assert runner.READER_CONTEXT_ENV == (
         "PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
         "PRISMABUILD_ACTION_SCOPE", "PRISMABUILD_READER_HELPER_ROOT")
-    core = importlib.util.find_spec("prismabuild.core")
-    if core is None:
+    core = None
+    try:
+        found = importlib.util.find_spec("prismabuild.core")
+    except (ImportError, ModuleNotFoundError):
+        found = None
+    if found is None:
         pytest.skip("published PB core is not importable here")
     import prismabuild.core as published
     assert published.ACTION_KEY_ENV == runner.ACTION_KEY_ENV
@@ -248,8 +260,10 @@ def test_no_broker_capability_crosses_the_boundary(tmp_path):
 def test_reader_context_rides_beside_the_residency_map(tmp_path, monkeypatch):
     """Both channels cross together; neither mount disturbs the other."""
     monkeypatch.setattr(runner, "_stage_root_mounted", lambda root: True)
-    stage = tmp_path / "stage"
-    stage.mkdir()
+    # The stage lives outside the declared mount, as /stage/prewarm does;
+    # the helper generation lives beneath it, under a covering rw mount.
+    stage = tmp_path.parent / f"{tmp_path.name}-stage"
+    stage.mkdir(exist_ok=True)
     helper = _helper_root(tmp_path)
     map_path = tmp_path / "queue" / "k.map.json"
     map_path.parent.mkdir(parents=True, exist_ok=True)
