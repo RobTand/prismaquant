@@ -28,7 +28,13 @@ import subprocess
 from pathlib import Path
 
 
-PB_PINNED_CHECKOUT = Path("/home/rob/tmp/pb-reader-lease-pin-20260920")
+#: Shared-mount bare mirror (visible from every fleet worker; the old
+#: host-local checkout below is a legacy fallback only). ``/home/rob`` is
+#: host-local per box, so a host-local object store makes qualification
+#: host-dependent (GREEN where visible, SKIP elsewhere).
+PB_PINNED_CHECKOUT = Path(
+    "/mnt/shared/pq-fleet-acceptance-20260920/pb-pin.git")
+PB_PINNED_CHECKOUT_LEGACY = Path("/home/rob/tmp/pb-reader-lease-pin-20260920")
 PB_CANDIDATE_REPO = "https://github.com/RobTand/prismabuild.git"
 PB_CANDIDATE_BRANCH = "fix/pb-reader-lifetime-20260920"
 #: PB741 merge ("refs_for_holder signals unknown census", corrected SDK
@@ -68,7 +74,10 @@ def _git(git_dir: Path, *args: str, timeout_s: int = 120) -> subprocess.Complete
 
 
 def _git_dir_of(checkout: Path) -> Path:
-    """The true git dir, including for linked worktrees (whose .git is a file)."""
+    """The true git dir: bare mirrors, workdirs, and linked worktrees."""
+    if ((checkout / "objects").is_dir()
+            and (checkout / "HEAD").is_file()):
+        return checkout
     dotgit = checkout / ".git"
     if dotgit.is_dir():
         return dotgit
@@ -137,12 +146,14 @@ def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
     - the extracted file set equals ``ls-tree -r`` exactly;
     - every file under the reused prefixes hash-matches its blob.
     """
-    try:
-        git_dir = _git_dir_of(PB_PINNED_CHECKOUT)
-        network = False
-    except NonQualified:
-        git_dir = None
-        network = True
+    git_dir = None
+    for candidate in (PB_PINNED_CHECKOUT, PB_PINNED_CHECKOUT_LEGACY):
+        try:
+            git_dir = _git_dir_of(candidate)
+            break
+        except NonQualified:
+            continue
+    network = git_dir is None
     if network:
         mirror = _resolve_via_network(dest, timeout_s=timeout_s)
         src_git_dir = mirror
