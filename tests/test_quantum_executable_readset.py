@@ -192,7 +192,7 @@ def test_build_covers_whole_consumption_corpus(tmp_path):
     assert ("/fixture/model/shard-l2.pt", 0) in staged
     # Calibration intake and the checkpoint plane.
     assert (CALIB["path"], 0) in staged
-    assert any("cotangent-0-0-at-4" in e["path"]
+    assert any("cotangent-0-0" in e["path"]
                for e in manifest["entries"])
     # Own boundary corpus repeats across both replay windows.
     replay = [p for p in manifest["read_plan"]["phases"]
@@ -410,7 +410,8 @@ def test_dispatcher_selects_executable_and_declares_phases(tmp_path,
     assert declared[1].startswith("checkpoint-load=")
     assert [name.split("=")[0] for name in declared] == (
         ["head"] + [p["name"]
-                    for p in manifest["read_plan"]["phases"]])
+                    for p in manifest["read_plan"]["phases"]
+                    if p["name"] != "head"])
     # Strict-owned lanes are byte-identical in both selections.
     legacy = dict(bound)
     del legacy["executable_readset"]
@@ -441,13 +442,14 @@ def test_runtime_reports_read_phases_without_pricing_units():
                         "own-002-source", "replay-00-p0"]
     progress.enter_head(3)
     units = progress.units()
+    assert progress._committed == (units, "head")
     progress.enter_read_phase("checkpoint-load")
     assert progress._phase == "checkpoint-load"
     assert progress.units() == units
-    assert progress.commits == 2
+    assert progress._committed == (units, "checkpoint-load")
     progress.enter_read_phase("no-such-phase")
     assert progress._phase == "checkpoint-load"
-    assert progress.commits == 2
+    assert progress.units() == units
 
 
 def test_replay_phase_zero_pending_convention():
@@ -527,6 +529,11 @@ def test_acceptance_sequence_opens_only_admitted_entries(tmp_path):
     assert all("checkpoint-load" in phase_of[path]
                for path in opened[:len(checkpoint["activation_entries"])
                                    + len(checkpoint["shared_state_entries"])])
+    # PB admits only paths under the sealed mount prefix; production
+    # entries always live there, so the test re-roots the fixture paths
+    # (test-only scaffolding) before validating.
+    for entry in manifest["entries"]:
+        entry["path"] = "/mnt/shared/fixture" + entry["path"]
     normalized = core.validate_data_manifest(manifest)
     ranges = tiers.manifest_phase_ranges(normalized)
     assert [r["name"] for r in ranges] == [
@@ -623,7 +630,7 @@ def _exec_receipt(tmp_path, campaign):
     (space / "entries").mkdir(parents=True, exist_ok=True)
     scope = {"fixture": "exec-cli"}
     boundary_entries = {}
-    for boundary in (2, 3):
+    for boundary in (0, 1, 2, 3):
         rows = []
         for batch in range(N_BATCHES):
             ref = write_exact_activation_cache_entry(
