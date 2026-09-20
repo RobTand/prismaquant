@@ -3,6 +3,30 @@
 As of: 2026-09-20 · `flash/strict-reader-tier-enforcement-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-20, `flash/stagea-adjoint-manifest-20260920`) for
+**quantum boundary readset binding** (PQ #848).
+`build_quantum_boundary_readset` derives a quantum's real bulk readset as
+a new immutable v2 manifest from the completed adjoint receipt plus the
+record's sealed chain/layer/checkpoint/windows and probe count: the
+checkpoint plane once (one whole-plane file load; decoded tensors stay
+RAM-resident), each chain layer's boundary entries once per probe in
+batch windows (`render_free_layer_roll` re-opens prefetch per probe),
+then the quantum's own boundary entries once per (replay window, probe)
+(`replay_backward` re-opens a boundary iterator per active probe per
+window). Repeats across phases are the mechanism; resume reads a subset.
+`bind_quantum_boundary_readset` attaches the wire-verified digest/path to
+a new record generation with recomputed identity (inputs never mutated),
+proving the manifest equals what the builder derives from the same record
+and completed-capture receipt -- forged triples refuse even with
+consistent rehashes; only `status: complete` receipts derive anything.
+`emit_quantum_boundary_readsets` is the post-capture generation path the
+regen calls (`--boundary-readsets`, probe count from the sealed plan),
+publishing manifests before records through the first-writer primitive.
+Receipt identity plus attach is provenance only, never a storage lease --
+the readset is the bindable object a PB output-scope staging contract
+admits. Gate:
+`tests/test_quantum_boundary_readset.py`.
+
 Re-stamped (2026-09-20, `container/reader-context-transport-20260920`) for
 **the campaign container forwarding PB's injected reader identity** (PQ
 #856; § container launch). `tools/tessera_campaign_container.py` forwards
