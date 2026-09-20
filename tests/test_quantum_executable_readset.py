@@ -708,13 +708,10 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
         seams["prefetch"] = pxc.prefetch_exact_activation_cache_entries
         import prismaquant.production_weight_cache as _pwc
         seams["rw_unbound"] = _pwc.ProductionWeightCache.retained_window
-        import prismaquant.joint_aura as _ja
-        seams["begin_probe"] = _ja.JointOperatorStatisticsLease.begin_probe
     orig_install = seams["install"]
     orig_load = seams["load"]
     orig_prefetch = seams["prefetch"]
     orig_rw_unbound = seams["rw_unbound"]
-    orig_begin_probe = seams["begin_probe"]
 
     def install_logged(layer, *, require_prefetched=False,
                        prefetch_following=True):
@@ -753,18 +750,17 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
 
     monkeypatch.setattr(
         pxc, "prefetch_exact_activation_cache_entries", prefetch_logged)
-    # Class-level seam so every PWC instance (including the one the replay
-    # loop holds) logs; delegates to the stored original, never stacks.
+    # Instance seam on the exact PWC object the replay holds (instance
+    # patching is observable here; class patching was not). Delegates to the
+    # stored class original so repeated drives never stack wrappers.
 
     @contextlib.contextmanager
-    def rw_logged(self, *args, **kwargs):
+    def rw_logged(*args, **kwargs):
         events.append(("window-open",))
-        with orig_rw_unbound(self, *args, **kwargs) as receipt_obj:
+        with orig_rw_unbound(cache, *args, **kwargs) as receipt_obj:
             yield receipt_obj
 
-    import prismaquant.production_weight_cache as _pwc_mod
-    monkeypatch.setattr(
-        _pwc_mod.ProductionWeightCache, "retained_window", rw_logged)
+    monkeypatch.setattr(cache, "retained_window", rw_logged)
     # Observe-level seam (module function patch, known to fire): proves the
     # replay loop is reached and whether it reports zero-pending (no window).
     import prismaquant.joint_statistics_replay as _replay_mod
@@ -782,33 +778,6 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
 
     monkeypatch.setattr(
         _replay_mod, "observe_and_project_retained_windows", observe_logged)
-    # Preflight runs once per window entry (retained_window.__enter__ calls
-    # it first): log here too, since it is a plain method and cannot be
-    # bypassed by a direct unbound contextmanager call.
-    orig_preflight = seams.setdefault(
-        "rw_preflight",
-        _pwc_mod.ProductionWeightCache._retained_window_preflight)
-
-    def preflight_logged(self, *args, **kwargs):
-        events.append(("window-open",))
-        return orig_preflight(self, *args, **kwargs)
-
-    monkeypatch.setattr(
-        _pwc_mod.ProductionWeightCache, "_retained_window_preflight",
-        preflight_logged)
-    # Lease-begin runs strictly inside the retained_window (see
-    # joint_statistics_replay.py:406-429: the window context opens, then per
-    # probe lease.begin_probe() runs, then backward()). Logging here as well
-    # makes the window-held-before-replay ordering observable even if the
-    # contextmanager patch is ever bypassed by a direct unbound call.
-
-    def begin_logged(self, *args, **kwargs):
-        events.append(("window-open",))
-        return orig_begin_probe(self, *args, **kwargs)
-
-    import prismaquant.joint_aura as _ja_mod
-    monkeypatch.setattr(
-        _ja_mod.JointOperatorStatisticsLease, "begin_probe", begin_logged)
 
     execution = rt._execution(tmp_path / f"qexec-{layer}-{int(resume)}")
     retained = quantum_retained_state(execution)
