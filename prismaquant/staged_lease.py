@@ -10,8 +10,8 @@ nothing here re-implements, shadows, or diverges from it:
   authoritative PB-injected ``PRISMABUILD_READER_HELPER_ROOT``) or, in
   tests only, the explicitly injected reviewed install — never an
   implicit installed fallback in production, which refuses fail-closed.
-  Every imported PB submodule must share one immutable root or the open
-  refuses as divergent. No vendoring.
+  Every imported PB submodule must share one immutable package root or
+  entry refuses as divergent BEFORE any pin is created. No vendoring.
 - Identity comes only from the SDK's ``injected_context`` (PB-owned
   env + live claim row); anything missing refuses, nothing guessed.
 - One :class:`LeaseWindow` per bounded read window — one composed-map
@@ -198,11 +198,17 @@ def inject_installed_sdk_for_tests():
             "test SDK injection needs a non-editable Git install at "
             f"{PB_READER_LEASE_PIN_COMMIT}, found {vcs}")
     import prismabuild.reader_lease as module  # noqa: PLC0415
-    origin = str(Path(getattr(module, "__file__", "")).resolve())
-    if "/pb-reader-lease-pin" in origin or "/tmp/" in origin:
+    try:
+        expected = _package_dir_of(module)
+    except LeaseRefused as exc:
+        raise RuntimeError(f"test SDK injection: {exc}") from None
+    try:
+        _check_package_coherence(expected)
+    except LeaseRefused as exc:
         raise RuntimeError(
-            "test SDK injection refuses a private worktree shadow: "
-            f"{origin}")
+            "test SDK injection refuses divergent preimported "
+            f"prismabuild.* outside {expected}: {exc}") from None
+    origin = str(Path(getattr(module, "__file__", "")).resolve())
     for name in _REQUIRED_NAMES:
         if not hasattr(module, name):
             raise RuntimeError(f"test SDK surface missing {name} at {origin}")
@@ -218,28 +224,94 @@ def clear_injected_sdk_for_tests() -> None:
         _INJECTED = None
 
 
+def _package_dir_of(module) -> Path:
+    """The immutable package root one SDK module proves: its parent dir."""
+    location = getattr(module, "__file__", None)
+    if not location:
+        raise _refuse("lease-helper-divergent: package has no file",
+                      kind="integrity")
+    return Path(location).resolve().parent
+
+
+def _check_package_coherence(expected_dir: Path) -> None:
+    """Refuse any preimported ``prismabuild.*`` outside the expected root.
+
+    Component-wise path containment against the actual package directory
+    proven by the resolved SDK module (plus the package itself) — never a
+    substring or private-path blacklist. Runs BEFORE any acquire, so a
+    divergent preimport cannot strand a pin.
+    """
+    expected = Path(expected_dir).resolve()
+    for name, mod in list(sys.modules.items()):
+        if name != "prismabuild" and not name.startswith("prismabuild."):
+            continue
+        if mod is None:
+            continue
+        location = getattr(mod, "__file__", None)
+        if location is None:
+            paths = getattr(mod, "__path__", None)
+            if paths is None:
+                continue
+            try:
+                entries = [Path(entry).resolve() for entry in paths]
+            except OSError:
+                raise _refuse(
+                    f"lease-helper-divergent: {name} has unresolvable path",
+                    kind="integrity")
+            if not any(entry == expected for entry in entries):
+                raise _refuse(
+                    f"lease-helper-divergent: {name} resolves elsewhere",
+                    kind="integrity")
+            continue
+        try:
+            resolved = Path(location).resolve()
+        except OSError:
+            raise _refuse(
+                f"lease-helper-divergent: {name} has unresolvable file",
+                kind="integrity")
+        if resolved != expected and expected not in resolved.parents:
+            raise _refuse(
+                f"lease-helper-divergent: {name} resolves elsewhere",
+                kind="integrity")
+
+
 def _sdk_from_tree(root: str):
-    """Import the SDK from one sealed generation tree."""
-    src = str(Path(root) / "src")
+    """Import the SDK from one sealed generation tree.
+
+    The tree's package root is ``<root>/src/prismabuild``; the serving
+    module plus every preimported ``prismabuild.*`` must resolve inside
+    it (component-wise containment), else entry refuses divergent before
+    any pin. No substring matching, no vendoring.
+    """
+    src = Path(root) / "src"
+    expected = src / "prismabuild"
     with _HELPER_LOCK:
         present = sys.modules.get("prismabuild.reader_lease")
         if present is not None:
-            if not str(getattr(present, "__file__", "")).startswith(src + os.sep):
-                raise _refuse("lease-helper-divergent", kind="integrity")
             module = present
         else:
-            sys.path.insert(0, src)
+            sys.path.insert(0, str(src))
             try:
                 import prismabuild.reader_lease as module  # noqa: PLC0415
             except ImportError as exc:
                 raise _refuse(f"lease-helper-unavailable: {exc}",
                               kind="availability") from None
-            if not str(getattr(module, "__file__", "")).startswith(src + os.sep):
-                raise _refuse("lease-helper-divergent", kind="integrity")
+        try:
+            served = Path(getattr(module, "__file__", "")).resolve()
+            want = expected.resolve()
+        except OSError:
+            raise _refuse("lease-helper-divergent: unresolvable SDK file",
+                          kind="integrity")
+        try:
+            served.relative_to(want)
+        except ValueError:
+            raise _refuse("lease-helper-divergent: SDK resolves elsewhere",
+                          kind="integrity")
     for name in _REQUIRED_NAMES:
         if not hasattr(module, name):
             raise _refuse(f"lease-helper-unsupported: no {name}",
                           kind="availability")
+    _check_package_coherence(_package_dir_of(module))
     return module
 
 
@@ -478,6 +550,18 @@ class LeaseWindow:
         if self._owner_pid is not None and os.getpid() != self._owner_pid:
             self._require_owner("__enter__")
         sdk, ctx = resolve_context(env=self._env)
+        # Provenance BEFORE side effects: the serving module proves the
+        # expected package root; pool plus every preimported prismabuild.*
+        # (and the package itself) must resolve inside it, component-wise.
+        # A divergent preimport refuses here — before any pin exists, so no
+        # `with` teardown is needed and nothing can strand.
+        expected = _package_dir_of(sdk)
+        try:
+            import prismabuild.pool as pool_mod  # noqa: PLC0415
+        except ImportError as exc:
+            raise _refuse(f"lease-helper-unavailable: {exc}",
+                          kind="availability") from None
+        _check_package_coherence(expected)
         spec = self._spec
         answer = sdk.acquire_for(
             ctx, tier_id=str(spec["tier_id"]), epoch=str(spec["epoch"]),
@@ -496,21 +580,47 @@ class LeaseWindow:
                     refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
             if not isinstance(answer, dict) or not answer.get("ok"):
                 raise _refuse(str(refusal), kind=_classify(refusal))
-        self._pin = answer["pin"]
-        self._pin_id = str(answer["pin_id"])
-        self._ref_id = str(answer["ref_id"])
-        self._consumer = str(ctx["action_key"])
-        self._queue_root = str(ctx["queue_root"])
-        self._pid = os.getpid()
-        self._owner_pid = os.getpid()
+        # Successful acquire: bind state without reporting entry until the
+        # very end. Any failure below releases exactly the just-acquired
+        # ref (ids known) or retains the idempotent token for an explicit
+        # retry (ids unknown) — never a silent strand, never entered=True.
+        pin_id = ref_id = consumer = queue_root = None
+        pin = None
+        try:
+            pin = answer["pin"]
+            pin_id = str(answer["pin_id"])
+            ref_id = str(answer["ref_id"])
+            consumer = str(ctx["action_key"])
+            queue_root = str(ctx["queue_root"])
+            self._pin = pin
+            self._pin_id = pin_id
+            self._ref_id = ref_id
+            self._consumer = consumer
+            self._queue_root = queue_root
+            self._pool_mod = pool_mod
+            self._pid = os.getpid()
+            self._owner_pid = os.getpid()
+        except Exception as exc:
+            if pin_id is not None and ref_id is not None:
+                try:
+                    queue = pool_mod.PoolQueue(queue_root)
+                    released = sdk.release(
+                        queue, pin_id, ref_id,
+                        consumer_action_key=consumer)
+                except Exception as rel_exc:
+                    raise _refuse(
+                        f"lease-enter-failed: {exc}; cleanup-error: {rel_exc}",
+                        kind="integrity") from None
+                if released is not True:
+                    raise _refuse(
+                        f"lease-enter-failed: {exc} (pin retained for retry)",
+                        kind="integrity") from None
+                self._pin = None
+                self._pin_id = None
+                self._ref_id = None
+            raise _refuse(f"lease-enter-failed: {exc}",
+                          kind="integrity") from None
         self._entered = True
-        import prismabuild.pool as pool_mod  # noqa: PLC0415, sealed tree
-        import prismabuild.reader_lease as lease_mod  # noqa: PLC0415
-        if (Path(pool_mod.__file__).resolve().parent
-                != Path(lease_mod.__file__).resolve().parent):
-            raise _refuse("lease-helper-divergent: pool and reader_lease "
-                          "resolve to different trees", kind="integrity")
-        self._pool_mod = pool_mod
         return self
 
     @property

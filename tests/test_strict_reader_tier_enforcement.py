@@ -985,9 +985,10 @@ def test_duplicate_acquire_token_adopts_one_ref(tmp_path, monkeypatch):
 
 
 def test_release_failure_retains_retry_state_then_releases_exactly(tmp_path, monkeypatch):
-    """A real SDK release failure (tainted pin file during unlink) refuses
-    loudly and retains full retry state — no silent strand, no marked
-    release. Restoring the pin lets the retry release exactly."""
+    """SDK ``False``-return path (tainted pin file makes ``release`` return
+    ``False``, not an unlink exception): exit refuses loudly and retains
+    full retry state — no silent strand, no marked release. Restoring the
+    pin lets the retry release exactly."""
     from prismaquant.staged_lease import LeaseRefused, LeaseWindow, covers_for_leads
     _pb()
     consumer = _hex64(f"consumer-{tmp_path}")
@@ -1253,6 +1254,161 @@ def test_released_window_reuse_and_nesting_refuse(tmp_path, monkeypatch):
         with window:
             pass
     assert _pins_live(tmp_path, consumer) == []
+
+
+# -- authoritative production discovery: sealed source tree -------------------
+
+def _build_coherent_tree(tmp_path):
+    """Copy the pinned installed package into a generation-style tree.
+
+    Build-only use of the install location: the servant under test is the
+    ``gen/src`` tree via the authoritative helper root, never the install.
+    """
+    import shutil
+    import prismabuild.reader_lease as installed_rl
+    src_pkg = Path(installed_rl.__file__).resolve().parent
+    gen = tmp_path / 'gen-root'
+    tree_pkg = gen / 'src' / 'prismabuild'
+    tree_pkg.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src_pkg, tree_pkg,
+                    ignore=shutil.ignore_patterns('__pycache__'),
+                    dirs_exist_ok=True)
+    return gen
+
+
+def _purge_pb_modules():
+    import sys
+    saved_mods = {k: v for k, v in sys.modules.items()
+                  if k == "prismabuild" or k.startswith("prismabuild.")}
+    for k in list(saved_mods):
+        del sys.modules[k]
+    saved_path = list(sys.path)
+    return saved_mods, saved_path
+
+
+def _restore_pb_modules(saved_mods, saved_path):
+    import sys
+    for k in [k for k in sys.modules
+              if k == "prismabuild" or k.startswith("prismabuild.")]:
+        del sys.modules[k]
+    sys.modules.update(saved_mods)
+    sys.path[:] = saved_path
+
+
+def test_production_tree_discovery_serves_and_releases(tmp_path, monkeypatch):
+    """Authoritative discovery: a coherent sealed source tree serves pinned
+    bytes and releases exactly, with every PB submodule under one root."""
+    import sys
+    from prismaquant.staged_lease import (
+        HELPER_ROOT_ENV_VAR, LeaseWindow, _package_dir_of,
+        clear_injected_sdk_for_tests, covers_for_leads, set_lease_helper_root)
+    gen = _build_coherent_tree(tmp_path)
+    saved_mods, saved_path = _purge_pb_modules()
+    clear_injected_sdk_for_tests()
+    set_lease_helper_root(None)
+    monkeypatch.setenv(HELPER_ROOT_ENV_VAR, str(gen))
+    sys.path.insert(0, str(gen / 'src'))
+    try:
+        import prismabuild.reader_lease as rl
+        import prismabuild.pool as pool_mod
+        import prismabuild.residency_map as map_mod
+        tree_root = (gen / 'src' / 'prismabuild').resolve()
+        assert Path(rl.__file__).resolve().is_relative_to(tree_root)
+        assert _package_dir_of(rl).resolve() == tree_root
+        consumer = _hex64(f"consumer-{tmp_path}")
+        queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
+        blob = b"production-tree-discovery-bytes-0011"
+        declared = tmp_path / 'pool' / 'd.bin'
+        declared.parent.mkdir(parents=True, exist_ok=True)
+        declared.write_bytes(blob)
+        staged = stage / 'd.bin'
+        staged.write_bytes(blob)
+        digest = hashlib.sha256(blob).hexdigest()
+        mover = _hex64(f"mover-{tmp_path}")
+        root = tmp_path / 'residency'
+        key = residency_map_key(str(declared), 0)
+        _pb_publish(rl, map_mod, root, stage, consumer, mover, MANIFEST,
+                    {key: (declared, staged)})
+        _launch_env(monkeypatch, consumer)
+        monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
+        spec = {"tier_id": STAGE_TIER, "epoch": "",
+                "covers": covers_for_leads([mover], MANIFEST),
+                "expected": {key: {"bytes": len(blob), "sha256": digest}},
+                "span": {"start_bytes": 0, "end_bytes": len(blob)}}
+        window = LeaseWindow(spec, acquire_token="token-tree-ok")
+        with window:
+            assert Path(
+                window._pool_mod.__file__).resolve().is_relative_to(tree_root)
+            fd, serving = window.open(key)
+            try:
+                got = os.pread(fd, len(blob), 0)
+            finally:
+                window.close_fd(fd)
+            assert got == blob
+            assert serving.get("pin_id")
+        assert _pins_live(tmp_path, consumer) == []
+    finally:
+        _restore_pb_modules(saved_mods, saved_path)
+
+
+def test_divergent_preimport_refuses_before_any_pin(tmp_path, monkeypatch):
+    """A divergent ``pool``/``residency_map`` preimport refuses at enter,
+    before any pin file exists — no strand, no teardown needed."""
+    import sys
+    import types
+    from prismaquant.staged_lease import (
+        HELPER_ROOT_ENV_VAR, LeaseRefused, LeaseWindow,
+        clear_injected_sdk_for_tests, covers_for_leads, set_lease_helper_root)
+    gen = _build_coherent_tree(tmp_path)
+    saved_mods, saved_path = _purge_pb_modules()
+    clear_injected_sdk_for_tests()
+    set_lease_helper_root(None)
+    monkeypatch.setenv(HELPER_ROOT_ENV_VAR, str(gen))
+    sys.path.insert(0, str(gen / 'src'))
+    try:
+        import prismabuild.reader_lease as rl
+        import prismabuild.pool as pool_mod
+        import prismabuild.residency_map as map_mod
+        consumer = _hex64(f"consumer-{tmp_path}")
+        queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
+        blob = b"divergent-preimport-refusal-bytes-22"
+        declared = tmp_path / 'pool' / 'd.bin'
+        declared.parent.mkdir(parents=True, exist_ok=True)
+        declared.write_bytes(blob)
+        staged = stage / 'd.bin'
+        staged.write_bytes(blob)
+        digest = hashlib.sha256(blob).hexdigest()
+        mover = _hex64(f"mover-{tmp_path}")
+        root = tmp_path / 'residency'
+        key = residency_map_key(str(declared), 0)
+        _pb_publish(rl, map_mod, root, stage, consumer, mover, MANIFEST,
+                    {key: (declared, staged)})
+        _launch_env(monkeypatch, consumer)
+        monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
+        spec = {"tier_id": STAGE_TIER, "epoch": "",
+                "covers": covers_for_leads([mover], MANIFEST),
+                "expected": {key: {"bytes": len(blob), "sha256": digest}},
+                "span": {"start_bytes": 0, "end_bytes": len(blob)}}
+        for stub_name, token in (("prismabuild.pool", "token-div-pool"),
+                                 ("prismabuild.residency_map", "token-div-map")):
+            stub = types.ModuleType(stub_name)
+            stub.__file__ = "/elsewhere/prismabuild/" + stub_name.split(".")[-1] + ".py"
+            real = sys.modules.get(stub_name)
+            sys.modules[stub_name] = stub
+            try:
+                window = LeaseWindow(spec, acquire_token=token)
+                with pytest.raises(LeaseRefused, match="divergent"):
+                    with window:
+                        pass
+                assert not window._entered
+                assert _pins_live(tmp_path, consumer) == []
+            finally:
+                if real is not None:
+                    sys.modules[stub_name] = real
+                else:
+                    del sys.modules[stub_name]
+    finally:
+        _restore_pb_modules(saved_mods, saved_path)
 
 
 # -- strict checkpoint shared-state payloads, pinned -------------------------
