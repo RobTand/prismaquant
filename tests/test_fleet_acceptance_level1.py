@@ -667,7 +667,8 @@ def _run_scenario(name: str, tmp_path: Path, scenario_dir: str,
     base = candidate_work if candidate_work is not None else tmp_path
     work = base / scenario_dir
     result = base / (scenario_dir + ".json")
-    notes = work / scenario_dir / "notes.json"
+    # The runner nests one level by scenario name under --work.
+    notes = work / name / "notes.json"
     done = subprocess.run(
         [sys.executable, str(RUNNER), name, "--work", str(work),
          "--result", str(result), "--checkout", str(ROOT)],
