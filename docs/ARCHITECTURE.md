@@ -72,10 +72,10 @@ named gaps. Gate: `tests/test_strict_reader_tier_enforcement.py` (plus
 
 Lease follow-on (PQ #850, same branch, unmerged): strict reads pin
 through the exact PB family (`injected_context`/`acquire_for`/
-`open_pinned`/`release`/`covers_for_keys`, pin `2637a9d0f7` as a reviewed
-installed dependency, never a worktree) — RAM-first: live tmpfs copies
-pin at the announced epoch via resolved, cross-checked RAM covers and
-serve; one window per entry with a single-shot enter/exit contract
+`open_pinned`/`release`/`covers_for_keys`, candidate integration pin
+`2637a9d0f7` as an installed dependency — NOT accepted or deployed; the
+final accepted merged PB pin update lands at integration, with no
+capability assertion) — RAM-first: live tmpfs copies pin at the
 (reuse and nesting refuse, never silent reacquisition); checkpoint
 payloads read into one owned buffer with sealed bounds checked before
 allocation; SDK serving records (with pin IDs) at open, exact release on

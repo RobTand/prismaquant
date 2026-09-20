@@ -4,7 +4,7 @@ The staged-read contract forbids bulk-input reads from the pool/HDD tier;
 the reader-lease contract pins every staged byte for its reader's
 lifetime. These tests run the REAL chain — real resolver, real composed
 map, real PB fragments/material written by the REAL PB writers, the REAL
-pinned SDK (`a6e6b310a1`, drift-refused), real claim rows in the real
+pinned SDK (candidate integration pin, drift-refused), real claim rows in the real
 format — on tiny fixtures, never giant payloads:
 
 - the legacy test proves the hole (inactive policy serves pool bytes);
@@ -60,16 +60,22 @@ def _forget_state(monkeypatch):
     monkeypatch.delenv(ENV_VAR, raising=False)
     monkeypatch.delenv(TIERS_DIR_ENV_VAR, raising=False)
     monkeypatch.delenv("PRISMABUILD_ACTION_KEY", raising=False)
+    monkeypatch.delenv("PRISMABUILD_ACTION_NONCE", raising=False)
+    monkeypatch.delenv("PRISMABUILD_ACTION_SCOPE", raising=False)
+    monkeypatch.delenv("PRISMABUILD_READER_HELPER_ROOT", raising=False)
     reset_residency_resolver_for_tests()
     deactivate_staged_tier_policy_for_tests()
     set_lease_helper_root(None)
-    from prismaquant.staged_lease import _ACQUIRE_CONTEXT
+    from prismaquant.staged_lease import (
+        _ACQUIRE_CONTEXT, clear_injected_sdk_for_tests)
     _ACQUIRE_CONTEXT.clear()
+    clear_injected_sdk_for_tests()
     yield
     reset_residency_resolver_for_tests()
     deactivate_staged_tier_policy_for_tests()
     set_lease_helper_root(None)
     _ACQUIRE_CONTEXT.clear()
+    clear_injected_sdk_for_tests()
 
 
 def _hex64(seed: str) -> str:
@@ -93,23 +99,19 @@ def _launch_env(monkeypatch, consumer):
 # -- pinned PB SDK + queue fixtures (real writers, real formats) ------------
 
 def _pb():
-    """The reviewed installed SDK; refuses private-worktree shadows.
+    """The reviewed installed SDK via explicit test-only injection.
 
-    Commit, RECORD bytes, and shadow-freedom are proved by the pbtest pin
-    guard before pytest starts; here the origin is attributed and the
-    exact API surface re-checked, so a passing suite always names what
-    it ran against.
+    Provenance (single non-editable install at the candidate pin, no
+    worktree shadow) is asserted inside the injection; the pbtest pin
+    guard proves it worker-side before pytest starts. The exact API
+    surface is re-checked, so a passing suite always names what it ran
+    against. Never silently skips on a missing dependency.
     """
-    import prismabuild.reader_lease as rl
+    from prismaquant.staged_lease import inject_installed_sdk_for_tests
+    module = inject_installed_sdk_for_tests()
     import prismabuild.pool as pool_mod
     import prismabuild.residency_map as map_mod
-    origin = str(Path(rl.__file__).resolve())
-    assert "/pb-reader-lease-pin" not in origin, (
-        f"must use the reviewed install, not a private worktree: {origin}")
-    for name in ("acquire_for", "open_pinned", "release", "covers_for_keys",
-                 "injected_context", "register_inherited_ref"):
-        assert hasattr(rl, name), f"SDK surface missing {name} at {origin}"
-    return rl, pool_mod, map_mod
+    return module, pool_mod, map_mod
 
 
 def _pb_queue(tmp_path, pool_mod, consumer):
@@ -979,6 +981,51 @@ def test_duplicate_acquire_token_adopts_one_ref(tmp_path, monkeypatch):
         # live windows never share).
     # The first window's exit is idempotent: the pin is already gone,
     # released exactly once.
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_release_failure_retains_retry_state_then_releases_exactly(tmp_path, monkeypatch):
+    """A real SDK release failure (tainted pin file during unlink) refuses
+    loudly and retains full retry state — no silent strand, no marked
+    release. Restoring the pin lets the retry release exactly."""
+    from prismaquant.staged_lease import LeaseRefused, LeaseWindow, covers_for_leads
+    _pb()
+    consumer = _hex64(f"consumer-{tmp_path}")
+    import prismabuild.pool as pool_mod
+    import prismabuild.residency_map as map_mod
+    import prismabuild.reader_lease as rl
+    queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
+    blob = b"release-failure-retry-bytes-0123456"
+    declared = tmp_path / 'pool' / 'd.bin'
+    declared.parent.mkdir(parents=True, exist_ok=True)
+    declared.write_bytes(blob)
+    staged = stage / 'd.bin'
+    staged.write_bytes(blob)
+    digest = hashlib.sha256(blob).hexdigest()
+    mover = _hex64(f"mover-{tmp_path}")
+    root = tmp_path / 'residency'
+    key = residency_map_key(str(declared), 0)
+    _pb_publish(rl, map_mod, root, stage, consumer, mover, MANIFEST,
+                {key: (declared, staged)})
+    _launch_env(monkeypatch, consumer)
+    monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
+    spec = {"tier_id": STAGE_TIER, "epoch": "",
+            "covers": covers_for_leads([mover], MANIFEST),
+            "expected": {key: {"bytes": len(blob), "sha256": digest}},
+            "span": {"start_bytes": 0, "end_bytes": len(blob)}}
+    window = LeaseWindow(spec, acquire_token="token-relfail")
+    pin_path = (tmp_path / 'residency' / 'leases' / consumer)
+    with window:
+        assert len(_pins_live(tmp_path, consumer)) == 1
+        saved = json.loads(
+            (pin_path / f"{window._pin_id}.lease.json").read_text())
+        (pin_path / f"{window._pin_id}.lease.json").write_text("tainted{")
+        with pytest.raises(LeaseRefused, match="lease-release-failed"):
+            window.__exit__(None, None, None)
+        assert window._released is False
+        assert len(_pins_live(tmp_path, consumer)) == 1
+        (pin_path / f"{window._pin_id}.lease.json").write_text(
+            json.dumps(saved, sort_keys=True) + "\n")
     assert _pins_live(tmp_path, consumer) == []
 
 

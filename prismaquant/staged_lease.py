@@ -6,12 +6,12 @@ family (`injected_context` / `acquire_for` / `open_pinned` / `release`,
 capability `reader-lease-v1`). The PB worker owns that implementation —
 nothing here re-implements, shadows, or diverges from it:
 
-- The SDK is imported only from a sealed root: the explicit override
-  (tests/wiring) else the authoritative PB-injected
-  ``PRISMABUILD_READER_HELPER_ROOT`` (sealed generation path, forwarded
-  read-only) — never a user knob, never mutable active ``/repo``
-  resolution, no vendoring. The imported tree is verified to be that
-  root, and a divergent pre-import refuses.
+- The SDK resolves from a sealed tree (explicit override, else the
+  authoritative PB-injected ``PRISMABUILD_READER_HELPER_ROOT``) or, in
+  tests only, the explicitly injected reviewed install — never an
+  implicit installed fallback in production, which refuses fail-closed.
+  Every imported PB submodule must share one immutable root or the open
+  refuses as divergent. No vendoring.
 - Identity comes only from the SDK's ``injected_context`` (PB-owned
   env + live claim row); anything missing refuses, nothing guessed.
 - One :class:`LeaseWindow` per bounded read window — one composed-map
@@ -48,9 +48,10 @@ from pathlib import Path
 
 from .staged_tier_policy import TierPolicyRefused
 
-#: Approved PB candidate commit (installed reviewed dependency; the
-#: owning literal the test resolver reads — see
-#: tools/resolve_prismabuild_dev_pin.py).
+#: Candidate integration pin for the PB reader lease (NOT accepted or
+#: deployed; final accepted merged PB pin update required at integration).
+#: The owning literal the test resolver reads — see
+#: tools/resolve_prismabuild_dev_pin.py. No capability assertion rides it.
 PB_READER_LEASE_PIN_COMMIT = "2637a9d0f7d31afbce7ad2e5735e8334fe37a40d"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
@@ -71,6 +72,9 @@ _AVAILABILITY_REFUSALS = ("unpublished", "stale-epoch", "retiring",
 
 _HELPER_LOCK = threading.Lock()
 _HELPER_ROOT: str | None = None
+#: Test-only injected SDK module (see inject_installed_sdk_for_tests).
+#: Production never sets this: it resolves the sealed tree or refuses.
+_INJECTED = None
 
 #: Authoritative PB-injected helper root: the sealed generation path PB
 #: forwards core+container read-only. Read automatically as the production
@@ -140,24 +144,78 @@ def _sdk():
     override else the authoritative PB-injected ``PRISMABUILD_READER_HELPER_ROOT``
     (generation root; ``src/`` appended per the agreed contract), verified
     to actually serve the imported module — no shadow, no divergent
-    pre-import. (2) The reviewed installed dependency: a normal import,
-    whose commit, RECORD bytes, and shadow-freedom the pbtest pin guard
-    proves before pytest starts (see tools/resolve_prismabuild_dev_pin.py).
-    Required names are checked on both paths. Neither path vendors code.
+    pre-import. (2) The TEST-ONLY injected reviewed install (see
+    :func:`inject_installed_sdk_for_tests`): the pbtest pin guard proves
+    its commit, RECORD bytes, and shadow-freedom before pytest starts.
+    Production with no sealed tree refuses fail-closed
+    (``lease-helper-unavailable``) — an installed package is never an
+    implicit production fallback. Neither path vendors code.
     """
     root = lease_helper_root()
     if root is not None:
         return _sdk_from_tree(root)
+    with _HELPER_LOCK:
+        injected = _INJECTED
+    if injected is not None:
+        for name in _REQUIRED_NAMES:
+            if not hasattr(injected, name):
+                raise _refuse(f"lease-helper-unsupported: no {name}",
+                              kind="availability")
+        return injected
+    raise _refuse("lease-helper-unavailable", kind="availability")
+
+
+def inject_installed_sdk_for_tests():
+    """TEST-ONLY explicit injection of the reviewed installed distribution.
+
+    Binds the ``prismabuild`` resolved by normal import after verifying it
+    is a single installed distribution at exactly
+    :data:`PB_READER_LEASE_PIN_COMMIT` (no worktree shadow, no editable
+    install — the same properties the pbtest pin guard proves worker-side
+    before pytest). Raises ``RuntimeError`` (never a tier refusal) when
+    the environment does not provide it: tests fail loudly on a missing
+    dependency, never silently skip. Production never calls this.
+    """
+    global _INJECTED
+    import importlib.metadata as metadata
+    import json as _json
+    owners = metadata.packages_distributions().get("prismabuild", [])
+    if len(owners) != 1:
+        raise RuntimeError(
+            "test SDK injection needs exactly one installed distribution "
+            f"owning prismabuild, found {owners}")
+    dist = metadata.distribution(owners[0])
     try:
-        import prismabuild.reader_lease as module  # noqa: PLC0415
-    except ImportError as exc:
-        raise _refuse(f"lease-helper-unavailable: {exc}",
-                      kind="availability") from None
+        direct = _json.loads(dist.read_text("direct_url.json") or "{}")
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            "test SDK injection cannot prove install provenance") from exc
+    vcs = direct.get("vcs_info", {})
+    if (direct.get("dir_info", {}).get("editable")
+            or vcs.get("vcs") != "git"
+            or vcs.get("commit_id") != PB_READER_LEASE_PIN_COMMIT):
+        raise RuntimeError(
+            "test SDK injection needs a non-editable Git install at "
+            f"{PB_READER_LEASE_PIN_COMMIT}, found {vcs}")
+    import prismabuild.reader_lease as module  # noqa: PLC0415
+    origin = str(Path(getattr(module, "__file__", "")).resolve())
+    if "/pb-reader-lease-pin" in origin or "/tmp/" in origin:
+        raise RuntimeError(
+            "test SDK injection refuses a private worktree shadow: "
+            f"{origin}")
     for name in _REQUIRED_NAMES:
         if not hasattr(module, name):
-            raise _refuse(f"lease-helper-unsupported: no {name}",
-                          kind="availability")
+            raise RuntimeError(f"test SDK surface missing {name} at {origin}")
+    with _HELPER_LOCK:
+        _INJECTED = module
     return module
+
+
+def clear_injected_sdk_for_tests() -> None:
+    """Drop the test-only injection (fixture hygiene)."""
+    global _INJECTED
+    with _HELPER_LOCK:
+        _INJECTED = None
 
 
 def _sdk_from_tree(root: str):
@@ -447,6 +505,11 @@ class LeaseWindow:
         self._owner_pid = os.getpid()
         self._entered = True
         import prismabuild.pool as pool_mod  # noqa: PLC0415, sealed tree
+        import prismabuild.reader_lease as lease_mod  # noqa: PLC0415
+        if (Path(pool_mod.__file__).resolve().parent
+                != Path(lease_mod.__file__).resolve().parent):
+            raise _refuse("lease-helper-divergent: pool and reader_lease "
+                          "resolve to different trees", kind="integrity")
         self._pool_mod = pool_mod
         return self
 
@@ -561,7 +624,15 @@ class LeaseWindow:
         sdk, _ctx = resolve_context(env=self._env)
         queue = self._pool_mod.PoolQueue(self._queue_root)
         try:
-            sdk.release(queue, self._pin_id, self._ref_id,
-                        consumer_action_key=self._consumer)
-        finally:
-            self._released = True
+            released = sdk.release(queue, self._pin_id, self._ref_id,
+                                   consumer_action_key=self._consumer)
+        except Exception as exc:
+            raise LeaseRefused(f"lease-release-failed: {exc}",
+                               kind="integrity") from exc
+        # The SDK returns False (never an exception) for a failed pin
+        # write/unlink: only an exact True releases. Anything else keeps
+        # full retry state so a failed exit never silently strands a ref.
+        if released is not True:
+            raise LeaseRefused("lease-release-failed: pin not released",
+                               kind="integrity")
+        self._released = True
