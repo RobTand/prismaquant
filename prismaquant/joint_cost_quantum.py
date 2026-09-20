@@ -145,11 +145,17 @@ def verify_quantum_identity(
         if _digest_of(adjoint_path) != adjoint_sha256:
             raise QuantumIdentityRefused(
                 f"adjoint receipt digest mismatch at {adjoint_path}")
-        if adjoint["receipt_sha256"] != adjoint_sha256:
+        receipt = load_adjoint_receipt(adjoint_path, adjoint_sha256)
+        # Wire and document identity are different bindings: the CLI carries
+        # the wire bytes the writer wrote (checked above and inside the
+        # loader), while the record carries the canonical digest the
+        # producer sealed. Each is compared against its matching
+        # representation -- never wire against canonical.
+        if (adjoint["receipt_sha256"] != canonical_json_sha256(
+                receipt, where="adjoint receipt identity")):
             raise QuantumIdentityRefused(
                 "quantum record binds another adjoint receipt: "
-                f"record={adjoint['receipt_sha256']!r} argv={adjoint_sha256}")
-        receipt = load_adjoint_receipt(adjoint_path, adjoint_sha256)
+                f"record={adjoint['receipt_sha256']!r}")
         if receipt.get("status") != "complete":
             raise QuantumIdentityRefused(
                 f"adjoint receipt status is {receipt.get('status')!r}, not complete")
@@ -208,7 +214,8 @@ def verify_quantum_identity(
                     "read_manifest_sha256": campaign["read_manifest_sha256"],
                     "unit_roster_sha256": campaign["unit_roster_sha256"],
                     "campaign_scope": campaign["campaign_scope"],
-                    "adjoint_receipt_sha256": adjoint_sha256,
+                    "adjoint_receipt_sha256": canonical_json_sha256(
+                        receipt, where="adjoint receipt identity"),
                 })
             except ValueError as exc:
                 raise QuantumIdentityRefused(
@@ -1625,7 +1632,9 @@ def run_layer_quantum(
     return result
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The layer-quantum CLI surface, shared by ``main`` and by tests that
+    prove a dispatcher payload parses before any gate runs."""
     parser = argparse.ArgumentParser(
         description="Run one layer quantum of the distributed joint-AURA "
                     "cost campaign (contract §6).")
@@ -1647,6 +1656,11 @@ def main(argv=None) -> int:
                              "of record, not every quantum)")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--data-manifest-sha256")
+    return parser
+
+
+def main(argv=None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.device != "cuda":
         parser.error("layer quanta are a GPU hot path; --device must be cuda")

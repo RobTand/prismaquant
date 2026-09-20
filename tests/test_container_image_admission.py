@@ -126,6 +126,10 @@ def _quantum_record(tmp_path: Path) -> Path:
     record_path.write_text(json.dumps({
         "schema": joint.RECORD_SCHEMA, "quantum_id": "layer-001", "layer": 1,
         "identity_sha256": "3" * 64,
+        "campaign": {"plan_path": str(tmp_path / "plan.json"),
+                     "plan_sha256": "1" * 64,
+                     "prepared_path": "/fixture/prepared.json",
+                     "prepared_sha256": "2" * 64},
         "read_set": {"manifest_path": str(slice_path),
                      "manifest_sha256": hashlib.sha256(
                          slice_path.read_bytes()).hexdigest()},
@@ -142,8 +146,11 @@ def test_stage_a_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec)
 def test_quantum_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec):
     record_path = _quantum_record(tmp_path)
     record = json.loads(record_path.read_text())
+    adjoint_path = tmp_path / "adjoint-capture.json"
+    adjoint_path.write_bytes(b'{"receipt": "fixture"}')
     argv = joint.quantum_argv(record, record_path=record_path,
-                              output_root=tmp_path / "out")
+                              output_root=tmp_path / "out",
+                              adjoint_path=adjoint_path)
     embedded = _embedded_spec(argv)
     assert _pbrun_option(argv, IMAGE_FLAG) == embedded["container"]["image"]
 

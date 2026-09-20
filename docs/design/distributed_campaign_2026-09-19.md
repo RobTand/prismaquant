@@ -332,8 +332,8 @@ keeps). Pure, deterministic, testable: same inputs → byte-identical records.
   stride, output_root)` → `{"records": […45 records…],
   "slice_manifests": {quantum_id: manifest_dict},
   "adjoint_manifest": <the stage-A read manifest, v2 `read_plan` in true
-  consumption order -- `head`, per-layer `forward_{L:03d}` ascending,
-  per-layer `chain_{L:03d}` descending (no tail phase; tail work commits
+  consumption order -- `head`, per-layer `forward-{L:03d}` ascending,
+  per-layer `chain-{L:03d}` descending (no tail phase; tail work commits
   under forward-last) -- with `entry_indices` into one
   entries list (no duplication for the repeated reads) and
   `entry_point: "prismaquant.joint_adjoint_capture"`>,
@@ -457,14 +457,44 @@ pbrun --tag gb10 \
       python3 -m tools.tessera_campaign_container --spec <spec> -- \
       python3 -m prismaquant.joint_cost_quantum \
         --quantum …/layer-quanta/records/layer-013.json \
-        --quantum-sha256 <identity_sha256> \
+        --quantum-sha256 <record file wire digest> \
+        --plan <plan> --plan-sha256 <plan digest> \
+        --prepared <prepared> --prepared-sha256 <prepared digest> \
+        --adjoint <adjoint-capture.json> --adjoint-sha256 <receipt wire digest> \
         --data-manifest-sha256 <slice manifest bytes digest> \
+        --resume \
         --output-root …/complete-512-seed237….encoder-reuse-02
 ```
 
 The slice digest is the row's own read-set digest (`read_set.manifest_sha256`),
 verified against the slice file at dispatch: the quantum binds the bytes pbrun
-stages for it, never the campaign parent it also carries (PQ #835).
+stages for it, never the campaign parent it also carries (PQ #835). The
+record digest is the record file's wire bytes (the consumer checks raw bytes
+first; its canonical body check inside stays), and the receipt digest is the
+receipt file's wire bytes (PQ #838: earlier rows bound the canonical digests
+and died in argparse or at the first gate).
+
+Wire and document identity stay distinct end to end. The producer seals the
+canonical digest of the decoded receipt (`bind_adjoint_receipt`); the writer
+persists pretty JSON plus a newline (`write_adjoint_receipt`). The dispatcher
+receipt gate and the consumer's record-vs-argv check therefore compare the
+record's canonical digest against the canonical digest of the decoded file --
+never raw bytes against the seal, which valid writer output fails. The CLI
+flags bind wire on both files, and the wire checks stay where they were.
+
+Quantum records are produced, never edited (producer D3). The reviewed
+regeneration path is `tools/regenerate_joint_quanta.py`: it replays the
+`layer_quanta()` producer call from digest-verified plan/prepared/parent
+inputs (gzip-transparent, digest over wire bytes) with the authoritative
+output root (never the tool's own directory), writes record files into a
+reviewed directory and slice manifests at the producer-named absolute
+paths the records bind (verified to resolve after writing), reproduces
+receipt-less at the original root against on-disk records under
+`--expect-existing`/`--original-root` (Gate 1a), validates that a root move
+touches only the authorized path fields (Gate 1b), and re-seals against
+`--adjoint-receipt` (Gate 2). Old records and history stay where they are;
+boundary payloads are never copied. The adjoint manifest itself is the
+phase worker's file and is never written here.
 
 - `PRISMAQUANT_DEV_MODE=1` (PR #776) is the interim lane: submissions run
   from any checkout with no campaign branch, no transition receipts, and the
