@@ -4,35 +4,144 @@ from __future__ import annotations
 from collections.abc import Sequence
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 
 import torch
 
 
-def load_calibration_input(path, *, expected_sha256, n_samples, seqlen):
-    """Load an independently pinned token draw without invoking a sampler.
+def _read_calibration_payload(path: Path, expected_sha256: str) -> bytes:
+    """One calibration artifact, staged-pinned under the active tier policy.
 
-    The campaign's ``fit_ids_sha256`` hashes int32 token bytes; joint AURA
-    hashes the actual int64 tensor. Preserve and check both conventions.
-    This is explicit artifact preparation, outside the measurement hot path.
+    The whole-file counterpart to the checkpoint shared-state staged read:
+    the bound map entry (whole file at offset 0, digest-bound to the
+    caller's independently pinned ``expected_sha256``) is opened through a
+    lifetime-pinned window — RAM first where offered and allowed, honest
+    SSD re-acquire otherwise, never the pool — and read once into an owned
+    buffer with the same sealed size/change fences. The descriptor closes
+    and the exact ref releases before the caller decodes: no raw fd or
+    mapping escapes, and the returned bytes outlive the lease.
     """
-    from safetensors import safe_open
+    from .residency_map import residency_resolver
+    from .staged_lease import LeaseRefused, acquire_entry_window
+    from .staged_tier_policy import refuse_pool_bulk_read
 
-    if not isinstance(expected_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
-        raise ValueError("exact calibration input requires its independent SHA256")
-    path = Path(path)
-    artifact_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
-    if artifact_sha256 != expected_sha256:
-        raise ValueError("exact calibration input artifact SHA256 mismatch")
-    with safe_open(str(path), framework="pt", device="cpu") as stream:
-        if set(stream.keys()) != {"calibration_ids"}:
-            raise ValueError("exact calibration input requires only calibration_ids")
+    label = str(path)
+    resolver = residency_resolver()
+    if resolver is None:
+        raise refuse_pool_bulk_read(label, "readset-not-staged")
+    staged = resolver.staged_read(path, expected_sha256=expected_sha256)
+    if staged is None:
+        raise refuse_pool_bulk_read(label, "readset-not-staged")
+    size = staged.get("bytes")
+    if type(size) is not int or isinstance(size, bool) or size <= 0:
+        raise refuse_pool_bulk_read(label, "readset-not-staged")
+    window, key = acquire_entry_window(resolver, path, staged)
+    with window:
         try:
-            provenance = json.loads(stream.metadata()["calibration_provenance"])
-        except (TypeError, KeyError, ValueError) as exc:
-            raise ValueError("exact calibration input requires calibration_provenance JSON") from exc
-        ids = stream.get_tensor("calibration_ids")
+            fd, serving = window.open(key)
+        except LeaseRefused as refusal:
+            resolver.record_fallback(path, str(refusal))
+            raise
+        tier = window.serving_tier or "stage"
+        resolver.record_serving_tier(
+            path, tier, pin_id=str(serving.get("pin_id") or ""),
+            range_ref=str(serving.get("range_ref") or ""))
+        # Sealed bounds before allocation: the held descriptor's size must
+        # match the staged entry's, or no buffer is built.
+        first = os.fstat(fd)
+        if first.st_size != size:
+            raise LeaseRefused("calibration-changed-under-pin",
+                               kind="integrity")
+        # One owned buffer, filled in place: the caller's digest hashes
+        # these same bytes and the tensor below decodes from them, so one
+        # staged read serves verification and decode alike.
+        raw = bytearray(size)
+        view = memoryview(raw)
+        try:
+            remaining = size
+            offset = 0
+            while remaining > 0:
+                try:
+                    moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
+                except OSError as exc:
+                    raise LeaseRefused(
+                        f"calibration-unreadable: {exc.strerror}",
+                        kind="availability") from None
+                if moved <= 0:
+                    break
+                offset += moved
+                remaining -= moved
+            if remaining:
+                raise LeaseRefused("calibration-truncated", kind="integrity")
+            if os.pread(fd, 1, size):
+                raise LeaseRefused("calibration-grew-during-read",
+                                   kind="integrity")
+            last = os.fstat(fd)
+            if (last.st_ino, last.st_size, last.st_mtime_ns) != (
+                    first.st_ino, first.st_size, first.st_mtime_ns):
+                raise LeaseRefused("calibration-changed-under-pin",
+                                   kind="integrity")
+        finally:
+            view.release()
+    if tier == "ram":
+        resolver.record_ram_read(path, len(raw))
+    else:
+        resolver.record_stage_read(path, len(raw))
+    return bytes(raw)
+
+
+def _decode_calibration_buffer(raw: bytes) -> tuple[torch.Tensor, dict]:
+    """The pinned ``(calibration_ids, provenance)`` out of staged bytes.
+
+    Tensor decoding is the installed public bytes decoder
+    (``safetensors.torch.load``) — the canonical parser, which rejects
+    noncontiguous and trailing framing a span reader would accept — never
+    a private reimplementation. Only the ``calibration_provenance``
+    metadata still comes from a bounded header extraction. The decoded
+    tensors retain decoder-owned storage and stay valid after the lease
+    releases. The reader freezes its bytearray once; the public decoder
+    manages its own allocations, so this is not a zero-copy guarantee.
+    Structural problems are the offline contract's
+    ValueErrors, exactly as the ``safe_open`` path reports them (the
+    decoders' own exception types are wrapped, never compared).
+    """
+    from .residency_shard_reader import MAX_HEADER_BYTES
+
+    from safetensors.torch import load
+
+    if len(raw) < 8:
+        raise ValueError("exact calibration input has no safetensors header length")
+    header_bytes = int.from_bytes(raw[:8], "little")
+    if not 0 < header_bytes <= min(MAX_HEADER_BYTES, len(raw) - 8):
+        raise ValueError("exact calibration input header length is out of range")
+    try:
+        header = json.loads(raw[8:8 + header_bytes])
+    except ValueError as exc:
+        raise ValueError("exact calibration input header is not an object") from exc
+    if type(header) is not dict:
+        raise ValueError("exact calibration input header is not an object")
+    try:
+        provenance = json.loads(header["__metadata__"]["calibration_provenance"])
+    except (TypeError, KeyError, ValueError) as exc:
+        raise ValueError("exact calibration input requires calibration_provenance JSON") from exc
+    try:
+        tensors = load(bytes(raw))
+    except Exception as exc:
+        raise ValueError(
+            "exact calibration input is not a decodable safetensors artifact") from exc
+    if set(tensors) != {"calibration_ids"}:
+        raise ValueError("exact calibration input requires only calibration_ids")
+    return tensors["calibration_ids"], provenance
+
+
+def _validate_calibration_draw(ids, provenance, *, artifact_sha256, n_samples, seqlen):
+    """The offline draw contract, shared by both read paths.
+
+    dtype/shape/domain/provenance/draw-hash checks and both identity hash
+    conventions, exactly as the legacy reader reports them.
+    """
     if ids.dtype != torch.int64 or list(ids.shape) != [n_samples, seqlen] or ids.numel() == 0:
         raise ValueError("exact calibration input dtype/shape differs from requested draw")
     if bool((ids < 0).any()) or bool((ids > torch.iinfo(torch.int32).max).any()):
@@ -45,14 +154,62 @@ def load_calibration_input(path, *, expected_sha256, n_samples, seqlen):
             or provenance.get("nsamples") != n_samples
             or provenance.get("seqlen") != seqlen):
         raise ValueError("exact calibration input differs from declared draw provenance")
-    # Refuse a file replacement between its digest check and tensor loading.
-    if hashlib.sha256(path.read_bytes()).hexdigest() != artifact_sha256:
-        raise ValueError("exact calibration input changed while loading")
     return ids, {
         "schema": "prismaquant.calibration_input.v1", "artifact_sha256": artifact_sha256,
         "calibration_sha256": hashlib.sha256(ids.contiguous().numpy().tobytes()).hexdigest(),
         "shape": list(ids.shape), "dtype": str(ids.dtype), "provenance": provenance,
     }
+
+
+def load_calibration_input(path, *, expected_sha256, n_samples, seqlen):
+    """Load an independently pinned token draw without invoking a sampler.
+
+    The campaign's ``fit_ids_sha256`` hashes int32 token bytes; joint AURA
+    hashes the actual int64 tensor. Preserve and check both conventions.
+    This is explicit artifact preparation, outside the measurement hot path.
+
+    Under the active staged-tier policy the artifact comes off the stage
+    through a lifetime-pinned window (RAM first, sealed-allowed SSD
+    fallback, never the pool) and decodes from the same owned bytes the
+    digest verifies; inactive policy keeps the legacy pool read exactly.
+    """
+    from safetensors import safe_open
+
+    from .staged_tier_policy import policy_is_active
+
+    if not isinstance(expected_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+        raise ValueError("exact calibration input requires its independent SHA256")
+    path = Path(path)
+    if policy_is_active():
+        from .staged_lease import LeaseRefused
+
+        raw = _read_calibration_payload(path, expected_sha256)
+        artifact_sha256 = hashlib.sha256(raw).hexdigest()
+        if artifact_sha256 != expected_sha256:
+            raise LeaseRefused("calibration-staged-digest-divergent",
+                               kind="integrity")
+        ids, provenance = _decode_calibration_buffer(raw)
+        return _validate_calibration_draw(
+            ids, provenance, artifact_sha256=artifact_sha256,
+            n_samples=n_samples, seqlen=seqlen)
+    artifact_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    if artifact_sha256 != expected_sha256:
+        raise ValueError("exact calibration input artifact SHA256 mismatch")
+    with safe_open(str(path), framework="pt", device="cpu") as stream:
+        if set(stream.keys()) != {"calibration_ids"}:
+            raise ValueError("exact calibration input requires only calibration_ids")
+        try:
+            provenance = json.loads(stream.metadata()["calibration_provenance"])
+        except (TypeError, KeyError, ValueError) as exc:
+            raise ValueError("exact calibration input requires calibration_provenance JSON") from exc
+        ids = stream.get_tensor("calibration_ids")
+    ids, receipt = _validate_calibration_draw(
+        ids, provenance, artifact_sha256=artifact_sha256,
+        n_samples=n_samples, seqlen=seqlen)
+    # Refuse a file replacement between its digest check and tensor loading.
+    if hashlib.sha256(path.read_bytes()).hexdigest() != artifact_sha256:
+        raise ValueError("exact calibration input changed while loading")
+    return ids, receipt
 
 
 def _sample_token_windows_from_texts(
