@@ -218,7 +218,8 @@ def _publish_claim(world: World, *, key: str, owner: str = OWNER) -> dict:
     return record
 
 
-def _record_scope(world: World, key: str, control: dict) -> dict:
+def _record_scope(world: World, key: str, control: dict,
+                  claim: dict | None = None) -> dict:
     """File the REAL validated scope block into the live claim, verbatim.
 
     Openly stands in for the worker loop's scope startup: values come
@@ -229,7 +230,8 @@ def _record_scope(world: World, key: str, control: dict) -> dict:
     pool = world.mod["pool"]
     path = world.queue.item_path(pool.CLAIMED, key)
     live = pool._read_json(path)
-    assert live is not None and pool._same_claim(live, {"action_key": key}), (
+    assert live is not None and pool._same_claim(
+        live, claim if claim is not None else {"action_key": key}), (
         "live claim changed under the scenario")
     block = {"action_key": key, "nonce": control["nonce"],
              "memory_max_bytes": control["memory_max_bytes"],
@@ -280,6 +282,7 @@ def _tiny_manifest(world: World) -> tuple[Path, dict, str]:
     total = sum(e["bytes"] for e in entries)
     manifest = {
         "schema": "prismaquant.prismabuild.data_manifest.v1",
+        "produced_by": {"tool": "fleet-acceptance-harness"},
         "mount_prefix": str(files),
         "entries": entries, "entry_count": 2, "total_bytes": total,
         "annotations": {"phases": [
@@ -393,7 +396,7 @@ def _sdk_context(world: World, *, key: str, nonce: str, map_path: Path,
     lease = world.mod["lease"]
     record = _publish_claim(world, key=key)
     scope, control = _open_scope(world, key=key, nonce=nonce)
-    _record_scope(world, key, control)
+    _record_scope(world, key, control, claim=record)
     claim = world.mod["pool"]._read_json(
         world.queue.item_path(world.mod["pool"].CLAIMED, key))
     env = {"PRISMABUILD_ACTION_KEY": key,
@@ -691,7 +694,7 @@ def scenario_sdk_alias_host(world: World, snapshots: dict) -> dict:
     """Holder derivation runs on real records; the alias distinction is evidence."""
     record = _publish_claim(world, key=KEY, owner=ALIAS_OWNER)
     _, control = _open_scope(world, key=KEY, nonce=NONCE)
-    _record_scope(world, KEY, control)
+    _record_scope(world, KEY, control, claim=record)
     claim = world.mod["pool"]._read_json(
         world.queue.item_path(world.mod["pool"].CLAIMED, KEY))
     host = world.queue.resolve_claim_holder(KEY, claim)
