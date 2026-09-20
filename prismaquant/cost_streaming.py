@@ -1551,7 +1551,10 @@ def build_source_checkpoint_identity(
             if not isinstance(size, int) or isinstance(size, bool):
                 raise RuntimeError(
                     "dev mode refuses: cannot price the unannounced seal, "
-                    f"no byte size recorded for {path}")
+                    f"no byte size recorded for {path} "
+                    f"(fingerprint keys: "
+                    f"{sorted(fingerprint) if isinstance(fingerprint, dict) else type(fingerprint).__name__})"
+                )
             uncovered.append((str(path), size))
         total = sum(size for _, size in uncovered)
         raise RuntimeError(
