@@ -1,7 +1,24 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `fix/joint-quanta-gb10-placement-20260920`.
+As of: 2026-09-20 · `flash/dev-anchor-seal-bypass-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/dev-anchor-seal-bypass-20260920`) for **the
+dev-mode merged-checkpoint seal skip** (#833). No default, stage, format, lane,
+pin or ship-gate verdict changes. Under `PRISMAQUANT_DEV_MODE=1`
+`load_measured_anchor_input` no longer recomputes
+`canonical_json_sha256_normalized(identity)` over the merged campaign
+checkpoint; it requires the manifest's declared `identity_sha256` to be a full
+64-hex string, prints the `[DEV-MODE]` record naming the digest it used, and
+hands that digest to the existing per-unit envelope binding. The declared
+digest is recorded, not verified. The measured cost of the skipped encode is
+302.653 s of a 765.6 s in-process profile (action `282c61140ba7`, 2026-09-20,
+`run/profile.pstats`) on the 7.2 GB checkpoint. Certified mode is
+byte-identical; the raw input `_bound` digests, roster / model / calibration
+geometry, per-unit mutation fences, PB action/progress/containment, mover
+inline integrity and the model source-identity cache are untouched. Tests:
+`tests/test_dev_anchor_seal_skip.py` plus the certified cases in
+`tests/test_tessera_joint_aura.py`.
 
 Re-stamped (2026-09-20, `fix/joint-quanta-gb10-placement-20260920`) for **the
 distributed campaign's placement policy: one shared `gb10` class tag, never a
@@ -10293,9 +10310,15 @@ silently reused: a mismatched checkpoint lineage is archived
 top-level `dev_uncertified` stamp in `results.json` — always; per-progress-record
 stamps are opt-in via `PRISMAQUANT_DEV_PROGRESS_STAMP=1`, so the default
 durable-unit commit is the certified six-field record and runs no source hash
-(#828).
+(#828). The merged campaign checkpoint's canonical seal is skipped rather than
+recomputed: the loader binds the walk to the manifest's declared
+`identity_sha256` after a 64-hex syntactic check and prints the `[DEV-MODE]`
+record (measured 302.653 s of a 765.6 s profile on action `282c61140ba7`,
+2026-09-20), while every per-unit envelope fence still refuses a mismatch. The
+raw checkpoint file keeps its `_bound` SHA-256 check above the gate, and the
+declared seal itself is recorded, not verified.
 With the variable unset, every one of these guards refuses exactly as before
-(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-20 stamp above.
+(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-20 stamps above.
 
 **The key set is `pipeline.py`'s job; the values are the shell's.** `STAGE_SETTINGS_KEYS`
 (`pipeline.py`) declares, per artifact, which settings that artifact's identity depends on.
