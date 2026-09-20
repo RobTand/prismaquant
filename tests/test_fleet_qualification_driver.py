@@ -196,7 +196,7 @@ def test_case_by_host_matrix_and_exit_codes():
                          "generation": "g"})
     report = driver.assemble_report(plan=plan, verdicts=both,
                                     started_unix=0.0)
-    assert report["covered_hosts"] == ["sparky", "sparklina"]
+    assert report["covered_hosts"] == ["sparklina", "sparky"]
     assert report["missing_hosts"] == []
     assert any("unimplemented leg" in r
                for r in report["incomplete_reasons"])
