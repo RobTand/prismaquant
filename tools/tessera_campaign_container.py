@@ -573,7 +573,6 @@ def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]"
     helper = PurePosixPath(root)
     mounts = spec.get("container", {}).get("mounts", []) if isinstance(spec, dict) else []
     extra: list[dict] = []
-    covered_readonly = False
     for mount in mounts:
         if not isinstance(mount, dict):
             continue
@@ -588,14 +587,12 @@ def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]"
                 f"container mount target {target} nests inside the helper "
                 "generation and would shadow its sealed bytes; the spec must "
                 "not name paths beneath the helper root")
-        if target in helper.parents and mount.get("readonly", False):
-            covered_readonly = True
-    if not covered_readonly:
-        # A broad covering rw mount (such as /mnt/shared) is not a read-only
-        # helper mount: the explicit readonly bind nests inside it and wins
-        # the helper subtree deterministically, since extras append after the
-        # declared mounts. A readonly covering mount already suffices.
-        extra.append({"source": root, "target": root, "readonly": True})
+    # A parent mount can expose a different host directory, or another
+    # nested ancestor can make this subtree writable. Always bind the exact
+    # inspected generation at its own path, after declared parent mounts.
+    # This proves both the source bytes and read-only access independently
+    # of the spec's ancestor mappings.
+    extra.append({"source": root, "target": root, "readonly": True})
     return ({name: present[name] for name in READER_CONTEXT_ENV}, extra)
 
 

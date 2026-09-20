@@ -14,8 +14,8 @@ tree). A spec naming any of the four is refused as forged; a partial
 bundle, a malformed key, a non-canonical or symlinked root, a root with no
 `src/prismabuild` tree, or a declared mount at or beneath the helper root
 is refused rather than downgraded. The generation binds read-only at its
-canonical path (a covering rw mount still gets the explicit readonly bind;
-a covering readonly mount needs no second bind). Key-only launcher env is
+canonical path, independently of ancestor mount permissions or source-path
+remapping. Key-only launcher env is
 the legacy published-PB shape and keeps a byte-identical `docker run`;
 no broker token or socket crosses. Gates:
 `tests/test_container_reader_context.py` (with

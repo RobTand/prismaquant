@@ -233,14 +233,23 @@ def test_a_broad_rw_mount_still_gets_the_readonly_helper_bind(tmp_path):
             in _mounts(argv))
 
 
-def test_a_readonly_covering_mount_needs_no_second_bind(tmp_path):
-    """A covering readonly mount already suffices: exactly one bind."""
-    helper = _helper_root(tmp_path)
-    mounts = [{"source": str(tmp_path), "target": str(tmp_path),
+@pytest.mark.parametrize("layout", ["same-source", "remapped-source", "nested-rw"])
+def test_parent_mounts_cannot_replace_or_make_the_helper_writable(tmp_path, layout):
+    """The exact helper source stays readonly despite ancestor mappings."""
+    parent = tmp_path / "generations"
+    parent.mkdir()
+    helper = _helper_root(parent)
+    source = tmp_path if layout != "remapped-source" else tmp_path / "other"
+    source.mkdir(exist_ok=True)
+    mounts = [{"source": str(source), "target": str(tmp_path),
                "readonly": True}]
+    if layout == "nested-rw":
+        mounts.append({"source": str(parent), "target": str(parent),
+                       "readonly": False})
     argv = _argv(_spec(tmp_path, mounts=mounts), _bundle(helper))
     binds = [m for m in _mounts(argv) if f"dst={helper}" in m]
-    assert binds == []
+    assert binds == [f"type=bind,src={helper},dst={helper},readonly"]
+    assert _mounts(argv)[-1] == binds[0]
 
 
 def test_no_broker_capability_crosses_the_boundary(tmp_path):
