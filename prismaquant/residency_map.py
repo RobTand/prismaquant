@@ -776,6 +776,14 @@ class ResidencyResolver:
         An unbound readset means this process cannot tell a declared range
         from an undeclared one, which is a reason to do nothing extra --
         never a reason to refuse a read, and never a licence to wait.
+
+        Cost, stated because it is paid under the resolver's lock: one
+        claim-row read, one bounded blob read and SHA-256, and PB's own
+        validation of the entry list -- 36,600 entries on the
+        GLM-5.3-Flash campaign. It happens once per binding, before any
+        wait it might authorize, and concurrent ``staged_range`` callers
+        wait behind it for that one pass. Loading outside the lock would
+        trade that for several threads each doing the same work.
         """
         self._declared_attempted = True
         if self._manifest_sha256 is None:
