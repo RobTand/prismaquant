@@ -1209,8 +1209,8 @@ def test_acceptance_multi_window_reports_across_windows(tmp_path, monkeypatch):
     # Durable units advance across windows (not just within one).
     units = [e[2] for e in events if e[0] == "report"]
     first_replay_units = next(
-        u for kind, phase, u in events
-        if kind == "report" and phase.startswith("replay-"))
+        e[2] for e in events
+        if e[0] == "report" and e[1].startswith("replay-"))
     assert units[-1] > first_replay_units, (units[-1], first_replay_units)
     assert units[-1] == max(units)
     assert sum(1 for e in events if e[0] == "window-open") == n_windows
