@@ -760,6 +760,20 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
     import prismaquant.production_weight_cache as _pwc_mod
     monkeypatch.setattr(
         _pwc_mod.ProductionWeightCache, "retained_window", rw_logged)
+    # Preflight runs once per window entry (retained_window.__enter__ calls
+    # it first): log here too, since it is a plain method and cannot be
+    # bypassed by a direct unbound contextmanager call.
+    orig_preflight = seams.setdefault(
+        "rw_preflight",
+        _pwc_mod.ProductionWeightCache._retained_window_preflight)
+
+    def preflight_logged(self, *args, **kwargs):
+        events.append(("window-open",))
+        return orig_preflight(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        _pwc_mod.ProductionWeightCache, "_retained_window_preflight",
+        preflight_logged)
     # Lease-begin runs strictly inside the retained_window (see
     # joint_statistics_replay.py:406-429: the window context opens, then per
     # probe lease.begin_probe() runs, then backward()). Logging here as well
