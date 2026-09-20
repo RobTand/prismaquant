@@ -83,7 +83,9 @@ LAUNCH_SCOPE = "unit-1"
 def _launch_env(monkeypatch, consumer):
     """Launch-bound identity pair, matching the claim row exactly (the new
     SDK binds pins from launch env + live claim, never a claim alone)."""
-    _launch_env(monkeypatch, consumer)
+    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", consumer)
+    monkeypatch.setenv("PRISMABUILD_ACTION_NONCE", LAUNCH_NONCE)
+    monkeypatch.setenv("PRISMABUILD_ACTION_SCOPE", LAUNCH_SCOPE)
     monkeypatch.setenv("PRISMABUILD_ACTION_NONCE", LAUNCH_NONCE)
     monkeypatch.setenv("PRISMABUILD_ACTION_SCOPE", LAUNCH_SCOPE)
 
