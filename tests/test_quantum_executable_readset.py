@@ -606,7 +606,8 @@ def run_adjoint_capture_core_alias(runner, calib, tmp_path, plan_sha,
         source_model_identity=tsc._model_identity("joint-source"),
         unit_roster_sha256=roster_sha, plan_sha256=plan_sha,
         prepared_sha256=prepared_sha, read_manifest_sha256=parent_sha,
-        implementation_sha256=aura._aura_source_sha256())
+        implementation_sha256=aura._aura_source_sha256(),
+        campaign_scope={"fixture": "exec-acceptance"})
 
 
 def _check_event_order(events, manifest, *, layer, chain):
