@@ -1,4 +1,4 @@
-"""Driver tests: real argv, unimplemented records, coverage arithmetic."""
+"""Driver tests: real client flags, detach/terminal parsing, coverage."""
 from __future__ import annotations
 
 import importlib.util
@@ -27,20 +27,22 @@ def _plan(driver, out_dir="/tmp/driver-out"):
                              python="/tmp/python", out_dir=out_dir)
 
 
-def _shard(host=None, rc=0, summary="2 passed in 1s",
-           actions=(), payload=None):
-    blob = ""
-    if host is not None:
-        blob += json.dumps({"hostname": host}) + "\n"
-    for action in actions:
-        blob += f"pbrun: queued {action[:8]} tags=['gb10']\n"
-        blob += json.dumps({"action_key": action}) + "\n"
-    if payload is not None:
-        blob += json.dumps({"payload_path": payload,
-                            "receipt_sha256": "e" * 64,
-                            "status": "published"}) + "\n"
-    return {"files": ["tests/test_x.py"], "output": blob,
-            "returncode": rc, "shard": 0, "summary": summary}
+def _detach_line(key="a" * 64, status="submitted"):
+    return json.dumps({
+        "schema": "prismaquant.prismabuild.pbrun_detach.v1",
+        "action_key": key,
+        "done": f"/mnt/shared/pb-queue/done/{key}.json",
+        "failed": f"/mnt/shared/pb-queue/failed/{key}.json",
+        "status": status})
+
+
+def _terminal(host="sparky", rc=0, summary="2 passed in 1s",
+              payload="/mnt/shared/cas/blobs/aa/x"):
+    return {"status": "executed",
+            "finished_host": host, "claimed_host": host,
+            "detail": {"returncode": rc,
+                       "stdout": f"collected stuff\n{summary}\n"
+                                 + json.dumps({"payload_path": payload})}}
 
 
 def test_plan_is_deterministic_for_declared_inputs():
@@ -55,7 +57,7 @@ def test_plan_is_deterministic_for_declared_inputs():
 
 
 def test_runnable_rows_carry_real_client_flags():
-    """Rows invoke the published client with concrete bounds, no fiction."""
+    """Rows invoke pbrun with concrete bounds; placement stays fleet-owned."""
     driver = _driver()
     plan = _plan(driver)
     assert plan["required_hosts"] == ["sparky", "sparklina"]
@@ -63,14 +65,20 @@ def test_runnable_rows_carry_real_client_flags():
     for case in plan["cases"]:
         assert case["client"] == driver.SUPPORTED_CLIENT
         argv = case["argv"]
-        assert argv[0].endswith("tools/pbtest.py"), argv
+        assert argv[0].endswith("tools/pbrun.py"), argv
         assert "run" not in argv
         assert argv[argv.index("--tag") + 1] == "gb10"
         assert int(argv[argv.index("--priority") + 1]) == -10
-        assert argv[argv.index("--json") + 1].startswith("/tmp/driver-out/")
+        assert "--cwd" in argv and "--demand" in argv
+        assert "--cpus" in argv and "--detach" in argv
+        assert "--wait-s" in argv and "--env" in argv
+        dash = argv.index("--")
+        rest = argv[dash + 1:]
+        assert rest[0] == "/tmp/python"
+        assert rest[1:3] == ["-m", "pytest"]
+        assert rest[3:] and all(f.endswith(".py") for f in rest[3:])
         assert not any("{" in arg or "}" in arg for arg in argv), argv
-        assert case["files"] and all(
-            f.endswith(".py") for f in case["files"])
+        assert "host" not in [a.lstrip("-") for a in argv], argv
 
 
 def test_unimplemented_legs_are_records_without_invocations():
@@ -93,15 +101,31 @@ def test_unimplemented_legs_are_records_without_invocations():
                    for line in lines)
 
 
+def test_detach_and_terminal_parse_to_attributable_facts():
+    """Action key, paths, host, counts come from the artifacts themselves."""
+    driver = _driver()
+    detach = driver.parse_detach(
+        "pbrun: queued aaaa1111 tags=['gb10']\n" + _detach_line())
+    assert detach["action_key"] == "a" * 64
+    assert detach["done"].endswith(".json")
+    assert detach["status"] == "submitted"
+    term = driver.parse_terminal(_terminal(host="sparklina"), side="done")
+    assert term["host"] == "sparklina"
+    assert term["returncode"] == 0
+    assert term["counts"]["passed"] == 2
+    assert term["payload_paths"] == ["/mnt/shared/cas/blobs/aa/x"]
+
+
 def test_host_coverage_marks_the_missing_box():
-    """Attribution from shard receipts; uncovered hosts stay gaps."""
+    """Only terminal-attested hosts count; uncovered hosts stay gaps."""
     driver = _driver()
     plan = _plan(driver)
-    report = driver.assemble_report(
-        plan=plan,
-        receipts={"pins": [_shard(host="sparky", actions=["a" * 64],
-                                  payload="/mnt/shared/x")]},
-        started_unix=0.0)
+    detach = driver.parse_detach(_detach_line())
+    cases = [driver._case_from_terminal(
+        "pins", detach,
+        driver.parse_terminal(_terminal(host="sparky"), side="done"))]
+    report = driver.assemble_report(plan=plan, cases=cases,
+                                    started_unix=0.0)
     assert report["covered_hosts"] == ["sparky"]
     assert report["missing_hosts"] == ["sparklina"]
     assert any("sparklina" in reason
@@ -109,36 +133,26 @@ def test_host_coverage_marks_the_missing_box():
     assert report["complete"] is False
 
 
-def test_failed_shards_fail_the_case_and_the_exit():
-    """A nonzero shard is a failed case; clean runs exit zero, never complete."""
+def test_failed_terminals_fail_the_case_and_the_exit():
+    """A failed terminal is a failed case; clean runs exit zero, never complete."""
     driver = _driver()
     plan = _plan(driver)
+    detach = driver.parse_detach(_detach_line())
+    bad_term = driver.parse_terminal(
+        _terminal(rc=1, summary="1 failed in 1s"), side="failed")
     bad = driver.assemble_report(
         plan=plan,
-        receipts={"pins": [_shard(host="sparky", rc=1,
-                                  summary="1 failed in 1s")]},
+        cases=[driver._case_from_terminal("pins", detach, bad_term)],
         started_unix=0.0)
     assert bad["cases"][0]["status"] == "failed"
     assert driver.exit_code_for(bad) == 1
+    good_term = driver.parse_terminal(_terminal(), side="done")
     good = driver.assemble_report(
         plan=plan,
-        receipts={case["name"]: [_shard(host="sparky")]
-                  for case in plan["cases"]},
+        cases=[driver._case_from_terminal(c["name"], detach, good_term)
+               for c in plan["cases"]],
         started_unix=0.0)
     assert all(c["status"] == "qualified" for c in good["cases"])
     assert good["complete"] is False
     assert good["unimplemented"]
     assert driver.exit_code_for(good) == 0
-
-
-def test_parse_shard_reads_receipt_facts():
-    """Action keys, payloads, hosts come from the shard record itself."""
-    driver = _driver()
-    parsed = driver.parse_shard(
-        _shard(host="sparklina", actions=["f" * 64],
-               payload="/mnt/shared/cas/blobs/aa/x"))
-    assert parsed["hosts"] == ["sparklina"]
-    assert parsed["actions"] == ["f" * 64]
-    assert parsed["payload_paths"] == ["/mnt/shared/cas/blobs/aa/x"]
-    assert parsed["published"] is True
-    assert parsed["counts"]["passed"] == 2

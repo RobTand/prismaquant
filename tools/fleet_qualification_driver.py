@@ -2,23 +2,33 @@
 
 Builds the hardware-phase qualification plan from declared pins and, with
 ``--submit``, EXECUTES the runnable component cases through the published
-PB clients only (``pbtest.py`` subprocesses -- no scheduler, no model-layer
-sharding, no placement control) and writes an attributable report.
+PB clients only and writes an attributable report.
 
-Every runnable row carries real flags (checkout, interpreter, tag,
-priority, shards, threads, memory, wait, per-case receipt JSON); there
-are no ``{placeholders}``, no ``run`` subcommand, no ``--tag cpu``, and
-no container ``--image``/``--help`` pseudo-validation. Cases that cannot
-run yet (membership JOIN/RESIGN/handoff, native-container readers) are
-explicit ``unimplemented`` case records with reasons -- never runnable
-invocations, never proof.
+Mechanism per case (all published interfaces, no invented flags):
+
+- ``pbrun.py`` with real bounds (``--cwd`` checkout, ``--demand``,
+  ``--cpus``, ``--tag gb10``, ``--priority -10``, ``--wait-s``,
+  ``OMP/MKL/OPENBLAS_NUM_THREADS=1``, ``--detach``) runs
+  ``<python> -m pytest <files>``. The detach line always names the
+  action key and the done/failed terminal paths -- even on ``cache_hit``,
+  which submits nothing and reuses the recorded terminal.
+- ``pbwait.py`` waits for the terminal; the driver then reads the
+  done/failed record itself: ``status``, ``finished_host`` (hardware
+  attribution), ``returncode``, full pytest stdout (pass/fail/skip
+  counts), and the CAS payload path.
+
+Placement stays PB-owned; the driver never schedules, shards, or pins
+hosts. It ATTRIBUTES serving hosts from terminal records and reports
+uncovered required hosts as nonqualified gaps. Cases that cannot run yet
+(membership JOIN/RESIGN/handoff, native-container readers) are explicit
+``unimplemented`` case records with reasons -- never runnable
+invocations, never ``--help``/``--image`` pseudo-validation.
 
 ``--submit`` exit code: 1 on failed cases or driver errors, 0 otherwise.
 Completeness is NEVER claimed here: the report always carries
-``complete: false`` with the incomplete reasons (unimplemented legs,
-uncovered hosts). Skips inside a passing case are the harness's named
-nonqualified legs (e.g. the cgroup-gated ticket case), recorded, never
-green conformance. Do NOT run live membership/deploy from this driver.
+``complete: false`` with the incomplete reasons. Skips inside a passing
+case are the harness's named nonqualified legs, recorded, never green
+conformance. Do NOT run live membership/deploy from this driver.
 
 ``--print-plan`` emits the exact invocations without executing them.
 """
@@ -36,7 +46,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve()
 CHECKOUT = HERE.parents[1]
-PB_CLIENT = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbtest.py")
+PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
+PBWAIT = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbwait.py")
 
 #: Fresh exact-pin env (PQ846 strict PB reader SDK 461728e4). Never modify
 #: a shared active env; this path names the provisioned one. It must exist
@@ -45,28 +56,31 @@ PB_CLIENT = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbtest.py")
 PYTHON = "/home/rob/venvs/pq846-pb461728e4/bin/python"
 
 ENTRYPOINTS = ("tools/pbtest.py", "tools/pbcampaign.py", "tools/pbrun.py")
-SUPPORTED_CLIENT = "tools/pbtest.py"
+SUPPORTED_CLIENT = "tools/pbrun.py"
+SUPPORTED_WAITER = "tools/pbwait.py"
 
 #: Hardware coverage is the purpose: both Sparks are required dependencies
-#: of a complete report. Placement stays PB-owned; the driver ATTRIBUTES
-#: serving hosts from shard receipts and reports uncovered hosts as
-#: nonqualified gaps.
+#: of a complete report. The driver attributes serving hosts from terminal
+#: records and reports uncovered hosts as nonqualified gaps.
 HOSTS = ("sparky", "sparklina")
 
 TAG = "gb10"
 PRIORITY = -10
 WAIT_S = 1500
 MEM_GB = 8
+CPUS = 1
+THREAD_ENV = (("OMP_NUM_THREADS", "1"), ("MKL_NUM_THREADS", "1"),
+              ("OPENBLAS_NUM_THREADS", "1"))
 
-#: Runnable component cases: (name, files, mem_gb). One shard per file;
-#: distinct files are distinct actions, so the fleet distributes them and
-#: host coverage emerges from receipts.
+#: Runnable component cases: (name, files). One action per case; distinct
+#: commands are distinct actions, so the fleet distributes them and host
+#: coverage emerges from terminal records.
 COMPONENT_CASES: tuple = (
-    ("pins", ("tests/test_fleet_acceptance_pins.py",), MEM_GB),
-    ("runner-table", ("tests/test_fleet_acceptance_runner.py",), MEM_GB),
-    ("matrix", ("tests/test_fleet_acceptance_matrix.py",), MEM_GB),
-    ("driver-self", ("tests/test_fleet_qualification_driver.py",), MEM_GB),
-    ("level1-connected", ("tests/test_fleet_acceptance_level1.py",), MEM_GB),
+    ("pins", ("tests/test_fleet_acceptance_pins.py",)),
+    ("runner-table", ("tests/test_fleet_acceptance_runner.py",)),
+    ("matrix", ("tests/test_fleet_acceptance_matrix.py",)),
+    ("driver-self", ("tests/test_fleet_qualification_driver.py",)),
+    ("level1-connected", ("tests/test_fleet_acceptance_level1.py",)),
 )
 
 #: Legs that cannot run yet: explicit records, never invocations.
@@ -86,39 +100,37 @@ REPORT_SCHEMA = "prismaquant.fleet_qualification.report.v1"
 PLAN_SCHEMA = "prismaquant.fleet_qualification.plan.v1"
 
 
-def _case_argv(*, out_json: Path, files: tuple[str, ...],
-               checkout: str, python: str) -> list[str]:
+def _case_argv(*, files: tuple[str, ...], checkout: str,
+               python: str) -> list[str]:
     """The exact published-client invocation for one component case."""
-    return [str(PB_CLIENT),
-            "--checkout", checkout,
-            "--python", python,
+    argv = [str(PBRUN),
+            "--cwd", checkout,
+            "--demand", f"mem_gb={MEM_GB}",
+            "--cpus", str(CPUS),
             "--tag", TAG,
             "--priority", str(PRIORITY),
-            "--shards", "1",
-            "--workers-per-shard", "1",
-            "--threads-per-shard", "1",
-            "--mem-gb", str(MEM_GB),
-            "--wait-s", str(WAIT_S),
-            "--json", str(out_json),
-            *[str(f) for f in files]]
+            "--wait-s", str(WAIT_S)]
+    for key, value in THREAD_ENV:
+        argv += ["--env", f"{key}={value}"]
+    argv += ["--detach", "--", python, "-m", "pytest",
+             *[str(f) for f in files]]
+    return argv
 
 
 def build_plan(*, pins: dict, checkout: str, python: str = PYTHON,
                out_dir: str, tag: str = TAG,
                priority: int = PRIORITY) -> dict:
     """The executable plan: runnable rows plus unimplemented records."""
-    out = Path(out_dir)
     cases = []
-    for name, files, _mem in COMPONENT_CASES:
-        argv = _case_argv(out_json=out / f"{name}.pbtest.json",
-                          files=files, checkout=checkout, python=python)
+    for name, files in COMPONENT_CASES:
+        argv = _case_argv(files=files, checkout=checkout, python=python)
         if tag != TAG:
             argv[argv.index("--tag") + 1] = tag
         if priority != PRIORITY:
             argv[argv.index("--priority") + 1] = str(priority)
         cases.append({"name": name, "client": SUPPORTED_CLIENT,
-                      "argv": argv, "files": list(files),
-                      "receipt": str(out / f"{name}.pbtest.json")})
+                      "waiter": SUPPORTED_WAITER, "argv": argv,
+                      "files": list(files)})
     return {"schema": PLAN_SCHEMA, "pins": pins,
             "checkout": checkout, "python": python,
             "required_hosts": list(HOSTS),
@@ -138,94 +150,79 @@ def format_invocations(plan: dict) -> list[str]:
     return lines
 
 
-def _counts(summary: str) -> dict[str, int]:
+def parse_detach(text: str) -> dict:
+    """Action key + terminal paths from a ``pbrun --detach`` JSON line."""
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            doc = json.loads(line)
+        except ValueError:
+            continue
+        if doc.get("schema") != "prismaquant.prismabuild.pbrun_detach.v1":
+            continue
+        return {"action_key": doc.get("action_key", ""),
+                "done": doc.get("done", ""),
+                "failed": doc.get("failed", ""),
+                "status": doc.get("status", "")}
+    return {"action_key": "", "done": "", "failed": "",
+            "status": "no-detach-line"}
+
+
+def _counts(stdout: str) -> dict[str, int]:
     out = {"passed": 0, "failed": 0, "skipped": 0, "error": 0}
     for match in re.finditer(r"(\d+)\s+(passed|failed|skipped|error)\b",
-                             summary):
+                             stdout):
         out[match.group(2)] += int(match.group(1))
     return out
 
 
-def parse_shard(shard: dict) -> dict:
-    """Attributable facts from one pbtest shard record (no verdicts)."""
-    output = str(shard.get("output", ""))
-    summary = str(shard.get("summary", ""))
-    hosts = set(re.findall(r'"hostname":\s*"([\w.-]+)"', output))
-    hosts.update(re.findall(r"executed on (\w[\w.-]*)", output))
-    actions = sorted(set(re.findall(r'"action_key":\s*"([0-9a-f]{64})"',
-                                    output)))
-    queued = sorted(set(re.findall(r"queued ([0-9a-f]{8,40})\b", output)))
+def parse_terminal(doc: dict, *, side: str) -> dict:
+    """Attributable facts from a done/failed terminal record."""
+    detail = doc.get("detail") if isinstance(doc.get("detail"), dict) else {}
+    stdout = str(detail.get("stdout", "") or "")
     payloads = sorted(set(re.findall(r'"payload_path":\s*"([^"]+)"',
-                                     output)))
-    receipts = sorted(set(re.findall(r'"receipt_sha256":\s*"([^"]+)"',
-                                     output)))
-    published = '"status": "published"' in output
-    return {"returncode": shard.get("returncode"),
-            "counts": _counts(summary),
-            "hosts": sorted(hosts),
-            "actions": actions, "queued": queued,
-            "payload_paths": payloads, "receipt_sha256": receipts,
-            "published": published}
+                                     stdout)))
+    hosts = [doc.get("finished_host"), doc.get("claimed_host")]
+    return {"side": side,
+            "status": doc.get("status", ""),
+            "host": next((h for h in hosts
+                          if isinstance(h, str) and h), ""),
+            "returncode": detail.get("returncode"),
+            "counts": _counts(stdout),
+            "payload_paths": payloads}
 
 
-def _case_status(name: str, shards: list[dict]) -> dict:
-    """qualified / failed for one executed case (skips stay visible)."""
-    parsed = [parse_shard(s) for s in shards]
-    passed = sum(p["counts"]["passed"] for p in parsed)
-    failed = sum(p["counts"]["failed"] for p in parsed)
-    skipped = sum(p["counts"]["skipped"] for p in parsed)
-    errors = sum(p["counts"]["error"] for p in parsed)
-    bad_rc = [p["returncode"] for p in parsed if p["returncode"] != 0]
-    hosts = sorted({h for p in parsed for h in p["hosts"]})
-    actions = sorted({a for p in parsed for a in p["actions"]})
-    queued = sorted({q for p in parsed for q in p["queued"]})
-    payloads = sorted({u for p in parsed for u in p["payload_paths"]})
-    receipts = sorted({u for p in parsed for u in p["receipt_sha256"]})
-    published = all(p["published"] for p in parsed) if parsed else False
-    if not parsed or bad_rc or failed or errors:
+def _case_from_terminal(name: str, detach: dict, term: dict) -> dict:
+    counts, host = term["counts"], term["host"]
+    passed, failed = counts["passed"], counts["failed"] + counts["error"]
+    if (term["side"] != "done" or term["returncode"] != 0
+            or failed or not host):
+        reason = "; ".join(part for part in (
+            f"terminal side={term['side']}" if term["side"] != "done"
+            else "",
+            f"returncode={term['returncode']}"
+            if term["returncode"] != 0 else "",
+            f"failed={failed}" if failed else "",
+            "host unattributed" if not host else "") if part)
         return {"name": name, "status": "failed",
-                "reason": ("no shard records" if not parsed else
-                           f"returncodes={bad_rc} failed={failed} "
-                           f"errors={errors}"),
-                "passed": passed, "failed": failed, "skipped": skipped,
-                "hosts": hosts, "actions": actions, "queued": queued,
-                "payload_paths": payloads, "receipt_sha256": receipts,
-                "published": published}
+                "reason": reason or "unreadable terminal",
+                "detach": detach["status"],
+                "action_key": detach["action_key"],
+                "terminal": detach["done"] or detach["failed"],
+                "passed": passed, "failed": failed,
+                "skipped": counts["skipped"], "hosts": [host] if host else [],
+                "payload_paths": term["payload_paths"]}
     return {"name": name, "status": "qualified",
-            "reason": (f"{skipped} named nonqualified skip(s)"
-                       if skipped else ""),
-            "passed": passed, "failed": 0, "skipped": skipped,
-            "hosts": hosts, "actions": actions, "queued": queued,
-            "payload_paths": payloads, "receipt_sha256": receipts,
-            "published": published}
-
-
-def assemble_report(*, plan: dict, receipts: dict[str, list[dict]],
-                    started_unix: float) -> dict:
-    """Report from executed cases; completeness never claimed here."""
-    cases = [_case_status(case["name"],
-                          receipts.get(case["name"], []))
-             for case in plan["cases"]]
-    covered = sorted({h for c in cases for h in c["hosts"]
-                      if h in plan["required_hosts"]})
-    missing = [h for h in plan["required_hosts"] if h not in covered]
-    incomplete = [f"unimplemented leg: {r['name']}"
-                  for r in plan["unimplemented"]]
-    if missing:
-        incomplete.append(
-            "host coverage gap: no shard served by "
-            + ", ".join(missing))
-    return {"schema": REPORT_SCHEMA, "pins": plan["pins"],
-            "driver": {"checkout": plan["checkout"],
-                       "python": plan["python"],
-                       "host": socket.gethostname(),
-                       "started_unix": started_unix,
-                       "finished_unix": time.time()},
-            "cases": cases,
-            "unimplemented": plan["unimplemented"],
-            "required_hosts": list(plan["required_hosts"]),
-            "covered_hosts": covered, "missing_hosts": missing,
-            "complete": False, "incomplete_reasons": incomplete}
+            "reason": (f"{counts['skipped']} named nonqualified skip(s)"
+                       if counts["skipped"] else ""),
+            "detach": detach["status"],
+            "action_key": detach["action_key"],
+            "terminal": detach["done"],
+            "passed": passed, "failed": 0,
+            "skipped": counts["skipped"], "hosts": [host],
+            "payload_paths": term["payload_paths"]}
 
 
 def exit_code_for(report: dict) -> int:
@@ -241,9 +238,33 @@ def exit_code_for(report: dict) -> int:
     return 1 if (failed or report.get("driver_errors")) else 0
 
 
-def submit(plan: dict, out_dir: str,
-           *, wait_slack_s: int = 900) -> tuple[dict, int]:
-    """Execute runnable cases via the published client; write the report.
+def assemble_report(*, plan: dict, cases: list[dict],
+                    started_unix: float) -> dict:
+    """Report from executed cases; completeness never claimed here."""
+    covered = sorted({h for c in cases for h in c["hosts"]
+                      if h in plan["required_hosts"]})
+    missing = [h for h in plan["required_hosts"] if h not in covered]
+    incomplete = [f"unimplemented leg: {r['name']}"
+                  for r in plan["unimplemented"]]
+    if missing:
+        incomplete.append(
+            "host coverage gap: no terminal served by "
+            + ", ".join(missing))
+    return {"schema": REPORT_SCHEMA, "pins": plan["pins"],
+            "driver": {"checkout": plan["checkout"],
+                       "python": plan["python"],
+                       "host": socket.gethostname(),
+                       "started_unix": started_unix,
+                       "finished_unix": time.time()},
+            "cases": cases,
+            "unimplemented": plan["unimplemented"],
+            "required_hosts": list(plan["required_hosts"]),
+            "covered_hosts": covered, "missing_hosts": missing,
+            "complete": False, "incomplete_reasons": incomplete}
+
+
+def submit(plan: dict, out_dir: str) -> tuple[dict, int]:
+    """Execute runnable cases via published clients; write the report.
 
     Returns ``(report, exit_code)``: 1 on failed cases or driver errors,
     else 0. A zero exit with ``complete: false`` is normal today: it
@@ -253,44 +274,54 @@ def submit(plan: dict, out_dir: str,
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     started = time.time()
-    receipts: dict[str, list[dict]] = {}
+    cases: list[dict] = []
     errors: list[str] = []
     for case in plan["cases"]:
         name = case["name"]
-        receipt_path = Path(case["receipt"])
-        log_path = out / f"{name}.stdout.txt"
+        log_path = out / f"{name}.submit.txt"
         try:
             done = subprocess.run(
                 [sys.executable, *case["argv"]],
-                capture_output=True, text=True,
-                timeout=WAIT_S + wait_slack_s)
+                capture_output=True, text=True, timeout=600)
         except (OSError, subprocess.TimeoutExpired) as exc:
             errors.append(f"{name}: submission error: {exc!r}")
             continue
         log_path.write_text(
             f"$ python3 {' '.join(case['argv'])}\n"
             f"returncode={done.returncode}\n"
-            f"--- stdout ---\n{done.stdout[-6000:]}\n"
+            f"--- stdout ---\n{done.stdout[-3000:]}\n"
             f"--- stderr ---\n{done.stderr[-2000:]}")
-        if done.returncode != 0 and not receipt_path.is_file():
+        detach = parse_detach(done.stdout)
+        if not detach["action_key"]:
             errors.append(
-                f"{name}: pbtest exited {done.returncode} with no receipt: "
+                f"{name}: no detach line: rc={done.returncode} "
                 f"{done.stderr.strip()[-300:]}")
             continue
-        try:
-            data = json.loads(receipt_path.read_text())
-            shards = data if isinstance(data, list) else [data]
-        except (OSError, ValueError) as exc:
-            errors.append(f"{name}: receipt unreadable: {exc!r}")
+        waited = subprocess.run(
+            [sys.executable, str(PBWAIT),
+             "--wait-s", str(WAIT_S), detach["action_key"]],
+            capture_output=True, text=True, timeout=WAIT_S + 300)
+        _ = waited
+        term, side = None, ""
+        for candidate, label in ((detach["done"], "done"),
+                                (detach["failed"], "failed")):
+            if candidate:
+                try:
+                    with open(candidate) as stream:
+                        term, side = json.load(stream), label
+                    break
+                except (OSError, ValueError):
+                    continue
+        if term is None:
+            errors.append(f"{name}: no terminal at recorded paths")
             continue
-        receipts[name] = shards
-    report = assemble_report(plan=plan, receipts=receipts,
-                             started_unix=started)
+        cases.append(_case_from_terminal(
+            name, detach, parse_terminal(term, side=side)))
+    report = assemble_report(plan=plan, cases=cases, started_unix=started)
     if errors:
         report["driver_errors"] = errors
-    report_path = out / "report.json"
-    report_path.write_text(json.dumps(report, indent=1, sort_keys=True)
-                           + "\n")
+    (out / "report.json").write_text(
+        json.dumps(report, indent=1, sort_keys=True) + "\n")
     return report, exit_code_for(report)
 
 
@@ -302,12 +333,16 @@ def print_summary(report: dict) -> None:
               f"passed={case['passed']} failed={case['failed']} "
               f"skipped={case['skipped']} "
               f"hosts={','.join(case['hosts']) or 'unattributed'} "
+              f"{case['detach']} {case['action_key'][:8]} "
               f"{case['reason']}")
     for record in report["unimplemented"]:
         print(f"NONQUALIFIED {record['name']}: {record['reason']}")
     if report["missing_hosts"]:
         print("NONQUALIFIED host coverage gap: "
               + ", ".join(report["missing_hosts"]))
+    if report.get("driver_errors"):
+        for line in report["driver_errors"]:
+            print(f"DRIVER-ERROR {line}")
     print("COMPLETE: false (" + "; ".join(report["incomplete_reasons"])
           + ")")
 
