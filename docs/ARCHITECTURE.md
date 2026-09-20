@@ -53,10 +53,15 @@ peak per entry: tensor copies in the resident budget mirroring exact
 writes, pickle/manifest buffers in an auxiliary hold aggregated with live
 plus promised auxiliary usage through the one shared check_auxiliary
 calculation (a hold fitting live usage but exceeding the per-probe
-reservation refuses). Stage A snapshots shared adjoints borrowed, never
-whole-plane CPU copies: quiescent accumulator storages already CPU
-contiguous are referenced (only exceptional layouts pin a copy), so the
-snapshot adds no new backing while originals stay live. Shared-state estimates count per-leaf serialized
+reservation refuses). Stage A snapshots shared adjoints borrowed when
+proven safe, never whole-plane CPU copies: quiescent accumulators already
+CPU contiguous are referenced with zero new backing, while any layout
+needing CPU pinning/contiguity refuses the borrowed view before copying
+and takes an owner-budgeted fallback (precomputed whole-owner copy bytes
+held across the synchronous snapshot plus write, copies released before
+the hold releases). Production Gemma4 accumulators are CPU via capture to
+CPU with graft/harvest preserving device; non-contiguous CPU exercises
+the same fallback path as any non-pinned device. Shared-state estimates count per-leaf serialized
 backing (measured: pickle emits per-view backing, no cross-view memo)
 with bit-length integer sizing; shared payloads stream through the
 digest sink with admitted per-file bounds instead of aggregate bytes

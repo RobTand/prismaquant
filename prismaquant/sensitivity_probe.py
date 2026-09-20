@@ -1834,32 +1834,62 @@ class SharedStateCotangents:
                     yield pos, item
 
     # -- serialization ----------------------------------------------------
-    def borrowed_state_dict(self) -> dict:
-        """Borrowed quiescent view with the same schema, no bulk CPU copy.
+    def snapshot_copy_plan(self) -> tuple[bool, int]:
+        """Whether this owner needs an owner-budgeted CPU copy, and how many bytes.
 
-        Same portable mapping as :meth:`state_dict` for the production
-        CPU-contiguous path: accumulators already CPU contiguous strided are
-        borrowed by detached reference (shared backing, no new allocation);
-        only tensors needing CPU pinning or contiguity are copied. The caller
-        must drop the view before the next graft/harvest and must not mutate
-        owners while the view serializes -- stage A's checkpoint write holds
-        it only for its synchronous pickle. Quiescence refuses exactly like
-        ``state_dict``.
+        No allocation: inspects live accumulators only. Returns
+        ``(needs_copy, copy_bytes)`` where ``needs_copy`` is True when any
+        accumulator is not already CPU contiguous strided, and ``copy_bytes``
+        sums ``numel * element_size`` over this owner's accumulators when a
+        copy is needed (0 otherwise). Meta or non-strided tensors refuse
+        (TypeError) like the checkpoint estimator -- they are unaccountable,
+        never silently copied. Quiescence refuses exactly like ``state_dict``.
+        """
+        if self._live or self._containers or self._live_ids:
+            raise RuntimeError("shared cotangent serialization requires a quiescent owner")
+        needs = False
+        total = 0
+        for tensor in self._acc.values():
+            if not isinstance(tensor, torch.Tensor):
+                raise TypeError(
+                    "exact boundary checkpoint cannot account opaque shared state "
+                    f"{type(tensor).__name__}")
+            if tensor.is_meta or tensor.layout != torch.strided:
+                raise TypeError(
+                    "exact boundary checkpoint cannot account this state tensor")
+            if not (tensor.device.type == "cpu" and tensor.is_contiguous()):
+                needs = True
+            total += tensor.numel() * tensor.element_size()
+        return (needs, int(total) if needs else 0)
+
+    def borrowed_state_dict(self) -> dict:
+        """Borrowed quiescent view, zero-copy only when proven safe.
+
+        Same portable mapping as :meth:`state_dict` when every accumulator
+        is already CPU contiguous strided: borrowed by detached reference
+        (shared backing, no new allocation). Any accumulator needing CPU
+        pinning or contiguity -- CUDA/non-CPU device, non-contiguous layout,
+        or any other non-pinned storage -- refuses BEFORE copying: the
+        caller must take the owner-budgeted fallback (precomputed
+        ``snapshot_copy_plan`` bytes held across the synchronous snapshot +
+        write lifetime, then :meth:`state_dict` copies inside that hold).
+        The caller must drop the view before the next graft/harvest and must
+        not mutate owners while the view serializes. Quiescence refuses
+        exactly like ``state_dict``.
         """
         if self._live or self._containers or self._live_ids:
             raise RuntimeError("shared cotangent serialization requires a quiescent owner")
         rows = []
         for slot, tensor in self._acc.items():
-            if (isinstance(tensor, torch.Tensor) and tensor.layout == torch.strided
+            if not (isinstance(tensor, torch.Tensor) and tensor.layout == torch.strided
                     and not tensor.is_meta and tensor.device.type == "cpu"
                     and tensor.is_contiguous()):
-                live = tensor.detach()
-            else:
-                live = tensor.detach().to(
-                    device="cpu", copy=True, memory_format=torch.contiguous_format)
+                raise RuntimeError(
+                    "shared cotangent borrowed view needs an owner-budgeted "
+                    "CPU snapshot: refused before copying")
             rows.append({
                 "slot": [slot[0], slot[1], slot[2]],
-                "tensor": live,
+                "tensor": tensor.detach(),
             })
         return {
             "enabled": bool(self.enabled),

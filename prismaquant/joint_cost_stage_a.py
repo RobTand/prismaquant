@@ -107,13 +107,37 @@ def shared_adjoint_snapshot(cotangents) -> dict:
     :meth:`SharedStateCotangents.borrowed_state_dict`. Values borrow live
     accumulator storages on the production CPU-contiguous path, so the
     whole-plane snapshot adds no new tensor backing while the watched
-    originals stay live. The caller must drop the snapshot before the next
+    originals stay live. Any owner needing CPU pinning/contiguity refuses
+    BEFORE copying -- the caller must take the owner-budgeted fallback
+    (:func:`shared_adjoint_copy_plan` + hold, then ``state_dict`` copies
+    inside that hold). The caller must drop the snapshot before the next
     harvest and must not mutate owners while ``write_adjoint_checkpoint``
     serializes it. This is the actual Stage-A checkpoint snapshot boundary.
     """
     return {(probe, batch): cotangents[probe][batch].borrowed_state_dict()
             for probe in range(len(cotangents))
             for batch in range(len(cotangents[probe]))}
+
+
+def shared_adjoint_copy_plan(cotangents) -> tuple[bool, int]:
+    """Whether the snapshot needs an owner-budgeted CPU copy, and how many bytes.
+
+    No allocation: sums each owner's :meth:`snapshot_copy_plan` without
+    materializing any tensor. Returns ``(needs_copy, copy_bytes)`` where
+    ``copy_bytes`` covers whole-owner copies for owners needing pinning
+    (``state_dict`` copies whole owners, so the hold covers whole owners,
+    not just exceptional tensors). Meta/non-strided refuse (TypeError)
+    like the checkpoint estimator. Stage A holds ``copy_bytes`` across the
+    synchronous snapshot + write lifetime before building any mapping.
+    """
+    needs = False
+    total = 0
+    for row in cotangents:
+        for owner in row:
+            owner_needs, owner_bytes = owner.snapshot_copy_plan()
+            needs = needs or owner_needs
+            total += owner_bytes
+    return (bool(needs), int(total))
 
 
 def resolve_stride(config, cli_stride) -> tuple[int, str]:
@@ -357,23 +381,45 @@ def run_adjoint_capture_core(
             f"publishing the tail checkpoint at boundary {num_layers}")
 
         def serialize_checkpoint(boundary: int, plane) -> None:
-            # Borrowed snapshot: no whole-plane CPU copy while the watched
-            # originals stay live; per-entry serialization holds still bound
-            # each pickle inside write_adjoint_checkpoint.
-            shared_adjoint = shared_adjoint_snapshot(cotangents)
+            # Zero-copy borrowed snapshot when all accumulators are already
+            # CPU contiguous (production Gemma4 path: capture to CPU,
+            # graft/harvest preserve device); otherwise hold the honest
+            # whole-owner copy bytes BEFORE any state_dict materialization,
+            # keep that hold across the synchronous snapshot + write, and
+            # release copies before releasing the hold. Per-entry
+            # serialization holds still bound each pickle inside the writer.
+            needs_copy, copy_bytes = shared_adjoint_copy_plan(cotangents)
             shared_pass = {batch: batches[batch].shared_pass_state
                            for batch in range(len(batches))}
-            # The checkpoint files land beside (not inside) the owner's entry
-            # directory, so the owner budgets them explicitly: the whole
-            # attempt is admitted against max_artifact_bytes before it writes,
-            # and the receipt's actual bytes commit on success.
-            record = write_adjoint_checkpoint(
-                space, boundary=boundary,
-                session={"generation": storage.session["generation"],
-                         "kind": "adjoint_checkpoint",
-                         "run_identity_sha256": storage.session["run_identity_sha256"]},
-                cotangents=plane, shared_adjoint=shared_adjoint,
-                shared_pass=shared_pass, owner=storage)
+            if not needs_copy:
+                shared_adjoint = shared_adjoint_snapshot(cotangents)
+                try:
+                    record = write_adjoint_checkpoint(
+                        space, boundary=boundary,
+                        session={"generation": storage.session["generation"],
+                                 "kind": "adjoint_checkpoint",
+                                 "run_identity_sha256": storage.session["run_identity_sha256"]},
+                        cotangents=plane, shared_adjoint=shared_adjoint,
+                        shared_pass=shared_pass, owner=storage)
+                finally:
+                    shared_adjoint.clear()
+            else:
+                with storage.hold_transient_metadata(
+                        copy_bytes, "shared-adjoint CPU snapshot"):
+                    shared_adjoint = {
+                        (probe, batch): cotangents[probe][batch].state_dict()
+                        for probe in range(len(cotangents))
+                        for batch in range(len(cotangents[probe]))}
+                    try:
+                        record = write_adjoint_checkpoint(
+                            space, boundary=boundary,
+                            session={"generation": storage.session["generation"],
+                                     "kind": "adjoint_checkpoint",
+                                     "run_identity_sha256": storage.session["run_identity_sha256"]},
+                            cotangents=plane, shared_adjoint=shared_adjoint,
+                            shared_pass=shared_pass, owner=storage)
+                    finally:
+                        shared_adjoint.clear()
             checkpoints.append(record)
             log(f"checkpoint published at boundary {boundary} "
                 f"({len(plane)} cotangent entries)")

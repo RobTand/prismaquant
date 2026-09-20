@@ -814,16 +814,107 @@ def test_stage_a_borrowed_snapshot_writes_unchanged_loadable_checkpoint(tmp_path
         assert torch.equal(got, want)
 
 
-def test_borrowed_snapshot_pins_noncontiguous_without_changing_values():
-    """Exceptional layouts still pin CPU-contiguous with equal values."""
+def test_borrowed_snapshot_refuses_noncontiguous_before_copying(tmp_path, monkeypatch):
+    """Fallback layouts refuse the zero-copy view before any allocation.
+
+    A non-contiguous CPU accumulator is the cheap stand-in for any
+    non-pinned layout (CUDA/non-contiguous share one budgeted fallback
+    path): the borrowed view refuses, the copy plan names the honest
+    whole-owner bytes without allocating, and the guard proves no
+    clone/copy materialized.
+    """
+    import torch as _torch
+
     from prismaquant.sensitivity_probe import SharedStateCotangents
 
     owner = SharedStateCotangents(enabled=True)
     owner._acc[("kv", 0, None)] = torch.ones(2, 3).t()
     assert not owner._acc[("kv", 0, None)].is_contiguous()
-    borrowed = owner.borrowed_state_dict()
-    pinned = borrowed["accumulators"][0]["tensor"]
+    needs, copy_bytes = owner.snapshot_copy_plan()
+    assert needs is True
+    assert copy_bytes == 2 * 3 * 4
+    real_to = _torch.Tensor.to
+    real_clone = _torch.Tensor.clone
+
+    def guarded_to(self, *args, **kwargs):
+        if kwargs.get("copy") is True:
+            pytest.fail("borrowed view allocated before refusing")
+        return real_to(self, *args, **kwargs)
+
+    def guarded_clone(self, *args, **kwargs):
+        pytest.fail("borrowed view cloned before refusing")
+        return real_clone(self, *args, **kwargs)
+
+    monkeypatch.setattr(_torch.Tensor, "to", guarded_to)
+    monkeypatch.setattr(_torch.Tensor, "clone", guarded_clone)
+    try:
+        with pytest.raises(RuntimeError, match="owner-budgeted"):
+            owner.borrowed_state_dict()
+    finally:
+        monkeypatch.undo()
+    # state_dict default semantics preserved: pins contiguous CPU, equal values.
+    pinned = owner.state_dict()["accumulators"][0]["tensor"]
     assert pinned.device.type == "cpu" and pinned.is_contiguous()
     assert torch.equal(pinned, torch.ones(3, 2))
-    copied = owner.state_dict()["accumulators"][0]["tensor"]
-    assert torch.equal(pinned, copied)
+
+
+def _noncontiguous_owner():
+    from prismaquant.sensitivity_probe import SharedStateCotangents
+    owner = SharedStateCotangents(enabled=True)
+    owner._acc[("kv", 0, None)] = torch.ones(2, 3).t()
+    assert not owner.resident_tensors()[0].is_contiguous()
+    return owner
+
+
+def test_fallback_snapshot_refuses_before_copying_when_over_budget(tmp_path, monkeypatch):
+    from prismaquant.joint_cost_stage_a import shared_adjoint_copy_plan
+    import torch as _torch
+    owners = [[_noncontiguous_owner()], [_noncontiguous_owner()]]
+    needs, copy_bytes = shared_adjoint_copy_plan(owners)
+    assert needs is True and copy_bytes == 2 * 2 * 3 * 4
+    owner = _owner(tmp_path / "tight", aux=80)
+    owner.watch_auxiliary([], owners)
+    real_to = _torch.Tensor.to
+    real_clone = _torch.Tensor.clone
+    def guarded_to(self, *args, **kwargs):
+        if kwargs.get("copy") is True:
+            pytest.fail("fallback allocated before budget refusal")
+        return real_to(self, *args, **kwargs)
+    def guarded_clone(self, *args, **kwargs):
+        pytest.fail("fallback cloned before budget refusal")
+        return real_clone(self, *args, **kwargs)
+    monkeypatch.setattr(_torch.Tensor, "to", guarded_to)
+    monkeypatch.setattr(_torch.Tensor, "clone", guarded_clone)
+    try:
+        with pytest.raises(RuntimeError, match="transient serialization budget"):
+            with owner.hold_transient_metadata(copy_bytes, "shared-adjoint CPU snapshot"):
+                raise AssertionError("hold admitted over-budget snapshot copies")
+    finally:
+        monkeypatch.undo()
+    assert owner._transient_hold_bytes == 0
+
+
+def test_fallback_snapshot_writes_loadable_checkpoint_when_budgeted(tmp_path):
+    from prismaquant.joint_adjoint_checkpoints import load_adjoint_checkpoint
+    from prismaquant.joint_cost_stage_a import shared_adjoint_copy_plan
+    owners = [[_noncontiguous_owner()], [_noncontiguous_owner()]]
+    needs, copy_bytes = shared_adjoint_copy_plan(owners)
+    assert needs is True and copy_bytes > 0
+    owner = _owner(tmp_path / "roomy")
+    owner.watch_auxiliary([], owners)
+    space = adjoint_space(tmp_path / "out-fallback")
+    plane = {(0, 0): torch.zeros(4, 4), (1, 0): torch.ones(2, 2)}
+    with owner.hold_transient_metadata(copy_bytes, "shared-adjoint CPU snapshot"):
+        snapshot = {(p, b): owners[p][b].state_dict()
+                    for p in range(len(owners)) for b in range(len(owners[p]))}
+        try:
+            record = write_adjoint_checkpoint(
+                space, boundary=5, session=_session(), cotangents=dict(plane),
+                shared_adjoint=snapshot, shared_pass=_shared_pass(), owner=owner)
+        finally:
+            snapshot.clear()
+    _cots, shared, _pass = load_adjoint_checkpoint(space, record)
+    for key in ((0, 0), (1, 0)):
+        got = shared[key]["accumulators"][0]["tensor"]
+        assert got.device.type == "cpu" and got.is_contiguous()
+        assert torch.equal(got, torch.ones(3, 2))
