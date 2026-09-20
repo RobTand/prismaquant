@@ -703,10 +703,13 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
         seams["prefetch"] = pxc.prefetch_exact_activation_cache_entries
         import prismaquant.production_weight_cache as _pwc
         seams["rw_unbound"] = _pwc.ProductionWeightCache.retained_window
+        import prismaquant.joint_aura as _ja
+        seams["begin_probe"] = _ja.JointOperatorStatisticsLease.begin_probe
     orig_install = seams["install"]
     orig_load = seams["load"]
     orig_prefetch = seams["prefetch"]
     orig_rw_unbound = seams["rw_unbound"]
+    orig_begin_probe = seams["begin_probe"]
 
     def install_logged(layer, *, require_prefetched=False,
                        prefetch_following=True):
@@ -757,6 +760,19 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
     import prismaquant.production_weight_cache as _pwc_mod
     monkeypatch.setattr(
         _pwc_mod.ProductionWeightCache, "retained_window", rw_logged)
+    # Lease-begin runs strictly inside the retained_window (see
+    # joint_statistics_replay.py:406-429: the window context opens, then per
+    # probe lease.begin_probe() runs, then backward()). Logging here as well
+    # makes the window-held-before-replay ordering observable even if the
+    # contextmanager patch is ever bypassed by a direct unbound call.
+
+    def begin_logged(self, *args, **kwargs):
+        events.append(("window-open",))
+        return orig_begin_probe(self, *args, **kwargs)
+
+    import prismaquant.joint_aura as _ja_mod
+    monkeypatch.setattr(
+        _ja_mod.JointOperatorStatisticsLease, "begin_probe", begin_logged)
 
     execution = rt._execution(tmp_path / f"qexec-{layer}-{int(resume)}")
     retained = quantum_retained_state(execution)
