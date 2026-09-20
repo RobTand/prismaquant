@@ -45,6 +45,49 @@ no broker token or socket crosses. Gates:
 `tests/test_container_reader_context.py` (with
 `tests/test_tessera_campaign_container.py` regression-green).
 
+Re-stamped (2026-09-20, `flash/checkpoint-artifact-budget-858`) for
+**checkpoint artifact budget hardening** (PQ #858 R6). Ordinary writes
+admit against the aggregate artifact total, so committed or retained
+checkpoint bytes narrow them too. Transient serialization holds bound the
+peak per entry: tensor copies in the resident budget mirroring exact
+writes, pickle/manifest buffers in an auxiliary hold aggregated with live
+plus promised auxiliary usage through the one shared check_auxiliary
+calculation (a hold fitting live usage but exceeding the per-probe
+reservation refuses). Stage A snapshots shared adjoints through one
+snapshot-plus-hold-plus-writer operation: quiescent accumulators already
+CPU contiguous are borrowed with zero new backing, while only owners
+needing CPU pinning/contiguity copy inside the precomputed hold (mixed
+contiguous plus transposed owners hold exactly the exceptional bytes),
+copies cleared before the hold releases. Production Gemma4 accumulators
+are CPU via capture to CPU with graft/harvest preserving device;
+non-contiguous CPU exercises the same fallback path as any non-pinned
+device. Shared-state estimates count per-leaf serialized
+backing (measured: pickle emits per-view backing, no cross-view memo)
+with bit-length integer sizing; shared payloads stream through the
+digest sink with admitted per-file bounds instead of aggregate bytes
+objects. Commit binds receipt names/paths/envelopes to the reserved plan
+plus a canonical receipt digest; reclaim and close disposal verify
+deletion or absence before release. Gate:
+`tests/test_checkpoint_artifact_budget.py`.
+
+Re-stamped (2026-09-20, `flash/checkpoint-artifact-budget-858`) for
+**checkpoint artifact budget enforcement** (PQ #858).
+`StreamedBoundaryArtifacts` enforced `max_artifact_bytes` on ordinary
+entries while `write_adjoint_checkpoint` serialized beside the owner's
+directory with no envelope reserved. The owner now admits each checkpoint
+attempt whole -- tensor envelopes, serialized shared-state payloads,
+manifest envelope, one in-progress temp overlap -- against live ordinary
+bytes plus live checkpoint bytes before the writer creates its directory,
+then commits the receipt's actual bytes/digests and returns unused
+envelope; failures retain bytes until an explicit reclaim disposes the
+attempt's own new directory, and committed checkpoints survive owner
+close. Shared-state sizes use a closed estimate grammar with exact
+post-serialization reservation; streaming-on-write hashing and in-memory
+digests are reused with no rehash pass. This enforces the application
+artifact budget only, not PB storage/RAM reservation or staged output;
+`checkpoint_output_descriptor` leaves the hook for that lane. Gate:
+`tests/test_checkpoint_artifact_budget.py`.
+
 Re-stamped (2026-09-20, `flash/validate-profile-gated-staging-854`) for
 **runner-equivalent validator config derivation** (PQ #854).
 `validate_cached_streamed_model_identity` derived its live config from a
