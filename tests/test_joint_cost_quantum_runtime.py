@@ -54,6 +54,18 @@ QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 HEX = "0123456789abcdef"
 
 
+@pytest.fixture(autouse=True)
+def _offline_tier_policy():
+    """Each offline test runs outside campaign scope with no staged-tier
+    policy: the entrypoints activate the process-global policy from sealed
+    args when driven in-process, and without this reset a passing main()
+    would poison every later offline bulk read in the session (PQ #845)."""
+    from prismaquant.staged_tier_policy import deactivate_staged_tier_policy_for_tests
+    deactivate_staged_tier_policy_for_tests()
+    yield
+    deactivate_staged_tier_policy_for_tests()
+
+
 def _hex(char: str) -> str:
     return char * 64
 
