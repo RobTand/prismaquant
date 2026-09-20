@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `container/reader-context-transport-20260920`.
+As of: 2026-09-20 · `flash/strict-reader-tier-enforcement-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-20, `container/reader-context-transport-20260920`) for
@@ -42,6 +42,33 @@ only the nonempty chunk phases in `annotations.phases`. A zero-byte
 table. Startup/head remains a separately declared payload progress phase;
 it does not create a zero-byte storage phase. The published-PB parser
 interoperability gate is `tests/test_slice_manifest_pb_staging.py`.
+
+Re-stamped (2026-09-20, `flash/strict-reader-tier-enforcement-20260920`)
+for **strict staged-tier enforcement on GPU-consumed bulk inputs** (PQ
+#845; staged-read INV-03/INV-04/INV-06, TIER-01/TIER-02, SAFE-02). Campaign
+bulk reads no longer fall back to pool/HDD: `prismaquant/staged_tier_policy.py`
+is the one shared policy (explicit sealed `--allowed-tiers`, comma subset
+of `{ram,ssd}`, default `ram,ssd`; no ambient fallback; process-global so
+prefetch threads see it; explicitly test-only monotonic scopes). The joint entrypoints (`joint_cost_quantum`,
+`joint_cost_stage_a`) activate it from sealed args and the dispatcher
+threads the flag as a payload binding on quantum and Stage A rows
+(`tools/dispatch_joint_quanta.py:STAGED_ALLOWED_TIERS`, part of the action
+key). Under policy the source-shard reader builds no pool `safe_open`
+handle (keys/metadata/shapes/dtypes from the bounded header parse;
+`get_slice` is a header-only proxy whose indexing materializes staged;
+empty tensors built locally), PWC bounded loads require the caller's
+digest binding (unbounded and digest-less legs refuse), wire blobs pin
+with content-corruption failing clear (never adopting the next copy),
+and verified/exact activation loads serve staged bytes with the
+pool file never opened. Every staged open records its serving tier at
+open time (SDK pin IDs where pinned); RAM legs refuse for want of
+RAM-mover covers and re-acquire SSD honestly. Inactive (offline
+library scope) behavior is byte-identical. Boundary bulk reads need no
+`cost_streaming.py` change: `ExactBoundaryStorage.prefetch` already
+delegates to the gated exact-entry seam. RNG-02/SM-03 lease pinning,
+TIER-03 producer readset coverage, and TIER-04 legacy authorization stay
+named gaps. Gate: `tests/test_strict_reader_tier_enforcement.py` (plus
+`tests/test_joint_cost_quantum_runtime.py` offline isolation).
 
 Re-stamped (2026-09-20, `flash/source-identity-portable-dev-20260920`) for
 **dev-portable source-identity reuse across hosts** (PQ #843). The six-field
