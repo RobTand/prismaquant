@@ -1,7 +1,28 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/executable-quantum-readplan-20260920` (merging `origin/main` ba59332e/PQ860).
+As of: 2026-09-20 · `flash/calibration-staged-tier-reader-865`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/calibration-staged-tier-reader-865`) for
+**the calibration staged-tier reader** (PQ #865).
+`load_calibration_input` honored no staged-tier policy: under an active
+allowed-tier declaration it hashed and `safe_open`ed the pool path while
+the executable manifest already declared the calibration file. Under the
+active policy the whole artifact now comes off the stage through one
+lifetime-pinned window — RAM first where offered and allowed, honest
+SSD re-acquire otherwise, never the pool — with the sealed size/change
+fences before allocation; the independently pinned SHA256 is verified
+and the int64 draw decodes from the same frozen bytes via the installed
+public bytes decoder (bounded header extraction for provenance only;
+one staged read serves verification and decode, and decoder-owned storage
+remains valid after pin release; no zero-copy guarantee), then the
+unchanged draw contract (dtype/shape/domain, provenance, both
+`fit_ids_sha256`/`calibration_sha256` conventions).
+Unmapped/wrong-pin/forbidden-tier/corrupt-stage refuse fail-closed with
+zero pool bytes and exact pin release; inactive policy keeps the legacy
+pool read byte for byte. Gate:
+`tests/test_calibration_staged_tier.py` (with
+`tests/test_native_panel_calibration.py` regression-green).
 
 Re-stamped (2026-09-20, `flash/executable-quantum-readplan-20260920`)
 for **one executable quantum read plan** (PQ #862, R3).
