@@ -924,12 +924,12 @@ def scenario_sdk_recovery_reaper(world: World, snapshots: dict) -> dict:
             world, restaged, owner=KEY, nonce=succ_nonce,
             scope_id=succ_control["scope_id"], holder=holder,
             token=secrets.token_hex(16))
-        pinfile = json.loads((
-            lease.leases_root(world.queue) / KEY
-            / f"{second['pin_id']}.lease.json").read_text())
-        holder2 = pinfile["refs"][second["ref_id"]]["holder"]
+        # The old attempt's own certificate: worker/host from the
+        # recorded claim (the same identity the attestation filed), so
+        # the certificate itself is valid and only the attempt mismatches.
+        assert claim.get("claimed_by"), claim.get("claimed_by")
         old_cert = {"action_key": KEY, "nonce": NONCE, "scope_id": unit,
-                    "worker": holder2["worker"], "host": holder2["host"]}
+                    "worker": claim["claimed_by"], "host": host}
         refused = lease.release_refs(
             world.queue,
             [{"consumer_action_key": KEY, "pin_id": second["pin_id"],
