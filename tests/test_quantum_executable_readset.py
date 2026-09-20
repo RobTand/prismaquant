@@ -629,9 +629,10 @@ def _check_event_order(events, manifest, *, layer, chain):
         if kind == "report":
             assert event[1] in names, event[1]
             if event[1].startswith("replay-"):
+                kinds = [e[0] for e in events]
                 assert seen_window_open, (
                     f"replay phase {event[1]!r} entered before any "
-                    "retained_window opened")
+                    f"retained_window opened; kinds={kinds}")
             current = event[1]
         elif kind == "checkpoint-open":
             assert current == "checkpoint-load", events
