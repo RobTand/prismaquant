@@ -642,6 +642,8 @@ def _check_event_order(events, manifest, *, layer, chain):
                     "replay-"), events
         elif kind in ("setup-open", "window-open"):
             pass
+        elif kind == "checkpoint-plane-open":
+            assert current == "checkpoint-load", events
         elif kind == "boundary-path-open":
             staged = {entry["path"] for entry in manifest["entries"]}
             assert event[1] in staged, event[1]
@@ -697,12 +699,19 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
 
     def prefetch_logged(references, **kwargs):
         bounds = set()
+        plane = True
         for ref in references:
-            name = ref.name
-            bounds.add(int(name.split("-")[2]))
+            parts = ref.name.split("-")
+            if parts[0] == "boundary":
+                plane = False
+                bounds.add(int(parts[3]))
             events.append(("boundary-path-open", ref.path))
-        events.append(("boundary-open", sorted(bounds)[0]
-                       if len(bounds) == 1 else -1, len(references)))
+        if plane:
+            events.append(("checkpoint-plane-open", len(references)))
+        else:
+            assert len(bounds) == 1
+            events.append(("boundary-open", next(iter(bounds)),
+                           len(references)))
         return orig_prefetch(references, **kwargs)
 
     monkeypatch.setattr(
