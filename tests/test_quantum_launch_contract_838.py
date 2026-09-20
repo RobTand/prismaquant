@@ -269,7 +269,7 @@ def test_consumer_parser_and_verify_drive_the_dispatched_row(tmp_path, portable_
     inner = _payload(dispatch.quantum_argv(
         record, record_path=record_path, output_root=campaign["root"],
         adjoint_path=receipt_path))
-    args = quantum.build_parser().parse_args(inner)
+    args = quantum.build_parser().parse_args(inner[3:])
     assert args.data_manifest_sha256 == record["read_set"]["manifest_sha256"]
     found, loaded = quantum.verify_quantum_identity(
         quantum_path=Path(args.quantum), quantum_sha256=args.quantum_sha256,
