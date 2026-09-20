@@ -140,6 +140,8 @@ def _read_verified_wire_blob(cell):
     resolver = residency_resolver()
     staged = (None if resolver is None
               else resolver.staged_read(wire, expected_sha256=expected))
+    from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
+    strict = policy_is_active()
     if staged is not None:
         # The ram copy first, the stage copy second, the declared path last.
         # PrismaBuild's ram tier (#640) promotes a staged range onto a tmpfs
@@ -154,9 +156,7 @@ def _read_verified_wire_blob(cell):
         # permitted copy: no permitted copy, or every permitted copy
         # refused, raises before a declared-path byte is read, and the SSD
         # stage copy serves only when the declaration permits it.
-        from .staged_tier_policy import (
-            policy_is_active, refuse_pool_bulk_read, tier_is_allowed)
-        strict = policy_is_active()
+        from .staged_tier_policy import tier_is_allowed
         copies = ([("ram", staged["ram_path"])] if "ram_path" in staged else []) \
             + [("stage", staged["stage_path"])]
         if strict:
@@ -197,7 +197,6 @@ def _read_verified_wire_blob(cell):
         if strict:
             raise refuse_pool_bulk_read(str(wire), last or "staged-not-serving")
     elif strict:
-        from .staged_tier_policy import refuse_pool_bulk_read
         raise refuse_pool_bulk_read(
             str(wire), "readset-not-staged" if resolver is None
             else "staged-not-serving")

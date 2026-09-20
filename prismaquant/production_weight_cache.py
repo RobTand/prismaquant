@@ -1279,7 +1279,12 @@ class ProductionWeightCache:
         map's word alone. Both joint stages take the bounded branch (prepare
         through ``enable_file_load_receipts``, run through
         ``require_file_load_sha256``).
+
+        Under the active allowed-tier policy the unbounded branch refuses
+        outright (no digest, no bulk HDD open), and the bounded branch
+        requires the caller's digest binding.
         """
+        from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
         path = Path(self._path_for_value(value)).absolute()
         limit = getattr(self, "_file_load_max_bytes", 0)
         window_files = getattr(self, '_resident_window_files', None)
@@ -1298,7 +1303,6 @@ class ProductionWeightCache:
                     str(path), "unbounded-read-has-no-digest-binding")
             return torch.load(path, map_location="cpu", weights_only=True), None
         from .residency_map import StagedReadRefused, residency_resolver
-        from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
         resolver = residency_resolver()
         strict = policy_is_active()
         expected = getattr(self, "_expected_file_sha256", None)

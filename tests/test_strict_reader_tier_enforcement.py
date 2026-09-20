@@ -541,7 +541,8 @@ def test_strict_verified_activation_unmapped_refuses(tmp_path, monkeypatch):
     root = _stage_root(tmp_path)
     _strict(monkeypatch, _write_map(
         tmp_path, {'o': (other, _stage_whole(root, other), None)}))
-    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+    # The map is bound but names nothing for this file: staged-not-serving.
+    with pytest.raises(TierPolicyRefused, match="staged-not-serving"):
         load_verified_activation_cache_entry(
             path, expected_sha256=digest, policy=_activation_policy(),
             max_storage_bytes=4 * 1024 ** 2)
@@ -588,7 +589,7 @@ def test_strict_exact_entry_unmapped_refuses(tmp_path, monkeypatch):
     other.write_bytes(Path(ref.path).read_bytes())
     _strict(monkeypatch, _write_map(
         tmp_path, {'o': (other, _stage_whole(root, other), None)}))
-    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+    with pytest.raises(TierPolicyRefused, match="staged-not-serving"):
         with prefetch_exact_activation_cache_entries(
                 [ref], max_tensor_bytes=nbytes,
                 expected_session="strict-tier-session",
