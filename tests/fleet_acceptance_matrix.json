@@ -77,7 +77,7 @@
    "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
    "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
+   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "ID-08",
@@ -140,7 +140,7 @@
    "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
    "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
+   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "INV-01",
@@ -168,7 +168,7 @@
    "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
    "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
+   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "INV-05",
@@ -189,7 +189,7 @@
    "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
    "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
+   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "INV-08",
@@ -259,7 +259,7 @@
    "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
    "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
+   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "PRG-02",
@@ -336,7 +336,7 @@
    "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
    "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
+   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "SAFE-02",
@@ -371,7 +371,7 @@
    "status": "failing:R7-proof-bug",
    "scenario": "runner:sdk-first-release",
    "evidence": "fleet result JSON + admitted-action receipt (status failed)",
-   "note": "connected RED on R7: finish persists no proof, reclaim cannot verify; flips qualified on R8"
+   "note": "connected RED on R7: egress tick replays no proof, reclaim cannot verify; flips qualified on R8"
   },
   {
    "id": "ACC-04",
