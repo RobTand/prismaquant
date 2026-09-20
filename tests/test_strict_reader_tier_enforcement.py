@@ -535,12 +535,21 @@ def test_strict_source_without_any_map_refuses(tmp_path, monkeypatch):
 def test_strict_source_unpublished_material_refuses(tmp_path, monkeypatch):
     """A map entry with no published material behind it refuses at
     acquisition (unpublished) instead of serving staged bytes unpinned
-    or falling open to the pool."""
+    or falling open to the pool. Context is live; the material is not."""
+    _pb()
+    import prismabuild.pool as pool_mod
+    consumer = _hex64(f"consumer-{tmp_path}")
+    _pb_queue(tmp_path, pool_mod, consumer)
     path, _ = _shard(tmp_path)
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
-    resolver = _strict(monkeypatch, _write_map(
-        tmp_path, {'s': (path, staged, None)}))
+    map_path = _write_map(tmp_path, {'s': (path, staged, None)})
+    monkeypatch.setenv(ENV_VAR, str(map_path))
+    _launch_env(monkeypatch, consumer)
+    reset_residency_resolver_for_tests()
+    bind_residency_manifest(MANIFEST)
+    activate_staged_tier_policy("ram,ssd")
+    resolver = residency_resolver()
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
         with pytest.raises(LeaseRefused, match="unpublished"):
             reader.get_tensor('f32')

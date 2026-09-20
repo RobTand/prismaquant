@@ -541,9 +541,11 @@ class LeaseWindow:
         except LeaseRefused as exc:
             if failure is None:
                 failure = exc
-        self._exited = True
         if failure is not None:
+            # State unchanged: a failed teardown may be retried by the
+            # holder; only a completed exit marks the manager released.
             raise failure
+        self._exited = True
         return False
 
     def _release_exact(self) -> None:
