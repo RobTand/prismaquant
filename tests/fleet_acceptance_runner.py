@@ -644,13 +644,17 @@ def scenario_sdk_namespace_separation(world: World, snapshots: dict) -> dict:
         held.append(acquired)
     lease = world.mod["lease"]
     leases = lease.leases_root(world.queue)
+    assert held[0]["pin_id"] == held[1]["pin_id"], (
+        "same window pins to the same pin id")
+    assert held[0]["ref_id"] != held[1]["ref_id"], "refs must differ"
     dirs = set()
     for acquired in held:
         pin = acquired["pin"]
         assert pin["owner_action_key"] in (KEY, "f" * 64), pin
-        found = list(leases.rglob(f"{acquired['pin_id']}.lease.json"))
-        assert len(found) == 1, (acquired["pin_id"], found)
-        dirs.add(str(found[0].parent))
+        owner_file = (leases / pin["owner_action_key"]
+                      / f"{acquired['pin_id']}.lease.json")
+        assert owner_file.is_file(), owner_file
+        dirs.add(str(owner_file.parent))
     assert len(dirs) == 2, dirs
     first, second = held
     assert lease.release(world.queue, first["pin_id"],
@@ -680,10 +684,13 @@ def scenario_sdk_failure_unwind(world: World, snapshots: dict) -> dict:
                                token=secrets.token_hex(16))
     lease = world.mod["lease"]
     try:
-        raise RuntimeError("simulated mid-hold failure")
-    finally:
-        assert lease.release(world.queue, acquired["pin_id"],
-                             acquired["ref_id"]) is True
+        try:
+            raise RuntimeError("simulated mid-hold failure")
+        finally:
+            assert lease.release(world.queue, acquired["pin_id"],
+                                 acquired["ref_id"]) is True
+    except RuntimeError as exc:
+        assert str(exc) == "simulated mid-hold failure"
     pin_path = (lease.leases_root(world.queue) / KEY
                 / f"{acquired['pin_id']}.lease.json")
     assert not pin_path.exists(), "unwind must drop the pin"
