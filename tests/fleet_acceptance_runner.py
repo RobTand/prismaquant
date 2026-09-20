@@ -573,7 +573,13 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
                                   detail={"acceptance": "sdk-first-release"},
                                   claim_snapshot=claim)
     expected_done = world.queue.item_path(pool.DONE, KEY)
-    assert terminal == expected_done, (terminal, expected_done)
+    if terminal != expected_done:
+        claimed_path = world.queue.item_path(pool.CLAIMED, KEY)
+        try:
+            pending = pool._read_json(claimed_path)
+        except Exception as exc:  # noqa: BLE001
+            pending = f"unreadable: {exc!r}"
+        assert terminal == expected_done, (terminal, expected_done, pending)
     assert terminal.is_file(), terminal
     evidence["terminal"] = str(terminal)
     done = json.loads(terminal.read_text())
