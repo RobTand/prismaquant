@@ -29,8 +29,13 @@ Three gates, all fail closed with exit 3:
   old root is explicit rather than inferred.
 * Gate 2: ``--adjoint-receipt`` must exist and load; the bound set is
   regenerated with the receipt mapping (every ``adjoint.receipt_sha256``
-  binds, every ``identity_sha256`` moves). ``--check-only`` runs the gates
-  and writes nothing, mirroring the external binder's dry run.
+  binds, every ``identity_sha256`` moves). Only with the opt-in
+  ``--boundary-readsets`` flag does each record additionally get a new
+  ``boundary_readset`` generation bound to its sealed bulk manifest
+  (PQ #848; probe count from the sealed plan), whose files land under
+  the new tree's ``bound-readsets/`` directory.
+  ``--check-only`` runs the gates and writes nothing, mirroring the
+  external binder's dry run.
 
 This is a producer, never a scheduler: it publishes no PB rows, claims
 nothing, and holds no state. Run it on a checkout inside the PB code
@@ -47,10 +52,14 @@ import zlib
 from pathlib import Path
 
 if __package__:
-    from prismaquant.joint_layer_quanta import layer_quanta, seal_manifest_bytes
+    from prismaquant.joint_layer_quanta import (
+        derive_stride, emit_quantum_boundary_readsets, layer_quanta,
+        seal_manifest_bytes)
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from prismaquant.joint_layer_quanta import layer_quanta, seal_manifest_bytes
+    from prismaquant.joint_layer_quanta import (
+        derive_stride, emit_quantum_boundary_readsets, layer_quanta,
+        seal_manifest_bytes)
 
 EXIT_REFUSED = 3
 
@@ -102,15 +111,26 @@ def _load_json(path: Path, *, digest: str | None, where: str):
         raise ValueError(f"{where} is not JSON at {path}: {exc}") from exc
 
 
-def _atomic_write(path: Path, payload: bytes) -> None:
-    if path.exists() and path.read_bytes() != payload:
+def _publish(path: Path, payload: bytes, *, where: str) -> None:
+    """First-writer immutable publication; same bytes are idempotent.
+
+    Reuses the existing no-clobber owner: concurrent writers cannot
+    overwrite supposedly immutable outputs or collide on a fixed temp
+    name, and a rerun over identical bytes completes instead of refusing.
+    Differing bytes at an existing path refuse -- a re-seal is a new
+    reviewed directory, never an edit.
+    """
+    from prismaquant.cost_stage_checkpoint import publish_new_bytes
+    if publish_new_bytes(path, payload):
+        return
+    try:
+        existing = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"{where} unreadable at {path}: {exc}") from exc
+    if existing != payload:
         raise ValueError(
             f"refusing to overwrite differing bytes at {path}: a re-seal "
             f"is a new reviewed directory, never an edit")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp-regen")
-    tmp.write_bytes(payload)
-    tmp.replace(path)
 
 
 def _pretty(value) -> bytes:
@@ -251,6 +271,12 @@ def main(argv=None) -> int:
                          "new root moves only the authorized path fields")
     ap.add_argument("--adjoint-receipt", type=Path, default=None,
                     help="Gate 2: stage-A adjoint-capture.json to bind")
+    ap.add_argument("--boundary-readsets", action="store_true",
+                    help="with Gate 2: derive each record's sealed bulk "
+                         "readset manifest (PQ #848) into the new tree's "
+                         "bound-readsets/ directory and bind it to a new "
+                         "record generation (probe count from the sealed "
+                         "plan); needs --adjoint-receipt")
     ap.add_argument("--check-only", action="store_true",
                     help="Gate 1 alone; write nothing")
     args = ap.parse_args(argv)
@@ -348,25 +374,57 @@ def main(argv=None) -> int:
             produced = _produce(output_root, receipt=receipt)
         except (ValueError, OSError) as exc:
             return _fail(str(exc))
+    bound_manifests: list = []
+    if args.boundary_readsets and receipt is None:
+        return _fail("--boundary-readsets needs --adjoint-receipt")
+    if receipt is not None and args.boundary_readsets:
+        # Post-capture readset binding (PQ #848): each record gets a new
+        # generation carrying its boundary readset manifest. Derivation is
+        # pure (no writes); the probe count comes from the sealed plan,
+        # never a knob. Refusal writes nothing.
+        try:
+            execution = plan.get("execution", {})
+            n_probes = execution.get("n_probes") \
+                if isinstance(execution, dict) else None
+            if type(n_probes) is not int or isinstance(n_probes, bool) \
+                    or n_probes < 1:
+                raise ValueError(
+                    "the sealed plan names no probe count: refusing")
+            layers = parent.get("annotations", {}).get("layers", [])
+            checkpoints = derive_stride(
+                len(layers), derivation.get("stride"))["checkpoints"]
+            emitted = emit_quantum_boundary_readsets(
+                receipt, produced["records"],
+                strided_boundaries=checkpoints, n_probes=n_probes,
+                output_root=output_root)
+        except (ValueError, KeyError, TypeError) as exc:
+            return _fail(f"boundary readset binding: {exc}")
+        produced["records"] = [row["record"] for row in emitted]
+        bound_manifests = [(row["manifest_path"], row["manifest"],
+                            row["manifest_sha256"]) for row in emitted]
     if args.check_only:
         return 0
     out = args.records_out
     try:
-        for record in produced["records"]:
-            _atomic_write(out / f"{record['quantum_id']}.json",
-                          _pretty(record))
-        _atomic_write(out / "records.json", _pretty(produced["records"]))
-        _atomic_write(out / "derivation.json", _pretty(produced["derivation"]))
-        # Slice manifests land at the producer-named absolute paths the
-        # records bind -- never beside the record files -- so the bound
-        # paths resolve to the exact bytes sealed. The adjoint manifest is
-        # the phase worker's file and is never written here.
+        # Publication order is the recoverability contract: every
+        # referenced manifest is published and hash-verified BEFORE any
+        # record or index names it, so no discoverable record ever points
+        # at absent or different bytes. A crash between manifests and
+        # records reruns to completion (same bytes are idempotent);
+        # differing bytes refuse instead of overwriting.
         for record in produced["records"]:
             qid = record["quantum_id"]
-            _atomic_write(Path(record["read_set"]["manifest_path"]),
-                          seal_manifest_bytes(produced["slice_manifests"][qid]))
+            _publish(Path(record["read_set"]["manifest_path"]),
+                     seal_manifest_bytes(produced["slice_manifests"][qid]),
+                     where="slice manifest")
+        # Bound boundary readsets land at their own producer-named absolute
+        # paths -- a new immutable generation beside the records, never an
+        # edit of a sealed file.
+        for manifest_path, manifest, _ in bound_manifests:
+            _publish(Path(manifest_path), seal_manifest_bytes(manifest),
+                     where="bound readset")
         # Resolution verification: every bound path must name the exact
-        # file just written, whose bytes hash to the sealed digest.
+        # file just published, whose bytes hash to the sealed digest.
         for record in produced["records"]:
             manifest_path = Path(record["read_set"]["manifest_path"])
             try:
@@ -377,10 +435,33 @@ def main(argv=None) -> int:
             if sealed != record["read_set"]["manifest_sha256"]:
                 return _fail(f"slice manifest at {manifest_path} does not "
                               f"hash to the sealed digest")
+        for manifest_path, _, manifest_sha256 in bound_manifests:
+            path = Path(manifest_path)
+            try:
+                sealed = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError as exc:
+                return _fail(f"bound readset unreadable at {path}: {exc}")
+            if sealed != manifest_sha256:
+                return _fail(f"bound readset at {path} does not hash to "
+                              f"the sealed digest")
+        # Records and the index publish last: nothing discoverable names
+        # bytes that were not just verified above. Slice manifests land at
+        # the producer-named absolute paths the records bind -- never
+        # beside the record files. The adjoint manifest is the phase
+        # worker's file and is never written here.
+        for record in produced["records"]:
+            _publish(out / f"{record['quantum_id']}.json",
+                     _pretty(record), where="quantum record")
+        _publish(out / "records.json", _pretty(produced["records"]),
+                 where="records index")
+        _publish(out / "derivation.json", _pretty(produced["derivation"]),
+                 where="derivation")
     except (ValueError, OSError) as exc:
         return _fail(str(exc))
     bound = ("unbound (pre-stage-A)" if receipt is None else
              f"bound to receipt {produced['records'][0]['adjoint']['receipt_sha256'][:16]}…")
+    if bound_manifests:
+        bound += f" with {len(bound_manifests)} boundary readsets"
     print(f"regenerate_joint_quanta: wrote {len(produced['records'])} records "
           f"{bound} under {out}")
     return 0
