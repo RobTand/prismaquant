@@ -2116,6 +2116,50 @@ def compact_streamed_model_identity(
     }
 
 
+def live_streaming_runner_config(source_model: str | Path) -> dict[str, object]:
+    """Derive the live checkpoint config exactly as the streaming runner does.
+
+    Profile-gated staging, offline ``AutoConfig`` load, then the real meta
+    skeleton: the same three calls ``_build_streaming_context`` makes before
+    materializing weights (``prismaquant/streaming_model.py``).  Sharing that
+    derivation -- rather than normalizing after the fact -- is what keeps
+    this validator bound to the config the runner actually runs:
+
+    - a multimodal-skeleton family (``glm5_next``) runs the umbrella config,
+      so a hardcoded text-only derivation can never agree with its cache;
+    - the model constructor applies config defaults (measured: nested
+      ``text_config.dtype`` resolves ``"bfloat16"`` at load and ``null``
+      after construction), so stopping at ``AutoConfig`` also disagrees.
+
+    Meta tensors only: no weight payload is read, no device is touched, and
+    ``attn_implementation`` is left at the context default (measured to not
+    affect the derived config).  Raises on any failure; callers report it
+    fail-closed.
+    """
+    from transformers import AutoConfig
+
+    from prismaquant.model_profiles import detect_profile
+    from prismaquant.sensitivity_probe import stage_multimodal, stage_text_only
+    from prismaquant.streaming_model import build_streaming_skeleton
+
+    source = str(source_model)
+    profile = detect_profile(source)
+    if profile.requires_multimodal_skeleton():
+        staged = stage_multimodal(source)
+        multimodal = True
+    else:
+        staged = stage_text_only(source)
+        multimodal = False
+    config = AutoConfig.from_pretrained(
+        staged, trust_remote_code=True, local_files_only=True
+    )
+    skeleton = build_streaming_skeleton(config, multimodal=multimodal)
+    config_dict = skeleton.config.to_dict()
+    if not isinstance(config_dict, dict):
+        raise TypeError("streaming runner config is not a mapping")
+    return config_dict
+
+
 def validate_cached_streamed_model_identity(
     source_model: str | Path,
     identity_cache_path: str | Path,
@@ -2198,24 +2242,18 @@ def validate_cached_streamed_model_identity(
             )
 
     # The shard/index fingerprints above do not cover config.json.  Recreate
-    # the same text-only Transformers config used by the streaming runner and
-    # compare its semantic JSON to the config carried by the cached content
-    # identity.  `_name_or_path` is host-local provenance and
-    # `transformers_version` belongs to the separately pinned runtime image;
+    # the live Transformers config through the same derivation the streaming
+    # runner uses (profile-gated staging plus the meta skeleton, which applies
+    # constructor defaults) and compare its semantic JSON to the config carried
+    # by the cached content identity.  `_name_or_path` is host-local provenance
+    # and `transformers_version` belongs to the separately pinned runtime image;
     # neither is model semantics.  All other fields must agree exactly, so a
     # same-shape change such as rope scaling cannot reuse old source hashes.
     try:
-        from transformers import AutoConfig
-
-        from prismaquant.sensitivity_probe import stage_text_only
-
         config_path = Path(source) / "config.json"
         config_before = _streamed_identity_stat_fingerprint(config_path)
-        staged = stage_text_only(source)
         live_config = canonical_streamed_model_semantic_config(
-            AutoConfig.from_pretrained(
-                staged, trust_remote_code=True, local_files_only=True,
-            ).to_dict(),
+            live_streaming_runner_config(source),
             where="live streamed model config",
         )
         cached_config = canonical_streamed_model_semantic_config(
