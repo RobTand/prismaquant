@@ -867,13 +867,13 @@ def _noncontiguous_owner():
 
 
 def test_fallback_snapshot_refuses_before_copying_when_over_budget(tmp_path, monkeypatch):
-    from prismaquant.joint_cost_stage_a import shared_adjoint_copy_plan
+    from prismaquant.joint_cost_stage_a import write_checkpoint_with_snapshot
     import torch as _torch
     owners = [[_noncontiguous_owner()], [_noncontiguous_owner()]]
-    needs, copy_bytes = shared_adjoint_copy_plan(owners)
-    assert needs is True and copy_bytes == 2 * 2 * 3 * 4
     owner = _owner(tmp_path / "tight", aux=80)
     owner.watch_auxiliary([], owners)
+    space = adjoint_space(tmp_path / "out-tight")
+    plane = {(0, 0): torch.zeros(4, 4), (1, 0): torch.ones(2, 2)}
     real_to = _torch.Tensor.to
     real_clone = _torch.Tensor.clone
     def guarded_to(self, *args, **kwargs):
@@ -887,32 +887,27 @@ def test_fallback_snapshot_refuses_before_copying_when_over_budget(tmp_path, mon
     monkeypatch.setattr(_torch.Tensor, "clone", guarded_clone)
     try:
         with pytest.raises(RuntimeError, match="transient serialization budget"):
-            with owner.hold_transient_metadata(copy_bytes, "shared-adjoint CPU snapshot"):
-                raise AssertionError("hold admitted over-budget snapshot copies")
+            write_checkpoint_with_snapshot(
+                owner, space, boundary=5, session=_session(),
+                plane=dict(plane), cotangents=owners, shared_pass=_shared_pass())
     finally:
         monkeypatch.undo()
     assert owner._transient_hold_bytes == 0
+    assert not (space / "checkpoints" / "boundary-005").exists()
 
 
 def test_fallback_snapshot_writes_loadable_checkpoint_when_budgeted(tmp_path):
     from prismaquant.joint_adjoint_checkpoints import load_adjoint_checkpoint
-    from prismaquant.joint_cost_stage_a import shared_adjoint_copy_plan
+    from prismaquant.joint_cost_stage_a import write_checkpoint_with_snapshot
     owners = [[_noncontiguous_owner()], [_noncontiguous_owner()]]
-    needs, copy_bytes = shared_adjoint_copy_plan(owners)
-    assert needs is True and copy_bytes > 0
     owner = _owner(tmp_path / "roomy")
     owner.watch_auxiliary([], owners)
     space = adjoint_space(tmp_path / "out-fallback")
     plane = {(0, 0): torch.zeros(4, 4), (1, 0): torch.ones(2, 2)}
-    with owner.hold_transient_metadata(copy_bytes, "shared-adjoint CPU snapshot"):
-        snapshot = {(p, b): owners[p][b].state_dict()
-                    for p in range(len(owners)) for b in range(len(owners[p]))}
-        try:
-            record = write_adjoint_checkpoint(
-                space, boundary=5, session=_session(), cotangents=dict(plane),
-                shared_adjoint=snapshot, shared_pass=_shared_pass(), owner=owner)
-        finally:
-            snapshot.clear()
+    record = write_checkpoint_with_snapshot(
+        owner, space, boundary=5, session=_session(), cotangents=owners,
+        plane=dict(plane), shared_pass=_shared_pass())
+    assert owner._transient_hold_bytes == 0
     _cots, shared, _pass = load_adjoint_checkpoint(space, record)
     for key in ((0, 0), (1, 0)):
         got = shared[key]["accumulators"][0]["tensor"]
@@ -920,30 +915,85 @@ def test_fallback_snapshot_writes_loadable_checkpoint_when_budgeted(tmp_path):
         assert torch.equal(got, torch.ones(3, 2))
 
 
-def test_mixed_snapshot_declared_hold_covers_actual_copies():
-    """Mixed owners: the declared hold must cover what the caller copies.
+def test_mixed_snapshot_declared_hold_covers_actual_copies(tmp_path, monkeypatch):
+    """Mixed owners: borrow contiguous, budget only the exceptional copy.
 
-    One CPU-contiguous owner (borrowable, 24 B) beside one transposed
-    owner (needs copy, 24 B). The plan declares only the exceptional
-    bytes; the production fallback must materialize exactly those bytes,
-    not a whole-plane copy of both owners. Fails on the whole-plane
-    fallback (48 actual vs 24 declared).
+    One CPU-contiguous owner (borrowable, 24 B value 3.0) beside one
+    transposed owner (needs copy, 24 B ones). Calls the actual production
+    operation write_checkpoint_with_snapshot: tight budget refuses BEFORE
+    any clone/copy with no quota leak and no files; roomy budget copies
+    exactly the declared 24 B (guard counts a single copy=True), holds
+    through the writer, releases after copies disappear, and loads equal
+    tensors with preserved precision.
     """
-    from prismaquant.joint_cost_stage_a import shared_adjoint_copy_plan
+    from prismaquant.joint_adjoint_checkpoints import load_adjoint_checkpoint
+    from prismaquant.joint_cost_stage_a import (
+        shared_adjoint_copy_plan,
+        write_checkpoint_with_snapshot,
+    )
+    import torch as _torch
 
-    contiguous = _accumulated_cotangent(3.0)
-    transposed = _noncontiguous_owner()
-    owners = [[contiguous], [transposed]]
-    needs, declared = shared_adjoint_copy_plan(owners)
-    assert needs is True
-    assert declared == 2 * 3 * 4
-    # What the pre-fix fallback materializes: state_dict() for EVERY owner.
-    materialized = {(p, b): owners[p][b].state_dict()
-                    for p in range(len(owners)) for b in range(len(owners[p]))}
+    def _mixed():
+        return [[_accumulated_cotangent(3.0)], [_noncontiguous_owner()]]
+
+    needs, declared = shared_adjoint_copy_plan(_mixed())
+    assert needs is True and declared == 2 * 3 * 4
+    # Tight: accounted originals (48) + declared (24) = 72 > 60 refuses
+    # before any clone/copy; no files, no quota leak, originals intact.
+    tight_owners = _mixed()
+    tight = _owner(tmp_path / "mixed-tight", aux=60)
+    tight.watch_auxiliary([], tight_owners)
+    real_to = _torch.Tensor.to
+    real_clone = _torch.Tensor.clone
+    def refused_to(self, *args, **kwargs):
+        if kwargs.get("copy") is True:
+            pytest.fail("mixed fallback allocated before budget refusal")
+        return real_to(self, *args, **kwargs)
+    def refused_clone(self, *args, **kwargs):
+        pytest.fail("mixed fallback cloned before budget refusal")
+        return real_clone(self, *args, **kwargs)
+    monkeypatch.setattr(_torch.Tensor, "to", refused_to)
+    monkeypatch.setattr(_torch.Tensor, "clone", refused_clone)
+    tight_space = adjoint_space(tmp_path / "out-mixed-tight")
+    tight_plane = {(0, 0): torch.zeros(4, 4), (1, 0): torch.ones(2, 2)}
     try:
-        actual = sum(row["tensor"].untyped_storage().nbytes()
-                     for state in materialized.values()
-                     for row in state["accumulators"])
-        assert actual == declared
+        with pytest.raises(RuntimeError, match="transient serialization budget"):
+            write_checkpoint_with_snapshot(
+                tight, tight_space, boundary=5, session=_session(),
+                plane=dict(tight_plane), cotangents=tight_owners,
+                shared_pass=_shared_pass())
     finally:
-        materialized.clear()
+        monkeypatch.undo()
+    assert tight._transient_hold_bytes == 0
+    assert not (tight_space / "checkpoints" / "boundary-005").exists()
+    assert torch.equal(tight_owners[0][0].resident_tensors()[0],
+                       torch.full((2, 3), 3.0))
+    # Roomy: exactly one 24 B copy (the transposed owner); the contiguous
+    # owner is borrowed (shared backing, no second copy).
+    roomy_owners = _mixed()
+    roomy = _owner(tmp_path / "mixed-roomy")
+    roomy.watch_auxiliary([], roomy_owners)
+    roomy_space = adjoint_space(tmp_path / "out-mixed-roomy")
+    roomy_plane = {(0, 0): torch.zeros(4, 4), (1, 0): torch.ones(2, 2)}
+    copied_bytes = []
+    orig_to = _torch.Tensor.to
+    def counting_to(self, *args, **kwargs):
+        if kwargs.get("copy") is True:
+            copied_bytes.append(self.numel() * self.element_size())
+        return orig_to(self, *args, **kwargs)
+    monkeypatch.setattr(_torch.Tensor, "to", counting_to)
+    try:
+        record = write_checkpoint_with_snapshot(
+            roomy, roomy_space, boundary=5, session=_session(),
+            plane=dict(roomy_plane), cotangents=roomy_owners,
+            shared_pass=_shared_pass())
+    finally:
+        monkeypatch.undo()
+    assert sum(copied_bytes) == declared == 24
+    assert roomy._transient_hold_bytes == 0
+    _cots, shared, _pass = load_adjoint_checkpoint(roomy_space, record)
+    assert torch.equal(shared[(0, 0)]["accumulators"][0]["tensor"],
+                       torch.full((2, 3), 3.0))
+    got = shared[(1, 0)]["accumulators"][0]["tensor"]
+    assert got.device.type == "cpu" and got.is_contiguous()
+    assert torch.equal(got, torch.ones(3, 2))
