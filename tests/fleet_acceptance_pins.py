@@ -35,8 +35,11 @@ from pathlib import Path
 PB_PINNED_CHECKOUT = Path(
     "/mnt/shared/pq-fleet-acceptance-20260920/pb-pin.git")
 PB_PINNED_CHECKOUT_LEGACY = Path("/home/rob/tmp/pb-reader-lease-pin-20260920")
+#: The upstream repo the pin merged into. Fresh installs fetch the pinned
+#: commit by exact SHA from this repo's ancestry -- never a branch tip,
+#: never HEAD. (The old ``fix/pb-reader-lifetime-20260920`` branch was
+#: retired on merge; naming it broke fresh installs.)
 PB_CANDIDATE_REPO = "https://github.com/RobTand/prismabuild.git"
-PB_CANDIDATE_BRANCH = "fix/pb-reader-lifetime-20260920"
 #: PB741 merge ("refs_for_holder signals unknown census", corrected SDK
 #: 461728e4, root census 7+179 qualified). Full immutable pin for the final
 #: harness: supersedes R8 0bf6fc81 (typed export proof, terminal replay),
@@ -110,18 +113,27 @@ def _git_bytes(git_dir: Path, *args: str, timeout_s: int = 300) -> bytes:
 
 
 def _resolve_via_network(dest: Path, *, timeout_s: int) -> Path:
-    """Clone the candidate branch metadata; the pin must be in its history.
+    """Fetch the pinned commit by exact SHA from its merged main ancestry.
 
-    Fallback when the pinned checkout is not visible from this worker.
-    Branch deletion (retirement on merge) fails closed here: the pin then
-    needs re-pointing at the merged home, never a silent substitution.
+    Fallback when no pinned object store is visible from this worker.
+    Fetches ONLY the pinned SHA (never a branch tip, never HEAD) from the
+    upstream repo the pin merged into, then the caller verifies the whole
+    extracted tree byte-for-byte against that revision. A wrong SHA fails
+    closed below; a substituted HEAD cannot pass the blob checks.
     """
     mirror = dest / "mirror.git"
     if not (mirror / "objects").is_dir():
         done = _run_git_no_dir(
-            ["clone", "--bare", "--filter=blob:none", "--single-branch",
-             "--branch", PB_CANDIDATE_BRANCH, PB_CANDIDATE_REPO,
-             str(mirror)], timeout_s=timeout_s)
+            ["init", "--bare", str(mirror)], timeout_s=timeout_s)
+        if done.returncode != 0:
+            raise NonQualified(
+                "PB candidate unreachable",
+                detail={"rev": PB_CANDIDATE_REV,
+                        "stderr": done.stderr.strip()[-500:]})
+        done = subprocess.run(
+            ["git", "--git-dir", str(mirror), "fetch",
+             "--filter=blob:none", PB_CANDIDATE_REPO, PB_CANDIDATE_REV],
+            capture_output=True, text=True, timeout=timeout_s)
         if done.returncode != 0:
             raise NonQualified(
                 "PB candidate unreachable",

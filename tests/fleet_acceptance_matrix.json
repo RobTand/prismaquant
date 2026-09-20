@@ -4,11 +4,12 @@
  "ledger": "docs/staged_read_requirements_2026-09-20.json schema pb.staged_read_requirements.v3",
  "pins": {
   "pb_candidate_rev": "c5012fbfc6986c551af5606ff9d6f0d874768116",
-  "pq_base": "origin/main 61ec9fcb8a37c4a171771f7574e147bc5f0593e2",
+  "pq_base": "fleet/acceptance-harness-20260920 on origin/main 217dee82c929eba9ae88300c74e4c4b511deca47 (PQ846 strict reader SDK 461728e)",
   "pb_r7_red_rev": "a9bb83e9abd2aeffe22af7d0b51238158954a909",
   "pb_r7_red_evidence": "/home/rob/tmp/pqfleet-r7red-20260920.json",
   "pb_r8_green_rev": "0bf6fc812eb4fdab20e8149d5b4583f58b508d33",
-  "pb_r8_green_evidence": "/home/rob/tmp/pqfleet-r8green-final-20260920.json"
+  "pb_r8_green_evidence": "/home/rob/tmp/pqfleet-r8green-final-20260920.json",
+  "pb_object_mirror": "/mnt/shared/pq-fleet-acceptance-20260920/pb-pin.git (bare mirror, read-only, PROVENANCE recorded)"
  },
  "requirements": [
   {
