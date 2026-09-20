@@ -602,13 +602,16 @@ def _acceptance_setup(tmp_path, monkeypatch):
 
 def run_adjoint_capture_core_alias(runner, calib, tmp_path, plan_sha,
                                    prepared_sha, parent_sha, roster_sha,
-                                   execution=None):
+                                   execution=None,
+                                   campaign_scope=None):
     import test_joint_cost_quantum_runtime as rt
     import test_streamed_cost_checkpoints as tsc
     import prismaquant.aura_cost as aura
     from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
     if execution is None:
         execution = rt._execution(tmp_path / "capture")
+    if campaign_scope is None:
+        campaign_scope = {"fixture": "exec-acceptance"}
     return run_adjoint_capture_core(
         runner, calib, execution=execution,
         output_root=str(tmp_path / "campaign"), stride=2,
@@ -616,7 +619,7 @@ def run_adjoint_capture_core_alias(runner, calib, tmp_path, plan_sha,
         unit_roster_sha256=roster_sha, plan_sha256=plan_sha,
         prepared_sha256=prepared_sha, read_manifest_sha256=parent_sha,
         implementation_sha256=aura._aura_source_sha256(),
-        campaign_scope={"fixture": "exec-acceptance"})
+        campaign_scope=campaign_scope)
 
 
 def _check_event_order(events, manifest, *, layer, chain,
@@ -1054,7 +1057,8 @@ def _acceptance_setup_expert(tmp_path, monkeypatch):
     receipt = run_adjoint_capture_core_alias(
         runner_b, lm.draw(), tmp_path, plan_sha, prepared_sha, parent_sha,
         roster_digest(sorted(prepared["formats_by_qname"])),
-        execution=make_execution(tmp_path / "capture"))
+        execution=make_execution(tmp_path / "capture"),
+        campaign_scope={"fixture": "exec-acceptance-expert"})
     assert receipt.get("status") == "complete"
     assert sorted(receipt["boundary_entries"]) == ["0", "1"]
     bound = _produce(
