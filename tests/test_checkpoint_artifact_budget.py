@@ -24,12 +24,13 @@ from prismaquant.joint_adjoint_checkpoints import (
 from test_streamed_boundary_artifacts import _policy
 
 
-def _owner(path, *, disk=1 << 24, cap=1 << 22, published=False, check_memory=None):
+def _owner(path, *, disk=1 << 24, cap=1 << 22, aux=1 << 20, n_probes=2,
+           published=False, check_memory=None):
     # Resident headroom covers per-entry transient serialization holds; the
     # artifact ceiling under test stays `disk`.
     owner = StreamedBoundaryArtifacts(
-        _policy(path, cap=cap, disk=disk))
-    owner.bind({"fixture": "checkpoint-budget"}, n_probes=2,
+        _policy(path, cap=cap, aux=aux, disk=disk))
+    owner.bind({"fixture": "checkpoint-budget"}, n_probes=n_probes,
                check_memory=check_memory, published=published)
     return owner
 
@@ -624,3 +625,50 @@ def test_bounded_sink_refuses_before_crossing_ceiling():
     unbounded.sink(io.BytesIO())
     assert unbounded.write(b"z" * 10000) == 10000
     assert unbounded.bytes_written == 10000
+
+
+def _watched_shared_batch():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        input_ids=torch.zeros(4, dtype=torch.long),
+        position_ids=torch.zeros(4, dtype=torch.long),
+        position_embeddings=None,
+        attention_mask=None,
+        shared_pass_state={"t": torch.zeros(100)})
+
+
+def test_hold_refuses_promised_not_just_live_auxiliary(tmp_path):
+    """A hold fitting live usage but exceeding promised reservations refuses.
+
+    Four probes promise 4 x 400 B of shared state beside ~464 B live
+    metadata/storage; a 1000 B hold fits the ~1464 B live-actual total but
+    not the ~3064 B promised total under a 2000 B ceiling, so admission
+    refuses before anything serializes. A generous ceiling admits the
+    identical hold.
+    """
+    owner = _owner(tmp_path / "boundaries", aux=2000, n_probes=4)
+    owner.watch_auxiliary([_watched_shared_batch()], [])
+    with pytest.raises(RuntimeError, match="transient serialization budget"):
+        with owner.hold_transient_metadata(1000, "fixture"):
+            raise AssertionError("hold admitted over promised bytes")
+    assert owner._transient_hold_bytes == 0
+    assert owner.telemetry["peak_transient_serialization_bytes"] == 0
+
+    roomy = _owner(tmp_path / "roomy", aux=1 << 20, n_probes=4)
+    roomy.watch_auxiliary([_watched_shared_batch()], [])
+    with roomy.hold_transient_metadata(1000, "fixture"):
+        assert roomy._transient_hold_bytes == 1000
+    assert roomy._transient_hold_bytes == 0
+    assert roomy.telemetry["peak_transient_serialization_bytes"] == 1000
+
+
+def test_check_auxiliary_sees_active_hold(tmp_path):
+    """check_auxiliary admits the same total the hold admission enforces."""
+    owner = _owner(tmp_path / "boundaries", aux=1000)
+    extra = [torch.zeros(150)]
+    owner.check_auxiliary([], extra=extra)
+    with owner.hold_transient_metadata(800, "fixture"):
+        with pytest.raises(RuntimeError, match="auxiliary.*residency budget"):
+            owner.check_auxiliary([], extra=extra)
+    owner.check_auxiliary([], extra=extra)
