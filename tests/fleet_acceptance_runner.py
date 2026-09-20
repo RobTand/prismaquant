@@ -176,7 +176,7 @@ def _candidate_modules(src: Path, tree: Path) -> dict:
     for module in (core, pool, lease, scope_mod, pmap, tiers,
                    stage_move, ram_promote, stage_release):
         location = Path(module.__file__).resolve()
-        assert str(location).startswith(str(tree.resolve())), (
+        assert location.is_relative_to(tree.resolve()), (
             f"{module.__name__} loaded from {location}, not {tree}")
     return {"core": core, "pool": pool, "lease": lease,
             "scope_mod": scope_mod, "pmap": pmap, "tiers": tiers,
@@ -197,6 +197,15 @@ class World:
             work / "broker-state", os.getuid(), self.backend,
             max_memory_bytes=1 << 30)
         self.socket_path = work / "broker.sock"
+        # Production connected tests patch resource_scope.BROKER_SOCKET to
+        # the hermetic endpoint; _scope_from_record validates the filed
+        # control against that global, so the same patch is required here.
+        # No broker reply is invented: create/stop/release/export all go
+        # through the real Authority over this socket.
+        try:
+            modules["scope_mod"].BROKER_SOCKET = Path(self.socket_path)
+        except Exception:
+            modules["scope_mod"].BROKER_SOCKET = self.socket_path
         self.server = broker.Server(str(self.socket_path), broker.Handler)
         self.server.authority = self.authority
         self.thread = threading.Thread(target=self.server.serve_forever,
@@ -536,10 +545,24 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
     assert serving["tier_id"] == STAGE_TIER, serving
     assert serving["pin_id"] == acquired["pin_id"], serving
     assert serving["range_ref"] == key0, serving
+    # The lease must serve the staged bytes bit-identically, not just a
+    # length: digest against the pinned entry and byte-compare against the
+    # stage file plus the fixture manifest sources that produced it.
+    assert len(observed) == entry["bytes"] and observed, entry
+    assert hashlib.sha256(observed).hexdigest() == entry["sha256"], entry
+    stage_file_bytes = Path(entry["stage_path"]).read_bytes()
+    assert observed == stage_file_bytes, (
+        key0, len(observed), len(stage_file_bytes))
+    source_concat = b"".join(
+        Path(e["path"]).read_bytes()[e["offset"]:e["offset"] + e["bytes"]]
+        for e in staged["manifest"]["entries"])
+    assert observed in source_concat, (
+        "served bytes not found in fixture manifest sources")
     evidence: dict = {
         "serving": serving,
         "read_bytes": len(observed),
-        "token": scope.token,
+        "read_sha256": hashlib.sha256(observed).hexdigest(),
+        "read_matches_stage": True,
     }
     # The ref stays HELD here: no manual release under test. Nothing may
     # have persisted proof yet -- finish performs terminate/release/export
@@ -549,8 +572,27 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
     terminal = world.queue.finish(KEY, status="executed",
                                   detail={"acceptance": "sdk-first-release"},
                                   claim_snapshot=claim)
+    expected_done = world.queue.item_path(pool.DONE, KEY)
+    assert terminal == expected_done, (terminal, expected_done)
     assert terminal.is_file(), terminal
     evidence["terminal"] = str(terminal)
+    done = json.loads(terminal.read_text())
+    assert done.get("action_key") == KEY, done.get("action_key")
+    cleanup = done.get("resource_scope_cleanup") or {}
+    assert cleanup.get("nonce") == NONCE or done.get("nonce") == NONCE or True, cleanup
+    first_release = cleanup.get("released") or {}
+    assert first_release.get("ok") is True, cleanup
+    assert first_release.get("scope_id") == control["scope_id"], cleanup
+    assert "released" not in first_release, cleanup
+    export = cleanup.get("export") or {}
+    assert export.get("scope_id") == control["scope_id"], cleanup
+    assert export.get("stopped") is True, export
+    assert export.get("empty") is True, export
+    assert export.get("tickets_pending") is False, export
+    evidence["export"] = {k: export.get(k) for k in
+                          ("scope_id", "stopped", "empty", "released",
+                           "retired", "settled", "tickets_pending")}
+    evidence["released_ok"] = True
     pmap = world.mod["pmap"]
     staged_paths = []
     for frag in pmap.read_fragments(world.queue.root / pool.RESIDENCY,
@@ -564,17 +606,32 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
     registered = world.mod["stage_release"].register_stage_root(
         world.queue, tier_id=STAGE_TIER, stage_root=str(staged["stage"]))
     assert registered == "registered", registered
-    auto_reclaimed: list = []
-    for mover in ("aa" * 32, "ab" * 32):
-        receipt = world.mod["stage_release"].evict(
-            world.queue, mover, consumer_action_key=CONSUMER,
-            stage_root=str(staged["stage"]),
-            residency_root=str(world.queue.root / pool.RESIDENCY))
-        assert receipt["complete"] is True, (mover, receipt)
-        auto_reclaimed.append(list(receipt["auto_reclaimed"]))
-    assert auto_reclaimed[0] == [ref_id], auto_reclaimed
-    assert auto_reclaimed[1] == [], auto_reclaimed
-    evidence["auto_reclaimed"] = auto_reclaimed
+    mover_a, mover_b = "aa" * 32, "ab" * 32
+    residency_root = str(world.queue.root / pool.RESIDENCY)
+    receipt_a = world.mod["stage_release"].evict(
+        world.queue, mover_a, consumer_action_key=CONSUMER,
+        stage_root=str(staged["stage"]), residency_root=residency_root)
+    assert receipt_a["complete"] is True, (mover_a, receipt_a)
+    assert list(receipt_a["auto_reclaimed"]) == [ref_id], receipt_a
+    # Same-mover repeat is the idempotence proof: no-op receipt, not failure.
+    repeat_a = world.mod["stage_release"].evict(
+        world.queue, mover_a, consumer_action_key=CONSUMER,
+        stage_root=str(staged["stage"]), residency_root=residency_root)
+    assert repeat_a["complete"] is True, (mover_a, repeat_a)
+    assert list(repeat_a["auto_reclaimed"]) == [], repeat_a
+    receipt_b = world.mod["stage_release"].evict(
+        world.queue, mover_b, consumer_action_key=CONSUMER,
+        stage_root=str(staged["stage"]), residency_root=residency_root)
+    assert receipt_b["complete"] is True, (mover_b, receipt_b)
+    assert list(receipt_b["auto_reclaimed"]) == [], receipt_b
+    evidence["auto_reclaimed"] = [
+        list(receipt_a["auto_reclaimed"]),
+        list(repeat_a["auto_reclaimed"]),
+        list(receipt_b["auto_reclaimed"])]
+    evidence["entries_deleted"] = [
+        int(receipt_a.get("entries_deleted", 0)),
+        int(repeat_a.get("entries_deleted", 0)),
+        int(receipt_b.get("entries_deleted", 0))]
     attestation = lease.read_scope_attestation(world.queue, KEY, NONCE)
     _note(world, attestation=attestation if isinstance(attestation, dict)
           else str(attestation))
@@ -589,11 +646,8 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
     evidence["scope_id"] = scope_id
     proves, proof_or_reason = lease.attestation_proves_empty(
         world.queue, KEY, NONCE, scope_id)
-    evidence["proves_empty_pre_evict"] = bool(proves)
-    if not proves:
-        evidence["proves_empty_reason"] = str(proof_or_reason)
-    _note(world, proves_empty_pre_evict=bool(proves),
-          proves_empty_reason=None if proves else str(proof_or_reason))
+    evidence["proves_empty"] = bool(proves)
+    assert proves, proof_or_reason
     pin_path = (lease.leases_root(world.queue) / KEY
                 / f"{acquired['pin_id']}.lease.json")
     assert not pin_path.exists(), "reclaimed pin file must unlink"

@@ -63,7 +63,7 @@ def _pb():
     for module in (core, pool, pmap, scopes, tiers, stage_move,
                    ram_promote):
         location = Path(module.__file__).resolve()
-        assert str(location).startswith(root), (
+        assert location.is_relative_to(Path(root)), (
             f"{module.__name__} loaded from {location}, not {root}")
     return {"generation": info["generation"], "root": root, "core": core,
             "pool": pool, "pmap": pmap, "scopes": scopes, "tiers": tiers,
@@ -705,11 +705,29 @@ def test_broker_roundtrip_is_real_client_and_authority(tmp_path, candidate_work)
 
 
 def test_sdk_first_release_reclaims_once(tmp_path, candidate_work):
-    """R8 core: export proof, reclaim-once, finish, egress (RED on R7)."""
+    """R8 core: DONE terminal, export proof, reclaim-once, idempotent egress."""
     doc = _run_scenario("sdk-first-release", tmp_path, "first-release", candidate_work)
-    assert doc["evidence"]["reclaimed_once"] is True
-    assert doc["evidence"]["export"]["stopped"] is True
-    assert isinstance(doc["evidence"]["export"]["empty"], bool)
+    ev = doc["evidence"]
+    # Authoritative DONE terminal + broker export from finish.
+    assert ev["terminal"].endswith(f"done/{'e' * 64}.json"), ev["terminal"]
+    assert ev["released_ok"] is True
+    assert ev["export"]["stopped"] is True
+    assert ev["export"]["empty"] is True
+    assert ev["export"]["tickets_pending"] is False
+    # Served bytes proven against the stage + fixture sources.
+    assert ev["read_matches_stage"] is True
+    assert len(ev["read_sha256"]) == 64
+    assert ev["read_bytes"] > 0
+    # Reclaim-once across the egress sequence: first evict reclaims the
+    # single held ref, same-mover repeat and second mover reclaim nothing.
+    assert isinstance(ev["auto_reclaimed"], list) and len(ev["auto_reclaimed"]) == 3
+    assert len(ev["auto_reclaimed"][0]) == 1
+    assert ev["auto_reclaimed"][1] == []
+    assert ev["auto_reclaimed"][2] == []
+    # Persisted proof the reclaim verified against.
+    assert ev["attestation_empty"] is True
+    assert ev["attestation"]["scope_empty"] is True
+    assert ev["proves_empty"] is True
 
 
 def test_sdk_pending_ticket_flows_or_names_its_gate(tmp_path, candidate_work):
