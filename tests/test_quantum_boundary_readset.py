@@ -32,6 +32,8 @@ from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
     write_adjoint_checkpoint, write_adjoint_receipt)
 from prismaquant.joint_layer_quanta import (
     ADJOINT_CAPTURE_SCHEMA,
+    LAYER_QUANTUM_SCHEMA,
+    MANIFEST_SCHEMA_V1,
     MANIFEST_SCHEMA_V2,
     bind_adjoint_receipt,
     bind_quantum_boundary_readset,
@@ -112,8 +114,10 @@ def _fixture(tmp_path, layer=3, chain=(7, 6, 5, 4), checkpoint=8,
             "policy": {"prefetch_batches": PREFETCH_BATCHES}},
         "boundary_entries": boundary_entries,
         "checkpoints": [checkpoint_record],
+        "status": "complete",
     }
-    record = {"quantum_id": f"layer-{layer:03d}", "layer": layer,
+    record = {"schema": LAYER_QUANTUM_SCHEMA,
+              "quantum_id": f"layer-{layer:03d}", "layer": layer,
               "adjoint": {"checkpoint_boundary": checkpoint,
                           "chain_layers": list(chain),
                           "receipt_sha256": None},
@@ -444,6 +448,7 @@ def _real_record_receipt(tmp_path):
             "policy": {"prefetch_batches": PREFETCH_BATCHES}},
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
+        "status": "complete",
     }
     return record, receipt
 
@@ -465,10 +470,11 @@ def test_bound_record_passes_real_campaign_validator(tmp_path):
     run_root = str(Path(
         record["output_space"]["root"]).resolve().parents[1])
     new = bind_quantum_boundary_readset(
-        record, manifest=manifest,
+        record, receipt, manifest=manifest,
         manifest_path=f"{run_root}/layer-quanta/adjoint/bound-readsets/"
                       "layer-003.boundary-readset.json.gz",
-        manifest_sha256=wire_sha256, output_root=run_root)
+        manifest_sha256=wire_sha256, output_root=run_root,
+        strided_boundaries=[8, 16, 24, 32, 40, 45])
     campaign = dict(record["campaign"],
                     unit_roster_sha256=record["campaign"].get(
                         "unit_roster_sha256"),
@@ -494,10 +500,11 @@ def test_binder_rejects_foreign_receipt_for_same_layer(tmp_path):
         record["output_space"]["root"]).resolve().parents[1])
     with pytest.raises(ValueError, match="another stage-A receipt"):
         bind_quantum_boundary_readset(
-            record, manifest=manifest,
+            record, receipt, manifest=manifest,
             manifest_path=f"{run_root}/layer-quanta/adjoint/bound-readsets/"
                           "layer-003.boundary-readset.json.gz",
-            manifest_sha256=wire_sha256, output_root=run_root)
+            manifest_sha256=wire_sha256, output_root=run_root,
+            strided_boundaries=[8, 16, 24, 32, 40, 45])
 
 
 def _tiny_campaign(tmp_path):
@@ -710,3 +717,110 @@ def test_cli_readsets_need_a_receipt(tmp_path):
            "--records-out", str(out),
            "--boundary-readsets"]) == 3
     assert not out.exists()
+
+
+@pytest.mark.parametrize("status", ["running", "failed"])
+def test_builder_refuses_incomplete_status(tmp_path, status):
+    record, receipt = _fixture(tmp_path)
+    receipt["status"] = status
+    with pytest.raises(ValueError, match="completed capture"):
+        _build(record, receipt)
+
+
+def test_builder_refuses_missing_status(tmp_path):
+    record, receipt = _fixture(tmp_path)
+    del receipt["status"]
+    with pytest.raises(ValueError, match="completed capture"):
+        _build(record, receipt)
+
+
+def test_binder_refuses_mutated_entry_consistent_rehash(tmp_path):
+    """A different path/bytes/digest set with matching annotations,
+    recomputed counts and a fresh wire hash must still refuse: the triples
+    must originate from the bound receipt, not merely agree with it."""
+    import copy
+    record, receipt = _fixture(tmp_path)
+    manifest = _build(record, receipt)
+    forged = copy.deepcopy(manifest)
+    forged["entries"][0]["bytes"] += 8
+    forged["entries"][0]["sha256"] = "c" * 64
+    total = 0
+    for phase in forged["read_plan"]["phases"]:
+        size = sum(forged["entries"][i]["bytes"]
+                   for i in phase["entry_indices"])
+        phase["bytes"] = size
+        total += size
+        phase["cumulative_bytes"] = total
+    forged["total_bytes"] = sum(e["bytes"] for e in forged["entries"])
+    forged["read_plan"]["read_bytes"] = total
+    forged_sha = hashlib.sha256(seal_manifest_bytes(forged)).hexdigest()
+    with pytest.raises(ValueError, match="originate from the bound receipt"):
+        bind_quantum_boundary_readset(
+            record, receipt, manifest=forged,
+            manifest_path="/mnt/shared/run/layer-quanta/adjoint/"
+                          "bound-readsets/layer-003.boundary-readset.json.gz",
+            manifest_sha256=forged_sha, output_root="/mnt/shared/run",
+            strided_boundaries=STRIDED)
+
+
+def test_binder_refuses_foreign_schema(tmp_path):
+    record, receipt = _fixture(tmp_path)
+    manifest = _build(record, receipt)
+    manifest["schema"] = MANIFEST_SCHEMA_V1
+    wire_sha = hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest()
+    with pytest.raises(ValueError, match="foreign schema"):
+        bind_quantum_boundary_readset(
+            record, receipt, manifest=manifest,
+            manifest_path="/mnt/shared/run/layer-quanta/adjoint/"
+                          "bound-readsets/layer-003.boundary-readset.json.gz",
+            manifest_sha256=wire_sha, output_root="/mnt/shared/run",
+            strided_boundaries=STRIDED)
+
+
+@pytest.mark.parametrize("status", ["running", "failed"])
+def test_cli_refuses_incomplete_status(tmp_path, status):
+    campaign = _tiny_campaign(tmp_path)
+    space = tmp_path / "adjoint-space"
+    space.mkdir()
+    receipt = _tiny_receipt(campaign, space)
+    receipt["status"] = status
+    partial = space / "partial-receipt.json"
+    partial.write_text(json.dumps(receipt, sort_keys=True))
+    out = tmp_path / "reviewed"
+    assert regen.main(
+        _regen_argv(tmp_path, campaign)
+        + ["--output-root", str(campaign["root"]),
+           "--records-out", str(out),
+           "--adjoint-receipt", str(partial),
+           "--boundary-readsets"]) == 3
+    assert not out.exists()
+    assert not (Path(str(campaign["root"])) / "layer-quanta" / "adjoint" /
+                "bound-readsets").exists()
+
+
+def test_cli_rerun_is_same_byte_idempotent(tmp_path):
+    campaign = _tiny_campaign(tmp_path)
+    space = tmp_path / "adjoint-space"
+    space.mkdir()
+    receipt = _tiny_receipt(campaign, space)
+    receipt_path = space / "adjoint-capture.json"
+    out = tmp_path / "reviewed"
+    argv = (_regen_argv(tmp_path, campaign)
+            + ["--output-root", str(campaign["root"]),
+               "--records-out", str(out),
+               "--adjoint-receipt", str(receipt_path),
+               "--boundary-readsets"])
+    assert regen.main(argv) == 0
+    first = {p.relative_to(out): p.read_bytes() for p in sorted(
+        list(out.rglob("layer-*.json")) + list(out.glob("*.json")))}
+    first_manifests = {}
+    for path in sorted((Path(str(campaign["root"])) / "layer-quanta" /
+                        "adjoint" / "bound-readsets").glob("*.gz")):
+        first_manifests[path.name] = path.read_bytes()
+    assert regen.main(argv) == 0
+    second = {p.relative_to(out): p.read_bytes() for p in sorted(
+        list(out.rglob("layer-*.json")) + list(out.glob("*.json")))}
+    assert second == first
+    for path in sorted((Path(str(campaign["root"])) / "layer-quanta" /
+                        "adjoint" / "bound-readsets").glob("*.gz")):
+        assert path.read_bytes() == first_manifests[path.name]

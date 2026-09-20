@@ -110,15 +110,26 @@ def _load_json(path: Path, *, digest: str | None, where: str):
         raise ValueError(f"{where} is not JSON at {path}: {exc}") from exc
 
 
-def _atomic_write(path: Path, payload: bytes) -> None:
-    if path.exists() and path.read_bytes() != payload:
+def _publish(path: Path, payload: bytes, *, where: str) -> None:
+    """First-writer immutable publication; same bytes are idempotent.
+
+    Reuses the existing no-clobber owner: concurrent writers cannot
+    overwrite supposedly immutable outputs or collide on a fixed temp
+    name, and a rerun over identical bytes completes instead of refusing.
+    Differing bytes at an existing path refuse -- a re-seal is a new
+    reviewed directory, never an edit.
+    """
+    from prismaquant.cost_stage_checkpoint import publish_new_bytes
+    if publish_new_bytes(path, payload):
+        return
+    try:
+        existing = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"{where} unreadable at {path}: {exc}") from exc
+    if existing != payload:
         raise ValueError(
             f"refusing to overwrite differing bytes at {path}: a re-seal "
             f"is a new reviewed directory, never an edit")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp-regen")
-    tmp.write_bytes(payload)
-    tmp.replace(path)
 
 
 def _pretty(value) -> bytes:
@@ -394,27 +405,25 @@ def main(argv=None) -> int:
         return 0
     out = args.records_out
     try:
-        for record in produced["records"]:
-            _atomic_write(out / f"{record['quantum_id']}.json",
-                          _pretty(record))
-        _atomic_write(out / "records.json", _pretty(produced["records"]))
-        _atomic_write(out / "derivation.json", _pretty(produced["derivation"]))
-        # Slice manifests land at the producer-named absolute paths the
-        # records bind -- never beside the record files -- so the bound
-        # paths resolve to the exact bytes sealed. The adjoint manifest is
-        # the phase worker's file and is never written here.
+        # Publication order is the recoverability contract: every
+        # referenced manifest is published and hash-verified BEFORE any
+        # record or index names it, so no discoverable record ever points
+        # at absent or different bytes. A crash between manifests and
+        # records reruns to completion (same bytes are idempotent);
+        # differing bytes refuse instead of overwriting.
         for record in produced["records"]:
             qid = record["quantum_id"]
-            _atomic_write(Path(record["read_set"]["manifest_path"]),
-                          seal_manifest_bytes(produced["slice_manifests"][qid]))
+            _publish(Path(record["read_set"]["manifest_path"]),
+                     seal_manifest_bytes(produced["slice_manifests"][qid]),
+                     where="slice manifest")
         # Bound boundary readsets land at their own producer-named absolute
         # paths -- a new immutable generation beside the records, never an
         # edit of a sealed file.
         for manifest_path, manifest, _ in bound_manifests:
-            _atomic_write(Path(manifest_path),
-                          seal_manifest_bytes(manifest))
+            _publish(Path(manifest_path), seal_manifest_bytes(manifest),
+                     where="bound readset")
         # Resolution verification: every bound path must name the exact
-        # file just written, whose bytes hash to the sealed digest.
+        # file just published, whose bytes hash to the sealed digest.
         for record in produced["records"]:
             manifest_path = Path(record["read_set"]["manifest_path"])
             try:
@@ -434,6 +443,18 @@ def main(argv=None) -> int:
             if sealed != manifest_sha256:
                 return _fail(f"bound readset at {path} does not hash to "
                               f"the sealed digest")
+        # Records and the index publish last: nothing discoverable names
+        # bytes that were not just verified above. Slice manifests land at
+        # the producer-named absolute paths the records bind -- never
+        # beside the record files. The adjoint manifest is the phase
+        # worker's file and is never written here.
+        for record in produced["records"]:
+            _publish(out / f"{record['quantum_id']}.json",
+                     _pretty(record), where="quantum record")
+        _publish(out / "records.json", _pretty(produced["records"]),
+                 where="records index")
+        _publish(out / "derivation.json", _pretty(produced["derivation"]),
+                 where="derivation")
     except (ValueError, OSError) as exc:
         return _fail(str(exc))
     bound = ("unbound (pre-stage-A)" if receipt is None else
