@@ -115,6 +115,7 @@ def staged_tier_policy_context(value: str):
     from sealed args once at startup. The process-global cell is what
     reaches prefetch worker threads.
     """
+    global _ACTIVE
     with _LOCK:
         prior = _ACTIVE
     activate_staged_tier_policy(value)
@@ -122,7 +123,6 @@ def staged_tier_policy_context(value: str):
         yield active_policy()
     finally:
         with _LOCK:
-            global _ACTIVE
             _ACTIVE = prior
 
 
