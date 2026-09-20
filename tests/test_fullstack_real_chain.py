@@ -145,7 +145,7 @@ def campaign(tmp_path_factory):
     wire.write_bytes(hashlib.sha256(b"chain-wire").digest() * 64)
     wire_raw = wire.read_bytes()
     pt_path = files / "pwc-0.pt"
-    pt_tensor = {"w": torch.arange(16, dtype=torch.float32).reshape(4, 4)}
+    pt_tensor = torch.arange(16, dtype=torch.float32).reshape(4, 4)
     torch.save(pt_tensor, str(pt_path))
     pt_raw = pt_path.read_bytes()
     range_path = files / "shard-range.safetensors"
@@ -267,7 +267,7 @@ def campaign(tmp_path_factory):
                      "sha256": hashlib.sha256(wire_raw).hexdigest()},
             "pt": {"path": str(pt_path), "bytes": len(pt_raw),
                    "sha256": hashlib.sha256(pt_raw).hexdigest(),
-                   "tensor": pt_tensor["w"]},
+                   "tensor": pt_tensor},
             "range": {"path": str(range_path), "offset": range_off,
                       "bytes": range_len,
                       "sha256": hashlib.sha256(range_raw).hexdigest(),
