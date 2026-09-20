@@ -48,8 +48,8 @@ from pathlib import Path
 
 from .staged_tier_policy import TierPolicyRefused
 
-#: Candidate integration pin for the PB reader lease (NOT accepted or
-#: deployed; final accepted merged PB pin update required at integration).
+#: Accepted PB730/PB741 source pin for the PB reader lease.
+#: Deployment qualification is separate; this pin advertises no capability.
 #: The owning literal the test resolver reads — see
 #: tools/resolve_prismabuild_dev_pin.py. No capability assertion rides it.
 PB_READER_LEASE_PIN_COMMIT = "461728e4dcc08123d5fdb410eb2f18772fdb3fe0"
