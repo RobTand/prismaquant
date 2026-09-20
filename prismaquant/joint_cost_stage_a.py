@@ -168,13 +168,13 @@ def write_checkpoint_with_snapshot(storage, space, *, boundary, session, plane,
             snapshot.clear()
     with storage.hold_transient_metadata(copy_bytes, "shared-adjoint CPU snapshot"):
         snapshot = {}
-        for probe in range(len(cotangents)):
-            for batch in range(len(cotangents[probe])):
-                owner = cotangents[probe][batch]
-                owner_needs, _ = owner.snapshot_copy_plan()
-                snapshot[(probe, batch)] = (
-                    owner.state_dict() if owner_needs else owner.borrowed_state_dict())
         try:
+            for probe in range(len(cotangents)):
+                for batch in range(len(cotangents[probe])):
+                    owner = cotangents[probe][batch]
+                    owner_needs, _ = owner.snapshot_copy_plan()
+                    snapshot[(probe, batch)] = (
+                        owner.state_dict() if owner_needs else owner.borrowed_state_dict())
             return write_adjoint_checkpoint(
                 space, boundary=boundary, session=session,
                 cotangents=plane, shared_adjoint=snapshot,

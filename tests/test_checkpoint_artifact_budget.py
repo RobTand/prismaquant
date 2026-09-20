@@ -866,6 +866,39 @@ def _noncontiguous_owner():
     return owner
 
 
+def test_snapshot_copy_failure_drops_prior_copies_before_releasing_hold(tmp_path, monkeypatch):
+    """A later copy failure must not retain earlier copies in its traceback."""
+    import weakref
+    from prismaquant.joint_cost_stage_a import write_checkpoint_with_snapshot
+
+    first, second = _noncontiguous_owner(), _noncontiguous_owner()
+    owners = [[first, second]]
+    storage = _owner(tmp_path / "copy-failure")
+    storage.watch_auxiliary([], owners)
+    original = first.state_dict
+    copied_refs = []
+
+    def capture_copy():
+        state = original()
+        copied_refs.extend(weakref.ref(row["tensor"])
+                           for row in state["accumulators"])
+        return state
+
+    def fail_second():
+        raise RuntimeError("second snapshot copy failed")
+
+    monkeypatch.setattr(first, "state_dict", capture_copy)
+    monkeypatch.setattr(second, "state_dict", fail_second)
+    with pytest.raises(RuntimeError, match="second snapshot copy failed") as failed:
+        write_checkpoint_with_snapshot(
+            storage, adjoint_space(tmp_path / "out-copy-failure"),
+            boundary=5, session=_session(), plane={}, cotangents=owners,
+            shared_pass={})
+    assert failed.value.__traceback__ is not None
+    assert copied_refs and all(ref() is None for ref in copied_refs)
+    assert storage._transient_hold_bytes == 0
+
+
 def test_fallback_snapshot_refuses_before_copying_when_over_budget(tmp_path, monkeypatch):
     from prismaquant.joint_cost_stage_a import write_checkpoint_with_snapshot
     import torch as _torch
