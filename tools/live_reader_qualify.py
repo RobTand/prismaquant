@@ -8,10 +8,24 @@ exact lease is held while the window is open and released after, and
 prints one result JSON on stdout. A refusal mode proves forbidden
 origins fail clear with zero pool payload reads.
 
+``--functional-only`` is the dev read mode: it qualifies the functional
+reader path -- strict staged read, byte/draw checks, allowed serving
+tier, exact live lease held and cleanly released -- and reports
+pool-origin I/O qualification separately instead of failing closed on
+missing mount-wide counters (the live cold-read result: everything
+passed, ``pool_reads_observed: false`` alone forced exit 2). Unknown
+telemetry stays unknown in every mode: the result always carries
+``pool_reads_observed``/``pool_client_read_delta`` as observed, plus
+``functional_success``, ``io_qualification`` and ``validation_scope`` --
+mount-wide counters observe the mount, never this payload, so absent
+counts can never read as proof of zero origin reads and nonzero counts
+never read as proof of reads. Default mode (no flag) still requires
+observed zero pool reads for success.
+
 Usage (argv sealed by the submitter):
   live_reader_qualify.py --allowed-tiers ram,ssd --declared PATH
       --expect-sha256 HEX --expect-draw HEX --n-samples N --seqlen L
-      [--refuse]
+      [--functional-only] [--refuse]
 """
 from __future__ import annotations
 
@@ -58,7 +72,9 @@ def _mount_of(path: str) -> str | None:
 
 #: Exit status: 0 qualified full pass; 1 infrastructure error; 2 the
 #: action executed but is NOT qualified (findings preserved in JSON).
-#: Only --refuse mode may exit 0 on an intended typed refusal.
+#: Only --refuse mode may exit 0 on an intended typed refusal, and only
+#: --functional-only may exit 0 while pool I/O is unqualified (the
+#: result names the validation scope and the I/O verdict either way).
 UNQUALIFIED = 2
 
 IDENTITY_NAMES = ("PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
@@ -206,7 +222,17 @@ def main() -> int:
     parser.add_argument("--n-samples", type=int, required=True)
     parser.add_argument("--seqlen", type=int, required=True)
     parser.add_argument("--refuse", action="store_true")
+    parser.add_argument("--functional-only", action="store_true",
+                        help="dev read mode: qualify the functional reader "
+                             "path (strict read, draw, allowed serving tier, "
+                             "exact lease held+released) and report pool I/O "
+                             "qualification separately; unknown counters "
+                             "stay unknown")
     ns = parser.parse_args()
+    if ns.functional_only and ns.refuse:
+        parser.error(
+            "--functional-only has no refuse-mode meaning: it qualifies "
+            "the read path only")
 
     from prismaquant.staged_tier_policy import activate_staged_tier_policy
     from prismaquant.calibration_data import load_calibration_input
@@ -217,7 +243,9 @@ def main() -> int:
 
     result: dict = {
         "schema": "pq.live_reader_qual.v1",
-        "mode": "refuse" if ns.refuse else "read",
+        "mode": "refuse" if ns.refuse else (
+            "functional-read" if ns.functional_only else "read"),
+        "functional_only": bool(ns.functional_only),
         "identity": {
             "key": os.environ.get("PRISMABUILD_ACTION_KEY"),
             "nonce": os.environ.get("PRISMABUILD_ACTION_NONCE"),
@@ -489,7 +517,27 @@ def main() -> int:
             m: ((after.get(m, {}).get("client_read", 0)
                  - before.get(m, {}).get("client_read", 0))
                 if observed else None) for m in after} if observed else None
-        ok = (result["draw_match"] and observed and delta == 0)
+        # Mount-wide counters observe the mount, never this payload: absent
+        # counters are unknown (never proof of zero reads), and a nonzero
+        # count is an observation, not attribution. Both modes report this
+        # honestly; only the requested verdict differs.
+        functional_success = bool(result["draw_match"])
+        io_qualified = bool(observed and delta == 0)
+        result["functional_success"] = functional_success
+        result["io_qualification"] = (
+            "qualified" if io_qualified else
+            "nonzero-observed" if observed else "unobserved")
+        result["validation_scope"] = {
+            "staged_read_draw_tier_lease_release": functional_success,
+            "pool_origin_reads_proven_zero": io_qualified,
+        }
+        if ns.functional_only:
+            result["ok"] = functional_success
+            if not functional_success:
+                result["finding"] = "functional read failed: draw mismatch"
+            print(json.dumps(result, sort_keys=True), flush=True)
+            return 0 if functional_success else UNQUALIFIED
+        ok = functional_success and io_qualified
         result["ok"] = bool(ok)
         if not ok:
             result["finding"] = "draw, observed pool accounting, or both failed"

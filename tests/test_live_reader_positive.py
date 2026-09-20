@@ -293,8 +293,9 @@ def _ram_root() -> Path:
 
 def _run_positive(world, monkeypatch, capsys, tmp_path, staged, *,
                   tiers="ssd", draw=None, artifact_digest=None,
-                  helper_root_path=None, extra=()):
-    _mount_patches(monkeypatch)
+                  helper_root_path=None, extra=(), patch_mounts=True):
+    if patch_mounts:
+        _mount_patches(monkeypatch)
     artifact_digest = artifact_digest or _artifact(tmp_path)[1]
     draw = draw if draw is not None else _artifact(tmp_path)[2]
     monkeypatch.setenv("PRISMABUILD_READER_HELPER_ROOT",
@@ -548,3 +549,165 @@ def test_ram_offered_without_published_material_falls_back_typed(
         assert result["serving_tier_check"] == "ssd-served"
     finally:
         shutil.rmtree(ram, ignore_errors=True)
+
+
+# -- the explicit functional dev mode -------------------------------------
+
+
+def _unknown_io(monkeypatch) -> None:
+    """The live cold-read telemetry shape: no mount-wide counters at all."""
+
+    monkeypatch.setattr(probe, "_mountstats", lambda: {})
+    monkeypatch.setattr(probe, "_mount_of", lambda _path: MOUNT)
+
+
+def test_functional_mode_unknown_io_returns_zero_named_unqualified(
+        world, monkeypatch, capsys, tmp_path, helper_root) -> None:
+    """The live cold-read case, pinned: full functional pass, I/O unknown.
+
+    The strict reader, draw, allowed serving tier, exact live lease and
+    clean release all succeed while mount-wide counters are absent: the
+    explicit mode exits 0 AND says the I/O half is unqualified, with the
+    counters reported as unknown -- never as proof of zero origin reads.
+    """
+
+    artifact, digest, draw = _artifact(tmp_path)
+    staged = _stage(world, tmp_path, artifact, digest)
+    record = far._publish_claim(world, key=KEY)
+    _scope, control = far._open_scope(world, key=KEY, nonce=NONCE)
+    far._record_scope(world, KEY, control, claim=record)
+    _identity_env(world, monkeypatch, staged["map_path"], control)
+    _unknown_io(monkeypatch)
+    code, result = _run_positive(
+        world, monkeypatch, capsys, tmp_path, staged,
+        tiers="ssd", draw=draw, artifact_digest=digest,
+        helper_root_path=helper_root, extra=("--functional-only",),
+        patch_mounts=False)
+    assert code == 0, result
+    assert result["ok"] is True
+    assert result["mode"] == "functional-read"
+    assert result["functional_success"] is True
+    assert result["io_qualification"] == "unobserved"
+    assert result["pool_reads_observed"] is False
+    assert result["pool_client_read_delta"] is None
+    assert result["validation_scope"] == {
+        "staged_read_draw_tier_lease_release": True,
+        "pool_origin_reads_proven_zero": False}
+    # Every functional proof is still in the result, not masked:
+    assert result["draw_match"] is True
+    assert result["serving_tier_check"] == "ssd-served"
+    assert len(result["held_refs_for_attempt"]) == 1
+    assert result["lingering_refs_for_attempt"] == []
+    assert result["tainted_after_release"] == []
+
+
+def test_functional_mode_nonzero_mount_counts_stay_observations(
+        world, monkeypatch, capsys, tmp_path, helper_root) -> None:
+    """Nonzero mount-wide counts are observations, not payload attribution.
+
+    Under the explicit mode they do not fail the functional verdict, and
+    they never read as pool-origin proof in either direction: the I/O
+    verdict names them ``nonzero-observed`` with scope excluding pool
+    proof. Default mode still refuses (unchanged elsewhere).
+    """
+
+    artifact, digest, draw = _artifact(tmp_path)
+    staged = _stage(world, tmp_path, artifact, digest)
+    record = far._publish_claim(world, key=KEY)
+    _scope, control = far._open_scope(world, key=KEY, nonce=NONCE)
+    far._record_scope(world, KEY, control, claim=record)
+    _identity_env(world, monkeypatch, staged["map_path"], control)
+    calls = {"n": 0}
+
+    def stats():
+        calls["n"] += 1
+        return _stats(41 + calls["n"] * 7)
+
+    monkeypatch.setattr(probe, "_mountstats", stats)
+    monkeypatch.setattr(probe, "_mount_of", lambda _path: MOUNT)
+    code, result = _run_positive(
+        world, monkeypatch, capsys, tmp_path, staged,
+        tiers="ssd", draw=draw, artifact_digest=digest,
+        helper_root_path=helper_root, extra=("--functional-only",),
+        patch_mounts=False)
+    assert code == 0, result
+    assert result["functional_success"] is True
+    assert result["io_qualification"] == "nonzero-observed"
+    assert result["pool_client_read_delta"] > 0
+    assert result["validation_scope"]["pool_origin_reads_proven_zero"] is False
+
+
+def test_functional_mode_wrong_draw_still_unqualified(
+        world, monkeypatch, capsys, tmp_path, helper_root) -> None:
+    """The mode never masks a real byte/draw failure: exit 2."""
+
+    artifact, digest, _draw = _artifact(tmp_path)
+    staged = _stage(world, tmp_path, artifact, digest)
+    record = far._publish_claim(world, key=KEY)
+    _scope, control = far._open_scope(world, key=KEY, nonce=NONCE)
+    far._record_scope(world, KEY, control, claim=record)
+    _identity_env(world, monkeypatch, staged["map_path"], control)
+    _unknown_io(monkeypatch)
+    code, result = _run_positive(
+        world, monkeypatch, capsys, tmp_path, staged,
+        tiers="ssd", draw="e" * 64, artifact_digest=digest,
+        helper_root_path=helper_root, extra=("--functional-only",),
+        patch_mounts=False)
+    assert code == probe.UNQUALIFIED == 2
+    assert result["ok"] is False
+    assert result["functional_success"] is False
+    assert result["draw_match"] is False
+    assert "draw" in str(result["finding"])
+
+
+def test_functional_mode_lease_failure_still_unqualified(
+        world, monkeypatch, capsys, tmp_path, helper_root) -> None:
+    """The mode never masks a real lease failure: exit 2.
+
+    A composed map and launch identity with NO live claim: the strict
+    read refuses ``lease-context-unavailable`` and the explicit mode
+    returns the same typed unqualified verdict as the default mode.
+    """
+
+    artifact, digest, _draw = _artifact(tmp_path)
+    staged = _stage(world, tmp_path, artifact, digest)
+    _unknown_io(monkeypatch)
+    monkeypatch.setenv("PRISMABUILD_ACTION_KEY", KEY)
+    monkeypatch.setenv("PRISMABUILD_ACTION_NONCE", NONCE)
+    monkeypatch.setenv("PRISMABUILD_ACTION_SCOPE", "scope-without-claim")
+    monkeypatch.setenv("PRISMABUILD_RESIDENCY_MAP", str(staged["map_path"]))
+    monkeypatch.setenv("PRISMABUILD_READER_HELPER_ROOT", str(helper_root))
+    code, result = _run_positive(
+        world, monkeypatch, capsys, tmp_path, staged,
+        tiers="ssd", draw="0" * 64, artifact_digest=digest,
+        helper_root_path=helper_root, extra=("--functional-only",),
+        patch_mounts=False)
+    assert code == probe.UNQUALIFIED == 2
+    assert result["ok"] is False
+    assert "lease-context-unavailable" in result["finding"]["refusal"]
+    leases = staged["residency_root"] / "leases"
+    assert not leases.exists() or not list(leases.rglob("*.lease.json"))
+
+
+def test_default_mode_unknown_io_still_unqualified(
+        world, monkeypatch, capsys, tmp_path, helper_root) -> None:
+    """Default behavior is unchanged: unobserved I/O fails the verdict."""
+
+    artifact, digest, draw = _artifact(tmp_path)
+    staged = _stage(world, tmp_path, artifact, digest)
+    record = far._publish_claim(world, key=KEY)
+    _scope, control = far._open_scope(world, key=KEY, nonce=NONCE)
+    far._record_scope(world, KEY, control, claim=record)
+    _identity_env(world, monkeypatch, staged["map_path"], control)
+    _unknown_io(monkeypatch)
+    code, result = _run_positive(
+        world, monkeypatch, capsys, tmp_path, staged,
+        tiers="ssd", draw=draw, artifact_digest=digest,
+        helper_root_path=helper_root, patch_mounts=False)
+    assert code == probe.UNQUALIFIED == 2
+    assert result["ok"] is False
+    assert result["functional_success"] is True
+    assert result["io_qualification"] == "unobserved"
+    assert result["pool_reads_observed"] is False
+    assert result["finding"] == \
+        "draw, observed pool accounting, or both failed"
