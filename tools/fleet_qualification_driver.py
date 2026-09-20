@@ -186,7 +186,73 @@ def _published():
     return pbcore, pbtest_mod
 
 
+def _sealed_tokens(action: object) -> list[str] | None:
+    """Shell words of the sealed bash/pytest command (comments stripped).
+
+    The pbtest/pbrun contract seals ``bash -c '<command> 2>&1 | tee log;
+    exit ${PIPESTATUS[0]}'`` with the inner command built by
+    ``shlex.join``; reading it back with ``shlex.split`` yields the real
+    operands. A filename merely echoed in a shell comment never appears:
+    comments lex away. None on any shape deviation -- callers fail
+    closed.
+    """
+    if not isinstance(action, dict):
+        return None
+    task = action.get("task")
+    argv = task.get("argv") if isinstance(task, dict) else None
+    if (not isinstance(argv, list) or len(argv) != 5
+            or argv[:4] != ["/bin/bash", "--noprofile", "--norc", "-c"]
+            or not isinstance(argv[4], str)):
+        return None
+    script = argv[4]
+    if "| tee " not in script or "exit ${PIPESTATUS[0]}" not in script:
+        return None
+    try:
+        return shlex.split(script, comments=True, posix=True)
+    except ValueError:
+        return None
+
+
+def _action_files(action: object) -> set[str] | None:
+    """Test-file operands of the sealed command, or None if malformed."""
+    tokens = _sealed_tokens(action)
+    if tokens is None:
+        return None
+    return {token for token in tokens if token.endswith(".py")}
+
+
 def _candidate_keys(output: object) -> set[str] | None:
+    """Distinct 64-hex action keys named in console output.
+
+    Console JSON only LOCATES a candidate key; nothing here authorizes
+    anything. None on malformed input.
+    """
+    if not isinstance(output, str):
+        return None
+    return set(re.findall(r'"action_key":\s*"([0-9a-f]{64})"', output))
+
+
+def _snapshot_agreement(action: object,
+                        terminal: dict) -> tuple[str | None, str]:
+    """Action snapshot input vs the terminal snapshot descriptor.
+
+    Returns ``(sha256, "")`` when the filed action's
+    ``pbrun.checkout-snapshot`` input digest equals the digest in the
+    terminal record used for attribution, else ``(None, reason)``.
+    """
+    inputs = action.get("inputs") if isinstance(action, dict) else None
+    snaps = [entry for entry in inputs
+             if isinstance(entry, dict)
+             and entry.get("id") == "pbrun.checkout-snapshot"
+             and isinstance(entry.get("sha256"), str)]
+    if len(snaps) != 1:
+        return None, "action snapshot input missing"
+    snapshot = terminal.get("checkout_snapshot")
+    descriptor = snapshot.get("input") if isinstance(snapshot, dict) else None
+    digest = descriptor.get("sha256") if isinstance(descriptor, dict) else None
+    if digest != snaps[0]["sha256"]:
+        return None, "snapshot input disagrees with terminal descriptor"
+    return str(digest), ""
     """Distinct 64-hex action keys named in console output.
 
     Console JSON only LOCATES a candidate key; nothing here authorizes
@@ -278,7 +344,8 @@ def _read_terminal(key: str) -> tuple[dict | None, str]:
     return None, ""
 
 
-def verify_shard(*, shard: object, host: str, declared: dict) -> dict:
+def verify_shard(*, shard: object, host: str, declared: dict,
+                 expected_file: str) -> dict:
     """qualified / nonqualified / failed for one shard on one host.
 
     The chain, all through existing PB machinery: console output locates
@@ -349,6 +416,18 @@ def verify_shard(*, shard: object, host: str, declared: dict) -> dict:
         return nope("failed", "no CAS receipt for filed action",
                     action_key=key)
     receipt_sha = str(receipt.get("receipt_sha256", ""))
+    tokens = _sealed_tokens(action)
+    if tokens is None:
+        return nope("failed", "sealed command malformed",
+                    action_key=key, receipt_sha256=receipt_sha)
+    if expected_file not in {t for t in tokens if t.endswith(".py")}:
+        return nope("failed",
+                    f"sealed command does not execute {expected_file}",
+                    action_key=key, receipt_sha256=receipt_sha)
+    python = declared.get("python")
+    if not isinstance(python, str) or python not in tokens:
+        return nope("failed", "sealed command interpreter mismatch",
+                    action_key=key, receipt_sha256=receipt_sha)
     try:
         result_path = cas.result_path(receipt, action)
         text = Path(result_path).read_bytes().decode("utf-8")
@@ -406,6 +485,13 @@ def verify_shard(*, shard: object, host: str, declared: dict) -> dict:
         return nope("failed",
                     f"source mismatch: declared {declared.get('pq_head')} "
                     f"vs executed parent {parent}",
+                    action_key=key, receipt_sha256=receipt_sha,
+                    passed=counts["passed"], skipped=counts["skipped"],
+                    snapshot_commit=commit or "",
+                    snapshot_parent=parent or "")
+    agreement, problem = _snapshot_agreement(action, term)
+    if problem:
+        return nope("failed", problem,
                     action_key=key, receipt_sha256=receipt_sha,
                     passed=counts["passed"], skipped=counts["skipped"],
                     snapshot_commit=commit or "",
@@ -486,6 +572,19 @@ def assemble_report(*, plan: dict, verdicts: list[dict],
         record["name"] = (f"{verdict.get('file', '')}"
                           f"@{verdict['host']}")
         cases.append(record)
+    first_use: dict[str, tuple] = {}
+    for record in cases:
+        key = record.get("action_key")
+        if not isinstance(key, str) or not key:
+            continue
+        owner = (record.get("file"), record.get("host"))
+        if key in first_use and first_use[key] != owner:
+            record["status"] = "failed"
+            record["reason"] = (
+                f"duplicate action key also used by "
+                f"{first_use[key][0]}@{first_use[key][1]}")
+        else:
+            first_use.setdefault(key, owner)
     return {"schema": REPORT_SCHEMA, "pins": plan["pins"],
             "driver": {"checkout": plan["checkout"],
                        "python": plan["python"],
@@ -652,7 +751,8 @@ def submit(plan: dict, out_dir: str, declared: dict) -> tuple[dict, int]:
         verdicts.extend(failures)
         for filename, shard in items:
             verdict = verify_shard(shard=shard, host=host,
-                                   declared=declared)
+                                   declared=declared,
+                                   expected_file=filename)
             verdict["file"] = filename
             verdicts.append(verdict)
     verdicts = complete_cases(plan, verdicts)
@@ -710,6 +810,7 @@ def main(argv=None) -> int:
         except SystemExit as exc:
             print(f"DRIVER-ERROR {exc}")
             return 2
+        declared["python"] = args.python
         report, exit_code = submit(plan, args.out_dir, declared)
         print_summary(report)
         return exit_code

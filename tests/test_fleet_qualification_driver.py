@@ -15,6 +15,7 @@ FIXTURES = HERE / "fixtures" / "cas-r5"
 KEY_A = "c74acd1a38ae4aa13e182b8625fbd403e2ed1b4d2ef4b0abc24c98114ea80505"
 KEY_B = "554fa0c61f3472a609e9eba92d3371cb0de4964b00151cb381c9fff3ec5451b1"
 KEY_C = "1ad62808565187698210a9bff83be35ad501e733511981d9b52cddae4dca812d"
+KEY_D = "d11c8a497ffe9866f391c0f7d53ebcfe56aa713b98ac312a1e6913660f201d30"
 GEN = "0467e9e2316c-1789881139-d2055704fb70"
 
 
@@ -36,8 +37,18 @@ def _plan(driver, out_dir="/tmp/driver-out"):
                              python="/tmp/python", out_dir=out_dir)
 
 
-def _declared(head="d" * 40, generation=GEN):
-    return {"pq_head": head, "pb_rev": "c" * 40, "generation": generation}
+REAL_PYTHON = "/home/rob/venvs/pq846-pb461728e4/bin/python"
+PINS_FILE = "tests/test_fleet_acceptance_pins.py"
+LEVEL1_FILE = "tests/test_fleet_acceptance_level1.py"
+RUNNER_FILE = "tests/test_fleet_acceptance_runner.py"
+INPUT_A = "35f2fca765407ad485b0da2778ffbceb7ca1de570154e5626fda99b704fc4cc9"
+INPUT_D = "d19e26fc5a9f6fd84dabad9adb9024f89db3b07527b38333c77cd239694e69b2"
+GEN_NEW = "495461327539-1789901949-c5b033dd06ba"
+
+
+def _declared(head="d" * 40, generation=GEN, python=REAL_PYTHON):
+    return {"pq_head": head, "pb_rev": "c" * 40, "generation": generation,
+            "python": python}
 
 
 def _tmp_cas(driver, tmp_path, tag):
@@ -64,11 +75,15 @@ def _tmp_cas(driver, tmp_path, tag):
     return root, key
 
 
-def _terminal(key, host="sparklina", rc=0, parent="d" * 40):
+def _terminal(key, host="sparklina", rc=0, parent="d" * 40,
+              input_sha=INPUT_A):
     return {"action_key": key, "status": "executed",
             "finished_host": host, "claimed_host": host,
             "detail": {"returncode": rc, "stdout": "", "argv": []},
-            "checkout_snapshot": {"commit": "f" * 40, "parent": parent}}
+            "checkout_snapshot": {
+                "commit": "f" * 40, "parent": parent,
+                "input": {"id": "pbrun.checkout-snapshot",
+                          "sha256": input_sha}}}
 
 
 def _shard(key, files=None):
@@ -138,6 +153,7 @@ def test_valid_chain_qualifies_with_receipt_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(driver, "_read_terminal",
                         lambda k: (terminal, "done"))
     verdict = driver.verify_shard(shard=_shard(key), host="sparklina",
+                                  expected_file=PINS_FILE,
                                   declared=_declared())
     assert verdict["status"] == "qualified", verdict["reason"]
     assert verdict["action_key"] == key
@@ -162,6 +178,7 @@ def test_substituted_payload_fails_integrity(tmp_path, monkeypatch):
     monkeypatch.setattr(driver, "_read_terminal",
                         lambda k: (_terminal(key), "done"))
     verdict = driver.verify_shard(shard=_shard(key), host="sparklina",
+                                  expected_file=PINS_FILE,
                                   declared=_declared())
     assert verdict["status"] == "failed"
     assert "receipt verification" in verdict["reason"]
@@ -179,6 +196,7 @@ def test_swapped_receipt_fails_action_binding(tmp_path, monkeypatch):
     monkeypatch.setattr(driver, "_read_terminal",
                         lambda k: (_terminal(key), "done"))
     verdict = driver.verify_shard(shard=_shard(key), host="sparklina",
+                                  expected_file=PINS_FILE,
                                   declared=_declared())
     assert verdict["status"] == "failed"
 
@@ -197,6 +215,7 @@ def test_corrupt_receipt_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(driver, "_read_terminal",
                         lambda k: (_terminal(key), "done"))
     verdict = driver.verify_shard(shard=_shard(key), host="sparklina",
+                                  expected_file=PINS_FILE,
                                   declared=_declared())
     assert verdict["status"] == "failed"
 
@@ -209,7 +228,8 @@ def test_wrong_generation_or_source_never_qualifies(tmp_path, monkeypatch):
     terminal = _terminal(key)
     monkeypatch.setattr(driver, "_read_terminal",
                         lambda k: (terminal, "done"))
-    base = {"shard": _shard(key), "host": "sparklina"}
+    base = {"shard": _shard(key), "host": "sparklina",
+            "expected_file": PINS_FILE}
     assert driver.verify_shard(declared=_declared(), **base)["status"] \
         == "qualified"
     assert "generation" in driver.verify_shard(
@@ -229,10 +249,12 @@ def test_wrong_host_or_failed_terminal_never_qualifies(tmp_path,
                         lambda k: (terminal, "done"))
     assert "host" in driver.verify_shard(
         shard=_shard(key), host="sparklina",
+        expected_file=PINS_FILE,
         declared=_declared())["reason"]
     terminal["finished_host"] = "sparklina"
     terminal["status"] = "failed"
     verdict = driver.verify_shard(shard=_shard(key), host="sparklina",
+                                  expected_file=PINS_FILE,
                                   declared=_declared())
     assert verdict["status"] == "failed"
 
@@ -245,7 +267,11 @@ def test_empty_collection_never_qualifies(tmp_path, monkeypatch):
     terminal = _terminal(key)
     monkeypatch.setattr(driver, "_read_terminal",
                         lambda k: (terminal, "done"))
+    terminal = _terminal(key, host="sparky")
+    monkeypatch.setattr(driver, "_read_terminal",
+                        lambda k: (terminal, "done"))
     verdict = driver.verify_shard(shard=_shard(key), host="sparky",
+                                  expected_file=PINS_FILE,
                                   declared=_declared())
     assert verdict["status"] in ("nonqualified", "failed"), verdict
 
@@ -257,7 +283,8 @@ def test_malformed_records_and_replays_rejected(monkeypatch):
     assert driver.verify_shard(
         shard={"files": "nope", "output": None, "returncode": "0",
                "summary": None},
-        host="sparky", declared=declared)["status"] == "failed"
+        host="sparky", expected_file=PINS_FILE,
+        declared=declared)["status"] == "failed"
     replay = driver.verify_shard(
         shard={"files": ["tests/test_x.py"], "output": "2 passed in 1s",
                "returncode": 0, "shard": 0, "summary": "2 passed in 1s"},
@@ -313,3 +340,113 @@ def test_completeness_regression_flags_a_dropped_case():
     assert "missing case file" in dropped[0]["reason"]
     assert report["complete"] is False
     assert driver.exit_code_for(report) == 0
+
+
+def _terminal_for(driver, tmp_path, monkeypatch, tag, key, host,
+                  head="d" * 40):
+    """Inline terminal mirroring the real record shape for one fixture."""
+    inputs = {"A": INPUT_A, "D": INPUT_D}
+    terminal = _terminal(key, host=host, parent=head,
+                         input_sha=inputs[tag])
+    monkeypatch.setattr(driver, "_read_terminal",
+                        lambda k: (terminal, "done"))
+    return terminal
+
+
+def test_sealed_command_names_the_executed_file():
+    """Filed action operands come from the sealed argv, not comments."""
+    import json as _json
+    driver = _driver()
+    action = _json.loads(
+        (FIXTURES / "A" / "request.json").read_bytes())
+    files = driver._action_files(action)
+    assert files == {PINS_FILE}, files
+    commented = {"task": {"argv": [
+        "/bin/bash", "--noprofile", "--norc", "-c",
+        "true # " + RUNNER_FILE + "\n"
+        "python -m pytest " + PINS_FILE + " 2>&1 | tee log.txt; "
+        "exit ${PIPESTATUS[0]}"]}}
+    assert RUNNER_FILE not in (driver._action_files(commented) or set())
+    assert PINS_FILE in (driver._action_files(commented) or set())
+    assert driver._action_files({"task": {"argv": ["x"]}}) is None
+    assert driver._action_files(None) is None
+
+
+def test_relabeled_file_fails_binding(tmp_path, monkeypatch):
+    """A pins receipt relabeled as the runner file must not qualify."""
+    driver = _driver()
+    _tmp_cas(driver, tmp_path, "A")
+    monkeypatch.setattr(driver, "_CAS_ROOT",
+                        tmp_path / "cas-A")
+    _terminal_for(driver, tmp_path, monkeypatch, "A", KEY_A, "sparklina")
+    verdict = driver.verify_shard(
+        shard=_shard(KEY_A), host="sparklina",
+        expected_file=RUNNER_FILE, declared=_declared())
+    assert verdict["status"] == "failed"
+    assert "does not execute" in verdict["reason"]
+
+
+def test_swapped_pair_and_unrelated_action_fail(tmp_path, monkeypatch):
+    """Cross-labeled genuine receipts fail; matching labels qualify."""
+    driver = _driver()
+    _tmp_cas(driver, tmp_path, "A")
+    _tmp_cas(driver, tmp_path, "D")
+    monkeypatch.setattr(driver, "_CAS_ROOT", tmp_path / "cas-A")
+    _terminal_for(driver, tmp_path, monkeypatch, "A", KEY_A, "sparklina")
+    assert driver.verify_shard(
+        shard=_shard(KEY_A), host="sparklina",
+        expected_file=RUNNER_FILE,
+        declared=_declared())["status"] == "failed"
+    monkeypatch.setattr(driver, "_CAS_ROOT", tmp_path / "cas-D")
+    _terminal_for(driver, tmp_path, monkeypatch, "D", KEY_D, "sparky",
+                  head="e" * 40)
+    assert driver.verify_shard(
+        shard=_shard(KEY_D), host="sparky",
+        expected_file=PINS_FILE,
+        declared=_declared(head="e" * 40, generation=GEN_NEW))["status"] \
+        == "failed"
+    assert driver.verify_shard(
+        shard=_shard(KEY_D), host="sparky",
+        expected_file=LEVEL1_FILE,
+        declared=_declared(head="e" * 40, generation=GEN_NEW))["status"] \
+        == "qualified"
+
+
+def test_duplicate_action_keys_across_cases_refused():
+    """One action cannot qualify two different case labels."""
+    driver = _driver()
+    plan = _plan(driver)
+    first = {"host": "sparky", "file": PINS_FILE, "status": "qualified",
+             "reason": "", "passed": 2, "failed": 0, "skipped": 0,
+             "action_key": KEY_A, "terminal": "/tmp/t.json",
+             "snapshot_commit": "f" * 40, "snapshot_parent": "d" * 40,
+             "generation": GEN, "receipt_sha256": "e" * 64}
+    second = dict(first, file=RUNNER_FILE)
+    report = driver.assemble_report(
+        plan=plan, verdicts=[first, second], started_unix=0.0)
+    duped = [c for c in report["cases"]
+             if c["file"] == RUNNER_FILE][0]
+    assert duped["status"] == "failed"
+    assert "duplicate action key" in duped["reason"]
+
+
+def test_snapshot_disagreement_and_interpreter_mismatch_fail(
+        tmp_path, monkeypatch):
+    """Terminal snapshot input and sealed interpreter bind the verdict."""
+    driver = _driver()
+    _tmp_cas(driver, tmp_path, "A")
+    monkeypatch.setattr(driver, "_CAS_ROOT", tmp_path / "cas-A")
+    _terminal_for(driver, tmp_path, monkeypatch, "A", KEY_A, "sparklina")
+    terminal = _terminal(KEY_A, host="sparklina", parent="d" * 40,
+                         input_sha="0" * 64)
+    monkeypatch.setattr(driver, "_read_terminal",
+                        lambda k: (terminal, "done"))
+    assert "snapshot input disagrees" in driver.verify_shard(
+        shard=_shard(KEY_A), host="sparklina",
+        expected_file=PINS_FILE,
+        declared=_declared())["reason"]
+    assert "interpreter mismatch" in driver.verify_shard(
+        shard=_shard(KEY_A), host="sparklina",
+        expected_file=PINS_FILE,
+        declared=_declared(
+            python="/elsewhere/python"))["reason"]
