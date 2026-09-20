@@ -552,14 +552,6 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
                                  snapshots=snapshots, evidence=evidence)
 
 
-SCENARIOS = {
-    "broker-roundtrip": scenario_broker_roundtrip,
-    "sdk-first-release": scenario_sdk_first_release,
-    "sdk-pending-ticket": scenario_sdk_pending_ticket,
-    "sdk-namespace-separation": scenario_sdk_namespace_separation,
-    "sdk-failure-unwind": scenario_sdk_failure_unwind,
-    "sdk-alias-host": scenario_sdk_alias_host,
-}
 
 
 def scenario_sdk_pending_ticket(world: World, snapshots: dict) -> dict:
@@ -723,6 +715,16 @@ def _enter_tree(resolved: dict):
     tree = Path(resolved["tree"])
     src = tree / "src"
     return _candidate_modules(src, tree), tree
+
+
+SCENARIOS = {
+    "broker-roundtrip": scenario_broker_roundtrip,
+    "sdk-first-release": scenario_sdk_first_release,
+    "sdk-pending-ticket": scenario_sdk_pending_ticket,
+    "sdk-namespace-separation": scenario_sdk_namespace_separation,
+    "sdk-failure-unwind": scenario_sdk_failure_unwind,
+    "sdk-alias-host": scenario_sdk_alias_host,
+}
 
 
 def main(argv=None) -> int:

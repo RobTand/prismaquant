@@ -11,7 +11,7 @@
    "id": "SC-01",
    "status": "nonqualified:needs live admission evidence",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": "harness uses PB decisions, never steers placement"
   },
   {
@@ -32,14 +32,14 @@
    "id": "ID-01",
    "status": "nonqualified:seal-to-key check not performed by harness",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "ID-02",
    "status": "nonqualified:attempt/terminal lifecycle needs live machinery",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
@@ -60,7 +60,7 @@
    "id": "ID-05",
    "status": "nonqualified:release-gate lane owns provenance/certification carriers",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
@@ -74,7 +74,7 @@
    "id": "ID-07",
    "status": "nonqualified:serving record asserted only in runner first-release flow",
    "scenario": "runner:sdk-first-release",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
@@ -88,14 +88,14 @@
    "id": "ID-09",
    "status": "nonqualified:application-validity half needs application gates",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": "submit/terminal/CAS legs green in lifecycle test; validity stays consumer-side"
   },
   {
    "id": "RNG-01",
    "status": "nonqualified:no overlapping-entry case exercised",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
@@ -109,14 +109,14 @@
    "id": "RNG-03",
    "status": "nonqualified:logical-repeat coverage not exercised",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "RNG-04",
    "status": "nonqualified:planner lane owns gather-set refusals",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
@@ -137,7 +137,7 @@
    "id": "SM-03",
    "status": "nonqualified:lease states need SDK pins",
    "scenario": "runner:sdk-first-release",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
@@ -151,56 +151,56 @@
    "id": "INV-02",
    "status": "nonqualified:lead-gated claim needs admitted mover rows",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "INV-03",
    "status": "nonqualified:strict-reader lane PQ846 owns bulk-open gating",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "INV-04",
    "status": "nonqualified:strict-reader lane PQ846 owns open-time serving records",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": "SDK serving record asserted in runner flow once qualified"
   },
   {
    "id": "INV-05",
    "status": "nonqualified:RAM-preference rule untested (promotion runs, preference does not)",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "INV-06",
    "status": "nonqualified:corrupt-digest/missing-range legs pending",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": "stale-epoch overlay refusal green; never-fallback needs strict readers"
   },
   {
    "id": "INV-07",
    "status": "nonqualified:eviction serialization needs live tier loop",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "INV-08",
    "status": "nonqualified:retry/adoption accounting needs live retries",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "INV-09",
    "status": "nonqualified:durable progress counters not exercised here",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
@@ -214,98 +214,98 @@
    "id": "INV-11",
    "status": "nonqualified:class-tag admission needs live admission",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "INV-12",
    "status": "nonqualified:checkpoint lane owns adoption caps",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "TIER-01",
    "status": "nonqualified:readiness-vs-enforcement audit needs strict readers + live tiers",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "TIER-02",
    "status": "nonqualified:metadata-allowance boundary untested",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "TIER-03",
    "status": "nonqualified:boundary/activation read-set coverage pending (planner lane)",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "TIER-04",
    "status": "nonqualified:waiver path untested (no waiver claimed)",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "PRG-01",
    "status": "nonqualified:safe-frontier accounting needs lease-state queries",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "PRG-02",
    "status": "nonqualified:planner lane owns read-plan fit proofs",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "PRG-03",
    "status": "nonqualified:typed waits need live admission",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "PRG-04",
    "status": "nonqualified:formal inequality unproven; no scheduler invented for it",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "PRG-05",
    "status": "nonqualified:window fit accounting not exercised",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "LIVE-01",
    "status": "nonqualified:conditional liveness needs both-Spark hardware phase",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "DEV-01",
    "status": "nonqualified:dev-mode producer paths not exercised",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "DEV-02",
    "status": "nonqualified:reuse-lineage paths not exercised",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
@@ -319,28 +319,28 @@
    "id": "DEV-04",
    "status": "nonqualified:dev-result marking not exercised",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "DEV-05",
    "status": "nonqualified:cross-host identity lane owns proof; same-host only here",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "SAFE-01",
    "status": "nonqualified:live-lease eviction needs live leases + tier loop",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "SAFE-02",
    "status": "nonqualified:strict-reader lane owns forbidden-tier refusal",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
@@ -361,35 +361,35 @@
    "id": "ACC-02",
    "status": "nonqualified:staged-lease races need live lease machinery",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "ACC-03",
    "status": "nonqualified:source/render/activation chain with forbidden-open negatives needs strict readers",
    "scenario": "runner:sdk-first-release",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": "published-path reads green in level-1; negatives pending"
   },
   {
    "id": "ACC-04",
    "status": "nonqualified:restart/retry incl. lease-crash needs live attempts",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "ACC-05",
    "status": "nonqualified:both-Spark concurrency is the hardware phase",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
    "id": "ACC-06",
    "status": "nonqualified:staged-only campaign + bytes_from_pool==0 is the hardware phase",
    "scenario": "",
-   "evidence": "",
+   "evidence": "fleet result JSON + admitted-action receipt (status nonqualified)",
    "note": ""
   },
   {
