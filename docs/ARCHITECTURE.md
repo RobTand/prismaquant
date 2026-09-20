@@ -4,7 +4,7 @@ As of: 2026-09-20 · `fix/glm5next-visual-materialization-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-20, `fix/glm5next-visual-materialization-20260920`) for
-**the streaming visual-materialization split** (PQ #871).
+**the streaming visual-materialization split** (PQ #872).
 `_build_streaming_context` let one `multimodal` flag answer two independent
 questions: whether the family can be CONSTRUCTED text-only -- a property of the
 pinned transformers, declared by `ModelProfile.requires_multimodal_skeleton()`
@@ -17301,7 +17301,7 @@ the profile declares this via `requires_multimodal_skeleton()` and
 `_build_streaming_context` flips itself, so probe/cost/validation call sites need no
 per-family threading (`multimodal=True` explicit still works). The path yields the `model.language_model` base
 prefix and root `lm_head` the spec already describes. That flip is **construction
-only** (2026-09-20, PQ #871): it selects `stage_multimodal`, the declared-arch class and
+only** (2026-09-20, PQ #872): it selects `stage_multimodal`, the declared-arch class and
 a multimodal weight map, and leaves `model.visual` on meta, exactly as the streamed
 exporter does. Materializing the tower remains the caller's declaration --
 `multimodal=True` -- because a text-only run's staged readset does not contain the

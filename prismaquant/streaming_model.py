@@ -1541,7 +1541,7 @@ def _build_streaming_context(model_path: str, *,
     #     declaration, and the only thing that may materialize the tower.
     # Letting the first imply the second read the entire vision namespace on a
     # token-ID-only cost run, which the run's text-only staged readset then
-    # refused (PQ #871). The streamed exporter already keeps the two apart:
+    # refused (PQ #872). The streamed exporter already keeps the two apart:
     # `materialize_tensors_streaming` flips on the same profile fact and
     # leaves the visual tower on meta.
     materialize_visual = multimodal

@@ -223,7 +223,7 @@ class Glm5NextProfile(ModelProfile):
         # must instantiate the declared Glm5NextForConditionalGeneration
         # via the multimodal SKELETON; text-only staging would fail closed.
         # Construction only: a text-only caller still leaves `model.visual`
-        # on meta, and only an explicit `multimodal=True` reads it (PQ #871).
+        # on meta, and only an explicit `multimodal=True` reads it (PQ #872).
         return True
 
     # ------------------------------------------------------------
