@@ -91,7 +91,7 @@ def _record(campaign, layer, receipts_root="adjoint-receipt.json",
             "prepared_sha256": campaign["prepared_sha256"],
             "plan_path": campaign["plan_path"],
             "prepared_path": campaign["prepared_path"],
-            "read_manifest_sha256": campaign["manifest_sha256"],
+            "read_manifest_sha256": campaign["read_manifest_sha256"],
             "campaign_scope": campaign["scope"],
             "unit_roster_sha256": campaign["roster_sha256"],
         },
@@ -295,6 +295,7 @@ def test_main_threads_stage_a_prefetch_override(tmp_path, campaign, records_dir,
     out = tmp_path / "out"
     code = main(["--records", str(records_dir), "--output-root", str(out),
                  "--state", str(tmp_path / "state.json"),
+                 "--adjoint-manifest", str(_adjoint_manifest(tmp_path, campaign)),
                  "--stage-a-prefetch-override", str(override)],
                 _gateway=gateway)
     assert code == 0
@@ -327,9 +328,11 @@ def test_publication_order_is_descending_layer_id(tmp_path, campaign, records_di
 def test_no_quanta_before_the_stage_a_receipt(tmp_path, campaign, records_dir):
     """Stage A first: quanta publish only once the receipt lands and
     validates. Without it the tool submits stage A and stops."""
+    manifest = _adjoint_manifest(tmp_path, campaign)
     gateway = FakeGateway(terminal=False)
     out = tmp_path / "out"
-    assert main(_argv(records_dir, out), _gateway=gateway) == 0
+    assert main(_argv(records_dir, out) + ["--adjoint-manifest", str(manifest)],
+                _gateway=gateway) == 0
     kinds = [call["kind"] for call in gateway.submitted]
     assert kinds == ["stage-a"]
     assert gateway.submitted[0]["argv"][gateway.submitted[0]["argv"].index("--tag") + 1] == "sparky"
