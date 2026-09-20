@@ -600,3 +600,27 @@ def test_meta_tensor_refuses_pre_write(tmp_path):
             owner=owner)
     assert not (Path(space) / "checkpoints").exists()
     assert owner._checkpoint_reservations == {}
+
+
+def test_bounded_sink_refuses_before_crossing_ceiling():
+    """The staged handle never holds more than admitted bytes."""
+    import hashlib
+    import io
+
+    from prismaquant.joint_adjoint_checkpoints import _BoundedDigestSink
+    from prismaquant.perturbed_x_cache import SerializedEntryDigest
+
+    target = io.BytesIO()
+    sink = _BoundedDigestSink(SerializedEntryDigest(), 100, label="fixture")
+    sink.sink(target)
+    assert sink.bytes_written == 0
+    assert sink.write(b"x" * 60) == 60
+    with pytest.raises(RuntimeError, match="admitted envelope"):
+        sink.write(b"y" * 50)
+    assert sink.bytes_written == 60
+    assert target.getvalue() == b"x" * 60
+    assert sink.hexdigest() == hashlib.sha256(b"x" * 60).hexdigest()
+    unbounded = _BoundedDigestSink(SerializedEntryDigest(), None, label="open")
+    unbounded.sink(io.BytesIO())
+    assert unbounded.write(b"z" * 10000) == 10000
+    assert unbounded.bytes_written == 10000

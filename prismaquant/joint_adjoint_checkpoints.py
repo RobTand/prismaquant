@@ -247,10 +247,10 @@ def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
     materialized, so the transient peak stays at the entry's own
     serialization instead of the whole checkpoint. The digest covers
     exactly the published bytes (no rehash pass); the admitted per-file
-    envelope is enforced by size before the temp is renamed, and the
-    temp is unlinked on exceedance, so an oversized entry never publishes.
-    Not a new serializer or cache: stdlib pickling plus the activation
-    owner's sink and atomic-publication shape.
+    envelope is enforced on every sink write before the underlying handle
+    can cross it, and the temp is unlinked on exceedance, so an oversized
+    entry never publishes. Not a new serializer or cache: stdlib pickling
+    plus the activation owner's sink and atomic-publication shape.
     """
     import os
 
@@ -264,17 +264,18 @@ def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
     path = checkpoint_dir / "entries" / f"{name}.pkl"
     if path.exists() or path.with_suffix(".pkl.tmp").exists():
         raise RuntimeError("exact boundary checkpoint entry already exists")
-    digest = SerializedEntryDigest()
+    sink = _BoundedDigestSink(SerializedEntryDigest(), max_file_bytes,
+                              label=f"shared state {name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + unique_temp_suffix())
     try:
         with temporary.open("wb") as handle:
-            pickle.dump(state, digest.sink(handle),
+            pickle.dump(state, sink.sink(handle),
                         protocol=pickle.HIGHEST_PROTOCOL)
             handle.flush()
             os.fsync(handle.fileno())
         published = temporary.stat().st_size
-        if published != digest.bytes:
+        if published != sink.bytes_written:
             raise RuntimeError(
                 "exact boundary checkpoint entry differs from its "
                 "serialized bytes")
@@ -294,9 +295,58 @@ def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
     return {
         "name": name,
         "path": str(path),
-        "sha256": digest.hexdigest(),
+        "sha256": sink.hexdigest(),
         "file_bytes": published,
     }
+
+
+class _BoundedDigestSink:
+    """Hash-while-writing sink that refuses before crossing an admitted ceiling.
+
+    Wraps ``SerializedEntryDigest`` (activation owner) without changing it:
+    every ``write`` is checked against the remaining admitted bytes first,
+    so the underlying handle -- and therefore the staged temp file -- never
+    holds more than admitted. Unbounded callers keep today's behavior by
+    passing no ceiling; the exact writer's own post-write check is untouched.
+    """
+
+    def __init__(self, digest, max_bytes: int | None, label: str):
+        self._digest = digest
+        self._label = str(label)
+        if max_bytes is not None and (
+                type(max_bytes) is not int or max_bytes <= 0):
+            raise RuntimeError(
+                "exact boundary bounded sink needs a positive byte ceiling")
+        self._ceiling = max_bytes
+        self._written = 0
+
+    def sink(self, handle):
+        self._digest.sink(handle)
+        return self
+
+    def write(self, data):
+        view = memoryview(data).cast("B")
+        try:
+            if (self._ceiling is not None
+                    and self._written + view.nbytes > self._ceiling):
+                raise RuntimeError(
+                    "exact boundary checkpoint entry exceeds its admitted "
+                    f"envelope for {self._label}")
+            self._digest.write(view)
+            self._written += view.nbytes
+            return view.nbytes
+        finally:
+            view.release()
+
+    def flush(self):
+        self._digest.flush()
+
+    def hexdigest(self):
+        return self._digest.hexdigest()
+
+    @property
+    def bytes_written(self):
+        return self._written
 
 
 #: Per-object framing bound for the shared-state pickle size estimate below.
