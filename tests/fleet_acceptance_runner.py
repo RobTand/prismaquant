@@ -544,6 +544,9 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
         staged_paths.extend(entry["stage_path"]
                             for entry in frag["entries"].values())
     assert staged_paths, "no staged objects to egress"
+    registered = world.mod["stage_release"].register_stage_root(
+        world.queue, tier_id=STAGE_TIER, stage_root=str(staged["stage"]))
+    assert registered == "registered", registered
     auto_reclaimed: list = []
     for mover in ("aa" * 32, "ab" * 32):
         receipt = world.mod["stage_release"].evict(
