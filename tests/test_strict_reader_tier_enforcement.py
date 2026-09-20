@@ -1189,8 +1189,10 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
 
 
 def test_lease_pin_module_reports_approved_commit():
-    from prismaquant.staged_lease import PINNED_SDK_COMMIT
-    assert PINNED_SDK_COMMIT == "2637a9d0f7d31afbce7ad2e5735e8334fe37a40d"
+    from prismaquant.staged_lease import (
+        PINNED_SDK_COMMIT, PB_READER_LEASE_PIN_COMMIT)
+    assert PINNED_SDK_COMMIT == PB_READER_LEASE_PIN_COMMIT
+    assert PINNED_SDK_COMMIT == "461728e4dcc08123d5fdb410eb2f18772fdb3fe0"
 
 
 # -- window enter/exit contract: single-shot, no leaks ------------------------

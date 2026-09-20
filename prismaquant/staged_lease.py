@@ -52,7 +52,7 @@ from .staged_tier_policy import TierPolicyRefused
 #: deployed; final accepted merged PB pin update required at integration).
 #: The owning literal the test resolver reads — see
 #: tools/resolve_prismabuild_dev_pin.py. No capability assertion rides it.
-PB_READER_LEASE_PIN_COMMIT = "2637a9d0f7d31afbce7ad2e5735e8334fe37a40d"
+PB_READER_LEASE_PIN_COMMIT = "461728e4dcc08123d5fdb410eb2f18772fdb3fe0"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
 #: Names PQ actually calls. Anything else is not our protocol.
