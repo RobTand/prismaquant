@@ -107,14 +107,23 @@ def deactivate_staged_tier_policy_for_tests() -> None:
 def staged_tier_policy_context(value: str):
     """Explicit-lifetime strict policy for tests and scoped library use.
 
-    Activates on entry, restores inactive on exit, even on error. The
-    process-global cell is what reaches prefetch worker threads.
+    Saves the prior policy on entry and restores it on exit — even on
+    error — so a nested context can never clear (or permanently weaken)
+    an outer campaign's enforcement: the inner policy governs only
+    inside, and the outer verdict is intact afterwards. Production
+    campaign entrypoints never use this helper; they activate explicitly
+    from sealed args once at startup. The process-global cell is what
+    reaches prefetch worker threads.
     """
+    with _LOCK:
+        prior = _ACTIVE
     activate_staged_tier_policy(value)
     try:
         yield active_policy()
     finally:
-        deactivate_staged_tier_policy_for_tests()
+        with _LOCK:
+            global _ACTIVE
+            _ACTIVE = prior
 
 
 def active_policy() -> frozenset[str] | None:

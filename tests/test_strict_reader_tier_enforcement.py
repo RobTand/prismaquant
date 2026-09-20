@@ -179,6 +179,25 @@ def test_policy_context_lifetime_is_explicit_and_thread_global():
     assert active_policy() is None
 
 
+def test_nested_context_restores_outer_enforcement():
+    """An inner context never clears or permanently weakens the outer one."""
+    with staged_tier_policy_context("ram"):
+        assert active_policy() == frozenset({"ram"})
+        with staged_tier_policy_context("ram,ssd"):
+            assert active_policy() == frozenset({"ram", "ssd"})
+        assert active_policy() == frozenset({"ram"})
+    assert active_policy() is None
+    # An explicitly activated outer verdict survives a nested test scope.
+    activate_staged_tier_policy("ram")
+    try:
+        with staged_tier_policy_context("ram,ssd"):
+            assert active_policy() == frozenset({"ram", "ssd"})
+        assert active_policy() == frozenset({"ram"})
+    finally:
+        deactivate_staged_tier_policy_for_tests()
+    assert active_policy() is None
+
+
 def test_activation_needs_an_explicit_sealed_value():
     with pytest.raises(TypeError):
         activate_staged_tier_policy()
