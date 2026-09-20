@@ -41,13 +41,33 @@ PIN_PATH = HERE / "produced_render_pb_pin.json"
 
 
 def _pb_source() -> tuple[Path, Path]:
-    """Resolve and digest-verify the pinned PrismaBuild candidate.
+    """Resolve the pinned PrismaBuild candidate: installed dist or source.
 
-    Returns ``(src_dir, repo_root)`` with ``src_dir`` on ``sys.path``.
-    Skips loudly when no search path holds the pinned bytes.
+    Prefers the interpreter's installed ``prismabuild`` when its files
+    match the pin digests exactly (the pbtest dependency resolver gates
+    the interpreter on the same commit -- no import shadowing, no mixed
+    generations); otherwise falls back to digest-verified source trees.
+    Returns ``(src_dir, repo_root)`` where ``repo_root`` carries the
+    candidate's ``tools/fleet`` (never installed by the dist).  Skips
+    loudly when nothing holds the pinned bytes.
     """
 
     pin = json.loads(PIN_PATH.read_text())
+
+    def _digest_ok(root: Path) -> bool:
+        try:
+            return all((root / name).is_file() and hashlib.sha256(
+                (root / name).read_bytes()).hexdigest() == digest
+                for name, digest in pin["files"].items())
+        except OSError:
+            return False
+
+    import prismabuild
+    installed_src = Path(prismabuild.__file__).resolve().parent
+    for candidate_src in (installed_src,):
+        repo_guess = candidate_src.parents[1]
+        if _digest_ok(repo_guess):
+            return candidate_src, repo_guess
     candidates: list[Path] = []
     for entry in pin["search_paths"]:
         if "env" in entry:
@@ -61,22 +81,17 @@ def _pb_source() -> tuple[Path, Path]:
         elif "path" in entry:
             candidates.append(Path(entry["path"]))
     for root in candidates:
-        try:
-            if all((root / name).is_file() and hashlib.sha256(
-                    (root / name).read_bytes()).hexdigest() == digest
-                    for name, digest in pin["files"].items()):
-                src = root / "src"
-                if str(src) not in sys.path:
-                    sys.path.insert(0, str(src))
-                from prismabuild import produced_output as _po
-                from prismabuild import pool as _pool
-                for module in (_po, _pool):
-                    if not Path(module.__file__).resolve().is_relative_to(
-                            src.resolve()):
-                        pytest.skip("a different prismabuild is imported")
-                return src, root
-        except OSError:
-            continue
+        if _digest_ok(root):
+            src = root / "src"
+            if str(src) not in sys.path:
+                sys.path.insert(0, str(src))
+            from prismabuild import produced_output as _po
+            from prismabuild import pool as _pool
+            for module in (_po, _pool):
+                if not Path(module.__file__).resolve().is_relative_to(
+                        src.resolve()):
+                    pytest.skip("a different prismabuild is imported")
+            return src, root
     pytest.skip(
         "no qualified PrismaBuild produced-output source resolves against "
         "tests/produced_render_pb_pin.json (candidate not published as a "
