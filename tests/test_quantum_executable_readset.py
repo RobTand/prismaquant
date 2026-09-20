@@ -231,7 +231,7 @@ def test_build_refuses_incomplete_status(tmp_path):
 
 
 def test_seal_deterministic_and_pb_validated(tmp_path):
-    core, tiers = _pb()
+    core, tiers, _plans = _pb()
     record, receipt, parent = _layer2(tmp_path)
     kwargs = dict(strided_boundaries=STRIDED, n_probes=N_PROBES,
                   calib=dict(CALIB),
@@ -274,10 +274,11 @@ def _pb():
         sys.path.insert(0, str(src))
     import prismabuild.core as core
     import prismabuild.storage_tiers as tiers
-    for module in (core, tiers):
+    import prismabuild.residency_plan as plans
+    for module in (core, tiers, plans):
         if not Path(module.__file__).resolve().is_relative_to(src.resolve()):
             pytest.skip("a different prismabuild is already imported")
-    return core, tiers
+    return core, tiers, plans
 
 
 def _bound_inputs(tmp_path, root="/mnt/shared/run"):
@@ -800,7 +801,7 @@ def _reported(events):
 
 def _assert_acceptance_run(events, manifest, record, tmp_path,
                            expect_replay_windows, layer_files):
-    import prismabuild.residency_plan as plans
+    _, _, plans = _pb()
     names = [p["name"] for p in manifest["read_plan"]["phases"]]
     reported = _reported(events)
     assert reported and reported[0] == "head"
