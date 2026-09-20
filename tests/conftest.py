@@ -265,3 +265,28 @@ def _restore_profile_detection_globals():
             registry._REGISTERED[:] = saved_registered
         registry._REGISTRY_GENERATION = saved_generation
         registry._DETECTION_ORDER_CACHE = saved_order_cache
+
+
+@pytest.fixture(autouse=True)
+def _no_staged_range_wait_unless_asked(monkeypatch):
+    """Tests do not wait on a PrismaBuild fleet that is not running.
+
+    ``StagedShardReader._range_for`` waits a bounded time for a range the
+    residency map does not cover yet, because on the fleet an uncovered span
+    is usually a mover that has not run rather than a range that will never
+    arrive (PQ #874). Under pytest there are no movers: every uncovered span
+    is permanent, so the default 300 s bound would turn each of the several
+    existing tests that assert an immediate ``readset-not-staged`` refusal
+    into a five-minute sleep that still passes.
+
+    Setting the bound to 0 here restores the pre-#874 refuse-on-first-miss
+    behaviour as the suite-wide default, which is what those tests were
+    written against. The tests that are ABOUT the wait set the variable
+    themselves; a test's own ``monkeypatch.setenv`` runs after this fixture
+    and wins.
+
+    This hides no cost: on the fleet the bound is 300 s, and an undeclared
+    range there does now fail slower than it used to -- see
+    ``_await_staged_range``, which says so.
+    """
+    monkeypatch.setenv("PRISMAQUANT_STAGED_RANGE_WAIT_S", "0")
