@@ -359,17 +359,6 @@ def _fixture_action(tag):
     return _json.loads((FIXTURES / tag / "request.json").read_bytes())
 
 
-def _action_with_script(script, command, path_var="/x/tools:/bin",
-                        log="log.txt"):
-    return {"task": {"argv": ["/bin/bash", "--noprofile", "--norc", "-c",
-                              script],
-                     "result_path": log},
-            "params": {"command": command},
-            "environment": {"variables": {"PATH": path_var}},
-            "inputs": [{"id": "pbrun.checkout-snapshot",
-                        "sha256": "0" * 64}]}
-
-
 def test_canonical_script_matches_filed_actions():
     """Rebuilt publisher expression equals real sealed scripts byte-wise."""
     driver = _driver()
