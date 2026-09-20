@@ -9,6 +9,7 @@ progress declarations; runtime read-phase reporting through the existing
 semantic reporter. Full GPU execution belongs to a later lane, not here.
 """
 
+import copy
 import hashlib
 import json
 import os
@@ -374,11 +375,15 @@ def _dispatcher_record(tmp_path, manifest, wire_sha):
               "chunks": [{"name": "layer-002-c000"}],
               "adjoint": {}}
     (tmp_path / "slice.gz").write_bytes(b"slice")
+    manifest = copy.deepcopy(manifest)
+    manifest["annotations"]["render_prerequisite"]["binding"] = {
+        "scope": "pb732", "material": "e" * 64}
     manifest_path = tmp_path / "exec.json.gz"
     manifest_path.write_bytes(seal_manifest_bytes(manifest))
     record["executable_readset"] = {
         "manifest_path": str(manifest_path),
-        "manifest_sha256": wire_sha,
+        "manifest_sha256": hashlib.sha256(
+            manifest_path.read_bytes()).hexdigest(),
         "phases": [p["name"] for p in manifest["read_plan"]["phases"]]}
     record_path.write_text("{}")
     return record, record_path, adjoint_path
@@ -403,7 +408,9 @@ def test_dispatcher_selects_executable_and_declares_phases(tmp_path,
         bound, record_path=record_path, output_root=tmp_path,
         adjoint_path=adjoint_path)
     assert argv[argv.index("--data-manifest") + 1].endswith("exec.json.gz")
-    assert argv[argv.index("--data-manifest-sha256") + 1] == wire_sha
+    assert argv[argv.index("--data-manifest-sha256") + 1] == hashlib.sha256(
+        Path(argv[argv.index("--data-manifest") + 1]).read_bytes()
+    ).hexdigest()
     declared = [argv[i + 1] for i, word in enumerate(argv[:-1])
                 if word == "--progress-phase"]
     assert declared[0].startswith("head=")
@@ -459,91 +466,362 @@ def test_replay_phase_zero_pending_convention():
     assert _replay(2, 0) == "replay-02-p0"
 
 
-def test_acceptance_sequence_opens_only_admitted_entries(tmp_path):
-    """Scripted replay of the reader call sequence on fixture bytes.
+def _acceptance_setup(tmp_path, monkeypatch):
+    """Real tiny CPU campaign: runner, capture receipt, producer records.
 
-    Every payload open lands on a manifest entry with a matching digest,
-    in manifest phase order; PB parser checks plus an
-    accepted/remaining walk over the reported phases prove the order the
-    tier loop would stage ahead of.
+    Returns a dict with everything the acceptance runs need. Every file
+    below is real bytes on disk; every record is real producer output.
     """
-    from prismaquant.joint_adjoint_checkpoints import (
-        load_adjoint_checkpoint, reference_from_record)
-    from prismaquant.perturbed_x_cache import (
-        prefetch_exact_activation_cache_entries)
-    core, tiers = _pb()
-    import prismabuild.residency_plan as plans
-    record, receipt, parent = _layer2(tmp_path)
-    manifest = build_quantum_executable_manifest(
-        record, receipt, parent, strided_boundaries=STRIDED,
-        n_probes=N_PROBES, calib=dict(CALIB),
-        render_prerequisite=dict(RENDER_PREREQ))
-    by_path = {e["path"]: e for e in manifest["entries"]}
-    opened = []
-    reported = []
+    import re as _re
 
-    def _open(path, sha256):
-        assert path in by_path, path
-        assert by_path[path]["sha256"] == sha256
-        opened.append(path)
+    import test_joint_cost_quantum_runtime as rt
+    import test_layer_major_boundary_capture as lm
+    import prismaquant.aura_cost as aura
+    from prismaquant.joint_layer_quanta import roster_digest
 
-    checkpoint = next(
-        entry for entry in receipt["checkpoints"]
-        if entry["boundary"] == record["adjoint"]["checkpoint_boundary"])
-    space = tmp_path / "adjoint"
-    cotangents, _, _ = load_adjoint_checkpoint(space, checkpoint)
-    assert cotangents, "checkpoint plane loads no tensors"
-    for entry in (checkpoint["activation_entries"]
-                  + checkpoint["shared_state_entries"]):
-        _open(entry["path"], entry["sha256"])
-    reported.append("checkpoint-load")
-    # Chain layer 3, probe 0: the real owner-level prefetch window over
-    # references rebuilt from the receipt records (verified reads).
-    refs = [reference_from_record(entry)
-            for entry in receipt["boundary_entries"]["3"]]
-    with prefetch_exact_activation_cache_entries(
-            refs, expected_session=receipt["boundary_storage"]["session"],
-            max_tensor_bytes=1 << 30) as window:
-        for ref in refs:
-            tensor = window.get(ref)
-            assert tensor.numel() > 0
-            _open(ref.path, ref.sha256)
-    reported.append("chain-003-bound")
-    # Replay window 0, probe 0 over the own boundary: same verified seam.
-    own = [reference_from_record(entry)
-           for entry in receipt["boundary_entries"]["2"]]
-    with prefetch_exact_activation_cache_entries(
-            own, expected_session=receipt["boundary_storage"]["session"],
-            max_tensor_bytes=1 << 30) as window:
-        for ref in own:
-            window.get(ref)
-            _open(ref.path, ref.sha256)
-    reported.append("replay-00-p0")
-    # Every open landed on an admitted entry; reports follow manifest order.
-    assert opened
-    phase_of = {}
-    for phase in manifest["read_plan"]["phases"]:
-        for index in phase["entry_indices"]:
-            phase_of.setdefault(manifest["entries"][index]["path"], []).append(
-                phase["name"])
-    assert all("checkpoint-load" in phase_of[path]
-               for path in opened[:len(checkpoint["activation_entries"])
-                                   + len(checkpoint["shared_state_entries"])])
-    # PB admits only paths under the sealed mount prefix; production
-    # entries always live there, so the test re-roots the fixture paths
-    # (test-only scaffolding) before validating.
-    for entry in manifest["entries"]:
-        entry["path"] = "/mnt/shared/fixture" + entry["path"]
-    normalized = core.validate_data_manifest(manifest)
-    ranges = tiers.manifest_phase_ranges(normalized)
-    assert [r["name"] for r in ranges] == [
-        p["name"] for p in manifest["read_plan"]["phases"]]
+    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    torch.manual_seed(85)
+    model, context, runner, cache = lm.fixture()
+    context.settle_prefetched_layers = lambda layers: None
+    context.source_residency_snapshot = lambda layers, include_head=False: {
+        "owners": [], "unique_storage_bytes": sum(
+            p.numel() * p.element_size() for p in model.parameters())}
+    cache, _proofs = rt._prepared_cache(
+        model, context, runner, cache, tmp_path / "shared")
+
+    layer_files = {}
+    for (name, _fmt), path in cache.weights.items():
+        match = _re.match(r"^model\.layers\.(\d+)\.", name)
+        assert match is not None, name
+        layer_files.setdefault(int(match.group(1)), []).append(path)
+    assert sorted(layer_files) == [0, 1]
+    calib_path = tmp_path / "calib.pt"
+    torch.save(lm.draw(), calib_path)
+    calib_sha = hashlib.sha256(calib_path.read_bytes()).hexdigest()
+
+    entries = [{"path": str(calib_path), "offset": 0,
+                "bytes": calib_path.stat().st_size, "sha256": calib_sha}]
+    phases = [{"name": "head", "bytes": entries[0]["bytes"],
+               "cumulative_bytes": entries[0]["bytes"]}]
+    total = entries[0]["bytes"]
+    for layer in (0, 1):
+        start = total
+        for path in sorted(layer_files[layer]):
+            size = Path(path).stat().st_size
+            entries.append({
+                "path": path, "offset": 0, "bytes": size,
+                "sha256": hashlib.sha256(
+                    Path(path).read_bytes()).hexdigest()})
+            total += size
+        phases.append({"name": f"layer-{layer}", "bytes": total - start,
+                       "cumulative_bytes": total})
+    scope = {"fixture": "exec-acceptance"}
+    parent = {
+        "schema": "prismaquant.prismabuild.data_manifest.v1",
+        "mount_prefix": "/mnt/shared",
+        "entries": entries, "entry_count": len(entries),
+        "total_bytes": total,
+        "annotations": {"campaign_scope": scope, "layers": [0, 1],
+                        "phases": phases},
+    }
+    plan = {"output_root": str(tmp_path / "campaign"),
+            "model": str(tmp_path / "shared" / "assets"),
+            "distributed_campaign": {},
+            "execution": {"n_probes": 4},
+            "calibration_input": {"path": str(calib_path),
+                                  "sha256": calib_sha}}
+    qnames = [f"model.layers.{layer}.proj" for layer in (0, 1)]
+    prepared = {"formats_by_qname": {name: ["BF16"] for name in qnames}}
+
+    def _sha(path):
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(plan, sort_keys=True))
+    prepared_path = tmp_path / "prepared.json"
+    prepared_path.write_text(json.dumps(prepared, sort_keys=True))
+    parent_path = tmp_path / "parent.json"
+    parent_path.write_text(json.dumps(parent, sort_keys=True))
+    plan_sha, prepared_sha, parent_sha = (
+        _sha(plan_path), _sha(prepared_path), _sha(parent_path))
+    import test_joint_cost_quantum_runtime as rt
+    preflight = rt._preflight_windows(runner, cache, None)
+    partition = {"windows_by_layer": {
+        str(layer): len(preflight[layer]) for layer in (0, 1)}}
+    from prismaquant.joint_layer_quanta import (
+        layer_quanta as _produce, roster_digest)
+    torch.manual_seed(85)
+    _model_b, _context_b, runner_b, _cache_b = lm.fixture()
+    _context_b.settle_prefetch_layers = lambda layers: None
+    receipt = run_adjoint_capture_core_alias(
+        runner_b, lm.draw(), tmp_path, plan_sha, prepared_sha, parent_sha,
+        roster_digest(sorted(prepared["formats_by_qname"])))
+    assert receipt.get("status") == "complete"
+    assert sorted(receipt["boundary_entries"]) == ["0", "1"]
+    bound = _produce(
+        plan, prepared, parent, chunk_target_bytes=1 << 20, stride=2,
+        output_root=str(tmp_path / "campaign"),
+        plan_path=str(plan_path), plan_sha256=plan_sha,
+        prepared_path=str(prepared_path), prepared_sha256=prepared_sha,
+        parent_manifest_sha256=parent_sha,
+        window_partition=partition,
+        ram_window_gib=160, max_resident_consumers=2,
+        adjoint_receipt=receipt)
+    assert all(r["adjoint"]["receipt_sha256"] is not None
+               for r in bound["records"])
+    production = {
+        "weights": {f"{name}@{fmt}": {
+            "path": path,
+            "sha256": hashlib.sha256(
+                Path(path).read_bytes()).hexdigest()}
+            for (name, fmt), path in cache.weights.items()}}
+    production_path = tmp_path / "production.json"
+    production_path.write_text(json.dumps(production, sort_keys=True))
+    render_prerequisite = {
+        "scope": "pb732",
+        "production_pkl_sha256": hashlib.sha256(
+            production_path.read_bytes()).hexdigest(),
+        "unit_roster_sha256": bound["records"][0]["campaign"][
+            "unit_roster_sha256"],
+        "binding": None,
+    }
+    return {"runner": runner, "cache": cache,
+            "records": {r["quantum_id"]: r for r in bound["records"]},
+            "receipt": receipt, "parent": parent, "plan": plan,
+            "layer_files": layer_files, "calib_path": calib_path,
+            "render_prerequisite": render_prerequisite,
+            "output_root": tmp_path / "campaign"}
+
+
+def run_adjoint_capture_core_alias(runner, calib, tmp_path, plan_sha,
+                                   prepared_sha, parent_sha, roster_sha):
+    import test_joint_cost_quantum_runtime as rt
+    import test_streamed_cost_checkpoints as tsc
+    import prismaquant.aura_cost as aura
+    from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
+    return run_adjoint_capture_core(
+        runner, calib, execution=rt._execution(tmp_path / "capture"),
+        output_root=str(tmp_path / "campaign"), stride=2,
+        source_model_identity=tsc._model_identity("joint-source"),
+        unit_roster_sha256=roster_sha, plan_sha256=plan_sha,
+        prepared_sha256=prepared_sha, read_manifest_sha256=parent_sha,
+        implementation_sha256=aura._aura_source_sha256())
+
+
+def _check_event_order(events, manifest, *, layer, chain):
+    """Fail-closed order checker: every bulk read occurs under its
+    already-reported owning phase. A hook moved after its read flips an
+    event pair and fails here -- that is the mutation sensitivity.
+    """
     names = [p["name"] for p in manifest["read_plan"]["phases"]]
+    current = None
+    for event in events:
+        kind = event[0]
+        if kind == "report":
+            assert event[1] in names, event[1]
+            current = event[1]
+        elif kind == "checkpoint-open":
+            assert current == "checkpoint-load", events
+        elif kind == "source-open":
+            _, opened, _status = event
+            if opened in chain:
+                assert current == f"chain-{opened:03d}-source", events
+            else:
+                assert opened == layer, events
+                assert current == f"own-{layer:03d}-source", events
+        elif kind == "boundary-open":
+            _, opened, _count = event
+            if opened in chain:
+                assert current == f"chain-{opened:03d}-bound", events
+            else:
+                assert opened == layer, events
+                assert current is not None and current.startswith(
+                    "replay-"), events
+        elif kind in ("setup-open", "window-open"):
+            pass
+        else:
+            raise AssertionError(f"unknown event {event!r}")
+
+
+def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
+    """One real run_layer_quantum_core with instrumented seams."""
+    import contextlib
+
+    import test_joint_cost_quantum_runtime as rt
+    import prismaquant.joint_cost_quantum as qc
+    import prismaquant.perturbed_x_cache as pxc
+    from prismaquant import prismabuild_progress as pbprog
+    from prismaquant.joint_cost_quantum import (
+        ChunkFrontier, QuantumCounters, QuantumProgress,
+        quantum_layer_roster, quantum_retained_state,
+        resolve_quantum_windows, run_layer_quantum_core)
+
+    runner = setup["runner"]
+    cache = setup["cache"]
+    record = setup["records"][f"layer-{layer:03d}"]
+    receipt = setup["receipt"]
+    events = []
+
+    phases_env = None
+    manifest_holder = {}
+
+    def _report(phase, units, **kwargs):
+        events.append(("report", phase, units))
+        return True
+
+    monkeypatch.setattr(pbprog, "report", _report)
+    orig_ensure = runner.context.ensure_loaded
+
+    def ensure_logged(L, *, require_prefetched=False):
+        tensors, status = orig_ensure(
+            L, require_prefetched=require_prefetched)
+        events.append(("source-open", int(L), status))
+        return tensors, status
+
+    runner.context.ensure_loaded = ensure_logged
+    orig_load = qc.load_adjoint_checkpoint
+
+    def load_logged(space, checkpoint_record):
+        events.append(("checkpoint-open",))
+        return orig_load(space, checkpoint_record)
+
+    monkeypatch.setattr(qc, "load_adjoint_checkpoint", load_logged)
+    orig_prefetch = pxc.prefetch_exact_activation_cache_entries
+
+    def prefetch_logged(references, **kwargs):
+        bounds = set()
+        for ref in references:
+            name = ref.name
+            bounds.add(int(name.split("-")[2]))
+            events.append(("boundary-path-open", ref.path))
+        events.append(("boundary-open", sorted(bounds)[0]
+                       if len(bounds) == 1 else -1, len(references)))
+        return orig_prefetch(references, **kwargs)
+
+    monkeypatch.setattr(
+        pxc, "prefetch_exact_activation_cache_entries", prefetch_logged)
+    orig_rw = type(cache).retained_window
+
+    @contextlib.contextmanager
+    def rw_logged(self, *args, **kwargs):
+        events.append(("window-open",))
+        with orig_rw(self, *args, **kwargs) as receipt_obj:
+            yield receipt_obj
+
+    monkeypatch.setattr(type(cache), "retained_window", rw_logged)
+
+    execution = rt._execution(tmp_path / f"qexec-{layer}-{int(resume)}")
+    retained = quantum_retained_state(execution)
+    roster = quantum_layer_roster(
+        runner, {f"model.layers.{i}.proj": list(rt.FORMATS)
+                 for i in range(runner.num_layers)}, layer)
+    resolved = resolve_quantum_windows(
+        record, layer=layer, names=roster.names, linears=roster.linears,
+        render_formats=roster.render_formats, production_cache=cache,
+        operator_windows=retained.operator_windows,
+        retained_budget=retained.retained_budget,
+        source_bytes=retained.source_bytes)
+    frontier = ChunkFrontier(chunks=record["chunks"], windows=resolved)
+    counters = QuantumCounters(
+        quantum_id=record["quantum_id"],
+        identity_sha256=record["identity_sha256"],
+        chunks=record["chunks"], frontier=frontier)
+    manifest = build_quantum_executable_manifest(
+        record, receipt, setup["parent"], strided_boundaries=[2],
+        n_probes=4,
+        calib={"path": str(setup["calib_path"]),
+               "bytes": setup["calib_path"].stat().st_size,
+               "sha256": hashlib.sha256(
+                   setup["calib_path"].read_bytes()).hexdigest()},
+        render_prerequisite=dict(setup["render_prerequisite"]))
+    manifest_holder["manifest"] = manifest
+    monkeypatch.setenv(
+        "PRISMABUILD_ACTION_PROGRESS_PHASES",
+        json.dumps([p["name"] for p in manifest["read_plan"]["phases"]]))
+    progress = QuantumProgress(frontier=frontier, base_units=0)
+    calib_ids = torch.load(setup["calib_path"])
+    events.append(("setup-open", str(setup["calib_path"])))
+    payload = run_layer_quantum_core(
+        runner, cache, calib_ids,
+        {f"model.layers.{i}.proj": list(rt.FORMATS)
+         for i in range(runner.num_layers)},
+        record=record, receipt=receipt, execution=execution,
+        output_root=setup["output_root"], projection_backend=None,
+        resume=resume, resolved_windows=resolved,
+        counters=counters, progress=progress)
+    assert payload["costs"], "quantum produced no cost rows"
+    return events, manifest
+
+
+def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
+    setup = _acceptance_setup(tmp_path, monkeypatch)
+    events, manifest = _drive_quantum(
+        tmp_path, monkeypatch, setup, layer=0, resume=False)
+    record = setup["records"]["layer-000"]
+    _assert_acceptance_run(events, manifest, record, tmp_path,
+                           expect_replay_windows="all")
+    # Resume: all windows complete, zero-pending replay under window zero.
+    events2, _ = _drive_quantum(
+        tmp_path, monkeypatch, setup, layer=0, resume=True)
+    _assert_acceptance_run(events2, manifest, record, tmp_path,
+                           expect_replay_windows={0})
+    # No-chain path still works.
+    events3, manifest1 = _drive_quantum(
+        tmp_path, monkeypatch, setup, layer=1, resume=False)
+    _assert_acceptance_run(
+        events3, manifest1, setup["records"]["layer-001"], tmp_path,
+        expect_replay_windows="all")
+    assert not [n for n in _reported(events3) if n.startswith("chain-")]
+
+
+
+def test_event_order_checker_rejects_post_read_reports():
+    assert _reported([]) == []
+    with pytest.raises(AssertionError):
+        _check_event_order(
+            [("report", "head", 0),
+             ("boundary-open", 1, 5),
+             ("report", "chain-001-bound", 0)],
+            {"read_plan": {"phases": [
+                {"name": "head", "entry_indices": []},
+                {"name": "chain-001-bound", "entry_indices": []}]}},
+            layer=0, chain=[1])
+
+
+def _reported(events):
+    return [phase for kind, phase, *_ in events if kind == "report"]
+
+
+def _assert_acceptance_run(events, manifest, record, tmp_path,
+                           expect_replay_windows):
+    import prismabuild.residency_plan as plans
+    names = [p["name"] for p in manifest["read_plan"]["phases"]]
+    reported = _reported(events)
+    assert reported and reported[0] == "head"
+    assert reported == [n for n in names if n in reported]
+    _check_event_order(
+        events, manifest, layer=record["layer"],
+        chain=list(record["adjoint"]["chain_layers"]))
+    staged = {e["path"]: e for e in manifest["entries"]}
+    for kind, *rest in events:
+        if kind == "boundary-path-open":
+            assert rest[0] in staged, rest[0]
+    units = [u for kind, _phase, u in events if kind == "report"]
+    assert all(b >= a for a, b in zip(units, units[1:]))
     plan_view = {"phases": [{"name": name} for name in names]}
-    for position, name in enumerate(names):
+    for name in reported:
         assert plans.accepted(plan_view, name)
-        remaining = [p["name"] for p in plans.remaining(plan_view, name)]
-        assert remaining == names[position:]
+    remaining = [p["name"] for p in plans.remaining(
+        plan_view, reported[-1])]
+    assert remaining == names[names.index(reported[-1]) + 1:]
+    replayed = {int(n.split("-")[1])
+                for n in reported if n.startswith("replay-")}
+    if expect_replay_windows == "all":
+        assert replayed == set(range(len(record["windows"])))
+    else:
+        assert replayed <= set(expect_replay_windows)
+    assert manifest["schema"] == "prismaquant.prismabuild.data_manifest.v2"
 
 
 def _exec_campaign(tmp_path):
@@ -762,3 +1040,92 @@ def test_cli_executable_refusal_writes_nothing(tmp_path):
     assert not out.exists()
     assert not (Path(str(campaign["root"])) / "layer-quanta" / "adjoint" /
                 "bound-readsets").exists()
+
+
+def _gate_manifest(tmp_path, manifest, binding):
+    import copy
+    manifest = copy.deepcopy(manifest)
+    manifest["annotations"]["render_prerequisite"]["binding"] = binding
+    path = tmp_path / "exec-gate.json.gz"
+    path.write_bytes(seal_manifest_bytes(manifest))
+    return path
+
+
+def test_dispatcher_accepts_bound_render_binding(tmp_path, monkeypatch):
+    import dispatch_joint_quanta as dispatch
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({"container": {"image": "sha256:" + "0" * 64},
+                                "env": {}}))
+    monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
+    record, receipt, parent = _layer2(tmp_path)
+    manifest = build_quantum_executable_manifest(
+        record, receipt, parent, strided_boundaries=STRIDED,
+        n_probes=N_PROBES, calib=dict(CALIB),
+        render_prerequisite=dict(RENDER_PREREQ))
+    bound_path = _gate_manifest(
+        tmp_path, manifest, {"scope": "pb732", "material": "f" * 64})
+    wire_sha = hashlib.sha256(bound_path.read_bytes()).hexdigest()
+    adjoint_path = tmp_path / "adjoint.json"
+    adjoint_path.write_text("{}")
+    record_path = tmp_path / "record.json"
+    record_path.write_text("{}")
+    record = {"quantum_id": "layer-003", "layer": 3,
+              "campaign": {"plan_path": "plan.json", "plan_sha256": "0" * 64,
+                           "prepared_path": "prep.json",
+                           "prepared_sha256": "1" * 64},
+              "read_set": {"manifest_path": str(tmp_path / "slice.gz"),
+                           "manifest_sha256": hashlib.sha256(
+                               b"slice").hexdigest()},
+              "chunks": [{"name": "layer-003-c000"}],
+              "adjoint": {},
+              "executable_readset": {
+                  "manifest_path": str(bound_path),
+                  "manifest_sha256": wire_sha,
+                  "phases": [p["name"]
+                             for p in manifest["read_plan"]["phases"]]}}
+    (tmp_path / "slice.gz").write_bytes(b"slice")
+    argv = dispatch.quantum_argv(
+        record, record_path=record_path, output_root=tmp_path,
+        adjoint_path=adjoint_path)
+    assert argv[argv.index("--data-manifest-sha256") + 1] == wire_sha
+
+
+def test_dispatcher_refuses_unbound_render_prerequisite(tmp_path,
+                                                        monkeypatch):
+    import dispatch_joint_quanta as dispatch
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({"container": {"image": "sha256:" + "0" * 64},
+                                "env": {}}))
+    monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
+    record, receipt, parent = _layer2(tmp_path)
+    manifest = build_quantum_executable_manifest(
+        record, receipt, parent, strided_boundaries=STRIDED,
+        n_probes=N_PROBES, calib=dict(CALIB),
+        render_prerequisite=dict(RENDER_PREREQ))
+    assert manifest["annotations"]["render_prerequisite"]["binding"] is None
+    bound_path = tmp_path / "exec-gate.json.gz"
+    bound_path.write_bytes(seal_manifest_bytes(manifest))
+    wire_sha = hashlib.sha256(bound_path.read_bytes()).hexdigest()
+    adjoint_path = tmp_path / "adjoint.json"
+    adjoint_path.write_text("{}")
+    record_path = tmp_path / "record.json"
+    record_path.write_text("{}")
+    record = {"quantum_id": "layer-003", "layer": 3,
+              "campaign": {"plan_path": "plan.json", "plan_sha256": "0" * 64,
+                           "prepared_path": "prep.json",
+                           "prepared_sha256": "1" * 64},
+              "read_set": {"manifest_path": str(tmp_path / "slice.gz"),
+                           "manifest_sha256": hashlib.sha256(
+                               b"slice").hexdigest()},
+              "chunks": [{"name": "layer-003-c000"}],
+              "adjoint": {},
+              "executable_readset": {
+                  "manifest_path": str(bound_path),
+                  "manifest_sha256": wire_sha,
+                  "phases": [p["name"]
+                             for p in manifest["read_plan"]["phases"]]}}
+    (tmp_path / "slice.gz").write_bytes(b"slice")
+    with pytest.raises(dispatch.DispatchRefused, match="not runnable"):
+        dispatch.quantum_argv(
+            record, record_path=record_path, output_root=tmp_path,
+            adjoint_path=adjoint_path)
