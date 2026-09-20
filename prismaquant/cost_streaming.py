@@ -1323,33 +1323,44 @@ def canonical_fingerprint_key(fingerprint: dict[str, object]) -> str:
 #: NFS mounts of one export). Certified comparisons use the full six-field
 #: fingerprint; dev-portable reuse compares on these five.
 _REUSE_FINGERPRINT_FIELDS = ("path", "inode", "size", "mtime_ns", "ctime_ns")
+_FINGERPRINT_FIELDS = _REUSE_FINGERPRINT_FIELDS + ("device",)
+
+
+def _well_formed_fingerprint(value: object) -> bool:
+    """The exact six-field stat shape with typed values, nothing else.
+
+    Both-missing and extra fields refuse: a missing field is not a match,
+    and an extra field could carry mutation signal no comparison reads.
+    """
+    return (
+        isinstance(value, dict)
+        and set(value) == set(_FINGERPRINT_FIELDS)
+        and isinstance(value.get("path"), str)
+        and all(type(value.get(key)) is int
+                for key in ("device", "inode", "size", "mtime_ns", "ctime_ns"))
+    )
 
 
 def stat_fingerprint_reusable(live: object, cached: object) -> bool:
     """Whether a recorded shard digest may be reused without rereading.
 
-    Certified mode: exact six-field equality, as before. Dev mode additionally
-    accepts two fingerprints that agree on every mutation-sensitive field and
-    differ only in the client-local ``device`` number (both sides must carry
-    integer devices, so a missing field is never portable). Anything else --
-    a moved, resized, retouched or replaced file -- refuses in both modes.
-    One predicate for every seed/validate/build comparison so the three
-    cannot disagree about what reuse means.
+    Both sides must carry the exact six-field shape first; malformed rows
+    never match, in either mode. Certified mode then requires full
+    equality. Dev mode additionally accepts two fingerprints that agree on
+    every mutation-sensitive field and differ only in the client-local
+    ``device`` number. Anything else -- a moved, resized, retouched or
+    replaced file -- refuses in both modes. One predicate for every
+    seed/validate/build comparison so the three cannot disagree about what
+    reuse means.
     """
+    if not (_well_formed_fingerprint(live) and _well_formed_fingerprint(cached)):
+        return False
     if live == cached:
         return True
     if not dev_mode_enabled():
         return False
-    if not isinstance(live, dict) or not isinstance(cached, dict):
-        return False
-    live_device = live.get("device")
-    cached_device = cached.get("device")
-    if (isinstance(live_device, bool) or isinstance(cached_device, bool)
-            or not isinstance(live_device, int)
-            or not isinstance(cached_device, int)):
-        return False
-    return all(live.get(key) == cached.get(key)
-               for key in _REUSE_FINGERPRINT_FIELDS)
+    assert isinstance(live, dict) and isinstance(cached, dict)
+    return all(live[key] == cached[key] for key in _REUSE_FINGERPRINT_FIELDS)
 
 
 def portable_fingerprint_key(fingerprint: dict[str, object]) -> str:
@@ -1529,6 +1540,15 @@ def build_source_checkpoint_identity(
             cached = portable_index.get(portable_fingerprint_key(fingerprint))
         digests.append(str(cached["sha256"]) if cached is not None else None)
     misses = [index for index, digest in enumerate(digests) if digest is None]
+    if misses and dev_mode_enabled() and digest_cache_path is not None:
+        total = sum(int(fingerprints[index]["bytes"]) for index in misses)
+        raise RuntimeError(
+            "dev mode refuses an unannounced source rehash of "
+            f"{total} bytes across {len(misses)} shard(s): the declared "
+            f"digest cache {digest_cache_path} does not cover them; "
+            "initialize it with an explicit certified run instead "
+            "(certified mode would hash them here)"
+        )
     for index, digest in zip(
         misses,
         _hash_source_shards(
@@ -1788,30 +1808,29 @@ def build_streamed_model_identity(
             f"{len(portable_paths)} recorded shard digests across a "
             "client device-number difference (dev-only portable reuse; "
             "certified mode would rehash): uncertified")
-    if (
-        cache_path is not None
-        and cache_path.is_file()
-        and dev_mode_enabled()
-    ):
-        pending = [
-            int(fingerprint["size"])
+    if cache_path is not None and dev_mode_enabled():
+        if not cache_path.is_file():
+            raise RuntimeError(
+                "dev mode refuses an unannounced source rehash: no identity "
+                f"cache at the declared {cache_path}; initialize it with an "
+                "explicit certified run instead"
+            )
+        uncovered = [
+            (str(fingerprint["path"]), int(fingerprint["size"]))
             for fingerprint in fingerprints
             if str(fingerprint["path"]) not in reusable_sha
         ]
-        if (mutated_paths or (pending and not reusable_sha)) and pending:
+        if uncovered:
+            total = sum(size for _, size in uncovered)
+            new_paths = [path for path, _ in uncovered
+                         if path not in mutated_paths]
             raise RuntimeError(
                 "dev mode refuses an unannounced source rehash of "
-                f"{sum(pending)} bytes: the declared identity cache "
-                f"{cache_path} "
-                + (
-                    "covers none of the live shards"
-                    if not reusable_sha
-                    else f"does not cover {len(mutated_paths)} mutated "
-                    "shard(s): "
-                    + ", ".join(mutated_paths[:4])
-                )
-                + " (certified mode would hash them here); refresh the "
-                "cache from the current source instead"
+                f"{total} bytes across {len(uncovered)} shard(s) "
+                f"({len(mutated_paths)} mutated, {len(new_paths)} new; "
+                f"first: {uncovered[0][0]}); refresh the declared cache "
+                f"{cache_path} from the current source instead "
+                "(certified mode would hash them here)"
             )
 
     shards: list[dict[str, object]] = []
