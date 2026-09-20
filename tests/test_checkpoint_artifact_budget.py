@@ -782,7 +782,7 @@ def test_stage_a_snapshot_boundary_makes_no_bulk_copies(tmp_path, monkeypatch):
 
 
 def test_stage_a_borrowed_snapshot_writes_unchanged_loadable_checkpoint(tmp_path):
-    """A fitting borrowed snapshot writes byte-identical loadable bytes."""
+    """A fitting borrowed snapshot writes equal-sized loadable bytes with equal values."""
     from prismaquant.joint_adjoint_checkpoints import load_adjoint_checkpoint
     from prismaquant.joint_cost_stage_a import shared_adjoint_snapshot
 
@@ -918,3 +918,32 @@ def test_fallback_snapshot_writes_loadable_checkpoint_when_budgeted(tmp_path):
         got = shared[key]["accumulators"][0]["tensor"]
         assert got.device.type == "cpu" and got.is_contiguous()
         assert torch.equal(got, torch.ones(3, 2))
+
+
+def test_mixed_snapshot_declared_hold_covers_actual_copies():
+    """Mixed owners: the declared hold must cover what the caller copies.
+
+    One CPU-contiguous owner (borrowable, 24 B) beside one transposed
+    owner (needs copy, 24 B). The plan declares only the exceptional
+    bytes; the production fallback must materialize exactly those bytes,
+    not a whole-plane copy of both owners. Fails on the whole-plane
+    fallback (48 actual vs 24 declared).
+    """
+    from prismaquant.joint_cost_stage_a import shared_adjoint_copy_plan
+
+    contiguous = _accumulated_cotangent(3.0)
+    transposed = _noncontiguous_owner()
+    owners = [[contiguous], [transposed]]
+    needs, declared = shared_adjoint_copy_plan(owners)
+    assert needs is True
+    assert declared == 2 * 3 * 4
+    # What the pre-fix fallback materializes: state_dict() for EVERY owner.
+    materialized = {(p, b): owners[p][b].state_dict()
+                    for p in range(len(owners)) for b in range(len(owners[p]))}
+    try:
+        actual = sum(row["tensor"].untyped_storage().nbytes()
+                     for state in materialized.values()
+                     for row in state["accumulators"])
+        assert actual == declared
+    finally:
+        materialized.clear()
