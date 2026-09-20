@@ -77,6 +77,22 @@ def test_any_other_difference_never_reuses(monkeypatch, field, value):
     assert not stat_fingerprint_reusable(live, "not-a-dict")
 
 
+def test_malformed_fingerprints_never_reuse(monkeypatch):
+    """Missing fields, extra fields, and empty rows never match -- a
+    missing field is not a match and an extra field could carry mutation
+    signal no comparison reads."""
+    from prismaquant.cost_streaming import stat_fingerprint_reusable
+    full = _fingerprint()
+    missing = {key: value for key, value in full.items() if key != "device"}
+    extra = dict(full, provenance="elsewhere")
+    for live, cached in ((full, missing), (missing, full), (full, extra),
+                         (extra, full), ({}, {}), (full, None)):
+        _dev_on(monkeypatch)
+        assert not stat_fingerprint_reusable(live, cached)
+        _dev_off(monkeypatch)
+        assert not stat_fingerprint_reusable(live, cached)
+
+
 # -- build-level reuse (fixture checkpoint, mocked hashing) ---------------
 
 @pytest.fixture
@@ -204,10 +220,20 @@ def test_certified_still_rehashes_mutated_cache(monkeypatch, checkpoint):
     assert len(calls) == 1
 
 
-def test_dev_missing_cache_still_hashes_fresh_iteration(
+def test_dev_missing_cache_refuses_with_byte_count(
         monkeypatch, checkpoint):
     root, shards = checkpoint
     _dev_on(monkeypatch)
+    _refusing_hash(monkeypatch)
+    with pytest.raises(RuntimeError, match="[Bb]ytes"):
+        cs.build_streamed_model_identity(
+            _runner(shards), str(root),
+            identity_cache_path=root / "identity-cache.json")
+
+
+def test_certified_missing_cache_hashes(monkeypatch, checkpoint):
+    root, shards = checkpoint
+    _dev_off(monkeypatch)
     calls = _counting_hash(monkeypatch)
     cs.build_streamed_model_identity(
         _runner(shards), str(root),
@@ -215,8 +241,24 @@ def test_dev_missing_cache_still_hashes_fresh_iteration(
     assert len(calls) == len(shards)
 
 
-def test_dev_top_up_hashes_only_new_shards_and_records_host_stats(
-        monkeypatch, tmp_path):
+def test_dev_top_up_without_contract_refuses(monkeypatch, tmp_path):
+    root = tmp_path / "model"
+    root.mkdir()
+    shard_a = root / "a.safetensors"
+    shard_a.write_bytes(b"a" * 65536)
+    cache = root / "identity-cache.json"
+    cs.build_streamed_model_identity(
+        _runner({"a": shard_a}), str(root), identity_cache_path=cache)
+    (root / "b.safetensors").write_bytes(b"b" * 131072)
+    _dev_on(monkeypatch)
+    _refusing_hash(monkeypatch)
+    with pytest.raises(RuntimeError, match="[Bb]ytes"):
+        cs.build_streamed_model_identity(
+            _runner({"a": shard_a, "b": root / "b.safetensors"}), str(root),
+            identity_cache_path=cache)
+
+
+def test_certified_top_up_hashes_only_new_shards(monkeypatch, tmp_path):
     root = tmp_path / "model"
     root.mkdir()
     shard_a = root / "a.safetensors"
@@ -226,7 +268,7 @@ def test_dev_top_up_hashes_only_new_shards_and_records_host_stats(
         _runner({"a": shard_a}), str(root), identity_cache_path=cache)
     shard_b = root / "b.safetensors"
     shard_b.write_bytes(b"b" * 131072)
-    _dev_on(monkeypatch)
+    _dev_off(monkeypatch)
     calls = _counting_hash(monkeypatch)
     identity = cs.build_streamed_model_identity(
         _runner({"a": shard_a, "b": shard_b}), str(root),
@@ -314,3 +356,134 @@ def test_digest_cache_memo_stays_strict_in_certified(
     calls = _counting_hash(monkeypatch)
     build_source_checkpoint_identity(str(root), digest_cache_path=cache_path)
     assert len(calls) == 2
+
+
+def test_digest_cache_memo_miss_refuses_in_dev(monkeypatch, tmp_path):
+    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    root = _memo_fixture(tmp_path)
+    cache_path = tmp_path / "digest-cache.json"
+    live = [cs._streamed_identity_stat_fingerprint(root / name)
+            for name in ("a.safetensors", "b.safetensors")]
+    entries = [{"fingerprint": live[0],
+                "sha256": hashlib.sha256(
+                    (root / "a.safetensors").read_bytes()).hexdigest()}]
+    cache_path.write_text(json.dumps(
+        {"schema": "prismaquant.source_checkpoint.digest_cache.v1",
+         "entries": entries}))
+    _dev_on(monkeypatch)
+    _refusing_hash(monkeypatch)
+    with pytest.raises(RuntimeError, match="[Bb]ytes"):
+        build_source_checkpoint_identity(
+            str(root), digest_cache_path=cache_path)
+
+
+def test_digest_cache_memo_none_path_hashes_in_dev(monkeypatch, tmp_path):
+    """Omitting the cache path is an explicit opt-out, not a hidden seal:
+    dev still hashes, exactly as before."""
+    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    root = _memo_fixture(tmp_path)
+    _dev_on(monkeypatch)
+    calls = _counting_hash(monkeypatch)
+    build_source_checkpoint_identity(str(root), digest_cache_path=None)
+    assert len(calls) == 2
+
+
+# -- seed path -----------------------------------------------------------
+
+def test_seed_copies_the_bound_cache_byte_identical(tmp_path):
+    from prismaquant.tessera_joint_aura import _seed_source_identity_cache
+    import hashlib as _hashlib
+    source = tmp_path / "plan-cache.json"
+    source.write_bytes(b'{"identity": "fixture"}')
+    digest = _hashlib.sha256(source.read_bytes()).hexdigest()
+    out_root = tmp_path / "run"
+    out_root.mkdir()
+    slot = _seed_source_identity_cache(
+        {"source_identity_cache": {"path": str(source), "sha256": digest}},
+        out_root)
+    assert slot == out_root / "source-identity.json"
+    assert slot.read_bytes() == b'{"identity": "fixture"}'
+
+
+def test_seed_refuses_a_different_preexisting_cache(tmp_path):
+    from prismaquant.tessera_joint_aura import _seed_source_identity_cache
+    import hashlib as _hashlib
+    source = tmp_path / "plan-cache.json"
+    source.write_bytes(b'{"identity": "fixture"}')
+    digest = _hashlib.sha256(source.read_bytes()).hexdigest()
+    out_root = tmp_path / "run"
+    out_root.mkdir()
+    (out_root / "source-identity.json").write_bytes(b"something else")
+    with pytest.raises(Exception):
+        _seed_source_identity_cache(
+            {"source_identity_cache": {"path": str(source),
+                                       "sha256": digest}},
+            out_root)
+
+
+# -- validate path, end to end -------------------------------------------
+
+def _validate_fixture(tmp_path):
+    transformers = pytest.importorskip("transformers")
+    try:
+        from transformers import LlamaConfig
+    except ImportError:
+        pytest.skip("no LlamaConfig in installed transformers")
+    root = tmp_path / "ckpt"
+    root.mkdir()
+    (root / "config.json").write_text(json.dumps(LlamaConfig().to_dict()))
+    index = {"metadata": {"total_size": 196608},
+             "weight_map": {"a.weight": "a.safetensors",
+                            "b.weight": "b.safetensors"}}
+    (root / "model.safetensors.index.json").write_text(json.dumps(index))
+    shards = {}
+    for name, payload in (("a.safetensors", b"a" * 65536),
+                          ("b.safetensors", b"b" * 131072)):
+        path = root / name
+        path.write_bytes(payload)
+        shards[name] = path
+    return root, shards
+
+
+def _validate_cache(root, shards):
+    from transformers import LlamaConfig
+    cache = root / "identity-cache.json"
+    runner = SimpleNamespace(
+        model=SimpleNamespace(config=SimpleNamespace(
+            to_dict=lambda: LlamaConfig().to_dict())),
+        context=SimpleNamespace(
+            weight_ckpt={},
+            weight_shard={name: str(path)
+                          for name, path in shards.items()}))
+    cs.build_streamed_model_identity(
+        runner, str(root), identity_cache_path=cache)
+    return cache
+
+
+def test_validate_reuses_across_device_in_dev(monkeypatch, tmp_path):
+    from prismaquant.cost_streaming import validate_cached_streamed_model_identity
+    root, shards = _validate_fixture(tmp_path)
+    cache = _validate_cache(root, shards)
+    payload = json.loads(cache.read_text())
+    live_device = payload["fingerprints"][0]["device"]
+    for row in payload["fingerprints"]:
+        row["device"] = live_device + 1000
+    cache.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    _dev_on(monkeypatch)
+    _refusing_hash(monkeypatch)
+    identity = validate_cached_streamed_model_identity(str(root), cache)
+    assert identity["content_sha256"] == payload["identity"]["content_sha256"]
+
+
+def test_validate_stays_strict_in_certified(monkeypatch, tmp_path):
+    from prismaquant.cost_streaming import validate_cached_streamed_model_identity
+    root, shards = _validate_fixture(tmp_path)
+    cache = _validate_cache(root, shards)
+    payload = json.loads(cache.read_text())
+    live_device = payload["fingerprints"][0]["device"]
+    for row in payload["fingerprints"]:
+        row["device"] = live_device + 1000
+    cache.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    _dev_off(monkeypatch)
+    with pytest.raises(RuntimeError, match="[Dd]rift"):
+        validate_cached_streamed_model_identity(str(root), cache)
