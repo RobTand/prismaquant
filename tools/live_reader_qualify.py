@@ -104,6 +104,17 @@ def main() -> int:
         before = _mountstats()
         pool_mount = _mount_of(ns.declared)
         result["pool_mount"] = pool_mount
+        try:
+            from prismaquant.residency_map import residency_resolver as _rr
+            _probe = _rr().staged_read(ns.declared, expected_sha256=(
+                ns.expect_sha256 if not ns.refuse else None))
+            if _probe is not None:
+                result["composed_entry"] = {
+                    "stage_path": _probe.get("stage_path"),
+                    "ram_path": _probe.get("ram_path"),
+                    "bytes": _probe.get("bytes")}
+        except Exception as exc:  # noqa: BLE001 -- diagnostic only
+            result["composed_entry"] = f"unreadable: {type(exc).__name__}: {exc}"
         if ns.refuse:
             try:
                 load_calibration_input(
