@@ -422,12 +422,12 @@ def test_publish_claim_finish_lifecycle(pb, tmp_path):
                          capacity={"cpu": 1, "mem_gb": 1})
     assert record is not None, "real claim refused a published cpu row"
     assert record["action_key"] == key
-    assert queue.ledger("fleet-harness").held() != {}
+    assert queue.ledger().held() != {}, "claim committed no local tokens"
     terminal = queue.finish(key, status="executed",
                             detail={"acceptance": "lifecycle"},
                             claim_snapshot=record)
     assert Path(terminal).is_file()
-    assert queue.ledger("fleet-harness").held() == {}
+    assert queue.ledger().held() == {}, "finish returned no capacity"
 
 
 def test_tier_ledger_concludes_both_sides_once(pb, tmp_path):
