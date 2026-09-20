@@ -4,9 +4,10 @@
 A receipt-driven **submitter**, never a scheduler. It publishes rows PB
 owns; it never claims, places, retries, reorders, or steers work, holds no
 long-running state, and reads no capacity to choose a box. Placement is the
-static policy both GB10 tags on every row; PB's ready-order, loop counts,
-and tier tokens do the balancing. If the static policy starves a box, that
-is a PB placement capability gap to file, not a knob to turn here.
+static policy one shared GB10 class tag on every quantum row; PB's
+ready-order, loop counts, and tier tokens do the balancing. If the static
+policy starves a box, that is a PB placement capability gap to file, not a
+knob to turn here.
 
 Order (§5.2): stage A first; then quanta, published descending by layer id
 as the stage-A receipt lands. A quantum is publishable once stage A's
@@ -36,14 +37,18 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
 PBWAIT = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbwait.py")
 
-#: §5.1 plan defaults. Both GB10 tags on every quantum row; PB owns which
-#: box claims.
-CONSUMER_TAGS = ("sparky", "sparklina")
+#: §5.1 plan defaults. One shared GB10 class tag on every quantum row; PB
+#: owns which box claims.  PB's matcher requires *every* tag a row lists
+#: (``wanted.issubset(offer.tags)``), and each live Spark offers ``gb10``
+#: plus its own host name -- so the host pair this default used to carry
+#: (``sparky``, ``sparklina``) admitted neither box (#831).
+CONSUMER_TAGS = ("gb10",)
 SUBMISSION_PRIORITY = -5
 ADJOINT_TAG = "sparky"
 DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE=1"
@@ -151,18 +156,22 @@ def _container_wrap(spec_path: Path, payload: list[str]) -> list[str]:
 
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
-                 head_grace_s: int = HEAD_PROGRESS_GRACE_S) -> list[str]:
+                 head_grace_s: int = HEAD_PROGRESS_GRACE_S,
+                 consumer_tags: Sequence[str] = CONSUMER_TAGS) -> list[str]:
     """The exact §5.2 submission argv for one quantum. Pinned by tests: a
-    drift here breaks placement."""
+    drift here breaks placement.  ``consumer_tags`` is the effective §5.1
+    placement policy, a conjunction PB matches against a worker's offered
+    tags; PB alone decides which matching box claims the row."""
     quantum_id = record["quantum_id"]
     manifest = Path(record["read_set"]["manifest_path"])
     if not manifest.is_absolute():
         manifest = output_root / manifest
-    argv = [sys.executable, str(PBRUN),
-            "--tag", CONSUMER_TAGS[0], "--tag", CONSUMER_TAGS[1],
-            "--data-manifest", str(manifest),
-            "--residency", "stage", "--residency-ram", "auto",
-            "--progress-phase", f"head={head_grace_s}"]
+    argv = [sys.executable, str(PBRUN)]
+    for tag in consumer_tags:
+        argv += ["--tag", str(tag)]
+    argv += ["--data-manifest", str(manifest),
+             "--residency", "stage", "--residency-ram", "auto",
+             "--progress-phase", f"head={head_grace_s}"]
     for chunk in record.get("chunks", []):
         argv += ["--progress-phase",
                  f"{chunk['name']}={CHUNK_PROGRESS_GRACE_S}"]
@@ -318,6 +327,29 @@ def _plan_block(plan_path: Path | None) -> dict:
     return block if isinstance(block, dict) else {}
 
 
+def plan_consumer_tags(block: Mapping) -> tuple[str, ...]:
+    """The effective §5.1 placement tags for the quantum rows.
+
+    The plan's ``distributed_campaign.consumer_tags`` when it declares them,
+    else the shared GB10 class tag.  PB requires *every* listed tag
+    (``wanted.issubset(offer.tags)``), so the list is a conjunction, never a
+    menu of acceptable boxes: an empty list would publish an unconstrained
+    row, and two host names would publish a row no single box can claim (the
+    defect this default fixes).  A plan that pins one box names that host
+    tag alone; anything ill-typed refuses at dispatch time, before a row is
+    sealed."""
+    raw = block.get("consumer_tags")
+    if raw is None:
+        return CONSUMER_TAGS
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+        raise DispatchRefused(
+            "plan distributed_campaign.consumer_tags must be a list of tags")
+    if not raw or any(not isinstance(tag, str) or not tag for tag in raw):
+        raise DispatchRefused(
+            "plan distributed_campaign.consumer_tags must be non-empty strings")
+    return tuple(raw)
+
+
 def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Publish distributed joint-AURA campaign rows (§5).")
@@ -352,18 +384,17 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
     output_root = Path(args.output_root)
     state_path = (Path(args.state) if args.state is not None
                   else output_root / "layer-quanta" / STATE_FILENAME)
-    block = _plan_block(Path(args.plan) if args.plan else None)
-    tags = tuple(block.get("consumer_tags", list(CONSUMER_TAGS)))
-    priority = int(block.get("submission_priority", args.priority))
-    adjoint_tag = str(block.get("adjoint", {}).get("tag", ADJOINT_TAG)
-                      if isinstance(block.get("adjoint"), dict)
-                      else ADJOINT_TAG)
-
     try:
+        block = _plan_block(Path(args.plan) if args.plan else None)
+        tags = plan_consumer_tags(block)
         records = load_records(records_dir)
     except DispatchRefused as exc:
         print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
         return EXIT_PRECONDITION_REFUSED
+    priority = int(block.get("submission_priority", args.priority))
+    adjoint_tag = str(block.get("adjoint", {}).get("tag", ADJOINT_TAG)
+                      if isinstance(block.get("adjoint"), dict)
+                      else ADJOINT_TAG)
     events = _read_state(state_path)
     submitted_keys = {event.get("quantum_id"): event.get("action_key")
                       for event in events if event.get("event") == "quantum-submitted"}
@@ -412,7 +443,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                          "argv": quantum_argv(
                              record, record_path=record_path,
                              output_root=output_root, priority=priority,
-                             head_grace_s=args.head_grace_s)})
+                             head_grace_s=args.head_grace_s,
+                             consumer_tags=tags)})
 
     if args.dry_run:
         print(json.dumps({"consumer_tags": list(tags), "priority": priority,

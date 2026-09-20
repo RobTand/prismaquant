@@ -1,7 +1,24 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/dev-progress-stamp-optin`.
+As of: 2026-09-20 · `fix/joint-quanta-gb10-placement-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `fix/joint-quanta-gb10-placement-20260920`) for **the
+distributed campaign's placement policy: one shared `gb10` class tag, never a
+host pair** (`docs/design/distributed_campaign_2026-09-19.md` §5; PQ #831).
+PrismaBuild admits a worker only when it offers *every* tag a row lists
+(`wanted.issubset(offer.tags)`, `src/prismabuild/pool.py:2847`), and each live
+Spark offers `gb10` plus its own host name, so `tools/dispatch_joint_quanta.py`'s
+shipped `--tag sparky --tag sparklina` — carried by both the module default and
+the design's §5.1 example — admitted neither box: the 45 per-layer quantum rows
+could not be claimed on either Spark. The dispatcher now defaults to
+`CONSUMER_TAGS = ("gb10",)`, emits one `--tag` per effective tag, and threads
+the plan's `distributed_campaign.consumer_tags` override — previously read but
+never passed to `quantum_argv` — through one validating helper that refuses an
+empty or ill-typed list at dispatch. Stage A keeps its explicit `adjoint.tag`
+pin (one monolithic capture by construction). No pipeline default, stage graph,
+format menu, plugin contract, serving lane, ship gate or published byte
+changes. Gate: `tests/test_dispatch_shared_tag_placement.py`.
 
 Re-stamped (2026-09-20, `flash/dev-progress-stamp-optin`) for **the dev
 progress-stamp opt-out** (§3.4; PQ #826, #828, follow-through on #771). No
