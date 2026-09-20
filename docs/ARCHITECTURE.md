@@ -1,7 +1,26 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/slice-zero-head-20260920`.
+As of: 2026-09-20 · `flash/stagea-adjoint-manifest-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/stagea-adjoint-manifest-20260920`) for
+**quantum boundary readset binding** (PQ #848).
+`build_quantum_boundary_readset` derives a quantum's real bulk readset as
+a new immutable v2 manifest from the completed adjoint receipt plus the
+record's sealed chain/layer/checkpoint/windows and probe count: the
+checkpoint plane once (one whole-plane file load; decoded tensors stay
+RAM-resident), each chain layer's boundary entries once per probe in
+batch windows (`render_free_layer_roll` re-opens prefetch per probe),
+then the quantum's own boundary entries once per (replay window, probe)
+(`replay_backward` re-opens a boundary iterator per active probe per
+window). Repeats across phases are the mechanism; resume reads a subset.
+`bind_quantum_boundary_readset` attaches the wire-verified digest/path to
+a new record generation (inputs never mutated);
+`emit_quantum_boundary_readsets` is the post-capture generation path the
+regen calls. Receipt identity plus attach is provenance only, never a
+storage lease -- the readset is the bindable object a PB output-scope
+staging contract admits. Gate:
+`tests/test_quantum_boundary_readset.py`.
 
 Re-stamped (2026-09-20, `flash/slice-zero-head-20260920`) for
 **stageable quantum slice phases** (PQ #851). Both slice producers seal
