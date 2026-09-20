@@ -238,6 +238,67 @@ def _write_shared_state_payload(checkpoint_dir: Path, name: str, payload: bytes)
     }
 
 
+def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
+                                  *, max_file_bytes: int) -> dict:
+    """Stream one shared state to its pickle file with an admitted bound.
+
+    Standard ``pickle.dump`` into the existing ``SerializedEntryDigest``
+    sink over an atomic temp file: no aggregate payload object is ever
+    materialized, so the transient peak stays at the entry's own
+    serialization instead of the whole checkpoint. The digest covers
+    exactly the published bytes (no rehash pass); the admitted per-file
+    envelope is enforced by size before the temp is renamed, and the
+    temp is unlinked on exceedance, so an oversized entry never publishes.
+    Not a new serializer or cache: stdlib pickling plus the activation
+    owner's sink and atomic-publication shape.
+    """
+    import os
+
+    from .cost_stage_checkpoint import unique_temp_suffix
+    from .perturbed_x_cache import SerializedEntryDigest
+
+    if type(max_file_bytes) is not int or max_file_bytes <= 0:
+        raise RuntimeError(
+            "exact boundary checkpoint shared-state write needs an "
+            "admitted per-file envelope")
+    path = checkpoint_dir / "entries" / f"{name}.pkl"
+    if path.exists() or path.with_suffix(".pkl.tmp").exists():
+        raise RuntimeError("exact boundary checkpoint entry already exists")
+    digest = SerializedEntryDigest()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + unique_temp_suffix())
+    try:
+        with temporary.open("wb") as handle:
+            pickle.dump(state, digest.sink(handle),
+                        protocol=pickle.HIGHEST_PROTOCOL)
+            handle.flush()
+            os.fsync(handle.fileno())
+        published = temporary.stat().st_size
+        if published != digest.bytes:
+            raise RuntimeError(
+                "exact boundary checkpoint entry differs from its "
+                "serialized bytes")
+        if published > max_file_bytes:
+            raise RuntimeError(
+                "exact boundary checkpoint shared-state file exceeds its "
+                f"admitted envelope for {name}")
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return {
+        "name": name,
+        "path": str(path),
+        "sha256": digest.hexdigest(),
+        "file_bytes": published,
+    }
+
+
 #: Per-object framing bound for the shared-state pickle size estimate below.
 #: Admission-side upper bound only: the reservation commits exact serialized
 #: lengths, exactly like the exact-entry writer's small PyTorch zip header
@@ -253,36 +314,28 @@ def _shared_state_envelope_estimate(value) -> int:
     instead of guessing. Two precision rules matter here:
 
     - Tensors count their actual serialized backing ownership
-      (``untyped_storage().nbytes()``), deduplicated within one state,
-      because pickling a small tensor view serializes its whole backing
-      storage, which ``numel`` would undercount. Pickle memoizes storage
-      references per dump, and each shared entry dumps separately, so
-      ownership is per entry, never across entries.
+      (``untyped_storage().nbytes()``), once per leaf, because pickling a
+      small tensor view serializes its whole backing storage, which
+      ``numel`` would undercount. Measured on the pinned torch (PB
+      ``4bbc5f134a53``): two 2 MiB views sharing one 4 MiB backing dump
+      ~8.00 MB in one call, the same as separately -- pickle emits
+      per-view backing bytes rather than memoizing shared storage, so no
+      cross-leaf deduplication is sound. (Pickle memoizes only the
+      identical object, which per-leaf summation already covers as an
+      upper bound.) Each shared entry dumps separately, so ownership is
+      per entry, never across entries.
     - Integers are sized by bit length: a short counter costs framing, but
       an arbitrary-precision giant must count its digits, never a flat 128.
 
     The estimate only admits the serialization attempt against the remaining
     envelope; the reservation commits the exact dumped lengths.
     """
-    tensors: list = []
-    small = _shared_state_small_bytes(value, tensors)
-    storages = {}
-    for tensor in tensors:
-        storage = tensor.untyped_storage()
-        key = (str(tensor.device), storage.data_ptr(), storage.nbytes())
-        storages[key] = storage.nbytes()
-    return (sum(storages.values())
-            + _PICKLE_ESTIMATE_FRAMING_BYTES * len(tensors) + small)
-
-
-def _shared_state_small_bytes(value, tensors: list) -> int:
-    """Exact small-object bytes plus tensor collection for the estimate above."""
     if isinstance(value, torch.Tensor):
         if value.is_meta or value.layout != torch.strided:
             raise TypeError(
                 "exact boundary checkpoint cannot account this state tensor")
-        tensors.append(value)
-        return 0
+        return (value.untyped_storage().nbytes()
+                + _PICKLE_ESTIMATE_FRAMING_BYTES)
     if isinstance(value, str):
         return len(value.encode("utf-8")) + 128
     if isinstance(value, bytes):
@@ -298,13 +351,13 @@ def _shared_state_small_bytes(value, tensors: list) -> int:
                 raise TypeError(
                     "exact boundary checkpoint cannot account shared state "
                     f"with {type(key).__name__} mapping keys")
-            total += _shared_state_small_bytes(key, tensors)
-            total += _shared_state_small_bytes(item, tensors)
+            total += _shared_state_envelope_estimate(key)
+            total += _shared_state_envelope_estimate(item)
         return total
     if isinstance(value, (list, tuple)):
         total = 128
         for item in value:
-            total += _shared_state_small_bytes(item, tensors)
+            total += _shared_state_envelope_estimate(item)
         return total
     raise TypeError(
         "exact boundary checkpoint cannot account opaque shared state "
@@ -508,25 +561,22 @@ def write_adjoint_checkpoint(
         owner.cancel_checkpoint_artifact(reservation)
         raise
     try:
-        # Shared states serialize, write, and release one entry at a time:
-        # the transient peak is the largest single payload, never the whole
-        # checkpoint, and each hold refuses against the resident budget
-        # before its bytes materialize.
+        # Shared states stream, write, and release one entry at a time: no
+        # aggregate payload object ever exists, so the transient peak is the
+        # largest single entry's serialization, never the whole checkpoint.
+        # An empty shared set simply skips the loop. Holds count live
+        # auxiliary usage plus transient bytes against the one auxiliary
+        # ceiling.
         shared_state_entries = []
         for plan in shared_plan:
             state = _shared_state_by_name(
                 shared_adjoint, shared_pass, plan["name"])
-            with owner.hold_transient_serialization(
+            with owner.hold_transient_metadata(
                     estimates[plan["name"]],
                     f"checkpoint shared state {plan['name']}"):
-                payload = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
-                if len(payload) > plan["file_envelope"]:
-                    raise RuntimeError(
-                        "exact boundary checkpoint shared-state payload exceeds "
-                        f"its admitted envelope for {plan['name']}")
-                shared_state_entries.append(_write_shared_state_payload(
-                    checkpoint_dir, plan["name"], payload))
-        del payload
+                shared_state_entries.append(_write_shared_state_streaming(
+                    checkpoint_dir, plan["name"], state,
+                    max_file_bytes=plan["file_envelope"]))
         activation_entries = []
         for plan in activation_plan:
             tensor = cotangents[(plan["probe_index"], plan["batch_index"])]
@@ -554,7 +604,7 @@ def write_adjoint_checkpoint(
              ("schema", "boundary", "session", "activation_entries", "shared_state_entries")},
             where="adjoint checkpoint",
         )
-        with owner.hold_transient_serialization(
+        with owner.hold_transient_metadata(
                 manifest_envelope, "checkpoint manifest"):
             manifest_payload = (json.dumps(
                 record, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
