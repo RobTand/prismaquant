@@ -183,16 +183,24 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
                              f"{new_path!r} leaves the moved tree")
     old_body = {k: v for k, v in old.items() if k != "identity_sha256"}
     new_body = {k: v for k, v in new.items() if k != "identity_sha256"}
+    # The moved path fields were checked by exact prefix swap above; drop
+    # them here so this comparison holds everything else strictly equal.
+    old_body.pop("output_space", None)
+    new_body.pop("output_space", None)
     old_body.pop("read_set", None)
     read_set = dict(new_body.pop("read_set", {}))
     read_set.pop("manifest_sha256", None)
+    read_set.pop("manifest_path", None)
     old_read = dict(old.get("read_set", {}))
     old_read.pop("manifest_sha256", None)
+    old_read.pop("manifest_path", None)
     if old_read != read_set:
         raise ValueError(f"Gate 1 {where}: {qid} read_set differs beyond "
                          f"the moved manifest path")
     old_adjoint = dict(old_body.pop("adjoint", {}))
     new_adjoint = dict(new_body.pop("adjoint", {}))
+    old_adjoint.pop("boundary_artifacts", None)
+    new_adjoint.pop("boundary_artifacts", None)
     old_receipt = old_adjoint.pop("receipt_sha256", None)
     new_receipt = new_adjoint.pop("receipt_sha256", None)
     if old_adjoint != new_adjoint:
