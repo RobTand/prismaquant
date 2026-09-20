@@ -1,7 +1,26 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `flash/strict-reader-tier-enforcement-20260920`.
+As of: 2026-09-21 · `flash/calibration-staged-tier-reader-865`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `flash/calibration-staged-tier-reader-865`) for
+**the calibration staged-tier reader** (PQ #865).
+`load_calibration_input` honored no staged-tier policy: under an active
+allowed-tier declaration it hashed and `safe_open`ed the pool path while
+the executable manifest already declared the calibration file. Under the
+active policy the whole artifact now comes off the stage through one
+lifetime-pinned window — RAM first where offered and allowed, honest
+SSD re-acquire otherwise, never the pool — with the sealed size/change
+fences before allocation; the independently pinned SHA256 is verified
+and the int64 draw decodes from the same owned bytes (header bounded,
+dtype through safetensors' own table, cloned into owned storage valid
+after release), then the unchanged draw contract (dtype/shape/domain,
+provenance, both `fit_ids_sha256`/`calibration_sha256` conventions).
+Unmapped/wrong-pin/forbidden-tier/corrupt-stage refuse fail-closed with
+zero pool bytes and exact pin release; inactive policy keeps the legacy
+pool read byte for byte. Gate:
+`tests/test_calibration_staged_tier.py` (with
+`tests/test_native_panel_calibration.py` regression-green).
 
 Re-stamped (2026-09-20, `flash/stagea-adjoint-manifest-20260920`) for
 **quantum boundary readset binding** (PQ #848).
