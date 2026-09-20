@@ -1030,3 +1030,221 @@ def bind_adjoint_receipt(receipt: Mapping, *, plan_sha256: str, prepared_sha256:
     return canonical_sha256(receipt, where="stage-A receipt")
 
 
+#: The quantum entry point consuming a boundary readset manifest.
+QUANTUM_ENTRY_POINT = "prismaquant.joint_cost_quantum"
+
+
+def quantum_boundary_read_phase_names(chain_layers: Sequence[int], layer: int,
+                                      *, batch_windows: int) -> tuple[str, ...]:
+    """The frozen quantum bulk-read order (PQ #848): the checkpoint plane
+    first (whole-plane load), then each chain layer's boundary entries
+    descending in batch windows, then the quantum's own boundary entries.
+
+    Names are manifest-local to the readset this builder seals: ``checkpoint``
+    plus ``chain-{boundary:03d}`` with ``-w{window:02d}`` suffixes. The
+    windows mirror the reader's prefetch batches; the descending chain order
+    mirrors ``render_free_layer_roll``. A staging contract declares exactly
+    this list -- a name outside it is a refusal, never an assumption that one
+    head occurrence permits later reads after egress.
+    """
+    chain = [int(c) for c in chain_layers]
+    if any(type(c) is not int or isinstance(c, bool) for c in chain_layers):
+        raise ValueError("chain layers must be integers, "
+                         f"not {list(chain_layers)!r}")
+    if len(set(chain)) != len(chain):
+        raise ValueError("chain layers repeat: refusing")
+    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
+        raise ValueError(f"a boundary readset needs a layer, not {layer!r}")
+    if type(batch_windows) is not int or isinstance(batch_windows, bool) \
+            or batch_windows < 1:
+        raise ValueError("batch windows must be positive, "
+                         f"not {batch_windows!r}")
+    names = ["checkpoint"]
+    for boundary in chain + [layer]:
+        names.extend(f"chain-{boundary:03d}-w{window:02d}"
+                     for window in range(batch_windows))
+    return tuple(names)
+
+
+def _manifest_entry_from_exact(exact: Mapping, *, where: str) -> dict:
+    """A v2 data-manifest entry for one sealed exact record.
+
+    Carries the writer's path, wire byte length and digest -- the triple a
+    staging contract admits and verifies without rehashing payloads. Any
+    malformed record is a refusal, never a skipped file.
+    """
+    if not isinstance(exact, dict):
+        raise ValueError(f"{where} is not an exact entry record: refusing")
+    path = exact.get("path")
+    digest = exact.get("sha256")
+    size = exact.get("file_bytes")
+    if type(path) is not str or not path:
+        raise ValueError(f"{where} names no entry path: refusing")
+    if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError(f"{where} carries no entry digest: refusing")
+    if type(size) is not int or isinstance(size, bool) or size <= 0:
+        raise ValueError(f"{where} carries no entry byte length: refusing")
+    return {"path": path, "offset": 0, "bytes": size, "sha256": digest}
+
+
+def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
+                                   strided_boundaries: Sequence[int]) -> dict:
+    """The quantum's real bulk readset as a NEW immutable v2 manifest.
+
+    Derived post-capture from the completed adjoint receipt and the record's
+    sealed ``chain_layers``/``layer``/``checkpoint_boundary``: the checkpoint
+    plane (activation + shared-state entries, resident for the whole quantum
+    action) then the needed boundary entries (prefetch-window leased during
+    the chain). Every entry carries the sealed path/length/digest triple, so
+    a staging contract admits and verifies the corpus with no payload
+    rehash and no new cache.
+
+    The receipt is validated through :func:`bind_adjoint_receipt` (campaign
+    scope, plan/prepared digests, stride marks) and its canonical digest is
+    sealed into the annotations; the record's chain is checked against the
+    single ``chain_layers_for`` owner. Old unbound records, slices and the
+    parent identity are untouched -- this manifest is a new generation with
+    a fresh digest, never a mutation of a sealed action.
+    """
+    from .joint_adjoint_checkpoints import chain_layers_for
+
+    if not isinstance(record, dict):
+        raise ValueError("a quantum record must be an object: refusing")
+    layer = record.get("layer")
+    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
+        raise ValueError("a quantum record names no layer: refusing")
+    adjoint = record.get("adjoint")
+    if not isinstance(adjoint, dict):
+        raise ValueError("a quantum record carries no adjoint block: refusing")
+    checkpoint_boundary = adjoint.get("checkpoint_boundary")
+    if type(checkpoint_boundary) is not int or isinstance(
+            checkpoint_boundary, bool):
+        raise ValueError("a quantum record names no checkpoint boundary: "
+                         "refusing")
+    chain = adjoint.get("chain_layers")
+    if not isinstance(chain, list) or any(
+            type(c) is not int or isinstance(c, bool) for c in chain):
+        raise ValueError("a quantum record names no chain layers: refusing")
+    if tuple(chain) != chain_layers_for(checkpoint_boundary, layer):
+        raise ValueError(
+            f"quantum {record.get('quantum_id')!r} chain {chain!r} is not the "
+            "sealed stride chain: refusing")
+    campaign = record.get("campaign")
+    if not isinstance(campaign, dict):
+        raise ValueError("a quantum record carries no campaign block: refusing")
+    for key in ("plan_path", "plan_sha256", "prepared_path", "prepared_sha256",
+                "read_manifest_sha256", "campaign_scope"):
+        if not campaign.get(key):
+            raise ValueError(f"a quantum record seals no campaign {key}: "
+                             "refusing")
+    receipt_sha256 = bind_adjoint_receipt(
+        receipt, plan_sha256=campaign["plan_sha256"],
+        prepared_sha256=campaign["prepared_sha256"],
+        scope=campaign["campaign_scope"], checkpoints=strided_boundaries)
+    checkpoint_record = None
+    for entry in receipt.get("checkpoints", []):
+        if isinstance(entry, dict) and int(entry.get("boundary", -1)) \
+                == checkpoint_boundary:
+            checkpoint_record = entry
+            break
+    if checkpoint_record is None:
+        raise ValueError(
+            "the adjoint receipt does not carry the record's checkpoint "
+            f"boundary {checkpoint_boundary}: refusing")
+    storage_block = receipt.get("boundary_storage")
+    policy = storage_block.get("policy", {}) \
+        if isinstance(storage_block, dict) else {}
+    prefetch_batches = policy.get("prefetch_batches")
+    if type(prefetch_batches) is not int or isinstance(
+            prefetch_batches, bool) or prefetch_batches < 1:
+        raise ValueError("the receipt seals no prefetch batch window: refusing")
+    needed = sorted(set(chain) | {layer})
+    boundary_table = receipt.get("boundary_entries", {})
+    if not isinstance(boundary_table, dict):
+        raise ValueError("the adjoint receipt carries no boundary entries: "
+                         "refusing")
+    manifest_entries: list[dict] = []
+    seen_paths: set[str] = set()
+
+    def _take(exact: Mapping, *, where: str) -> int:
+        entry = _manifest_entry_from_exact(exact, where=where)
+        if entry["path"] in seen_paths:
+            raise ValueError(f"duplicate staged path {entry['path']}: refusing")
+        seen_paths.add(entry["path"])
+        manifest_entries.append(entry)
+        return len(manifest_entries) - 1
+
+    checkpoint_indices: list[int] = []
+    for exact in list(checkpoint_record.get("activation_entries", [])) \
+            + list(checkpoint_record.get("shared_state_entries", [])):
+        checkpoint_indices.append(_take(
+            exact, where=f"checkpoint boundary {checkpoint_boundary}"))
+    if not checkpoint_indices:
+        raise ValueError("the checkpoint plane is empty: refusing")
+    batch_counts = set()
+    boundary_runs: dict[int, list[int]] = {}
+    for boundary in needed:
+        rows = boundary_table.get(str(boundary))
+        if not isinstance(rows, list) or not rows:
+            raise ValueError(f"the receipt carries no boundary {boundary} "
+                             "entries: refusing")
+        run = [_take(exact, where=f"boundary {boundary} entry {index}")
+               for index, exact in enumerate(rows)]
+        boundary_runs[boundary] = run
+        batch_counts.add(len(run))
+    if len(batch_counts) != 1:
+        raise ValueError("needed boundaries hold different batch counts: "
+                         "mixed campaign, refusing")
+    batch_total = batch_counts.pop()
+    batch_windows = (batch_total + prefetch_batches - 1) // prefetch_batches
+    read_phases: list[dict] = []
+    cumulative = 0
+
+    def _seal_phase(name: str, indices: list[int]) -> None:
+        nonlocal cumulative
+        size = sum(manifest_entries[index]["bytes"] for index in indices)
+        if size <= 0:
+            raise ValueError(f"read phase {name} is empty: refusing")
+        cumulative += size
+        read_phases.append({"name": name, "entry_indices": list(indices),
+                            "bytes": size, "cumulative_bytes": cumulative})
+
+    _seal_phase("checkpoint", checkpoint_indices)
+    for boundary in chain + [layer]:
+        run = boundary_runs[boundary]
+        for window in range(batch_windows):
+            _seal_phase(f"chain-{boundary:03d}-w{window:02d}",
+                        run[window * prefetch_batches:
+                            (window + 1) * prefetch_batches])
+    names = [phase["name"] for phase in read_phases]
+    if names != list(quantum_boundary_read_phase_names(
+            chain, layer, batch_windows=batch_windows)):
+        raise ValueError("the boundary read plan is not the frozen reader "
+                         "order: refusing")
+    unique_bytes = sum(entry["bytes"] for entry in manifest_entries)
+    return {
+        "schema": MANIFEST_SCHEMA_V2,
+        "produced_by": {"tool": "prismaquant/joint_layer_quanta.py",
+                        "entry_point": QUANTUM_ENTRY_POINT,
+                        "plan": campaign["plan_path"],
+                        "plan_sha256": campaign["plan_sha256"]},
+        "mount_prefix": "/mnt/shared",
+        "entries": manifest_entries,
+        "entry_count": len(manifest_entries),
+        "total_bytes": unique_bytes,
+        "annotations": {
+            "entry_point": QUANTUM_ENTRY_POINT,
+            "quantum_id": record.get("quantum_id"),
+            "quantum_layer": layer,
+            "checkpoint_boundary": checkpoint_boundary,
+            "chain_layers": list(chain),
+            "receipt_sha256": receipt_sha256,
+            "plan_sha256": campaign["plan_sha256"],
+            "prepared_sha256": campaign["prepared_sha256"],
+            "parent_manifest_sha256": campaign["read_manifest_sha256"],
+            "campaign_scope": campaign["campaign_scope"],
+        },
+        "read_plan": {"phases": read_phases, "read_bytes": cumulative},
+    }
+
+
