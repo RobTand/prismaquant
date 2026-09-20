@@ -552,7 +552,7 @@ def test_strict_ram_only_with_dead_epoch_refuses(tmp_path, monkeypatch):
         tiers="ram")
     set_lease_helper_root(PB_PIN_ROOT)
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        with pytest.raises(TierPolicyRefused, match="no-permitted-tier"):
+        with pytest.raises(TierPolicyRefused, match="ssd-not-allowed"):
             reader.get_tensor('f32')
     assert resolver.report()['bytes_from_pool'] == 0
 
