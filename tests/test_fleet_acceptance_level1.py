@@ -681,7 +681,9 @@ def _run_scenario(name: str, tmp_path: Path, scenario_dir: str,
         print(f"nonqualified {name}: {doc['reason']}")
         pytest.skip(f"nonqualified: {doc['reason']}")
     if doc["status"] != "qualified":
-        print(json.dumps(doc.get("evidence", {}))[-6000:])
+        shown = dict(doc.get("evidence", {}))
+        shown.pop("traceback", None)
+        print("EVIDENCE " + json.dumps(shown, sort_keys=True)[:8000])
     assert doc["status"] == "qualified", doc["reason"]
     return doc
 
