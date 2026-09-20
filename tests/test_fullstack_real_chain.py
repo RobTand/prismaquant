@@ -481,6 +481,9 @@ def _write_payloads(root: Path, binding, produced, probe, fmt_list) -> None:
         assert units, f"layer {layer} has units"
         costs = {qname: {fmt: _row(qname, fmt, probe)
                          for fmt in fmt_list} for qname in units}
+        records = root / "layer-quanta" / "records"
+        records.mkdir(parents=True, exist_ok=True)
+        (records / f"{quantum_id}.json").write_text(json.dumps(record))
         space = root / "layer-quanta" / quantum_id
         space.mkdir(parents=True, exist_ok=True)
         payload = {"costs": costs,
