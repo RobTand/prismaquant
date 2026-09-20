@@ -285,8 +285,14 @@ def _no_staged_range_wait_unless_asked(monkeypatch):
     themselves; a test's own ``monkeypatch.setenv`` runs after this fixture
     and wins.
 
-    This hides no cost: on the fleet the bound is 300 s, and an undeclared
-    range there does now fail slower than it used to -- see
-    ``_await_staged_range``, which says so.
+    This hides no cost. What waits on the fleet is
+    ``layer_streaming._await_layer_readset``, and only it: the strict policy
+    path, the layer read, and only spans PrismaBuild's sealed readset
+    declares and no mover has written yet. A span the readset does not
+    declare, an entry that covers a span and fails a check, and an unbound
+    readset all refuse at once there, exactly as they do here. The one
+    behaviour this default replaces is the 300 s a *declared* range that
+    never arrives would cost before failing -- which needs movers to be
+    meaningful, and there are none under pytest.
     """
     monkeypatch.setenv("PRISMAQUANT_STAGED_RANGE_WAIT_S", "0")

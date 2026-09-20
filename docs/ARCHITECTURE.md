@@ -31,10 +31,15 @@ not tell a declared range from an undeclared one. `staged_lease` now resolves
 the sealed readset from the identity the reader-lease SDK already vouches:
 `injected_context`'s `queue_root` and `action_key` name the action's claim
 row, which carries the `cas_root` and `residency.manifest_sha256`/
-`manifest_bytes` PrismaBuild wrote at publish time; the CAS blob is read,
-bounded by that size, hashed against that digest *and* against the digest this
-run bound, and decoded by `prismabuild.core.read_data_manifest` — PB's own
-validating reader, not a second parser. Its `entries` are the declared spans
+`manifest_bytes` PrismaBuild wrote at publish time. The row's stated size is
+**not** the ceiling — it is an input, and the same record carries
+`detail.prewarm.manifest_bytes`, 1,244,988,662,830 on this campaign, because
+that one measures the payload the entries describe. Both the stated size and
+the blob's own size are checked against `prismabuild.core.DATA_MANIFEST_MAX_BYTES`,
+PB's fixed bound, **before the blob is opened**; only then is it read and
+hashed against that digest *and* against the digest this run bound, and
+decoded by `prismabuild.core.read_data_manifest` — PB's own validating reader,
+not a second parser. No payload is ever sealed or hashed. Its `entries` are the declared spans
 in file offsets. **When any hop is missing the readset is *unbound*, and an
 unbound readset never waits**: not knowing whether a range is declared is
 precisely the state in which waiting would be guessing, so the pre-#874

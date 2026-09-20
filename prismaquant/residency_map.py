@@ -890,8 +890,8 @@ class ResidencyResolver:
         past it on every look.
 
         This method reports the kind and never waits. Re-asking belongs to
-        the caller (:meth:`StagedShardReader._await_staged_range`), which
-        does not hold this lock.
+        the caller -- ``layer_streaming._await_layer_readset``, before a
+        layer's gather is submitted -- which does not hold this lock.
 
         ``staged_read``'s pre-open checks, asked of a byte range. One entry has
         to cover the span outright; the staged copy has to be a regular file of

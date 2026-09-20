@@ -1592,11 +1592,17 @@ def _await_layer_readset(by_shard, *, source_authentication=None):
             return
     if not wanted:
         return
-    deadline = time.monotonic() + budget
-    verdict = await_staged_spans(resolver, wanted, deadline=deadline)
+    began = time.monotonic()
+    verdict = await_staged_spans(resolver, wanted, deadline=began + budget)
     if verdict != RANGE_HIT:
+        # The time that actually elapsed, never the budget: an undeclared
+        # span and a covering entry that failed a check both return from
+        # ``await_staged_spans`` immediately, and a line claiming "after
+        # 300s" would send an operator looking for a stall that never
+        # happened.
         print(f"[residency] layer readset not staged ({verdict}) after "
-              f"{budget:.0f}s; the read below decides", flush=True)
+              f"{time.monotonic() - began:.1f}s of a {budget:.0f}s bound; "
+              "the read below decides", flush=True)
 
 
 def _read_layer_to_device(prefix: str,
