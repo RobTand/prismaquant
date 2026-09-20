@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -52,8 +53,10 @@ def _tmp_cas(driver, tmp_path, tag):
     (root / "blobs" / digest[:2]).mkdir(parents=True)
     blob = (src / "result.bin").read_bytes()
     (root / "requests" / key[:2] / f"{key}.json").write_bytes(request)
-    (root / "actions" / "v3" / key[:2] / f"{key}.json").write_bytes(
-        json.dumps(receipt).encode())
+    # Receipt bytes must stay byte-identical: the verifier checks the
+    # filed bytes are canonical JSON, and any reserialization breaks it.
+    shutil.copyfile(src / "receipt.json",
+                    root / "actions" / "v3" / key[:2] / f"{key}.json")
     (root / "blobs" / digest[:2] / digest).write_bytes(blob)
     for path in root.rglob("*"):
         if path.is_file():
