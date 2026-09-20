@@ -3,6 +3,23 @@
 As of: 2026-09-20 · `flash/quantum-launch-contract-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-20, `flash/stagea-forward-read-plan-20260920`) for **the
+Stage A read manifest's forward lifetimes in true consumption order** (PQ
+#837). `build_adjoint_manifest` sealed v1 `head, chain-000..044` ascending
+with no forward lifetimes while the capture consumes head → forward 0..44 →
+tail → reverse 44..0: no movers staged ahead of the forward pass, and the
+first reverse report released the whole window while layers 43..0 were still
+unread. The manifest is now `data_manifest.v2` with `read_plan.phases` in
+the frozen order `head, forward-000..044, chain-044..000`,
+`entry_indices` into the unchanged entries list (repeats across phases are
+the mechanism, not duplicated bytes; no standalone tail phase -- the tail
+checkpoint work commits under forward-last); the capture reports `forward-L`
+on the runner's `source_phase` hook through
+shared name helpers, with durable-unit counting untouched. Records, entry
+bytes/digests, and plan/prepared/capture identities unchanged; the live
+`adjoint-manifest.json` regenerates later from this builder. Gate:
+`tests/test_stagea_forward_read_plan.py`.
+
 Re-stamped (2026-09-20, `flash/quantum-launch-contract-20260920`) for **the
 quantum launch contract** (#838). The quanta rows the dispatcher published
 could not survive the consumer's gates: the payload missed the required

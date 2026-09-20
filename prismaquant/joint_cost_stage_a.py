@@ -53,6 +53,29 @@ from .joint_adjoint_checkpoints import (
     write_adjoint_checkpoint,
     write_adjoint_receipt,
 )
+from .joint_layer_quanta import (
+    ADJOINT_TAIL_PHASE,
+    adjoint_chain_phase_name,
+    adjoint_forward_phase_name,
+)
+
+
+def stage_a_forward_observer(progress):
+    """Map the runner's source-phase callbacks onto read-plan phases.
+
+    The visitor reports ``source_loading`` (prefetch/speculation starts)
+    and ``capture_forward`` (installed, computing) per layer, ascending;
+    both name the layer being read, so both map to that layer's forward
+    phase. Anything else is ignored: never invent a phase, never advance
+    on an unknown stage, and with no progress channel observe nothing.
+    """
+    def observe(stage, layer, _auxiliary_bytes):
+        if progress is None:
+            return
+        if stage in ("source_loading", "capture_forward"):
+            progress.enter(adjoint_forward_phase_name(int(layer)))
+            progress.flush(force=True)
+    return observe
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -268,7 +291,9 @@ def run_adjoint_capture_core(
         capture_started = time.time()
         batches = runner.capture_layer_major_boundaries(
             [calib_ids[offset:offset + batch_rows] for offset in row_offsets],
-            storage=storage)
+            storage=storage,
+            source_phase=(stage_a_forward_observer(progress)
+                          if progress is not None else None))
         log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} min; "
             f"starting {n_probes}-probe tail cotangents")
 
@@ -336,11 +361,23 @@ def run_adjoint_capture_core(
         # chains nothing (§3.1).
         serialize_checkpoint(num_layers, tail_plane)
         tail_plane.clear()
+        if progress is not None:
+            # The tail checkpoint is durable work landed while the read plan
+            # stays on forward-last: count it without leaving the phase the
+            # tier still holds. There is deliberately no tail progress phase
+            # (a name the sealed plan does not carry would reset its
+            # tracking); the phase name survives only in the log line below.
+            progress.entry(layer=num_layers, partition=0,
+                           kind="tail_checkpoint")
+            progress.flush(force=True)
+            log(f"{ADJOINT_TAIL_PHASE} checkpoint published at boundary "
+                f"{num_layers}; read plan stays on "
+                f"{adjoint_forward_phase_name(num_layers - 1)}")
 
         chain_started = time.time()
         for layer in reversed(range(num_layers)):
             if progress is not None:
-                progress.enter(f"chain_{layer:03d}")
+                progress.enter(adjoint_chain_phase_name(layer))
                 progress.flush(force=True)
             layer_started = time.time()
             try:
