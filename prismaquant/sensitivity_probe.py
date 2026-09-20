@@ -1834,6 +1834,41 @@ class SharedStateCotangents:
                     yield pos, item
 
     # -- serialization ----------------------------------------------------
+    def borrowed_state_dict(self) -> dict:
+        """Borrowed quiescent view with the same schema, no bulk CPU copy.
+
+        Same portable mapping as :meth:`state_dict` for the production
+        CPU-contiguous path: accumulators already CPU contiguous strided are
+        borrowed by detached reference (shared backing, no new allocation);
+        only tensors needing CPU pinning or contiguity are copied. The caller
+        must drop the view before the next graft/harvest and must not mutate
+        owners while the view serializes -- stage A's checkpoint write holds
+        it only for its synchronous pickle. Quiescence refuses exactly like
+        ``state_dict``.
+        """
+        if self._live or self._containers or self._live_ids:
+            raise RuntimeError("shared cotangent serialization requires a quiescent owner")
+        rows = []
+        for slot, tensor in self._acc.items():
+            if (isinstance(tensor, torch.Tensor) and tensor.layout == torch.strided
+                    and not tensor.is_meta and tensor.device.type == "cpu"
+                    and tensor.is_contiguous()):
+                live = tensor.detach()
+            else:
+                live = tensor.detach().to(
+                    device="cpu", copy=True, memory_format=torch.contiguous_format)
+            rows.append({
+                "slot": [slot[0], slot[1], slot[2]],
+                "tensor": live,
+            })
+        return {
+            "enabled": bool(self.enabled),
+            "accumulators": rows,
+            "counters": {name: int(getattr(self, name))
+                         for name in ("n_grafted", "n_harvested", "n_seeded", "n_no_grad")},
+            "nondifferentiable": list(self.nondifferentiable),
+        }
+
     def state_dict(self) -> dict:
         """The completed shared-pass adjoint state, CPU-pinned and picklable.
 

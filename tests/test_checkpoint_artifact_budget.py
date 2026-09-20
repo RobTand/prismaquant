@@ -672,3 +672,152 @@ def test_check_auxiliary_sees_active_hold(tmp_path):
         with pytest.raises(RuntimeError, match="auxiliary.*residency budget"):
             owner.check_auxiliary([], extra=extra)
     owner.check_auxiliary([], extra=extra)
+
+
+def _accumulated_cotangent(value=3.0):
+    """A real quiescent owner with one nonempty CPU accumulator."""
+    from prismaquant.sensitivity_probe import SharedStateCotangents
+
+    owner = SharedStateCotangents(enabled=True)
+    grafted = owner.graft({"kv": {0: torch.ones(2, 3)}})
+    (grafted["kv"][0] * float(value)).sum().backward()
+    assert owner.harvest() == 1
+    assert owner.resident_tensors()[0].is_contiguous()
+    assert owner.resident_tensors()[0].device.type == "cpu"
+    return owner
+
+
+def test_state_dict_copies_each_accumulator_backing():
+    """Exhibit the demonstrated hole on the existing API.
+
+    Passes on unmodified main and on the fixed tree (state_dict semantics
+    are preserved): every accumulator copy holds new backing beside the
+    live original, so a whole-plane snapshot doubles the auxiliary plane
+    before any owner hold. The borrowed snapshot below removes this copy.
+    """
+    owner = _accumulated_cotangent()
+    original = owner.resident_tensors()[0]
+    copied_tensor = owner.state_dict()["accumulators"][0]["tensor"]
+    assert copied_tensor.data_ptr() != original.data_ptr()
+    assert torch.equal(copied_tensor, original)
+
+
+def test_borrowed_snapshot_shares_backing_where_state_dict_copies():
+    """Old state_dict copies every accumulator; the borrowed view does not.
+
+    Fails on unmodified main (no borrowed_state_dict) and distinguishes the
+    demonstrated whole-plane copy: the copy's backing is new storage while
+    the view shares the live backing, with identical portable bytes.
+    """
+    import pickle
+
+    owner = _accumulated_cotangent()
+    original = owner.resident_tensors()[0]
+    copied = owner.state_dict()
+    copied_tensor = copied["accumulators"][0]["tensor"]
+    assert copied_tensor.data_ptr() != original.data_ptr()
+    assert torch.equal(copied_tensor, original)
+    borrowed = owner.borrowed_state_dict()
+    borrowed_tensor = borrowed["accumulators"][0]["tensor"]
+    assert borrowed_tensor.data_ptr() == original.data_ptr()
+    assert torch.equal(borrowed_tensor, original)
+    assert borrowed["enabled"] == copied["enabled"]
+    assert borrowed["counters"] == copied["counters"]
+    assert (pickle.dumps(borrowed, protocol=pickle.HIGHEST_PROTOCOL)
+            == pickle.dumps(copied, protocol=pickle.HIGHEST_PROTOCOL))
+
+
+def test_borrowed_snapshot_refuses_live_owner_like_state_dict():
+    """Quiescence refuses identically on both snapshot spellings."""
+    owner = _accumulated_cotangent()
+    owner.graft({"kv": {0: torch.ones(2, 3)}})
+    with pytest.raises(RuntimeError, match="quiescent"):
+        owner.state_dict()
+    with pytest.raises(RuntimeError, match="quiescent"):
+        owner.borrowed_state_dict()
+
+
+def test_stage_a_snapshot_boundary_makes_no_bulk_copies(tmp_path, monkeypatch):
+    """The actual Stage-A snapshot boundary allocates no tensor backing.
+
+    Drives shared_adjoint_snapshot (the caller write_adjoint_checkpoint
+    serializes) with real quiescent owners under a bulk-copy guard: any
+    clone or copy=True materialization fails the test. Every snapshot
+    tensor shares its live backing.
+    """
+    import torch as _torch
+
+    from prismaquant.joint_cost_stage_a import shared_adjoint_snapshot
+
+    owners = [[_accumulated_cotangent(3.0), _accumulated_cotangent(5.0)],
+              [_accumulated_cotangent(7.0), _accumulated_cotangent(9.0)]]
+    real_to = _torch.Tensor.to
+    real_clone = _torch.Tensor.clone
+
+    def guarded_to(self, *args, **kwargs):
+        if kwargs.get("copy") is True:
+            pytest.fail("bulk CPU copy allocated during borrowed snapshot")
+        return real_to(self, *args, **kwargs)
+
+    def guarded_clone(self, *args, **kwargs):
+        pytest.fail("bulk clone allocated during borrowed snapshot")
+        return real_clone(self, *args, **kwargs)
+
+    monkeypatch.setattr(_torch.Tensor, "to", guarded_to)
+    monkeypatch.setattr(_torch.Tensor, "clone", guarded_clone)
+    try:
+        snapshot = shared_adjoint_snapshot(owners)
+    finally:
+        monkeypatch.undo()
+    assert set(snapshot) == {(0, 0), (0, 1), (1, 0), (1, 1)}
+    for (probe, batch), state in snapshot.items():
+        original = owners[probe][batch].resident_tensors()[0]
+        assert state["accumulators"][0]["tensor"].data_ptr() == original.data_ptr()
+
+
+def test_stage_a_borrowed_snapshot_writes_unchanged_loadable_checkpoint(tmp_path):
+    """A fitting borrowed snapshot writes byte-identical loadable bytes."""
+    from prismaquant.joint_adjoint_checkpoints import load_adjoint_checkpoint
+    from prismaquant.joint_cost_stage_a import shared_adjoint_snapshot
+
+    owners = [[_accumulated_cotangent(3.0)], [_accumulated_cotangent(5.0)]]
+    borrowed = shared_adjoint_snapshot(owners)
+    copied = {(probe, batch): owners[probe][batch].state_dict()
+              for probe in range(len(owners)) for batch in range(len(owners[probe]))}
+    plane = {(0, 0): torch.zeros(4, 4), (1, 0): torch.ones(2, 2)}
+    owner_b = _owner(tmp_path / "b-borrowed")
+    space_b = adjoint_space(tmp_path / "out-borrowed")
+    record_b = write_adjoint_checkpoint(
+        space_b, boundary=5, session=_session(), cotangents=dict(plane),
+        shared_adjoint=borrowed, shared_pass=_shared_pass(), owner=owner_b)
+    owner_c = _owner(tmp_path / "b-copied")
+    space_c = adjoint_space(tmp_path / "out-copied")
+    record_c = write_adjoint_checkpoint(
+        space_c, boundary=5, session=_session(), cotangents=dict(plane),
+        shared_adjoint=copied, shared_pass=_shared_pass(), owner=owner_c)
+    bytes_b = {row["name"]: row["file_bytes"]
+               for row in record_b["shared_state_entries"] if row["name"].startswith("shared-adjoint")}
+    bytes_c = {row["name"]: row["file_bytes"]
+               for row in record_c["shared_state_entries"] if row["name"].startswith("shared-adjoint")}
+    assert bytes_b == bytes_c
+    _cotangents, shared_b, _pass = load_adjoint_checkpoint(space_b, record_b)
+    assert torch.equal(_cotangents[(0, 0)], plane[(0, 0)])
+    for key, state in borrowed.items():
+        want = state["accumulators"][0]["tensor"]
+        got = shared_b[key]["accumulators"][0]["tensor"]
+        assert torch.equal(got, want)
+
+
+def test_borrowed_snapshot_pins_noncontiguous_without_changing_values():
+    """Exceptional layouts still pin CPU-contiguous with equal values."""
+    from prismaquant.sensitivity_probe import SharedStateCotangents
+
+    owner = SharedStateCotangents(enabled=True)
+    owner._acc[("kv", 0, None)] = torch.ones(2, 3).t()
+    assert not owner._acc[("kv", 0, None)].is_contiguous()
+    borrowed = owner.borrowed_state_dict()
+    pinned = borrowed["accumulators"][0]["tensor"]
+    assert pinned.device.type == "cpu" and pinned.is_contiguous()
+    assert torch.equal(pinned, torch.ones(3, 2))
+    copied = owner.state_dict()["accumulators"][0]["tensor"]
+    assert torch.equal(pinned, copied)

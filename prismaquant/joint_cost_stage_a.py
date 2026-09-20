@@ -100,6 +100,22 @@ class AdjointIdentityRefused(RuntimeError):
     """A plan/prepared digest or binding mismatch, before anything runs."""
 
 
+def shared_adjoint_snapshot(cotangents) -> dict:
+    """Borrowed whole-plane shared-adjoint snapshot, no bulk CPU copies.
+
+    Maps ``(probe, batch)`` to each live owner's
+    :meth:`SharedStateCotangents.borrowed_state_dict`. Values borrow live
+    accumulator storages on the production CPU-contiguous path, so the
+    whole-plane snapshot adds no new tensor backing while the watched
+    originals stay live. The caller must drop the snapshot before the next
+    harvest and must not mutate owners while ``write_adjoint_checkpoint``
+    serializes it. This is the actual Stage-A checkpoint snapshot boundary.
+    """
+    return {(probe, batch): cotangents[probe][batch].borrowed_state_dict()
+            for probe in range(len(cotangents))
+            for batch in range(len(cotangents[probe]))}
+
+
 def resolve_stride(config, cli_stride) -> tuple[int, str]:
     """S comes from the plan's ``distributed_campaign`` block when present
     (§3.4: a plan knob, not a CLI guess); a CLI value may supply it only for
@@ -341,9 +357,10 @@ def run_adjoint_capture_core(
             f"publishing the tail checkpoint at boundary {num_layers}")
 
         def serialize_checkpoint(boundary: int, plane) -> None:
-            shared_adjoint = {
-                (probe, batch): cotangents[probe][batch].state_dict()
-                for probe in range(n_probes) for batch in range(len(batches))}
+            # Borrowed snapshot: no whole-plane CPU copy while the watched
+            # originals stay live; per-entry serialization holds still bound
+            # each pickle inside write_adjoint_checkpoint.
+            shared_adjoint = shared_adjoint_snapshot(cotangents)
             shared_pass = {batch: batches[batch].shared_pass_state
                            for batch in range(len(batches))}
             # The checkpoint files land beside (not inside) the owner's entry
