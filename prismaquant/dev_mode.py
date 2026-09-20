@@ -21,6 +21,13 @@ The contract, in one paragraph:
   ``dev_uncertified`` stamp carrying the actual digests of what executed.
   A dev result can therefore never masquerade as a certified one: the stamp
   is top-level in results.json and in every progress record.
+* One run-gate computation is skipped rather than suspended: the merged
+  campaign checkpoint's canonical seal in ``load_measured_anchor_input`` would
+  cost 302.653 s on the real input, and its result is the manifest's declared
+  ``identity_sha256``. Dev mode requires that value to be a full 64-hex
+  string, records which digest it used in the ``[DEV-MODE]`` line, and still
+  hands it to every per-unit envelope fence -- a skip with the record kept,
+  never a silent trust. (2026-09-20, #833.)
 * Recording is not optional in dev mode. Even a dev run records what ran:
   the executing package's actual tree digest is computed and stamped. A
   record, never a gate.

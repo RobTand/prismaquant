@@ -921,15 +921,34 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
     _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
     identity = manifest["identity"]
-    # The checkpoint is parsed from JSON, so its identity is already normalized
-    # (string keys, dict/list containers, JSON scalars) and the seal can stream
-    # the canonical bytes into the digest. The generic helper normalizes first,
-    # which holds the encoded text, a second full graph and the second encoded
-    # text at once; on a checkpoint this size that is the difference between
-    # fitting a bounded envelope and being killed by it. Same digest -- held by
-    # tests/test_canonical_json_normalized.py.
-    seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
-    _same(seal, manifest.get("identity_sha256"), "campaign checkpoint seal")
+    declared_seal = manifest.get("identity_sha256")
+    if dev_mode_enabled():
+        # Rob's dev-mode directive (2026-09-19): the seal returns at the
+        # artifact gate, not the run gate. This recompute is the run gate's
+        # most expensive step on the real campaign -- 302.653 s of a 765.6 s
+        # in-process profile on action 282c61140ba7 (2026-09-20) over the
+        # 7.2 GB merged checkpoint -- and the digest it would produce is
+        # already declared by the manifest. The declared value is checked for
+        # 64-hex shape and RECORDED, never silently trusted: the walk still
+        # hands it to every unit envelope below (``_load_unit``), and the run
+        # stays ``dev_uncertified`` through the existing stamp.
+        _require_sha256(declared_seal, "campaign checkpoint seal")
+        dev_warning(
+            "campaign checkpoint seal not recomputed under dev mode; using "
+            f"the manifest's declared identity_sha256 {declared_seal} "
+            "(recorded, not gated)")
+        seal = declared_seal
+    else:
+        # The checkpoint is parsed from JSON, so its identity is already
+        # normalized (string keys, dict/list containers, JSON scalars) and the
+        # seal can stream the canonical bytes into the digest. The generic
+        # helper normalizes first, which holds the encoded text, a second full
+        # graph and the second encoded text at once; on a checkpoint this size
+        # that is the difference between fitting a bounded envelope and being
+        # killed by it. Same digest -- held by
+        # tests/test_canonical_json_normalized.py.
+        seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
+        _same(seal, declared_seal, "campaign checkpoint seal")
     _same(identity.get("campaign_schema"), CAMPAIGN_SCHEMA, "checkpoint campaign schema")
     _same(identity.get("currency"), CURRENCY, "checkpoint scalar currency")
     _same(set(identity["units"]), names, "complete checkpoint identity roster")

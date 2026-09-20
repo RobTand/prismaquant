@@ -1,7 +1,23 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-19 · `flash/tessera-pin-bump-20260919`.
+As of: 2026-09-20 · `flash/dev-anchor-seal-bypass-20260920`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-20, `flash/dev-anchor-seal-bypass-20260920`) for **the
+dev-mode merged-checkpoint seal skip** (#833). No default, stage, format, lane,
+pin or ship-gate verdict changes. Under `PRISMAQUANT_DEV_MODE=1`
+`load_measured_anchor_input` no longer recomputes
+`canonical_json_sha256_normalized(identity)` over the merged campaign
+checkpoint; it requires the manifest's declared `identity_sha256` to be a full
+64-hex string, prints the `[DEV-MODE]` record naming the digest it used, and
+hands that digest to the existing per-unit envelope binding. The measured cost
+of the skipped encode is 302.653 s of a 765.6 s in-process profile (action
+`282c61140ba7`, 2026-09-20, `run/profile.pstats`) on the 7.2 GB checkpoint.
+Certified mode is byte-identical; the raw input `_bound` digests, roster /
+model / calibration geometry, per-unit mutation fences, PB
+action/progress/containment, mover inline integrity and the model
+source-identity cache are untouched. Tests: `tests/test_dev_anchor_seal_skip.py`
+plus the certified cases in `tests/test_tessera_joint_aura.py`.
 
 Re-stamped (2026-09-19, `flash/tessera-pin-bump-20260919`) for **runtime
 contract v32** (#760, the coordinated post-#560-lineage bump: the pin names
@@ -10260,6 +10276,11 @@ checkpoint-lineage identity mismatch become stamps — loudly recorded, never
 silently reused: a mismatched checkpoint lineage is archived
 (`<dir>.dev-archived-<iso>`) and recomputed fresh, and every dev run carries a
 top-level `dev_uncertified` stamp in `results.json` and its progress records.
+The merged campaign checkpoint's canonical seal is skipped rather than
+recomputed: the loader binds the walk to the manifest's declared
+`identity_sha256` after a 64-hex syntactic check and prints the `[DEV-MODE]`
+record (measured 302.653 s of a 765.6 s profile on action `282c61140ba7`,
+2026-09-20), while every per-unit envelope fence still refuses a mismatch.
 With the variable unset, every one of these guards refuses exactly as before
 (`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-19 stamp above.
 
