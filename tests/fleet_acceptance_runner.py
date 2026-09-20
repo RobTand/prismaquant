@@ -916,7 +916,7 @@ def scenario_sdk_recovery_reaper(world: World, snapshots: dict) -> dict:
         map_path2 = _compose_map(world, manifest_sha=restaged["digest"])
         _ = map_path2
         succ_nonce = "d" * 32
-        _, _, succ_control, _ = _open_scope(
+        _, succ_control = _open_scope(
             world, key="d" * 64, nonce=succ_nonce)
         holder = {"host": host, "worker": f"{host}:4242:9d001122",
                   "pid": 4242}
