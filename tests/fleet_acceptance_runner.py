@@ -230,9 +230,13 @@ def _record_scope(world: World, key: str, control: dict,
     pool = world.mod["pool"]
     path = world.queue.item_path(pool.CLAIMED, key)
     live = pool._read_json(path)
-    assert live is not None and pool._same_claim(
-        live, claim if claim is not None else {"action_key": key}), (
-        "live claim changed under the scenario")
+    snapshot = claim if claim is not None else {"action_key": key}
+    assert live is not None and pool._same_claim(live, snapshot), (
+        "live claim changed under the scenario",
+        {f: (live.get(f) if live else None,
+             snapshot.get(f) if isinstance(snapshot, dict) else None)
+         for f in ("claimed_by", "claimed_unix", "published_unix",
+                   "attempts")})
     block = {"action_key": key, "nonce": control["nonce"],
              "memory_max_bytes": control["memory_max_bytes"],
              "socket_path": str(control.get("socket_path") or ""),
@@ -432,7 +436,7 @@ def _acquire_window(world: World, ctx: dict, staged: dict,
         covers=[{"mover_action_key": m, "manifest_sha256": staged["digest"]}
                 for m in ("aa" * 32, "ab" * 32)],
         expected=expected, span={"start_bytes": 0, "end_bytes": total},
-        acquire_token=token)
+        acquire_token=token, material_namespace=CONSUMER)
     assert acquired.get("ok") is True, acquired
     return acquired
 
