@@ -24,9 +24,13 @@ from prismaquant.joint_adjoint_checkpoints import (
 from test_streamed_boundary_artifacts import _policy
 
 
-def _owner(path, *, disk=1 << 24, published=False):
-    owner = StreamedBoundaryArtifacts(_policy(path, disk=disk))
-    owner.bind({"fixture": "checkpoint-budget"}, n_probes=2, published=published)
+def _owner(path, *, disk=1 << 24, cap=1 << 22, published=False, check_memory=None):
+    # Resident headroom covers per-entry transient serialization holds; the
+    # artifact ceiling under test stays `disk`.
+    owner = StreamedBoundaryArtifacts(
+        _policy(path, cap=cap, disk=disk))
+    owner.bind({"fixture": "checkpoint-budget"}, n_probes=2,
+               check_memory=check_memory, published=published)
     return owner
 
 
@@ -140,7 +144,9 @@ def test_rollback_retains_then_reclaims(tmp_path, monkeypatch):
         _write(owner, space)
     checkpoint_dir = Path(space) / "checkpoints" / "boundary-005"
     assert checkpoint_dir.is_dir()
-    assert list((checkpoint_dir / "entries").glob("*.pt"))
+    # Shared states serialize first, so the very first pickle failure lands
+    # before any file exists: fail-fast ordering with nothing partial.
+    assert _space_files(space) == []
     retained = [entry for entry in owner._checkpoint_reservations.values()
                 if entry["state"] == "retained"]
     assert len(retained) == 1
@@ -148,6 +154,7 @@ def test_rollback_retains_then_reclaims(tmp_path, monkeypatch):
     assert held < owner.config["max_artifact_bytes"]
     result = owner.reclaim_checkpoint_artifact(space, 5)
     assert result["reclaimed"] is True
+    assert result["disposition"] == "deleted"
     assert not checkpoint_dir.exists()
     assert owner.checkpoint_remaining_bytes() == owner.config["max_artifact_bytes"]
     with pytest.raises(RuntimeError, match="no retained attempt"):
@@ -261,12 +268,14 @@ def test_output_descriptor_is_application_scope(tmp_path):
 def test_close_refuses_active_reservation(tmp_path):
     """Closing with a live reservation fails closed like a live window."""
     owner = _owner(tmp_path / "boundaries")
-    plan = {"files": [{"name": "f", "envelope_bytes": 100}],
+    directory = tmp_path / "checkpoints" / "boundary-005"
+    plan = {"files": [{"name": "f", "path": str(directory / "f.pt"),
+                       "envelope_bytes": 100}],
             "manifest_bytes": 100, "temp_overlap_bytes": 100,
             "envelope_bytes": 300}
     reservation = owner.reserve_checkpoint_artifact(
         label="fixture", envelope_bytes=300, file_plan=plan,
-        checkpoint_dir=tmp_path / "checkpoints" / "boundary-005")
+        checkpoint_dir=directory)
     with pytest.raises(RuntimeError, match="active checkpoint reservation"):
         owner.__exit__(None, None, None)
     owner.cancel_checkpoint_artifact(reservation)
@@ -276,19 +285,285 @@ def test_close_refuses_active_reservation(tmp_path):
 def test_reentrant_reservation_refuses(tmp_path):
     """The single-owner writer never holds two envelopes at once."""
     owner = _owner(tmp_path / "boundaries")
-    plan = {"files": [{"name": "f", "envelope_bytes": 100}],
+    directory = tmp_path / "c1"
+    plan = {"files": [{"name": "f", "path": str(directory / "f.pt"),
+                       "envelope_bytes": 100}],
             "manifest_bytes": 100, "temp_overlap_bytes": 100,
             "envelope_bytes": 300}
     first = owner.reserve_checkpoint_artifact(
         label="first", envelope_bytes=300, file_plan=plan,
-        checkpoint_dir=tmp_path / "c1")
+        checkpoint_dir=directory)
+    plan2 = {"files": [{"name": "f", "path": str(tmp_path / "c2" / "f.pt"),
+                        "envelope_bytes": 100}],
+             "manifest_bytes": 100, "temp_overlap_bytes": 100,
+             "envelope_bytes": 300}
     with pytest.raises(RuntimeError, match="already active"):
         owner.reserve_checkpoint_artifact(
-            label="second", envelope_bytes=300, file_plan=plan,
+            label="second", envelope_bytes=300, file_plan=plan2,
             checkpoint_dir=tmp_path / "c2")
     owner.cancel_checkpoint_artifact(first)
     second = owner.reserve_checkpoint_artifact(
-        label="second", envelope_bytes=300, file_plan=plan,
+        label="second", envelope_bytes=300, file_plan=plan2,
         checkpoint_dir=tmp_path / "c2")
     owner.cancel_checkpoint_artifact(second)
     assert owner.checkpoint_remaining_bytes() == owner.config["max_artifact_bytes"]
+
+
+def _big_plane():
+    return {(0, 0): torch.zeros(512, 512)}
+
+
+def _checkpoint_actual(owner, space, record):
+    return (sum(row["file_bytes"] for row in record["activation_entries"])
+            + sum(row["file_bytes"] for row in record["shared_state_entries"])
+            + (Path(space) / "checkpoints" / "boundary-005"
+               / "checkpoint.json").stat().st_size)
+
+
+def test_checkpoint_then_ordinary_share_ceiling(tmp_path):
+    """A committed checkpoint narrows later ordinary writes (aggregate)."""
+    owner = _owner(tmp_path / "boundaries", disk=2300000)
+    space = adjoint_space(tmp_path / "out")
+    record = write_adjoint_checkpoint(
+        space, boundary=5, session=_session(), cotangents=_big_plane(),
+        shared_adjoint=_shared_adjoint(), shared_pass=_shared_pass(),
+        owner=owner)
+    actual = _checkpoint_actual(owner, space, record)
+    assert owner.telemetry["live_checkpoint_bytes"] == actual
+    # 700x700 needs ~2.03 MiB envelope: fits live-only headroom, but the
+    # committed checkpoint bytes push it over the shared ceiling.
+    with pytest.raises(RuntimeError, match="budget exceeded"):
+        owner.write(torch.zeros(700, 700), batch_index=0, boundary_index=0)
+    assert owner.telemetry["live_artifact_bytes"] == 0
+    small = owner.write(torch.zeros(64, 64), batch_index=0, boundary_index=0)
+    assert owner.telemetry["live_artifact_bytes"] == small.file_bytes
+    assert owner.checkpoint_remaining_bytes() == (
+        owner.config["max_artifact_bytes"] - actual - small.file_bytes)
+
+
+def test_retained_partial_blocks_ordinary_until_reclaimed(tmp_path, monkeypatch):
+    """A retained envelope counts against ordinary writes until reclaimed."""
+    import prismaquant.joint_adjoint_checkpoints as checkpoints
+
+    owner = _owner(tmp_path / "boundaries", disk=2300000)
+    space = adjoint_space(tmp_path / "out")
+    real_atomic = checkpoints.atomic_write_bytes
+    calls = []
+
+    def fail_first_pickle(path, payload):
+        calls.append(str(path))
+        if len(calls) == 1:
+            raise RuntimeError("boom: simulated pickle failure")
+        return real_atomic(path, payload)
+
+    monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_first_pickle)
+    with pytest.raises(RuntimeError, match="boom"):
+        write_adjoint_checkpoint(
+            space, boundary=5, session=_session(), cotangents=_big_plane(),
+            shared_adjoint=_shared_adjoint(), shared_pass=_shared_pass(),
+            owner=owner)
+    assert calls, "the failure never reached the pickle writer"
+    # The 256 KiB ordinary envelope fits live-only headroom but not the
+    # retained ~2.26 MiB checkpoint envelope beside it.
+    with pytest.raises(RuntimeError, match="budget exceeded"):
+        owner.write(torch.zeros(256, 256), batch_index=0, boundary_index=0)
+    assert owner.telemetry["live_artifact_bytes"] == 0
+    result = owner.reclaim_checkpoint_artifact(space, 5)
+    assert result["disposition"] == "deleted"
+    admitted = owner.write(torch.zeros(256, 256), batch_index=0, boundary_index=0)
+    assert owner.telemetry["live_artifact_bytes"] == admitted.file_bytes
+
+
+def test_cotangent_rollover_overlap_counts_checkpoints(tmp_path):
+    """Rollover peak (old plus new) is admitted against the shared ceiling."""
+    owner = _owner(tmp_path / "boundaries", disk=2300000)
+    space = adjoint_space(tmp_path / "out")
+    record = write_adjoint_checkpoint(
+        space, boundary=5, session=_session(), cotangents=_big_plane(),
+        shared_adjoint=_shared_adjoint(), shared_pass=_shared_pass(),
+        owner=owner)
+    actual = _checkpoint_actual(owner, space, record)
+    old = owner.write(torch.zeros(256, 256), batch_index=0, boundary_index=1,
+                      probe_index=0)
+    # Same-shape rollover: old plus new plus checkpoint still fits.
+    rolled = owner.write(torch.zeros(256, 256), batch_index=0, boundary_index=0,
+                         probe_index=0, previous=old)
+    assert owner.telemetry["live_artifact_bytes"] == rolled.file_bytes
+    # A 700x700 rollover fits live-only headroom but overlaps the committed
+    # checkpoint past the ceiling.
+    old2 = owner.write(torch.zeros(256, 256), batch_index=0, boundary_index=1,
+                       probe_index=0)
+    with pytest.raises(RuntimeError, match="budget exceeded"):
+        owner.write(torch.zeros(700, 700), batch_index=0, boundary_index=0,
+                    probe_index=0, previous=old2)
+    assert owner.telemetry["live_artifact_bytes"] == (
+        rolled.file_bytes + old2.file_bytes)
+    assert actual == owner.telemetry["live_checkpoint_bytes"]
+
+
+def test_baseline_legacy_bypass_both_directions(tmp_path):
+    """Exhibit on the existing API: unwatched writes bypass every counter.
+
+    Passes on unmodified main and on the fixed tree (the legacy path is
+    preserved byte for byte); reported separately from missing-API RED.
+    """
+    owner = _owner(tmp_path / "boundaries", disk=100000)
+    space = adjoint_space(tmp_path / "out")
+    owner.write(torch.zeros(8, 8), batch_index=0, boundary_index=0)
+    record = write_adjoint_checkpoint(
+        space, boundary=5, session=_session(),
+        cotangents={(0, 0): torch.zeros(256, 256)},
+        shared_adjoint={}, shared_pass={})
+    true_usage = (sum(path.stat().st_size for path in _space_files(space))
+                  + sum(path.stat().st_size
+                        for path in (Path(owner.directory) / "entries").glob("*")
+                        if path.is_file()))
+    assert true_usage > owner.config["max_artifact_bytes"]
+    assert owner.telemetry.get("live_checkpoint_bytes", 0) == 0
+    # ...and a later ordinary write is still admitted on live-only headroom
+    # even though true on-disk usage already exceeds the ceiling.
+    owner.write(torch.zeros(8, 8), batch_index=1, boundary_index=0)
+
+
+def test_tensor_entry_receives_admitted_file_limit(tmp_path, monkeypatch):
+    """The exact writer gets the reservation's per-file envelope."""
+    import prismaquant.perturbed_x_cache as perturbed
+
+    owner = _owner(tmp_path / "boundaries")
+    space = adjoint_space(tmp_path / "out")
+    seen = {}
+    real_exact = perturbed.write_exact_activation_cache_entry
+
+    def spy_exact(cache_dir, name, inputs, *, identity, max_tensor_bytes,
+                  max_file_bytes, **kwargs):
+        seen[name] = (max_tensor_bytes, max_file_bytes)
+        return real_exact(cache_dir, name, inputs, identity=identity,
+                          max_tensor_bytes=max_tensor_bytes,
+                          max_file_bytes=max_file_bytes, **kwargs)
+
+    monkeypatch.setattr(perturbed, "write_exact_activation_cache_entry", spy_exact)
+    _write(owner, space)
+    for (probe, batch), tensor in _plane().items():
+        name = f"cotangent-{probe}-{batch}"
+        nbytes = tensor.numel() * tensor.element_size()
+        assert seen[name] == (nbytes, nbytes + 65536)
+
+
+def test_oversized_shared_payload_refuses_pre_write(tmp_path, monkeypatch):
+    """A payload over its admitted envelope never reaches the file."""
+    import pickle
+
+    owner = _owner(tmp_path / "boundaries")
+    space = adjoint_space(tmp_path / "out")
+    real_dumps = pickle.dumps
+
+    def fat_dumps(state, *args, **kwargs):
+        payload = real_dumps(state, *args, **kwargs)
+        if isinstance(state, dict) and state.get("tag") == "a":
+            return payload + b"\x00" * (1 << 20)
+        return payload
+
+    monkeypatch.setattr(pickle, "dumps", fat_dumps)
+    with pytest.raises(RuntimeError, match="admitted envelope"):
+        _write(owner, space)
+    entries = Path(space) / "checkpoints" / "boundary-005" / "entries"
+    assert [path.name for path in entries.glob("shared-pass-*.pkl")] == []
+    assert list(entries.glob("shared-adjoint-*.pkl"))
+    retained = [entry for entry in owner._checkpoint_reservations.values()
+                if entry["state"] == "retained"]
+    assert len(retained) == 1
+    result = owner.reclaim_checkpoint_artifact(space, 5)
+    assert result["reclaimed"] is True
+    assert not (Path(space) / "checkpoints" / "boundary-005").exists()
+
+
+def _reserve_for_record(owner, space, record):
+    """Reserve the record's own actuals as its envelope for tamper tests."""
+    directory = Path(space) / "checkpoints" / "boundary-005"
+    files = [{"name": row["name"], "path": row["path"],
+              "envelope_bytes": row["file_bytes"]}
+             for row in record["activation_entries"] + record["shared_state_entries"]]
+    manifest_bytes = (directory / "checkpoint.json").stat().st_size
+    envelope = sum(row["envelope_bytes"] for row in files) + manifest_bytes
+    return owner.reserve_checkpoint_artifact(
+        label="tamper", envelope_bytes=envelope,
+        file_plan={"files": files, "manifest_bytes": manifest_bytes,
+                   "temp_overlap_bytes": 0, "envelope_bytes": envelope},
+        checkpoint_dir=directory)
+
+
+def test_commit_rejects_unplanned_receipt_rows(tmp_path):
+    """Extra, missing, duplicate, and rerouted rows refuse before any stat."""
+    owner = _owner(tmp_path / "boundaries")
+    space = adjoint_space(tmp_path / "out")
+    record = _write(owner, space)
+
+    def attempt(mutated):
+        reservation = _reserve_for_record(owner, space, record)
+        with pytest.raises(RuntimeError, match="reserved plan|reserved path"):
+            owner.commit_checkpoint_artifact(reservation, mutated)
+
+    extra = json.loads(json.dumps(record))
+    extra["activation_entries"] = extra["activation_entries"] + [
+        dict(extra["activation_entries"][0], name="zzz-extra")]
+    attempt(extra)
+    missing = json.loads(json.dumps(record))
+    missing["shared_state_entries"] = missing["shared_state_entries"][:-1]
+    attempt(missing)
+    duplicate = json.loads(json.dumps(record))
+    duplicate["activation_entries"] = (
+        duplicate["activation_entries"] + duplicate["activation_entries"][:1])
+    attempt(duplicate)
+    rerouted = json.loads(json.dumps(record))
+    other = rerouted["activation_entries"][-1]["path"]
+    rerouted["activation_entries"][0]["path"] = other
+    attempt(rerouted)
+
+
+def test_commit_rejects_per_file_over_envelope(tmp_path):
+    """A receipt row over its admitted envelope refuses even with files present."""
+    owner = _owner(tmp_path / "boundaries")
+    space = adjoint_space(tmp_path / "out")
+    record = _write(owner, space)
+    inflated = json.loads(json.dumps(record))
+    inflated["activation_entries"][0]["file_bytes"] += 1
+    reservation = _reserve_for_record(owner, space, record)
+    with pytest.raises(RuntimeError, match="reserved envelope"):
+        owner.commit_checkpoint_artifact(reservation, inflated)
+
+
+def test_hook_failure_after_commit_stays_truthful(tmp_path):
+    """An error after the receipt commits propagates; state stays committed."""
+    def hook(label):
+        if "publication" in label:
+            raise RuntimeError("hook boom: UMA floor")
+
+    owner = _owner(tmp_path / "boundaries", check_memory=hook)
+    space = adjoint_space(tmp_path / "out")
+    with pytest.raises(RuntimeError, match="hook boom"):
+        _write(owner, space)
+    assert len(owner._checkpoint_reservations) == 1
+    reservation = next(iter(owner._checkpoint_reservations))
+    assert owner.checkpoint_reservation_state(reservation) == "committed"
+    assert owner.telemetry["live_checkpoint_bytes"] > 0
+    assert (Path(space) / "checkpoints" / "boundary-005" / "checkpoint.json").is_file()
+
+
+def test_close_disposes_retained_attempt(tmp_path, monkeypatch):
+    """Owner close reclaims never-receipted partials and keeps the error."""
+    import prismaquant.joint_adjoint_checkpoints as checkpoints
+
+    policy = _policy(tmp_path / "boundaries")
+    space = adjoint_space(tmp_path / "out")
+    real_atomic = checkpoints.atomic_write_bytes
+
+    def fail_first_pickle(path, payload):
+        raise RuntimeError("boom: simulated pickle failure")
+
+    monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_first_pickle)
+    owner = StreamedBoundaryArtifacts(policy)
+    owner.bind({"fixture": "checkpoint-budget"}, n_probes=2)
+    with pytest.raises(RuntimeError, match="boom"):
+        with owner:
+            _write(owner, space)
+    assert not (Path(space) / "checkpoints" / "boundary-005").exists()
