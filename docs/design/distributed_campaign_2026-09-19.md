@@ -418,12 +418,18 @@ repartition, the same freeze semantics `residency_stage_rows` already keeps):
 1. Seal (or verify) all 46 artifacts: 45 records + slice manifests, coverage
    proof green. Nothing is submitted if the proof refuses.
 2. **Stage A first:** submit the adjoint action — `pbrun --tag <adjoint.tag>
-   --data-manifest <adjoint read set> --residency stage --container-image
+   --data-manifest <adjoint read set> --residency stage
+   --progress-phase head=<head_grace> --progress-phase <phase>=900 … (one per
+   manifest read phase, in manifest order) --container-image
    <spec image> --detach -- python3 -m tools.tessera_campaign_container --spec
    <spec> -- python3 -m prismaquant.joint_adjoint_capture …` — and record its
    action key in `<output_root>/layer-quanta/campaign-state.json` (the
    campaign's own machine-readable state; atomic append of submission events,
-   never edits).
+   never edits). The payload carries `--data-manifest-sha256` (the submitted
+   manifest bytes) and `--read-manifest-sha256` (the annotated parent
+   read-set digest): a pass that seals no read schedule is told its manifest
+   by the submitter, and a pass told nothing binds nothing and gets no
+   redirect (PQ #835).
 3. **Then quanta, when their inputs exist:** a layer-L quantum is publishable
    once stage A's terminal record says `executed` AND
    `adjoint-capture.json` validates (digests match the state file). The tool
@@ -449,8 +455,13 @@ pbrun --tag gb10 \
       python3 -m prismaquant.joint_cost_quantum \
         --quantum …/layer-quanta/records/layer-013.json \
         --quantum-sha256 <identity_sha256> \
+        --data-manifest-sha256 <slice manifest bytes digest> \
         --output-root …/complete-512-seed237….encoder-reuse-02
 ```
+
+The slice digest is the row's own read-set digest (`read_set.manifest_sha256`),
+verified against the slice file at dispatch: the quantum binds the bytes pbrun
+stages for it, never the campaign parent it also carries (PQ #835).
 
 - `PRISMAQUANT_DEV_MODE=1` (PR #776) is the interim lane: submissions run
   from any checkout with no campaign branch, no transition receipts, and the
