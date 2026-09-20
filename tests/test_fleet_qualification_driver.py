@@ -84,10 +84,12 @@ def test_unimplemented_legs_are_records_without_invocations():
         assert record["reason"]
         assert "argv" not in record
     lines = driver.format_invocations(plan)
+    runnable = [line for line in lines
+                if not line.startswith("# unimplemented")]
+    assert not any("--help" in line for line in runnable)
     for record in plan["unimplemented"]:
-        assert any("unimplemented" in line and record["name"] in line
-                   for line in lines)
-    assert not any("--help" in line and "reader" in line.lower()
+        assert any(line.startswith("# unimplemented")
+                   and record["name"] in line
                    for line in lines)
 
 
