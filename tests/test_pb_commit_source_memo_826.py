@@ -71,3 +71,32 @@ def test_pb_commit_dev_stamp_reuses_the_memo(monkeypatch, tmp_path):
         assert row["unit"] == "layers.0.b"
     finally:
         tessera_joint_aura._DEV_SOURCE_SHA256_MEMO = None
+
+
+def test_pb_commit_default_dev_path_never_hashes_the_source(monkeypatch, tmp_path):
+    """The default dev path pays no sealing ceremony: no stamp, no hash.
+
+    The per-line stamp is opt-in (PR #828): with ``PRISMAQUANT_DEV_MODE=1``
+    and no ``PRISMAQUANT_DEV_PROGRESS_STAMP``, a durable-unit commit must
+    neither hash the executing tree nor alter the certified six-field record.
+    The tree walk on this path is the regression #826 measured.
+    """
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(tmp_path / "progress.json"))
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "tok")
+
+    def refuse_hash():
+        raise AssertionError("default dev progress commits must not hash the source tree")
+
+    monkeypatch.setattr(tessera_joint_aura, "_progress_dev_source_sha256",
+                        refuse_hash, raising=True)
+    assert tessera_joint_aura._pb_commit(1, "head", unit="layers.0.a")
+    assert tessera_joint_aura._pb_commit(2, "head", unit="layers.0.b")
+
+    import json
+
+    row = json.loads((tmp_path / "progress.json").read_text())
+    assert set(row) == {"schema", "token", "phase", "units_completed", "unit",
+                        "reported_unix"}
+    assert row["units_completed"] == 2
+    assert row["unit"] == "layers.0.b"
