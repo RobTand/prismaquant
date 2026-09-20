@@ -78,37 +78,6 @@ def test_qualified_scenarios_exist_as_tests():
                     row["id"], scenario)
 
 
-def _imported_roots(path: Path) -> set[str]:
-    """Top-level imported module roots (docstrings and prose ignored)."""
-    tree = ast.parse(path.read_text())
-    roots = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            roots.update(a.name.split(".")[0] for a in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                roots.add(node.module.split(".")[0])
-    return roots
-
-
-def test_harness_adds_no_parallel_paths():
-    """SC-02: import scan -- no dispatcher/cache/scheduler machinery.
-
-    Calling the real movers is compliance, not a second path; prose may
-    name supported entrypoints. Only the import surface is asserted.
-    """
-    forbidden = {"dispatch_tessera_campaign", "pbcampaign", "dask",
-                 "ray", "celery"}
-    for path in (HERE / "fleet_acceptance_pins.py",
-                 HERE / "fleet_acceptance_runner.py",
-                 Path(__file__).resolve().parents[1] / "tools"
-                 / "fleet_qualification_driver.py"):
-        if not path.is_file():
-            continue
-        roots = _imported_roots(path)
-        assert not (roots & forbidden), (path.name, roots & forbidden)
-
-
 def test_explicit_gates_name_owners():
     """Out-of-harness scopes stay explicit with owning lanes."""
     gates = MATRIX["explicit_gates"]

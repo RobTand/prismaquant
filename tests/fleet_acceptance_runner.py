@@ -37,11 +37,11 @@ import hashlib
 import importlib.util
 import json
 import os
+import secrets
 import socket
 import sys
 import threading
 import time
-import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -53,6 +53,7 @@ KEY = "e" * 64
 NONCE = "e" * 32
 OWNER = "localhost:1:acceptance"
 ALIAS_OWNER = "fleet-alias:1:acceptance"
+CONSUMER = "cc" * 32
 STAGE_TIER = "prismabuild-stage:dl380g10"
 RAM_TIER = "ram:dl380g10"
 
@@ -381,9 +382,6 @@ def _compose_map(world: World, *, manifest_sha: str) -> Path:
     return path
 
 
-CONSUMER = "cc" * 32
-
-
 def _sdk_context(world: World, *, key: str, nonce: str, map_path: Path,
                  helper_root: str):
     """Real injected context over a real claim + real scope block.
@@ -475,11 +473,18 @@ def scenario_broker_roundtrip(world: World, snapshots: dict) -> dict:
 
 
 def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
-    """R8 core: first release reply, export proof, reclaim-once, finish, egress.
+    """R8 core: ref held through finish; egress auto-reclaims; proof persisted.
 
-    Fails on R7 (writer requires the absent ``released`` flag / persists
-    no proof, so reclaim never happens); passes once the R8 correction
-    lands. That RED-then-GREEN is the delivered signal.
+    Production order (PB730
+    ``test_connected_sdk_ref_reclaims_through_egress``): create/claim/scope
+    -> staging+acquire -> open/verify/close with the ref HELD ->
+    queue.finish (terminate/release/export/proof) -> stage_release.evict
+    auto-reclaims -> exact token/file/second-egress state. No manual
+    ``lease.release()``, no direct broker release/export before finish,
+    no proof expectations before finish writes.
+
+    RED on R7 (proof never persisted / complete shortcut replays the
+    incomplete verdict, so reclaim never happens); GREEN once R8 lands.
     """
     lease = world.mod["lease"]
     pool = world.mod["pool"]
@@ -491,67 +496,68 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
     acquired = _acquire_window(world, ctx, staged,
                                token=secrets.token_hex(16))
     pin, ref_id = acquired["pin"], acquired["ref_id"]
-    key0 = sorted(acquired["pin"]["entries"])[0]
+    keys = sorted(entry["key"] for entry in pin["entries"])
+    assert keys, "pin covers no keys"
+    key0 = keys[0]
     fd, serving = lease.open_pinned(world.queue, pin, ref_id, key0)
     try:
-        entry = next(e for e in acquired["pin"]["entries"]
-                     if e["key"] == key0)
+        entry = next(e for e in pin["entries"] if e["key"] == key0)
         observed = os.pread(fd, entry["bytes"], 0)
     finally:
         os.close(fd)
     assert serving["tier_id"] == STAGE_TIER, serving
     assert serving["pin_id"] == acquired["pin_id"], serving
     assert serving["range_ref"] == key0, serving
-    assert lease.release(world.queue, acquired["pin_id"], ref_id) is True
-    first = world.broker_request({"op": "release", "action_key": KEY,
-                                  "nonce": NONCE, "token": scope.token,
-                                  "reason": "acceptance",
-                                  "memory_max_bytes": 64 << 20})
-    assert first.get("ok") is True, first
-    export = _export(world, scope, key=KEY, nonce=NONCE)
-    assert export.get("ok") is True and export.get("stopped") is True, export
-    assert isinstance(export.get("empty"), bool), export
     evidence: dict = {
         "serving": serving,
-        "first_release_keys": sorted(first.keys()),
-        "export": {k: export.get(k) for k in
-                   ("scope_id", "stopped", "empty", "released", "retired",
-                    "settled", "tickets_pending")},
         "read_bytes": len(observed),
+        "token": scope.token,
     }
-    attestation = lease.read_scope_attestation(world.queue, KEY, NONCE)
-    evidence["attestation_present"] = attestation is not None
-    if attestation is not None and not isinstance(attestation, Exception):
-        assert attestation.get("scope_empty") == export["empty"], (
-            attestation, export)
-    else:
-        assert attestation is not None, (
-            "no persisted proof after release+export: reclaim cannot verify")
-    reclaimed = lease.auto_reclaim(world.queue)
-    assert ref_id in reclaimed.get("released", []), reclaimed
-    pin_path = (lease.leases_root(world.queue) / KEY
-                / f"{acquired['pin_id']}.lease.json")
-    assert not pin_path.exists(), "ordinary completion must reclaim once"
-    again = lease.auto_reclaim(world.queue)
-    assert ref_id not in again.get("released", []), again
-    evidence["reclaimed_once"] = True
+    # The ref stays HELD here: no manual release under test. Nothing may
+    # have persisted proof yet -- finish performs terminate/release/export
+    # and proof, and only afterwards may attestations exist.
+    pre = lease.read_scope_attestation(world.queue, KEY, NONCE)
+    assert pre is None or isinstance(pre, Exception), pre
     terminal = world.queue.finish(KEY, status="executed",
                                   detail={"acceptance": "sdk-first-release"},
                                   claim_snapshot=claim)
     assert terminal.is_file(), terminal
     evidence["terminal"] = str(terminal)
+    attestation = lease.read_scope_attestation(world.queue, KEY, NONCE)
+    assert attestation is not None and not isinstance(
+        attestation, Exception), (
+        "no persisted proof after finish: reclaim cannot verify")
+    assert attestation.get("scope_empty") is True, attestation
+    evidence["attestation_empty"] = True
+    pmap = world.mod["pmap"]
+    staged_paths = []
+    for frag in pmap.read_fragments(world.queue.root / pool.RESIDENCY,
+                                    CONSUMER):
+        frag = pmap.validate_fragment(frag)
+        if frag["tier_id"] != STAGE_TIER:
+            continue
+        staged_paths.extend(entry["stage_path"]
+                            for entry in frag["entries"].values())
+    assert staged_paths, "no staged objects to egress"
+    auto_reclaimed: list = []
     for mover in ("aa" * 32, "ab" * 32):
         receipt = world.mod["stage_release"].evict(
             world.queue, mover, consumer_action_key=CONSUMER,
             stage_root=str(staged["stage"]),
             residency_root=str(world.queue.root / pool.RESIDENCY))
         assert receipt["complete"] is True, (mover, receipt)
-    evidence["egress_complete"] = True
+        auto_reclaimed.append(list(receipt["auto_reclaimed"]))
+    assert auto_reclaimed[0] == [ref_id], auto_reclaimed
+    assert auto_reclaimed[1] == [], auto_reclaimed
+    evidence["auto_reclaimed"] = auto_reclaimed
+    pin_path = (lease.leases_root(world.queue) / KEY
+                / f"{acquired['pin_id']}.lease.json")
+    assert not pin_path.exists(), "reclaimed pin file must unlink"
+    for staged_path in staged_paths:
+        assert not Path(staged_path).exists(), staged_path
     return pins.result_document(status="qualified",
                                  scenario="sdk-first-release",
                                  snapshots=snapshots, evidence=evidence)
-
-
 
 
 def scenario_sdk_pending_ticket(world: World, snapshots: dict) -> dict:
