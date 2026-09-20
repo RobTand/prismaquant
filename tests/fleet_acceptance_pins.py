@@ -31,10 +31,12 @@ from pathlib import Path
 PB_PINNED_CHECKOUT = Path("/home/rob/tmp/pb-reader-lease-pin-20260920")
 PB_CANDIDATE_REPO = "https://github.com/RobTand/prismabuild.git"
 PB_CANDIDATE_BRANCH = "fix/pb-reader-lifetime-20260920"
-#: PB730 R7 (root R8 scope). R8's first-release correction is expected
-#: next; the connected first-release scenario must fail on this revision
-#: and pass on the fix -- that RED-then-GREEN is the point.
-PB_CANDIDATE_REV = "a9bb83e9abd2aeffe22af7d0b51238158954a909"
+#: PB730 R8 ("typed export proof, terminal replay on egress tick").
+#: The connected first-release scenario fails on R7 (a9bb83e9, recorded
+#: in pqfleet-r7red-20260920.json) and must pass here -- that RED-then-
+#: GREEN is the point. R9's incomplete-proof-on-finish hole stays open
+#: separately; ordinary completion does not wait on it.
+PB_CANDIDATE_REV = "0bf6fc812eb4fdab20e8149d5b4583f58b508d33"
 
 #: Tree paths this harness reuses (imports or executes). Every byte under
 #: these prefixes is hash-verified against the pinned revision.

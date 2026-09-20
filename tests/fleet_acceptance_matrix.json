@@ -3,8 +3,10 @@
  "contract": "docs/staged_read_contract_2026-09-20.md (PB worktree, read-only)",
  "ledger": "docs/staged_read_requirements_2026-09-20.json schema pb.staged_read_requirements.v3",
  "pins": {
-  "pb_candidate_rev": "a9bb83e9abd2aeffe22af7d0b51238158954a909",
-  "pq_base": "origin/main 61ec9fcb8a37c4a171771f7574e147bc5f0593e2"
+  "pb_candidate_rev": "0bf6fc812eb4fdab20e8149d5b4583f58b508d33",
+  "pq_base": "origin/main 61ec9fcb8a37c4a171771f7574e147bc5f0593e2",
+  "pb_r7_red_rev": "a9bb83e9abd2aeffe22af7d0b51238158954a909",
+  "pb_r7_red_evidence": "/home/rob/tmp/pqfleet-r7red-20260920.json"
  },
  "requirements": [
   {
