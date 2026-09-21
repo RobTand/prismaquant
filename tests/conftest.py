@@ -268,6 +268,24 @@ def _restore_profile_detection_globals():
 
 
 @pytest.fixture(autouse=True)
+def _no_staged_tier_policy_carried_between_tests():
+    """No test inherits another test's strict staged-tier policy.
+
+    The policy is process-global, and an entry point driven in-process
+    activates it from its sealed args. A per-module reset (PQ #845) covers
+    only the module that carries it; several modules drive the same entry
+    points without one, and CI distributes tests with ``--dist worksteal``,
+    so which tests run after a leaker is luck. On PR #901 it was nine tessera
+    tests on one worker, each refused ``readset-not-staged`` (PQ #906).
+    """
+    from prismaquant.staged_tier_policy import (
+        deactivate_staged_tier_policy_for_tests)
+    deactivate_staged_tier_policy_for_tests()
+    yield
+    deactivate_staged_tier_policy_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _no_staged_range_wait_unless_asked(monkeypatch):
     """Tests do not wait on a PrismaBuild fleet that is not running.
 
