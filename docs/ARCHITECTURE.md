@@ -1140,20 +1140,21 @@ says exactly that.
   **Telemetry.** `produced_group_stage_wait_s`, `produced_group_release_wait_s`
   and `produced_group_ahead_wait_s` are the owner's time blocked on, or
   spent asking, the PrismaBuild queue.
-  **Evidence** is four live chain cycles on the fleet
+  **Evidence** is five live chain cycles on the fleet
   (`tools/stagea_produced_live_cycle.py --mode chain`, owner on a Spark,
-  24-group window, 3 s of stand-in compute per window; the last three in the
-  capture's own dispose-then-settle order). Three were clean: every group
+  24-group window, 3 s of stand-in compute per window; the last four in the
+  capture's own dispose-then-settle order, the last on the code as merged).
+  Four were clean: every group
   read back was published at write-complete, no refusals, no credit waits,
   durable charge back at zero, and per layer of 24 s compute the wait on
-  staging was 0.04 s to 0.05 s in steady state and 12 s to 15 s on the
+  staging was 0.04 s to 0.05 s in steady state and 11 s to 15 s on the
   cold-start layer, whose top plane's retirement from the forward read is
   still in flight when the chain asks for it. One was not: a read-path
   funding step was refused, the recovery as first written gave back all nine
   groups staged ahead one retirement at a time, and the layer took 172 s
   instead of 48 s; it still finished with correct bytes and no debt, where
   the code before the recovery would have ended the run. The refusal was not
-  recorded and did not recur in two further cycles, so its cause is an
+  recorded and did not recur in three further cycles, so its cause is an
   inference (a funding census during ten concurrent movers), not a finding;
   refusals are recorded with their reason since. That is a **screen of the
   loop, not a measurement of Stage A**: the real compute per window is
