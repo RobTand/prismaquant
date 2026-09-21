@@ -1215,7 +1215,8 @@ says exactly that.
   thread is joined inside the staging budget plus 60 s. After the join there
   is no thread, so the settle at close is the synchronous code, unchanged,
   and still never changes the run's outcome. A failure kept at that point is
-  recorded as a release error. If the join times out, a PrismaBuild call is
+  recorded as a release error. A failing run waits for that join too, where
+  the synchronous loop only asked and left. If the join times out, a PrismaBuild call is
   still running on that thread: the settle is skipped and said so, in the log
   and in the release errors.
   **Telemetry.** `produced_compute_blocked_s` is the compute thread's time
@@ -1225,6 +1226,10 @@ says exactly that.
   `stage_ahead`, `read_fund`, `stage_wait`, `compose`, `release`,
   `copy_before_unlink`, `reclaim_origin`, `queue_full`, `settle`, `close`),
   and it is counted inline too, so an `inline` run reports the same figure.
+  It includes the settle, which the cycle driver's external clock does not:
+  in the cycles below the owner reports 37.4 s and 38.2 s where the driver
+  reports 29.8 s and 31.1 s, and the difference is `settle` (8.5 s and 8.0 s)
+  less the driver's own per-call overhead.
   `produced_group_stage_wait_s`, `produced_group_release_wait_s` and
   `produced_group_ahead_wait_s` keep their meaning, time spent on or waiting
   for the PrismaBuild queue, but with a stager most of it is the stager's
