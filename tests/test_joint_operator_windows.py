@@ -31,10 +31,15 @@ def admissible_prefetch_workers(want=FIXTURE_PREFETCH_WORKERS):
 
 
 def policy(**overrides):
-    return dict(schema=SCHEMA, max_statistics_bytes=2048, max_candidate_bytes=1024,
+    # Merged, not splatted: a keyword this already names must override it
+    # rather than raise `dict() got multiple values`, so a test that wants
+    # a wider window than the mask allows can still ask for one by name.
+    base = dict(schema=SCHEMA, max_statistics_bytes=2048, max_candidate_bytes=1024,
         max_render_resident_bytes=1024*1024, max_load_buffer_bytes=1024*1024,
         workspace_reserve_bytes=1024*1024, max_replay_cotangent_bytes=1024*1024,
-        prefetch_workers=admissible_prefetch_workers(), **overrides)
+        prefetch_workers=admissible_prefetch_workers())
+    base.update(overrides)
+    return base
 
 
 def test_dense_windows_match_independent_full_model_fp64_oracle(monkeypatch):
@@ -292,10 +297,7 @@ def test_candidate_windows_hold_what_the_operator_policy_admits(tmp_path):
     each = max(path.stat().st_size for path in paths.values())
 
     def windows_for(**overrides):
-        # policy() cannot re-specify a key it already names, so override the
-        # dict it returns, the way this file's other budget gates do.
-        window = policy()
-        window.update(overrides)
+        window = policy(**overrides)
         cache = ProductionWeightCache(weights=dict(weights), levers={})
         cache.enable_lru(100000)
         seen = []
