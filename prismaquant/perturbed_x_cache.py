@@ -1007,8 +1007,18 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                     _acquire_bulk_window(path, ref.sha256,
                                          resolver=entry_resolver))
                 live_windows.append(lease_window)
-                lease_fd, _serving, _tier = _enter_and_open_window(
-                    lease_resolver, lease_window, lease_key, path)
+                try:
+                    lease_fd, _serving, _tier = _enter_and_open_window(
+                        lease_resolver, lease_window, lease_key, path)
+                except BaseException:
+                    # ``_enter_and_open_window`` already exited the window on
+                    # every failure it raises, so leaving it in the live list
+                    # makes the cleanup below exit it a SECOND time -- and a
+                    # released manager refuses re-exit, which replaces the
+                    # real refusal with "LeaseWindow re-exit is refused" and
+                    # hides why the read failed.
+                    live_windows.remove(lease_window)
+                    raise
                 source = Path(lease_window.stage_path(lease_key) or path)
                 source_before = os.fstat(lease_fd)
             raw = owned.buffer(ref.file_bytes)

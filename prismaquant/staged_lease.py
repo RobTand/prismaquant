@@ -969,8 +969,16 @@ class LeaseWindow:
             raise _refuse("lease-not-acquired", kind="integrity")
         sdk, ctx = resolve_context(env=self._env)
         queue = self._pool_mod.PoolQueue(self._queue_root)
+        # The pin lives under the residency root it was ACQUIRED in. A
+        # produced-output window acquires under the produced-output
+        # fragment root, so opening without naming it reads the tier's
+        # default root, finds nothing, and refuses "pin is not live" for a
+        # pin that is perfectly live one directory over.
+        where = ({"residency_root": str(self._spec["residency_root"])}
+                 if self._spec.get("material_namespace") else {})
         try:
-            fd, serving = sdk.open_pinned(queue, self._pin, self._ref_id, str(key))
+            fd, serving = sdk.open_pinned(queue, self._pin, self._ref_id,
+                                          str(key), **where)
         except Exception as exc:
             # Open-time refusal (stale ref, changed bytes, unknown key) or
             # PB-internal failure: fail clear either way, never guess.
