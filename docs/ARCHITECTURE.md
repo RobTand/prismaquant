@@ -1,7 +1,35 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/quantum-metadata-generation-20260921`.
+As of: 2026-09-21 · `fix/stagea-produced-boundaries-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `fix/stagea-produced-boundaries-20260921`) for
+**Stage A reading its own boundary entries through PrismaBuild produced
+output** (PQ #880). No format, lane, pin or ship-gate verdict changes, and
+the **strict input resolver is untouched**: an own-generation read is handed
+a supplemental, explicitly namespaced resolver as an argument, never a
+swapped input map, and a read-only or foreign attached generation stays an
+ordinary input-map entry that cannot declare an owner prewrite. What changes
+is that an admitted Stage A capture now BINDS a produced-output owner:
+`joint_cost_stage_a.bind_stage_a_produced_output` is called from
+`run_adjoint_capture`, returns `None` only when the process carries no
+PrismaBuild launch context at all, and otherwise binds or REFUSES carrying
+the original reason. `cost_streaming.bind_produced_output` prewrites each
+64-entry publication group before its first byte, defers publication to the
+first read, retires the stage copy at window exit and reclaims a group's
+durable origin charge when its last origin file is gone. The operator entry
+point is `tools/dispatch_joint_quanta.py --stage-a-produced-output-template`,
+forwarded as the deployed `pbrun --produced-output-template` envelope
+option, which ingests the document as a declared input, seals its
+declaration into request params and derives the tier window demand from it.
+Every `prismabuild.*` module loads through `staged_lease.sdk_submodule`, from
+the same sealed generation as the reader SDK. Geometry is derived from the
+effective configured artifact max; no budget figure is written into the code.
+Open finding, not closed by this branch: produced-output egress can decharge
+a batch's stage token instead of releasing it when the staged entries are
+still shared with an in-flight copy, which permanently shrinks the tier mint
+(`tools/audit_produced_window_tokens.py` reproduces it). Gates:
+`tests/test_stage_a_produced_boundary_chain.py`.
 
 Re-stamped (2026-09-21, `fix/quantum-metadata-generation-20260921`) for
 **the quantum control-metadata generation seam** (PQ #884). No default,
