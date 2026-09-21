@@ -28,8 +28,10 @@ OWN sealed request (`producer_action_key`), funds the batch by exact
 transfer from the producer's reserved window, and commits through the
 CAS root the owner's row files (never a guessed queue topology);
 identical retries re-derive the content-addressed mover and answer typed
-duplicates. `retire_batch` and `safe_release_instance` close the
-lifetime and return capacity.
+duplicates. `retire_batch` evicts the staged batch and returns its
+window; the end-of-run `safe_release_instance` is best-effort and
+honestly defers while the owner claim is live (`owner-active-retain`),
+re-driven from a post-terminal context.
 
 `prismaquant.produced_render_publication.ProducedRenderPublication`
 binds everything from the admitted owner's request -- owner key, nonce
