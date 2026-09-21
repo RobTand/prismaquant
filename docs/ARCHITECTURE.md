@@ -28,14 +28,17 @@ effective configured artifact max; no budget figure is written into the code.
 A refused retirement is named from PrismaBuild's own egress receipt by
 `classify_egress_outcome`: `retire_batch` returns the category (refusal
 `egress-incomplete`) and the receipt carries the cause. A non-empty
-`deferred_own` is an own-copy deferral -- PrismaBuild deferred on the
-evicted mover's own live claimed copy, keeping bytes, proof and full credit
--- and is the ONLY case this lane waits on, paced and bounded by the
+`deferred_own` is a deferral on this lane's OWN in-flight work -- the
+evicted mover's own live claimed copy, or the retirement's own egress action
+on the tier host, which an owner on a GPU host always sees because only the
+tier host mounts the stage read-write (RobTand/prismabuild#801). PrismaBuild
+keeps bytes, proof and full credit in both cases
+-- and it is the ONLY case this lane waits on, paced and bounded by the
 `staging_timeout_s` already bound at `bind_produced_output`, against one
 ABSOLUTE deadline that a re-driven retirement cannot reset. A live pin is a
 real foreign-reader failure, preserved and never waited on; a deferred
-handoff is a promotion lifecycle that is not this lane's. The reason is matched as the EXACT string
-PrismaBuild writes (`own-copy-in-flight`), and three receipts are surfaced
+handoff is a promotion lifecycle that is not this lane's. Each reason is matched as the EXACT string
+PrismaBuild writes (`own-copy-in-flight`, `own-egress-in-flight`), and three receipts are surfaced
 as `BoundaryEgressUnclassified` rather than decided: no `deferred_own` key
 at all with no other positive cause, a non-empty `deferred_own` naming an
 unrecognised reason, and a `deferred_own` that is not a list. A missing key

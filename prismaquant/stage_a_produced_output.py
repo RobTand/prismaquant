@@ -258,12 +258,23 @@ DEFERRED_OWN_FIELD = "deferred_own"
 #: this lane has never seen is not a reason it may wait on.
 OWN_COPY_IN_FLIGHT = "own-copy-in-flight"
 
+#: The ``deferred_own`` reason ``retire_batch`` reports while the retirement's
+#: own egress action is queued or running on the tier host
+#: (``produced_output.OWN_EGRESS_IN_FLIGHT``, RobTand/prismabuild#801). Only
+#: the tier host mounts the stage read-write, so an owner on a GPU host cannot
+#: delete its staged files in its own process: PrismaBuild publishes the egress
+#: as an action placed on the tier host and answers this until that action has
+#: ended. Bytes, proof and full credit are kept exactly as for an own-copy
+#: deferral, and the same ordinary retry completes the retirement.
+OWN_EGRESS_IN_FLIGHT = "own-egress-in-flight"
+
 #: Every reason a bounded wait is correct for. A non-empty ``deferred_own``
 #: carrying anything outside this set is surfaced, because "PrismaBuild
 #: deferred for a reason I do not recognise" and "PrismaBuild deferred on
-#: its own in-flight copy" are different facts and only the second one is
+#: its own in-flight work" are different facts and only the second one is
 #: known to clear on retry.
-RECOGNISED_DEFERRED_OWN_REASONS = frozenset({OWN_COPY_IN_FLIGHT})
+RECOGNISED_DEFERRED_OWN_REASONS = frozenset(
+    {OWN_COPY_IN_FLIGHT, OWN_EGRESS_IN_FLIGHT})
 
 
 #: What each surfaced classification means, in the one place a reader of
@@ -359,11 +370,14 @@ def classify_egress_outcome(outcome) -> str:
     answers below is waited on; every other one is visible.
 
     ``own-copy-deferral`` -- WAIT
-        ``deferred_own`` is a list naming only :data:`OWN_COPY_IN_FLIGHT`.
-        PrismaBuild deferred this retirement on the evicted mover's OWN
-        still-live claimed copy: bytes, proof and full credit are kept, and
-        ordinary retry returns the token once that child mover reaches
-        terminal. The only case this lane waits on.
+        ``deferred_own`` is a list naming only reasons in
+        :data:`RECOGNISED_DEFERRED_OWN_REASONS`. PrismaBuild deferred this
+        retirement on this lane's OWN in-flight work -- the evicted mover's
+        still-live claimed copy (:data:`OWN_COPY_IN_FLIGHT`), or the
+        retirement's own egress action on the tier host
+        (:data:`OWN_EGRESS_IN_FLIGHT`): bytes, proof and full credit are
+        kept, and ordinary retry returns the token once that child action
+        reaches terminal. The only case this lane waits on.
     ``egress-deferral-unrecognised`` -- SURFACE
         ``deferred_own`` is a non-empty list naming something else. A
         deferral this lane has never seen is not one it may wait out.

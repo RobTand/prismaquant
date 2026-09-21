@@ -1907,13 +1907,19 @@ def test_the_egress_classifier_reads_the_confirmed_receipt_shape():
     """
 
     from prismaquant.stage_a_produced_output import (
-        OWN_COPY_IN_FLIGHT, classify_egress_outcome)
+        OWN_COPY_IN_FLIGHT, OWN_EGRESS_IN_FLIGHT, classify_egress_outcome)
 
     assert OWN_COPY_IN_FLIGHT == "own-copy-in-flight"
+    assert OWN_EGRESS_IN_FLIGHT == "own-egress-in-flight"
     assert classify_egress_outcome({"ok": True}) == "retired"
-    # 1. The one that waits.
+    # 1. The ones that wait: the mover's own live copy, and the retirement's
+    #    own egress action on the tier host (RobTand/prismabuild#801), which
+    #    an owner on a GPU host always sees because only the tier host can
+    #    delete from the stage.
     assert classify_egress_outcome(_incomplete(
         deferred_own=["own-copy-in-flight"])) == "own-copy-deferral"
+    assert classify_egress_outcome(_incomplete(
+        deferred_own=["own-egress-in-flight"])) == "own-copy-deferral"
     # 2. Non-empty, unrecognised reason: visible, never waited on.
     assert classify_egress_outcome(_incomplete(
         deferred_own=["some-other-hold"])) == "egress-deferral-unrecognised"
