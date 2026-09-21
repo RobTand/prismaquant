@@ -490,6 +490,32 @@ class StreamedBoundaryArtifacts:
             # owner disposing of its files.
             self._produced_index.pop(reference, None)
 
+    def _reclaim_produced_origin_for_group(self, key, group):
+        """Release a group's durable charge when both conditions hold.
+
+        Group-keyed, because the reference-keyed gate below cannot reach
+        this case: a group whose retirement was REFUSED at window exit has
+        already had its entries unlinked and dropped from the lookup index,
+        so when the drain later succeeds there is no live reference left to
+        ask about. Without this, exactly the groups that hit the
+        exceptional path would keep their charge forever -- the leak the
+        gate exists to prevent, surviving in its own error branch.
+        """
+
+        if group.get("origin_reclaimed") or not group["retired"]:
+            return
+        for held in group["references"]:
+            if Path(held.path).exists():
+                return
+        out = self._produced.reclaim_origin(group["batch_id"])
+        if out.get("ok"):
+            group["origin_reclaimed"] = True
+            self.telemetry["produced_groups_origin_reclaimed"] += 1
+        else:
+            self._produced_release_errors.append(
+                {"batch_id": group["batch_id"], "step": "reclaim_origin",
+                 "reason": {"refusal": out.get("refusal")}})
+
     def _reclaim_produced_origin_if_final(self, reference):
         """Free a group's DURABLE charge once its last origin file is gone.
 
@@ -515,21 +541,9 @@ class StreamedBoundaryArtifacts:
         """
 
         key, group = self._produced_group_for(reference)
-        if group is None or group.get("origin_reclaimed"):
+        if group is None:
             return
-        if not group["retired"]:
-            return
-        for held in group["references"]:
-            if Path(held.path).exists():
-                return
-        out = self._produced.reclaim_origin(group["batch_id"])
-        if out.get("ok"):
-            group["origin_reclaimed"] = True
-            self.telemetry["produced_groups_origin_reclaimed"] += 1
-        else:
-            self._produced_release_errors.append(
-                {"batch_id": group["batch_id"], "step": "reclaim_origin",
-                 "reason": {"refusal": out.get("refusal")}})
+        self._reclaim_produced_origin_for_group(key, group)
 
     def retire(self, reference):
         if self._readonly:
@@ -1314,6 +1328,11 @@ class StreamedBoundaryArtifacts:
         if group is None:
             raise RuntimeError(
                 "exact boundary reference is not in any produced group")
+        return self._retire_produced_group(key, group)
+
+    def _retire_produced_group(self, key, group):
+        """Give one group's stage copy back. The caller names the group."""
+
         if group["retired"]:
             return dict(group["published"] or {})
         if self._active_window is not None:
@@ -1348,12 +1367,20 @@ class StreamedBoundaryArtifacts:
                   "first_reason": None, "last_reason": None})
         record["attempts"] += 1
         try:
-            out = self.release_produced_group(group["references"][0])
+            # By KEY, never by reference: a group whose entries were
+            # disposed while its retirement was refused has no live
+            # reference left to look itself up with, and that is exactly
+            # the group a drain exists for.
+            out = self._retire_produced_group(key, group)
         except Exception as exc:                        # noqa: BLE001
             reason = {"error": repr(exc)}
         else:
             if group["retired"]:
                 self._produced_release_pending.pop(key, None)
+                # The stage copy is gone; if this group's origins went
+                # while its retirement was refused, THIS is the moment its
+                # durable charge becomes releasable.
+                self._reclaim_produced_origin_for_group(key, group)
                 return True
             reason = {"refusal": out.get("refusal"), "step": out.get("step"),
                       "receipt": out.get("receipt")}

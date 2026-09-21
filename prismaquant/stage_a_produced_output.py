@@ -223,7 +223,12 @@ def build_boundary_template(*, output_prefix, tier: str,
         "durable_maxima": {"payload_max_bytes": int(artifact_max_bytes),
                            "checkpoint_max_bytes": int(checkpoint),
                            "temp_max_bytes": int(artifact_max_bytes)},
-        "working_demands": {tier: {"minimum_gib": max(window // 2, 1),
+        # The working MINIMUM is one group, the window is
+        # ``concurrent_groups`` of them: an owner that cannot hold a single
+        # publication group cannot make progress at all, while the window is
+        # what it wants in order to keep the next group ahead of the reader.
+        "working_demands": {tier: {"minimum_gib": max(
+                                       window // max(concurrent_groups, 1), 1),
                                    "window_gib": window}},
         "permitted_tiers": [str(tier)]}))
 
@@ -397,7 +402,8 @@ class BoundaryProducedPublication:
     # -- binding -----------------------------------------------------------
 
     @classmethod
-    def bind_from_admitted_owner(cls, *, queue_root: str | Path, tier: str,
+    def bind_from_admitted_owner(cls, *, queue_root: str | Path,
+                                 tier: str | None = None,
                                  slot: str | None = None,
                                  env: Mapping[str, str] | None = None,
                                  command_extra: tuple[str, ...] = (),
@@ -422,7 +428,20 @@ class BoundaryProducedPublication:
             raise BoundaryProducedBindingError(
                 f"the owner action {owner[:12]} declares no "
                 f"produced-output template: {exc}") from exc
-        if str(tier) not in template.get("permitted_tiers", []):
+        permitted = list(template.get("permitted_tiers", []))
+        if tier is None:
+            # The runtime is told which tier CLASSES it may read; the tier
+            # ID is the declaration's own. Deriving it is only honest when
+            # the declaration leaves no choice, so more than one permitted
+            # tier refuses rather than picking.
+            if len(permitted) != 1:
+                raise BoundaryProducedBindingError(
+                    "no tier was named and the declared template permits "
+                    f"{permitted!r}: a produced-output owner binds ONE tier, "
+                    "and choosing between several is the submitter's to "
+                    "declare, not this process's to guess")
+            tier = str(permitted[0])
+        if str(tier) not in permitted:
             raise BoundaryProducedBindingError(
                 f"tier {tier!r} is not in the declared template's "
                 "permitted tiers")

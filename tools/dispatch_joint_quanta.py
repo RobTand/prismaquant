@@ -132,29 +132,37 @@ class ExecutableBindingUnsupported(DispatchRefused):
 
 
 class ProducedOutputDeclarationUnsupported(DispatchRefused):
-    """A Stage A produced-output template cannot be SEALED at submit yet.
+    """The client in front of this dispatcher cannot SEAL a template.
 
-    The runtime half of the bridge exists: an admitted owner binds through
-    ``produced_output.declared_template`` and reads its own boundary
-    entries back. The submit half does not. A produced-output owner is
-    admitted only when the queue row carries the template
-    (``queue.publish(produced_output_template=...)``) AND the sealed
-    request carries the matching declaration
-    (``params["produced_output_template"]`` validated against an input
-    ingested under ``core.PRODUCED_OUTPUT_TEMPLATE_INPUT_ID``) -- and the
-    published ``pbrun`` exposes no flag that does either. It is not in the
-    deployed client's argument list and the candidate bundle ships no
-    client at all.
+    A produced-output owner is admitted only when the queue row carries the
+    template AND the sealed request carries the matching declaration,
+    validated against an input ingested under
+    ``core.PRODUCED_OUTPUT_TEMPLATE_INPUT_ID``. The deployed ``pbrun`` does
+    all of that behind ``--produced-output-template``; an older one does
+    none of it.
 
-    So this refuses rather than threading a payload flag that would look
-    like a declaration and admit nothing, which is the same fail-open shape
-    :class:`ExecutableBindingUnsupported` already refuses next door. The
-    capability needed from PrismaBuild is one submit-side flag -- name it
-    what the PB lane wishes -- that takes a template document, ingests it
-    under ``PRODUCED_OUTPUT_TEMPLATE_INPUT_ID``, seals
-    ``produced_output.build_declaration(template, input)`` into
-    ``params``, and passes the template to ``queue.publish``.
+    So this refusal is CONDITIONAL on the client in hand, never blanket:
+    threading a flag an older client ignores would submit a capture that
+    writes its boundary entries and then cannot read them, and adding a
+    payload flag instead would advertise a declaration that admitted
+    nothing.
     """
+
+
+def _pbrun_seals_produced_output(pbrun: Path = PBRUN) -> bool:
+    """Does THIS client carry the produced-output template seal?
+
+    Asked of the client that will actually run, by its own help, rather
+    than assumed from a version or a date. A client that cannot be asked
+    is treated as not carrying it -- the fail-closed direction.
+    """
+
+    try:
+        probe = subprocess.run([sys.executable, str(pbrun), "--help"],
+                               capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "--produced-output-template" in (probe.stdout or "")
 
 
 def build_stage_a_produced_template(*, output_prefix, tier: str,
@@ -650,27 +658,34 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     hardcoded (#835).
 
     ``produced_output_template`` (optional): the pre-submit produced-output
-    declaration that would let the capture read its OWN boundary entries
-    back through PrismaBuild. Passing it refuses with
-    :class:`ProducedOutputDeclarationUnsupported` -- the published client
-    has no flag that seals a template into the request and the queue row,
-    and a payload flag alone would advertise an admission that never
-    happened.
+    declaration that lets the capture read its OWN boundary entries back
+    through PrismaBuild. It rides as a pbrun ENVELOPE option, so the client
+    ingests it as a declared input, seals the matching declaration into the
+    request params and carries the template onto the queue row -- and
+    derives the bounded window's tier demand from the template rather than
+    from anything restated here. A client without that flag refuses
+    (:class:`ProducedOutputDeclarationUnsupported`) rather than submitting
+    a capture that could write its entries and not read them.
 
     ``binding`` (optional) is a precomputed :func:`_stage_manifest_binding`
     for this manifest and campaign, so a caller that also records the
     digests does not read the manifest twice.
     """
     if produced_output_template is not None:
-        raise ProducedOutputDeclarationUnsupported(
-            "stage-A submission names a produced-output template "
-            f"({produced_output_template}), but the published pbrun seals "
-            "none: the owner's request must carry the declaration in "
-            "params against an ingested "
-            "prismabuild.produced-output-template input, and the queue row "
-            "must carry the template itself. Refusing rather than "
-            "submitting a capture that would write its boundary entries "
-            "and then be unable to read them")
+        if not Path(produced_output_template).is_file():
+            raise DispatchRefused(
+                "stage-A produced-output template is not a file: "
+                f"{produced_output_template}")
+        if not _pbrun_seals_produced_output():
+            raise ProducedOutputDeclarationUnsupported(
+                "stage-A submission names a produced-output template "
+                f"({produced_output_template}), but the client at {PBRUN} "
+                "carries no --produced-output-template: the owner's request "
+                "must seal the declaration against an ingested "
+                "prismabuild.produced-output-template input and the queue "
+                "row must carry the template itself. Refusing rather than "
+                "submitting a capture that would write its boundary entries "
+                "and then be unable to read them")
     if binding is None:
         binding = _stage_manifest_binding(adjoint_manifest, campaign)
     if artifact_budget_bytes is not None:
@@ -725,6 +740,13 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         argv += ["--progress-phase", f"{phase}={grace}"]
     argv += ["--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
              "--cpus", "10"]
+    if produced_output_template is not None:
+        # An ENVELOPE option, before the payload separator, like every
+        # other pbrun flag. Not a payload flag: the seal has to happen on
+        # the request and the queue row, which is the submitting client's
+        # job, and the tier demand for the bounded window is derived by
+        # pbrun from the template itself -- so nothing here adds it again.
+        argv += ["--produced-output-template", str(produced_output_template)]
     if container_image is not None:
         # Before the separator, like every other pbrun option; see the
         # quantum row above and RobTand/prismabuild#714.

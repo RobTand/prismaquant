@@ -1088,7 +1088,7 @@ def _io_counters() -> dict:
     return values
 
 
-def bind_stage_a_produced_output(*, tier, artifact_max_bytes,
+def bind_stage_a_produced_output(*, artifact_max_bytes, tier=None,
                                  queue_root=None, env=None,
                                  command_extra=()):
     """This action's own PrismaBuild produced-output publication, or None.
@@ -1108,6 +1108,11 @@ def bind_stage_a_produced_output(*, tier, artifact_max_bytes,
     runs under (the plan's sealed ``max_artifact_bytes`` or this run's
     override). A capture admitted against one budget and running under
     another is producer/consumer drift and must refuse, not adapt.
+
+    ``tier`` is optional and normally omitted: the payload carries tier
+    CLASSES, not a tier id, so the tier is the declaration's own -- derived
+    when the template permits exactly one, refused when it permits several
+    (that choice belongs to whoever declared the template).
 
     ``None`` is returned in exactly ONE case: this process carries no
     PrismaBuild launch context at all (a legacy or local invocation), so
@@ -1306,6 +1311,8 @@ def run_adjoint_capture(
             layers=runner.num_layers, partitions=1,
             base_units=data.progress_committed, log=lambda message: print(
                 f"joint_cost_stage_a: {message}", flush=True))
+        publication = bind_stage_a_produced_output(
+            artifact_max_bytes=int(artifact["run_used"]))
         receipt = run_adjoint_capture_core(
             runner, ids.to(runner.device), execution=execution,
             output_root=output_root, stride=stride_value,
@@ -1317,7 +1324,8 @@ def run_adjoint_capture(
             campaign_scope=config.get("campaign_scope"),
             boundary_artifact_bytes=int(artifact["run_used"]),
             artifact_budget_stamp=artifact["override"],
-            min_free_gib=config.get("min_free_gib", 0.0), progress=progress)
+            min_free_gib=config.get("min_free_gib", 0.0), progress=progress,
+            produced_output=publication)
         receipt["stride"]["source"] = stride_source
         torch.cuda.synchronize()
         result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()

@@ -802,14 +802,27 @@ def test_a_refused_release_is_recorded_and_drained_not_dropped(
                     consumer_action_key=holder_key,
                     residency_root=str(publication.fragment_root())) is True
 
-        # The pin is gone: the next window drains the debt through the SAME
-        # PrismaBuild retire before publishing anything new.
-        with storage.prefetch(references) as window:
-            storage.get(window, references[0])
-        assert storage.telemetry["produced_group_release_retries"] >= 1
-        assert storage.produced_release_debt() == {"pending": {},
-                                                   "abandoned": {}}
+        # The leak that lives ONLY in the exceptional branch: the group's
+        # entries are disposed while its retirement is still refused, so
+        # the reference-keyed reclaim gate can never see this group again
+        # -- its references are unlinked and out of the lookup index.
+        for reference in references:
+            storage.retire(reference)
+        assert storage.produced_group_records()[0]["origin_reclaimed"] is False, (
+            "nothing is reclaimed while the stage copy is still held")
+        assert storage.produced_group_records()[0]["retired"] is False
+
+        # The pin is gone, so the drain re-drives the SAME PrismaBuild
+        # retire -- by group key, because there is no live reference left
+        # to find it with -- and the charge check rides with it.
+        storage._drain_produced_releases()
+    assert storage.telemetry["produced_group_release_retries"] >= 1
+    assert storage.produced_release_debt() == {"pending": {}, "abandoned": {}}
     assert storage.produced_group_records()[0]["retired"] is True
+    assert storage.produced_group_records()[0]["origin_reclaimed"] is True, (
+        "the drained retire released the charge of a group whose origins "
+        "went while its retirement was refused")
+    assert publication.durable_charge()["payload"] == 0
 
 
 def test_a_groups_durable_charge_is_reclaimed_when_its_last_origin_goes(
@@ -1020,16 +1033,18 @@ def test_the_sdk_loads_one_generation_even_when_the_install_lacks_it():
         sdk_submodule("produced_output")
 
 
-def test_the_dispatcher_refuses_a_template_it_cannot_seal():
-    """The submit half is missing, and the dispatcher says so.
+def test_the_dispatcher_seals_the_template_the_client_supports(
+        tmp_path, monkeypatch):
+    """The seal rides the SUBMISSION, and only on a client that has it.
 
     An admitted produced-output owner needs the template on the queue row
-    AND the matching declaration in the sealed request. The published
-    client seals neither, so naming a template at submit refuses rather
-    than producing an argv that looks like a declaration and admits
-    nothing. The derived template itself is checked here too: the durable
-    origin class maximum is the configured artifact max, and the window
-    comes from the actual maximum group.
+    AND the matching declaration in the sealed request -- which is the
+    submitting client's job, not a payload flag's. The deployed pbrun does
+    it behind --produced-output-template; an older one does not, so the
+    refusal is conditional on the client in hand rather than blanket. The
+    derived template is checked here too: the durable origin class maximum
+    is the configured artifact max, and the window comes from the actual
+    maximum group.
     """
 
     import sys
@@ -1054,10 +1069,41 @@ def test_the_dispatcher_refuses_a_template_it_cannot_seal():
         "2 tokens) for the current and the next group -- never derived "
         "from the retained origin peak", template["working_demands"])
 
+    # The deployed client seals it; an older one does not, and the
+    # dispatcher asks the client in hand rather than assuming either.
+    import dispatch_joint_quanta as djq
+    document = tmp_path / "produced-output-template.json"
+    document.write_text(json.dumps(template, sort_keys=True))
+
+    monkeypatch.setattr(djq, "_pbrun_seals_produced_output", lambda *a: False)
     with pytest.raises(ProducedOutputDeclarationUnsupported,
-                       match="published pbrun seals none"):
+                       match="carries no --produced-output-template"):
         stage_a_argv(Path("/nonexistent/manifest.json"), {},
-                     produced_output_template=Path("/tmp/does-not-matter"))
+                     produced_output_template=document)
+
+    monkeypatch.setattr(djq, "_pbrun_seals_produced_output", lambda *a: True)
+    monkeypatch.setattr(djq, "_stage_manifest_binding", lambda *a, **k: {
+        "data_manifest_sha256": "a" * 64, "read_manifest_sha256": "b" * 64,
+        "phases": ["head"]})
+    monkeypatch.setattr(djq, "_container_wrap",
+                        lambda spec, payload: (list(payload), None))
+    monkeypatch.setattr(djq, "_plan_output_root", lambda campaign: "/tmp/out")
+    argv = stage_a_argv(Path("/nonexistent/manifest.json"),
+                        {"plan_path": "/p", "plan_sha256": "c" * 64,
+                         "prepared_path": "/q", "prepared_sha256": "d" * 64},
+                        produced_output_template=document)
+    assert "--produced-output-template" in argv, argv
+    flag = argv.index("--produced-output-template")
+    assert argv[flag + 1] == str(document)
+    assert flag < argv.index("--"), (
+        "the seal is an ENVELOPE option the client acts on, never a payload "
+        "flag the capture would merely read", argv)
+    assert "--produced-output-template" not in argv[argv.index("--"):]
+
+    # pbrun derives the bounded window's tier demand from the template, so
+    # the dispatcher must not restate it.
+    demands = [argv[i + 1] for i, word in enumerate(argv) if word == "--demand"]
+    assert not any("stage" in value for value in demands), demands
 
 
 def test_the_pinned_candidate_provenance_is_immutable():
