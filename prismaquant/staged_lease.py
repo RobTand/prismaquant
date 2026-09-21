@@ -23,10 +23,18 @@ nothing here re-implements, shadows, or diverges from it:
 - Material integrity failure fails clear with no alternate-copy
   adoption; availability refuses the leg (a RAM leg may then acquire
   SSD covers honestly, with its own material and lifetime).
-- Covers come from actual PB identity: the composed map's leads plus its
-  manifest for the stage tier, and the PB `covers_for_keys` lookup for
-  RAM tiers (resolved per key, cross-checked against the sealed entry,
-  never equated). SSD leads are never consulted for RAM identity.
+- Covers come from actual PB identity: the PB `covers_for_keys` lookup
+  resolves the minimal covering movers for the requested key on BOTH
+  tiers — stage-tier selection is bounded to the current consumer,
+  manifest, tier and the SSD empty epoch and cross-checked against the
+  sealed entry before adoption; RAM covers resolve at the announced
+  epoch, never equated. The composed map's leads are heritage, not a
+  covering set: an egress legitimately retires a lead's fragment and
+  material once its phase is read past, and ``acquire`` requires every
+  named cover to exist, so naming all leads let one retired, unrelated
+  mover poison any later entry (Stage A ``f9951e60``: every model-87..90
+  SSD entry refused ``unpublished`` while its own mover was complete).
+  SSD leads are never consulted for RAM identity.
 - Fork safety: supported PQ readers use threads and owned pread
   buffers, and every window operation (open, close, exit) plus every
   reader payload/lifecycle operation rejects inherited handle
@@ -562,6 +570,58 @@ def resolve_ram_covers(resolver, declared, entry):
     return covers, key
 
 
+def resolve_stage_covers(resolver, declared, entry):
+    """Stage-tier covers via the PB cover lookup: minimal, per requested key.
+
+    The composed map's leads are heritage, not a covering set: an egress
+    legitimately retires a lead's fragment and material once its phase is
+    read past, and ``acquire`` requires every named cover to exist — so
+    naming all leads let one retired, unrelated mover poison any later
+    entry with ``unpublished``. ``covers_for_keys`` resolves the minimal
+    covering movers for the ACTUAL requested key from the current
+    consumer's fragments plus publish-time sidecars, bounded to this
+    consumer, manifest, tier and the SSD empty epoch; PQ cross-checks the
+    helper's expected bytes/digest against the sealed composed-map entry
+    before adopting anything — a divergent proof fails clear as
+    integrity. Selection only, exactly like the RAM leg: the SDK's
+    ownership-lock acquire stays the admission authority, and movers are
+    never invented from paths.
+    """
+    from .residency_map import residency_map_key
+    sdk, ctx = resolve_context()
+    identity = resolver.lease_identity()
+    stage_tier = identity["tier_id"]
+    if not stage_tier:
+        raise _refuse("stage-not-announced", kind="availability")
+    key = residency_map_key(str(declared), entry["offset"])
+    if not hasattr(sdk, "covers_for_keys"):
+        raise _refuse("stage-covers-unresolved: no cover lookup",
+                      kind="availability")
+    try:
+        answer = sdk.covers_for_keys(
+            identity["residency_root"], str(ctx["action_key"]), [key],
+            tier_id=stage_tier, manifest_sha256=identity["manifest_sha256"],
+            epoch="", context=_ACQUIRE_CONTEXT)
+    except Exception as exc:
+        raise _refuse(f"stage-cover-lookup-error: {exc}",
+                      kind="integrity") from None
+    if not isinstance(answer, dict) or not answer.get("ok"):
+        refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
+        raise _refuse(str(refusal), kind=_classify(refusal))
+    expected = answer.get("expected")
+    got = expected.get(key) if isinstance(expected, dict) else None
+    if (not isinstance(got, dict) or got.get("bytes") != entry["bytes"]
+            or str(got.get("sha256") or "") != str(entry["sha256"] or "")):
+        raise _refuse("stage-cover-proof-divergent", kind="integrity")
+    covers = answer.get("covers")
+    if (not isinstance(covers, list) or not covers
+            or any(not isinstance(cover, dict)
+                   or len(str(cover.get("mover_action_key") or "")) != 64
+                   for cover in covers)):
+        raise _refuse("stage-cover-proof-divergent", kind="integrity")
+    return covers, key
+
+
 def _select_ram_window(resolver, declared, entry):
     """Build (unentered) a RAM-tier lifetime window for one entry.
 
@@ -607,15 +667,16 @@ def acquire_entry_window(resolver, declared, entry: dict):
     copy serves with its own material and lifetime — the full goal, not
     a fallback. An availability refusal on the RAM leg records and falls
     through to SSD; an integrity refusal propagates with no alternate
-    adoption. SSD acquires honestly with the map's leads. ``ssd`` outside
-    the allowed tiers refuses.
+    adoption. SSD acquires with minimal per-key covers resolved through
+    the PB cover lookup — never the whole lead set, which a legitimately
+    retired, unrelated mover would poison into ``unpublished``.
+    ``ssd`` outside the allowed tiers refuses.
 
     Enter-time races (republish/retire between this selection and the
     caller's single enter) fail clear by design — no hidden
     reacquisition, no alternate adoption. PB-level retry mints a new
     attempt; bytes are never wrong and the pool is never read.
     """
-    from .residency_map import residency_map_key
     from .staged_tier_policy import tier_is_allowed
     if entry.get("ram_path") is not None and tier_is_allowed("ram"):
         try:
@@ -626,13 +687,12 @@ def acquire_entry_window(resolver, declared, entry: dict):
             resolver.record_ram_fallback(declared, str(refusal))
     if not tier_is_allowed("ssd"):
         raise _refuse("ssd-not-allowed", kind="availability")
-    key = residency_map_key(str(declared), entry["offset"])
     identity = resolver.lease_identity()
+    covers, key = resolve_stage_covers(resolver, declared, entry)
     window = LeaseWindow({
         "tier_id": identity["tier_id"],
         "epoch": "",
-        "covers": covers_for_leads(identity["leads"],
-                                   identity["manifest_sha256"]),
+        "covers": covers,
         "expected": {key: {"bytes": entry["bytes"],
                            "sha256": entry["sha256"]}},
         "span": {"start_bytes": entry["offset"],
