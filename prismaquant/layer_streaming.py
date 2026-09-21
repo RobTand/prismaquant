@@ -1593,7 +1593,9 @@ def _await_layer_readset(by_shard, *, source_authentication=None):
     if not wanted:
         return
     began = time.monotonic()
-    verdict = await_staged_spans(resolver, wanted, deadline=began + budget)
+    from .staged_lease import stage_cover_is_published
+    verdict = await_staged_spans(resolver, wanted, deadline=began + budget,
+                                 published=stage_cover_is_published)
     if verdict != RANGE_HIT:
         # The time that actually elapsed, never the budget: an undeclared
         # span and a covering entry that failed a check both return from

@@ -16,6 +16,120 @@ deferral that runs its budget out is recorded where it is decided, in the
 wait, alongside the `BoundaryProducedReleaseDeferred` it raises; foreign
 pins, promotion handoffs and egress errors are recorded exactly as before.
 
+Re-stamped (2026-09-21, `fix/stagea-unpublished-905`) for **a lease that sees
+what a stage mover has published now** (PQ #905, PrismaBuild #823). A
+PrismaBuild stage mover republishes its fragment and its material sidecar as
+entries land, under one material generation for its whole run, and the reader
+SDK caches both documents in the caller's `context`: by generation in
+`covers_for_keys`, unconditionally in `acquire`. `staged_lease` kept one
+`context` for the life of the process, so a mover looked at once while it was
+mid-copy stayed frozen there. Stage A r2 leased a shard's 1 MiB header entry,
+waited 37 s for the same mover's 5 GB body entry, saw its map row, and was
+refused `unpublished` for bytes that were on the stage. Two changes. **(1)**
+Every SDK call gets a `context` of its own (`staged_lease._call_context`); a
+stale pair can only hide a key, never serve a wrong one, so nothing else
+changes. Cost: one small fragment read per mover per lease, and leases are per
+staged entry, never per tensor. **(2)** The layer readiness wait
+(`_await_layer_readset`, PQ #874) now also asks whether a covered entry's proof
+is published (`staged_lease.stage_cover_is_published`, selection only, nothing
+pinned): a mover writes the fragment, which puts the row in the map, before the
+sidecar a lease needs, so a row without its sidecar is a range still landing
+and is waited on under the same single deadline. Only `unpublished` waits;
+every other refusal is the read's to make, at once, as before. After the bound
+the refusal stands and nothing is read from the pool. No format, lane, pin,
+kernel order or ship gate changes. Gates:
+`tests/test_stage_cover_mid_copy_mover.py`.
+
+Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
+staged-range resolver asking every covering entry** (PQ #902). PrismaBuild
+refuses a repeated `(path, offset)` and allows an overlap, and stages each
+overlapping entry as a file of its own; its composed map can also name an entry
+whose staged file an eviction has already unlinked (a fragment is dropped only
+after a fully clean eviction, and the map is recomposed on events, not on every
+cycle). `ResidencyResolver.staged_range_outcome` took the lowest-offset
+covering entry and stopped, so a stale neighbour entry hid a healthy range
+behind it and the strict tier policy ended the run on bytes that were staged.
+It now asks every covering entry, lowest offset first; the first to pass serves
+the span, and `RANGE_REFUSED` means all of them failed (reporting the first
+reason, so a span with one covering entry behaves as before). A span served by
+a later entry is counted in `range_rows_passed_over` and is not a fallback.
+**Not changed:** a covering entry whose file is missing, while the layer's own
+range is declared but has not landed, still refuses instead of waiting. No
+format, lane, pin, kernel order or ship gate changes. Gates:
+`tests/test_staged_range_every_covering_entry.py`.
+
+Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
+stage-A read manifest and the reader it describes** (PQ #898). A read manifest
+is a claim about what a reader will read, and nothing compared the two.
+`build_adjoint_manifest` copies each `layer-N` phase's source entries from the
+parent manifest verbatim, so a parent with a hole seals a stage-A readset with
+the same hole. The GLM-5.3-Flash 512 campaign's parent (`71fd8f56…`) drops the
+tails of layers 9, 19, 29 and 39: 3.05, 1.66, 0.20 and 2.21 GB. Each tail opens
+a shard for which an earlier phase already holds a 1 MiB header entry at
+`(path, 0)`; PrismaBuild refuses a manifest that repeats a `(path, offset)`, so
+the tail's own extent was dropped instead of clipped. Under the strict
+staged-tier policy the run refuses at the layer-9 prefetch
+(`staged-tier-forbidden: readset-not-staged`), which is the policy working: the
+bytes were never declared, so nothing staged them. Before the strict policy
+they were read from the HDD pool silently (PQ #822).
+`joint_layer_quanta.read_layer_source_spans` reads what
+`layer_streaming._read_layer_to_device` reads, every checkpoint tensor under the
+layers prefix, from the checkpoint index and each shard's header (stdlib only).
+`build_adjoint_manifest(layer_source_spans=...)` then **completes** each layer
+phase and **gates** the result:
+
+- A tensor counts as covered only when **one** entry of its own layer's phase
+  contains its whole span. The staged reader serves a span from the one staged
+  range that contains it; a span straddling two ranges is a pool read, which
+  the strict policy refuses. Coverage by another layer's phase does not count
+  toward this gate either, because PrismaBuild stages and evicts by phase. The
+  gate is about what is **declared**, not about which entry the reader picks:
+  the resolver asks every map entry that covers a span, lowest offset first, so
+  a neighbour's header entry still serves a layer's first tensors while it is
+  staged, and the layer's own entry serves them once it is not (PQ #902).
+- Each run of uncovered tensors becomes one entry from the first tensor's own
+  file offset to the last one's end. The offset is derived, not aligned, so it
+  cannot land on a header entry's `(path, 0)`.
+- Added entries are appended after every parent entry, so recorded entry
+  indices do not move. `forward-NNN` and `chain-NNN` share one index run, as
+  before. What was added is recorded in `annotations.source_completion`.
+- The finished manifest is refused if any span is still uncovered.
+
+**The default is unchanged**: without `layer_source_spans` the manifest is
+byte-identical to what the function always built, and the recorded campaign
+manifest `43f40d18…` reproduces byte for byte from its recorded inputs.
+Completed, it gains 47 entries: the four tails, and 43 first-of-shard F32
+tensors (safetensors orders a shard by dtype, so a layer's few F32 tensors sit
+in the first 80 KB of a shard whose first MiB a neighbouring layer's phase
+declares). PrismaBuild's `validate_data_manifest` and `manifest_phase_ranges`
+accept it. **Not changed:** the per-layer slice manifests and the quantum records
+that seal them. They tile the parent byte for byte (§3.1 of the distributed
+campaign contract), so they carry the same four holes into Stage B; that is
+filed separately. Gates: `tests/test_stagea_readset_source_coverage.py`.
+
+Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
+scope of Stage A's kernel-time profiler** (PQ #899). `run_adjoint_capture`
+held one `torch.profiler` CUDA session (`KernelTimeProfiler`) across the whole
+forward and chain passes (it opened after the head walk and the artifact
+preflight) and stopped it in its `finally`. Kineto holds every CUDA
+record in host memory until the stop, and the stop then builds the whole trace.
+On the 512-sample run of 2026-09-21 (PB action `e9840722d83d`, sparklina; pqteld)
+AnonPages grew 7.4 GB to 10.9 GB in 15 minutes of collecting and 10.9 GB to
+32.3 GB in the 135 s after the stop, on a box whose host and GPU share one pool.
+The capture had already raised; the kernel killed the process before the
+traceback printed, and PrismaBuild recorded exit 137 and an stdout ending at
+`profiler_stop`. GPU-side memory was flat at 78.8 GB, inside the 80 GiB budget.
+**Stage A now holds no profiler session unless
+`PRISMAQUANT_STAGE_A_KERNEL_PROFILE=1`.** `KernelTimeProfiler(not_measured=...)`
+opens nothing and reports `kernel_active_s: None` with the reason; `counters.json`
+and `results.json` read the value through `block()`, so a profiler that could
+not measure no longer reports `0.0`. The GPU power sampler is bounded and stays
+on, so the receipt still carries power against the envelope (principle 15).
+A failing capture prints `capture failed: <type>: <message>` before any
+teardown. Stage B's per-chain and per-window sessions are bounded scopes and are
+unchanged. No format, lane, pin, kernel order or ship gate changes. Gates:
+`tests/test_stage_a_kernel_profile_scope.py`.
+
 Re-stamped (2026-09-21, `feat/stagea-owner-loop-readahead-20260921`) for
 **read-ahead in the Stage A produced-boundary owner loop** (PQ #887). No
 format, lane, pin, ship-gate verdict or kernel order changes, and the
@@ -237,7 +351,9 @@ future range is a worker the current layer's already-staged reads queue
 behind; a ready current-layer read now proceeds while every lookahead layer is
 cold. It waits under one deadline for the whole layer, however many shards it
 spans (`PRISMAQUANT_STAGED_RANGE_WAIT_S`, default 300 s, `0` restores the
-pre-#874 behaviour, and the value must be finite). It only ever waits: it
+pre-#874 behaviour, and the value must be finite). A covered entry whose
+material sidecar PrismaBuild has not written yet counts as not landed, asked
+once per staged entry per poll (PQ #905). It only ever waits: it
 never reads payload and never refuses, so an unreachable range still fails
 from the same line with the same error. It is scoped by
 `policy_is_active()`, so a non-strict reader holding a map is untouched, and
