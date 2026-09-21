@@ -220,6 +220,12 @@ class StreamedBoundaryArtifacts:
         self._checkpoint_active = None
         self._next_checkpoint_reservation = 1
         self._transient_hold_bytes = 0
+        # Produced-output binding (Stage A's own entries staged through PB).
+        # None on every ordinary path: an unbound owner writes, reads and
+        # retires exactly as it did before produced output existed.
+        self._produced = None
+        self._produced_plan = None
+        self._produced_groups = {}
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -229,7 +235,9 @@ class StreamedBoundaryArtifacts:
             "checkpoint_envelope_unused_bytes": 0,
             "written_tensor_bytes": 0, "read_tensor_bytes": 0,
             "written_entries": 0, "retired_entries": 0, "prefetch_windows": 0,
-            "hot_read_misses": 0}
+            "hot_read_misses": 0,
+            "produced_groups_prewritten": 0, "produced_groups_published": 0,
+            "produced_groups_materialized": 0, "produced_groups_retired": 0}
 
     def __enter__(self):
         return self
@@ -419,6 +427,17 @@ class StreamedBoundaryArtifacts:
                 f"{self.config['max_artifact_bytes']}")
         name = f"{slot}-at-{boundary_index}"
         identity = {"session": self.session, "slot": slot, "kind": kind, "coordinates": coordinates}
+        # BEFORE the first byte: a bound owner claims its group's durable
+        # budget, or refuses with nothing written. The claim covers the
+        # whole 64-entry group once, so the remaining writes in it cost no
+        # further call, and it holds no stage credit -- the funding happens
+        # at the commit inside the deferred publish.
+        produced_group = None
+        if self._produced is not None:
+            produced_group = self._produced_prewrite(self._produced_group_key(
+                kind=kind, batch_index=batch_index, boundary_index=boundary_index,
+                probe_index=probe_index,
+                group_size=self._produced_plan["group_size"]))
         self._reserve(nbytes)
         try:
             with torch.profiler.record_function("aura.exact_activation.write"):
@@ -428,6 +447,8 @@ class StreamedBoundaryArtifacts:
             self._reserve(-nbytes)
         self._references[name] = reference
         self._slots[slot] = reference
+        if produced_group is not None:
+            produced_group["references"].append(reference)
         self.telemetry["written_entries"] += 1
         self.telemetry["written_tensor_bytes"] += nbytes
         self.telemetry["live_artifact_bytes"] += reference.file_bytes
@@ -914,6 +935,266 @@ class StreamedBoundaryArtifacts:
                 continue
             self._dispose_retained_entry(reservation_id, entry)
 
+    # ------------------------------------------------------------------
+    # Produced-output binding: this owner's own entries, staged by PB.
+    #
+    # Without it a Stage A action writes its boundary entries and then
+    # refuses to read them: the strict allowed-tier path resolves the
+    # process residency map, which is the map of the run's SEALED INPUTS,
+    # and an output this action just produced is not in it. There is no
+    # own-session exemption, so the entries go through PrismaBuild's
+    # produced-output lifecycle like any other staged object.
+    #
+    # The unit is the EXISTING 64-entry logical publication group -- the
+    # same window ``prefetched_boundary_batches`` already yields -- so a
+    # group is prewritten once, published once, staged by one PB mover and
+    # read back through one namespaced reader context. Per-entry movers
+    # were considered and rejected: a boundary entry is ~1 GiB, and one
+    # mover each would be hundreds of sealed actions for a window PB can
+    # move as one.
+    #
+    # PUBLISH IS DEFERRED TO THE FIRST READ. ``require_prewrite`` charges
+    # only the durable class budget and holds no ledger tokens, while the
+    # commit inside ``publish_prepaid_batch`` funds the stage window by
+    # exact transfer. Publishing at write time would therefore spend the
+    # whole stage credit on groups nothing has asked for yet -- the first
+    # boundary's writes must all land under the durable maxima WITHOUT
+    # consuming the stage credits the first read needs.
+    # ------------------------------------------------------------------
+
+    def bind_produced_output(self, publication, *, group_size, n_batches,
+                             max_entry_tensor_bytes):
+        """Stage this generation's entries through ``publication``.
+
+        Called after :meth:`bind`, because the entry directory this owner
+        already chose is what must sit inside the publication's bound
+        output prefix -- an own-generation path outside it is refused here
+        rather than at the first descriptor. ``group_size`` is the read
+        window's batch count (``config['prefetch_batches']``, the 64-entry
+        group), ``n_batches`` bounds the last, partial group, and
+        ``max_entry_tensor_bytes`` is the bound per-entry tensor ceiling
+        the prewrite's conservative per-group ceiling is derived from.
+
+        A read-only attached generation can never take this binding: an
+        attached owner does not write, so it has nothing to declare and its
+        entries stay ordinary input-map reads.
+        """
+
+        if self._produced is not None:
+            raise RuntimeError("exact boundary produced output is already bound")
+        if self._readonly:
+            raise RuntimeError(
+                "an attached read-only generation cannot declare a produced "
+                "output owner: it writes nothing and its entries resolve "
+                "through the ordinary input map")
+        if self.session is None or self.directory is None:
+            raise RuntimeError(
+                "bind the exact boundary generation before its produced output")
+        for name, value in (("group_size", group_size),
+                            ("n_batches", n_batches),
+                            ("max_entry_tensor_bytes", max_entry_tensor_bytes)):
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"produced output {name} must be a positive int")
+        entries = self.directory / "entries"
+        if not publication.contains(entries):
+            raise RuntimeError(
+                f"the exact boundary entry directory {entries} is outside the "
+                f"bound output prefix {publication.output_prefix}: an "
+                "own-generation path must sit inside the prefix its owner "
+                "declared")
+        self._produced = publication
+        self._produced_plan = {"group_size": int(group_size),
+                               "n_batches": int(n_batches),
+                               "max_entry_tensor_bytes": int(max_entry_tensor_bytes)}
+        self._produced_groups = {}
+
+    @staticmethod
+    def _produced_group_key(*, kind, batch_index, boundary_index, probe_index,
+                            group_size):
+        """The logical publication group one entry belongs to.
+
+        Keyed by the read window, not by the file: a boundary plane's 64
+        batches at one boundary are one group, and so is the cotangent
+        plane's 64 at one boundary for one probe. A cotangent rollover
+        writes a NEW canonical name at a new boundary, so it is a new
+        group -- never a second writer of a filed path.
+        """
+
+        return (str(kind), int(boundary_index),
+                -1 if probe_index is None else int(probe_index),
+                int(batch_index) // int(group_size))
+
+    def _produced_group_slots(self, key):
+        """Every canonical entry name the group will write, in batch order."""
+
+        kind, boundary_index, probe, group_index = key
+        plan = self._produced_plan
+        start = group_index * plan["group_size"]
+        stop = min(start + plan["group_size"], plan["n_batches"])
+        for batch_index in range(start, stop):
+            slot = (f"boundary-{batch_index}-{boundary_index}" if probe < 0
+                    else f"cotangent-{probe}-{batch_index}")
+            yield f"{slot}-at-{boundary_index}"
+
+    def _produced_planned_paths(self, key):
+        """The group's planned durable-origin superset: finals and temps.
+
+        Both spellings, because the writer creates the ``.pt.tmp`` staging
+        file and renames it: the prewrite must have charged it before it
+        exists, and the rename makes it absent again, which is exactly what
+        the commit's planned-omitted-absent proof checks. The names are the
+        existing writer's own -- nothing is copied, renamed or hashed to
+        satisfy this.
+        """
+
+        from .perturbed_x_cache import activation_cache_filename
+        directory = self.directory / "entries"
+        paths = []
+        for name in self._produced_group_slots(key):
+            final = directory / activation_cache_filename(name)
+            paths.append(str(final))
+            paths.append(str(final.with_suffix(".pt.tmp")))
+        return paths
+
+    def _produced_prewrite(self, key):
+        """Claim the group's durable budget before its first byte lands."""
+
+        group = self._produced_groups.get(key)
+        if group is not None:
+            return group
+        planned = self._produced_planned_paths(key)
+        kind, boundary_index, probe, group_index = key
+        batch_id = self._produced.batch_id_for(
+            kind=kind, boundary_index=boundary_index,
+            probe_index=None if probe < 0 else probe, group_index=group_index)
+        ceiling = self._produced.group_ceiling_bytes(
+            entries=len(planned) // 2,
+            max_entry_tensor_bytes=self._produced_plan["max_entry_tensor_bytes"])
+        self._produced.require_prewrite(
+            batch_id=batch_id, payload_ceiling_bytes=ceiling, paths=planned)
+        group = {"batch_id": batch_id, "planned": planned,
+                 "references": [], "published": None, "context": None,
+                 "manifest_digest": None, "retired": False}
+        self._produced_groups[key] = group
+        self.telemetry["produced_groups_prewritten"] += 1
+        return group
+
+    def _produced_group_for(self, reference):
+        """Which bound group holds this reference, or None."""
+
+        for key, group in self._produced_groups.items():
+            if reference in group["references"]:
+                return key, group
+        return None, None
+
+    def _produced_publish(self, key, group):
+        """Publish the group once, when a read first asks for it."""
+
+        if group["published"] is not None:
+            return group
+        descriptors = [self._produced.descriptor_for(
+            reference, producer_generation=group["batch_id"])
+            for reference in group["references"]]
+        if not descriptors:
+            raise RuntimeError(
+                f"produced boundary group {group['batch_id']!r} has no "
+                "written entry to publish")
+        group["manifest_digest"] = self._produced.manifest_digest_for(descriptors)
+        group["published"] = self._produced.publish(
+            batch_id=group["batch_id"], descriptors=descriptors)
+        self.telemetry["produced_groups_published"] += 1
+        return group
+
+    def _produced_reader_context(self, references):
+        """Publish and materialize every group this window reads.
+
+        Returns a per-reference resolver: a window spanning a boundary
+        plane and the incoming cotangent plane reads two batches, each
+        vouched in its own material namespace. Nothing polls and nothing
+        falls back -- an unstaged group raises PB's own incomplete signal.
+        """
+
+        wanted = {}
+        for reference in references:
+            key, group = self._produced_group_for(reference)
+            if group is None:
+                raise RuntimeError(
+                    "exact boundary reference is not in any produced group: "
+                    "a bound owner reads only entries it declared")
+            wanted[key] = group
+        contexts = {}
+        for key, group in wanted.items():
+            self._produced_publish(key, group)
+            if group["context"] is None:
+                resolver, block = self._produced.reader_context(
+                    batch_id=group["batch_id"],
+                    manifest_digest=group["manifest_digest"])
+                group["context"] = (resolver, block)
+                self.telemetry["produced_groups_materialized"] += 1
+            contexts[key] = group["context"][0]
+        by_reference = {reference: contexts[key]
+                        for key, group in wanted.items()
+                        for reference in group["references"]}
+        return lambda reference: by_reference.get(reference)
+
+    def produced_group_records(self):
+        """What this owner published, for a receipt. Never a second ledger."""
+
+        return [{"batch_id": group["batch_id"],
+                 "entries": len(group["references"]),
+                 "manifest_digest": group["manifest_digest"],
+                 "staged": group["context"] is not None,
+                 "retired": group["retired"]}
+                for group in self._produced_groups.values()]
+
+    def _release_unpublished_prewrites(self):
+        """Give back the durable headroom of groups that produced nothing.
+
+        A prewrite that was claimed and never committed would otherwise
+        charge its ceiling against the instance's durable maxima for the
+        life of the instance. Aborting is safe only when nothing durable
+        remains, and PrismaBuild proves that itself -- ``abort_prewrite``
+        lstats every planned path and retains on a present or unstatable
+        one, so this never turns a crashed write into freed budget. A
+        published (committed) group is deliberately skipped: its entries
+        are durable and its charge ends at ``reclaim_origin``, not here.
+        """
+
+        if self._produced is None:
+            return
+        for group in self._produced_groups.values():
+            if group["published"] is not None:
+                continue
+            self._produced.abort_prewrite(batch_id=group["batch_id"])
+
+    def release_produced_group(self, reference):
+        """Release the stage copy of the group holding ``reference``.
+
+        Stage retirement only: the durable origin survives, its charge is
+        constant, and this owner still owns disposal of its own entries.
+        Deliberately explicit rather than automatic on window exit -- a
+        group read twice in one pass would otherwise need a re-staging
+        transition PrismaBuild does not publish yet (see
+        ``stage_a_produced_output.BoundaryRematerializationUnavailable``).
+        """
+
+        key, group = self._produced_group_for(reference)
+        if group is None:
+            raise RuntimeError(
+                "exact boundary reference is not in any produced group")
+        if group["retired"]:
+            return dict(group["published"] or {})
+        if self._active_window is not None:
+            raise RuntimeError(
+                "a produced boundary group cannot be retired while its "
+                "window is live: the pin must be released first")
+        out = self._produced.retire(group["batch_id"])
+        if out.get("ok"):
+            group["retired"] = True
+            group["context"] = None
+            self.telemetry["produced_groups_retired"] += 1
+        return out
+
     @contextmanager
     def prefetch(self, references):
         from .perturbed_x_cache import prefetch_exact_activation_cache_entries
@@ -922,13 +1203,20 @@ class StreamedBoundaryArtifacts:
         references = tuple(references)
         for reference in references:
             self._entry_identity(reference)
+        # A bound owner publishes and materializes this window's groups
+        # here, at the FIRST read, and hands the read their namespaced
+        # contexts. An unbound owner passes None and resolves through the
+        # process input map exactly as before.
+        resolver = (None if self._produced is None
+                    else self._produced_reader_context(references))
         with torch.profiler.record_function("aura.exact_activation.prefetch"):
             if self._scratch is None:
                 from .perturbed_x_cache import EntryReadScratch
                 self._scratch = EntryReadScratch()
             context = prefetch_exact_activation_cache_entries(references,
                 expected_session=self.session, max_tensor_bytes=self.config["max_resident_bytes"],
-                residency_check=self._reserve, scratch=self._scratch)
+                residency_check=self._reserve, scratch=self._scratch,
+                resolver=resolver)
             window = context.__enter__()
         self._active_window = window
         self.telemetry["prefetch_windows"] += 1
@@ -976,6 +1264,7 @@ class StreamedBoundaryArtifacts:
                     self._retire(reference, missing_ok=True)
                 self._slots.clear()
             self._reclaim_retained_checkpoints()
+            self._release_unpublished_prewrites()
         except BaseException:
             self._status = "failed"
             raise

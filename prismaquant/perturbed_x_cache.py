@@ -611,7 +611,7 @@ def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):
     return max(storages.values(), default=0) if device == 'meta' else sum(storages.values())
 
 
-def _acquire_bulk_window(path, expected_sha256):
+def _acquire_bulk_window(path, expected_sha256, *, resolver=None):
     """Strict-policy pinned window for a whole-file bulk input.
 
     Returns the entered ``(window, key, staged)``: the RAM leg refuses
@@ -621,10 +621,17 @@ def _acquire_bulk_window(path, expected_sha256):
     reads through held descriptors, verifies content against
     ``expected_sha256``, re-checks the declared file's binding, and exits
     the window (close-then-release) on every path.
+
+    ``resolver`` defaults to the process's input-map resolver, which is
+    what every sealed input, every read-only attached generation and every
+    foreign generation uses -- unchanged. A caller reading its OWN
+    produced batch passes that batch's explicitly namespaced resolver
+    instead; the input map is never swapped out from under anyone.
     """
     from .residency_map import residency_resolver
     from .staged_lease import LeaseRefused, acquire_entry_window
-    resolver = residency_resolver()
+    if resolver is None:
+        resolver = residency_resolver()
     if resolver is None:
         raise LeaseRefused("readset-not-staged", kind="availability")
     staged = resolver.staged_read(path, expected_sha256=expected_sha256)
@@ -633,7 +640,7 @@ def _acquire_bulk_window(path, expected_sha256):
     # acquire_entry_window records its own acquire refusal; the LeaseRefused
     # propagates with kind intact (never converted into a pool read).
     window, key = acquire_entry_window(resolver, path, staged)
-    return window, key, staged
+    return window, key, staged, resolver
 
 
 def _enter_and_open_window(resolver, window, key, path):
@@ -699,10 +706,10 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     source_signature = signature
     window = None
     if strict:
-        from .residency_map import residency_resolver
-        window, key, _staged = _acquire_bulk_window(path, expected_sha256)
+        window, key, _staged, lease_resolver = _acquire_bulk_window(
+            path, expected_sha256)
         descriptor, serving, _tier = _enter_and_open_window(
-            residency_resolver(), window, key, path)
+            lease_resolver, window, key, path)
         source_signature = cache_file_stat_signature(os.fstat(descriptor))
         source, source_before = Path(window.stage_path(key) or path), os.fstat(descriptor)
     def check(label, reserve_bytes=0):
@@ -937,12 +944,21 @@ class _ExactActivationPrefetch:
 @contextmanager
 def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                                             expected_session, residency_check=None,
-                                            release_file_pages=True, scratch=None):
+                                            release_file_pages=True, scratch=None,
+                                            resolver=None):
     """Read/verify the entire bounded window before exposing any tensor.
 
     This is the existing activation artifact owner's exact-input read seam.
     The consumer owns no additional cache and receives no lazy-loading path.
     ``residency_check`` reserves/releases these tensors in its aggregate owner.
+
+    ``resolver`` names which staged reader context this window resolves
+    through. ``None`` -- every existing caller -- is the process input map,
+    resolved exactly as before. An owner reading back its own produced
+    batch passes that batch's namespaced context, or a callable answering
+    one per reference when the window spans two batches; nothing else about
+    the read changes, and every identity fence below still runs on the
+    declared file.
     """
     references = tuple(references)
     if any(not isinstance(ref, ExactActivationReference) for ref in references):
@@ -980,12 +996,19 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             source, source_before = path, prefetched_stat
             lease_window = None
             if strict:
-                from .residency_map import residency_resolver
-                lease_window, lease_key, _staged = _acquire_bulk_window(
-                    path, ref.sha256)
+                # One window may span more than one produced batch (a
+                # boundary plane plus the incoming cotangent plane read in
+                # the same 64-entry window), and each batch is vouched in
+                # its own material namespace. A callable resolver answers
+                # per entry; a plain one answers for the whole window, which
+                # is what every input read passes.
+                entry_resolver = resolver(ref) if callable(resolver) else resolver
+                lease_window, lease_key, _staged, lease_resolver = (
+                    _acquire_bulk_window(path, ref.sha256,
+                                         resolver=entry_resolver))
                 live_windows.append(lease_window)
                 lease_fd, _serving, _tier = _enter_and_open_window(
-                    residency_resolver(), lease_window, lease_key, path)
+                    lease_resolver, lease_window, lease_key, path)
                 source = Path(lease_window.stage_path(lease_key) or path)
                 source_before = os.fstat(lease_fd)
             raw = owned.buffer(ref.file_bytes)
