@@ -171,8 +171,15 @@ def _broker_control(q, owner: str) -> dict:
     return control
 
 
-def _template(prefix: str, *, payload_max_bytes: int = 1 << 20) -> dict:
+def _template(prefix: str, *, payload_max_bytes: int = 1 << 20,
+              temp_max_bytes: int | None = None) -> dict:
     from prismabuild import produced_output as po
+    # The atomic writer's temp lifetime holds the whole serialization
+    # during the write, so the temp ceiling must cover the same bound as
+    # the payload ceiling; a 1 KiB temp ceiling would refuse every real
+    # write at prewrite (deployed contract, honestly kept).
+    if temp_max_bytes is None:
+        temp_max_bytes = payload_max_bytes
     return po.validate_template({
         "schema": po.TEMPLATE_SCHEMA_V1,
         "version": 1,
@@ -181,7 +188,7 @@ def _template(prefix: str, *, payload_max_bytes: int = 1 << 20) -> dict:
         "slots": {"rendered-weights": {"class": "payload"}},
         "durable_maxima": {"payload_max_bytes": payload_max_bytes,
                            "checkpoint_max_bytes": 1 << 10,
-                           "temp_max_bytes": 1 << 10},
+                           "temp_max_bytes": temp_max_bytes},
         "working_demands": {TIER: {"minimum_gib": 1, "window_gib": 2}},
         "permitted_tiers": [TIER],
     })
