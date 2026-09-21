@@ -403,6 +403,15 @@ def _stage_groups(storage, q):
     The publish is what seals the mover; a real producer's fleet then
     admits and executes it. Here the fixture is the fleet, and it uses the
     pool's own claim/execute/finish rather than the sealed argv.
+
+    MUST RUN BEFORE the strict launch identity is exported. ``Pool.execute``
+    spawns the mover as a CHILD, which inherits this process's environment
+    and derives its OWN identity from it; an owner's launch tuple sitting in
+    the environment is a tuple that belongs to a different action, and the
+    launcher refuses it -- "refusing rather than binding a strict identity
+    from half of one". That refusal is correct, so the fixture orders
+    around it instead of weakening it. Measured, not reasoned: the mover
+    exited 1 with exactly that message until the order changed.
     """
 
     for key, group in list(storage._produced_groups.items()):
@@ -464,8 +473,8 @@ def test_own_boundary_group_publishes_stages_and_reads_back(
     assert storage.telemetry["produced_groups_published"] == 0, (
         "publishing at write time would spend the stage credit the first "
         "read needs")
-    _strict(monkeypatch, env, pb_repo)
     _stage_groups(storage, q)
+    _strict(monkeypatch, env, pb_repo)
     with storage.prefetch(references) as window:
         for index, reference in enumerate(references):
             assert torch.equal(storage.get(window, reference),
@@ -493,8 +502,8 @@ def test_multi_window_initial_writes_exceed_the_window_and_fit_durable(
     references = _write_group(storage, count=2 * GROUP_SIZE)
     assert storage.telemetry["produced_groups_prewritten"] == 2
     assert storage.telemetry["produced_groups_published"] == 0
-    _strict(monkeypatch, env, pb_repo)
     _stage_groups(storage, q)
+    _strict(monkeypatch, env, pb_repo)
     for start in (0, GROUP_SIZE):
         window_refs = references[start:start + GROUP_SIZE]
         with storage.prefetch(window_refs) as window:
@@ -557,8 +566,8 @@ def test_a_mutated_origin_refuses_before_any_tensor_is_exposed(
 
     storage, _publication, q, env, pb_repo = _bound_owner(tmp_path)
     references = _write_group(storage, count=1)
-    _strict(monkeypatch, env, pb_repo)
     _stage_groups(storage, q)
+    _strict(monkeypatch, env, pb_repo)
     origin = Path(references[0].path)
     payload = bytearray(origin.read_bytes())
     payload[-1] ^= 0xFF
