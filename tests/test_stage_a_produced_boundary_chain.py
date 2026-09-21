@@ -76,6 +76,11 @@ PIN_PATH = Path(__file__).resolve().parent / "stagea_produced_pb_pin.json"
 #: nor the owner knows that number, which is why this can be 4.
 GROUP_SIZE = 4
 
+#: An owner that owes nothing. Three buckets, not two: an egress refusal
+#: this lane cannot classify is reported in its own, because folding it
+#: into "abandoned" would say a decision was made when none was.
+_NO_DEBT = {"pending": {}, "abandoned": {}, "unclassified": {}}
+
 
 # -- pinned candidate resolution -------------------------------------------
 
@@ -360,7 +365,7 @@ def _execute_mover(q, mover: str) -> dict:
 
 def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
                  payload_max_bytes: int = 1 << 20, window_gib: int = 2,
-                 gib: int = 4):
+                 gib: int = 4, staging_timeout_s: float = 900.0):
     """A real queue, admitted owner, declared template, bound publication,
     and a real ``StreamedBoundaryArtifacts`` writing inside its prefix."""
 
@@ -411,7 +416,8 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
     storage.bind({"source_model": "fixture"}, n_probes=1)
     storage.bind_produced_output(
         publication, group_size=GROUP_SIZE, n_batches=n_batches,
-        max_entry_tensor_bytes=1 << 14)
+        max_entry_tensor_bytes=1 << 14,
+        staging_timeout_s=staging_timeout_s)
     return storage, publication, q, env, pb_repo
 
 
@@ -817,7 +823,7 @@ def test_a_refused_release_is_recorded_and_drained_not_dropped(
         # to find it with -- and the charge check rides with it.
         storage._drain_produced_releases()
     assert storage.telemetry["produced_group_release_retries"] >= 1
-    assert storage.produced_release_debt() == {"pending": {}, "abandoned": {}}
+    assert storage.produced_release_debt() == _NO_DEBT
     assert storage.produced_group_records()[0]["retired"] is True
     assert storage.produced_group_records()[0]["origin_reclaimed"] is True, (
         "the drained retire released the charge of a group whose origins "
@@ -857,7 +863,7 @@ def test_entries_disposed_INSIDE_a_window_still_return_their_credits(
     assert storage.telemetry["produced_groups_retired"] == 1, (
         "the window's stage copy must come back even though nothing it "
         "read is resolvable any more", storage.telemetry)
-    assert storage.produced_release_debt() == {"pending": {}, "abandoned": {}}
+    assert storage.produced_release_debt() == _NO_DEBT
     assert record["retired"] is True and record["origin_reclaimed"] is True
     assert publication.durable_charge() == {"payload": 0, "checkpoint": 0,
                                             "temp": 0}
@@ -942,8 +948,7 @@ def test_repeated_distinct_group_turnover_on_a_single_stage_token(
                     for reference in previous:
                         storage.retire(reference)
             previous = references
-            assert storage.produced_release_debt() == {"pending": {},
-                                                       "abandoned": {}}, (
+            assert storage.produced_release_debt() == _NO_DEBT, (
                 "a window that could not give its credit back would starve "
                 "the next one", index)
     records = {record["batch_id"]: record
@@ -1255,3 +1260,302 @@ def test_the_pinned_candidate_provenance_is_immutable():
         assert not os.access(path, os.W_OK), f"{name} is not immutable"
     import prismabuild
     assert Path(prismabuild.__file__).resolve().is_relative_to(src.resolve())
+
+
+# -- the egress outcome seam ----------------------------------------------
+#
+# PrismaBuild's conservative egress fix makes an evicted mover's own live
+# CLAIMED copy a deferred handoff instead of a second co-owner: bytes,
+# proof and full credit are kept, and ordinary retry returns the token once
+# that child mover reaches terminal. The receipt says so in a NEW top-level
+# key, ``deferred_own`` -- a sibling of ``deferred_handoffs``,
+# ``live_pins``, ``entries_deferred`` and ``errors``, not an entry in any
+# of them. ``retire_batch`` still returns refusal "egress-incomplete", so
+# the refusal is the category and the receipt is the cause.
+#
+# These tests drive the REAL bound owner and the real release path; only
+# the egress receipt is substituted, because provoking a genuine own-copy
+# deferral needs the PrismaBuild candidate that is not pinned yet. The
+# shapes below are the confirmed ones, not invented ones.
+
+
+def _staged_group(tmp_path, monkeypatch, **kwargs):
+    """A real owner with one published, staged, read group."""
+
+    storage, publication, q, env, pb_repo = _bound_owner(tmp_path, **kwargs)
+    references = _write_group(storage)
+    return storage, publication, q, env, pb_repo, references
+
+
+def _incomplete(**receipt) -> dict:
+    """What retire_batch returns when the egress did not complete."""
+
+    body = {"complete": False, "reason": "egress", "live_pins": [],
+            "deferred_handoffs": [], "entries_deferred": 0, "errors": []}
+    body.update(receipt)
+    return {"ok": False, "refusal": "egress-incomplete", "receipt": body}
+
+
+def test_an_own_copy_deferral_is_waited_out_and_then_succeeds(
+        tmp_path, monkeypatch):
+    """The one case this lane waits on: keep asking until PB gives it back.
+
+    PrismaBuild defers rather than destroying anything, so the credit is
+    still there and ordinary retry is what returns it. The adapter must
+    re-drive inside the budget it already has -- not a second one -- and
+    must never declare the group retired on its own.
+    """
+
+    storage, publication, q, env, pb_repo, references = _staged_group(
+        tmp_path, monkeypatch)
+    monkeypatch.setattr(storage, "PRODUCED_DEFERRAL_POLL_S", 0.01)
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with storage.prefetch(references) as window:
+            storage.get(window, references[0])
+            real = publication.retire
+            calls = {"n": 0}
+
+            def deferring(batch_id, **kwargs):
+                calls["n"] += 1
+                if calls["n"] <= 2:
+                    return _incomplete(deferred_own=["own-copy-in-flight"],
+                                       entries_deferred=GROUP_SIZE)
+                return real(batch_id, **kwargs)
+
+            monkeypatch.setattr(publication, "retire", deferring)
+        assert calls["n"] == 3, ("two deferrals, then the real retire", calls)
+    assert storage.produced_group_records()[0]["retired"] is True
+    assert storage.produced_release_debt() == _NO_DEBT, (
+        "a deferral that cleared owes nothing",
+        storage.produced_release_debt())
+    assert storage.telemetry["produced_group_release_deferrals"] == 1
+
+
+def test_an_own_copy_deferral_that_never_clears_raises_inside_its_budget(
+        tmp_path, monkeypatch):
+    """Never continue quietly into a refill that cannot fund.
+
+    The other half of the same contract: exhaustion is loud, it carries the
+    elapsed time and the re-drive count, and the credit is reported as
+    still owed rather than written off.
+    """
+
+    from prismaquant.stage_a_produced_output import (
+        BoundaryProducedReleaseDeferred)
+
+    storage, publication, q, env, pb_repo, references = _staged_group(
+        tmp_path, monkeypatch)
+    monkeypatch.setattr(storage, "PRODUCED_DEFERRAL_POLL_S", 0.05)
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with pytest.raises(BoundaryProducedReleaseDeferred) as caught:
+            with storage.prefetch(references) as window:
+                storage.get(window, references[0])
+                # ONE budget: the staging wait above spent it honestly at
+                # its bound value, and the deferral below is shortened here
+                # so the test does not sit for fifteen minutes proving a
+                # bound it shares.
+                storage._produced_plan["staging_timeout_s"] = 0.3
+                monkeypatch.setattr(
+                    publication, "retire",
+                    lambda batch_id, **kwargs: _incomplete(
+                        deferred_own=["own-copy-in-flight"]))
+    assert caught.value.attempts >= 1, (
+        "it must actually have re-driven, not merely timed out", caught.value)
+    assert caught.value.waited_s >= 0.05, (
+        "the paced wait is the point: a bounded attempt count that burns "
+        "the budget in milliseconds reports a timeout it never waited for",
+        caught.value.waited_s)
+    assert storage.produced_group_records()[0]["retired"] is False
+    assert storage.produced_release_debt()["abandoned"], (
+        "the credit is still owed and says so",
+        storage.produced_release_debt())
+
+
+def test_a_receipt_without_the_deferred_own_key_is_surfaced_not_decided(
+        tmp_path, monkeypatch):
+    """A missing key is not an empty list.
+
+    An older PrismaBuild's receipt carries no ``deferred_own`` at all and
+    could not have reported an own-copy deferral. Reading that silence as
+    "no deferral" -- which ``receipt.get("deferred_own", [])`` would do --
+    is the exact fail-open shape that destroyed a stage token per
+    occurrence. The handler written for it refuses to repeat it.
+    """
+
+    from prismaquant.stage_a_produced_output import BoundaryEgressUnclassified
+
+    storage, publication, q, env, pb_repo, references = _staged_group(
+        tmp_path, monkeypatch)
+    old_receipt = {"complete": False, "reason": "egress", "live_pins": [],
+                   "deferred_handoffs": [], "errors": []}
+    assert "deferred_own" not in old_receipt
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with pytest.raises(BoundaryEgressUnclassified) as caught:
+            with storage.prefetch(references) as window:
+                storage.get(window, references[0])
+                monkeypatch.setattr(
+                    publication, "retire",
+                    lambda batch_id, **kwargs: {
+                        "ok": False, "refusal": "egress-incomplete",
+                        "receipt": dict(old_receipt)})
+    assert "deferred_own" in str(caught.value)
+    assert storage.produced_release_debt()["unclassified"], (
+        "reported in its own bucket, because folding it into 'abandoned' "
+        "would claim a decision was made")
+
+
+def test_a_deferred_own_receipt_that_turns_into_a_foreign_pin_stops_waiting(
+        tmp_path, monkeypatch):
+    """Whatever it becomes, it is handled as that.
+
+    A real foreign pin is preserved, not waited out: the wait exists for
+    PrismaBuild's own child mover and for nothing else.
+    """
+
+    storage, publication, q, env, pb_repo, references = _staged_group(
+        tmp_path, monkeypatch)
+    monkeypatch.setattr(storage, "PRODUCED_DEFERRAL_POLL_S", 0.01)
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        calls = {"n": 0}
+
+        def turning(batch_id, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _incomplete(deferred_own=["own-copy-in-flight"])
+            return _incomplete(live_pins=[{"pin_id": "a-real-reader"}])
+
+        with storage.prefetch(references) as window:
+            storage.get(window, references[0])
+            monkeypatch.setattr(publication, "retire", turning)
+    assert calls["n"] >= 2
+    debt = storage.produced_release_debt()
+    assert debt["pending"] or debt["abandoned"], (
+        "a foreign pin is recorded and drained, never waited on", debt)
+    assert not debt["unclassified"], (
+        "a live pin is a positive cause; it is not the unknown case", debt)
+    assert storage.produced_group_records()[0]["retired"] is False
+
+
+def test_the_egress_classifier_reads_the_confirmed_receipt_shape():
+    """The four cases, plus the one answer that is not a cause."""
+
+    from prismaquant.stage_a_produced_output import classify_egress_outcome
+
+    assert classify_egress_outcome({"ok": True}) == "retired"
+    assert classify_egress_outcome(_incomplete(
+        deferred_own=["own-copy-in-flight"])) == "own-copy-deferral"
+    assert classify_egress_outcome(_incomplete(
+        deferred_own=[], live_pins=[{"pin_id": "r"}])) == "foreign-pin"
+    assert classify_egress_outcome(_incomplete(
+        deferred_own=[],
+        deferred_handoffs=["promotion-handoff"])) == "promotion-handoff"
+    assert classify_egress_outcome(_incomplete(
+        deferred_own=[], errors=["something"])) == "egress-error"
+    # deferred_own present and empty, nothing else: a complete answer.
+    assert classify_egress_outcome(_incomplete(
+        deferred_own=[])) == "egress-incomplete"
+    # deferred_own ABSENT and nothing else positive: not an answer at all.
+    assert classify_egress_outcome({
+        "ok": False, "refusal": "egress-incomplete",
+        "receipt": {"complete": False, "live_pins": [],
+                    "deferred_handoffs": [], "errors": []}}) == "unknown"
+    # An older receipt that DOES name a cause still classifies by it: a
+    # live pin is observed, not inferred from the missing key.
+    assert classify_egress_outcome({
+        "ok": False, "refusal": "egress-incomplete",
+        "receipt": {"complete": False,
+                    "live_pins": [{"pin_id": "r"}]}}) == "foreign-pin"
+
+
+def test_mixed_outcomes_cannot_extend_the_declared_deferral_bound(
+        tmp_path, monkeypatch):
+    """One absolute deadline for the whole wait, whatever it sees.
+
+    The failure this guards is the inverse of a tight loop and just as
+    unbounded. A wait that hands a CHANGED outcome back by re-driving the
+    retirement gets a fresh answer; when that answer is another deferral,
+    the handler starts a NEW full budget, and a source that alternates
+    deferral and something-else extends the bound forever while reporting
+    the original one. It never spins and it never ends.
+
+    Alternating outcomes here, a 0.3 s budget, and the assertion is that
+    the whole wait still ends inside a small multiple of it.
+    """
+
+    from prismaquant.stage_a_produced_output import (
+        BoundaryProducedReleaseDeferred)
+
+    storage, publication, q, env, pb_repo, references = _staged_group(
+        tmp_path, monkeypatch)
+    monkeypatch.setattr(storage, "PRODUCED_DEFERRAL_POLL_S", 0.02)
+    budget = 0.3
+    calls = {"n": 0}
+
+    def alternating(batch_id, **kwargs):
+        calls["n"] += 1
+        if calls["n"] % 2:
+            return _incomplete(deferred_own=["own-copy-in-flight"])
+        return _incomplete(live_pins=[{"pin_id": "a-real-reader"}])
+
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        import time as _time
+        started = _time.monotonic()
+        try:
+            with storage.prefetch(references) as window:
+                storage.get(window, references[0])
+                storage._produced_plan["staging_timeout_s"] = budget
+                monkeypatch.setattr(publication, "retire", alternating)
+        except BoundaryProducedReleaseDeferred:
+            pass
+        elapsed = _time.monotonic() - started
+    assert elapsed < budget * 6, (
+        "the wait must be bounded by the budget it declares, not by one "
+        "budget per changed outcome", elapsed, budget, calls)
+    assert storage.produced_group_records()[0]["retired"] is False
+
+
+def test_a_changed_outcome_is_handled_not_re_driven_unseen(
+        tmp_path, monkeypatch):
+    """The outcome the wait observed is the outcome that is recorded.
+
+    Re-driving to "find out" what it already saw costs an extra egress and
+    replaces the observed refusal with a newer one, so a foreign pin seen
+    inside the wait could be reported as whatever the next call returned.
+    Here the retirement defers once, then reports a live pin, then would
+    report a DIFFERENT cause if asked again -- and it must not be asked.
+    """
+
+    storage, publication, q, env, pb_repo, references = _staged_group(
+        tmp_path, monkeypatch)
+    monkeypatch.setattr(storage, "PRODUCED_DEFERRAL_POLL_S", 0.01)
+    calls = {"n": 0}
+
+    def sequence(batch_id, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _incomplete(deferred_own=["own-copy-in-flight"])
+        if calls["n"] == 2:
+            return _incomplete(live_pins=[{"pin_id": "the-observed-pin"}])
+        return _incomplete(errors=["a third call would hide the pin"])
+
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with storage.prefetch(references) as window:
+            storage.get(window, references[0])
+            monkeypatch.setattr(publication, "retire", sequence)
+    assert calls["n"] == 2, (
+        "exactly one retirement per decision: the deferral, then the "
+        "outcome that changed. A third call means the wait asked again "
+        "instead of handling what it saw", calls)
+    debt = storage.produced_release_debt()
+    recorded = json.dumps(debt)
+    assert "the-observed-pin" in recorded, (
+        "the recorded reason must be the outcome the wait actually saw",
+        debt)
+    assert "a third call would hide the pin" not in recorded, (
+        "an extra retirement would have overwritten it", debt)

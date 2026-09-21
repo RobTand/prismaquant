@@ -6,6 +6,7 @@ unload all go through the existing streaming-model machinery.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
@@ -231,6 +232,7 @@ class StreamedBoundaryArtifacts:
         self._produced_window_keys = ()
         self._produced_release_pending = {}
         self._produced_release_abandoned = {}
+        self._produced_release_unclassified = {}
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -246,6 +248,7 @@ class StreamedBoundaryArtifacts:
             "produced_groups_rematerialized": 0,
             "produced_group_release_failures": 0,
             "produced_group_release_retries": 0,
+            "produced_group_release_deferrals": 0,
             "produced_groups_origin_reclaimed": 0}
 
     def __enter__(self):
@@ -1081,6 +1084,11 @@ class StreamedBoundaryArtifacts:
         ``BoundaryStagingTimeout`` and a withdrawal -- never a direct
         origin read and never a second publication.
 
+        A refused retirement is named by PrismaBuild's own egress receipt
+        through :func:`classify_egress_outcome`; only an own-copy deferral
+        is waited on, and it is waited on against THIS budget rather than
+        a second one.
+
         A read-only attached generation can never take this binding: an
         attached owner does not write, so it has nothing to declare and its
         entries stay ordinary input-map reads.
@@ -1117,6 +1125,7 @@ class StreamedBoundaryArtifacts:
                                "n_batches": int(n_batches),
                                "max_entry_tensor_bytes": int(max_entry_tensor_bytes),
                                "staging_timeout_s": float(staging_timeout_s)}
+
         self._produced_groups = {}
 
     @staticmethod
@@ -1379,8 +1388,12 @@ class StreamedBoundaryArtifacts:
     #: scheduler, and this lane does not own scheduling.
     PRODUCED_RELEASE_ATTEMPTS = 3
 
-    def _release_one_produced_group(self, key, group):
+    def _release_one_produced_group(self, key, group, deadline=None):
         """Drive one group's stage retirement. Returns True when it is gone.
+
+        ``deadline`` is the absolute monotonic instant the whole wait must
+        end by, threaded through so a retirement that is re-driven inside
+        one cannot mint itself a fresh budget.
 
         A returned ``{"ok": False}`` is a RESULT, not an absence of news:
         PrismaBuild's egress refused for a reason, and that reason is
@@ -1392,7 +1405,6 @@ class StreamedBoundaryArtifacts:
         record = self._produced_release_pending.setdefault(
             key, {"batch_id": group["batch_id"], "attempts": 0,
                   "first_reason": None, "last_reason": None})
-        record["attempts"] += 1
         try:
             # By KEY, never by reference: a group whose entries were
             # disposed while its retirement was refused has no live
@@ -1400,17 +1412,33 @@ class StreamedBoundaryArtifacts:
             # the group a drain exists for.
             out = self._retire_produced_group(key, group)
         except Exception as exc:                        # noqa: BLE001
-            reason = {"error": repr(exc)}
-        else:
-            if group["retired"]:
-                self._produced_release_pending.pop(key, None)
-                # The stage copy is gone; if this group's origins went
-                # while its retirement was refused, THIS is the moment its
-                # durable charge becomes releasable.
-                self._reclaim_produced_origin_for_group(key, group)
-                return True
-            reason = {"refusal": out.get("refusal"), "step": out.get("step"),
-                      "receipt": out.get("receipt")}
+            record["attempts"] += 1
+            return self._handle_produced_release_outcome(
+                key, group, record, None, {"error": repr(exc)}, deadline)
+        record["attempts"] += 1
+        if group["retired"]:
+            self._produced_release_pending.pop(key, None)
+            # The stage copy is gone; if this group's origins went while
+            # its retirement was refused, THIS is the moment its durable
+            # charge becomes releasable.
+            self._reclaim_produced_origin_for_group(key, group)
+            return True
+        return self._handle_produced_release_outcome(
+            key, group, record, out,
+            {"refusal": out.get("refusal"), "step": out.get("step"),
+             "receipt": out.get("receipt")}, deadline)
+
+    def _handle_produced_release_outcome(self, key, group, record, out,
+                                         reason, deadline):
+        """Decide about ONE observed outcome. No second retirement here.
+
+        Split out because the wait loop must be able to hand back the
+        outcome it just saw instead of asking again: re-driving to "find
+        out" what it already knows costs an extra egress, hides the
+        outcome that changed, and -- when the new answer is another
+        deferral -- restarts a budget that is supposed to be absolute.
+        """
+
         record["last_reason"] = reason
         if record["first_reason"] is None:
             record["first_reason"] = reason
@@ -1418,6 +1446,32 @@ class StreamedBoundaryArtifacts:
         self._produced_release_errors.append(
             {"batch_id": group["batch_id"], "attempt": record["attempts"],
              "reason": reason})
+        if "error" not in reason:
+            from .stage_a_produced_output import (
+                BoundaryEgressUnclassified, classify_egress_outcome)
+            kind = classify_egress_outcome(out)
+            record["class"] = kind
+            if kind == "own-copy-deferral":
+                # PrismaBuild deferred this on a lifecycle it owns: the
+                # evicted mover's own live claimed copy. Bytes, proof and
+                # full credit are kept and ordinary retry returns the
+                # token, so wait it out inside the budget already bound --
+                # the SAME deadline if one is already running.
+                return self._await_produced_release_deferral(
+                    key, group, record, out, deadline)
+            if kind == "unknown":
+                # The receipt has no deferred_own key and no positive
+                # cause: it could not have told us whether this deferred.
+                # Surfaced, not decided -- reading absence as "no
+                # deferral" is the fail-open shape this exists for.
+                self._produced_release_pending.pop(key, None)
+                self._produced_release_unclassified[key] = dict(record)
+                raise BoundaryEgressUnclassified(
+                    group["batch_id"], out, out.get("receipt"))
+            # foreign-pin, promotion-handoff, egress-error: real failures
+            # on other lifecycles. Preserved exactly as before -- recorded,
+            # re-driven on the next drain, credits retained, never waited
+            # on. None of them is this lane's to resolve.
         if record["attempts"] >= self.PRODUCED_RELEASE_ATTEMPTS:
             # Cleared EXPLICITLY, with the original reason kept and the
             # credits retained. The group stays unretired, so nothing
@@ -1427,6 +1481,95 @@ class StreamedBoundaryArtifacts:
             self._produced_release_abandoned[key] = dict(record)
             self._produced_release_pending.pop(key, None)
         return False
+
+    #: How long one paced re-drive waits before asking PrismaBuild again.
+    #: A floor, not a schedule: without it a bounded attempt count burns a
+    #: whole budget in milliseconds and reports a timeout that never
+    #: waited for anything.
+    PRODUCED_DEFERRAL_POLL_S = 0.5
+
+    def _await_produced_release_deferral(self, key, group, record, outcome,
+                                         deadline=None):
+        """Re-drive a DEFERRED retirement, paced, inside the staging budget.
+
+        PrismaBuild keeps the bytes, the proof and the full credit while
+        its own child mover is still live, and says so by deferring rather
+        than by destroying anything. Ordinary retry returns the token once
+        that mover reaches terminal, so the only thing this owes is to
+        keep asking at a sane cadence until the budget bound at
+        :meth:`bind_produced_output` is spent -- the SAME budget the read
+        already waits on for staging, not a second one.
+
+        Two failure shapes are deliberately excluded. It does not spin: it
+        sleeps :data:`PRODUCED_DEFERRAL_POLL_S` between asks, so a bounded
+        attempt count cannot report a timeout it never waited for. And it
+        does not continue quietly into a refill that cannot fund: running
+        the budget out raises :class:`BoundaryProducedReleaseDeferred` with
+        the reason, the elapsed time and the attempt count.
+
+        Anything that stops being a deferral leaves immediately and is
+        handled as what it became -- a retirement that starts deferred and
+        ends refused by a foreign pin is a foreign-pin refusal, and a
+        reason the vocabulary cannot name is surfaced, not absorbed.
+        """
+
+        import time
+        from .stage_a_produced_output import (
+            DEFERRED_OWN_FIELD, BoundaryProducedReleaseDeferred,
+            classify_egress_outcome)
+
+        budget = float(self._produced_plan["staging_timeout_s"])
+        started = time.monotonic()
+        # ONE absolute deadline for the whole wait. Taken from the caller
+        # when a wait is already running, so a re-driven retirement that
+        # reports another deferral continues the original bound instead of
+        # minting a new one -- the inverse of the tight loop, and just as
+        # unbounded: it never spins, and it never ends either.
+        if deadline is None:
+            deadline = started + budget
+        receipt = outcome.get("receipt") or {}
+        record["deferred_own"] = receipt.get(DEFERRED_OWN_FIELD)
+        self.telemetry["produced_group_release_deferrals"] += 1
+        try:
+            record["deferred_state"] = self._produced.materialization_state(
+                batch_id=group["batch_id"])
+        except Exception as exc:                        # noqa: BLE001
+            # Evidence only. A state read that fails does not change what
+            # the retirement said, and must not become the failure.
+            record["deferred_state"] = {"error": repr(exc)}
+        redrives = 0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                record["deferred_waited_s"] = time.monotonic() - started
+                self._produced_release_pending.pop(key, None)
+                self._produced_release_abandoned[key] = dict(record)
+                raise BoundaryProducedReleaseDeferred(
+                    group["batch_id"],
+                    waited_s=time.monotonic() - started, timeout_s=budget,
+                    attempts=redrives, outcome=outcome)
+            time.sleep(min(self.PRODUCED_DEFERRAL_POLL_S, remaining))
+            redrives += 1
+            self.telemetry["produced_group_release_retries"] += 1
+            outcome = self._retire_produced_group(key, group)
+            if group["retired"]:
+                record["deferred_waited_s"] = time.monotonic() - started
+                record["deferred_redrives"] = redrives
+                self._produced_release_pending.pop(key, None)
+                self._reclaim_produced_origin_for_group(key, group)
+                return True
+            if classify_egress_outcome(outcome) != "own-copy-deferral":
+                # It changed into something else. Hand THAT outcome to the
+                # one place that decides -- not another retirement. Asking
+                # again would spend an extra egress, lose the outcome just
+                # observed, and, if the new answer deferred, restart a
+                # budget that is meant to be absolute.
+                record["attempts"] += 1
+                return self._handle_produced_release_outcome(
+                    key, group, record, outcome,
+                    {"refusal": outcome.get("refusal"),
+                     "step": outcome.get("step"),
+                     "receipt": outcome.get("receipt")}, deadline)
 
     def _drain_produced_releases(self):
         """Re-drive every still-pending retirement before the next window.
@@ -1472,7 +1615,10 @@ class StreamedBoundaryArtifacts:
         return {"pending": {str(record["batch_id"]): record["last_reason"]
                             for record in self._produced_release_pending.values()},
                 "abandoned": {str(record["batch_id"]): record["first_reason"]
-                              for record in self._produced_release_abandoned.values()}}
+                              for record in self._produced_release_abandoned.values()},
+                "unclassified": {str(record["batch_id"]): record["last_reason"]
+                                 for record
+                                 in self._produced_release_unclassified.values()}}
 
     @contextmanager
     def prefetch(self, references):

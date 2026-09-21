@@ -151,7 +151,8 @@ def main() -> int:
         "origin_charge_constant_across_the_cycle":
             report["charge_after_repeat_read"] == report["charge_after_first_read"],
         "no_release_debt":
-            report["release_debt"] == {"pending": {}, "abandoned": {}},
+            report["release_debt"] == {"pending": {}, "abandoned": {},
+                                       "unclassified": {}},
         "final_origin_disposal_reclaimed_the_charge":
             report["charge_after_disposal"] == {"payload": 0, "checkpoint": 0,
                                                 "temp": 0},

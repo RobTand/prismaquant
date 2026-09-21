@@ -246,6 +246,124 @@ class BoundaryStagingTimeout(TimeoutError):
     """
 
 
+#: The egress receipt key that says an own-copy deferral occurred. A NEW
+#: TOP-LEVEL key, a sibling of ``deferred_handoffs``, ``live_pins``,
+#: ``entries_deferred`` and ``errors`` -- not an entry inside any of them.
+DEFERRED_OWN_FIELD = "deferred_own"
+
+
+class BoundaryEgressUnclassified(RuntimeError):
+    """A retirement refused and the receipt could not say whether it deferred.
+
+    Raised for exactly one thing: an egress receipt with no
+    ``deferred_own`` key at all, and no other positive cause in it. That
+    receipt predates the field and could not have told us either way, so
+    the answer is "unknown", not "no deferral". Collapsing the two is the
+    fail-open shape that cost a stage token per occurrence, and the
+    handler written for it does not get to repeat it.
+    """
+
+    def __init__(self, batch_id: str, outcome, receipt) -> None:
+        self.batch_id = batch_id
+        self.outcome = outcome
+        self.receipt = receipt
+        super().__init__(
+            f"produced-output boundary group {batch_id!r} was refused by an "
+            f"egress receipt carrying no {DEFERRED_OWN_FIELD!r} key and no "
+            "other positive cause (no live pins, no deferred handoffs, no "
+            "errors). A receipt that predates the field cannot say whether "
+            "this was an own-copy deferral, so it is neither waited on nor "
+            "called final. Run against a PrismaBuild generation that "
+            f"publishes {DEFERRED_OWN_FIELD!r}. Outcome: {outcome!r}")
+
+
+class BoundaryProducedReleaseRefused(RuntimeError):
+    """A retirement refused terminally: retrying it cannot help."""
+
+    def __init__(self, batch_id: str, outcome, cause) -> None:
+        self.batch_id = batch_id
+        self.outcome = outcome
+        self.cause = cause
+        super().__init__(
+            f"produced-output boundary group {batch_id!r} was refused "
+            f"terminally ({cause}); its stage credit stays held by the "
+            f"material that is still there. Outcome: {outcome!r}")
+
+
+class BoundaryProducedReleaseDeferred(TimeoutError):
+    """An own-copy deferral did not clear inside the staging budget."""
+
+    def __init__(self, batch_id: str, *, waited_s: float, timeout_s: float,
+                 attempts: int, outcome) -> None:
+        self.batch_id = batch_id
+        self.waited_s = waited_s
+        self.timeout_s = timeout_s
+        self.attempts = attempts
+        self.outcome = outcome
+        super().__init__(
+            f"produced-output boundary group {batch_id!r} deferred its "
+            f"retirement on its own in-flight copy and did not clear in "
+            f"{waited_s:.1f}s of a {timeout_s:.1f}s budget over {attempts} "
+            "re-drives. The stage credit is still held; the next window "
+            "will not fund. Reported rather than waited on further -- this "
+            f"lane does not own scheduling. Last outcome: {outcome!r}")
+
+
+def classify_egress_outcome(outcome) -> str:
+    """Name one ``retire_batch`` outcome from PrismaBuild's egress receipt.
+
+    ``retire_batch`` returns ``{ok: False, refusal: "egress-incomplete",
+    receipt: <egress receipt>}`` for every incomplete egress, so the
+    refusal is a category and the receipt is the cause. Four causes, and a
+    fifth answer that is not a cause:
+
+    ``own-copy-deferral``
+        ``deferred_own`` is present and non-empty. PrismaBuild deferred
+        this retirement on the evicted mover's OWN still-live claimed copy:
+        bytes, proof and full credit are kept, and ordinary retry returns
+        the token once that child mover reaches terminal. The only case
+        this lane waits on.
+    ``foreign-pin``
+        A live reader holds the staged bytes. A real failure to preserve,
+        never something to wait out.
+    ``promotion-handoff``
+        A deferred promotion handoff: a different lifecycle, not this
+        lane's wait.
+    ``egress-error``
+        The receipt carries errors.
+    ``unknown``
+        The receipt has NO ``deferred_own`` key and no positive cause in
+        it. A missing key is not an empty list: this receipt could not
+        have reported an own-copy deferral, so it is surfaced rather than
+        read as "no deferral".
+
+    On a receipt with no ``deferred_own`` key, a non-empty ``live_pins`` or
+    ``deferred_handoffs`` still classifies, because each is a POSITIVE
+    observation of a different cause rather than an inference from an
+    absence -- an older generation reports those two exactly as a newer one
+    does. What the missing key removes is the ability to conclude anything
+    from silence, and that case alone returns ``unknown``.
+    """
+
+    if isinstance(outcome, Mapping) and outcome.get("ok"):
+        return "retired"
+    receipt = outcome.get("receipt") if isinstance(outcome, Mapping) else None
+    if not isinstance(receipt, Mapping):
+        return "unknown"
+    deferred_own = receipt.get(DEFERRED_OWN_FIELD)
+    if DEFERRED_OWN_FIELD in receipt and deferred_own:
+        return "own-copy-deferral"
+    if receipt.get("live_pins"):
+        return "foreign-pin"
+    if receipt.get("deferred_handoffs"):
+        return "promotion-handoff"
+    if receipt.get("errors"):
+        return "egress-error"
+    if DEFERRED_OWN_FIELD not in receipt:
+        return "unknown"
+    return "egress-incomplete"
+
+
 class BoundaryRepeatMaterializationUnsupported(RuntimeError):
     """The pinned PrismaBuild candidate has no repeat-materialization API.
 
