@@ -389,7 +389,8 @@ def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
         {"output_root": str(tmp_path / "campaign-root")}))
     campaign = {"plan_path": str(plan_path), "plan_sha256": "d" * 64,
                 "prepared_path": "prepared.json",
-                "prepared_sha256": "e" * 64}
+                "prepared_sha256": "e" * 64,
+                "read_manifest_sha256": parent}
 
     plain = stage_a_argv(manifest, campaign)
     assert "--artifact-budget-bytes" not in plain
