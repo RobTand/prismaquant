@@ -849,6 +849,43 @@ composed map's path as `PRISMABUILD_RESIDENCY_MAP`. **PrismaQuant now reads
 it.** Without a reader the stage is a copy nobody reads, and the before/after
 says exactly that.
 
+- **One input map, and an explicitly namespaced context beside it** (added
+  2026-09-21, RobTand/prismaquant#881). The map `PRISMABUILD_RESIDENCY_MAP`
+  names is the map of a run's **sealed inputs**. An admitted action's own
+  outputs are not in it, so under the strict allowed-tier policy a Stage A
+  action that writes exact boundary entries and reads them back in the same
+  action is refused `staged-not-serving` — correctly, since there is no
+  own-session exemption from the physical tier policy. The fix is not to swap
+  the process map. `prismaquant/stage_a_produced_output.py` takes those
+  entries through PrismaBuild's produced-output lifecycle (`require_prewrite`
+  before the first byte, the existing writer's unchanged canonical names, one
+  descriptor per entry carrying the **writer's own inline digest**, then
+  `publish_prepaid_batch`), and composes the fragments PB's mover files under
+  the batch namespace into a **supplemental resolver**
+  (`residency_map.namespaced_residency_resolver`) bound to that batch's own
+  manifest digest and material namespace. That resolver is carried into the
+  read as an argument (`perturbed_x_cache.prefetch_exact_activation_cache_
+  entries(resolver=…)`); the process resolver, every sealed input, every
+  read-only attached generation and every foreign generation resolve exactly
+  as before, and an input resolver's lease identity and acquire call are
+  unchanged. `PRISMABUILD_RESIDENCY_MAP` stays the input map for a second
+  reason: the SDK derives the **queue root** from its shape
+  (`Path(map_path).parent.parent`), so pointing it at a produced batch's map
+  would send the SDK looking for the queue elsewhere. The publication unit is
+  the existing 64-entry read window, and the publish is **deferred to the
+  first read** — a prewrite holds no ledger tokens while a commit funds the
+  stage window, so publishing at write time would spend the stage credit the
+  first read needs. **Not yet available:** re-staging an unchanged batch after
+  its stage copy is released (`publish_prepaid_batch` replays the committed
+  duplicate rather than sealing a successor mover); the capability is
+  requested from the owning PrismaBuild lane and no symbol for it is invented
+  here. **Measured blocker:** `retire_batch` currently refuses
+  `egress-incomplete` with zero live pins, because `stage_release` identifies
+  movement nodes by tier demand and a produced-output owner demands its
+  working minimum on that tier while sealing an ordinary action with no
+  `params.command`. Gates:
+  `tests/test_stage_a_produced_boundary_chain.py`.
+
 - **One resolver**, `prismaquant/residency_map.py`. It owns no bytes: it
   answers "where do I open this declared path", and the caller's own digest
   decides whether the answer was good. Three read sites ask it. Two are places
