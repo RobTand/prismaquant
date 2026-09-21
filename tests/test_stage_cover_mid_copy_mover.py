@@ -204,7 +204,8 @@ def test_the_wait_holds_a_covered_span_until_its_proof_is_published(monkeypatch)
         resolver, wanted, deadline=time.monotonic() + 30, published=published)
 
     assert verdict == RANGE_HIT
-    assert resolver.waited[0] == "landing" and resolver.waited[2] is True
+    _declared, polls, served = resolver.waited
+    assert polls == 3 and served is True
     # Once per staged entry per poll, never per tensor, and never again
     # after a yes.
     assert asked.count(("ready", 0)) == 1
