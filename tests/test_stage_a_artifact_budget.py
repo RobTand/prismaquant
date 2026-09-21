@@ -96,44 +96,92 @@ def test_resolve_cli_env_sources_and_disagreement(tmp_path):
 def test_estimate_matches_actual_stage_a_retention_math():
     """The production geometry's file counts, from the existing derivation.
 
-    GLM-5.3-Flash panel: 45 layers, stride 8 -> {45,40,32,24,16,8};
-    512 batches (probe_microbatch 1 over 512 rows); 4 probes; 16 MiB raw
-    per tensor (1x512x4x4096 BF16 via hc_mult 4). 45 retained INPUT groups
-    (46 written, tail retires the final boundary), one live cotangent plane,
-    six checkpoint copies. The 416 GiB plan is below even the raw floor.
+    GLM-5.3-Flash panel (plan cited in the design doc): 45 layers, stride
+    8 -> {45,40,32,24,16,8}; 512 full batches (probe_microbatch 1 over 512
+    rows, no remainder); 4 probes; 16 MiB raw per tensor (1 row x 512
+    tokens (plan calib_seqlen) x hc_mult 4 streams x 4096 BF16). 45
+    retained INPUT groups (46 written, tail retires the final boundary),
+    one live cotangent plane set (4 probe planes x 512 batches), six
+    checkpoint copies. The 416 GiB plan is below even the raw floor.
     """
     from prismaquant.joint_cost_stage_a import estimate_stage_a_artifact_demand
 
     demand = estimate_stage_a_artifact_demand(
-        n_probes=4, n_batches=512, per_tensor_nbytes=16777216,
+        n_probes=4, n_full_batches=512, remainder_rows=0,
+        per_full_tensor_nbytes=16777216,
         num_layers=45, stride=8)
     assert demand["boundaries"] == [45, 40, 32, 24, 16, 8]
     assert demand["n_checkpoints"] == 6
     assert demand["n_retained_boundary_groups"] == 45
-    assert demand["per_file_envelope_bytes"] == 16777216 + 65536
+    assert demand["n_batches_total"] == 512
+    assert demand["per_full_file_envelope_bytes"] == 16777216 + 65536
     # Hard floor: (23040 + 2048 + 12288) files x 16 MiB raw = 584 GiB exact.
     assert demand["lower_bound_bytes"] == 37376 * 16777216
     assert demand["lower_bound_bytes"] == 627065225216
     assert PLAN_SEALED < demand["lower_bound_bytes"]
     # File envelopes alone (no shared/manifest) already exceed the plan.
-    assert demand["conservative_bytes"] > PLAN_SEALED
-    assert demand["conservative_bytes"] == (
+    assert demand["planning_estimate_bytes"] > PLAN_SEALED
+    assert demand["planning_estimate_bytes"] == (
         37376 * (16777216 + 65536) + (16777216 + 65536))
-    # The proposed 640 GiB invocation covers the file-envelope peak with
-    # headroom for shared/manifest/temp (bounded separately below).
-    assert RUN_640_GIB > demand["conservative_bytes"]
+
+    # With the stated planning allowances (2 GiB shared per checkpoint from
+    # the plan auxiliary bound -- an assumption, not a proven ceiling -- and
+    # 4 MiB manifest per checkpoint), the 640 GiB proposal still covers the
+    # planning estimate with ~44 GiB headroom.
+    allowed = estimate_stage_a_artifact_demand(
+        n_probes=4, n_full_batches=512, remainder_rows=0,
+        per_full_tensor_nbytes=16777216,
+        num_layers=45, stride=8,
+        shared_per_checkpoint_bytes=1 << 31,
+        manifest_per_checkpoint_bytes=4 << 20)
+    assert allowed["planning_estimate_bytes"] == 642441609216
+    assert RUN_640_GIB > allowed["planning_estimate_bytes"]
+
+
+def test_estimate_counts_remainder_at_true_size_not_ceiling():
+    """An uneven last batch is smaller than a full one: the hard floor sums
+    full groups plus the true remainder geometry, strictly below the naive
+    ``ceil`` full-size estimate (which is an UPPER estimate, not a floor).
+
+    Uses the actual tiny fixture runner: the remainder tensor is derived
+    through the runner's own profile expansion on ``meta`` tensors, the
+    same path the run preflight uses -- not a hand constant.
+    """
+    from test_layer_major_boundary_capture import fixture
+    from prismaquant.joint_cost_stage_a import (
+        _stage_a_per_tensor_nbytes, estimate_stage_a_artifact_demand)
+
+    _, _, runner, _ = fixture()
+    seqlen = 4
+    per_full = _stage_a_per_tensor_nbytes(runner, batch_rows=2, seqlen=seqlen)
+    per_rem = _stage_a_per_tensor_nbytes(runner, batch_rows=1, seqlen=seqlen)
+    assert per_rem < per_full
+    assert per_rem * 2 == per_full  # row-linear hidden geometry
+    n_layers = int(runner.num_layers)
+    demand = estimate_stage_a_artifact_demand(
+        n_probes=1, n_full_batches=2, remainder_rows=1,
+        per_full_tensor_nbytes=per_full,
+        per_remainder_tensor_nbytes=per_rem,
+        num_layers=n_layers, stride=2)
+    assert demand["n_batches_total"] == 3
+    unit_sets = n_layers + 1 + len(demand["boundaries"]) * 1
+    assert demand["lower_bound_bytes"] == unit_sets * (2 * per_full + per_rem)
+    naive_ceil = unit_sets * 3 * per_full
+    assert demand["lower_bound_bytes"] < naive_ceil
 
 
 def test_preflight_refuses_plan_budget_and_accepts_explicit_override():
-    """Old too-small config fails early with required/declared/remedy; the
-    adequate override proceeds with n_probes/seed/calibration/guard
-    unchanged -- only the declared ceiling moves."""
+    """Old too-small config fails early on the hard floor with
+    required/declared/remedy; the adequate override proceeds with
+    n_probes/seed/calibration/guard unchanged -- only the declared
+    ceiling moves."""
     from prismaquant.joint_cost_stage_a import (
         AdjointIdentityRefused, estimate_stage_a_artifact_demand,
         preflight_stage_a_artifact_budget)
 
     demand = estimate_stage_a_artifact_demand(
-        n_probes=4, n_batches=512, per_tensor_nbytes=16777216,
+        n_probes=4, n_full_batches=512, remainder_rows=0,
+        per_full_tensor_nbytes=16777216,
         num_layers=45, stride=8,
         shared_per_checkpoint_bytes=1 << 31,
         manifest_per_checkpoint_bytes=4 << 20)
@@ -142,30 +190,35 @@ def test_preflight_refuses_plan_budget_and_accepts_explicit_override():
             declared_bytes=PLAN_SEALED, demand=demand,
             plan_sealed_bytes=PLAN_SEALED)
     message = str(excinfo.value)
-    assert str(demand["conservative_bytes"]) in message
+    assert str(demand["lower_bound_bytes"]) in message
+    assert str(demand["planning_estimate_bytes"]) in message
     assert str(PLAN_SEALED) in message
     assert "--artifact-budget-bytes" in message
     assert "sealed plan is unchanged" in message
 
     ok = preflight_stage_a_artifact_budget(
-        declared_bytes=int(demand["conservative_bytes"]), demand=demand,
+        declared_bytes=int(demand["lower_bound_bytes"]), demand=demand,
         plan_sealed_bytes=PLAN_SEALED)
-    assert ok["declared_bytes"] == demand["conservative_bytes"]
+    assert ok["declared_bytes"] == demand["lower_bound_bytes"]
+    assert ok["required_floor_bytes"] == demand["lower_bound_bytes"]
+    assert ok["planning_estimate_bytes"] == demand["planning_estimate_bytes"]
     # The demand inputs are the sealed invocation geometry, untouched.
     assert demand["n_probes"] == 4
-    assert demand["n_batches"] == 512
+    assert demand["n_batches_total"] == 512
     assert demand["boundaries"] == [45, 40, 32, 24, 16, 8]
 
 
-def test_scaled_writer_late_failure_then_early_refusal_then_override_proceeds(
+def test_scaled_writer_floor_refusal_mid_guard_and_adequate_override(
         tmp_path):
     """Scaled actual-writer exhibit on the real checkpoint path.
 
     A tiny owner + the real ``write_adjoint_checkpoint`` with tiny CPU
-    tensors: a 416-equivalent too-small ceiling lets ordinary writes land
-    and then refuses late at the checkpoint reservation (the runtime guard
-    doing its job); the new preflight refuses the same geometry early
-    before any file lands; the explicit adequate override then proceeds.
+    tensors, in three bands: below the hard floor the new preflight
+    refuses early before any file lands; between the floor and the
+    planning estimate the preflight passes and the runtime guard still
+    refuses late at the checkpoint reservation (the guard stays
+    authoritative for serialized bytes); at the planning estimate the
+    explicit adequate override proceeds on the same writer, same guard.
     No missing import is claimed RED: every name here exists.
     """
     from prismaquant.cost_streaming import StreamedBoundaryArtifacts
@@ -189,57 +242,61 @@ def test_scaled_writer_late_failure_then_early_refusal_then_override_proceeds(
     def _shared():
         return {(0, 0): {"w": torch.zeros(4)}}
 
-    # Scaled demand: 3 retained groups x 2 batches + 1 live plane (1x2)
-    # + 2 checkpoint copies (2 boundaries x 1x2), 4 KiB tensors.
+    def _session():
+        return {"generation": "ab" * 16, "kind": "adjoint_checkpoint",
+                "run_identity_sha256": "cd" * 32}
+
+    # Scaled demand: 3 retained groups x 2 full batches + 1 live plane set
+    # (1 probe plane x 2 batches) + 2 checkpoint copies, 4 KiB tensors.
     demand = estimate_stage_a_artifact_demand(
-        n_probes=1, n_batches=2, per_tensor_nbytes=4096,
+        n_probes=1, n_full_batches=2, remainder_rows=0,
+        per_full_tensor_nbytes=4096,
         num_layers=3, stride=2)
     assert demand["boundaries"] == [3, 2]
-    tiny_conservative = demand["conservative_bytes"]
-    tiny_lower = demand["lower_bound_bytes"]
-    assert tiny_lower == 12 * 4096
+    tiny_floor = demand["lower_bound_bytes"]
+    tiny_planning = demand["planning_estimate_bytes"]
+    assert tiny_floor == 12 * 4096
+    assert tiny_planning == 12 * (4096 + 65536) + (4096 + 65536)
+    assert tiny_floor < tiny_planning
 
-    # 1. Late failure: a ceiling between the lower floor and the envelope
-    # lets the ordinary entry land, then refuses the checkpoint reservation.
-    late_disk = tiny_lower + 70000
-    assert tiny_lower < late_disk < tiny_conservative
-    owner = _owner(tmp_path / "late", late_disk)
+    # 1. Below the floor: early refusal, and no checkpoint file lands.
+    below = tiny_floor - 1
+    with pytest.raises(AdjointIdentityRefused, match="hard geometry floor"):
+        preflight_stage_a_artifact_budget(
+            declared_bytes=below, demand=demand, plan_sealed_bytes=below)
+    assert not list(Path(adjoint_space(tmp_path / "below-out")).rglob("*"))
+
+    # 2. Between floor and planning estimate: the preflight passes (the
+    # floor is the mandatory gate) and the runtime guard refuses late.
+    mid_disk = tiny_floor + 70000
+    assert tiny_floor <= mid_disk < tiny_planning
+    preflight_stage_a_artifact_budget(
+        declared_bytes=mid_disk, demand=demand, plan_sealed_bytes=mid_disk)
+    owner = _owner(tmp_path / "late", mid_disk)
     space = adjoint_space(tmp_path / "late-out")
     with owner:
         owner.write(torch.zeros(32, 32), batch_index=0, boundary_index=0)
         with pytest.raises(RuntimeError, match="budget exceeded"):
             write_adjoint_checkpoint(
-                space, boundary=2,
-                session={"generation": "ab" * 16,
-                         "kind": "adjoint_checkpoint",
-                         "run_identity_sha256": "cd" * 32},
+                space, boundary=2, session=_session(),
                 cotangents=_plane(), shared_adjoint=_shared(),
                 shared_pass={0: {"tag": "a"}}, owner=owner)
 
-    # 2. Early refusal: the same ceiling fails the preflight before any file.
-    with pytest.raises(AdjointIdentityRefused, match="too small"):
-        preflight_stage_a_artifact_budget(
-            declared_bytes=late_disk, demand=demand,
-            plan_sealed_bytes=late_disk)
-
-    # 3. Adequate override: the conservative ceiling proceeds on the real
+    # 3. Adequate override: the planning estimate proceeds on the real
     # writer, same tensors, same guard.
-    owner2 = _owner(tmp_path / "adequate", tiny_conservative)
+    owner2 = _owner(tmp_path / "adequate", tiny_planning)
     space2 = adjoint_space(tmp_path / "adequate-out")
     with owner2:
         owner2.write(torch.zeros(32, 32), batch_index=0, boundary_index=0)
         record = write_adjoint_checkpoint(
-            space2, boundary=2,
-            session={"generation": "ab" * 16,
-                     "kind": "adjoint_checkpoint",
-                     "run_identity_sha256": "cd" * 32},
+            space2, boundary=2, session=_session(),
             cotangents=_plane(), shared_adjoint=_shared(),
             shared_pass={0: {"tag": "a"}}, owner=owner2)
     assert record["boundary"] == 2
     assert record["cotangent_sha256"]
     preflight_stage_a_artifact_budget(
-        declared_bytes=tiny_conservative, demand=demand,
-        plan_sealed_bytes=late_disk)
+        declared_bytes=tiny_planning, demand=demand,
+        plan_sealed_bytes=mid_disk)
 
 
 def test_core_carries_override_stamp_and_ceiling(tmp_path, monkeypatch):

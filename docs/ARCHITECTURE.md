@@ -18,9 +18,11 @@ dispatcher's `--stage-a-artifact-budget-bytes` payload flag, stamped
 (`artifact_budget.v1`: source, unit bytes, `plan_sealed_bytes`,
 `run_used_bytes`) into `results.json`, `counters.json` and the adjoint
 receipt. An under-budget invocation refuses in an early preflight from live
-geometry (retained INPUT groups + live cotangent plane + strided
-checkpoints, file-header envelope, plan auxiliary bound, manifest
-estimator) before any expensive forward; the sealed plan is unchanged.
+geometry -- the hard raw-bytes floor (full batches plus the remainder
+batch at its true smaller size) is the mandatory gate, and a named
+planning allowance (file-header envelopes plus stated per-checkpoint
+shared/manifest assumptions, never a proven ceiling) sizes the proposed
+invocation -- before any expensive forward; the sealed plan is unchanged.
 Design: `docs/design/stage_a_artifact_budget_2026-09-21.md`. Gates:
 `tests/test_stage_a_artifact_budget.py`.
 

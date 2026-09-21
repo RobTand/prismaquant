@@ -536,8 +536,8 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     monkeypatch.setattr(stage_a, "_run_artifact_preflight",
                         lambda *a, **k: {
                             "declared_bytes": 1,
-                            "required_conservative_bytes": 1,
-                            "required_lower_bound_bytes": 1,
+                            "required_floor_bytes": 1,
+                            "planning_estimate_bytes": 1,
                             "demand": {}})
     monkeypatch.setattr(torch.cuda, "synchronize", lambda *a, **k: None)
     monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
