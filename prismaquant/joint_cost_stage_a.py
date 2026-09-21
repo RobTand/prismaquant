@@ -548,6 +548,104 @@ def preflight_stage_a_artifact_budget(
         "unchanged and the override is stamped into the run provenance.")
 
 
+def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
+                            space, artifact) -> dict:
+    """Early durable-budget preflight from already-available geometry.
+
+    Runs after the runner + calibration load and before any expensive
+    forward / layer traversal. Uses the live runner + calibration shapes
+    (no bulk buffers: embedding width off the live model, stream expansion
+    through the runner's own profile on a ``meta`` tensor), the writer's
+    own file-header envelope, the plan's auxiliary bound for shared
+    payloads, and the checkpoint manifest estimator -- the same ceiling
+    the runtime reserve enforces. Refuses fail-closed with the concrete
+    required / declared values and the named remedy. The runtime
+    reserve / write / commit guards stay authoritative for serialized
+    bytes and unpredicted overhead.
+    """
+    _n_probes = int(execution["n_probes"])
+    _probe_microbatch = int(execution.get("probe_microbatch", 0))
+    _n_rows = int(calib_ids.shape[0])
+    _seqlen = int(calib_ids.shape[1])
+    _batch_rows = min(_probe_microbatch or _n_rows, _n_rows)
+    _n_batches = (_n_rows + _batch_rows - 1) // _batch_rows
+    _per_tensor = _stage_a_per_tensor_nbytes(
+        runner, batch_rows=int(_batch_rows), seqlen=int(_seqlen))
+    try:
+        _aux_bound = int(execution["boundary_storage"]["max_auxiliary_bytes"])
+    except (KeyError, TypeError):
+        _aux_bound = 0
+    if type(_aux_bound) is bool or not isinstance(_aux_bound, int) or _aux_bound < 0:
+        _aux_bound = 0
+    try:
+        from .joint_adjoint_checkpoints import (
+            _checkpoint_manifest_envelope_bytes,
+            checkpoint_directory,
+        )
+        _manifest_probe_boundary = derive_checkpoint_boundaries(
+            int(runner.num_layers), int(stride_value))[0]
+        _manifest_dir = checkpoint_directory(space, int(_manifest_probe_boundary))
+        _dummy_session = {"generation": "0" * 32, "kind": "adjoint_checkpoint",
+                          "run_identity_sha256": "0" * 64}
+        _act_plan = [{
+            "probe_index": p, "batch_index": b, "slot": f"cotangent-{p}-{b}",
+            "name": f"cotangent-{p}-{b}",
+            "path": str(_manifest_dir / "entries" / f"cotangent-{p}-{b}.pt"),
+            "tensor_bytes": int(_per_tensor),
+            "file_envelope": int(_per_tensor) + int(ARTIFACT_FILE_HEADER_BYTES),
+            "shape": [int(_batch_rows), int(_seqlen)],
+            "dtype": str(runner.dtype),
+        } for p in range(_n_probes) for b in range(_n_batches)]
+        _shared_names = (
+            [f"shared-adjoint-{p}-{b}" for p in range(_n_probes)
+             for b in range(_n_batches)]
+            + [f"shared-pass-{b}" for b in range(_n_batches)])
+        _n_shared = len(_shared_names)
+        _per_shared_envelope = max(
+            int(ARTIFACT_FILE_HEADER_BYTES),
+            int(_aux_bound) // max(1, _n_shared) if _aux_bound else int(
+                ARTIFACT_FILE_HEADER_BYTES))
+        _shared_plan = [{
+            "name": name,
+            "path": str(_manifest_dir / "entries" / f"{name}.pkl"),
+            "file_envelope": int(_per_shared_envelope),
+        } for name in _shared_names]
+        _manifest_bytes = int(_checkpoint_manifest_envelope_bytes(
+            boundary=int(_manifest_probe_boundary), session=_dummy_session,
+            activation_plan=_act_plan, shared_plan=_shared_plan))
+    except (ImportError, RuntimeError, TypeError, ValueError):
+        _manifest_bytes = 4 << 20
+    _demand = estimate_stage_a_artifact_demand(
+        n_probes=int(_n_probes), n_batches=int(_n_batches),
+        per_tensor_nbytes=int(_per_tensor),
+        num_layers=int(runner.num_layers), stride=int(stride_value),
+        header_bytes=int(ARTIFACT_FILE_HEADER_BYTES),
+        shared_per_checkpoint_bytes=int(_aux_bound),
+        manifest_per_checkpoint_bytes=int(_manifest_bytes))
+    _preflight = preflight_stage_a_artifact_budget(
+        declared_bytes=int(artifact["run_used"]), demand=_demand,
+        plan_sealed_bytes=int(artifact["override"]["plan_sealed_bytes"]
+                              if artifact["override"] is not None
+                              else int(artifact["run_used"])))
+    print(f"joint_cost_stage_a: artifact preflight: declared "
+          f"{_preflight['declared_bytes']} bytes "
+          f"({_preflight['declared_bytes'] / 1024 ** 3:.2f} GiB) >= "
+          f"required {_preflight['required_conservative_bytes']} bytes "
+          f"({_preflight['required_conservative_bytes'] / 1024 ** 3:.2f} GiB "
+          f"conservative; lower {_preflight['required_lower_bound_bytes']} bytes); "
+          f"per-tensor {_per_tensor} bytes x {_n_batches} batches, "
+          f"boundaries {_demand['boundaries']}", flush=True)
+    return {
+        "declared_bytes": _preflight["declared_bytes"],
+        "required_conservative_bytes": _preflight["required_conservative_bytes"],
+        "required_lower_bound_bytes": _preflight["required_lower_bound_bytes"],
+        "demand": {k: _demand[k] for k in (
+            "boundaries", "n_checkpoints", "n_retained_boundary_groups",
+            "n_batches", "n_probes", "per_tensor_nbytes",
+            "per_file_envelope_bytes")},
+    }
+
+
 def run_adjoint_capture_core(
     runner, calib_ids, *, execution, output_root, stride,
     source_model_identity, unit_roster_sha256, plan_sha256, prepared_sha256,
@@ -1018,94 +1116,8 @@ def run_adjoint_capture(
         roster_digest = hashlib.sha256("".join(
             f"{name}\n" for name in sorted(data.formats_by_qname)).encode()).hexdigest()
 
-        # Early durable-budget preflight from already-available geometry,
-        # before any expensive forward / layer traversal. Uses the live
-        # runner + calibration shapes (no bulk buffers), the writer's own
-        # file-header envelope, the plan's auxiliary bound for shared
-        # payloads, and the checkpoint manifest estimator -- the same
-        # ceiling the runtime reserve enforces. The runtime guards stay
-        # authoritative for serialized bytes and unpredicted overhead.
-        _n_probes = int(execution["n_probes"])
-        _probe_microbatch = int(execution.get("probe_microbatch", 0))
-        _n_rows = int(ids.shape[0])
-        _seqlen = int(ids.shape[1])
-        _batch_rows = min(_probe_microbatch or _n_rows, _n_rows)
-        _n_batches = (_n_rows + _batch_rows - 1) // _batch_rows
-        _per_tensor = _stage_a_per_tensor_nbytes(
-            runner, batch_rows=int(_batch_rows), seqlen=int(_seqlen))
-        try:
-            _aux_bound = int(execution["boundary_storage"]["max_auxiliary_bytes"])
-        except (KeyError, TypeError):
-            _aux_bound = 0
-        if type(_aux_bound) is bool or not isinstance(_aux_bound, int) or _aux_bound < 0:
-            _aux_bound = 0
-        try:
-            from .joint_adjoint_checkpoints import (
-                _checkpoint_manifest_envelope_bytes,
-                checkpoint_directory,
-            )
-            _manifest_probe_boundary = derive_checkpoint_boundaries(
-                int(runner.num_layers), int(stride_value))[0]
-            _manifest_dir = checkpoint_directory(space, int(_manifest_probe_boundary))
-            _dummy_session = {"generation": "0" * 32, "kind": "adjoint_checkpoint",
-                              "run_identity_sha256": "0" * 64}
-            _act_plan = [{
-                "probe_index": p, "batch_index": b, "slot": f"cotangent-{p}-{b}",
-                "name": f"cotangent-{p}-{b}",
-                "path": str(_manifest_dir / "entries" / f"cotangent-{p}-{b}.pt"),
-                "tensor_bytes": int(_per_tensor),
-                "file_envelope": int(_per_tensor) + int(ARTIFACT_FILE_HEADER_BYTES),
-                "shape": [int(_batch_rows), int(_seqlen)],
-                "dtype": str(runner.dtype),
-            } for p in range(_n_probes) for b in range(_n_batches)]
-            _shared_names = (
-                [f"shared-adjoint-{p}-{b}" for p in range(_n_probes)
-                 for b in range(_n_batches)]
-                + [f"shared-pass-{b}" for b in range(_n_batches)])
-            _n_shared = len(_shared_names)
-            _per_shared_envelope = max(
-                int(ARTIFACT_FILE_HEADER_BYTES),
-                int(_aux_bound) // max(1, _n_shared) if _aux_bound else int(
-                    ARTIFACT_FILE_HEADER_BYTES))
-            _shared_plan = [{
-                "name": name,
-                "path": str(_manifest_dir / "entries" / f"{name}.pkl"),
-                "file_envelope": int(_per_shared_envelope),
-            } for name in _shared_names]
-            _manifest_bytes = int(_checkpoint_manifest_envelope_bytes(
-                boundary=int(_manifest_probe_boundary), session=_dummy_session,
-                activation_plan=_act_plan, shared_plan=_shared_plan))
-        except (ImportError, RuntimeError, TypeError, ValueError):
-            _manifest_bytes = 4 << 20
-        _demand = estimate_stage_a_artifact_demand(
-            n_probes=int(_n_probes), n_batches=int(_n_batches),
-            per_tensor_nbytes=int(_per_tensor),
-            num_layers=int(runner.num_layers), stride=int(stride_value),
-            header_bytes=int(ARTIFACT_FILE_HEADER_BYTES),
-            shared_per_checkpoint_bytes=int(_aux_bound),
-            manifest_per_checkpoint_bytes=int(_manifest_bytes))
-        _preflight = preflight_stage_a_artifact_budget(
-            declared_bytes=int(artifact["run_used"]), demand=_demand,
-            plan_sealed_bytes=int(artifact["override"]["plan_sealed_bytes"]
-                                  if artifact["override"] is not None
-                                  else int(artifact["run_used"])))
-        result["artifact_preflight"] = {
-            "declared_bytes": _preflight["declared_bytes"],
-            "required_conservative_bytes": _preflight["required_conservative_bytes"],
-            "required_lower_bound_bytes": _preflight["required_lower_bound_bytes"],
-            "demand": {k: _demand[k] for k in (
-                "boundaries", "n_checkpoints", "n_retained_boundary_groups",
-                "n_batches", "n_probes", "per_tensor_nbytes",
-                "per_file_envelope_bytes")},
-        }
-        print(f"joint_cost_stage_a: artifact preflight: declared "
-              f"{_preflight['declared_bytes']} bytes "
-              f"({ _preflight['declared_bytes'] / 1024 ** 3:.2f} GiB) >= "
-              f"required {_preflight['required_conservative_bytes']} bytes "
-              f"({_preflight['required_conservative_bytes'] / 1024 ** 3:.2f} GiB "
-              f"conservative; lower {_preflight['required_lower_bound_bytes']} bytes); "
-              f"per-tensor {_per_tensor} bytes x {_n_batches} batches, "
-              f"boundaries {_demand['boundaries']}", flush=True)
+        result["artifact_preflight"] = _run_artifact_preflight(
+            runner, ids, execution, stride_value, space, artifact)
 
         kernel.__enter__()
         progress = JointRunProgress(
