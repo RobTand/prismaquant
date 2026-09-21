@@ -475,7 +475,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
             pass
 
     class _Ids:
-        shape = (0, 0)
+        shape = (4, 512)
 
         def to(self, device):
             return self
