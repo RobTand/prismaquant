@@ -1864,7 +1864,8 @@ def _source_extent_entries(parent_manifest: Mapping, *,
 def build_quantum_executable_manifest(
         record: Mapping, receipt: Mapping, parent_manifest: Mapping, *,
         strided_boundaries: Sequence[int], n_probes: int, calib: Mapping,
-        render_prerequisite: Mapping) -> dict:
+        render_prerequisite: Mapping,
+        binding_validator=None) -> dict:
     """ONE executable v2 read manifest for a quantum row (PQ #862).
 
     Derived post-capture from the completed adjoint receipt, the record's
@@ -1884,14 +1885,13 @@ def build_quantum_executable_manifest(
     reads that need them name the PB732 produced-output scope in
     ``annotations.render_prerequisite`` (production pickle digest plus
     roster digest, both sealed inputs) -- never a silent HDD read.
-    The annotation names the missing dependency; it does not implement
-    staging and proves no capability. No accepted PB produced-output
-    binding validator exists yet (the PB732/735 stacks are still
-    unaccepted), so every manifest this builder seals carries
-    ``binding: None`` and is sequencing-only: the dispatcher refuses all
-    executable rows with a typed unsupported-binding refusal, even for a
-    plausible-looking prerequisite dictionary. A non-None ``binding``
-    input refuses here rather than sealing fiction. Only a receipt whose
+    The annotation names the dependency; it implements no staging and
+    proves no capability by itself.  A ``binding`` input is sealed only
+    when the closed queue validator accepts it (the injected
+    ``binding_validator`` -- PrismaBuild's
+    ``PoolQueue.validate_produced_output_batch`` through PQ's adapter);
+    ``binding: None`` stays sequencing-only and the dispatcher keeps its
+    typed refusal for it.  Only a receipt whose
     status is ``complete`` derives anything here.
     """
     from .joint_adjoint_checkpoints import chain_layers_for
@@ -1958,17 +1958,40 @@ def build_quantum_executable_manifest(
             not render_prerequisite.get("unit_roster_sha256"):
         raise ValueError("an executable readset names no PB732 render "
                          "prerequisite: refusing")
-    if render_prerequisite.get("binding") is not None:
-        raise ValueError(
-            "an executable readset names a render binding, but no accepted "
-            "PB produced-output binding validator exists (PB732/735 stacks "
-            "unaccepted): refusing to seal fiction -- manifests are "
-            "sequencing-only with binding None")
+    binding = render_prerequisite.get("binding")
+    if binding is None:
+        # Sequencing-only, exactly as before: the manifest names the
+        # missing dependency and stages nothing.
+        sealed_binding = None
+    else:
+        # A binding is sealed only when the closed queue validator
+        # accepted it (PrismaBuild's PoolQueue.validate_produced_output_
+        # batch over the produced-output batch reference).  The callable
+        # is injected -- this module imports no queue implementation --
+        # and a missing or refusing validator still refuses here rather
+        # than sealing an unvalidated dictionary as capability.
+        if not callable(binding_validator):
+            raise ValueError(
+                "an executable readset names a render binding, but no "
+                "binding validator was supplied (the accepted validator "
+                "is PrismaBuild's validate_produced_output_batch): "
+                "refusing to seal an unvalidated binding")
+        try:
+            checked_binding = binding_validator(binding)
+        except Exception as exc:
+            raise ValueError(
+                "the render binding is not an accepted produced-output "
+                f"batch reference: {exc}") from exc
+        if not isinstance(checked_binding, dict):
+            raise ValueError(
+                "the binding validator did not return the checked batch "
+                "reference: refusing")
+        sealed_binding = checked_binding
     prerequisite = {
         "scope": "pb732",
         "production_pkl_sha256": render_prerequisite["production_pkl_sha256"],
         "unit_roster_sha256": render_prerequisite["unit_roster_sha256"],
-        "binding": None,
+        "binding": sealed_binding,
     }
     receipt_sha256 = bind_adjoint_receipt(
         receipt, plan_sha256=campaign["plan_sha256"],
@@ -2157,7 +2180,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             strided_boundaries: Sequence[int], n_probes: int,
                             calib: Mapping,
                             render_prerequisite: Mapping,
-                            metadata_root: str | None = None) -> dict:
+                            metadata_root: str | None = None,
+                            binding_validator=None) -> dict:
     """Bind a sealed executable read manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying an ``executable_readset``
@@ -2239,7 +2263,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
         expected = build_quantum_executable_manifest(
             record, receipt, parent_manifest,
             strided_boundaries=strided_boundaries, n_probes=n_probes,
-            calib=calib, render_prerequisite=render_prerequisite)
+            calib=calib, render_prerequisite=render_prerequisite,
+            binding_validator=binding_validator)
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         raise ValueError("the executable readset does not derive from its "
                          f"record, receipt and parent: refusing ({exc})") from exc
@@ -2273,7 +2298,8 @@ def emit_quantum_executable_readsets(
         receipt: Mapping, records: Sequence[Mapping],
         parent_manifest: Mapping, *, strided_boundaries: Sequence[int],
         n_probes: int, calib: Mapping, render_prerequisite: Mapping,
-        output_root: str, metadata_root: str | None = None) -> list[dict]:
+        output_root: str, metadata_root: str | None = None,
+        binding_validator=None) -> list[dict]:
     """The post-capture generation path for executable read manifests.
 
     For every record, derives the executable manifest, seals it, and binds
@@ -2299,7 +2325,8 @@ def emit_quantum_executable_readsets(
         manifest = build_quantum_executable_manifest(
             record, receipt, parent_manifest,
             strided_boundaries=strided_boundaries, n_probes=n_probes,
-            calib=calib, render_prerequisite=render_prerequisite)
+            calib=calib, render_prerequisite=render_prerequisite,
+            binding_validator=binding_validator)
         quantum_id = record.get("quantum_id")
         manifest_path = f"{bound_dir}/{quantum_id}.executable.json.gz"
         if quantum_id in seen or manifest_path in seen:
@@ -2317,7 +2344,8 @@ def emit_quantum_executable_readsets(
                 output_root=output_root,
                 strided_boundaries=strided_boundaries, n_probes=n_probes,
                 calib=calib, render_prerequisite=render_prerequisite,
-                metadata_root=metadata_root),
+                metadata_root=metadata_root,
+                binding_validator=binding_validator),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,

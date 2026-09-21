@@ -1,7 +1,71 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/stagea-readset-898-profiler-899`.
+As of: 2026-09-21 · `fix/produced-render-870-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `fix/produced-render-870-20260921`) for **the
+produced-render writer/reader connection** (PQ #870) and the validated
+executable binding.
+
+`ProductionWeightCache.store_rendered_weight_published` is the
+publication-aware spelling of the renderer's anchor write
+(`tessera_campaign._finish_anchor`). Reuse is PROVEN, not assumed: a
+filed render is a clean hit only when this process recorded a successful
+publication AND the file's stat signature still matches; a filed render
+whose publication state is unknown (crash between write and record, or
+an earlier failed publication) reconciles through the idempotent publish
+with the stable batch id and the descriptor the file's current size
+derives, and bytes that changed under a batch id refuse loudly. A new
+render admits its budget BEFORE the one actual write from a conservative
+storage-metadata bound (no serialization pass just to count bytes),
+covering BOTH lifetimes the existing atomic writer creates (the
+temporary file during the write and the final path after the rename);
+the write itself is the existing `_store_rendered_weight_entry`, and the
+descriptor afterwards carries the actual size (reconciled against the
+admitted bound, fail-closed) with the DEV null digest -- no payload
+reread or hash. `publish_prepaid_batch` seals the mover off the owner's
+OWN sealed request (`producer_action_key`), funds the batch by exact
+transfer from the producer's reserved window, and commits through the
+CAS root the owner's row files (never a guessed queue topology);
+identical retries re-derive the content-addressed mover and answer typed
+duplicates. `retire_batch` and `safe_release_instance` close the
+lifetime and return capacity.
+
+`prismaquant.produced_render_publication.ProducedRenderPublication`
+binds everything from the admitted owner's request -- owner key, nonce
+and scope from the launch environment, the template from the
+submission's own `--produced-output-template` declaration
+(`declared_template`), the instance from `bind_declared_instance`
+against the live claim -- with no operator-supplied template dictionary
+and no per-batch source re-seal. The campaign wires it opt-in
+(`--produced-render-publication` with `--produced-output-pool-root` /
+`--produced-output-tier`); without it every path is byte-identical to
+before. The executable readset seam accepts exactly-validated bindings:
+`build_quantum_executable_manifest` and
+`dispatch_joint_quanta.quantum_argv` take an injectable
+`binding_validator` (PrismaBuild's closed
+`PoolQueue.validate_produced_output_batch` through PQ's adapter) and
+seal/admit a binding only when the real queue validator accepts it;
+`binding: None` stays sequencing-only, and a missing validator, a
+refused reference, or a hand-tampered sealed binding keeps the typed
+`ExecutableBindingUnsupported` gate. The regen CLI seals a binding
+opt-in via `--render-binding` + `--render-binding-pool-root`.
+
+Status, stated honestly: the integration is bound to PrismaBuild's
+DEPLOYED runtime generation `d1c640e74d97-1790008584-459339399864`
+(pinned by file digest in `tests/produced_render_pb_pin.json`; the
+cross-repo tests skip loudly when those bytes do not resolve), which
+carries `PoolQueue.validate_produced_output_batch` and the full prepaid
+lifecycle. No live-fleet or GPU-campaign claim is made, and the
+checkpoint/boundary publication seam remains a distinct next dependency
+(the boundary readsets are not yet produced-output batches). No
+production record is regenerated until Stage B source completion (PQ
+#900) and this integration are accepted together. Gate:
+`tests/test_produced_render_publication.py` (tiny real tensors through
+the actual writer, prewrite refusal before a file appears, funded
+publish/read via the real mover argv, cache reuse without charge or
+rewrite, idempotent retry, retire/release) plus the sequencing gates in
+`tests/test_quantum_executable_readset.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 staged-range resolver asking every covering entry** (PQ #902). PrismaBuild
@@ -384,17 +448,13 @@ its boundary entries, the own source extents, then per retained window
 and probe the replay boundary reads (own-boundary corpus repeats across
 windows; resume reads a subset). Entries deduplicate exact
 path/offset/bytes/sha triples and refuse contradictions; rendered-weight
-bytes are not staged here. The annotation names the missing PB732
+bytes are not staged here. The annotation names the PB732
 produced-output dependency (production pickle digest plus roster digest);
-it implements no staging and proves no capability. No accepted PB
-produced-output binding validator exists (PB732/735 stacks unaccepted),
-so every sealed manifest carries `binding: None` (a non-None binding
-input refuses rather than sealing fiction) and is sequencing-only, never
-production-runnable: the dispatcher refuses all executable rows with the
-typed `ExecutableBindingUnsupported` refusal -- even for a
-plausible-looking prerequisite dictionary -- while manifest/phase
-propagation is exercised through the private `_executable_row_parts`
-helper without bypassing that production gate. `bind_quantum_executable`
+it implements no staging and proves no capability. A binding is sealed
+only when the closed queue validator accepts it (see the
+produced-render-integration re-stamp above; previously every manifest
+carried `binding: None` and the dispatcher refused all executable rows).
+`bind_quantum_executable`
 attaches the rebuild-anchored digest/path to a new record generation with
 recomputed identity; `--executable-readsets` wires the regen path. Rows
 without the block keep the legacy slice contract with strict tiers. The

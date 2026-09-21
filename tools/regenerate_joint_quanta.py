@@ -700,6 +700,15 @@ def main(argv=None) -> int:
                          "chain and own source extents plus boundary/probe/"
                          "replay reads) into bound-readsets/ and bind it to "
                          "a new record generation; needs --adjoint-receipt")
+    ap.add_argument("--render-binding", default=None, metavar="JSON",
+                    help="a produced-output batch reference JSON to seal "
+                         "into every executable readset's render "
+                         "prerequisite; validated against the real queue "
+                         "before anything seals (opt-in: without it the "
+                         "manifests stay sequencing-only with binding None)")
+    ap.add_argument("--render-binding-pool-root", default=None, metavar="ROOT",
+                    help="PrismaBuild pool root the render binding is "
+                         "validated against (required with --render-binding)")
     ap.add_argument("--check-only", action="store_true",
                     help="Gate 1 alone; write nothing")
     args = ap.parse_args(argv)
@@ -913,16 +922,42 @@ def main(argv=None) -> int:
                 if not roster:
                     raise ValueError(
                         "the record campaign seals no unit roster: refusing")
+                prerequisite = {
+                    "scope": "pb732",
+                    "production_pkl_sha256": production_sha,
+                    "unit_roster_sha256": roster}
+                binding_validator = None
+                if args.render_binding:
+                    if not args.render_binding_pool_root:
+                        raise ValueError(
+                            "--render-binding needs "
+                            "--render-binding-pool-root: the reference is "
+                            "validated against the real queue or nothing "
+                            "seals")
+                    from prismaquant.produced_render_publication import (
+                        produced_batch_binding_validator)
+                    try:
+                        prerequisite["binding"] = json.loads(
+                            Path(args.render_binding).read_text())
+                    except (OSError, ValueError) as exc:
+                        raise ValueError(
+                            f"render binding unreadable at "
+                            f"{args.render_binding}: {exc}") from exc
+                    try:
+                        binding_validator = produced_batch_binding_validator(
+                            args.render_binding_pool_root)
+                    except Exception as exc:
+                        raise ValueError(
+                            f"cannot build the binding validator: {exc}"
+                        ) from exc
                 emitted = emit_quantum_executable_readsets(
                     receipt, produced["records"], parent,
                     strided_boundaries=checkpoints, n_probes=n_probes,
                     calib={"path": calib_path, "bytes": calib_bytes,
                            "sha256": calib_sha256},
-                    render_prerequisite={
-                        "scope": "pb732",
-                        "production_pkl_sha256": production_sha,
-                        "unit_roster_sha256": roster},
-                    output_root=output_root, metadata_root=metadata_root)
+                    render_prerequisite=prerequisite,
+                    output_root=output_root, metadata_root=metadata_root,
+                    binding_validator=binding_validator)
                 produced["records"] = [row["record"] for row in emitted]
                 bound_manifests.extend(
                     (row["manifest_path"], row["manifest"],
