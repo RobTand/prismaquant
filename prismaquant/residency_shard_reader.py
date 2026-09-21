@@ -104,7 +104,7 @@ STAGED_RANGE_WAIT_S = 300.0
 STAGED_RANGE_POLL_S = 1.0
 
 
-def await_staged_spans(resolver, wanted, *, deadline) -> str:
+def await_staged_spans(resolver, wanted, *, deadline, published=None) -> str:
     """Give PrismaBuild's movers until ``deadline`` to land ``wanted``.
 
     ``wanted`` is ``[(declared path, start, end, declared size), ...]`` --
@@ -130,18 +130,37 @@ def await_staged_spans(resolver, wanted, *, deadline) -> str:
     Cheap to poll: an uncovered span returns before ``staged_range``
     stats anything, and ``ResidencyResolver._read_map`` is identity-gated,
     so a poll that finds the map unchanged costs one ``lstat``.
+
+    ``published(resolver, declared, entry) -> bool`` extends "landed" to the
+    entry's proof. A mover writes its fragment, which puts the row in the
+    map, and then the sidecar a lease needs; a covered span whose sidecar is
+    not there yet is still landing, and is waited on exactly like an
+    uncovered one (PQ #905). Asked once per staged entry per poll, never per
+    tensor, and an entry that answered yes is not asked again.
     """
     started = time.monotonic()
     polls = 0
     pending = list(wanted)
     verdict = RANGE_HIT
+    proven = set()
     while pending:
         still = []
+        unproven = set()
         for row in pending:
             declared, start, end, size = row
-            _entry, outcome = resolver.staged_range_outcome(
+            entry, outcome = resolver.staged_range_outcome(
                 declared, start, end, declared_size=size)
             if outcome == RANGE_HIT:
+                if published is None:
+                    continue
+                key = (declared, entry["offset"], entry["bytes"])
+                if key in proven:
+                    continue
+                if key not in unproven and published(resolver, declared, entry):
+                    proven.add(key)
+                    continue
+                unproven.add(key)
+                still.append(row)
                 continue
             if outcome != RANGE_UNCOVERED:
                 verdict = outcome
