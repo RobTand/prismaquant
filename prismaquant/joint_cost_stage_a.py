@@ -1086,6 +1086,15 @@ def run_adjoint_capture_core(
         },
         "dev_mode": dev_mode_stamp(),
     }
+    produced = getattr(storage, "produced_output_report", None)
+    if callable(produced):
+        # After the owner closed: ``retention`` above was taken inside the
+        # ``with`` block, so it cannot see the settle, and a stage copy
+        # PrismaBuild would not retire must be on the artifact, not only
+        # on stdout.
+        report = produced()
+        if report is not None:      # an unbound owner's receipt is unchanged
+            receipt["telemetry"]["produced_output"] = report
     return receipt
 
 

@@ -575,3 +575,252 @@ def test_the_waits_account_for_the_settle(tmp_path, monkeypatch):
         before = storage.telemetry["produced_group_release_wait_s"]
         storage.settle_produced_releases()
     assert storage.telemetry["produced_group_release_wait_s"] > before
+
+
+# ---------------------------------------------------------------------------
+# Second review pass (2026-09-21): the recovery itself.
+# ---------------------------------------------------------------------------
+
+def _shortfall(group):
+    from prismaquant.stage_a_produced_output import (
+        BoundaryProducedPublicationFailed)
+    return BoundaryProducedPublicationFailed(
+        batch_id=group["batch_id"],
+        refusal={"ok": False, "step": "fund",
+                 "refusal": "tier-reservation-unavailable"})
+
+
+def test_a_full_window_surfaces_at_the_fund_step_and_is_still_a_shortfall():
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    kind = StreamedBoundaryArtifacts._produced_refill_refusal_kind
+    assert kind(_shortfall({"batch_id": "b"})) == "shortfall"
+
+    class _Refused(Exception):
+        def __init__(self, refusal):
+            self.refusal = refusal
+
+    assert kind(_Refused({"step": "refill",
+                          "refusal": "unknown-retain: funding-census"})) == "census"
+    assert kind(_Refused({"step": "fund",
+                          "refusal": "unknown-retain: mover-publication"})) == "census"
+    assert kind(_Refused({"step": "origin",
+                          "refusal": "tier-reservation-unavailable"})) is None
+    assert kind(_Refused({"step": "fund",
+                          "refusal": "mover-publication-mismatch"})) is None
+    assert kind(_Refused("tier-reservation-unavailable")) is None
+
+
+def test_read_ahead_given_up_first_is_the_group_read_last():
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    order = StreamedBoundaryArtifacts._produced_surrender_order
+    held = [("boundary", 7, -1, 0),      # the plane this layer is reading
+            ("boundary", 6, -1, 3),      # the next layer's plane
+            ("cotangent", 8, 0, 1),      # incoming, read this layer
+            ("cotangent", 7, 3, 1),      # written now, read next layer, last
+            ("cotangent", 7, 0, 0)]
+    assert sorted(held, key=order) == [
+        ("cotangent", 7, 3, 1), ("cotangent", 7, 0, 0), ("cotangent", 8, 0, 1),
+        ("boundary", 6, -1, 3), ("boundary", 7, -1, 0)]
+
+
+def test_a_reclaim_that_cannot_finish_ends_inside_the_reads_own_budget(
+        tmp_path, monkeypatch):
+    """A reclaim is part of the group's staging, never a budget of its own."""
+
+    import time
+    from prismaquant.stage_a_produced_output import (
+        BoundaryProducedPublicationFailed)
+
+    storage, publication, q, env, pb_repo = _owner(
+        tmp_path, groups=3, window_gib=8)
+    monkeypatch.setattr(storage, "PRODUCED_DEFERRAL_POLL_S", 0.01)
+    chain._write_group(storage)
+    wanted = chain._write_group(storage, first=GROUP_SIZE, count=GROUP_SIZE - 1)
+
+    def never_funds(key, group, deadline=None):
+        raise _shortfall(group)
+
+    def always_deferred(batch_id, **kwargs):
+        return chain._incomplete(deferred_own=["own-copy-in-flight"],
+                                 entries_deferred=GROUP_SIZE)
+
+    with chain._fleet(q, tmp_path):
+        chain._strict(monkeypatch, env, pb_repo, q)
+        real_retire = publication.retire
+        monkeypatch.setattr(storage, "_produced_publish", never_funds)
+        monkeypatch.setattr(publication, "retire", always_deferred)
+        storage._produced_plan["staging_timeout_s"] = 0.5
+        started = time.monotonic()
+        with pytest.raises(BoundaryProducedPublicationFailed):
+            with storage.prefetch(wanted):
+                pass
+        assert time.monotonic() - started < 10.0, (
+            "the reclaim minted itself a budget the read never had")
+        assert any(entry.get("step") == "reclaim-credit"
+                   for entry in storage._produced_release_errors)
+        storage._produced_plan["staging_timeout_s"] = 900.0
+        monkeypatch.setattr(publication, "retire", real_retire)
+        storage.settle_produced_releases()
+
+
+def test_another_groups_egress_is_not_the_failure_of_this_read(
+        tmp_path, monkeypatch):
+    storage, publication, q, env, pb_repo = _owner(
+        tmp_path, groups=4, window_gib=8)
+    chain._write_group(storage)
+    broken_refs = chain._write_group(storage, first=GROUP_SIZE)
+    wanted = chain._write_group(
+        storage, first=2 * GROUP_SIZE, count=GROUP_SIZE - 1)
+    broken_id = storage._produced_groups[
+        storage._produced_index[broken_refs[0]]]["batch_id"]
+    real_publish, real_retire = storage._produced_publish, publication.retire
+    refused = {"n": 0}
+
+    def short_once(key, group, deadline=None):
+        if group["published"] is None and not refused["n"]:
+            refused["n"] += 1
+            raise _shortfall(group)
+        return real_publish(key, group, deadline=deadline)
+
+    def one_is_unclassified(batch_id, **kwargs):
+        if batch_id == broken_id:
+            return {"ok": False, "refusal": "egress-incomplete",
+                    "receipt": {"complete": False}}
+        return real_retire(batch_id, **kwargs)
+
+    with chain._fleet(q, tmp_path):
+        chain._strict(monkeypatch, env, pb_repo, q)
+        monkeypatch.setattr(storage, "_produced_publish", short_once)
+        monkeypatch.setattr(publication, "retire", one_is_unclassified)
+        _read(storage, wanted, _expected(2 * GROUP_SIZE, GROUP_SIZE - 1))
+        assert refused["n"] == 1
+        assert storage.telemetry["produced_groups_ahead_surrendered"] == 1, (
+            "the other group staged ahead gave its credit back")
+        assert [entry["batch_id"] for entry in storage._produced_release_errors
+                if entry.get("step") == "reclaim-credit"] == [broken_id]
+        monkeypatch.setattr(publication, "retire", real_retire)
+        storage.settle_produced_releases()
+    assert all(record["retired"] for record in storage.produced_group_records())
+
+
+def test_a_two_group_read_funds_beside_a_stuck_group_at_exact_capacity(
+        tmp_path, monkeypatch):
+    """The outcome the window-wide bound exists for, on PrismaBuild's ledger."""
+
+    storage, publication, q, env, pb_repo = _owner(
+        tmp_path, groups=5, window_gib=4)
+    assert storage._produced_plan["window_groups"] == 4
+    stuck = chain._write_group(storage, count=GROUP_SIZE - 1)
+    with chain._fleet(q, tmp_path):
+        chain._strict(monkeypatch, env, pb_repo, q)
+        real = publication.retire
+        stuck_id = storage.produced_group_records()[0]["batch_id"]
+
+        def refusing_the_stuck_one(batch_id, **kwargs):
+            if batch_id == stuck_id:
+                return _foreign_pin(batch_id)
+            return real(batch_id, **kwargs)
+
+        monkeypatch.setattr(publication, "retire", refusing_the_stuck_one)
+        _read(storage, stuck, _expected(0, GROUP_SIZE - 1))
+        for index in (1, 2):
+            chain._write_group(storage, first=index * GROUP_SIZE)
+        pair = [chain._write_group(storage, first=index * GROUP_SIZE,
+                                   count=GROUP_SIZE - 1) for index in (3, 4)]
+        _read(storage, pair[0] + pair[1],
+              _expected(3 * GROUP_SIZE, GROUP_SIZE - 1)
+              + _expected(4 * GROUP_SIZE, GROUP_SIZE - 1))
+        storage.settle_produced_releases()
+
+
+def test_a_group_the_read_published_is_retained_for_the_next_pass(
+        tmp_path, monkeypatch):
+    storage, _publication, q, env, pb_repo = _owner(
+        tmp_path, groups=1, window_gib=8)
+    references = chain._write_group(storage, count=GROUP_SIZE - 1)
+    with chain._fleet(q, tmp_path):
+        chain._strict(monkeypatch, env, pb_repo, q)
+        with storage.retain_produced_boundary(0):
+            _read(storage, references, _expected(0, GROUP_SIZE - 1))
+            assert storage.telemetry["produced_groups_retained"] == 1
+            assert storage.telemetry["produced_groups_retired"] == 0
+            _read(storage, references, _expected(0, GROUP_SIZE - 1))
+        storage.settle_produced_releases()
+    assert storage.telemetry["produced_groups_rematerialized"] == 0
+    assert storage.produced_release_debt() == chain._NO_DEBT
+
+
+def test_what_the_owner_learned_as_it_closed_is_in_its_report(
+        tmp_path, monkeypatch, capsys):
+    storage, publication, q, env, pb_repo = _owner(
+        tmp_path, groups=1, window_gib=8)
+    chain._write_group(storage)
+
+    def broken(batch_id, **kwargs):
+        return {"ok": False, "refusal": "egress-incomplete",
+                "receipt": {"complete": False}}
+
+    primary = RuntimeError("the capture failed")
+    with chain._fleet(q, tmp_path):
+        chain._strict(monkeypatch, env, pb_repo, q)
+        monkeypatch.setattr(publication, "retire", broken)
+        storage._settle_produced_releases_at_exit(primary)
+    assert any("settle at exit did not finish" in note
+               for note in primary.__notes__), (
+        "the failure already propagating keeps its name and gains the debt")
+    report = storage.produced_output_report()
+    assert report["release_debt"]["unclassified"]
+    assert report["release_error_count"] >= 1
+    assert report["window_groups"] == 8
+    assert report["telemetry"]["produced_groups_published_ahead"] == 1
+
+
+def test_an_unbound_owner_reports_nothing(tmp_path):
+    from prismaquant.cost_streaming import (
+        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    storage = StreamedBoundaryArtifacts({
+        "schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "x"),
+        "max_resident_bytes": 1 << 20, "max_auxiliary_bytes": 1 << 20,
+        "max_artifact_bytes": 1 << 20, "prefetch_batches": GROUP_SIZE})
+    assert storage.produced_output_report() is None
+
+
+def test_the_capture_declares_its_last_roll_unread(tmp_path, monkeypatch):
+    """The line that keeps the last roll off the stage tier, pinned."""
+
+    from test_layer_major_boundary_capture import fixture, draw
+    from test_streamed_boundary_artifacts import _policy
+    from test_streamed_cost_checkpoints import _model_identity
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
+
+    seen = []
+    real = StreamedBoundaryArtifacts.write
+
+    def recording(self, tensor, **kwargs):
+        if kwargs.get("probe_index") is not None:
+            seen.append((kwargs["boundary_index"],
+                         kwargs.get("read_back", True)))
+        return real(self, tensor, **kwargs)
+
+    monkeypatch.setattr(StreamedBoundaryArtifacts, "write", recording)
+    _, _, runner, _ = fixture()
+    runner.context.settle_prefetch_layers = lambda layers: None
+    receipt = run_adjoint_capture_core(
+        runner, draw(), execution={
+            "n_probes": 1, "seed_base": 7000, "probe_microbatch": 0,
+            "boundary_storage": {
+                **_policy(tmp_path / "b", cap=1 << 24, aux=1 << 22,
+                          disk=1 << 26),
+                "schema": "prismaquant.aura.boundary_storage.v2",
+                "capture_order": "layer_major"}},
+        output_root=tmp_path / "out", stride=8,
+        source_model_identity=_model_identity("joint-source"),
+        unit_roster_sha256="a" * 64, plan_sha256="d" * 64,
+        prepared_sha256="e" * 64, read_manifest_sha256="f" * 64,
+        implementation_sha256="b" * 64)
+    assert "produced_output" not in receipt["telemetry"], (
+        "an unbound owner's receipt is unchanged")
+    boundaries = sorted({boundary for boundary, _ in seen})
+    assert boundaries[0] == 0 and len(boundaries) > 1
+    assert all(read_back is (boundary > 0) for boundary, read_back in seen), seen

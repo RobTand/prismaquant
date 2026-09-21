@@ -1451,14 +1451,44 @@ class StreamedBoundaryArtifacts:
             # the read decides, and raises under its own name if it must.
             self._produced_publish_deferred.pop(key, None)
             self.telemetry["produced_group_ahead_refusals"] += 1
+            adopted = self._produced_adopt_after_refusal(key, group)
             self._produced_ahead_refusals.append(
                 {"batch_id": group["batch_id"], "restage": bool(restage),
-                 "reason": repr(exc)})
+                 "adopted": adopted, "reason": repr(exc)})
             del self._produced_ahead_refusals[:-self.PRODUCED_AHEAD_REFUSAL_LOG]
             return False
         finally:
             self.telemetry["produced_group_ahead_wait_s"] += (
                 time.monotonic() - started)
+        self._produced_held.add(key)
+        self._produced_ahead.add(key)
+        return True
+
+    def _produced_adopt_after_refusal(self, key, group):
+        """Count credit PrismaBuild took before a read-ahead step failed.
+
+        A step that fails after its funding moved leaves a mover PrismaBuild
+        will run and an owner that thinks it holds nothing. Ask, and count
+        what the ledger says: over-counting costs a little read-ahead,
+        under-counting costs a refused read. The group's own state is left
+        for its read, which re-drives the identical, content-addressed step
+        and is answered with a typed duplicate.
+        """
+
+        try:
+            state = self._produced.materialization_state(
+                batch_id=group["batch_id"])
+        except Exception:                               # noqa: BLE001
+            return False
+        if not (isinstance(state, dict) and state.get("ok")
+                and not state.get("stage_retired")):
+            return False
+        if group["retired"]:
+            # A re-staging PrismaBuild did start: the copy is coming back,
+            # so the group is not retired, and nothing has awaited it yet.
+            group["retired"] = False
+            group["context"] = None
+            group["copy_awaited"] = False
         self._produced_held.add(key)
         self._produced_ahead.add(key)
         return True
@@ -1471,6 +1501,30 @@ class StreamedBoundaryArtifacts:
         """The most recent read-ahead steps PrismaBuild did not take."""
 
         return [dict(entry) for entry in self._produced_ahead_refusals]
+
+    def produced_output_report(self):
+        """What a receipt should carry about this owner's staging, or None.
+
+        Meant to be read AFTER the owner closed, so it includes the settle:
+        the counters, the stage copies PrismaBuild would not retire, the
+        read-ahead steps it did not take, and the release errors recorded
+        along the way (a bounded tail of each list; the counts are exact).
+        """
+
+        if self._produced is None or self._produced_plan is None:
+            return None
+        return {
+            "window_groups": self._produced_plan["window_groups"],
+            "ahead_groups": self._produced_plan["ahead_groups"],
+            "telemetry": {name: value for name, value in self.telemetry.items()
+                          if name.startswith("produced_")},
+            "release_debt": self.produced_release_debt(),
+            "ahead_refusals": self.produced_ahead_refusals(),
+            "release_errors": [
+                {**entry, "reason": repr(entry.get("reason"))[:400]}
+                for entry in self._produced_release_errors[
+                    -self.PRODUCED_AHEAD_REFUSAL_LOG:]],
+            "release_error_count": len(self._produced_release_errors)}
 
     def _produced_publish_ahead(self, key, group):
         if (self._produced_plan["ahead_groups"] <= 0
@@ -1563,50 +1617,82 @@ class StreamedBoundaryArtifacts:
         try:
             self._produced_reclaim_credit(
                 keep, until=lambda: (
-                    len(self._produced_held) + need <= capacity))
+                    len(self._produced_held) + need <= capacity),
+                deadline=started + float(
+                    self._produced_plan["staging_timeout_s"]))
         finally:
             self.telemetry["produced_group_release_wait_s"] += (
                 time.monotonic() - started)
 
     def _produced_reclaim_credit(self, keep=(), *, until=None,
-                                 on_reclaim=None):
+                                 on_reclaim=None, deadline=None):
         """Take stage credit back, waiting for each group. Returns the count.
 
         Pending retirements first -- they were asked for already -- then
-        the groups read-ahead holds. ``keep`` is never touched; ``until``
-        stops as soon as it holds, and ``on_reclaim`` hears each key.
+        the groups read-ahead holds, the one read LAST given up FIRST.
+        ``keep`` is never touched; ``until`` stops as soon as it holds;
+        ``on_reclaim`` hears each key; ``deadline`` bounds every wait in
+        here to the budget of the read that asked.
+
+        A candidate that will not retire is some OTHER group's trouble. It
+        is recorded against that group and the next candidate is tried: a
+        request for credit must not make an unrelated group's egress the
+        failure of this read. If nothing comes back the caller raises its
+        own refusal, under its own name.
         """
 
+        import time
+
         reclaimed = 0
-        for key in list(self._produced_release_pending):
+        candidates = [key for key in list(self._produced_release_pending)]
+        candidates += [key for key in sorted(
+            self._produced_ahead, key=self._produced_surrender_order)
+            if key not in self._produced_release_pending]
+        for key in candidates:
             if until is not None and until():
-                return reclaimed
+                break
+            if deadline is not None and time.monotonic() >= deadline:
+                break
             group = self._produced_groups.get(key)
             if group is None or group["retired"]:
                 self._produced_release_pending.pop(key, None)
-                continue
-            if key in keep:
-                continue
-            if self._release_one_produced_group(key, group):
-                reclaimed += 1
-                if on_reclaim is not None:
-                    on_reclaim(key)
-        for key in sorted(self._produced_ahead):
-            if until is not None and until():
-                break
-            if key in keep:
-                continue
-            group = self._produced_groups.get(key)
-            if group is None or group["retired"]:
                 self._produced_held.discard(key)
                 self._produced_ahead.discard(key)
                 continue
-            if self._release_one_produced_group(key, group):
+            if key in keep:
+                continue
+            ahead = key in self._produced_ahead
+            try:
+                gone = self._release_one_produced_group(key, group, deadline)
+            except Exception as exc:                    # noqa: BLE001
+                self._produced_release_errors.append(
+                    {"batch_id": group["batch_id"], "step": "reclaim-credit",
+                     "reason": {"error": repr(exc)}})
+                continue
+            if gone:
                 reclaimed += 1
-                self.telemetry["produced_groups_ahead_surrendered"] += 1
+                if ahead:
+                    self.telemetry["produced_groups_ahead_surrendered"] += 1
                 if on_reclaim is not None:
                     on_reclaim(key)
         return reclaimed
+
+    @staticmethod
+    def _produced_surrender_order(key):
+        """Sort key: the group whose next read is furthest away comes first.
+
+        From the read order, not from taste. The reverse walk descends the
+        boundaries, and inside a layer it runs probes outer, windows inner.
+        So among cotangent groups the lowest boundary is read last (it
+        feeds the NEXT layer), then the highest probe, then the last
+        window. A boundary group is read once in every probe pass where a
+        cotangent group is read once, so boundary planes are given up after
+        every cotangent group, the lower plane (the next layer's) before
+        the one the current layer is still reading.
+        """
+
+        kind, boundary_index, probe, group_index = key
+        return (kind == "boundary", boundary_index, -probe, -group_index)
 
     #: How long a read waits before asking again after PrismaBuild could
     #: not take a census of this owner's funding.
@@ -1616,22 +1702,27 @@ class StreamedBoundaryArtifacts:
     def _produced_refill_refusal_kind(refused):
         """Name a refused window refill this owner knows how to answer.
 
-        Only the refill step, and only PrismaBuild's own two answers
-        (``produced_output.refill_window``). ``tier-reservation-unavailable``
-        is a shortfall: the tier's free pool cannot supply the window, and
-        credit read-ahead gives back is credit the refill can take.
-        ``unknown-retain: ...`` is PrismaBuild failing closed on a census it
-        could not complete -- with many movers in flight a row is caught
-        mid-transition -- and the next ask sees it whole. Anything else,
-        including every refusal of the publication or re-materialization
-        itself, is not a credit question: giving credit back cannot fix it,
-        so it returns ``None`` and propagates as it always did.
+        Only the two steps that move credit -- ``refill`` (the tier's free
+        pool into this owner's window, ``produced_output.refill_window``)
+        and ``fund`` (this owner's holdings onto the group's mover,
+        ``PoolQueue.fund_output_batch``) -- and only the two answers both
+        give. ``tier-reservation-unavailable`` is a shortfall: at refill the
+        free pool cannot supply the window, at fund the owner's holdings
+        cannot cover the group, which is how a full window surfaces (a
+        refill with no room answers ok, acquired 0). Credit read-ahead
+        gives back is credit either step can take. ``unknown-retain: ...``
+        is PrismaBuild failing closed on something it could not establish
+        -- with many movers in flight a row is caught mid-transition -- and
+        the next ask sees it whole. Anything else, on any step, is not a
+        credit question: giving credit back cannot fix it, so it returns
+        ``None`` and propagates as it always did.
         """
 
         from collections.abc import Mapping
 
         refusal = getattr(refused, "refusal", None)
-        if not isinstance(refusal, Mapping) or refusal.get("step") != "refill":
+        if (not isinstance(refusal, Mapping)
+                or refusal.get("step") not in ("refill", "fund")):
             return None
         text = str(refusal.get("refusal") or "")
         if text == "tier-reservation-unavailable":
@@ -1681,15 +1772,19 @@ class StreamedBoundaryArtifacts:
                     self.telemetry["produced_group_stage_wait_s"] += (
                         time.monotonic() - started)
                     continue
+                if started >= deadline:
+                    raise
                 # Two groups at a time: the refusal does not say how much
                 # the tier is short, and giving everything back for a
                 # shortfall of one throws away the staging the next windows
-                # were about to use. Bounded by what is held.
+                # were about to use. Bounded by what is held, and by the
+                # read's own deadline: a reclaim is part of this group's
+                # staging, never a budget of its own.
                 taken = []
                 try:
                     reclaimed = self._produced_reclaim_credit(
                         keep, until=lambda: len(taken) >= 2,
-                        on_reclaim=taken.append)
+                        on_reclaim=taken.append, deadline=deadline)
                 finally:
                     self.telemetry["produced_group_release_wait_s"] += (
                         time.monotonic() - started)
