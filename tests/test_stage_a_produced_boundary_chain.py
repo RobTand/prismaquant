@@ -867,18 +867,19 @@ def test_a_rollover_longer_than_the_credit_bound_keeps_making_progress(
         tmp_path, monkeypatch):
     """More windows than the stage window can hold at once.
 
-    The tier is minted with ONE token and the template's window is one
-    token, so exactly one publication group can be staged at a time. Four
-    groups are then read in four windows, with the previous group's
-    entries disposed INSIDE the next window -- the cotangent rollover. If
-    a single stage copy were not returned, the next window could not fund
-    and this stops; that is the assertion.
+    The template's window is ONE token against a two-token tier, so the
+    producer can hold exactly one publication group's stage copy at a
+    time. Four groups are then read in four windows, with the previous
+    group's entries disposed INSIDE the next window -- the cotangent
+    rollover. There are more groups than credits, so if a single stage
+    copy were not returned the next window could not fund and this stops;
+    that is the assertion.
     """
 
     import torch
     storage, publication, q, env, pb_repo = _bound_owner(
         tmp_path, n_batches=4 * GROUP_SIZE, payload_max_bytes=1 << 22,
-        window_gib=1, gib=1)
+        window_gib=1, gib=2)
     groups = [_write_group(storage, count=GROUP_SIZE, first=index * GROUP_SIZE)
               for index in range(4)]
     assert storage.telemetry["produced_groups_prewritten"] == 4
