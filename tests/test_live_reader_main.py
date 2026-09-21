@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from fleet_sdk import require_prismabuild_sdk
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import tools.live_reader_qualify as probe  # noqa: E402
@@ -83,12 +85,14 @@ def _artifact(tmp_path: Path):
 
 
 def _sdk():
+    require_prismabuild_sdk()
     from prismaquant.staged_lease import inject_installed_sdk_for_tests
     return inject_installed_sdk_for_tests()
 
 
 def _composed(tmp_path: Path, artifact: Path, digest: str):
     """Fragment/material/map through the real SDK writers (isolated)."""
+    require_prismabuild_sdk()
 
     import prismabuild.pool as pool_mod
     import prismabuild.residency_map as sdk_map

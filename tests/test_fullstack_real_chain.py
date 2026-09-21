@@ -44,6 +44,8 @@ from pathlib import Path
 import sys
 
 import pytest
+
+from fleet_sdk import require_prismabuild_sdk
 import torch
 from safetensors.torch import save_file
 
@@ -81,6 +83,7 @@ RAM_TIER = "ram:dl380g10"
 @pytest.fixture(scope="module")
 def pb():
     """Published PB stdlib + fleet tools from the immutable generation."""
+    require_prismabuild_sdk()
     info = pbgen.require_paths()
     import prismabuild.core as core  # noqa: E402
     import prismabuild.storage_tiers as tiers  # noqa: E402
@@ -361,6 +364,7 @@ def staged(pb, produced, campaign):
     and one entry span per slice promotes to RAM (the wire blob on
     layer-000, the nonzero-offset payload range on layer-001).
     """
+    require_prismabuild_sdk()
     stage_move, ram_promote = pb["stage_move"], pb["ram_promote"]
     pool = pb["pool"]
     tmp = campaign["tmp"]

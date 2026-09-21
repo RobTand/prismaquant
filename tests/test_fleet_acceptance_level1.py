@@ -27,6 +27,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from fleet_sdk import require_prismabuild_sdk
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -50,6 +52,7 @@ RAM_TIER = "ram:dl380g10"
 
 def _pb():
     """Published PB modules from the immutable generation (verified)."""
+    require_prismabuild_sdk()
     info = published.require_paths()
     import prismabuild.core as core  # noqa: E402
     import prismabuild.pool as pool  # noqa: E402
@@ -295,6 +298,7 @@ def test_published_pb_parses_slice_ranges(pb, produced, campaign):
 @pytest.fixture(scope="module")
 def staged(pb, produced, campaign):
     """Real published movers over the parent manifest (whole + split)."""
+    require_prismabuild_sdk()
     stage_move, ram_promote = pb["stage_move"], pb["ram_promote"]
     pool = pb["pool"]
     tmp = campaign["tmp"]

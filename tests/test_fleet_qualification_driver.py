@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from fleet_sdk import require_prismabuild_sdk
+
 HERE = Path(__file__).resolve().parent
 DRIVER = HERE.parent / "tools" / "fleet_qualification_driver.py"
 FIXTURES = HERE / "fixtures" / "cas-r5"
@@ -148,6 +150,7 @@ def test_unimplemented_legs_are_records_without_invocations():
 
 def test_valid_chain_qualifies_with_receipt_evidence(tmp_path, monkeypatch):
     """Filed action + verified receipt + result + terminal all agree."""
+    require_prismabuild_sdk()
     driver = _driver()
     root, key = _tmp_cas(driver, tmp_path, "A")
     monkeypatch.setattr(driver, "_CAS_ROOT", root)
@@ -167,6 +170,7 @@ def test_valid_chain_qualifies_with_receipt_evidence(tmp_path, monkeypatch):
 
 def test_substituted_payload_fails_integrity(tmp_path, monkeypatch):
     """Valid bytes from another action do not verify under this receipt."""
+    require_prismabuild_sdk()
     driver = _driver()
     root, key = _tmp_cas(driver, tmp_path, "A")
     other = (FIXTURES / "B" / "result.bin").read_bytes()
@@ -224,6 +228,7 @@ def test_corrupt_receipt_fails(tmp_path, monkeypatch):
 
 def test_wrong_generation_or_source_never_qualifies(tmp_path, monkeypatch):
     """Declared pins that disagree with receipt/terminal evidence fail."""
+    require_prismabuild_sdk()
     driver = _driver()
     root, key = _tmp_cas(driver, tmp_path, "A")
     monkeypatch.setattr(driver, "_CAS_ROOT", root)
@@ -243,6 +248,7 @@ def test_wrong_generation_or_source_never_qualifies(tmp_path, monkeypatch):
 def test_wrong_host_or_failed_terminal_never_qualifies(tmp_path,
                                                         monkeypatch):
     """Terminal host and executed status bind the verdict."""
+    require_prismabuild_sdk()
     driver = _driver()
     root, key = _tmp_cas(driver, tmp_path, "A")
     monkeypatch.setattr(driver, "_CAS_ROOT", root)
@@ -297,6 +303,7 @@ def test_malformed_records_and_replays_rejected(monkeypatch):
 
 def test_summary_counts_cover_singular_plural_and_usage():
     """Anchored summary stems: pass/fail/skip/error, both numbers."""
+    require_prismabuild_sdk()
     driver = _driver()
     pbcore, pbtest_mod = driver._published()
     assert pbtest_mod.pytest_summary(
@@ -445,6 +452,7 @@ def test_command_operands_rejects_extra_operands():
 
 def test_guard_bytes_reject_fake_entry():
     """Only the bound generation's exact guard program is admitted."""
+    require_prismabuild_sdk()
     driver = _driver()
     action = _fixture_action("D")
     operands, _ = driver._command_operands(action)
@@ -493,6 +501,7 @@ def test_environment_cannot_reduce_declared_case(where, assignment):
 
 def test_relabeled_file_fails_binding(tmp_path, monkeypatch):
     """A pins receipt relabeled as the runner file must not qualify."""
+    require_prismabuild_sdk()
     driver = _driver()
     _tmp_cas(driver, tmp_path, "A")
     monkeypatch.setattr(driver, "_CAS_ROOT",
@@ -507,6 +516,7 @@ def test_relabeled_file_fails_binding(tmp_path, monkeypatch):
 
 def test_swapped_pair_and_unrelated_action_fail(tmp_path, monkeypatch):
     """Cross-labeled genuine receipts fail; matching labels qualify."""
+    require_prismabuild_sdk()
     driver = _driver()
     _tmp_cas(driver, tmp_path, "A")
     _tmp_cas(driver, tmp_path, "D")
@@ -552,6 +562,7 @@ def test_duplicate_action_keys_across_cases_refused():
 def test_snapshot_disagreement_and_interpreter_mismatch_fail(
         tmp_path, monkeypatch):
     """Terminal snapshot input and sealed interpreter bind the verdict."""
+    require_prismabuild_sdk()
     driver = _driver()
     _tmp_cas(driver, tmp_path, "A")
     monkeypatch.setattr(driver, "_CAS_ROOT", tmp_path / "cas-A")
