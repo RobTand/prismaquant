@@ -49,7 +49,9 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 import re
+import struct
 from collections.abc import Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
@@ -63,6 +65,9 @@ COVERAGE_SCHEMA = "prismaquant.joint_layer_quanta.coverage.v1"
 ADJOINT_CAPTURE_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 MANIFEST_SCHEMA_V1 = "prismaquant.prismabuild.data_manifest.v1"
 MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
+#: The stage-A manifest's record of what was added to the parent's layer
+#: extents, and that the source-coverage gate ran (PQ #898).
+SOURCE_COMPLETION_SCHEMA = "prismaquant.joint_layer_quanta.source_completion.v1"
 
 #: The tail leg's telemetry name. It is NOT a read-plan phase: published
 #: ``manifest_phase_ranges`` drops cumulative==previous phases, so a
@@ -477,7 +482,8 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                  ram_window_gib: int | float | None = None,
                  max_resident_consumers: int | None = None,
                  window_partition: Mapping | None = None,
-                 adjoint_receipt: Mapping | None = None) -> dict:
+                 adjoint_receipt: Mapping | None = None,
+                 layer_source_spans: Mapping[int, Sequence] | None = None) -> dict:
     """Cut the sealed campaign into per-layer quantum records (§4.1).
 
     Reads the plan, the prepared completion and the sealed run manifest;
@@ -498,6 +504,12 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
     the control root is the historical ``{output_root}/layer-quanta`` and
     every sealed path is byte-identical to the previous layout (existing
     calls and defaults unchanged).
+
+    ``layer_source_spans`` (optional, PQ #898) is handed to
+    ``build_adjoint_manifest``, which completes and gates the stage-A manifest
+    against it. The per-layer slices and the records that seal them are not
+    completed here: they tile the parent byte for byte (§3.1), so a parent
+    that dropped a layer's tail is carried into that layer's slice unchanged.
     """
     if not isinstance(plan, dict) or not isinstance(prepared, dict):
         raise ValueError("layer_quanta needs the plan and prepared mappings")
@@ -694,7 +706,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         plan, parent_manifest, ranges,
         plan_path=plan_path, plan_sha256=plan_sha256, prepared_path=prepared_path,
         prepared_sha256=prepared_sha256, parent_manifest_sha256=parent_manifest_sha256,
-        output_root=output_root)
+        output_root=output_root, layer_source_spans=layer_source_spans)
     coverage = verify_quanta_coverage(records, parent_manifest, plan=plan,
                                       window_partition=window_partition)
     return {"records": records, "slice_manifests": slices,
@@ -810,11 +822,126 @@ def slice_layer_manifest(parent_manifest: Mapping, layer: int, *,
     }
 
 
+#: A safetensors header is a u64 length and that many bytes of JSON. The bound
+#: is ``layer_streaming``'s own, so the two readers refuse the same files.
+_SAFETENSORS_HEADER_MAX_BYTES = 100_000_000
+
+
+def read_layer_source_spans(model_dir: str, num_layers: int, *,
+                            checkpoint_layers_prefix: str,
+                            ) -> dict[int, list[tuple[str, int, int]]]:
+    """What stage A reads from the source, per layer, as file spans.
+
+    ``{layer: [(shard path, start, end), ...]}`` in absolute file offsets, for
+    every checkpoint tensor named ``{checkpoint_layers_prefix}{layer}.*`` with
+    ``0 <= layer < num_layers``. This is the streamed reader's own selection
+    (``layer_streaming._read_layer_to_device`` takes every name under the
+    layer's prefix), read from the same two places it reads: the checkpoint
+    index and each shard's header. Stdlib only, like the rest of this module.
+
+    It exists because a read manifest is a claim about what a reader will
+    read, and until PQ #898 nothing compared the two.
+    """
+    index_path = os.path.join(model_dir, "model.safetensors.index.json")
+    with open(index_path, encoding="utf-8") as handle:
+        weight_map = json.load(handle)["weight_map"]
+    pattern = re.compile(rf"^{re.escape(checkpoint_layers_prefix)}([0-9]+)\.")
+    wanted: dict[str, list[tuple[int, str]]] = {}
+    for name, shard in weight_map.items():
+        match = pattern.match(name)
+        if match is None or int(match.group(1)) >= num_layers:
+            continue
+        wanted.setdefault(shard, []).append((int(match.group(1)), name))
+    spans: dict[int, list[tuple[str, int, int]]] = {
+        layer: [] for layer in range(num_layers)}
+    for shard in sorted(wanted):
+        path = os.path.normpath(os.path.join(model_dir, shard))
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            raw = handle.read(8)
+            if len(raw) != 8:
+                raise ValueError(f"{path} is too short to be a safetensors file")
+            (length,) = struct.unpack("<Q", raw)
+            if not 0 < length <= min(_SAFETENSORS_HEADER_MAX_BYTES, size - 8):
+                raise ValueError(f"{path} has an invalid safetensors header length")
+            header = json.loads(handle.read(length))
+        base = 8 + length
+        for layer, name in wanted[shard]:
+            if name not in header:
+                raise ValueError(f"{path} does not hold tensor {name!r}, which "
+                                 "the checkpoint index places in it")
+            begin, end = header[name]["data_offsets"]
+            if (type(begin) is not int or type(end) is not int
+                    or not 0 <= begin <= end <= size - base):
+                raise ValueError(f"{path} tensor {name!r} has an invalid span")
+            if end > begin:
+                spans[layer].append((path, base + begin, base + end))
+    empty = [layer for layer, rows in spans.items() if not rows]
+    if empty:
+        raise ValueError(
+            f"no source tensor is named {checkpoint_layers_prefix}{empty[0]}.*: "
+            "wrong prefix or wrong layer count, refusing")
+    return {layer: sorted(rows) for layer, rows in spans.items()}
+
+
+def uncovered_source_spans(entries: Sequence[Mapping],
+                           spans: Sequence[tuple[str, int, int]],
+                           ) -> list[tuple[str, int, int]]:
+    """The ``spans`` that no single one of ``entries`` covers outright.
+
+    One entry has to cover a tensor's span whole: the staged reader serves a
+    span from the one staged range that contains it and reads a straddling
+    span from the pool (``residency_shard_reader``), which the strict tier
+    policy refuses. Two entries that together cover a span do not cover it.
+    """
+    by_path: dict[str, list[tuple[int, int]]] = {}
+    for entry in entries:
+        by_path.setdefault(os.path.normpath(entry["path"]), []).append(
+            (entry["offset"], entry["offset"] + entry["bytes"]))
+    return [(path, start, end) for path, start, end in spans
+            if not any(low <= start and end <= high
+                       for low, high in by_path.get(os.path.normpath(path), ()))]
+
+
+def complete_source_extent(entries: Sequence[Mapping],
+                           spans: Sequence[tuple[str, int, int]], *,
+                           taken: set[tuple[str, int]], where: str) -> list[dict]:
+    """The entries that make ``entries`` cover every one of ``spans``.
+
+    Each run of uncovered tensors that touch or overlap becomes one entry, from
+    the first tensor's own file offset to the last one's end. The offset is
+    derived, not aligned: PrismaBuild refuses a manifest that repeats a
+    ``(path, offset)``, and a run that begins in a shard's first MiB would
+    otherwise land on the header entry an earlier phase already holds at
+    ``(path, 0)``. That collision is how the 512 campaign's parent manifest
+    lost the tails of layers 9, 19, 29 and 39 (PQ #898). ``taken`` is every
+    ``(path, offset)`` the manifest already uses; it is updated here.
+    """
+    runs: list[list] = []
+    for path, start, end in sorted(uncovered_source_spans(entries, spans)):
+        if runs and runs[-1][0] == path and start <= runs[-1][2]:
+            runs[-1][2] = max(runs[-1][2], end)
+        else:
+            runs.append([path, start, end])
+    added = []
+    for path, start, end in runs:
+        if (path, start) in taken:
+            raise ValueError(
+                f"{where}: an entry already starts at {path}:{start} and does "
+                "not cover the tensors that start there; refusing to repeat a "
+                "(path, offset)")
+        taken.add((path, start))
+        added.append(dict(path=path, offset=start, bytes=end - start, sha256=None))
+    return added
+
+
 def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
                            ranges: Mapping[str, dict] | None = None, *,
                            plan_path: str, plan_sha256: str, prepared_path: str,
                            prepared_sha256: str, parent_manifest_sha256: str,
-                           output_root: str) -> dict:
+                           output_root: str,
+                           layer_source_spans: Mapping[int, Sequence] | None = None,
+                           ) -> dict:
     """The stage-A read manifest: head plus per-layer ``chain_`` phases.
 
     Stage A walks the source backward render-free, so chain phases carry each
@@ -830,6 +957,15 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
     checkpoint work commits under forward-last (see ``ADJOINT_TAIL_PHASE``).
     The entries list, its digests, and every record the producer seals are
     untouched by the table.
+
+    ``layer_source_spans`` (``read_layer_source_spans``) is what the reader
+    will read. With it, each layer's extent is completed against those spans
+    and the finished manifest is refused unless it covers all of them: the
+    parent's layer phases are a claim, and a claim with a hole in it otherwise
+    surfaces hours into a run, as a strict-tier refusal at the first layer
+    whose tail the parent dropped (PQ #898). Without it nothing is added and
+    nothing is checked, and the manifest is byte-identical to what this
+    function always built.
     """
     model = plan.get("model")
     if type(model) is not str or not model:
@@ -853,6 +989,21 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
              bytes=entry["bytes"], sha256=entry.get("sha256"))
         for entry in head_entries]
     layer_index_runs: list[list[int]] = []
+    # Every (path, offset) the finished manifest will hold before completion:
+    # the head's and every layer's, so an added entry cannot land on one a
+    # later layer brings.
+    # Spelled the way the reader-side spans are, so the collision check in
+    # ``complete_source_extent`` compares like with like.
+    taken = {(os.path.normpath(entry["path"]), entry["offset"])
+             for entry in manifest_entries}
+    taken.update(
+        (os.path.normpath(entry["path"]), entry["offset"])
+        for layer in layers
+        for entry in entries[rows[f"layer-{layer}"]["entry_begin"]:
+                             rows[f"layer-{layer}"]["entry_end"]]
+        if type(entry.get("path")) is str and entry["path"].startswith(prefix))
+    completed: list[dict] = []
+    pending: list[list[dict]] = []
     for layer in layers:
         row = rows[f"layer-{layer}"]
         group = [entry for entry in entries[row["entry_begin"]:row["entry_end"]]
@@ -866,6 +1017,22 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
                  bytes=entry["bytes"], sha256=entry.get("sha256"))
             for entry in group)
         layer_index_runs.append(list(range(start, len(manifest_entries))))
+        if layer_source_spans is not None:
+            if layer not in layer_source_spans:
+                raise ValueError(
+                    f"phase layer-{layer} has no source spans: gap, refusing")
+            pending.append(complete_source_extent(
+                group, layer_source_spans[layer], taken=taken,
+                where=f"phase layer-{layer}"))
+    # Added entries go after every entry the parent gave, so each of those
+    # keeps the index it has without the reader's spans.
+    for layer, run, completion in zip(layers, layer_index_runs, pending):
+        run.extend(range(len(manifest_entries),
+                         len(manifest_entries) + len(completion)))
+        manifest_entries.extend(completion)
+        completed.extend(
+            dict(layer=layer, path=entry["path"], offset=entry["offset"],
+                 bytes=entry["bytes"]) for entry in completion)
     read_phases: list[dict] = []
     cumulative = 0
 
@@ -885,7 +1052,23 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
     if names != list(adjoint_read_plan_phase_names(len(layers))):
         raise ValueError(
             "the adjoint read plan is not the frozen consumption order")
+    if layer_source_spans is not None:
+        for layer, run in zip(layers, layer_index_runs):
+            missing = uncovered_source_spans(
+                [manifest_entries[index] for index in run],
+                layer_source_spans[layer])
+            if missing:
+                path, begin, end = missing[0]
+                raise ValueError(
+                    f"phase layer-{layer} leaves {len(missing)} source span(s) "
+                    f"undeclared, first {path}:[{begin}, {end}): gap, refusing")
     unique_bytes = sum(entry["bytes"] for entry in manifest_entries)
+    completion_block = {} if layer_source_spans is None else {
+        "source_completion": {
+            "schema": SOURCE_COMPLETION_SCHEMA,
+            "layers_checked": len(layers),
+            "source_spans": sum(len(layer_source_spans[layer]) for layer in layers),
+            "added": completed}}
     return {
         "schema": MANIFEST_SCHEMA_V2,
         "produced_by": {"tool": "prismaquant/joint_layer_quanta.py",
@@ -901,6 +1084,7 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
             "prepared_sha256": prepared_sha256,
             "parent_manifest_sha256": parent_manifest_sha256,
             "campaign_scope": scope,
+            **completion_block,
             "argv": ["python3", "-m", ADJOINT_ENTRY_POINT, "--plan", plan_path,
                      "--plan-sha256", plan_sha256, "--prepared", prepared_path,
                      "--prepared-sha256", prepared_sha256,

@@ -95,14 +95,22 @@ _INJECTED = None
 #: a test fallback. The explicit setter above wins when set (tests).
 HELPER_ROOT_ENV_VAR = "PRISMABUILD_READER_HELPER_ROOT"
 
-#: Caller-owned pre-check cache shared process-wide (mirrors the SDK's
-#: ``context`` argument): fragment/material/epoch reads cached across
-#: calls so a window batch does not re-stat over NFS per tensor. Successes
-#: may cache; the SDK re-reads fresh under its lock before anything pins,
-#: so no cached pre-check is ever admission proof. Plain dict: concurrent
-#: inserts race benignly (idempotent values), correctness never depends
-#: on it.
-_ACQUIRE_CONTEXT: dict = {}
+def _call_context() -> dict:
+    """The SDK's ``context`` pre-check cache, for one call and never kept.
+
+    The SDK caches each mover's fragment and material in it: by generation in
+    ``covers_for_keys``, unconditionally in ``acquire``. A stage mover
+    republishes both documents as its entries land, all under ONE generation
+    for its whole run, so a cache that outlives the call answers for a mover
+    as it stood at the first look. Stage A r2 (2026-09-21) leased a shard's
+    1 MiB header entry, waited 37 s for the same mover's 5 GB body entry, and
+    was refused ``unpublished`` for bytes that were on the stage (PQ #905,
+    PrismaBuild #823). A stale pair can only ever hide a key, so the cost of
+    keeping it was a dead run and the cost of dropping it is one small
+    fragment read per mover per lease -- leases are per staged entry, never
+    per tensor.
+    """
+    return {}
 
 
 class LeaseRefused(TierPolicyRefused):
@@ -115,6 +123,7 @@ class LeaseRefused(TierPolicyRefused):
 
     def __init__(self, reason: str, *, kind: str):
         super().__init__(f"staged-tier-forbidden: {reason}")
+        self.reason = str(reason)
         self.kind = kind
 
 
@@ -658,7 +667,7 @@ def resolve_ram_covers(resolver, declared, entry):
             identity["residency_root"], _material_consumer(identity, ctx),
             [key],
             tier_id=ram_tier, manifest_sha256=identity["manifest_sha256"],
-            epoch=ram_epoch, context=_ACQUIRE_CONTEXT)
+            epoch=ram_epoch, context=_call_context())
     except Exception as exc:
         raise _refuse(f"ram-cover-lookup-error: {exc}",
                       kind="integrity") from None
@@ -711,7 +720,7 @@ def resolve_stage_covers(resolver, declared, entry):
             identity["residency_root"], _material_consumer(identity, ctx),
             [key],
             tier_id=stage_tier, manifest_sha256=identity["manifest_sha256"],
-            epoch="", context=_ACQUIRE_CONTEXT)
+            epoch="", context=_call_context())
     except Exception as exc:
         raise _refuse(f"stage-cover-lookup-error: {exc}",
                       kind="integrity") from None
@@ -730,6 +739,27 @@ def resolve_stage_covers(resolver, declared, entry):
                    for cover in covers)):
         raise _refuse("stage-cover-proof-divergent", kind="integrity")
     return covers, key
+
+
+def stage_cover_is_published(resolver, declared, entry) -> bool:
+    """Whether PrismaBuild has published the proof for a staged map entry.
+
+    A mover writes its fragment first and the material sidecar that dates it
+    second, and the composed map is built from fragments. A reader polling
+    for a row can therefore see it before its sidecar exists, and a lease
+    asked in that window answers ``unpublished``. That is a range that has
+    not finished landing, which is what the readiness wait is for.
+
+    Selection only, nothing is pinned. False for ``unpublished`` alone; every
+    other refusal -- integrity, a missing helper, a tier that is not
+    announced -- is True here, because waiting cannot improve it and the read
+    that follows owns the refusal.
+    """
+    try:
+        resolve_stage_covers(resolver, declared, entry)
+    except LeaseRefused as refusal:
+        return refusal.reason.split(":", 1)[0] != "unpublished"
+    return True
 
 
 def _select_ram_window(resolver, declared, entry):
@@ -922,7 +952,7 @@ class LeaseWindow:
             ctx, tier_id=str(spec["tier_id"]), epoch=str(spec["epoch"]),
             covers=spec["covers"], expected=spec.get("expected"),
             span=spec["span"], acquire_token=self._token,
-            ram=spec.get("ram"), context=_ACQUIRE_CONTEXT, **namespace)
+            ram=spec.get("ram"), context=_call_context(), **namespace)
         if not isinstance(answer, dict) or not answer.get("ok"):
             refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
             if str(refusal).split(":", 1)[0] == "generation-changed":
@@ -930,7 +960,7 @@ class LeaseWindow:
                     ctx, tier_id=str(spec["tier_id"]), epoch=str(spec["epoch"]),
                     covers=spec["covers"], expected=spec.get("expected"),
                     span=spec["span"], acquire_token=self._token,
-                    ram=spec.get("ram"), context=_ACQUIRE_CONTEXT,
+                    ram=spec.get("ram"), context=_call_context(),
                     **namespace)
                 if not isinstance(answer, dict) or not answer.get("ok"):
                     refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"

@@ -60,7 +60,6 @@ RAM_HOST = "fixturesh"
 def _isolated_probe_env(monkeypatch):
     """Each main run starts with no identity, map, policy, or injection."""
 
-    from prismaquant import staged_lease as _staged_lease
     from prismaquant.residency_map import reset_residency_resolver_for_tests
     from prismaquant.staged_lease import (
         clear_injected_sdk_for_tests,
@@ -81,12 +80,6 @@ def _isolated_probe_env(monkeypatch):
         clear_injected_sdk_for_tests()
         reset_residency_resolver_for_tests()
         deactivate_staged_tier_policy_for_tests()
-        # The caller-owned acquire pre-check cache is a process global the
-        # tool never clears (one action = one read set in production). A
-        # test process runs many read sets under one consumer key, so a
-        # stale scenario's fragment/material pre-checks would poison the
-        # next scenario's coverage union with its paths.
-        _staged_lease._ACQUIRE_CONTEXT.clear()
 
     scrub()
     yield

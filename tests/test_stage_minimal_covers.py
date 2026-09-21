@@ -50,15 +50,13 @@ def _clean_state(monkeypatch):
     reset_residency_resolver_for_tests()
     deactivate_staged_tier_policy_for_tests()
     from prismaquant.staged_lease import (
-        _ACQUIRE_CONTEXT, clear_injected_sdk_for_tests, set_lease_helper_root)
+        clear_injected_sdk_for_tests, set_lease_helper_root)
     set_lease_helper_root(None)
-    _ACQUIRE_CONTEXT.clear()
     clear_injected_sdk_for_tests()
     yield
     reset_residency_resolver_for_tests()
     deactivate_staged_tier_policy_for_tests()
     set_lease_helper_root(None)
-    _ACQUIRE_CONTEXT.clear()
     clear_injected_sdk_for_tests()
 
 

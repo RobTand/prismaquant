@@ -1113,14 +1113,26 @@ class KernelTimeProfiler:
     ``kernel_active_s`` is the profiler's device-time sum. Enabled around the
     phases that do GPU work (chain layers, window replays); a backend that
     cannot profile records the failure instead of a zero.
+
+    **Scope it to bounded work.** Kineto keeps every CUDA activity record in
+    host memory until the session stops, and the stop then builds the whole
+    trace before ``key_averages`` can sum it. Around one chain layer or one
+    window replay that is small. Around a whole 512-sample Stage A capture it
+    was 14 GB an hour while collecting and another 22 GB in the two minutes
+    after the stop, on a box whose host and GPU share one pool (PQ #899). A
+    caller that cannot bound its scope passes ``not_measured`` with the reason:
+    no session is opened, and the block reports ``None`` and why.
     """
 
-    def __init__(self):
+    def __init__(self, *, not_measured: str | None = None):
         self.kernel_active_s = 0.0
-        self.error: str | None = None
+        self.error: str | None = not_measured
         self._profile = None
+        self._measure = not_measured is None
 
     def __enter__(self):
+        if not self._measure:
+            return self
         try:
             self._profile = torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CUDA])

@@ -246,6 +246,9 @@ class ResidencyResolver:
         self._range_wait_seconds = 0.0
         self._range_waits_served = 0
         self._range_waits_refused = 0
+        # Spans a later covering entry served after a lower-offset one failed
+        # its pre-open checks (PQ #902). Not a fallback: the stage served it.
+        self._range_rows_passed_over = 0
         self._intervals: dict[str, list[dict]] = {}
         self._real_intervals: dict[str, list[dict]] = {}
         self._intervals_for: dict[str, dict] | None = None
@@ -907,6 +910,15 @@ class ResidencyResolver:
         the caller -- ``layer_streaming._await_layer_readset``, before a
         layer's gather is submitted -- which does not hold this lock.
 
+        Two entries may cover one span: PrismaBuild refuses a repeated
+        ``(path, offset)`` and allows an overlap, and a layer's first tensors
+        often sit inside a neighbouring phase's header entry. Every covering
+        entry is asked, lowest offset first, and the first to pass serves the
+        span. The map is composed after the fact, so an entry can outlive its
+        staged file (an eviction that has not been recomposed yet); that entry
+        must not hide a healthy one behind it. ``RANGE_REFUSED`` means every
+        covering entry failed, and reports the first one's reason.
+
         ``staged_read``'s pre-open checks, asked of a byte range. One entry has
         to cover the span outright; the staged copy has to be a regular file of
         exactly the entry's length; and the entry has to fit inside the declared
@@ -931,12 +943,9 @@ class ResidencyResolver:
             self._read_map()
             index, real = self._interval_index()
             rows = index.get(path) or real.get(path)
-            entry = None
-            for row in rows or ():
-                if row["offset"] <= start and end <= row["offset"] + row["bytes"]:
-                    entry = row
-                    break
-            if entry is None:
+            covering = [row for row in rows or ()
+                        if row["offset"] <= start and end <= row["offset"] + row["bytes"]]
+            if not covering:
                 self._range_misses += 1
                 if self._declares(path, start, end) is False:
                     return None, RANGE_UNDECLARED
@@ -948,36 +957,48 @@ class ResidencyResolver:
                     self._record_fallback(
                         path, "declared file is unstatable, cannot bind the entry to it")
                     return None, RANGE_REFUSED
-            if entry["offset"] + entry["bytes"] > declared_size:
-                self._record_fallback(path, "map entry runs past the declared file")
-                return None, RANGE_REFUSED
-            ram_path = self._ram_offer(entry, path)
-            stage_path = entry["stage_path"]
-            try:
-                info = os.lstat(stage_path)
-            except OSError as error:
-                stage_refusal = f"staged copy is unreadable: {error.strerror}"
+            refusal = None
+            for entry in covering:
+                answer, reason = self._range_answer(entry, path, declared_size)
+                if answer is not None:
+                    if refusal is not None:
+                        self._range_rows_passed_over += 1
+                    return answer, RANGE_HIT
+                refusal = refusal or reason
+            self._record_fallback(path, refusal)
+            return None, RANGE_REFUSED
+
+    def _range_answer(self, entry: dict, path: str,
+                      declared_size: int) -> tuple[dict | None, str | None]:
+        """``(answer, None)`` or ``(None, reason)`` for one covering entry.
+
+        Caller holds the lock. Records nothing about the stage copy: the caller
+        knows whether another entry served the span, and only a span nothing
+        served is a fallback.
+        """
+        if entry["offset"] + entry["bytes"] > declared_size:
+            return None, "map entry runs past the declared file"
+        ram_path = self._ram_offer(entry, path)
+        stage_path = entry["stage_path"]
+        try:
+            info = os.lstat(stage_path)
+        except OSError as error:
+            stage_refusal = f"staged copy is unreadable: {error.strerror}"
+        else:
+            if not stat.S_ISREG(info.st_mode):
+                stage_refusal = "staged copy is not a regular file"
+            elif info.st_size != entry["bytes"]:
+                stage_refusal = "staged copy size differs from the map"
             else:
-                if not stat.S_ISREG(info.st_mode):
-                    stage_refusal = "staged copy is not a regular file"
-                elif info.st_size != entry["bytes"]:
-                    stage_refusal = "staged copy size differs from the map"
-                else:
-                    stage_refusal = None
-            if stage_refusal is not None:
-                if ram_path is None:
-                    self._record_fallback(path, stage_refusal)
-                    return None, RANGE_REFUSED
-                return ({"declared_path": path, "stage_path": stage_path,
-                         "ram_path": ram_path, "bytes": entry["bytes"],
-                         "offset": entry["offset"],
-                         "sha256": entry["sha256"]}, RANGE_HIT)
-            answer = {"declared_path": path, "stage_path": stage_path,
-                      "bytes": entry["bytes"], "offset": entry["offset"],
-                      "sha256": entry["sha256"]}
-            if ram_path is not None:
-                answer["ram_path"] = ram_path
-            return answer, RANGE_HIT
+                stage_refusal = None
+        if stage_refusal is not None and ram_path is None:
+            return None, stage_refusal
+        answer = {"declared_path": path, "stage_path": stage_path,
+                  "bytes": entry["bytes"], "offset": entry["offset"],
+                  "sha256": entry["sha256"]}
+        if ram_path is not None:
+            answer["ram_path"] = ram_path
+        return answer, None
 
     # -- the accounting --------------------------------------------------
 
@@ -1151,6 +1172,7 @@ class ResidencyResolver:
                 "range_wait_seconds": round(self._range_wait_seconds, 3),
                 "range_waits_served": self._range_waits_served,
                 "range_waits_refused": self._range_waits_refused,
+                "range_rows_passed_over": self._range_rows_passed_over,
                 "declared_readset": (
                     {"state": "bound", "paths": len(self._declared)}
                     if self._declared is not None else
