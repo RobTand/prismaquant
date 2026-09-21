@@ -24,6 +24,34 @@ PLAN_SEALED = 446676598784
 RUN_640_GIB = 640 * 1024 ** 3
 
 
+@pytest.fixture(autouse=True)
+def _release_process_state_this_file_installs():
+    """Give back the process-global state the CLI entrypoints install (#889).
+
+    ``joint_cost_stage_a.main`` activates the staged-tier policy from its
+    sealed ``--allowed-tiers`` flag, always and process-globally: that is
+    the production contract, and a campaign run owns the process it ends.
+    A test that calls ``main`` in-process does not, so the policy it turned
+    on stayed on for every file pytest ran afterwards in the same process,
+    and every bulk read there refused with no residency map to serve from.
+    Two files were seen failing behind it, in the order pbtest happened to
+    group them.
+
+    The same applies to the ``tools/`` entry this file puts on ``sys.path``
+    and the module it imports from there: both outlive the test that added
+    them. Teardown only -- a setup-time reset would hide the leak this
+    file's last test asserts against.
+    """
+
+    import sys
+
+    yield
+    from prismaquant.staged_tier_policy import (
+        deactivate_staged_tier_policy_for_tests)
+    deactivate_staged_tier_policy_for_tests()
+    sys.modules.pop("dispatch_joint_quanta", None)
+
+
 def _config(sealed: int = PLAN_SEALED) -> dict:
     return {"execution": {"boundary_storage": {
         "schema": "prismaquant.aura.boundary_storage.v2",
@@ -412,8 +440,7 @@ def test_stage_a_cli_threads_artifact_flag(tmp_path, monkeypatch):
 
 def _dispatcher_argv_fixture(tmp_path, monkeypatch):
     """Minimal valid manifest + campaign for stage_a_argv budget tests."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "tools"))
     from dispatch_joint_quanta import stage_a_argv  # noqa: F401
     import dispatch_joint_quanta
     import gzip
@@ -453,11 +480,10 @@ def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
     """The dispatcher forwards the NEW field as a payload flag (the PB
     channel), validates strict bytes, and leaves argv unchanged when
     absent -- mirroring the prefetch-override threading."""
-    import sys
     # `pytest.ini` puts the repo root on the path, not `tools/`, and this
     # import runs BEFORE the fixture helper below that would have added
     # it -- so it only ever resolved when something else had already run.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "tools"))
     from dispatch_joint_quanta import DispatchRefused, stage_a_argv
 
     manifest, campaign = _dispatcher_argv_fixture(tmp_path, monkeypatch)
@@ -480,8 +506,7 @@ def test_dispatcher_refuses_non_integer_numerics(tmp_path, monkeypatch):
     strings: a float like 640.9 must refuse, never truncate to 640 the way
     a bare int() coercion would -- the capture resolver refuses floats, so
     the dispatcher must not launder one."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "tools"))
     from decimal import Decimal
     from dispatch_joint_quanta import DispatchRefused, stage_a_argv
 
@@ -512,3 +537,28 @@ def test_parse_refuses_unicode_digits_named():
     # Not even isdigit, still a named refusal (never untyped).
     with pytest.raises(AdjointIdentityRefused):
         _parse_artifact_budget_bytes("½", where="test")
+
+
+def test_this_file_leaves_no_process_global_state_behind():
+    """FAILING-BEFORE (PQ #889): the leak, asserted where it is made.
+
+    Deliberately the last test in the file and deliberately order
+    dependent: pytest runs a module's tests in file order, so by the time
+    this runs, the two ``joint_cost_stage_a.main`` calls above have already
+    activated the staged-tier policy process-wide. Before the teardown
+    fixture at the top of this file, this assertion failed here instead of
+    failing -- as it did on main -- in whichever unrelated file pbtest
+    happened to group next in the same process.
+
+    ``sys.path`` is covered by ``monkeypatch.syspath_prepend`` at the three
+    sites that add ``tools/``; this checks the two pieces monkeypatch
+    cannot see.
+    """
+
+    import sys
+    from prismaquant.staged_tier_policy import active_policy
+
+    assert active_policy() is None, (
+        "the staged-tier policy an in-process CLI run installed is still "
+        "active: every bulk read in the next file refuses", active_policy())
+    assert "dispatch_joint_quanta" not in sys.modules
