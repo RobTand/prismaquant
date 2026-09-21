@@ -557,6 +557,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
                 "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
     config = {"execution": {"production_act_scales": "0",
                             "n_calib_samples": 4, "calib_seqlen": 512,
+                            "n_probes": 1, "probe_microbatch": 0,
                             "boundary_storage": _boundary_policy(
                                 tmp_path / "stub-boundaries")},
               "inputs": {}, "output_root": str(out_root),
