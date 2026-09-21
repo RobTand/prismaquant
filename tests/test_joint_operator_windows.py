@@ -1,4 +1,5 @@
 """Integrated target replay preserves probes while bounding matrix/cache owners."""
+import os
 from functools import partial
 
 import pytest
@@ -9,11 +10,36 @@ import prismaquant.aura_cost as aura
 from test_joint_aura_streamed import _fixture, _run
 
 
+#: The window worker count this fixture asks for when the shard is wide
+#: enough to hold it. Two is what these suites were written against.
+FIXTURE_PREFETCH_WORKERS = 2
+
+
+def admissible_prefetch_workers(want=FIXTURE_PREFETCH_WORKERS):
+    """Window workers that fit the CPUs this process was assigned.
+
+    ``ProductionWeightCache._window_limits`` refuses a window whose worker
+    count exceeds ``len(os.sched_getaffinity(0))``, and that refusal is
+    correct production behavior: a shard admitted with one CPU may not open
+    two loaders. A test that hardcodes the count therefore asserts on the
+    host's CPU count rather than on the code (PQ #888), so the fixture asks
+    for what it was given. The mask is read the same bare way the guard
+    reads it, so the two can never disagree.
+    """
+
+    return max(1, min(int(want), len(os.sched_getaffinity(0))))
+
+
 def policy(**overrides):
-    return dict(schema=SCHEMA, max_statistics_bytes=2048, max_candidate_bytes=1024,
+    # Merged, not splatted: a keyword this already names must override it
+    # rather than raise `dict() got multiple values`, so a test that wants
+    # a wider window than the mask allows can still ask for one by name.
+    base = dict(schema=SCHEMA, max_statistics_bytes=2048, max_candidate_bytes=1024,
         max_render_resident_bytes=1024*1024, max_load_buffer_bytes=1024*1024,
         workspace_reserve_bytes=1024*1024, max_replay_cotangent_bytes=1024*1024,
-        prefetch_workers=2, **overrides)
+        prefetch_workers=admissible_prefetch_workers())
+    base.update(overrides)
+    return base
 
 
 def test_dense_windows_match_independent_full_model_fp64_oracle(monkeypatch):
@@ -271,10 +297,7 @@ def test_candidate_windows_hold_what_the_operator_policy_admits(tmp_path):
     each = max(path.stat().st_size for path in paths.values())
 
     def windows_for(**overrides):
-        # policy() cannot re-specify a key it already names, so override the
-        # dict it returns, the way this file's other budget gates do.
-        window = policy()
-        window.update(overrides)
+        window = policy(**overrides)
         cache = ProductionWeightCache(weights=dict(weights), levers={})
         cache.enable_lru(100000)
         seen = []
@@ -286,7 +309,8 @@ def test_candidate_windows_hold_what_the_operator_policy_admits(tmp_path):
                     torch.testing.assert_close(cache.get_resident(*pair), expected[pair])
         return seen
 
-    # prefetch_workers is 2 in this fixture and both budgets admit all six.
+    # The window is closed by the two byte budgets, not by the loader count,
+    # so both of them admit all six whatever the shard's affinity allows.
     assert windows_for() == [keys]
 
     # MUTATE THE DRIVER: each budget still closes a quantum on its own axis, and
@@ -295,3 +319,44 @@ def test_candidate_windows_hold_what_the_operator_policy_admits(tmp_path):
     assert windows_for(max_load_buffer_bytes=2 * each) == [keys[:2], keys[2:4], keys[4:]]
     assert windows_for(max_render_resident_bytes=6 * each,
                        max_load_buffer_bytes=each) == [(key,) for key in keys]
+
+
+def test_policy_prefetch_workers_fit_the_assigned_affinity(monkeypatch):
+    """FAILING-BEFORE (PQ #888): the fixture asked for a CPU it was not given.
+
+    ``ProductionWeightCache._window_limits`` refuses more window workers
+    than ``os.sched_getaffinity(0)`` holds, so a fixture that names a
+    constant makes every suite importing it assert on the shard width. The
+    default now fits the mask; an explicit request is still honored, so a
+    test that deliberately asks for a wider window keeps its meaning.
+    """
+
+    monkeypatch.setattr(os, 'sched_getaffinity', lambda pid: {0})
+    assert policy()['prefetch_workers'] == 1
+    assert policy(prefetch_workers=2)['prefetch_workers'] == 2
+
+    monkeypatch.setattr(os, 'sched_getaffinity', lambda pid: {0, 1, 2, 3})
+    assert policy()['prefetch_workers'] == FIXTURE_PREFETCH_WORKERS
+
+
+def test_policy_windows_open_under_a_one_cpu_shard(tmp_path, monkeypatch):
+    """The refusal itself: the policy default must open a real window.
+
+    Not a re-statement of the arithmetic above -- this drives the
+    production guard the eleven listed tests died on, with the mask the
+    one-CPU shard actually has.
+    """
+
+    import torch
+    from prismaquant.joint_statistics_replay import resident_candidates
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    monkeypatch.setattr(os, 'sched_getaffinity', lambda pid: {0})
+    key = ('unit0', 'TESSERA_E4M3_K1_R1024')
+    value = torch.arange(16, dtype=torch.bfloat16).reshape(4, 4)
+    path = tmp_path / 'render0.pt'
+    torch.save(value, path)
+    cache = ProductionWeightCache(weights={key: str(path)}, levers={})
+    cache.enable_lru(100000)
+    with resident_candidates(cache, (key,), policy()) as iterator:
+        assert [window for window, _ in iterator] == [(key,)]

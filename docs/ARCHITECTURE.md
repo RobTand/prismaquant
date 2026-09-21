@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `feat/stagea-background-stager-895`.
+As of: 2026-09-21 · `muse/stager904-reconciled-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-21, `feat/stagea-background-stager-895`) for **the Stage A
@@ -21,6 +21,96 @@ forward pass, because at 1 GiB a group the owner's PrismaBuild calls, made on
 the compute thread, took longer than the compute between them.
 `PRISMAQUANT_STAGEA_STAGER=inline` is the run-scoped override that keeps
 every step on the calling thread at any window width.
+
+Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
+staged-range resolver asking every covering entry** (PQ #902). PrismaBuild
+refuses a repeated `(path, offset)` and allows an overlap, and stages each
+overlapping entry as a file of its own; its composed map can also name an entry
+whose staged file an eviction has already unlinked (a fragment is dropped only
+after a fully clean eviction, and the map is recomposed on events, not on every
+cycle). `ResidencyResolver.staged_range_outcome` took the lowest-offset
+covering entry and stopped, so a stale neighbour entry hid a healthy range
+behind it and the strict tier policy ended the run on bytes that were staged.
+It now asks every covering entry, lowest offset first; the first to pass serves
+the span, and `RANGE_REFUSED` means all of them failed (reporting the first
+reason, so a span with one covering entry behaves as before). A span served by
+a later entry is counted in `range_rows_passed_over` and is not a fallback.
+**Not changed:** a covering entry whose file is missing, while the layer's own
+range is declared but has not landed, still refuses instead of waiting. No
+format, lane, pin, kernel order or ship gate changes. Gates:
+`tests/test_staged_range_every_covering_entry.py`.
+
+Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
+stage-A read manifest and the reader it describes** (PQ #898). A read manifest
+is a claim about what a reader will read, and nothing compared the two.
+`build_adjoint_manifest` copies each `layer-N` phase's source entries from the
+parent manifest verbatim, so a parent with a hole seals a stage-A readset with
+the same hole. The GLM-5.3-Flash 512 campaign's parent (`71fd8f56…`) drops the
+tails of layers 9, 19, 29 and 39: 3.05, 1.66, 0.20 and 2.21 GB. Each tail opens
+a shard for which an earlier phase already holds a 1 MiB header entry at
+`(path, 0)`; PrismaBuild refuses a manifest that repeats a `(path, offset)`, so
+the tail's own extent was dropped instead of clipped. Under the strict
+staged-tier policy the run refuses at the layer-9 prefetch
+(`staged-tier-forbidden: readset-not-staged`), which is the policy working: the
+bytes were never declared, so nothing staged them. Before the strict policy
+they were read from the HDD pool silently (PQ #822).
+`joint_layer_quanta.read_layer_source_spans` reads what
+`layer_streaming._read_layer_to_device` reads, every checkpoint tensor under the
+layers prefix, from the checkpoint index and each shard's header (stdlib only).
+`build_adjoint_manifest(layer_source_spans=...)` then **completes** each layer
+phase and **gates** the result:
+
+- A tensor counts as covered only when **one** entry of its own layer's phase
+  contains its whole span. The staged reader serves a span from the one staged
+  range that contains it; a span straddling two ranges is a pool read, which
+  the strict policy refuses. Coverage by another layer's phase does not count
+  toward this gate either, because PrismaBuild stages and evicts by phase. The
+  gate is about what is **declared**, not about which entry the reader picks:
+  the resolver asks every map entry that covers a span, lowest offset first, so
+  a neighbour's header entry still serves a layer's first tensors while it is
+  staged, and the layer's own entry serves them once it is not (PQ #902).
+- Each run of uncovered tensors becomes one entry from the first tensor's own
+  file offset to the last one's end. The offset is derived, not aligned, so it
+  cannot land on a header entry's `(path, 0)`.
+- Added entries are appended after every parent entry, so recorded entry
+  indices do not move. `forward-NNN` and `chain-NNN` share one index run, as
+  before. What was added is recorded in `annotations.source_completion`.
+- The finished manifest is refused if any span is still uncovered.
+
+**The default is unchanged**: without `layer_source_spans` the manifest is
+byte-identical to what the function always built, and the recorded campaign
+manifest `43f40d18…` reproduces byte for byte from its recorded inputs.
+Completed, it gains 47 entries: the four tails, and 43 first-of-shard F32
+tensors (safetensors orders a shard by dtype, so a layer's few F32 tensors sit
+in the first 80 KB of a shard whose first MiB a neighbouring layer's phase
+declares). PrismaBuild's `validate_data_manifest` and `manifest_phase_ranges`
+accept it. **Not changed:** the per-layer slice manifests and the quantum records
+that seal them. They tile the parent byte for byte (§3.1 of the distributed
+campaign contract), so they carry the same four holes into Stage B; that is
+filed separately. Gates: `tests/test_stagea_readset_source_coverage.py`.
+
+Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
+scope of Stage A's kernel-time profiler** (PQ #899). `run_adjoint_capture`
+held one `torch.profiler` CUDA session (`KernelTimeProfiler`) across the whole
+forward and chain passes (it opened after the head walk and the artifact
+preflight) and stopped it in its `finally`. Kineto holds every CUDA
+record in host memory until the stop, and the stop then builds the whole trace.
+On the 512-sample run of 2026-09-21 (PB action `e9840722d83d`, sparklina; pqteld)
+AnonPages grew 7.4 GB to 10.9 GB in 15 minutes of collecting and 10.9 GB to
+32.3 GB in the 135 s after the stop, on a box whose host and GPU share one pool.
+The capture had already raised; the kernel killed the process before the
+traceback printed, and PrismaBuild recorded exit 137 and an stdout ending at
+`profiler_stop`. GPU-side memory was flat at 78.8 GB, inside the 80 GiB budget.
+**Stage A now holds no profiler session unless
+`PRISMAQUANT_STAGE_A_KERNEL_PROFILE=1`.** `KernelTimeProfiler(not_measured=...)`
+opens nothing and reports `kernel_active_s: None` with the reason; `counters.json`
+and `results.json` read the value through `block()`, so a profiler that could
+not measure no longer reports `0.0`. The GPU power sampler is bounded and stays
+on, so the receipt still carries power against the envelope (principle 15).
+A failing capture prints `capture failed: <type>: <message>` before any
+teardown. Stage B's per-chain and per-window sessions are bounded scopes and are
+unchanged. No format, lane, pin, kernel order or ship gate changes. Gates:
+`tests/test_stage_a_kernel_profile_scope.py`.
 
 Re-stamped (2026-09-21, `feat/stagea-owner-loop-readahead-20260921`) for
 **read-ahead in the Stage A produced-boundary owner loop** (PQ #887). No

@@ -105,6 +105,15 @@ EXIT_IDENTITY_REFUSED = 3
 ARTIFACT_BUDGET_ENV = "PRISMAQUANT_STAGE_A_ARTIFACT_BUDGET_BYTES"
 ARTIFACT_BUDGET_STAMP_SCHEMA = (
     "prismaquant.joint_adjoint_capture.artifact_budget.v1")
+#: Opt in to a whole-capture ``torch.profiler`` session. Off by default: the
+#: session's scope is the whole capture, which nothing bounds, and Kineto holds
+#: every CUDA record in host memory until the stop (PQ #899). ``1`` restores
+#: the measurement for a capture small enough to afford it.
+KERNEL_PROFILE_ENV = "PRISMAQUANT_STAGE_A_KERNEL_PROFILE"
+KERNEL_PROFILE_NOT_MEASURED = (
+    "not measured: a whole-capture torch.profiler session holds every CUDA "
+    "record in host memory until its stop (PQ #899); "
+    f"{KERNEL_PROFILE_ENV}=1 opts in")
 #: The exact-entry writer's small PyTorch zip header envelope
 #: (``cost_streaming.StreamedBoundaryArtifacts.write``: ``nbytes + 65536``),
 #: mirrored here so the preflight bounds the same ceiling the runtime
@@ -1118,6 +1127,19 @@ def _produced_output_block(storage) -> dict:
         return {"produced_output": {"report_error": repr(exc)[:400]}}
 
 
+def _stage_a_kernel_profiler() -> KernelTimeProfiler:
+    """The capture's kernel-time profiler: not measured unless asked for.
+
+    The GPU power sampler beside it is bounded and stays on, so the receipt
+    still says how loaded the device was (principle 15). What is given up by
+    default is the kernel-time sum, and the block says so rather than
+    reporting a zero.
+    """
+    if os.environ.get(KERNEL_PROFILE_ENV) == "1":
+        return KernelTimeProfiler()
+    return KernelTimeProfiler(not_measured=KERNEL_PROFILE_NOT_MEASURED)
+
+
 def _io_counters() -> dict:
     values = {}
     for line in Path("/proc/self/io").read_text().splitlines():
@@ -1276,7 +1298,7 @@ def run_adjoint_capture(
               flush=True)
 
     sampler = GpuPowerSampler().start()
-    kernel = KernelTimeProfiler()
+    kernel = _stage_a_kernel_profiler()
     runner = None
     started, before_io = time.time(), _io_counters()
     try:
@@ -1381,6 +1403,13 @@ def run_adjoint_capture(
              "cotangent_sha256": entry["cotangent_sha256"]}
             for entry in receipt["checkpoints"]]
         result["passed"] = True
+    except BaseException as error:
+        # Said before any teardown. On 2026-09-21 the teardown below took the
+        # box down and the kernel killed this process before its traceback
+        # printed: PrismaBuild recorded exit 137 and no reason (PQ #899).
+        print(f"joint_cost_stage_a: capture failed: {type(error).__name__}: "
+              f"{error}", flush=True)
+        raise
     finally:
         kernel.__exit__(None, None, None)
         if runner is not None:
@@ -1392,7 +1421,7 @@ def run_adjoint_capture(
                                  "end_epoch": result["env"]["finished_epoch"]})
         result["io_before"], result["io_after"] = before_io, _io_counters()
         result["gpu"] = gpu
-        result["kernel_active_s"] = kernel.kernel_active_s
+        result["kernel_active_s"] = kernel.block()["kernel_active_s"]
         result["kernel_profiler_error"] = kernel.error
         residency = residency_report()
         if residency is not None:
@@ -1403,7 +1432,7 @@ def run_adjoint_capture(
             "joint_layer_quantum", "joint_adjoint_capture"),
         "stage": "adjoint_capture",
         "wall_s": result["phases"][0]["end_epoch"] - started,
-        "kernel_active_s": kernel.kernel_active_s,
+        "kernel_active_s": kernel.block()["kernel_active_s"],
         "gpu_joules": gpu.get("gpu_joules"),
         "gpu_power_w_p50": gpu.get("gpu_power_w_p50"),
         "gpu_power_w_p95": gpu.get("gpu_power_w_p95"),

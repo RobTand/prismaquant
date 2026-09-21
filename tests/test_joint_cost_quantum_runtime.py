@@ -377,10 +377,11 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
                         lambda: type("S", (), {"start": lambda s: s,
                                                "stop": lambda s: {}})())
     monkeypatch.setattr(stage_a, "KernelTimeProfiler",
-                        lambda: type("K", (), {
+                        lambda **_scope: type("K", (), {
                             "__enter__": lambda s: s,
                             "__exit__": lambda s, *a: None,
                             "kernel_active_s": 0.0,
+                            "block": lambda s: {"kernel_active_s": 0.0},
                             "error": None})())
     monkeypatch.setattr(residency, "residency_report", lambda: None)
 
@@ -530,10 +531,11 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
                         lambda: type("S", (), {"start": lambda s: s,
                                                "stop": lambda s: {}})())
     monkeypatch.setattr(stage_a, "KernelTimeProfiler",
-                        lambda: type("K", (), {
+                        lambda **_scope: type("K", (), {
                             "__enter__": lambda s: s,
                             "__exit__": lambda s, *a: None,
                             "kernel_active_s": 0.0,
+                            "block": lambda s: {"kernel_active_s": 0.0},
                             "error": None})())
     monkeypatch.setattr(residency, "residency_report", lambda: None)
     monkeypatch.setattr(stage_a, "run_adjoint_capture_core",
@@ -756,10 +758,11 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
                         lambda: type("S", (), {"start": lambda s: s,
                                                "stop": lambda s: {}})())
     monkeypatch.setattr(stage_a, "KernelTimeProfiler",
-                        lambda: type("K", (), {
+                        lambda **_scope: type("K", (), {
                             "__enter__": lambda s: s,
                             "__exit__": lambda s, *a: None,
                             "kernel_active_s": 0.0,
+                            "block": lambda s: {"kernel_active_s": 0.0},
                             "error": None})())
     monkeypatch.setattr(residency, "residency_report", lambda: None)
 
