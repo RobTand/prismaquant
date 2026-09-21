@@ -72,8 +72,9 @@ filed separately. Gates: `tests/test_stagea_readset_source_coverage.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 scope of Stage A's kernel-time profiler** (PQ #899). `run_adjoint_capture`
-wrapped the whole capture in one `torch.profiler` CUDA session
-(`KernelTimeProfiler`) and stopped it in its `finally`. Kineto holds every CUDA
+held one `torch.profiler` CUDA session (`KernelTimeProfiler`) across the whole
+forward and chain passes (it opened after the head walk and the artifact
+preflight) and stopped it in its `finally`. Kineto holds every CUDA
 record in host memory until the stop, and the stop then builds the whole trace.
 On the 512-sample run of 2026-09-21 (PB action `e9840722d83d`, sparklina; pqteld)
 AnonPages grew 7.4 GB to 10.9 GB in 15 minutes of collecting and 10.9 GB to

@@ -133,6 +133,15 @@ def test_a_prefix_that_names_nothing_refuses(campaign):
                                 checkpoint_layers_prefix="model.layers.")
 
 
+def test_a_tensor_the_index_names_and_the_shard_lacks_refuses(campaign):
+    index = Path(campaign["model"]) / "model.safetensors.index.json"
+    body = json.loads(index.read_text())
+    body["weight_map"][f"{PREFIX}0.ghost.weight"] = "b.safetensors"
+    index.write_text(json.dumps(body))
+    with pytest.raises(ValueError, match="does not hold tensor"):
+        _spans(campaign)
+
+
 def test_the_parent_alone_carries_the_hole_forward(campaign):
     manifest = _build(campaign)
     layer1 = [manifest["entries"][index]
@@ -219,4 +228,10 @@ def test_prismabuild_accepts_the_completed_manifest(campaign):
     import prismabuild.core as core
     if not Path(core.__file__).resolve().is_relative_to(PUBLISHED_PB_SRC.resolve()):
         pytest.skip("a different prismabuild is already imported")
-    core.validate_data_manifest(_build(campaign, _spans(campaign)))
+    import prismabuild.storage_tiers as tiers
+    manifest = _build(campaign, _spans(campaign))
+    core.validate_data_manifest(manifest)
+    # The completion's index runs are not contiguous; PrismaBuild's read-order
+    # expansion has to accept that, or the seal refuses the whole manifest.
+    assert len(tiers.manifest_phase_ranges(manifest)) == \
+        len(manifest["read_plan"]["phases"])

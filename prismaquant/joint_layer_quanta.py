@@ -867,6 +867,9 @@ def read_layer_source_spans(model_dir: str, num_layers: int, *,
             header = json.loads(handle.read(length))
         base = 8 + length
         for layer, name in wanted[shard]:
+            if name not in header:
+                raise ValueError(f"{path} does not hold tensor {name!r}, which "
+                                 "the checkpoint index places in it")
             begin, end = header[name]["data_offsets"]
             if (type(begin) is not int or type(end) is not int
                     or not 0 <= begin <= end <= size - base):
@@ -989,9 +992,12 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
     # Every (path, offset) the finished manifest will hold before completion:
     # the head's and every layer's, so an added entry cannot land on one a
     # later layer brings.
-    taken = {(entry["path"], entry["offset"]) for entry in manifest_entries}
+    # Spelled the way the reader-side spans are, so the collision check in
+    # ``complete_source_extent`` compares like with like.
+    taken = {(os.path.normpath(entry["path"]), entry["offset"])
+             for entry in manifest_entries}
     taken.update(
-        (entry["path"], entry["offset"])
+        (os.path.normpath(entry["path"]), entry["offset"])
         for layer in layers
         for entry in entries[rows[f"layer-{layer}"]["entry_begin"]:
                              rows[f"layer-{layer}"]["entry_end"]]
