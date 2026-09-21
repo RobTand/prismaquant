@@ -67,15 +67,12 @@ def _forget_state(monkeypatch):
     reset_residency_resolver_for_tests()
     deactivate_staged_tier_policy_for_tests()
     set_lease_helper_root(None)
-    from prismaquant.staged_lease import (
-        _ACQUIRE_CONTEXT, clear_injected_sdk_for_tests)
-    _ACQUIRE_CONTEXT.clear()
+    from prismaquant.staged_lease import clear_injected_sdk_for_tests
     clear_injected_sdk_for_tests()
     yield
     reset_residency_resolver_for_tests()
     deactivate_staged_tier_policy_for_tests()
     set_lease_helper_root(None)
-    _ACQUIRE_CONTEXT.clear()
     clear_injected_sdk_for_tests()
 
 
