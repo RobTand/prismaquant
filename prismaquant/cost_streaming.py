@@ -1194,18 +1194,25 @@ class StreamedBoundaryArtifacts:
     def _produced_group_for(self, reference):
         """Which bound group holds this reference, or None.
 
-        Indexed, because MEASURED: the previous form walked every bound
-        group and asked ``reference in group["references"]`` per entry, so
-        a late window cost O(groups x entries). Profiled on the production
-        panel's shape -- 1563 groups of 64, ~100k rotated cotangent
-        entries, cProfile through PrismaBuild on dl380g10 -- one 64-entry
-        window's lookups took **0.537 s** and 128M ``__eq__`` calls, in
-        front of a window that reads 1 GiB. The same lookups through this
-        index take **13.9 us**. The index is the canonical reference ->
-        group identity and not a second store: the groups still own their
-        reference lists, and an entry leaves the index when its origin is
-        unlinked, so a dead reference answers None instead of resolving to
-        a group whose bytes are gone.
+        Indexed. Its standing reason is identity, not speed: this is the
+        canonical reference -> group mapping and not a second store --
+        the groups still own their reference lists, and an entry leaves
+        the index when its origin is unlinked, so a dead reference
+        answers None instead of resolving to a group whose bytes are
+        gone.
+
+        Profiled on both sides through PrismaBuild on dl380g10, at the
+        production panel's shape (1563 groups of 64, ~100k rotated
+        cotangent entries, twenty 64-entry windows), because a loop shape
+        is not evidence. The previous form walked every bound group
+        asking ``reference in group["references"]``, so a late window
+        cost O(groups x entries): **0.537 s** and 128M ``__eq__`` calls
+        per window, in front of a window that reads 1 GiB. This form
+        costs **19.4 us** per window on the same fixture. Read that as
+        CPU metadata on a fixture, not as Stage A throughput or energy.
+        Against a bare dict written inline the index measures 1.046x --
+        i.e. at parity, very slightly slower -- which says the win is
+        against the walk it replaced and nothing more.
         """
 
         key = self._produced_index.get(reference)

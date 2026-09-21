@@ -107,8 +107,14 @@ def main() -> int:
         out[name] = {"wall_s_total": wall,
                      "wall_s_per_window": wall / args.windows,
                      "profile_head": stream.getvalue().splitlines()[:12]}
-    out["speedup"] = (out["produced_group_for"]["wall_s_total"]
-                      / out["reference_index_control"]["wall_s_total"])
+    # NOT a before/after delta: this divides whatever _produced_group_for
+    # currently is by an inline dict control, so it reads ~38694x while the
+    # function walks and ~1.05x once it is indexed. The delta lives ACROSS
+    # the two receipts, in produced_group_for. The archived receipts spell
+    # this key "speedup", with this same definition, which is exactly the
+    # misreading the name invites.
+    out["ratio_to_dict_control"] = (out["produced_group_for"]["wall_s_total"]
+                                    / out["reference_index_control"]["wall_s_total"])
     # The window this lookup sits in front of reads 64 x 16 MiB from a
     # staged tier. That is the number the lookup has to be compared with.
     out["window_payload_bytes"] = args.per_group * (16 << 20)
