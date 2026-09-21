@@ -36,6 +36,8 @@ import uuid
 
 import pytest
 
+from fleet_sdk import require_prismabuild_sdk
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -115,6 +117,7 @@ def world(tmp_path, pinned_tree, monkeypatch):
     sealed-tree coherence check holds. The real broker Authority, socket
     server, claim machinery and scope client are the 864 machinery itself.
     """
+    require_prismabuild_sdk()
 
     import prismabuild.core as core
     import prismabuild.pool as pool
@@ -153,6 +156,8 @@ def helper_root(tmp_path):
     layout ``<root>/src/prismabuild``, so ``main`` runs the real sealed-tree
     resolution (``_sdk_from_tree``) rather than any test-only injection.
     """
+
+    require_prismabuild_sdk()
 
     from prismaquant.staged_lease import inject_installed_sdk_for_tests
 
