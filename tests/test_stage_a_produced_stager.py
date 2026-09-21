@@ -286,6 +286,26 @@ def test_a_slow_publication_does_not_hold_the_writer(
     assert storage.telemetry["produced_stager_busy_s"] >= 1.5
 
 
+def test_the_next_groups_prewrite_is_claimed_ahead_of_the_writer(
+        tmp_path, closing):
+    storage, publication, _q, _env, _pb = _owner(
+        tmp_path, groups=2, window_gib=8)
+    closing(storage)
+    chain._write_group(storage, count=1)
+    assert storage.drain_produced_stager(60.0)
+    assert len(storage._produced_groups) == 2, (
+        "the first entry of a group claims the next group of its plane")
+    assert storage.telemetry["produced_groups_prewritten_ahead"] == 1
+    urgent = storage.telemetry["produced_stager_urgent_tasks"]
+    chain._write_group(storage, count=GROUP_SIZE - 1, first=1)
+    chain._write_group(storage, first=GROUP_SIZE)
+    assert storage.drain_produced_stager(60.0)
+    assert storage.telemetry["produced_stager_urgent_tasks"] == urgent, (
+        "the writer found the second group claimed and waited for nothing")
+    assert storage.telemetry["produced_groups_prewritten"] == 2
+    assert len(storage._produced_groups) == 2, "and the plane ends there"
+
+
 def test_a_staged_group_is_read_without_asking_the_stager(
         tmp_path, monkeypatch, closing):
     storage, _publication, q, env, pb_repo = _owner(

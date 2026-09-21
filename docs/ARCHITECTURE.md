@@ -1,7 +1,26 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `feat/stagea-owner-loop-readahead-20260921`.
+As of: 2026-09-21 · `feat/stagea-background-stager-895`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `feat/stagea-background-stager-895`) for **the Stage A
+owner's background stager** (PQ #895). No format, lane, pin, ship-gate verdict
+or kernel order changes, and the **default is unchanged**: at the sealed
+two-group window the owner starts no thread and every step runs where it is
+called. With a window wider than two groups, the bound owner starts one stager
+thread (`prismaquant/produced_stager.py`) and runs on it every PrismaBuild
+call that can wait on a lock: the prewrite claim, publication, re-staging,
+retirement asks and their polls, and the durable-charge reclaim. The compute
+thread submits that work and keeps two lock-free reads, the poll of a mover's
+receipt and the composition of a group's reader context. It blocks only for a
+group it must read that is not funded yet, for a prewrite the stager has not
+claimed yet, or for a full optional queue. The read-ahead rules of #887 are
+the same code; what changed is the thread they run on. The reason is measured:
+in the first production run with read-ahead the GPU was busy 18 percent of the
+forward pass, because at 1 GiB a group the owner's PrismaBuild calls, made on
+the compute thread, took longer than the compute between them.
+`PRISMAQUANT_STAGEA_STAGER=inline` is the run-scoped override that keeps
+every step on the calling thread at any window width.
 
 Re-stamped (2026-09-21, `feat/stagea-owner-loop-readahead-20260921`) for
 **read-ahead in the Stage A produced-boundary owner loop** (PQ #887). No
@@ -1075,7 +1094,9 @@ says exactly that.
   trips each way on the 512-sample panel. The owner reads the group count
   back from the sealed window (`window_gib // ceil(group_bytes / GiB)`,
   `cost_streaming._sealed_window_groups`) and treats every group past two as
-  credit for work no read has asked for yet. Five rules, no threads:
+  credit for work no read has asked for yet. Five rules, which run on the
+  calling thread at the default window and on the stager thread described
+  after them at a wider one:
   (1) a group is **published when its last entry is durable**, so its mover
   runs while the writer computes — unless the writer says no read follows
   (`write(read_back=False)`, the walk's last roll); (2)
@@ -1140,9 +1161,79 @@ says exactly that.
   groups plus retirements in flight, so `concurrent_groups` of about 56
   (`window_gib` 112). A narrower window degrades toward the synchronous loop;
   it does not fail.
-  **Telemetry.** `produced_group_stage_wait_s`, `produced_group_release_wait_s`
-  and `produced_group_ahead_wait_s` are the owner's time blocked on, or
-  spent asking, the PrismaBuild queue.
+  **The stager thread (PQ #895).** At a window wider than two groups the
+  owner runs those rules on one background thread, because on the compute
+  thread they cost more than the compute: in the first production run the GPU
+  was busy 18 percent of the forward pass, and a publish-ahead step that
+  overran its 10 s budget was counted as a refusal, so its group was published
+  at its first read while the GPU waited for the mover. The stager
+  (`produced_stager.ProducedStager`) is a serial executor with two lanes.
+  Lane 1 holds a read the compute thread is waiting for (urgent) and a closed
+  window's retirement asks (ordered), first in, first out, so a read never
+  runs ahead of a retirement ask queued before it. Lane 2 holds optional work
+  nobody waits for (publication at write-complete, staging a plane ahead, the
+  next group's prewrite claim, the durable-charge reclaim); it runs only when
+  lane 1 is empty, and it is bounded at four times the window, so a full lane
+  blocks the writer instead of queueing work faster than PrismaBuild takes it.
+  **One task runs at a time, on purpose.** PrismaBuild serializes one owner's
+  mutating calls anyway: every mutating `produced_output` entry point takes
+  `stage_ownership_lock(output_prefix)`, one path for all of an owner's
+  groups, and `posix_lock.held` takes a per-path `threading.RLock` before the
+  POSIX lock, because a POSIX lock is process-scoped. A second thread inside
+  the SDK would wait on that lock and gain nothing. The cost is stated, not
+  hidden: an urgent task waits for the task in flight
+  (`produced_stager_urgent_delay_s`), and an optional step's budget on the
+  stager is 120 s (`PRODUCED_STAGER_STEP_BUDGET_S`), not the staging budget.
+  **What the compute thread still does.** It writes and reads tensors, polls
+  a mover's receipt (`await_materialized`) and composes a group's reader
+  context, both lock-free reads of PrismaBuild's records. A window whose
+  groups are all published, funded and not being retired submits nothing
+  (`produced_group_fast_reads`); that is the steady state. Which groups a
+  closing window keeps for the next probe pass is decided on the compute
+  thread at window exit, never later on the stager, and the groups whose
+  retirement is queued are marked, so the read that wants one waits for the
+  ask instead of reading a copy an egress may be deleting. The stager retires
+  the previous window's groups while the next window is open; the rule that a
+  group is not retired under a live window is therefore checked against the
+  live window's own groups there, and against any live window on the calling
+  thread, as before. One lock guards the bookkeeping both threads touch
+  (`produced_stager.OwnerLock`), and a thread gives it up around every
+  PrismaBuild call: decide under the lock, call without it, commit under it.
+  Credit a read-ahead step takes is counted before its call, so the other
+  thread's arithmetic sees it while the call runs.
+  **A failure never disappears.** An optional step stays a counted refusal
+  with its reason. An urgent step raises on the compute thread under its own
+  type, as it did inline. Any other step's failure is kept and raised by the
+  owner's next call, with a note naming the step. Refusals, funding
+  deferrals, retirements PrismaBuild did not take, and stager steps that ran
+  longer than 10 s are printed when they happen, one line each with the
+  reason, and are not left to the closing receipt.
+  **Close.** The owner stops the stager before it disposes of anything:
+  queued optional steps are dropped (a queued publication as a refusal with
+  reason `owner-closing`, because a mover for a group nobody will read is not
+  worth starting), retirement asks and charge reclaims still run, and the
+  thread is joined inside the staging budget plus 60 s. After the join there
+  is no thread, so the settle at close is the synchronous code, unchanged,
+  and still never changes the run's outcome. A failure kept at that point is
+  recorded as a release error. If the join times out, a PrismaBuild call is
+  still running on that thread: the settle is skipped and said so, in the log
+  and in the release errors.
+  **Telemetry.** `produced_compute_blocked_s` is the compute thread's time
+  blocked on this owner's PrismaBuild work, which is the GPU's cost of
+  staging. It is the sum of one exclusive counter per reason
+  (`produced_compute_blocked_<reason>_s`: `prewrite`, `publish_ahead`,
+  `stage_ahead`, `read_fund`, `stage_wait`, `compose`, `release`,
+  `copy_before_unlink`, `reclaim_origin`, `queue_full`, `settle`, `close`),
+  and it is counted inline too, so an `inline` run reports the same figure.
+  `produced_group_stage_wait_s`, `produced_group_release_wait_s` and
+  `produced_group_ahead_wait_s` keep their meaning, time spent on or waiting
+  for the PrismaBuild queue, but with a stager most of it is the stager's
+  time, not the GPU's: read them beside `produced_stager_busy_s`.
+  `produced_stager_busy_s` over `produced_stager_alive_s` is the stager's
+  load, with `produced_stager_queue_peak`, `produced_stager_step_overruns` and
+  `produced_stager_dropped`. A stager near full load is PrismaBuild's fixed
+  action cost (PB #811) surfacing on the other thread, and the bound on
+  read-ahead then.
   **Evidence** is five live chain cycles on the fleet
   (`tools/stagea_produced_live_cycle.py --mode chain`, owner on a Spark,
   24-group window, 3 s of stand-in compute per window; the last four in the
