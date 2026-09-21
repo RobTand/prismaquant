@@ -1127,7 +1127,10 @@ says exactly that.
   capture's `retention` block is taken before the owner closes, the receipt
   also carries `telemetry.produced_output` (`produced_output_report`, read
   after close): the counters, the release debt, the read-ahead steps not
-  taken and the release errors. An unbound owner's receipt is unchanged. The
+  taken and the release errors. The block runs after the last layer, so it
+  may only add: a reason JSON cannot carry travels as its repr, and a report
+  that cannot be taken or sealed is recorded as `report_error`
+  (`_produced_output_block`). An unbound owner's receipt is unchanged. The
   kernel order
   is untouched — the probe loop moved verbatim into
   `_render_free_probe_passes` — so §9.3's bitwise gate holds.
