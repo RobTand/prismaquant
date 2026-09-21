@@ -368,6 +368,12 @@ def run_adjoint_capture_core(
     with storage:
         storage.bind(bind_identity, n_probes=n_probes, published=True)
         if progress is not None:
+            # The initial boundary loop reports under the declared head
+            # phase until the first forward observer fires. Entering moves
+            # no units: the head walk's committed total is already the
+            # reporter's base, and only published entries advance it.
+            from .joint_run_progress import HEAD_PHASE
+            progress.enter(HEAD_PHASE)
             storage.watch_progress(progress)
         log(f"boundary capture: calib {tuple(calib_ids.shape)} in "
             f"{len(row_offsets)} partition(s) across {num_layers} layers ...")
