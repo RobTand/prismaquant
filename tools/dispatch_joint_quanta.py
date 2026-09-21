@@ -563,6 +563,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
 def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                  *, tag: str = ADJOINT_TAG,
                  prefetch_override: Path | None = None,
+                 artifact_budget_bytes: int | str | None = None,
                  binding: dict | None = None) -> list[str]:
     """The §5.2 stage-A submission argv: the adjoint capture goes first and
     alone; quanta wait on its receipt.  The campaign binding every record
@@ -577,6 +578,14 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     action environment into the payload), so the dispatcher threads the
     flag, not ``--env``.  Absent: the plan's sealed budget, argv unchanged.
 
+    ``artifact_budget_bytes`` (optional, #882): the explicit durable
+    artifact ceiling in bytes the capture reads through its own
+    ``--artifact-budget-bytes`` flag -- the durable-side #809 seam for a
+    frozen plan whose sealed ``max_artifact_bytes`` cannot hold the retained
+    peak. Strict positive-integer bytes; the payload flag is the channel
+    that crosses the container boundary, so the dispatcher threads the
+    flag, not ``--env``. Absent: the plan's sealed ceiling, argv unchanged.
+
     The manifest binding is derived the same way: ``--data-manifest-sha256``
     and ``--read-manifest-sha256`` ride the payload (a run that bound no
     manifest digest gets no tier redirect), and the manifest's read phases
@@ -590,6 +599,28 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     """
     if binding is None:
         binding = _stage_manifest_binding(adjoint_manifest, campaign)
+    if artifact_budget_bytes is not None:
+        if isinstance(artifact_budget_bytes, bool):
+            raise DispatchRefused(
+                "stage-A artifact budget must be a positive integer byte "
+                f"count (bytes), got bool {artifact_budget_bytes!r}")
+        try:
+            _budget = int(str(artifact_budget_bytes).strip(), 10) if isinstance(
+                artifact_budget_bytes, str) else int(artifact_budget_bytes)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise DispatchRefused(
+                "stage-A artifact budget must be a positive integer byte "
+                f"count (bytes), got {artifact_budget_bytes!r}: {exc}") from exc
+        if isinstance(artifact_budget_bytes, str) and (
+                not str(artifact_budget_bytes).strip().isdigit()):
+            raise DispatchRefused(
+                "stage-A artifact budget must be a positive integer byte "
+                f"count (bytes), got {artifact_budget_bytes!r}")
+        if _budget <= 0:
+            raise DispatchRefused(
+                "stage-A artifact budget must be a positive integer byte "
+                f"count (bytes), got {_budget!r}")
+        artifact_budget_bytes = _budget
     payload = [
         "python3", "-m", "prismaquant.joint_adjoint_capture",
         "--plan", str(campaign["plan_path"]),
@@ -603,6 +634,8 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         "--resume"]
     if prefetch_override is not None:
         payload += ["--prefetch-override", str(prefetch_override)]
+    if artifact_budget_bytes is not None:
+        payload += ["--artifact-budget-bytes", str(artifact_budget_bytes)]
     wrapped, container_image = _container_wrap(SPEC_PATH, payload)
     argv = [sys.executable, str(PBRUN),
             "--tag", tag,
@@ -776,6 +809,12 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                              "the stage-A action (#819): threaded into the "
                              "payload's --prefetch-override; the run stamps "
                              "the deviation into its provenance")
+    parser.add_argument("--stage-a-artifact-budget-bytes", default=None,
+                        help="explicit durable artifact ceiling in bytes for "
+                             "the stage-A action (#882): threaded into the "
+                             "payload's --artifact-budget-bytes; the run stamps "
+                             "the deviation into its provenance; the sealed "
+                             "plan is unchanged")
     parser.add_argument("--spec", default=None,
                         help="campaign spec for the container wrapper (default: the joint-panel dev spec)")
     parser.add_argument("--state", default=None)
@@ -841,6 +880,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                          "argv": stage_a_argv(manifest, records[0][1]["campaign"],
                                               tag=adjoint_tag,
                                               prefetch_override=args.stage_a_prefetch_override,
+                                              artifact_budget_bytes=args.stage_a_artifact_budget_bytes,
                                               binding=stage_a_binding)})
         if receipt_ok:
             for record_path, record in records:
@@ -890,6 +930,11 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                                            "prefetch_override": (
                                                str(args.stage_a_prefetch_override)
                                                if args.stage_a_prefetch_override
+                                               else None),
+                                           "artifact_budget_bytes": (
+                                               str(args.stage_a_artifact_budget_bytes)
+                                               if args.stage_a_artifact_budget_bytes
+                                               is not None
                                                else None)})
             else:
                 _append_state(state_path,
