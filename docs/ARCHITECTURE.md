@@ -1098,22 +1098,37 @@ says exactly that.
   path's two groups, because a group whose retirement PrismaBuild refused
   holds credit without being read-ahead. Every exception from an optional
   step is a counted refusal (`produced_ahead_refusals()` keeps the reasons),
-  and the read then publishes under the full staging budget. A **read** whose
-  window refill PrismaBuild refuses is answered by kind
+  and the read then publishes under the full staging budget; if the step
+  failed after its funding moved, the owner asks `materialization_state` and
+  counts what the ledger holds. A **read** that PrismaBuild refuses at one of
+  the two steps that move credit (`refill`, the tier's free pool into the
+  owner's window; `fund`, the owner's holdings onto the group's mover, which
+  is where a full window surfaces) is answered by kind
   (`_produced_refill_refusal_kind`, counted in `produced_group_read_refunds`):
   `tier-reservation-unavailable` is a shortfall, so pending retirements are
   waited out and groups staged ahead are retired two at a time
-  (`produced_groups_ahead_surrendered`) until the step funds or nothing is
-  left to give; `unknown-retain: …` is PrismaBuild failing closed on a funding
-  census it could not complete, which many movers in flight make likelier
-  than the synchronous loop's two ever did, so the step is asked again inside
-  the group's own staging deadline and nothing is given up. Every other
+  (`produced_groups_ahead_surrendered`), the group read last given up first
+  (`_produced_surrender_order`, derived from the walk: lowest cotangent
+  boundary, highest probe, last window, and boundary planes after every
+  cotangent group), until the step funds or nothing is left to give;
+  `unknown-retain: …` is PrismaBuild failing closed on something it could not
+  establish, which many movers in flight make likelier than the synchronous
+  loop's two ever did, so the step is asked again and nothing is given up.
+  Both answers live inside the group's own staging deadline — a reclaim is
+  part of that group's staging, never a budget of its own — and a candidate
+  that will not retire is recorded against itself and skipped, so another
+  group's egress is never the failure of this read. Every other
   refusal, and every refusal at the default window, propagates exactly as
   before: giving credit back cannot fix what is not about credit. The settle
   at owner close never changes the run's outcome: a clean run waits for each
   retirement, a failing run only asks, and a settle that cannot finish is
   printed and reported as `produced_release_debt()` rather than raised over a
-  finished capture or over the failure already propagating. The kernel order
+  finished capture or over the failure already propagating. Because the
+  capture's `retention` block is taken before the owner closes, the receipt
+  also carries `telemetry.produced_output` (`produced_output_report`, read
+  after close): the counters, the release debt, the read-ahead steps not
+  taken and the release errors. An unbound owner's receipt is unchanged. The
+  kernel order
   is untouched — the probe loop moved verbatim into
   `_render_free_probe_passes` — so §9.3's bitwise gate holds.
   **Width.** The rules are fully effective when the share holds the plane
