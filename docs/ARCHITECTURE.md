@@ -28,7 +28,12 @@ effective configured artifact max; no budget figure is written into the code.
 Open finding, not closed by this branch: produced-output egress can decharge
 a batch's stage token instead of releasing it when the staged entries are
 still shared with an in-flight copy, which permanently shrinks the tier mint
-(`tools/audit_produced_window_tokens.py` reproduces it). Gates:
+(`tools/audit_produced_window_tokens.py` reproduces it; the cause is a
+PrismaBuild one, traced by root to an egress eviction that does not exclude
+its own mover from the claimed-path check, and repaired outside this lane).
+The rollover fixture therefore mints two stage tokens although steady-state
+occupancy is one, and its one-token acceptance is pending a re-run against
+the repaired PrismaBuild candidate. Gates:
 `tests/test_stage_a_produced_boundary_chain.py`.
 
 Re-stamped (2026-09-21, `fix/quantum-metadata-generation-20260921`) for

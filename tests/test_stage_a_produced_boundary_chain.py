@@ -902,8 +902,19 @@ def test_repeated_distinct_group_turnover_on_a_single_stage_token(
     with nothing scheduled to return it (``retiring: false``,
     ``deferred_handoffs: []``). The tier's capacity silently shrank by one.
 
+    Root traced it the rest of the way, in PrismaBuild and not here: the
+    mover misreads ITSELF as another pending copy, because
+    ``stage_release._evict_owned`` calls ``_claimed_paths`` without the
+    ``exclude`` argument that call takes -- three lines from a
+    ``_fragment_owners`` call that already self-excludes -- and the final
+    move receipt exists before the row leaves CLAIMED. It drops its only
+    proof and destroys its own token. That repair is assigned elsewhere.
+
     So do not shrink this tier back to one. One token does not make this
     test stricter; it makes it fail whenever that egress path is taken.
+    When the repair lands and a new PB candidate is pinned, re-run the
+    one-token acceptance against that candidate: this is NOT closed at the
+    42f2cfb8 candidate.
 
     What this does NOT establish: full cotangent rollover. The previous
     group's entries are disposed inside the NEXT group's window, after the
