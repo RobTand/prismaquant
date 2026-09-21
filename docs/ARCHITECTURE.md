@@ -894,19 +894,53 @@ says exactly that.
   unchanged. `PRISMABUILD_RESIDENCY_MAP` stays the input map for a second
   reason: the SDK derives the **queue root** from its shape
   (`Path(map_path).parent.parent`), so pointing it at a produced batch's map
-  would send the SDK looking for the queue elsewhere. The publication unit is
-  the existing 64-entry read window, and the publish is **deferred to the
-  first read** — a prewrite holds no ledger tokens while a commit funds the
-  stage window, so publishing at write time would spend the stage credit the
-  first read needs. **Not yet available:** re-staging an unchanged batch after
-  its stage copy is released (`publish_prepaid_batch` replays the committed
-  duplicate rather than sealing a successor mover); the capability is
-  requested from the owning PrismaBuild lane and no symbol for it is invented
-  here. **Measured blocker:** `retire_batch` currently refuses
-  `egress-incomplete` with zero live pins, because `stage_release` identifies
-  movement nodes by tier demand and a produced-output owner demands its
-  working minimum on that tier while sealing an ordinary action with no
-  `params.command`. Gates:
+  would send the SDK looking for the queue elsewhere.
+
+- **The publication unit is the existing read window, and the stage copy is a
+  loan.** A group is the 64 entries `prefetched_boundary_batches` already
+  yields, and the publish is **deferred to the first read**: a prewrite holds
+  no ledger tokens while a commit funds the stage window, so publishing at
+  write time would spend the stage credit the first read needs. Per-entry
+  movers are rejected on PrismaBuild's own arithmetic, not on entry size —
+  `storage_tiers.stage_tokens_for_bytes` rounds **per mover** up to a whole
+  GiB token, so 64 movers of ~16 MiB cost 64 tokens where the one group that
+  already is the read window costs `ceil(group_bytes / GiB)`; the smaller last
+  group is priced on its own byte range. The window exit **retires** the
+  group's stage copy once its pins release, and a later read of the same
+  unchanged logical batch re-stages it through PrismaBuild's own surface
+  (`produced_output.materialization_state` to ask,
+  `produced_output.ensure_batch_materialized` to drive) — one logical batch,
+  one durable origin charge, a PB-sealed successor mover, no second
+  publication. A refused retirement is recorded with its reason, re-driven
+  through the same PB retire before the next window publishes, and after a
+  bounded number of attempts left standing with its credits retained; it is
+  never reported as retired. A group's durable charge is reclaimed when its
+  **last** origin file is gone **and** its stage copy is retired. Staging is
+  asynchronous, so the read waits on the mover's own receipt (fragments
+  compose identically whether a batch is whole or half staged) with a named,
+  bounded `BoundaryStagingTimeout` and a withdrawal — never a fallback or a
+  direct origin read.
+
+- **Geometry is derived from the configured budget, never from a constant.**
+  `build_boundary_template` takes the **effective** artifact max — the plan's
+  sealed `boundary_storage.max_artifact_bytes` or the run's
+  `--artifact-budget-bytes` override — as the durable origin class maximum,
+  and derives the tier window from the **actual maximum publication group**
+  (64 × 16 MiB + envelope → 2 tokens; current plus next → 4), which is a
+  different quantity from the retained origin peak. The runtime binder refuses
+  when the admitted template's declared maximum is not the effective one. Every
+  `prismabuild.*` module the publication uses loads through
+  `staged_lease.sdk_submodule`, i.e. from the **same sealed generation** as the
+  reader SDK: production forwards `PRISMABUILD_READER_HELPER_ROOT` and mounts
+  it without populating `sys.path`, so a bare import can serve an older
+  container distribution or a mixture across modules, and qualified provenance
+  over bytes you cannot name is not provenance. **Not available:** sealing the
+  produced-output template at **submit** — the published `pbrun` exposes no
+  flag that ingests a template under `PRODUCED_OUTPUT_TEMPLATE_INPUT_ID`,
+  seals its declaration into `params`, and passes it to `queue.publish`, so
+  `tools/dispatch_joint_quanta.py` refuses
+  `ProducedOutputDeclarationUnsupported` rather than submitting a capture that
+  could write its entries and not read them. Gates:
   `tests/test_stage_a_produced_boundary_chain.py`.
 
 - **One resolver**, `prismaquant/residency_map.py`. It owns no bytes: it

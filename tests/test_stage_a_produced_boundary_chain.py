@@ -983,6 +983,83 @@ def test_a_read_only_attachment_cannot_declare_an_owner_prewrite(tmp_path):
             max_entry_tensor_bytes=1 << 14)
 
 
+def test_the_sdk_loads_one_generation_even_when_the_install_lacks_it():
+    """An old installed distribution must not serve half the SDK.
+
+    The deployed container carries a pip distribution at PrismaQuant's
+    reviewed reader-lease pin, and that distribution has NO
+    ``produced_output`` module at all -- the produced-output API is an
+    unqualified candidate. Production forwards an immutable
+    ``PRISMABUILD_READER_HELPER_ROOT`` and mounts it but does not populate
+    ``sys.path``, so a bare ``import prismabuild.produced_output`` is
+    exactly where a run would silently pick up the wrong generation, or a
+    MIXTURE across modules.
+
+    So this asserts the property that matters: with the helper root named,
+    every module the publication uses resolves inside ONE package
+    directory; with no helper root and no test injection, the loader
+    refuses instead of falling back to whatever is installed.
+    """
+
+    from prismaquant.staged_lease import (
+        LeaseRefused, set_lease_helper_root, sdk_submodule)
+
+    _src, pb_repo = _pb_source()
+    set_lease_helper_root(str(pb_repo))
+    roots = set()
+    for name in ("reader_lease", "produced_output", "pool", "storage_tiers",
+                 "residency_map"):
+        module = sdk_submodule(name)
+        roots.add(str(Path(module.__file__).resolve().parent))
+    assert len(roots) == 1, ("the SDK must be ONE generation, not a mixture",
+                             sorted(roots))
+    assert Path(roots.pop()) == (pb_repo / "src" / "prismabuild").resolve()
+
+    set_lease_helper_root(None)
+    with pytest.raises(LeaseRefused, match="lease-helper-unavailable"):
+        sdk_submodule("produced_output")
+
+
+def test_the_dispatcher_refuses_a_template_it_cannot_seal():
+    """The submit half is missing, and the dispatcher says so.
+
+    An admitted produced-output owner needs the template on the queue row
+    AND the matching declaration in the sealed request. The published
+    client seals neither, so naming a template at submit refuses rather
+    than producing an argv that looks like a declaration and admits
+    nothing. The derived template itself is checked here too: the durable
+    origin class maximum is the configured artifact max, and the window
+    comes from the actual maximum group.
+    """
+
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    _src, pb_repo = _pb_source()
+    from prismaquant.staged_lease import set_lease_helper_root
+    set_lease_helper_root(str(pb_repo))
+    from dispatch_joint_quanta import (
+        ProducedOutputDeclarationUnsupported, build_stage_a_produced_template,
+        stage_a_argv)
+
+    artifact_max = 640 * (1 << 30)          # a PLANNING figure, passed in
+    template = build_stage_a_produced_template(
+        output_prefix="/home/rob/stage-a-out", tier=TIER,
+        artifact_max_bytes=artifact_max,
+        group_size=64, max_entry_tensor_bytes=16 << 20)
+    assert template["durable_maxima"]["payload_max_bytes"] == artifact_max, (
+        "the configured artifact max is the single source of the durable "
+        "origin class maximum")
+    assert template["working_demands"][TIER]["window_gib"] == 4, (
+        "the window is the actual maximum group (64 x 16 MiB + envelope = "
+        "2 tokens) for the current and the next group -- never derived "
+        "from the retained origin peak", template["working_demands"])
+
+    with pytest.raises(ProducedOutputDeclarationUnsupported,
+                       match="published pbrun seals none"):
+        stage_a_argv(Path("/nonexistent/manifest.json"), {},
+                     produced_output_template=Path("/tmp/does-not-matter"))
+
+
 def test_the_pinned_candidate_provenance_is_immutable():
     """No fake green: the run names the immutable bundle it resolved.
 

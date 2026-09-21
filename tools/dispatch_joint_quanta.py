@@ -131,6 +131,61 @@ class ExecutableBindingUnsupported(DispatchRefused):
     """
 
 
+class ProducedOutputDeclarationUnsupported(DispatchRefused):
+    """A Stage A produced-output template cannot be SEALED at submit yet.
+
+    The runtime half of the bridge exists: an admitted owner binds through
+    ``produced_output.declared_template`` and reads its own boundary
+    entries back. The submit half does not. A produced-output owner is
+    admitted only when the queue row carries the template
+    (``queue.publish(produced_output_template=...)``) AND the sealed
+    request carries the matching declaration
+    (``params["produced_output_template"]`` validated against an input
+    ingested under ``core.PRODUCED_OUTPUT_TEMPLATE_INPUT_ID``) -- and the
+    published ``pbrun`` exposes no flag that does either. It is not in the
+    deployed client's argument list and the candidate bundle ships no
+    client at all.
+
+    So this refuses rather than threading a payload flag that would look
+    like a declaration and admit nothing, which is the same fail-open shape
+    :class:`ExecutableBindingUnsupported` already refuses next door. The
+    capability needed from PrismaBuild is one submit-side flag -- name it
+    what the PB lane wishes -- that takes a template document, ingests it
+    under ``PRODUCED_OUTPUT_TEMPLATE_INPUT_ID``, seals
+    ``produced_output.build_declaration(template, input)`` into
+    ``params``, and passes the template to ``queue.publish``.
+    """
+
+
+def build_stage_a_produced_template(*, output_prefix, tier: str,
+                                    artifact_max_bytes: int,
+                                    group_size: int,
+                                    max_entry_tensor_bytes: int) -> dict:
+    """The Stage A boundary template this submission would declare.
+
+    Derived, never constant: ``artifact_max_bytes`` is the EFFECTIVE
+    artifact budget this submission forwards (the plan's sealed
+    ``boundary_storage.max_artifact_bytes`` or the run's
+    ``--artifact-budget-bytes`` override, whichever the payload carries),
+    and it becomes the durable origin class maximum. The tier window is
+    derived from the ACTUAL maximum publication group, which is a
+    different quantity from the retained origin peak.
+
+    The single implementation lives with the runtime binding
+    (``prismaquant.stage_a_produced_output.build_boundary_template``) so
+    the submitted declaration and the bound instance cannot drift into two
+    spellings of one contract.
+    """
+
+    from prismaquant.stage_a_produced_output import build_boundary_template
+
+    return build_boundary_template(
+        output_prefix=output_prefix, tier=tier,
+        artifact_max_bytes=int(artifact_max_bytes),
+        group_size=int(group_size),
+        max_entry_tensor_bytes=int(max_entry_tensor_bytes))
+
+
 def _sha_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -564,6 +619,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                  *, tag: str = ADJOINT_TAG,
                  prefetch_override: Path | None = None,
                  artifact_budget_bytes: int | str | None = None,
+                 produced_output_template: Path | None = None,
                  binding: dict | None = None) -> list[str]:
     """The §5.2 stage-A submission argv: the adjoint capture goes first and
     alone; quanta wait on its receipt.  The campaign binding every record
@@ -593,10 +649,28 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     the worker refuses undeclared names, so the list is derived, never
     hardcoded (#835).
 
+    ``produced_output_template`` (optional): the pre-submit produced-output
+    declaration that would let the capture read its OWN boundary entries
+    back through PrismaBuild. Passing it refuses with
+    :class:`ProducedOutputDeclarationUnsupported` -- the published client
+    has no flag that seals a template into the request and the queue row,
+    and a payload flag alone would advertise an admission that never
+    happened.
+
     ``binding`` (optional) is a precomputed :func:`_stage_manifest_binding`
     for this manifest and campaign, so a caller that also records the
     digests does not read the manifest twice.
     """
+    if produced_output_template is not None:
+        raise ProducedOutputDeclarationUnsupported(
+            "stage-A submission names a produced-output template "
+            f"({produced_output_template}), but the published pbrun seals "
+            "none: the owner's request must carry the declaration in "
+            "params against an ingested "
+            "prismabuild.produced-output-template input, and the queue row "
+            "must carry the template itself. Refusing rather than "
+            "submitting a capture that would write its boundary entries "
+            "and then be unable to read them")
     if binding is None:
         binding = _stage_manifest_binding(adjoint_manifest, campaign)
     if artifact_budget_bytes is not None:
