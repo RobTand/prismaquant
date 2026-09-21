@@ -1,0 +1,17 @@
+{
+  "schema": "prismaquant.produced_render.pb_generation_pin.v1",
+  "note": "PQ #870 pins PrismaBuild's produced-output API to the DEPLOYED runtime generation d1c640e74d97-1790008584-459339399864 (commit d1c640e74d97a36cbc3f53aa966ab9b50853bb1c, live on the fleet), which carries PoolQueue.validate_produced_output_batch and the full prepaid lifecycle (declare/bind/admit/require_prewrite/publish_prepaid_batch/retire/safe_release) including the DEV null-digest descriptor path. Cross-repo tests resolve the generation directory, verify every listed file by digest, and skip loudly when the bytes do not resolve -- never silently pass, never a candidate. Rebased from PR #871 (which pinned the unqualified candidate 1c9fb1bbea4) onto the qualified deployed bytes.",
+  "generation": "d1c640e74d97-1790008584-459339399864",
+  "commit": "d1c640e74d97a36cbc3f53aa966ab9b50853bb1c",
+  "files": {
+    "src/prismabuild/produced_output.py": "9ed082bf0b4f5c6e6e706e961434a4ffb62cb81045ed486d5a5bd074b0f15d1f",
+    "src/prismabuild/pool.py": "e4ee9b8b769b0cb5b1b637caa1dd7eb1d508eda940cc19a30ee67e030c251528",
+    "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
+    "src/prismabuild/movement_actions.py": "fd3a76883033c4e955a9e6e5a939536390671064ed44132fd90835003683d2af",
+    "src/prismabuild/storage_tiers.py": "a33faa564893f9c745a105bc9d6cfd84eba26cd7732a18375a08ffacfaced294",
+    "src/prismabuild/resource_scope.py": "f9a85dd277042031ae42a234d947c5abcdf20790e491610961e380445e6503e0",
+    "tools/fleet/stage_move.py": "3e67cb50c99e3e804a3b9a00c80cfe0b39a36517fcf2e2420e28ca8fd42960d2",
+    "tools/fleet/stage_release.py": "9c0a489275348b8b18f09434479ef5d8d6cfe285c89cb964869748e3661c3fe8",
+    "tools/fleet/prewarm_loop.py": "638f2aeda817037df4c2ea99c557ab9104172823351553849ad0cc3244b9634f"
+  }
+}
