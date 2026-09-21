@@ -8,14 +8,13 @@ coverage proofs refuse gaps rather than shrinking the layer set.
 Derivation decisions (the contract leaves these corners implicit; each is
 documented where it is implemented):
 
-D1. Slice phase tables name ``head`` as a zero-byte leading phase. ``chunks``
-    must tile ``[0, total_bytes)`` (§3.1) and the 45 read sets must be
-    pairwise disjoint (§2.3), so no parent-head entry and no other layer's
-    source extent may be copied into a slice. The quantum loads its head
-    inputs (plan, prepared, calibration, identity — digest-verified, ARC-warm)
-    by path from the shared mount, exactly as boundary artifacts are
-    receipt-addressed rather than manifest entries (§3.3); every tier-fed
-    byte flows through a chunk phase.
+D1. Slice phase tables contain only chunk phases (PQ #849); a zero-byte
+    leading ``head`` would invalidate the table for PrismaBuild. ``chunks``
+    tile ``[0, total_bytes)`` (§3.1) and the 45 slices are pairwise disjoint
+    (§2.3), so no parent-head entry or another layer's source extent may be
+    copied into a slice. The separately bound executable readset declares
+    calibration, checkpoint, chain/own source and boundary consumption;
+    its read phases do not change the slice's chunk tiling.
 D2. ``windows`` seals the ordered window-index slice of the plan's retained
     window partition (``windows_by_layer`` counts, copied verbatim). Per-window
     names and byte sizes are recomputed at runtime by the quantum through
