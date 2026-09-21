@@ -527,6 +527,25 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
                             "stride": {"value": 2, "source": None,
                                        "boundaries": [], "max_chain_layers": 1},
                             "checkpoints": []})
+    # The #882 durable-budget seam resolves + preflights from live geometry
+    # before the (mocked) core; these fakes carry no model geometry, so the
+    # preflight is stubbed here -- the real preflight is covered by
+    # tests/test_stage_a_artifact_budget.py on the actual writer path.
+    monkeypatch.setattr(stage_a, "_stage_a_per_tensor_nbytes",
+                        lambda *a, **k: 4096)
+    monkeypatch.setattr(stage_a, "estimate_stage_a_artifact_demand",
+                        lambda *a, **k: {
+                            "boundaries": [2], "n_checkpoints": 1,
+                            "n_retained_boundary_groups": 2, "n_batches": 1,
+                            "n_probes": 1, "per_tensor_nbytes": 4096,
+                            "per_file_envelope_bytes": 4096 + 65536,
+                            "lower_bound_bytes": 1,
+                            "conservative_bytes": 1})
+    monkeypatch.setattr(stage_a, "preflight_stage_a_artifact_budget",
+                        lambda *a, **k: {
+                            "declared_bytes": 1,
+                            "required_conservative_bytes": 1,
+                            "required_lower_bound_bytes": 1})
     monkeypatch.setattr(torch.cuda, "synchronize", lambda *a, **k: None)
     monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
     monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda: 0)
@@ -537,7 +556,9 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     prepared = {"path": str(prepared_path),
                 "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
     config = {"execution": {"production_act_scales": "0",
-                            "n_calib_samples": 4, "calib_seqlen": 512},
+                            "n_calib_samples": 4, "calib_seqlen": 512,
+                            "boundary_storage": _boundary_policy(
+                                tmp_path / "stub-boundaries")},
               "inputs": {}, "output_root": str(out_root),
               "model": "/models/x",
               "canonical_capture": None,
