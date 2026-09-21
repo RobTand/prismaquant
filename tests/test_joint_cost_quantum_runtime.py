@@ -396,7 +396,9 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
                 "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
     config = {"execution": {"production_act_scales": "scales",
                             "source_derivative": derivative,
-                            "n_calib_samples": 4, "calib_seqlen": 512},
+                            "n_calib_samples": 4, "calib_seqlen": 512,
+                            "boundary_storage": _boundary_policy(
+                                tmp_path / "deriv-boundaries")},
               "inputs": {}, "output_root": str(tmp_path),
               "model": "/models/x",
               "calibration_input": {"path": str(tmp_path / "cal.json"),
@@ -475,7 +477,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
             pass
 
     class _Ids:
-        shape = (0, 0)
+        shape = (4, 512)
 
         def to(self, device):
             return self
@@ -527,6 +529,16 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
                             "stride": {"value": 2, "source": None,
                                        "boundaries": [], "max_chain_layers": 1},
                             "checkpoints": []})
+    # The #882 durable-budget seam preflights from live geometry before the
+    # (mocked) core; these fakes carry no model geometry, so the preflight
+    # is stubbed here -- the real preflight is covered by
+    # tests/test_stage_a_artifact_budget.py on the actual writer path.
+    monkeypatch.setattr(stage_a, "_run_artifact_preflight",
+                        lambda *a, **k: {
+                            "declared_bytes": 1,
+                            "required_floor_bytes": 1,
+                            "planning_estimate_bytes": 1,
+                            "demand": {}})
     monkeypatch.setattr(torch.cuda, "synchronize", lambda *a, **k: None)
     monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda: 0)
     monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda: 0)
@@ -537,7 +549,10 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     prepared = {"path": str(prepared_path),
                 "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
     config = {"execution": {"production_act_scales": "0",
-                            "n_calib_samples": 4, "calib_seqlen": 512},
+                            "n_calib_samples": 4, "calib_seqlen": 512,
+                            "n_probes": 1, "probe_microbatch": 0,
+                            "boundary_storage": _boundary_policy(
+                                tmp_path / "stub-boundaries")},
               "inputs": {}, "output_root": str(out_root),
               "model": "/models/x",
               "canonical_capture": None,
@@ -749,7 +764,9 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
     # #816 seam; _load_plan refuses without one), and the capture validates
     # it up front now that the #819 override resolves beside it -- so the
     # fixture config carries one like any real plan.
-    config = {"execution": {"production_act_scales": "scales"},
+    config = {"execution": {"production_act_scales": "scales",
+                            "boundary_storage": _boundary_policy(
+                                tmp_path / "reuse-boundaries")},
               "inputs": {}, "output_root": str(tmp_path),
               "source_prefetch": _prefetch_budget(),
               "historical_encoder_reuse": reuse_block}

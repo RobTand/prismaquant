@@ -20,6 +20,18 @@ name an explicit override document validated by the plan's own field grammar;
 it replaces the budget for one run only and stamps the deviation into the
 run's provenance (``results.json``, ``counters.json``) -- the IO-side #809
 seam: explicit input beside the sealed plan, recorded, never silent.
+
+The plan's ``boundary_storage.max_artifact_bytes`` is the capture's durable
+contract, and a frozen plan can still be wrong about it (#882: the sealed
+416 GiB ceiling cannot hold the ~584 GiB retained peak).
+``--artifact-budget-bytes`` / ``PRISMAQUANT_STAGE_A_ARTIFACT_BUDGET_BYTES``
+name an explicit byte count validated as a strict positive integer; it
+replaces the ceiling for one run only (through the core's existing
+``boundary_artifact_bytes``) and stamps the deviation into the run's
+provenance (``results.json``, ``counters.json``, the adjoint receipt) --
+the durable-side #809 seam. An under-budget invocation refuses in an early
+preflight from live geometry, before any expensive forward; the runtime
+reserve / write / commit guards stay authoritative for serialized bytes.
 """
 from __future__ import annotations
 
@@ -81,6 +93,24 @@ EXIT_OK = 0
 EXIT_FAILURE = 1
 EXIT_USAGE = 2
 EXIT_IDENTITY_REFUSED = 3
+
+#: The durable-side explicit-input seam (the #809 pattern, second budget):
+#: a frozen plan's sealed ``boundary_storage.max_artifact_bytes`` stays the
+#: campaign's identity, and one run may replace it with an explicitly
+#: recorded byte count -- stamped into the run's result, counters and
+#: receipt provenance, never silent, never a default. The PB channel is the
+#: CLI flag (the container launcher forwards no ambient action environment
+#: into the payload); the environment variable serves direct invocations,
+#: and two explicit sources that disagree refuse. Units are bytes, always.
+ARTIFACT_BUDGET_ENV = "PRISMAQUANT_STAGE_A_ARTIFACT_BUDGET_BYTES"
+ARTIFACT_BUDGET_STAMP_SCHEMA = (
+    "prismaquant.joint_adjoint_capture.artifact_budget.v1")
+#: The exact-entry writer's small PyTorch zip header envelope
+#: (``cost_streaming.StreamedBoundaryArtifacts.write``: ``nbytes + 65536``),
+#: mirrored here so the preflight bounds the same ceiling the runtime
+#: reserve enforces. The runtime guard stays authoritative for serialized
+#: bytes and unpredicted overhead; this is only the preflight's bound.
+ARTIFACT_FILE_HEADER_BYTES = 65536
 
 #: The IO-side explicit-input seam (the #809 pattern): a frozen plan's sealed
 #: ``source_prefetch`` budget stays the campaign's identity, and one run may
@@ -272,11 +302,439 @@ def resolve_prefetch_override(config, cli_path=None, environ=None) -> dict:
     return {"run_used": override["source_prefetch"], "override": stamp}
 
 
+def _parse_artifact_budget_bytes(value, *, where: str) -> int:
+    """Strict positive-integer byte count; bools, floats and non-decimals refuse.
+
+    Units are bytes, always. A bool is an int subclass but never a byte
+    budget; a float string (``"1e9"``, ``"640.0"``) is never an exact count.
+    Strings must be ASCII decimal: ``str.isdigit`` also accepts non-ASCII
+    digits (superscripts, fullwidth) that ``int()`` then refuses with an
+    untyped error, so the ASCII check runs first and every invalid input
+    carries the named refusal.
+    """
+    if isinstance(value, bool):
+        raise AdjointIdentityRefused(
+            f"{where} artifact budget must be a positive integer byte count, "
+            f"got bool {value!r}")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text or any(ch not in "0123456789" for ch in text):
+            raise AdjointIdentityRefused(
+                f"{where} artifact budget must be a positive integer byte "
+                f"count (ASCII decimal bytes), got {value!r}")
+        parsed = int(text, 10)
+    else:
+        raise AdjointIdentityRefused(
+            f"{where} artifact budget must be a positive integer byte count "
+            f"(bytes), got {type(value).__name__} {value!r}")
+    if parsed <= 0:
+        raise AdjointIdentityRefused(
+            f"{where} artifact budget must be a positive integer byte count "
+            f"(bytes), got {parsed!r}")
+    return int(parsed)
+
+
+def _plan_sealed_artifact_bytes(config) -> int:
+    """The sealed plan's durable ceiling, validated strictly, never rewritten."""
+    try:
+        block = config["execution"]["boundary_storage"]
+        sealed = block["max_artifact_bytes"]
+    except (KeyError, TypeError) as exc:
+        raise AdjointIdentityRefused(
+            "plan execution.boundary_storage.max_artifact_bytes is missing: "
+            f"{exc}") from exc
+    if type(sealed) is not int or sealed <= 0:
+        raise AdjointIdentityRefused(
+            "plan execution.boundary_storage.max_artifact_bytes must be a "
+            f"positive integer byte count (bytes), got {sealed!r}")
+    return int(sealed)
+
+
+def resolve_artifact_budget_override(config, cli_value=None, environ=None) -> dict:
+    """Resolve the run's durable artifact ceiling beside the sealed plan.
+
+    The plan's ``max_artifact_bytes`` is validated exactly as before and
+    remains the campaign's identity -- nothing here rewrites plan bytes or
+    the digests that bind them. An explicit override (the CLI flag, or
+    ``ARTIFACT_BUDGET_ENV`` for a direct invocation) replaces the ceiling
+    **for this run only**, and the return carries the deviation stamp the
+    run's result, counters and receipt quote verbatim. Two explicit sources
+    that disagree refuse (the #809 rule); neither source present is the
+    plan's budget verbatim; there is no default override and no silent one.
+    """
+    environ = os.environ if environ is None else environ
+    plan_sealed = _plan_sealed_artifact_bytes(config)
+    cli_parsed = (None if cli_value is None
+                  else _parse_artifact_budget_bytes(cli_value, where="--artifact-budget-bytes"))
+    env_raw = str(environ.get(ARTIFACT_BUDGET_ENV, "") or "").strip()
+    env_parsed = (None if not env_raw
+                  else _parse_artifact_budget_bytes(env_raw, where=ARTIFACT_BUDGET_ENV))
+    if cli_parsed is not None and env_parsed is not None and cli_parsed != env_parsed:
+        raise AdjointIdentityRefused(
+            f"--artifact-budget-bytes {cli_parsed} disagrees with "
+            f"{ARTIFACT_BUDGET_ENV}={env_parsed}")
+    source, run_used = ((("cli", cli_parsed) if cli_parsed is not None
+                         else ("env", env_parsed) if env_parsed is not None
+                         else (None, plan_sealed)))
+    if source is None:
+        return {"run_used": int(plan_sealed), "override": None}
+    stamp = {
+        "schema": ARTIFACT_BUDGET_STAMP_SCHEMA,
+        "source": source,
+        "unit": "bytes",
+        "plan_sealed_bytes": int(plan_sealed),
+        "run_used_bytes": int(run_used),
+    }
+    return {"run_used": int(run_used), "override": stamp}
+
+
+def estimate_stage_a_artifact_demand(
+    *, n_probes: int, n_full_batches: int, remainder_rows: int,
+    per_full_tensor_nbytes: int, per_remainder_tensor_nbytes: int | None = None,
+    num_layers: int, stride: int,
+    header_bytes: int = ARTIFACT_FILE_HEADER_BYTES,
+    shared_per_checkpoint_bytes: int = 0,
+    manifest_per_checkpoint_bytes: int = 0,
+) -> dict:
+    """Bound Stage A durable demand from geometry alone; allocates nothing.
+
+    Counts files the actual caller retains, never a second execution path:
+    ``num_layers`` retained INPUT boundary groups (46 written, the tail
+    retires the final boundary, so ``num_layers`` stay live), one live
+    cotangent plane set (``n_probes`` probe planes x batches entries -- four
+    probe planes of 512 entries each on the 4-probe production panel; roll
+    replaces the previous), and one checkpoint copy of that plane set per
+    strided boundary (``derive_checkpoint_boundaries``).
+
+    Batches are counted exactly: ``n_full_batches`` full batches plus one
+    remainder batch of ``remainder_rows`` rows when nonzero. A remainder
+    batch's tensor is smaller than a full one, so ``ceil(n_rows /
+    batch_rows)`` full-size tensors would be an UPPER estimate -- the hard
+    floor below sums full groups plus the true remainder geometry
+    (``_stage_a_per_tensor_nbytes`` derives both through the profile's own
+    expansion on ``meta`` tensors).
+
+    Returns ``lower_bound_bytes`` -- the hard floor of true raw tensor
+    bytes, before headers / shared / manifest -- which the preflight
+    enforces as a mandatory early refusal; and ``planning_estimate_bytes``
+    -- an explicitly named planning allowance, NOT a proven upper bound
+    (per-file ``header_bytes`` envelope, plus the caller-supplied
+    per-checkpoint shared and manifest allowances). The shared allowance
+    reuses the plan's ``max_auxiliary_bytes`` as a stated assumption:
+    deduplicated live storages can serialize into separate retained files,
+    so it does not prove a ceiling. The runtime reserve / write / commit
+    guards stay authoritative for serialized bytes and unpredicted
+    overhead. Both are ints.
+    """
+    for name, value in (("n_probes", n_probes),
+                        ("per_full_tensor_nbytes", per_full_tensor_nbytes),
+                        ("num_layers", num_layers), ("stride", stride)):
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"stage A artifact demand needs positive {name}")
+    for name, value in (("n_full_batches", n_full_batches),
+                        ("remainder_rows", remainder_rows)):
+        if type(value) is not int or value < 0:
+            raise ValueError(f"stage A artifact demand needs nonnegative {name}")
+    if n_full_batches == 0 and remainder_rows == 0:
+        raise ValueError("stage A artifact demand needs at least one batch")
+    if remainder_rows > 0 and (type(per_remainder_tensor_nbytes) is not int
+                               or per_remainder_tensor_nbytes <= 0):
+        raise ValueError("stage A artifact demand needs a positive "
+                         "per_remainder_tensor_nbytes for a remainder batch")
+    for name, value in (("header_bytes", header_bytes),
+                        ("shared_per_checkpoint_bytes", shared_per_checkpoint_bytes),
+                        ("manifest_per_checkpoint_bytes",
+                         manifest_per_checkpoint_bytes)):
+        if type(value) is not int or value < 0:
+            raise ValueError(f"stage A artifact demand needs nonnegative {name}")
+    boundaries = derive_checkpoint_boundaries(int(num_layers), int(stride))
+    n_checkpoints = len(boundaries)
+    n_retained_groups = int(num_layers)
+    has_remainder = int(remainder_rows) > 0
+    n_batches_total = int(n_full_batches) + (1 if has_remainder else 0)
+    per_full = int(per_full_tensor_nbytes)
+    per_rem = int(per_remainder_tensor_nbytes) if has_remainder else 0
+    # True raw sum per boundary group / probe plane set: full groups plus
+    # the remainder batch at its own smaller size.
+    per_group_raw = int(n_full_batches) * per_full + per_rem
+    lower = ((n_retained_groups + int(n_probes)
+              + n_checkpoints * int(n_probes)) * per_group_raw)
+    full_envelope = per_full + int(header_bytes)
+    rem_envelope = (per_rem + int(header_bytes)) if has_remainder else 0
+    unit_sets = n_retained_groups + int(n_probes) + n_checkpoints * int(n_probes)
+    planning = (unit_sets * int(n_full_batches) * full_envelope
+                + (unit_sets * rem_envelope if has_remainder else 0)
+                + n_checkpoints * int(shared_per_checkpoint_bytes)
+                + n_checkpoints * int(manifest_per_checkpoint_bytes)
+                + max(full_envelope, rem_envelope))
+    return {
+        "boundaries": [int(b) for b in boundaries],
+        "n_checkpoints": int(n_checkpoints),
+        "n_retained_boundary_groups": int(n_retained_groups),
+        "n_full_batches": int(n_full_batches),
+        "remainder_rows": int(remainder_rows),
+        "n_batches_total": int(n_batches_total),
+        "n_probes": int(n_probes),
+        "per_full_tensor_nbytes": per_full,
+        "per_remainder_tensor_nbytes": (per_rem if has_remainder else 0),
+        "per_full_file_envelope_bytes": int(full_envelope),
+        "lower_bound_bytes": int(lower),
+        "planning_estimate_bytes": int(planning),
+        "shared_per_checkpoint_bytes": int(shared_per_checkpoint_bytes),
+        "manifest_per_checkpoint_bytes": int(manifest_per_checkpoint_bytes),
+    }
+
+
+def _stage_a_per_tensor_nbytes(runner, *, batch_rows: int, seqlen: int) -> int:
+    """Per-boundary tensor bytes from live geometry; allocates no bulk bytes.
+
+    Reads the embedding width off the live model (``base_model.embed_tokens``),
+    expands it through the runner's own profile (GLM mHC ``hc_mult`` streams,
+    passthrough otherwise) on a ``meta`` tensor, and counts
+    ``numel * dtype itemsize``. A ``meta`` tensor owns no storage, so no
+    buffer is allocated merely to calc size. Refuses fail-closed when the
+    geometry cannot be derived rather than guessing.
+    """
+    import torch
+
+    if type(batch_rows) is not int or batch_rows <= 0:
+        raise AdjointIdentityRefused(
+            f"stage A preflight needs a positive batch row count, got {batch_rows!r}")
+    if type(seqlen) is not int or seqlen <= 0:
+        raise AdjointIdentityRefused(
+            f"stage A preflight needs a positive sequence length, got {seqlen!r}")
+    try:
+        embed = runner.base_model.embed_tokens
+        hidden_width = int(embed.weight.shape[1])
+    except (AttributeError, IndexError, TypeError, ValueError) as exc:
+        raise AdjointIdentityRefused(
+            "stage A preflight cannot derive the hidden width from the live "
+            f"model's base_model.embed_tokens: {exc}") from exc
+    if hidden_width <= 0:
+        raise AdjointIdentityRefused(
+            f"stage A preflight saw a non-positive hidden width {hidden_width!r}")
+    try:
+        dtype_itemsize = int(torch.empty((), dtype=runner.dtype).element_size())
+    except (AttributeError, TypeError, RuntimeError) as exc:
+        raise AdjointIdentityRefused(
+            "stage A preflight cannot derive the execution dtype itemsize: "
+            f"{exc}") from exc
+    try:
+        hidden_meta = torch.empty(
+            (int(batch_rows), int(seqlen), int(hidden_width)),
+            dtype=runner.dtype, device="meta")
+        expanded = runner.profile.expand_hidden_for_layers(
+            hidden_meta, runner.base_model)
+        per_tensor = int(expanded.numel()) * int(dtype_itemsize)
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        raise AdjointIdentityRefused(
+            "stage A preflight cannot expand the hidden geometry through "
+            f"the runner's own profile: {exc}") from exc
+    if per_tensor <= 0:
+        raise AdjointIdentityRefused(
+            f"stage A preflight derived a non-positive tensor size {per_tensor!r}")
+    return int(per_tensor)
+
+
+def preflight_stage_a_artifact_budget(
+    *, declared_bytes: int, demand: dict, plan_sealed_bytes: int | None = None,
+) -> dict:
+    """Refuse an under-budget Stage A invocation before any expensive forward.
+
+    ``demand`` is :func:`estimate_stage_a_artifact_demand`: the hard
+    ``lower_bound_bytes`` floor (true raw tensor bytes, full groups plus
+    true remainder geometry) is the mandatory early-refusal threshold;
+    ``planning_estimate_bytes`` is an explicitly named planning allowance,
+    NOT a proven upper bound -- it assumes the per-file header envelope
+    plus the stated per-checkpoint shared (plan auxiliary bound, which
+    deduplicated live storages can exceed in retained files) and manifest
+    allowances. ``declared_bytes`` is the run's ceiling (the override's
+    ``run_used`` or the plan's sealed value). A below-floor ceiling refuses
+    with the concrete required / declared values and the named remedy --
+    never a silent raise. The runtime reserve / write / commit guards stay
+    authoritative for serialized bytes and unpredicted overhead; this
+    catches geometry the plan never derived, like the 416 GiB plan against
+    the ~584 GiB floor.
+    """
+    if type(declared_bytes) is bool or type(declared_bytes) is not int:
+        raise AdjointIdentityRefused(
+            "stage A preflight needs an integer declared artifact budget "
+            f"(bytes), got {declared_bytes!r}")
+    floor = demand.get("lower_bound_bytes")
+    planning = demand.get("planning_estimate_bytes")
+    if type(floor) is not int or floor <= 0:
+        raise AdjointIdentityRefused(
+            "stage A preflight demand carries no positive lower_bound_bytes")
+    if type(planning) is not int or planning < floor:
+        raise AdjointIdentityRefused(
+            "stage A preflight demand carries no planning_estimate_bytes "
+            "at or above its floor")
+    if int(declared_bytes) >= int(floor):
+        return {"declared_bytes": int(declared_bytes),
+                "required_floor_bytes": int(floor),
+                "planning_estimate_bytes": int(planning)}
+    sealed_note = (f" (plan sealed {int(plan_sealed_bytes)} bytes)"
+                   if plan_sealed_bytes is not None else "")
+    raise AdjointIdentityRefused(
+        "stage A artifact budget below this invocation's hard geometry "
+        f"floor: need >= {int(floor)} bytes raw "
+        f"({int(floor) / 1024 ** 3:.2f} GiB true tensor bytes before "
+        "headers/shared/manifest); planning allowance "
+        f"{int(planning)} bytes "
+        f"({int(planning) / 1024 ** 3:.2f} GiB, assuming per-file header "
+        f"{ARTIFACT_FILE_HEADER_BYTES} B plus "
+        f"{demand.get('shared_per_checkpoint_bytes')} B shared and "
+        f"{demand.get('manifest_per_checkpoint_bytes')} B manifest per "
+        f"checkpoint -- not a proven ceiling); declared "
+        f"{int(declared_bytes)} bytes "
+        f"({int(declared_bytes) / 1024 ** 3:.2f} GiB){sealed_note} for "
+        f"{demand.get('n_retained_boundary_groups')} retained boundary "
+        f"groups x {demand.get('n_batches_total')} batches "
+        f"({demand.get('n_full_batches')} full + "
+        f"{'one remainder batch' if demand.get('remainder_rows') else 'no remainder'}) + "
+        f"{demand.get('n_probes')} probe planes live + "
+        f"{demand.get('n_checkpoints')} checkpoints at boundaries "
+        f"{demand.get('boundaries')}. Remedy: re-invoke with "
+        f"--artifact-budget-bytes {int(planning)} (or "
+        f"{ARTIFACT_BUDGET_ENV}={int(planning)}); the sealed plan is "
+        "unchanged and the override is stamped into the run provenance.")
+
+
+def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
+                            space, artifact) -> dict:
+    """Early durable-budget preflight from already-available geometry.
+
+    Runs after the runner + calibration load and before any expensive
+    forward / layer traversal. Uses the live runner + calibration shapes
+    (no bulk buffers: embedding width off the live model, stream expansion
+    through the runner's own profile on ``meta`` tensors -- full batches
+    and the remainder batch each at their own true size), the writer's own
+    file-header envelope, the plan's auxiliary bound as a stated shared
+    planning assumption, and the checkpoint manifest estimator on the real
+    synthetic file plan. The hard floor refuses fail-closed with the
+    concrete required / declared values and the named remedy; an
+    underivable geometry or manifest estimate refuses named rather than
+    guessing. The runtime reserve / write / commit guards stay
+    authoritative for serialized bytes and unpredicted overhead.
+    """
+    _n_probes = int(execution["n_probes"])
+    _probe_microbatch = int(execution.get("probe_microbatch", 0))
+    _n_rows = int(calib_ids.shape[0])
+    _seqlen = int(calib_ids.shape[1])
+    _batch_rows = min(_probe_microbatch or _n_rows, _n_rows)
+    _n_full = _n_rows // _batch_rows
+    _rem_rows = _n_rows % _batch_rows
+    _per_full = _stage_a_per_tensor_nbytes(
+        runner, batch_rows=int(_batch_rows), seqlen=int(_seqlen))
+    _per_rem = (_stage_a_per_tensor_nbytes(
+        runner, batch_rows=int(_rem_rows), seqlen=int(_seqlen))
+        if _rem_rows else None)
+    _n_batches_total = _n_full + (1 if _rem_rows else 0)
+    try:
+        _aux_bound = int(execution["boundary_storage"]["max_auxiliary_bytes"])
+    except (KeyError, TypeError) as exc:
+        raise AdjointIdentityRefused(
+            "stage A preflight needs the plan's boundary_storage."
+            f"max_auxiliary_bytes shared planning assumption: {exc}") from exc
+    if type(_aux_bound) is bool or not isinstance(_aux_bound, int) or _aux_bound < 0:
+        raise AdjointIdentityRefused(
+            "stage A preflight needs a nonnegative plan "
+            f"max_auxiliary_bytes, got {_aux_bound!r}")
+    try:
+        from .joint_adjoint_checkpoints import (
+            _checkpoint_manifest_envelope_bytes,
+            checkpoint_directory,
+        )
+    except ImportError as exc:
+        raise AdjointIdentityRefused(
+            "stage A preflight cannot reuse the checkpoint manifest "
+            f"estimator: {exc}") from exc
+    try:
+        _manifest_probe_boundary = derive_checkpoint_boundaries(
+            int(runner.num_layers), int(stride_value))[0]
+        _manifest_dir = checkpoint_directory(space, int(_manifest_probe_boundary))
+        _dummy_session = {"generation": "0" * 32, "kind": "adjoint_checkpoint",
+                          "run_identity_sha256": "0" * 64}
+        _batch_sizes = [_batch_rows] * _n_full + ([_rem_rows] if _rem_rows else [])
+        _act_plan = [{
+            "probe_index": p, "batch_index": b,
+            "slot": f"cotangent-{p}-{b}",
+            "name": f"cotangent-{p}-{b}",
+            "path": str(_manifest_dir / "entries" / f"cotangent-{p}-{b}.pt"),
+            "tensor_bytes": (int(_per_full) if _rows == _batch_rows
+                             else int(_per_rem)),
+            "file_envelope": ((int(_per_full) if _rows == _batch_rows
+                               else int(_per_rem))
+                              + int(ARTIFACT_FILE_HEADER_BYTES)),
+            "shape": [int(_rows), int(_seqlen)],
+            "dtype": str(runner.dtype),
+        } for p in range(_n_probes) for b, _rows in enumerate(_batch_sizes)]
+        _shared_names = (
+            [f"shared-adjoint-{p}-{b}" for p in range(_n_probes)
+             for b in range(_n_batches_total)]
+            + [f"shared-pass-{b}" for b in range(_n_batches_total)])
+        _n_shared = len(_shared_names)
+        _per_shared_envelope = max(
+            int(ARTIFACT_FILE_HEADER_BYTES),
+            int(_aux_bound) // max(1, _n_shared) if _aux_bound else int(
+                ARTIFACT_FILE_HEADER_BYTES))
+        _shared_plan = [{
+            "name": name,
+            "path": str(_manifest_dir / "entries" / f"{name}.pkl"),
+            "file_envelope": int(_per_shared_envelope),
+        } for name in _shared_names]
+        _manifest_bytes = int(_checkpoint_manifest_envelope_bytes(
+            boundary=int(_manifest_probe_boundary), session=_dummy_session,
+            activation_plan=_act_plan, shared_plan=_shared_plan))
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise AdjointIdentityRefused(
+            "stage A preflight cannot bound the checkpoint manifest from "
+            f"this invocation's geometry: {exc}") from exc
+    _demand = estimate_stage_a_artifact_demand(
+        n_probes=int(_n_probes), n_full_batches=int(_n_full),
+        remainder_rows=int(_rem_rows),
+        per_full_tensor_nbytes=int(_per_full),
+        per_remainder_tensor_nbytes=_per_rem,
+        num_layers=int(runner.num_layers), stride=int(stride_value),
+        header_bytes=int(ARTIFACT_FILE_HEADER_BYTES),
+        shared_per_checkpoint_bytes=int(_aux_bound),
+        manifest_per_checkpoint_bytes=int(_manifest_bytes))
+    _preflight = preflight_stage_a_artifact_budget(
+        declared_bytes=int(artifact["run_used"]), demand=_demand,
+        plan_sealed_bytes=int(artifact["override"]["plan_sealed_bytes"]
+                              if artifact["override"] is not None
+                              else int(artifact["run_used"])))
+    print(f"joint_cost_stage_a: artifact preflight: declared "
+          f"{_preflight['declared_bytes']} bytes "
+          f"({_preflight['declared_bytes'] / 1024 ** 3:.2f} GiB) >= floor "
+          f"{_preflight['required_floor_bytes']} bytes "
+          f"({_preflight['required_floor_bytes'] / 1024 ** 3:.2f} GiB raw; "
+          f"planning allowance {_preflight['planning_estimate_bytes']} bytes); "
+          f"full-tensor {_per_full} bytes x {_n_full} batches"
+          f"{f' + remainder {_per_rem} bytes x 1 batch' if _rem_rows else ''}, "
+          f"boundaries {_demand['boundaries']}", flush=True)
+    return {
+        "declared_bytes": _preflight["declared_bytes"],
+        "required_floor_bytes": _preflight["required_floor_bytes"],
+        "planning_estimate_bytes": _preflight["planning_estimate_bytes"],
+        "demand": {k: _demand[k] for k in (
+            "boundaries", "n_checkpoints", "n_retained_boundary_groups",
+            "n_full_batches", "remainder_rows", "n_batches_total",
+            "n_probes", "per_full_tensor_nbytes",
+            "per_remainder_tensor_nbytes",
+            "shared_per_checkpoint_bytes",
+            "manifest_per_checkpoint_bytes")},
+    }
+
+
 def run_adjoint_capture_core(
     runner, calib_ids, *, execution, output_root, stride,
     source_model_identity, unit_roster_sha256, plan_sha256, prepared_sha256,
     read_manifest_sha256, implementation_sha256, campaign_scope=None,
-    boundary_artifact_bytes=None, min_free_gib=0.0, progress=None,
+    boundary_artifact_bytes=None, artifact_budget_stamp=None,
+    min_free_gib=0.0, progress=None,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -286,6 +744,12 @@ def run_adjoint_capture_core(
     ``compute_aura_cost_streamed``'s reverse walk -- run for every layer,
     with boundary entries **retained** (every quantum reads them later) and a
     checkpoint serialized at each strided boundary.
+
+    ``boundary_artifact_bytes`` (optional, bytes) replaces the sealed
+    ``max_artifact_bytes`` for this invocation only; ``artifact_budget_stamp``
+    (optional, the :func:`resolve_artifact_budget_override` deviation stamp)
+    is carried into the receipt provenance verbatim. Neither rewrites the
+    sealed plan.
     """
     from .cost_streaming import (
         StreamedBoundaryArtifacts,
@@ -309,7 +773,16 @@ def run_adjoint_capture_core(
     storage_policy = dict(normalize_boundary_storage(execution["boundary_storage"]))
     storage_policy["directory"] = str(boundary_entry_directory(space))
     if boundary_artifact_bytes is not None:
+        if type(boundary_artifact_bytes) is bool or not isinstance(
+                boundary_artifact_bytes, int) or boundary_artifact_bytes <= 0:
+            raise AdjointIdentityRefused(
+                "stage A boundary_artifact_bytes must be a positive integer "
+                f"byte count (bytes), got {boundary_artifact_bytes!r}")
         storage_policy["max_artifact_bytes"] = int(boundary_artifact_bytes)
+    if artifact_budget_stamp is not None and not isinstance(
+            artifact_budget_stamp, dict):
+        raise AdjointIdentityRefused(
+            "stage A artifact_budget_stamp must be a mapping or None")
     storage = StreamedBoundaryArtifacts(storage_policy)
 
     batch_rows = min(probe_microbatch or len(calib_ids), len(calib_ids))
@@ -555,6 +1028,7 @@ def run_adjoint_capture_core(
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
         "retention": retention,
+        "artifact_budget_override": artifact_budget_stamp,
         "telemetry": {
             "started_unix": started,
             "wall_s": time.time() - started,
@@ -583,7 +1057,7 @@ def _io_counters() -> dict:
 def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
-    prefetch_override=None,
+    prefetch_override=None, artifact_budget_bytes=None,
 ) -> dict:
     """Load the head phase and run the adjoint capture (one PB action)."""
     from .aura_cost import _aura_source_sha256
@@ -624,6 +1098,8 @@ def run_adjoint_capture(
     _bound(prepared, "prepared anchors")
     stride_value, stride_source = resolve_stride(config, stride)
     prefetch = resolve_prefetch_override(config, prefetch_override)
+    artifact = resolve_artifact_budget_override(
+        config, artifact_budget_bytes)
 
     space = adjoint_space(output_root)
     space.mkdir(parents=True, exist_ok=True)
@@ -635,6 +1111,7 @@ def run_adjoint_capture(
         "prepared_sha256": prepared["sha256"],
         "stride": {"value": stride_value, "source": stride_source},
         "prefetch_override": prefetch["override"],
+        "artifact_budget_override": artifact["override"],
         "env": {"host": socket.gethostname(), "started_epoch": time.time(),
                 "torch": str(torch.__version__), "cuda": torch.version.cuda,
                 "affinity": sorted(os.sched_getaffinity(0))},
@@ -647,6 +1124,13 @@ def run_adjoint_capture(
         print("joint_cost_stage_a: prefetch override: plan sealed "
               f"{stamp['plan_sealed']} replaced by {stamp['run_used']} "
               f"(source {stamp['source']}, reason: {stamp['reason']})",
+              flush=True)
+    if artifact["override"] is not None:
+        astamp = artifact["override"]
+        print("joint_cost_stage_a: artifact budget override: plan sealed "
+              f"{astamp['plan_sealed_bytes']} bytes replaced by "
+              f"{astamp['run_used_bytes']} bytes (source {astamp['source']}); "
+              "sealed plan unchanged",
               flush=True)
 
     sampler = GpuPowerSampler().start()
@@ -715,6 +1199,9 @@ def run_adjoint_capture(
         roster_digest = hashlib.sha256("".join(
             f"{name}\n" for name in sorted(data.formats_by_qname)).encode()).hexdigest()
 
+        result["artifact_preflight"] = _run_artifact_preflight(
+            runner, ids, execution, stride_value, space, artifact)
+
         kernel.__enter__()
         progress = JointRunProgress(
             layers=runner.num_layers, partitions=1,
@@ -729,6 +1216,8 @@ def run_adjoint_capture(
                                   or "0" * 64),
             implementation_sha256=implementation,
             campaign_scope=config.get("campaign_scope"),
+            boundary_artifact_bytes=int(artifact["run_used"]),
+            artifact_budget_stamp=artifact["override"],
             min_free_gib=config.get("min_free_gib", 0.0), progress=progress)
         receipt["stride"]["source"] = stride_source
         torch.cuda.synchronize()
@@ -785,6 +1274,8 @@ def run_adjoint_capture(
                     "bytes_from_pool": (residency or {}).get("bytes_from_pool")}],
         "stride": {"value": stride_value, "source": stride_source},
         "prefetch_override": prefetch["override"],
+        "artifact_budget_override": artifact["override"],
+        "artifact_preflight": result.get("artifact_preflight"),
     }
     atomic_write_bytes(space / "counters.json",
                        (json.dumps(counters, sort_keys=True, indent=2,
@@ -825,6 +1316,13 @@ def main(argv=None) -> int:
                              "same field grammar, with the deviation "
                              "stamped into results.json and counters.json"
                              % PREFETCH_OVERRIDE_INPUT_SCHEMA)
+    parser.add_argument("--artifact-budget-bytes", default=None,
+                        help="explicit durable artifact ceiling in bytes "
+                             "(positive integer): replaces the plan's sealed "
+                             "boundary_storage.max_artifact_bytes for this "
+                             "run only, with the deviation stamped into "
+                             "results.json, counters.json and the adjoint "
+                             "receipt; the sealed plan is unchanged")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -845,7 +1343,8 @@ def main(argv=None) -> int:
             output_root=args.output_root, stride=args.stride,
             read_manifest_sha256=args.read_manifest_sha256,
             data_manifest_sha256=args.data_manifest_sha256, resume=args.resume,
-            prefetch_override=args.prefetch_override)
+            prefetch_override=args.prefetch_override,
+            artifact_budget_bytes=args.artifact_budget_bytes)
     except AdjointIdentityRefused as exc:
         print(f"adjoint_identity_refused: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED
