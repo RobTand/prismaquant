@@ -4,6 +4,51 @@ As of: 2026-09-21 · `fix/stagea-readset-898-profiler-899`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
+stage-A read manifest and the reader it describes** (PQ #898). A read manifest
+is a claim about what a reader will read, and nothing compared the two.
+`build_adjoint_manifest` copies each `layer-N` phase's source entries from the
+parent manifest verbatim, so a parent with a hole seals a stage-A readset with
+the same hole. The GLM-5.3-Flash 512 campaign's parent (`71fd8f56…`) drops the
+tails of layers 9, 19, 29 and 39: 3.05, 1.66, 0.20 and 2.21 GB. Each tail opens
+a shard for which an earlier phase already holds a 1 MiB header entry at
+`(path, 0)`; PrismaBuild refuses a manifest that repeats a `(path, offset)`, so
+the tail's own extent was dropped instead of clipped. Under the strict
+staged-tier policy the run refuses at the layer-9 prefetch
+(`staged-tier-forbidden: readset-not-staged`), which is the policy working: the
+bytes were never declared, so nothing staged them. Before the strict policy
+they were read from the HDD pool silently (PQ #822).
+`joint_layer_quanta.read_layer_source_spans` reads what
+`layer_streaming._read_layer_to_device` reads, every checkpoint tensor under the
+layers prefix, from the checkpoint index and each shard's header (stdlib only).
+`build_adjoint_manifest(layer_source_spans=...)` then **completes** each layer
+phase and **gates** the result:
+
+- A tensor counts as covered only when **one** entry of its own layer's phase
+  contains its whole span. The staged reader serves a span from the one staged
+  range that contains it; a span straddling two ranges is a pool read, which
+  the strict policy refuses. Coverage by another layer's phase does not count
+  either, because PrismaBuild stages and evicts by phase.
+- Each run of uncovered tensors becomes one entry from the first tensor's own
+  file offset to the last one's end. The offset is derived, not aligned, so it
+  cannot land on a header entry's `(path, 0)`.
+- Added entries are appended after every parent entry, so recorded entry
+  indices do not move. `forward-NNN` and `chain-NNN` share one index run, as
+  before. What was added is recorded in `annotations.source_completion`.
+- The finished manifest is refused if any span is still uncovered.
+
+**The default is unchanged**: without `layer_source_spans` the manifest is
+byte-identical to what the function always built, and the recorded campaign
+manifest `43f40d18…` reproduces byte for byte from its recorded inputs.
+Completed, it gains 47 entries: the four tails, and 43 first-of-shard F32
+tensors (safetensors orders a shard by dtype, so a layer's few F32 tensors sit
+in the first 80 KB of a shard whose first MiB a neighbouring layer's phase
+declares). PrismaBuild's `validate_data_manifest` and `manifest_phase_ranges`
+accept it. **Not changed:** the per-layer slice manifests and the quantum records
+that seal them. They tile the parent byte for byte (§3.1 of the distributed
+campaign contract), so they carry the same four holes into Stage B; that is
+filed separately. Gates: `tests/test_stagea_readset_source_coverage.py`.
+
+Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 scope of Stage A's kernel-time profiler** (PQ #899). `run_adjoint_capture`
 wrapped the whole capture in one `torch.profiler` CUDA session
 (`KernelTimeProfiler`) and stopped it in its `finally`. Kineto holds every CUDA
