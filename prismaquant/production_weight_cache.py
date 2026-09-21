@@ -439,7 +439,7 @@ class ProductionWeightCache:
         if isinstance(existing, str):
             existing_path = cache_dir / existing
             try:
-                signature = self._file_signature(existing_path)
+                signature = self._file_signature(existing_path.stat())
             except OSError:
                 signature = None
             if signature is not None:
@@ -503,7 +503,7 @@ class ProductionWeightCache:
             raise ProducedRenderPublicationFailed(
                 batch_id=batch_id, refusal=published)
         try:
-            signature = self._file_signature(final_path)
+            signature = self._file_signature(final_path.stat())
         except OSError:
             signature = None
         self._record_published_render(qname, fmt, batch_id, signature,
