@@ -31,6 +31,41 @@ from test_stage_a_produced_boundary_chain import (  # noqa: F401
 GROUP_SIZE = chain.GROUP_SIZE
 
 
+@pytest.fixture(autouse=True, params=["inline", "thread"])
+def _stager_mode(request, monkeypatch):
+    """Every rule below holds on the calling thread AND on the stager thread.
+
+    With a window wider than two groups the owner runs its PrismaBuild calls
+    on a background stager (RobTand/prismaquant#895), and a test that asserts
+    a group is published the moment its last entry lands would race it.
+    ``inline`` is the run-scoped override that keeps every step on the
+    calling thread. ``thread`` runs the real stager and waits for each task
+    where it is submitted, so the same assertions are made step by step on
+    the thread production uses. What the stager does when nobody waits is
+    ``test_stage_a_produced_stager``'s subject.
+    """
+
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts as Owner
+
+    owners = []
+    start = getattr(Owner, "_produced_start_stager", None)
+    if request.param == "inline":
+        monkeypatch.setenv("PRISMAQUANT_STAGEA_STAGER", "inline")
+    else:
+        monkeypatch.setattr(Owner, "_PRODUCED_STAGER_WAIT_ALL", True,
+                            raising=False)
+        if start is not None:
+            def tracked(self):
+                owners.append(self)
+                return start(self)
+            monkeypatch.setattr(Owner, "_produced_start_stager", tracked)
+    yield request.param
+    # Most tests here never close their owner. Its thread must not outlive
+    # the test, polling a queue under a tmp_path that is about to go.
+    for owner in owners:
+        owner._produced_stop_stager()
+
+
 def _owner(tmp_path, *, groups: int, window_gib: int):
     return chain._bound_owner(
         tmp_path, n_batches=groups * GROUP_SIZE, window_gib=window_gib,
