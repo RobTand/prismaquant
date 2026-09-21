@@ -299,10 +299,13 @@ def _bound_publication(tmp_path: Path, *, gib: int = 4,
                        payload_max_bytes: int = 1 << 20):
     """A real queue, admitted owner, declared template, bound instance."""
 
+    # The pinned source FIRST: importing prismabuild before the
+    # digest-verified generation is on sys.path would bind the wrong
+    # bytes (a red run on main caught exactly this ordering).
+    _src, pb_repo = _pb_source()
     from prismabuild import produced_output as po
     from prismaquant.produced_render_publication import (
         ProducedRenderPublication)
-    _src, pb_repo = _pb_source()
     cas_root = tmp_path / "cas"
     owner = _sealed_producer_request(tmp_path, cas_root, pb_repo)
     q = _queue(tmp_path, gib=gib)
