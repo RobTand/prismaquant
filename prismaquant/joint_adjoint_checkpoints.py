@@ -899,6 +899,32 @@ def render_free_layer_roll(
     cotangent at boundary ``layer`` (publish it, keep it, or checkpoint it).
     Returns the number of backwards performed.
     """
+    from contextlib import nullcontext
+
+    # Staging only, never order: every probe pass below re-reads this
+    # layer's input boundary, so a storage that stages its reads through
+    # PrismaBuild keeps that plane staged across the passes, and asks for
+    # the next layer's plane now so its movers run during this roll
+    # (RobTand/prismaquant#887). A storage without the hooks is untouched.
+    retain = getattr(storage, "retain_produced_boundary", None)
+    stage_ahead = getattr(storage, "stage_produced_boundary_ahead", None)
+    if stage_ahead is not None and int(layer) > 0:
+        stage_ahead(int(layer) - 1)
+    with (retain(int(layer)) if retain is not None else nullcontext()):
+        backwards = _render_free_probe_passes(
+            runner, storage=storage, batches=batches, layer=layer,
+            cotangents=cotangents, n_probes=n_probes,
+            incoming_entries=incoming_entries,
+            incoming_tensor=incoming_tensor, roll=roll,
+            min_free_gib=min_free_gib)
+    return backwards
+
+
+def _render_free_probe_passes(
+    runner, *, storage, batches, layer, cotangents, n_probes,
+    incoming_entries, incoming_tensor, roll, min_free_gib,
+) -> int:
+    """The probe passes of :func:`render_free_layer_roll`, order unchanged."""
     from .aura_cost import _free_gib
     from .cost_streaming import prefetched_boundary_batches
 

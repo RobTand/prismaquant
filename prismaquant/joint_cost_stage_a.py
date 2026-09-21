@@ -967,6 +967,12 @@ def run_adjoint_capture_core(
                 f"{adjoint_forward_phase_name(num_layers - 1)}")
 
         chain_started = time.time()
+        if num_layers > 0:
+            # The chain's first layer reads a plane the forward pass wrote
+            # and retired long ago; every later layer's plane is asked for
+            # by the roll before it (``render_free_layer_roll``). Asking
+            # here starts its movers before the first window needs them.
+            storage.stage_produced_boundary_ahead(num_layers - 1)
         for layer in reversed(range(num_layers)):
             if progress is not None:
                 progress.enter(adjoint_chain_phase_name(layer))
@@ -995,10 +1001,13 @@ def run_adjoint_capture_core(
                 stash: dict[tuple[int, int], torch.Tensor] = {}
 
                 def roll(tensor, batch_index, probe_index):
+                    # Layer 0 is the walk's last roll: no read follows it,
+                    # and its entries are retired right after the loop.
                     grad_outs[probe_index][batch_index] = storage.write(
                         tensor, batch_index=batch_index, boundary_index=layer,
                         probe_index=probe_index,
-                        previous=grad_outs[probe_index][batch_index])
+                        previous=grad_outs[probe_index][batch_index],
+                        **({} if layer > 0 else {"read_back": False}))
                     stash[(probe_index, batch_index)] = tensor
 
                 chain_backwards += render_free_layer_roll(
@@ -1077,7 +1086,36 @@ def run_adjoint_capture_core(
         },
         "dev_mode": dev_mode_stamp(),
     }
+    # After the owner closed: ``retention`` above was taken inside the
+    # ``with`` block, so it cannot see the settle, and a stage copy
+    # PrismaBuild would not retire must be on the artifact, not only on
+    # stdout.
+    receipt["telemetry"].update(_produced_output_block(storage))
     return receipt
+
+
+def _produced_output_block(storage) -> dict:
+    """The owner's closing staging facts, as a receipt block that seals.
+
+    This runs after the last layer, so it may only add to the receipt. The
+    receipt is sealed with ``json.dumps(allow_nan=False)``: a reason
+    PrismaBuild worded with something JSON cannot carry travels as its repr,
+    and a report that cannot be taken or carried is recorded as its own
+    error. A finished capture is never failed by its own telemetry. An
+    unbound owner adds nothing, so its receipt is unchanged.
+    """
+
+    produced = getattr(storage, "produced_output_report", None)
+    if not callable(produced):
+        return {}
+    try:
+        report = produced()
+        if report is None:
+            return {}
+        return {"produced_output": json.loads(json.dumps(
+            report, sort_keys=True, default=repr, allow_nan=False))}
+    except Exception as exc:
+        return {"produced_output": {"report_error": repr(exc)[:400]}}
 
 
 def _io_counters() -> dict:

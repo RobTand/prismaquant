@@ -161,12 +161,18 @@ def boundary_window_gib(*, group_size: int, max_entry_tensor_bytes: int,
     STAGE space the bounded reader borrows at once, which is the groups
     that can be live together.
 
-    ``concurrent_groups`` is 2 because that is what the source does: a
-    window may not overlap another (``cost_streaming`` refuses it), and the
-    read window plus the incoming cotangent plane are the two groups a
-    single window can span. Each is priced with PrismaBuild's own per-mover
-    ceiling, ``ceil(bytes / GiB)``, so the production geometry -- 64 entries
-    of 16 MiB plus envelope -- is 2 tokens a group and 4 for the pair.
+    ``concurrent_groups`` defaults to 2 because that is what one window
+    needs: a window may not overlap another (``cost_streaming`` refuses it),
+    and the read window plus the incoming cotangent plane are the two groups
+    a single window can span. Each is priced with PrismaBuild's own
+    per-mover ceiling, ``ceil(bytes / GiB)``, so the production geometry --
+    64 entries of 16 MiB plus envelope -- is 2 tokens a group and 4 for the
+    pair.
+
+    A larger count funds read-ahead (#887). The bound owner derives the
+    count back from the sealed ``window_gib`` and treats every group past
+    two as credit for staging work it has not been asked for yet; at two it
+    is the synchronous loop, unchanged.
     """
 
     if type(concurrent_groups) is not int or concurrent_groups <= 0:
