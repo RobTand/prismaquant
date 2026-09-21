@@ -7058,11 +7058,13 @@ def _main(argv, *, source_scope) -> int:
           f"{total} priced rungs, {len(payload['formats'])} distinct formats",
           flush=True)
     if render_publication is not None:
-        # Close the instance; committed batches stay published and are
-        # retired by their own lifetime (retire_batch), not here.  A
-        # failure to release is reported, never fatal to the finished
-        # campaign -- recovery (recover_batches/safe_release_instance)
-        # is idempotent.
+        # Best-effort close of the instance; committed batches stay
+        # published and are retired by their own lifetime (retire_batch),
+        # not here.  While this owner claim is live the queue honestly
+        # retains (owner-active-retain): leftovers release only with no
+        # live claim plus a broker containment certificate, so the
+        # release is re-driven from a post-terminal context.  A deferral
+        # is reported, never fatal to the finished campaign.
         try:
             render_publication.release()
         except Exception as exc:  # pragma: no cover - environment-dependent

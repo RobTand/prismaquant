@@ -659,7 +659,15 @@ def test_retry_publish_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_retire_returns_capacity_and_releases(tmp_path: Path) -> None:
-    """retire_batch cleans the staged batch; the instance releases."""
+    """retire_batch cleans the staged batch.
+
+    Release while the owner claim is live honestly retains
+    (owner-active-retain): the deployed contract releases leftovers only
+    with no live claim plus a broker containment certificate, a proof
+    chain only a real broker run produces (PB's own suite owns that
+    positive path). The adapter proves it passes the coherent SDK by
+    getting past lease-sdk-missing to the containment verdict.
+    """
     publication, q, _cas, pb_repo = _bound_publication(tmp_path)
     # The fixture process plays tier host here: the in-process egress
     # needs the fleet tool importable, exactly as the tier host's own
@@ -679,7 +687,8 @@ def test_retire_returns_capacity_and_releases(tmp_path: Path) -> None:
     assert retired.get("ok") is True, retired
     assert int(ledger.holder_tokens(mover).get(KIND, 0)) == 0
     released = publication.release()
-    assert released.get("ok") is True, released
+    assert released.get("ok") is False, released
+    assert released.get("refusal") == "owner-active-retain", released
 
 
 def _validated_ref(publication, q, qname: str) -> dict:
