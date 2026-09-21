@@ -111,6 +111,11 @@ def test_a_group_is_published_when_its_last_entry_lands(tmp_path, monkeypatch):
     with chain._fleet(q, tmp_path):
         chain._strict(monkeypatch, env, pb_repo, q)
         _read(storage, references, _expected())
+        # A window exit only asks for the retirement (rule 4), and the first
+        # ask can find the egress incomplete while the fleet driver is still
+        # finishing the mover. That is a pending retirement, not debt, until
+        # the settle has waited for it (RobTand/prismaquant#890).
+        storage.settle_produced_releases()
     assert storage.telemetry["produced_groups_published"] == 1, (
         "the read found the group published and did not publish it again")
     assert storage.produced_release_debt() == chain._NO_DEBT
