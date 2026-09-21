@@ -25,15 +25,29 @@ declaration into request params and derives the tier window demand from it.
 Every `prismabuild.*` module loads through `staged_lease.sdk_submodule`, from
 the same sealed generation as the reader SDK. Geometry is derived from the
 effective configured artifact max; no budget figure is written into the code.
-Open finding, not closed by this branch: produced-output egress can decharge
-a batch's stage token instead of releasing it when the staged entries are
-still shared with an in-flight copy, which permanently shrinks the tier mint
+A refused retirement is named from PrismaBuild's own egress receipt by
+`classify_egress_outcome`: `retire_batch` returns the category (refusal
+`egress-incomplete`) and the receipt carries the cause. A non-empty
+`deferred_own` is an own-copy deferral -- PrismaBuild deferred on the
+evicted mover's own live claimed copy, keeping bytes, proof and full credit
+-- and is the ONLY case this lane waits on, paced and bounded by the
+`staging_timeout_s` already bound at `bind_produced_output`, against one
+ABSOLUTE deadline that a re-driven retirement cannot reset. A live pin is a
+real foreign-reader failure, preserved and never waited on; a deferred
+handoff is a promotion lifecycle that is not this lane's. A receipt with no
+`deferred_own` KEY and no other positive cause is surfaced as
+`BoundaryEgressUnclassified`, never read as "no deferral": a missing key is
+not an empty list, and `receipt.get(field, [])` is the fail-open shape that
+destroyed a stage token per occurrence. Open finding, not closed by this
+branch: that token loss itself -- produced-output egress decharging a
+batch's stage token instead of releasing it when the staged entries are
+still shared with an in-flight copy, permanently shrinking the tier mint
 (`tools/audit_produced_window_tokens.py` reproduces it; the cause is a
 PrismaBuild one, traced by root to an egress eviction that does not exclude
 its own mover from the claimed-path check, and repaired outside this lane).
 The rollover fixture therefore mints two stage tokens although steady-state
 occupancy is one, and its one-token acceptance is pending a re-run against
-the repaired PrismaBuild candidate. Gates:
+the accepted PrismaBuild pin. Gates:
 `tests/test_stage_a_produced_boundary_chain.py`.
 
 Re-stamped (2026-09-21, `fix/quantum-metadata-generation-20260921`) for

@@ -6,7 +6,6 @@ unload all go through the existing streaming-model machinery.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
