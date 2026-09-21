@@ -150,6 +150,38 @@ def lease_helper_root() -> str | None:
     return os.environ.get(HELPER_ROOT_ENV_VAR)
 
 
+def _sdk_accepts_material_namespace(sdk) -> bool:
+    """Does this pinned SDK take a produced batch's material namespace?
+
+    Asked of the SDK itself rather than assumed from its version: the
+    owner/material-namespace split is an ADDITIVE parameter on
+    ``acquire_for``, so a pin predating it would silently bind an output
+    namespace as the running action. A pin that does not carry it refuses
+    the produced read outright; nothing falls back to the owner namespace
+    and nothing reads the pool.
+
+    COST, stated rather than assumed away: this runs once per acquired
+    window, and a window is one entry, so it is per-entry reflection on a
+    path that then reads a multi-megabyte payload. Caching it per pinned
+    module (the module is immutable, so one validation would do) is the
+    obvious shape and is deliberately NOT applied here: nothing has
+    measured it against the read it sits beside, and a performance change
+    justified by a guess is the thing this repo refuses. Measure first.
+    """
+
+    import inspect
+
+    acquire_for = getattr(sdk, "acquire_for", None)
+    if acquire_for is None:
+        return False
+    try:
+        parameters = inspect.signature(acquire_for).parameters
+    except (TypeError, ValueError):  # pragma: no cover - exotic callables
+        return False
+    return ("material_namespace" in parameters
+            and "residency_root" in parameters)
+
+
 def _sdk():
     """The pinned SDK module, or a clear availability refusal.
 
@@ -176,6 +208,49 @@ def _sdk():
                               kind="availability")
         return injected
     raise _refuse("lease-helper-unavailable", kind="availability")
+
+
+def sdk_submodule(name: str):
+    """One ``prismabuild.<name>`` from the SAME generation as the SDK.
+
+    Every PrismaBuild module this package uses must come from ONE sealed
+    generation. A bare ``import prismabuild.produced_output`` does not
+    guarantee that: production forwards an immutable
+    ``PRISMABUILD_READER_HELPER_ROOT`` and mounts it, but it does not
+    populate ``sys.path``, so a bare import can land on an older container
+    distribution -- or, worse, a MIXTURE, with produced_output from one
+    generation and pool from another. That is fatal to a lane whose whole
+    output is qualified provenance: bytes you cannot name are not a pin.
+
+    So the reader-lease SDK is resolved first (it owns the generation
+    discovery and its ``src`` insertion), the requested submodule is
+    imported after it, and the existing coherence check then proves every
+    imported ``prismabuild.*`` -- the new one included -- resolves inside
+    that one package directory. The refusal is the ordinary lease refusal,
+    named, never a fallback.
+    """
+
+    import importlib                                     # noqa: PLC0415
+
+    sdk = _sdk()
+    expected = _package_dir_of(sdk)
+    try:
+        module = importlib.import_module(f"prismabuild.{name}")
+    except ImportError as exc:
+        raise _refuse(f"lease-helper-unavailable: prismabuild.{name}: {exc}",
+                      kind="availability") from None
+    _check_package_coherence(expected)
+    served = Path(getattr(module, "__file__", ""))
+    try:
+        inside = served.resolve().is_relative_to(expected.resolve())
+    except OSError:
+        inside = False
+    if not inside:
+        raise _refuse(
+            f"lease-helper-divergent: prismabuild.{name} serves {served}, "
+            f"outside the SDK generation at {expected}",
+            kind="integrity")
+    return module
 
 
 def inject_installed_sdk_for_tests():
@@ -508,6 +583,39 @@ def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int,
     return spans
 
 
+def _material_consumer(identity, ctx) -> str:
+    """Whose fragments vouch this window: the owner, or a named namespace.
+
+    PrismaBuild splits OWNER from MATERIAL NAMESPACE for produced output:
+    the owner is the running action that holds the pin, the namespace is
+    the producing consumer whose fragments and sidecars vouch the bytes.
+    For every ordinary input read they are the same string, which is why
+    ``covers_for_keys`` and ``acquire_for`` both default the namespace to
+    the owner and why this returns the action key unchanged there. A
+    resolver built for one produced batch names its namespace explicitly,
+    and it is never inferred from a path or from a terminal record.
+    """
+
+    namespace = identity.get("material_namespace")
+    if namespace:
+        return str(namespace)
+    return str(ctx["action_key"])
+
+
+def _namespace_spec(identity) -> dict:
+    """The window-spec fields a produced-output read needs, or nothing.
+
+    Empty for an input map, so the window a sealed input builds is
+    byte-identical to the one it built before produced output existed.
+    """
+
+    namespace = identity.get("material_namespace")
+    if not namespace:
+        return {}
+    return {"material_namespace": str(namespace),
+            "residency_root": str(identity["residency_root"])}
+
+
 def covers_for_leads(leads, manifest_sha256) -> list[dict[str, str]]:
     """Stage-tier covers from actual composed-map identity.
 
@@ -547,7 +655,8 @@ def resolve_ram_covers(resolver, declared, entry):
                       kind="availability")
     try:
         answer = sdk.covers_for_keys(
-            identity["residency_root"], str(ctx["action_key"]), [key],
+            identity["residency_root"], _material_consumer(identity, ctx),
+            [key],
             tier_id=ram_tier, manifest_sha256=identity["manifest_sha256"],
             epoch=ram_epoch, context=_ACQUIRE_CONTEXT)
     except Exception as exc:
@@ -599,7 +708,8 @@ def resolve_stage_covers(resolver, declared, entry):
                       kind="availability")
     try:
         answer = sdk.covers_for_keys(
-            identity["residency_root"], str(ctx["action_key"]), [key],
+            identity["residency_root"], _material_consumer(identity, ctx),
+            [key],
             tier_id=stage_tier, manifest_sha256=identity["manifest_sha256"],
             epoch="", context=_ACQUIRE_CONTEXT)
     except Exception as exc:
@@ -639,6 +749,7 @@ def _select_ram_window(resolver, declared, entry):
                            "sha256": entry["sha256"]}},
         "span": {"start_bytes": entry["offset"],
                  "end_bytes": entry["offset"] + entry["bytes"]},
+        **_namespace_spec(identity),
     })
     return window, key
 
@@ -697,6 +808,7 @@ def acquire_entry_window(resolver, declared, entry: dict):
                            "sha256": entry["sha256"]}},
         "span": {"start_bytes": entry["offset"],
                  "end_bytes": entry["offset"] + entry["bytes"]},
+        **_namespace_spec(identity),
     })
     return window, key
 
@@ -789,11 +901,28 @@ class LeaseWindow:
                           kind="availability") from None
         _check_package_coherence(expected)
         spec = self._spec
+        # Owner and material namespace are the same action for every input
+        # read, so these stay absent there and the call is byte-identical
+        # to the one this window made before produced output existed. A
+        # produced-output window names both: the pin files under the owner
+        # from ``ctx`` either way, and only the proof resolves in the
+        # batch's namespace.
+        namespace: dict = {}
+        if spec.get("material_namespace"):
+            namespace = {"material_namespace": str(spec["material_namespace"]),
+                         "residency_root": str(spec["residency_root"])}
+            if not _sdk_accepts_material_namespace(sdk):
+                raise _refuse(
+                    "produced-namespace-unsupported: the pinned reader-lease "
+                    "SDK has no material_namespace parameter, so a produced "
+                    "batch's material cannot be vouched without treating an "
+                    "output namespace as the running action",
+                    kind="availability")
         answer = sdk.acquire_for(
             ctx, tier_id=str(spec["tier_id"]), epoch=str(spec["epoch"]),
             covers=spec["covers"], expected=spec.get("expected"),
             span=spec["span"], acquire_token=self._token,
-            ram=spec.get("ram"), context=_ACQUIRE_CONTEXT)
+            ram=spec.get("ram"), context=_ACQUIRE_CONTEXT, **namespace)
         if not isinstance(answer, dict) or not answer.get("ok"):
             refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
             if str(refusal).split(":", 1)[0] == "generation-changed":
@@ -801,7 +930,8 @@ class LeaseWindow:
                     ctx, tier_id=str(spec["tier_id"]), epoch=str(spec["epoch"]),
                     covers=spec["covers"], expected=spec.get("expected"),
                     span=spec["span"], acquire_token=self._token,
-                    ram=spec.get("ram"), context=_ACQUIRE_CONTEXT)
+                    ram=spec.get("ram"), context=_ACQUIRE_CONTEXT,
+                    **namespace)
                 if not isinstance(answer, dict) or not answer.get("ok"):
                     refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
             if not isinstance(answer, dict) or not answer.get("ok"):
@@ -882,8 +1012,16 @@ class LeaseWindow:
             raise _refuse("lease-not-acquired", kind="integrity")
         sdk, ctx = resolve_context(env=self._env)
         queue = self._pool_mod.PoolQueue(self._queue_root)
+        # The pin lives under the residency root it was ACQUIRED in. A
+        # produced-output window acquires under the produced-output
+        # fragment root, so opening without naming it reads the tier's
+        # default root, finds nothing, and refuses "pin is not live" for a
+        # pin that is perfectly live one directory over.
+        where = ({"residency_root": str(self._spec["residency_root"])}
+                 if self._spec.get("material_namespace") else {})
         try:
-            fd, serving = sdk.open_pinned(queue, self._pin, self._ref_id, str(key))
+            fd, serving = sdk.open_pinned(queue, self._pin, self._ref_id,
+                                          str(key), **where)
         except Exception as exc:
             # Open-time refusal (stale ref, changed bytes, unknown key) or
             # PB-internal failure: fail clear either way, never guess.
@@ -959,9 +1097,17 @@ class LeaseWindow:
             return
         sdk, _ctx = resolve_context(env=self._env)
         queue = self._pool_mod.PoolQueue(self._queue_root)
+        # The pin lives under its OWNER directory either way, but a produced
+        # window's owner directory is under the produced-output fragment
+        # root, not the tier's default residency root -- so the release names
+        # the root it acquired in rather than letting the SDK fall back to a
+        # full scan of the wrong one.
+        where = ({"residency_root": str(self._spec["residency_root"])}
+                 if self._spec.get("material_namespace") else {})
         try:
             released = sdk.release(queue, self._pin_id, self._ref_id,
-                                   consumer_action_key=self._consumer)
+                                   consumer_action_key=self._consumer,
+                                   **where)
         except Exception as exc:
             raise LeaseRefused(f"lease-release-failed: {exc}",
                                kind="integrity") from exc

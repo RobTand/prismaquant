@@ -220,6 +220,23 @@ class StreamedBoundaryArtifacts:
         self._checkpoint_active = None
         self._next_checkpoint_reservation = 1
         self._transient_hold_bytes = 0
+        # Produced-output binding (Stage A's own entries staged through PB).
+        # None on every ordinary path: an unbound owner writes, reads and
+        # retires exactly as it did before produced output existed.
+        self._produced = None
+        self._produced_plan = None
+        self._produced_groups = {}
+        self._produced_release_errors = []
+        self._produced_index = {}
+        self._produced_window_keys = ()
+        self._produced_release_pending = {}
+        self._produced_release_abandoned = {}
+        self._produced_release_unclassified = {}
+        # Groups whose PUBLISH never completed because PrismaBuild's
+        # funding lock stayed contended for the whole staging budget.
+        # Their prewrite credit is still held by this owner, so the
+        # debt is reported rather than dropped.
+        self._produced_publish_deferred = {}
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -229,7 +246,15 @@ class StreamedBoundaryArtifacts:
             "checkpoint_envelope_unused_bytes": 0,
             "written_tensor_bytes": 0, "read_tensor_bytes": 0,
             "written_entries": 0, "retired_entries": 0, "prefetch_windows": 0,
-            "hot_read_misses": 0}
+            "hot_read_misses": 0,
+            "produced_groups_prewritten": 0, "produced_groups_published": 0,
+            "produced_groups_materialized": 0, "produced_groups_retired": 0,
+            "produced_groups_rematerialized": 0,
+            "produced_group_release_failures": 0,
+            "produced_group_release_retries": 0,
+            "produced_group_release_deferrals": 0,
+            "produced_group_funding_deferrals": 0,
+            "produced_groups_origin_reclaimed": 0}
 
     def __enter__(self):
         return self
@@ -419,6 +444,17 @@ class StreamedBoundaryArtifacts:
                 f"{self.config['max_artifact_bytes']}")
         name = f"{slot}-at-{boundary_index}"
         identity = {"session": self.session, "slot": slot, "kind": kind, "coordinates": coordinates}
+        # BEFORE the first byte: a bound owner claims its group's durable
+        # budget, or refuses with nothing written. The claim covers the
+        # whole 64-entry group once, so the remaining writes in it cost no
+        # further call, and it holds no stage credit -- the funding happens
+        # at the commit inside the deferred publish.
+        produced_group = None
+        if self._produced is not None:
+            produced_group = self._produced_prewrite(self._produced_group_key(
+                kind=kind, batch_index=batch_index, boundary_index=boundary_index,
+                probe_index=probe_index,
+                group_size=self._produced_plan["group_size"]))
         self._reserve(nbytes)
         try:
             with torch.profiler.record_function("aura.exact_activation.write"):
@@ -428,6 +464,13 @@ class StreamedBoundaryArtifacts:
             self._reserve(-nbytes)
         self._references[name] = reference
         self._slots[slot] = reference
+        if produced_group is not None:
+            produced_group["references"].append(reference)
+            produced_group["live_references"] += 1
+            self._produced_index[reference] = self._produced_group_key(
+                kind=kind, batch_index=batch_index,
+                boundary_index=boundary_index, probe_index=probe_index,
+                group_size=self._produced_plan["group_size"])
         self.telemetry["written_entries"] += 1
         self.telemetry["written_tensor_bytes"] += nbytes
         self.telemetry["live_artifact_bytes"] += reference.file_bytes
@@ -448,6 +491,75 @@ class StreamedBoundaryArtifacts:
         del self._references[reference.name]
         self.telemetry["live_artifact_bytes"] -= reference.file_bytes
         self.telemetry["retired_entries"] += 1
+        if self._produced is not None:
+            key = self._produced_index.get(reference)
+            group = None if key is None else self._produced_groups.get(key)
+            if group is not None and group["live_references"] > 0:
+                group["live_references"] -= 1
+            self._reclaim_produced_origin_if_final(reference)
+            # The origin is gone, so the reference is dead: drop it from
+            # the lookup index AFTER the reclaim gate has read it. The
+            # group's own list is untouched -- the committed batch's
+            # descriptors are PrismaBuild's and are not rewritten by this
+            # owner disposing of its files.
+            self._produced_index.pop(reference, None)
+
+    def _reclaim_produced_origin_for_group(self, key, group):
+        """Release a group's durable charge when both conditions hold.
+
+        Group-keyed, because the reference-keyed gate below cannot reach
+        this case: a group whose retirement was REFUSED at window exit has
+        already had its entries unlinked and dropped from the lookup index,
+        so when the drain later succeeds there is no live reference left to
+        ask about. Without this, exactly the groups that hit the
+        exceptional path would keep their charge forever -- the leak the
+        gate exists to prevent, surviving in its own error branch.
+        """
+
+        if group.get("origin_reclaimed") or not group["retired"]:
+            return
+        if group["live_references"]:
+            return
+        out = self._produced.reclaim_origin(group["batch_id"])
+        if out.get("ok"):
+            group["origin_reclaimed"] = True
+            self.telemetry["produced_groups_origin_reclaimed"] += 1
+        else:
+            self._produced_release_errors.append(
+                {"batch_id": group["batch_id"], "step": "reclaim_origin",
+                 "reason": {"refusal": out.get("refusal")}})
+
+    def _reclaim_produced_origin_if_final(self, reference):
+        """Free a group's DURABLE charge once its last origin file is gone.
+
+        Two conditions, both required. This owner must have disposed of
+        every entry it wrote into the group -- the cotangent roll replaces
+        a plane entry by entry, so the charge is only releasable when the
+        LAST one goes -- and the group's stage copy must already be
+        retired, because a live materialization is material PrismaBuild is
+        still holding over those origins. The first condition is the
+        owner's own count of entries it has not yet unlinked, not a sweep
+        of the group's paths: the sweep re-stat'd every already-deleted
+        path on every retirement, and it was never the proof anyway.
+
+        Why it matters at Stage A scale: the reverse walk rolls a
+        cotangent plane across 45 boundaries. Without a group-final
+        reclaim, every replaced plane keeps its durable charge for the life
+        of the instance and the origin class fills with bytes that are not
+        there any more. Note what this is NOT: the capture's origin peak is
+        the boundaries it RETAINS, not the sum of every cotangent it ever
+        wrote, so this gate is what keeps the two the same number.
+
+        The proof of absence stays PrismaBuild's own (``reclaim_origin``
+        lstats every filed origin path and retains on a present or
+        unstatable one). This only decides when it is worth asking, and a
+        refusal is recorded rather than retried into a loop.
+        """
+
+        key, group = self._produced_group_for(reference)
+        if group is None:
+            return
+        self._reclaim_produced_origin_for_group(key, group)
 
     def retire(self, reference):
         if self._readonly:
@@ -914,6 +1026,668 @@ class StreamedBoundaryArtifacts:
                 continue
             self._dispose_retained_entry(reservation_id, entry)
 
+    # ------------------------------------------------------------------
+    # Produced-output binding: this owner's own entries, staged by PB.
+    #
+    # Without it a Stage A action writes its boundary entries and then
+    # refuses to read them: the strict allowed-tier path resolves the
+    # process residency map, which is the map of the run's SEALED INPUTS,
+    # and an output this action just produced is not in it. There is no
+    # own-session exemption, so the entries go through PrismaBuild's
+    # produced-output lifecycle like any other staged object.
+    #
+    # The unit is the EXISTING 64-entry logical publication group -- the
+    # same window ``prefetched_boundary_batches`` already yields -- so a
+    # group is prewritten once, published once, staged by one PB mover and
+    # read back through one namespaced reader context.
+    #
+    # Per-entry movers were considered and REJECTED, and the reason is the
+    # ledger's own arithmetic rather than the size of an entry. At Stage A
+    # scale one boundary ENTRY is ~16 MiB and one 64-entry GROUP is ~1 GiB.
+    # PrismaBuild prices a stage reservation PER MOVER and rounds UP to a
+    # whole token: ``storage_tiers.stage_tokens_for_bytes`` returns
+    # ``-(-range_bytes // GIB)``, deliberately, because a token is the unit
+    # PB can refuse on and rounding down would leave the last partial GiB
+    # of every reservation unaccounted. So 64 movers of ~16 MiB each cost
+    # 64 tokens for ~1 GiB of bytes, while the one group that already is
+    # the read window costs ceil(group_bytes / GiB) -- 2 tokens once the
+    # zip envelopes are counted. That is the ~32x, and it is on top of
+    # replacing 64 sealed requests, admissions, claims and fragments with
+    # one for a single window the reader was going to take whole anyway.
+    #
+    # The LAST group is smaller and is priced as what it is: the ceiling
+    # rule applies to its own byte range (``group_ceiling_bytes`` over the
+    # entries that group actually holds), never to an assumed full 64.
+    #
+    # PUBLISH IS DEFERRED TO THE FIRST READ. ``require_prewrite`` charges
+    # only the durable class budget and holds no ledger tokens, while the
+    # commit inside ``publish_prepaid_batch`` funds the stage window by
+    # exact transfer. Publishing at write time would therefore spend the
+    # whole stage credit on groups nothing has asked for yet -- the first
+    # boundary's writes must all land under the durable maxima WITHOUT
+    # consuming the stage credits the first read needs.
+    # ------------------------------------------------------------------
+
+    def bind_produced_output(self, publication, *, group_size, n_batches,
+                             max_entry_tensor_bytes,
+                             staging_timeout_s=900.0):
+        """Stage this generation's entries through ``publication``.
+
+        Called after :meth:`bind`, because the entry directory this owner
+        already chose is what must sit inside the publication's bound
+        output prefix -- an own-generation path outside it is refused here
+        rather than at the first descriptor. ``group_size`` is the read
+        window's batch count (``config['prefetch_batches']``, the 64-entry
+        group), ``n_batches`` bounds the last, partial group, and
+        ``max_entry_tensor_bytes`` is the bound per-entry tensor ceiling
+        the prewrite's conservative per-group ceiling is derived from.
+
+        ``staging_timeout_s`` is ONE budget for a group's whole staging,
+        not one per step. A read opens a single absolute deadline and the
+        publish, any re-materialization and the wait for PrismaBuild's own
+        mover receipt all spend it: a funding transient waited out inside
+        the publish shortens the receipt wait rather than extending the
+        total, and nothing in that span mints a second budget. Exceeding it
+        is a named failure and a withdrawal -- ``BoundaryStagingTimeout``
+        when the mover never finished, ``BoundaryProducedFundingDeferred``
+        when PrismaBuild's funding lock never cleared -- never a direct
+        origin read and never a second publication.
+
+        Two PrismaBuild transients are waited out inside that budget and
+        nothing else. On the publish side, ``funding-race-deferred`` is the
+        pool's typed answer for a contended transition lock, and the
+        re-drive is the documented identical-input idempotent call. On the
+        retirement side, an own-copy deferral is named by PrismaBuild's own
+        egress receipt through :func:`classify_egress_outcome`. Every other
+        refusal is terminal here and returns at once.
+
+        A read-only attached generation can never take this binding: an
+        attached owner does not write, so it has nothing to declare and its
+        entries stay ordinary input-map reads.
+        """
+
+        if self._produced is not None:
+            raise RuntimeError("exact boundary produced output is already bound")
+        if self._readonly:
+            raise RuntimeError(
+                "an attached read-only generation cannot declare a produced "
+                "output owner: it writes nothing and its entries resolve "
+                "through the ordinary input map")
+        if self.session is None or self.directory is None:
+            raise RuntimeError(
+                "bind the exact boundary generation before its produced output")
+        for name, value in (("group_size", group_size),
+                            ("n_batches", n_batches),
+                            ("max_entry_tensor_bytes", max_entry_tensor_bytes)):
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"produced output {name} must be a positive int")
+        entries = self.directory / "entries"
+        if not publication.contains(entries):
+            raise RuntimeError(
+                f"the exact boundary entry directory {entries} is outside the "
+                f"bound output prefix {publication.output_prefix}: an "
+                "own-generation path must sit inside the prefix its owner "
+                "declared")
+        self._produced = publication
+        if not isinstance(staging_timeout_s, (int, float)) or (
+                staging_timeout_s <= 0):
+            raise ValueError(
+                "produced output staging_timeout_s must be a positive number")
+        self._produced_plan = {"group_size": int(group_size),
+                               "n_batches": int(n_batches),
+                               "max_entry_tensor_bytes": int(max_entry_tensor_bytes),
+                               "staging_timeout_s": float(staging_timeout_s)}
+
+        self._produced_groups = {}
+
+    @staticmethod
+    def _produced_group_key(*, kind, batch_index, boundary_index, probe_index,
+                            group_size):
+        """The logical publication group one entry belongs to.
+
+        Keyed by the read window, not by the file: a boundary plane's 64
+        batches at one boundary are one group, and so is the cotangent
+        plane's 64 at one boundary for one probe. A cotangent rollover
+        writes a NEW canonical name at a new boundary, so it is a new
+        group -- never a second writer of a filed path.
+        """
+
+        return (str(kind), int(boundary_index),
+                -1 if probe_index is None else int(probe_index),
+                int(batch_index) // int(group_size))
+
+    def _produced_group_slots(self, key):
+        """Every canonical entry name the group will write, in batch order."""
+
+        kind, boundary_index, probe, group_index = key
+        plan = self._produced_plan
+        start = group_index * plan["group_size"]
+        stop = min(start + plan["group_size"], plan["n_batches"])
+        for batch_index in range(start, stop):
+            slot = (f"boundary-{batch_index}-{boundary_index}" if probe < 0
+                    else f"cotangent-{probe}-{batch_index}")
+            yield f"{slot}-at-{boundary_index}"
+
+    def _produced_planned_paths(self, key):
+        """The group's planned durable-origin superset: finals and temps.
+
+        Both spellings, because the writer creates the ``.pt.tmp`` staging
+        file and renames it: the prewrite must have charged it before it
+        exists, and the rename makes it absent again, which is exactly what
+        the commit's planned-omitted-absent proof checks. The names are the
+        existing writer's own -- nothing is copied, renamed or hashed to
+        satisfy this.
+        """
+
+        from .perturbed_x_cache import activation_cache_filename
+        directory = self.directory / "entries"
+        paths = []
+        for name in self._produced_group_slots(key):
+            final = directory / activation_cache_filename(name)
+            paths.append(str(final))
+            paths.append(str(final.with_suffix(".pt.tmp")))
+        return paths
+
+    def _produced_prewrite(self, key):
+        """Claim the group's durable budget before its first byte lands."""
+
+        group = self._produced_groups.get(key)
+        if group is not None:
+            return group
+        planned = self._produced_planned_paths(key)
+        kind, boundary_index, probe, group_index = key
+        batch_id = self._produced.batch_id_for(
+            kind=kind, boundary_index=boundary_index,
+            probe_index=None if probe < 0 else probe, group_index=group_index)
+        ceiling = self._produced.group_ceiling_bytes(
+            entries=len(planned) // 2,
+            max_entry_tensor_bytes=self._produced_plan["max_entry_tensor_bytes"])
+        self._produced.require_prewrite(
+            batch_id=batch_id, payload_ceiling_bytes=ceiling, paths=planned)
+        group = {"batch_id": batch_id, "planned": planned,
+                 "references": [], "published": None, "context": None,
+                 "manifest_digest": None, "retired": False,
+                 "origin_reclaimed": False, "live_references": 0}
+        self._produced_groups[key] = group
+        self.telemetry["produced_groups_prewritten"] += 1
+        return group
+
+    def _produced_group_for(self, reference):
+        """Which bound group holds this reference, or None.
+
+        Indexed. Its standing reason is identity, not speed: this is the
+        canonical reference -> group mapping and not a second store --
+        the groups still own their reference lists, and an entry leaves
+        the index when its origin is unlinked, so a dead reference
+        answers None instead of resolving to a group whose bytes are
+        gone.
+
+        It is also faster than what it replaced, measured on both sides
+        through PrismaBuild on dl380g10 at the production panel's shape
+        (1563 groups of 64, ~100k rotated cotangent entries, twenty
+        64-entry windows), because a loop shape is not evidence. The
+        previous implementation walked every bound group asking
+        ``reference in group["references"]``, so a late window cost
+        O(groups x entries): **0.537 s** per window and 128M ``__eq__``
+        calls, in front of a window that reads 1 GiB. This implementation
+        costs **19.4 us** per window on the same fixture. Beside it,
+        honestly: against a bare dict written inline it measures 1.046x,
+        so it carries ~4.6% overhead over an idealized control -- that
+        ratio is NOT the before/after delta, which is against the walk.
+        Narrow CPU metadata on a fixture; no GPU, throughput, energy or
+        whole-model claim follows from it.
+        """
+
+        key = self._produced_index.get(reference)
+        if key is None:
+            return None, None
+        return key, self._produced_groups[key]
+
+    def _produced_publish(self, key, group, deadline=None):
+        """Publish the group once, when a read first asks for it.
+
+        ``deadline`` is the absolute instant this group's WHOLE staging
+        must end by. It is passed down rather than re-derived so a funding
+        transient waited out inside the publish is spent from the same
+        budget the materialization wait then gets the remainder of.
+        """
+
+        from .stage_a_produced_output import BoundaryProducedFundingDeferred
+
+        if group["published"] is not None:
+            return group
+        descriptors = [self._produced.descriptor_for(
+            reference, producer_generation=group["batch_id"])
+            for reference in group["references"]]
+        if not descriptors:
+            raise RuntimeError(
+                f"produced boundary group {group['batch_id']!r} has no "
+                "written entry to publish")
+        group["manifest_digest"] = self._produced.manifest_digest_for(descriptors)
+        before = int(getattr(self._produced, "funding_deferrals", 0))
+        try:
+            group["published"] = self._produced.publish(
+                batch_id=group["batch_id"], descriptors=descriptors,
+                deadline=deadline)
+        except BoundaryProducedFundingDeferred as exc:
+            # The budget is spent and the batch is NOT published: nothing
+            # was reserved and nothing transferred, so this owner still
+            # holds the group's prewrite credit. Recorded in its own bucket
+            # before the failure propagates, because a held window that
+            # nothing names is the invisible half of a leak.
+            self._produced_publish_deferred[key] = {
+                "batch_id": group["batch_id"], "step": exc.step,
+                "attempts": exc.attempts, "waited_s": exc.waited_s,
+                "timeout_s": exc.timeout_s, "outcome": exc.outcome}
+            raise
+        finally:
+            self.telemetry["produced_group_funding_deferrals"] += max(
+                int(getattr(self._produced, "funding_deferrals", 0)) - before,
+                0)
+        self.telemetry["produced_groups_published"] += 1
+        return group
+
+    def _produced_reader_context(self, references):
+        """Publish and materialize every group this window reads.
+
+        Returns a per-reference resolver: a window spanning a boundary
+        plane and the incoming cotangent plane reads two batches, each
+        vouched in its own material namespace. Nothing polls and nothing
+        falls back -- an unstaged group raises PB's own incomplete signal.
+        """
+
+        import time
+
+        # Before anything new is published: give PrismaBuild another
+        # chance to take back the windows an earlier exit could not.
+        self._drain_produced_releases()
+        wanted = {}
+        for reference in references:
+            key, group = self._produced_group_for(reference)
+            if group is None:
+                raise RuntimeError(
+                    "exact boundary reference is not in any produced group: "
+                    "a bound owner reads only entries it declared")
+            wanted[key] = group
+        contexts = {}
+        for key, group in wanted.items():
+            # ONE absolute instant for this group's whole staging: the
+            # publish, any re-materialization and the wait for PB's receipt
+            # all spend it and none of them resets it. A budget that starts
+            # again at each step is not a bound.
+            deadline = time.monotonic() + float(
+                self._produced_plan["staging_timeout_s"])
+            self._produced_publish(key, group, deadline=deadline)
+            if group["retired"]:
+                # The same unchanged logical batch, taken back onto the
+                # tier. PB is asked first (``materialization_state``) and
+                # drives the transition only if its own records say the
+                # copy is gone; the batch id, manifest, descriptors,
+                # namespace and durable charge are all unchanged.
+                self._produced.ensure_batch_materialized(
+                    batch_id=group["batch_id"], deadline=deadline)
+                group["retired"] = False
+                group["context"] = None
+                self.telemetry["produced_groups_rematerialized"] += 1
+            if group["context"] is None:
+                # Staging is asynchronous: the publish (or the ensure
+                # above) seals a mover row and the FLEET runs it. Wait on
+                # PB's own receipt -- bounded, named, no fallback -- before
+                # composing, because fragments alone compose the same
+                # whether the batch is whole or half there.
+                self._produced.await_materialized(
+                    batch_id=group["batch_id"],
+                    timeout_s=self._produced_plan["staging_timeout_s"],
+                    deadline=deadline)
+                resolver, block = self._produced.reader_context(
+                    batch_id=group["batch_id"],
+                    manifest_digest=group["manifest_digest"])
+                group["context"] = (resolver, block)
+                self.telemetry["produced_groups_materialized"] += 1
+            contexts[key] = group["context"][0]
+        by_reference = {reference: contexts[key]
+                        for key, group in wanted.items()
+                        for reference in group["references"]}
+        # The window OWNS these groups for its whole lifetime. Resolving
+        # them again at exit through the reference index would lose any
+        # group whose entries were disposed while the window was live --
+        # and that is the ordinary production pattern, not an edge case:
+        # the tail retires an activation inside the read window, and the
+        # reverse roll retires the previous cotangent as it writes the
+        # next. Such a group would resolve to nothing, never be offered to
+        # the retirement, raise no release debt, and silently keep its
+        # stage credits.
+        self._produced_window_keys = tuple(wanted)
+        return lambda reference: by_reference.get(reference)
+
+    def produced_group_records(self):
+        """What this owner published, for a receipt. Never a second ledger."""
+
+        return [{"batch_id": group["batch_id"],
+                 "entries": len(group["references"]),
+                 "manifest_digest": group["manifest_digest"],
+                 "staged": group["context"] is not None,
+                 "retired": group["retired"],
+                 "origin_reclaimed": group["origin_reclaimed"]}
+                for group in self._produced_groups.values()]
+
+    def _release_unpublished_prewrites(self):
+        """Give back the durable headroom of groups that produced nothing.
+
+        A prewrite that was claimed and never committed would otherwise
+        charge its ceiling against the instance's durable maxima for the
+        life of the instance. Aborting is safe only when nothing durable
+        remains, and PrismaBuild proves that itself -- ``abort_prewrite``
+        lstats every planned path and retains on a present or unstatable
+        one, so this never turns a crashed write into freed budget. A
+        published (committed) group is deliberately skipped: its entries
+        are durable and its charge ends at ``reclaim_origin``, not here.
+        """
+
+        if self._produced is None:
+            return
+        for group in self._produced_groups.values():
+            if group["published"] is not None:
+                continue
+            self._produced.abort_prewrite(batch_id=group["batch_id"])
+
+    def release_produced_group(self, reference):
+        """Release the stage copy of the group holding ``reference``.
+
+        Stage retirement only: the durable origin survives, its charge is
+        constant, and this owner still owns disposal of its own entries.
+        This is what makes the window BOUNDED -- the stage copy is a loan,
+        and a later read of the same unchanged logical batch takes it again
+        through PrismaBuild's repeat-materialization surface rather than
+        through a second publication or a second charge.
+
+        The cached reader context is dropped with the copy. Reusing a
+        composed map after its fragments are evicted would resolve a path
+        that is no longer there, which is the second failure shape of a
+        bounded window (the first being never releasing at all).
+        """
+
+        key, group = self._produced_group_for(reference)
+        if group is None:
+            raise RuntimeError(
+                "exact boundary reference is not in any produced group")
+        return self._retire_produced_group(key, group)
+
+    def _retire_produced_group(self, key, group):
+        """Give one group's stage copy back. The caller names the group."""
+
+        if group["retired"]:
+            return dict(group["published"] or {})
+        if self._active_window is not None:
+            raise RuntimeError(
+                "a produced boundary group cannot be retired while its "
+                "window is live: the pin must be released first")
+        out = self._produced.retire(group["batch_id"])
+        if out.get("ok"):
+            group["retired"] = True
+            group["context"] = None
+            self.telemetry["produced_groups_retired"] += 1
+        return out
+
+    #: How many times one group's stage retirement is re-driven through
+    #: PrismaBuild's own egress before the failure is recorded and left
+    #: standing. Bounded on purpose: a retry loop with no ceiling is a
+    #: scheduler, and this lane does not own scheduling.
+    PRODUCED_RELEASE_ATTEMPTS = 3
+
+    def _release_one_produced_group(self, key, group, deadline=None):
+        """Drive one group's stage retirement. Returns True when it is gone.
+
+        ``deadline`` is the absolute monotonic instant the whole wait must
+        end by, threaded through so a retirement that is re-driven inside
+        one cannot mint itself a fresh budget.
+
+        A returned ``{"ok": False}`` is a RESULT, not an absence of news:
+        PrismaBuild's egress refused for a reason, and that reason is
+        recorded against the group so the next attempt can see it. Nothing
+        here pretends the copy was retired and nothing refunds its credit
+        -- the tokens stay held by the material that is still there.
+        """
+
+        record = self._produced_release_pending.setdefault(
+            key, {"batch_id": group["batch_id"], "attempts": 0,
+                  "first_reason": None, "last_reason": None})
+        try:
+            # By KEY, never by reference: a group whose entries were
+            # disposed while its retirement was refused has no live
+            # reference left to look itself up with, and that is exactly
+            # the group a drain exists for.
+            out = self._retire_produced_group(key, group)
+        except Exception as exc:                        # noqa: BLE001
+            record["attempts"] += 1
+            return self._handle_produced_release_outcome(
+                key, group, record, None, {"error": repr(exc)}, deadline)
+        record["attempts"] += 1
+        if group["retired"]:
+            self._produced_release_pending.pop(key, None)
+            # The stage copy is gone; if this group's origins went while
+            # its retirement was refused, THIS is the moment its durable
+            # charge becomes releasable.
+            self._reclaim_produced_origin_for_group(key, group)
+            return True
+        return self._handle_produced_release_outcome(
+            key, group, record, out,
+            {"refusal": out.get("refusal"), "step": out.get("step"),
+             "receipt": out.get("receipt")}, deadline)
+
+    def _handle_produced_release_outcome(self, key, group, record, out,
+                                         reason, deadline):
+        """Decide about ONE observed outcome. No second retirement here.
+
+        Split out because the wait loop must be able to hand back the
+        outcome it just saw instead of asking again: re-driving to "find
+        out" what it already knows costs an extra egress, hides the
+        outcome that changed, and -- when the new answer is another
+        deferral -- restarts a budget that is supposed to be absolute.
+        """
+
+        record["last_reason"] = reason
+        if record["first_reason"] is None:
+            record["first_reason"] = reason
+        self.telemetry["produced_group_release_failures"] += 1
+        self._produced_release_errors.append(
+            {"batch_id": group["batch_id"], "attempt": record["attempts"],
+             "reason": reason})
+        if "error" not in reason:
+            from .stage_a_produced_output import (
+                UNCLASSIFIED_OUTCOMES, BoundaryEgressUnclassified,
+                classify_egress_outcome)
+            kind = classify_egress_outcome(out)
+            record["class"] = kind
+            if kind == "own-copy-deferral":
+                # PrismaBuild deferred this on a lifecycle it owns: the
+                # evicted mover's own live claimed copy. Bytes, proof and
+                # full credit are kept and ordinary retry returns the
+                # token, so wait it out inside the budget already bound --
+                # the SAME deadline if one is already running.
+                return self._await_produced_release_deferral(
+                    key, group, record, out, deadline)
+            if kind in UNCLASSIFIED_OUTCOMES:
+                # Three receipts that are not a decision: no deferred_own
+                # key at all and no positive cause, a non-empty
+                # deferred_own naming a reason this lane does not
+                # recognise, and a deferred_own of the wrong shape. Each is
+                # surfaced, not decided -- reading any of them as "no
+                # deferral" is the fail-open shape this exists for, and
+                # reading an unrecognised one as a deferral would sit on a
+                # wait that is not known to clear.
+                self._produced_release_pending.pop(key, None)
+                self._produced_release_unclassified[key] = dict(record)
+                raise BoundaryEgressUnclassified(
+                    group["batch_id"], out, out.get("receipt"), kind)
+            # foreign-pin, promotion-handoff, egress-error: real failures
+            # on other lifecycles. Preserved exactly as before -- recorded,
+            # re-driven on the next drain, credits retained, never waited
+            # on. None of them is this lane's to resolve.
+        if record["attempts"] >= self.PRODUCED_RELEASE_ATTEMPTS:
+            # Cleared EXPLICITLY, with the original reason kept and the
+            # credits retained. The group stays unretired, so nothing
+            # downstream may treat its window as free, and a later read of
+            # it still finds its live copy rather than asking for a
+            # re-materialization that would be wrong.
+            self._produced_release_abandoned[key] = dict(record)
+            self._produced_release_pending.pop(key, None)
+        return False
+
+    #: How long one paced re-drive waits before asking PrismaBuild again.
+    #: A floor, not a schedule: without it a bounded attempt count burns a
+    #: whole budget in milliseconds and reports a timeout that never
+    #: waited for anything.
+    PRODUCED_DEFERRAL_POLL_S = 0.5
+
+    def _await_produced_release_deferral(self, key, group, record, outcome,
+                                         deadline=None):
+        """Re-drive a DEFERRED retirement, paced, inside the staging budget.
+
+        PrismaBuild keeps the bytes, the proof and the full credit while
+        its own child mover is still live, and says so by deferring rather
+        than by destroying anything. Ordinary retry returns the token once
+        that mover reaches terminal, so the only thing this owes is to
+        keep asking at a sane cadence until the budget bound at
+        :meth:`bind_produced_output` is spent -- the SAME budget the read
+        already waits on for staging, not a second one.
+
+        Two failure shapes are deliberately excluded. It does not spin: it
+        sleeps :data:`PRODUCED_DEFERRAL_POLL_S` between asks, so a bounded
+        attempt count cannot report a timeout it never waited for. And it
+        does not continue quietly into a refill that cannot fund: running
+        the budget out raises :class:`BoundaryProducedReleaseDeferred` with
+        the reason, the elapsed time and the attempt count.
+
+        Anything that stops being a deferral leaves immediately and is
+        handled as what it became -- a retirement that starts deferred and
+        ends refused by a foreign pin is a foreign-pin refusal, and a
+        reason the vocabulary cannot name is surfaced, not absorbed.
+        """
+
+        import time
+        from .stage_a_produced_output import (
+            DEFERRED_OWN_FIELD, BoundaryProducedReleaseDeferred,
+            classify_egress_outcome)
+
+        budget = float(self._produced_plan["staging_timeout_s"])
+        started = time.monotonic()
+        # ONE absolute deadline for the whole wait. Taken from the caller
+        # when a wait is already running, so a re-driven retirement that
+        # reports another deferral continues the original bound instead of
+        # minting a new one -- the inverse of the tight loop, and just as
+        # unbounded: it never spins, and it never ends either.
+        if deadline is None:
+            deadline = started + budget
+        receipt = outcome.get("receipt") or {}
+        record["deferred_own"] = receipt.get(DEFERRED_OWN_FIELD)
+        self.telemetry["produced_group_release_deferrals"] += 1
+        try:
+            record["deferred_state"] = self._produced.materialization_state(
+                batch_id=group["batch_id"])
+        except Exception as exc:                        # noqa: BLE001
+            # Evidence only. A state read that fails does not change what
+            # the retirement said, and must not become the failure.
+            record["deferred_state"] = {"error": repr(exc)}
+        redrives = 0
+
+        def _spent():
+            """The budget is gone: record it and stop, calling nothing."""
+            record["deferred_waited_s"] = time.monotonic() - started
+            self._produced_release_pending.pop(key, None)
+            self._produced_release_abandoned[key] = dict(record)
+            raise BoundaryProducedReleaseDeferred(
+                group["batch_id"],
+                waited_s=time.monotonic() - started, timeout_s=budget,
+                attempts=redrives, outcome=outcome)
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _spent()
+            time.sleep(min(self.PRODUCED_DEFERRAL_POLL_S, remaining))
+            # THE DEADLINE IS READ AGAIN HERE, immediately before the
+            # retirement, because a retire is a mutation and the sleep
+            # above can have landed exactly on the deadline. Checking only
+            # at the top of the loop wakes at expiry and drives one more
+            # egress anyway. Same rule as the funding path: a deadline
+            # bounds SIDE EFFECTS, not iterations.
+            if time.monotonic() >= deadline:
+                _spent()
+            redrives += 1
+            self.telemetry["produced_group_release_retries"] += 1
+            outcome = self._retire_produced_group(key, group)
+            if group["retired"]:
+                record["deferred_waited_s"] = time.monotonic() - started
+                record["deferred_redrives"] = redrives
+                self._produced_release_pending.pop(key, None)
+                self._reclaim_produced_origin_for_group(key, group)
+                return True
+            if classify_egress_outcome(outcome) != "own-copy-deferral":
+                # It changed into something else. Hand THAT outcome to the
+                # one place that decides -- not another retirement. Asking
+                # again would spend an extra egress, lose the outcome just
+                # observed, and, if the new answer deferred, restart a
+                # budget that is meant to be absolute.
+                record["attempts"] += 1
+                return self._handle_produced_release_outcome(
+                    key, group, record, outcome,
+                    {"refusal": outcome.get("refusal"),
+                     "step": outcome.get("step"),
+                     "receipt": outcome.get("receipt")}, deadline)
+
+    def _drain_produced_releases(self):
+        """Re-drive every still-pending retirement before the next window.
+
+        Called BEFORE the next window publishes, because that is where a
+        stalled retirement actually costs something: the tier window is
+        small (the production geometry is four tokens -- current plus
+        next), so one group that failed to give its two tokens back is the
+        whole next advance. Draining here is the difference between
+        degrading and stalling.
+        """
+
+        for key in list(self._produced_release_pending):
+            group = self._produced_groups.get(key)
+            if group is None or group["retired"]:
+                self._produced_release_pending.pop(key, None)
+                continue
+            self.telemetry["produced_group_release_retries"] += 1
+            self._release_one_produced_group(key, group)
+
+    def _release_produced_window(self, keys):
+        """Retire every stage copy this window borrowed.
+
+        By the KEYS the window captured when it opened, never by its
+        references: a reference disposed during the window is gone from
+        the lookup index, and a group found by nothing is a group whose
+        credits are never asked for.
+        """
+
+        for key in keys:
+            group = self._produced_groups.get(key)
+            if group is None or group["retired"]:
+                continue
+            self._release_one_produced_group(key, group)
+
+    def produced_release_debt(self):
+        """Stage copies this owner asked PB to retire and PB did not.
+
+        Reported rather than hidden: a caller that needs the window back
+        can see exactly which groups still hold it and why.
+        """
+
+        return {"pending": {str(record["batch_id"]): record["last_reason"]
+                            for record in self._produced_release_pending.values()},
+                "abandoned": {str(record["batch_id"]): record["first_reason"]
+                              for record in self._produced_release_abandoned.values()},
+                "unclassified": {str(record["batch_id"]): record["last_reason"]
+                                 for record
+                                 in self._produced_release_unclassified.values()},
+                "publish_deferred": {
+                    str(record["batch_id"]): record
+                    for record in self._produced_publish_deferred.values()}}
+
     @contextmanager
     def prefetch(self, references):
         from .perturbed_x_cache import prefetch_exact_activation_cache_entries
@@ -922,22 +1696,58 @@ class StreamedBoundaryArtifacts:
         references = tuple(references)
         for reference in references:
             self._entry_identity(reference)
+        # A bound owner publishes and materializes this window's groups
+        # here, at the FIRST read, and hands the read their namespaced
+        # contexts. An unbound owner passes None and resolves through the
+        # process input map exactly as before.
+        resolver = (None if self._produced is None
+                    else self._produced_reader_context(references))
+        # Captured HERE, while every group is still resolvable.
+        window_keys = self._produced_window_keys
+        self._produced_window_keys = ()
         with torch.profiler.record_function("aura.exact_activation.prefetch"):
             if self._scratch is None:
                 from .perturbed_x_cache import EntryReadScratch
                 self._scratch = EntryReadScratch()
             context = prefetch_exact_activation_cache_entries(references,
                 expected_session=self.session, max_tensor_bytes=self.config["max_resident_bytes"],
-                residency_check=self._reserve, scratch=self._scratch)
+                residency_check=self._reserve, scratch=self._scratch,
+                resolver=resolver)
             window = context.__enter__()
         self._active_window = window
         self.telemetry["prefetch_windows"] += 1
         self.telemetry["read_tensor_bytes"] += sum(ref.tensor_bytes for ref in references)
+        primary = None
         try:
             yield window
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
             self._active_window = None
-            context.__exit__(None, None, None)
+            # Cleanup never MASKS the failure that caused it. A cleanup
+            # error raised out of a `finally` replaces the compute error as
+            # the exception the caller sees, which is worse than either
+            # fact alone -- so when something is already in flight, the
+            # cleanup failure is attached to it and the original
+            # propagates.
+            for step in (lambda: context.__exit__(
+                    type(primary) if primary is not None else None, primary,
+                    primary.__traceback__ if primary is not None else None),
+                    # The pins are gone with the window, so the stage
+                    # copies it borrowed go back to free HERE -- that is
+                    # the bounded-window contract, and holding them would
+                    # accumulate every group the pass ever read.
+                    lambda: (self._release_produced_window(window_keys)
+                             if self._produced is not None else None)):
+                try:
+                    step()
+                except BaseException as cleanup:
+                    if primary is None:
+                        raise
+                    primary.add_note(
+                        "exact boundary window cleanup also failed: "
+                        f"{cleanup!r}")
 
     def get(self, window, reference):
         self._entry_identity(reference)
@@ -976,6 +1786,7 @@ class StreamedBoundaryArtifacts:
                     self._retire(reference, missing_ok=True)
                 self._slots.clear()
             self._reclaim_retained_checkpoints()
+            self._release_unpublished_prewrites()
         except BaseException:
             self._status = "failed"
             raise

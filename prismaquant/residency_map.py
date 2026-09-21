@@ -180,12 +180,26 @@ def _identity(info: os.stat_result) -> tuple[int, int, int, int]:
 class ResidencyResolver:
     """Where to open a declared path, and what each tier actually served."""
 
-    def __init__(self, map_path: str | Path, tiers_dir: str | Path | None = None):
+    def __init__(self, map_path: str | Path, tiers_dir: str | Path | None = None,
+                 *, residency_root: str | Path | None = None,
+                 material_namespace: str | None = None):
         self._map_path = str(map_path)
         override = os.environ.get(TIERS_DIR_ENV_VAR)
         self._tiers_dir = str(tiers_dir if tiers_dir is not None else
                               override if override else
                               Path(self._map_path).parent.parent / "tiers")
+        # The material namespace and the root its fragments live under. Both
+        # are None for the process's INPUT map, where the material namespace
+        # is the running action itself and the fragments sit beside the
+        # composed map -- so an input resolver's lease identity is exactly
+        # what it was before a produced namespace existed. A supplemental
+        # produced-output context names both explicitly: its material is
+        # vouched under the batch namespace, in the produced-output fragment
+        # root, and neither is ever inferred from a path.
+        self._residency_root = (None if residency_root is None
+                                else str(residency_root))
+        self._material_namespace = (None if material_namespace is None
+                                    else str(material_namespace))
         self._lock = threading.Lock()
         self._manifest_sha256: str | None = None
         self._identity: tuple[int, int, int, int] | None = None
@@ -1096,6 +1110,15 @@ class ResidencyResolver:
         covering set: both tier legs resolve minimal per-key covers
         through PB's ``covers_for_keys`` (RAM movers are not in the
         composed map at all — see ``staged_lease.ram_covers``).
+
+        ``material_namespace`` is ``None`` for the process input map — the
+        material is vouched under the running action itself, which is what
+        the cover lookup and the acquire already default to — and names the
+        producing consumer for a supplemental produced-output context.
+        ``residency_root`` follows it: the composed map's own directory for
+        an input map, the produced-output fragment root for a namespaced
+        one. A lookup that took the map's parent for a produced context
+        would scan the wrong ``material/`` directory and find nothing.
         """
         with self._lock:
             return {"tier_id": self._tier_id,
@@ -1103,7 +1126,10 @@ class ResidencyResolver:
                     "manifest_sha256": self._manifest_sha256,
                     "ram_tier_id": self._ram_tier_id,
                     "ram_epoch": self._ram_epoch,
-                    "residency_root": str(Path(self._map_path).parent)}
+                    "material_namespace": self._material_namespace,
+                    "residency_root": (
+                        self._residency_root if self._residency_root is not None
+                        else str(Path(self._map_path).parent))}
 
     def report(self) -> dict:
         """What each tier served this run, for ``results.json``."""
@@ -1176,6 +1202,43 @@ def residency_resolver() -> ResidencyResolver | None:
             resolver = ResidencyResolver(named)
             _RESOLVER_FOR = (named, resolver)
         return resolver
+
+
+def namespaced_residency_resolver(map_path: str | Path, *,
+                                  manifest_sha256: str,
+                                  residency_root: str | Path,
+                                  material_namespace: str,
+                                  tiers_dir: str | Path | None = None,
+                                  ) -> ResidencyResolver:
+    """A supplemental reader context for one explicitly namespaced batch.
+
+    NOT the process input map, and deliberately not reachable through
+    :func:`residency_resolver`: this resolver is constructed for one
+    composed map, bound to that map's own manifest digest, and handed to
+    exactly the reads that want that batch's entries. The run's sealed
+    inputs, every read-only attached generation and every foreign
+    generation keep resolving through the unchanged process resolver, which
+    this never replaces, mutates or caches over.
+
+    The caller supplies the identity rather than deriving it from the path:
+    ``manifest_sha256`` is the batch's own manifest digest (the one its
+    mover published its fragment under), ``residency_root`` is the fragment
+    root that mover filed into, and ``material_namespace`` is the batch
+    namespace its material is vouched under. ``tiers_dir`` is explicit
+    because a supplemental map does not live two levels under the queue.
+    """
+
+    if not _is_hex64(manifest_sha256):
+        raise ValueError(
+            "a namespaced reader context needs its batch's manifest digest")
+    if not material_namespace or "/" in str(material_namespace):
+        raise ValueError(
+            "a namespaced reader context needs its material namespace")
+    resolver = ResidencyResolver(
+        map_path, tiers_dir=tiers_dir, residency_root=residency_root,
+        material_namespace=str(material_namespace))
+    resolver.bind_manifest_sha256(str(manifest_sha256))
+    return resolver
 
 
 def bind_residency_manifest(digest: str | None) -> None:

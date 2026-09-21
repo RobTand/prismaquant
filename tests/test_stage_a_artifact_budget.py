@@ -453,6 +453,11 @@ def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
     """The dispatcher forwards the NEW field as a payload flag (the PB
     channel), validates strict bytes, and leaves argv unchanged when
     absent -- mirroring the prefetch-override threading."""
+    import sys
+    # `pytest.ini` puts the repo root on the path, not `tools/`, and this
+    # import runs BEFORE the fixture helper below that would have added
+    # it -- so it only ever resolved when something else had already run.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
     from dispatch_joint_quanta import DispatchRefused, stage_a_argv
 
     manifest, campaign = _dispatcher_argv_fixture(tmp_path, monkeypatch)

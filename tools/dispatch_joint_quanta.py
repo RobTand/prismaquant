@@ -131,6 +131,69 @@ class ExecutableBindingUnsupported(DispatchRefused):
     """
 
 
+class ProducedOutputDeclarationUnsupported(DispatchRefused):
+    """The client in front of this dispatcher cannot SEAL a template.
+
+    A produced-output owner is admitted only when the queue row carries the
+    template AND the sealed request carries the matching declaration,
+    validated against an input ingested under
+    ``core.PRODUCED_OUTPUT_TEMPLATE_INPUT_ID``. The deployed ``pbrun`` does
+    all of that behind ``--produced-output-template``; an older one does
+    none of it.
+
+    So this refusal is CONDITIONAL on the client in hand, never blanket:
+    threading a flag an older client ignores would submit a capture that
+    writes its boundary entries and then cannot read them, and adding a
+    payload flag instead would advertise a declaration that admitted
+    nothing.
+    """
+
+
+def _pbrun_seals_produced_output(pbrun: Path = PBRUN) -> bool:
+    """Does THIS client carry the produced-output template seal?
+
+    Asked of the client that will actually run, by its own help, rather
+    than assumed from a version or a date. A client that cannot be asked
+    is treated as not carrying it -- the fail-closed direction.
+    """
+
+    try:
+        probe = subprocess.run([sys.executable, str(pbrun), "--help"],
+                               capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "--produced-output-template" in (probe.stdout or "")
+
+
+def build_stage_a_produced_template(*, output_prefix, tier: str,
+                                    artifact_max_bytes: int,
+                                    group_size: int,
+                                    max_entry_tensor_bytes: int) -> dict:
+    """The Stage A boundary template this submission would declare.
+
+    Derived, never constant: ``artifact_max_bytes`` is the EFFECTIVE
+    artifact budget this submission forwards (the plan's sealed
+    ``boundary_storage.max_artifact_bytes`` or the run's
+    ``--artifact-budget-bytes`` override, whichever the payload carries),
+    and it becomes the durable origin class maximum. The tier window is
+    derived from the ACTUAL maximum publication group, which is a
+    different quantity from the retained origin peak.
+
+    The single implementation lives with the runtime binding
+    (``prismaquant.stage_a_produced_output.build_boundary_template``) so
+    the submitted declaration and the bound instance cannot drift into two
+    spellings of one contract.
+    """
+
+    from prismaquant.stage_a_produced_output import build_boundary_template
+
+    return build_boundary_template(
+        output_prefix=output_prefix, tier=tier,
+        artifact_max_bytes=int(artifact_max_bytes),
+        group_size=int(group_size),
+        max_entry_tensor_bytes=int(max_entry_tensor_bytes))
+
+
 def _sha_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -564,6 +627,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                  *, tag: str = ADJOINT_TAG,
                  prefetch_override: Path | None = None,
                  artifact_budget_bytes: int | str | None = None,
+                 produced_output_template: Path | None = None,
                  binding: dict | None = None) -> list[str]:
     """The §5.2 stage-A submission argv: the adjoint capture goes first and
     alone; quanta wait on its receipt.  The campaign binding every record
@@ -593,10 +657,35 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     the worker refuses undeclared names, so the list is derived, never
     hardcoded (#835).
 
+    ``produced_output_template`` (optional): the pre-submit produced-output
+    declaration that lets the capture read its OWN boundary entries back
+    through PrismaBuild. It rides as a pbrun ENVELOPE option, so the client
+    ingests it as a declared input, seals the matching declaration into the
+    request params and carries the template onto the queue row -- and
+    derives the bounded window's tier demand from the template rather than
+    from anything restated here. A client without that flag refuses
+    (:class:`ProducedOutputDeclarationUnsupported`) rather than submitting
+    a capture that could write its entries and not read them.
+
     ``binding`` (optional) is a precomputed :func:`_stage_manifest_binding`
     for this manifest and campaign, so a caller that also records the
     digests does not read the manifest twice.
     """
+    if produced_output_template is not None:
+        if not Path(produced_output_template).is_file():
+            raise DispatchRefused(
+                "stage-A produced-output template is not a file: "
+                f"{produced_output_template}")
+        if not _pbrun_seals_produced_output():
+            raise ProducedOutputDeclarationUnsupported(
+                "stage-A submission names a produced-output template "
+                f"({produced_output_template}), but the client at {PBRUN} "
+                "carries no --produced-output-template: the owner's request "
+                "must seal the declaration against an ingested "
+                "prismabuild.produced-output-template input and the queue "
+                "row must carry the template itself. Refusing rather than "
+                "submitting a capture that would write its boundary entries "
+                "and then be unable to read them")
     if binding is None:
         binding = _stage_manifest_binding(adjoint_manifest, campaign)
     if artifact_budget_bytes is not None:
@@ -651,6 +740,13 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         argv += ["--progress-phase", f"{phase}={grace}"]
     argv += ["--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
              "--cpus", "10"]
+    if produced_output_template is not None:
+        # An ENVELOPE option, before the payload separator, like every
+        # other pbrun flag. Not a payload flag: the seal has to happen on
+        # the request and the queue row, which is the submitting client's
+        # job, and the tier demand for the bounded window is derived by
+        # pbrun from the template itself -- so nothing here adds it again.
+        argv += ["--produced-output-template", str(produced_output_template)]
     if container_image is not None:
         # Before the separator, like every other pbrun option; see the
         # quantum row above and RobTand/prismabuild#714.
@@ -819,6 +915,17 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                              "payload's --artifact-budget-bytes; the run stamps "
                              "the deviation into its provenance; the sealed "
                              "plan is unchanged")
+    parser.add_argument("--stage-a-produced-output-template", type=Path,
+                        default=None,
+                        help="produced-output template JSON declaring the "
+                             "bounded window the stage-A action will stage "
+                             "for the boundary entries it produces itself "
+                             "(RobTand/prismaquant#881). Sealed by pbrun as "
+                             "a declared input plus request params and "
+                             "carried onto the queue row, so the capture can "
+                             "read its OWN entries back; its window demand is "
+                             "derived by pbrun from the template. Without it "
+                             "the capture writes entries it cannot read.")
     parser.add_argument("--spec", default=None,
                         help="campaign spec for the container wrapper (default: the joint-panel dev spec)")
     parser.add_argument("--state", default=None)
@@ -885,6 +992,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                                               tag=adjoint_tag,
                                               prefetch_override=args.stage_a_prefetch_override,
                                               artifact_budget_bytes=args.stage_a_artifact_budget_bytes,
+                                              produced_output_template=(
+                                                  args.stage_a_produced_output_template),
                                               binding=stage_a_binding)})
         if receipt_ok:
             for record_path, record in records:

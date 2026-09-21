@@ -1,7 +1,96 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/quantum-metadata-generation-20260921`.
+As of: 2026-09-21 · `fix/stagea-produced-boundaries-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `fix/stagea-produced-boundaries-20260921`) for
+**Stage A reading its own boundary entries through PrismaBuild produced
+output** (PQ #880). No format, lane, pin or ship-gate verdict changes, and
+the **strict input resolver is untouched**: an own-generation read is handed
+a supplemental, explicitly namespaced resolver as an argument, never a
+swapped input map, and a read-only or foreign attached generation stays an
+ordinary input-map entry that cannot declare an owner prewrite. What changes
+is that an admitted Stage A capture now BINDS a produced-output owner:
+`joint_cost_stage_a.bind_stage_a_produced_output` is called from
+`run_adjoint_capture`, returns `None` only when the process carries no
+PrismaBuild launch context at all, and otherwise binds or REFUSES carrying
+the original reason. `cost_streaming.bind_produced_output` prewrites each
+64-entry publication group before its first byte, defers publication to the
+first read, retires the stage copy at window exit and reclaims a group's
+durable origin charge when its last origin file is gone. The operator entry
+point is `tools/dispatch_joint_quanta.py --stage-a-produced-output-template`,
+forwarded as the deployed `pbrun --produced-output-template` envelope
+option, which ingests the document as a declared input, seals its
+declaration into request params and derives the tier window demand from it.
+Every `prismabuild.*` module loads through `staged_lease.sdk_submodule`, from
+the same sealed generation as the reader SDK. Geometry is derived from the
+effective configured artifact max; no budget figure is written into the code.
+A refused retirement is named from PrismaBuild's own egress receipt by
+`classify_egress_outcome`: `retire_batch` returns the category (refusal
+`egress-incomplete`) and the receipt carries the cause. A non-empty
+`deferred_own` is a deferral on this lane's OWN in-flight work -- the
+evicted mover's own live claimed copy, or the retirement's own egress action
+on the tier host, which an owner on a GPU host always sees because only the
+tier host mounts the stage read-write (RobTand/prismabuild#801). PrismaBuild
+keeps bytes, proof and full credit in both cases
+-- and it is the ONLY case this lane waits on, paced and bounded by the
+`staging_timeout_s` already bound at `bind_produced_output`, against one
+ABSOLUTE deadline that a re-driven retirement cannot reset. A live pin is a
+real foreign-reader failure, preserved and never waited on; a deferred
+handoff is a promotion lifecycle that is not this lane's. Each reason is matched as the EXACT string
+PrismaBuild writes (`own-copy-in-flight`, `own-egress-in-flight`), and three receipts are surfaced
+as `BoundaryEgressUnclassified` rather than decided: no `deferred_own` key
+at all with no other positive cause, a non-empty `deferred_own` naming an
+unrecognised reason, and a `deferred_own` that is not a list. A missing key
+is not an empty list -- `receipt.get(field, [])` is the fail-open shape
+that destroyed a stage token per occurrence -- and an unrecognised deferral
+is not one this lane knows will clear. A `deferred_own` present and EMPTY
+is the opposite and is NOT surfaced: PrismaBuild looked and found no
+own-copy deferral, which is a positive observation. The rule under all of
+it is act on positive observations, surface only true silence, which is
+also why a live pin still classifies on a receipt from a generation that
+publishes no `deferred_own`. Which generations those are is a dated
+observation in `tests/stagea_produced_pb_pin.json`, not an invariant: the
+requirement is that the classifier keep an answer for such a receipt for as
+long as one can be served at all.
+
+A SECOND PrismaBuild transient is waited out on the publish side, and
+nothing else is. `pool.fund_output_batch` and `pool.stage_output_intent`
+take their transition locks with `blocking=False` and answer
+`funding-race-deferred` when one is contended; both `publish_prepaid_batch`
+and `ensure_batch_materialized` surface it verbatim, stamped with the step
+that met it. The transient is narrow -- THAT non-blocking call
+moved no tokens -- and is not a claim that nothing happened: the request
+is sealed and filed, the intent staged and the READY row published before
+the funding step runs, and a deferral rolls none of it back. The re-drive
+is licensed by the content-addressed mover key and PrismaBuild's step-wise
+idempotency, so the adapter re-drives the IDENTICAL call -- same batch id,
+same descriptors, same instance -- which is resumption, not a second
+publication. It is
+keyed on the refusal, never on the step, and every other refusal is
+terminal at once. The budget is the same `staging_timeout_s`: ONE absolute
+deadline spans the publish, any re-materialization and the wait for the
+mover's receipt, so a transient waited out shortens the wait that follows
+instead of extending the total, and expiry is a named
+`BoundaryProducedFundingDeferred` that records the group in
+`produced_release_debt()["publish_deferred"]`. What that failure states is
+bounded on purpose: the logical batch's COMMIT is unfinished, the request,
+intent and mover row may already exist, and the credits stay
+PrismaBuild-accounted -- no rollback is inferred and none is performed.
+
+Closed by this branch, having been open in it: the intermittent stage-token
+loss (produced-output egress decharging a batch's stage token instead of
+releasing it when the staged entries are still shared with an in-flight
+copy, permanently shrinking the tier mint). The cause was a PrismaBuild
+one, traced by root to an egress eviction that did not exclude its own
+mover from the claimed-path check, and repaired outside this lane. This
+lane re-pinned its harness onto the repaired candidate
+(`83e8d502ad9305177ee6e0501ff7c88ee036579d`, byte-identical on all eleven
+pinned paths to merged `3641e29332bfd7a091f35b5bd3875b6de294c86e`) and the
+rollover fixture now runs at ONE stage token as well as two, as a
+parameter rather than a restored assumption -- at the superseded candidate
+that one-token run failed 1 in 6, so a single green is evidence and not
+proof. Gates: `tests/test_stage_a_produced_boundary_chain.py`.
 
 Re-stamped (2026-09-21, `fix/quantum-metadata-generation-20260921`) for
 **the quantum control-metadata generation seam** (PQ #884). No default,
@@ -903,6 +992,86 @@ ranges a row's data manifest names onto an SSD stage tier and injects the
 composed map's path as `PRISMABUILD_RESIDENCY_MAP`. **PrismaQuant now reads
 it.** Without a reader the stage is a copy nobody reads, and the before/after
 says exactly that.
+
+- **One input map, and an explicitly namespaced context beside it** (added
+  2026-09-21, RobTand/prismaquant#881). The map `PRISMABUILD_RESIDENCY_MAP`
+  names is the map of a run's **sealed inputs**. An admitted action's own
+  outputs are not in it, so under the strict allowed-tier policy a Stage A
+  action that writes exact boundary entries and reads them back in the same
+  action is refused `staged-not-serving` — correctly, since there is no
+  own-session exemption from the physical tier policy. The fix is not to swap
+  the process map. `prismaquant/stage_a_produced_output.py` takes those
+  entries through PrismaBuild's produced-output lifecycle (`require_prewrite`
+  before the first byte, the existing writer's unchanged canonical names, one
+  descriptor per entry carrying the **writer's own inline digest**, then
+  `publish_prepaid_batch`), and composes the fragments PB's mover files under
+  the batch namespace into a **supplemental resolver**
+  (`residency_map.namespaced_residency_resolver`) bound to that batch's own
+  manifest digest and material namespace. That resolver is carried into the
+  read as an argument (`perturbed_x_cache.prefetch_exact_activation_cache_
+  entries(resolver=…)`); the process resolver, every sealed input, every
+  read-only attached generation and every foreign generation resolve exactly
+  as before, and an input resolver's lease identity and acquire call are
+  unchanged. `PRISMABUILD_RESIDENCY_MAP` stays the input map for a second
+  reason: the SDK derives the **queue root** from its shape
+  (`Path(map_path).parent.parent`), so pointing it at a produced batch's map
+  would send the SDK looking for the queue elsewhere.
+
+- **The publication unit is the existing read window, and the stage copy is a
+  loan.** A group is the 64 entries `prefetched_boundary_batches` already
+  yields, and the publish is **deferred to the first read**: a prewrite holds
+  no ledger tokens while a commit funds the stage window, so publishing at
+  write time would spend the stage credit the first read needs. Per-entry
+  movers are rejected on PrismaBuild's own arithmetic, not on entry size —
+  `storage_tiers.stage_tokens_for_bytes` rounds **per mover** up to a whole
+  GiB token, so 64 movers of ~16 MiB cost 64 tokens where the one group that
+  already is the read window costs `ceil(group_bytes / GiB)`; the smaller last
+  group is priced on its own byte range. The window exit **retires** the
+  group's stage copy once its pins release, and a later read of the same
+  unchanged logical batch re-stages it through PrismaBuild's own surface
+  (`produced_output.materialization_state` to ask,
+  `produced_output.ensure_batch_materialized` to drive) — one logical batch,
+  one durable origin charge, a PB-sealed successor mover, no second
+  publication. A refused retirement is recorded with its reason, re-driven
+  through the same PB retire before the next window publishes, and after a
+  bounded number of attempts left standing with its credits retained; it is
+  never reported as retired. A group's durable charge is reclaimed when its
+  **last** origin file is gone **and** its stage copy is retired. Staging is
+  asynchronous, so the read waits on the mover's own receipt (fragments
+  compose identically whether a batch is whole or half staged) with a named,
+  bounded `BoundaryStagingTimeout` and a withdrawal — never a fallback or a
+  direct origin read.
+
+- **Geometry is derived from the configured budget, never from a constant.**
+  `build_boundary_template` takes the **effective** artifact max — the plan's
+  sealed `boundary_storage.max_artifact_bytes` or the run's
+  `--artifact-budget-bytes` override — as the durable origin class maximum,
+  and derives the tier window from the **actual maximum publication group**
+  (64 × 16 MiB + envelope → 2 tokens; current plus next → 4), which is a
+  different quantity from the retained origin peak. The runtime binder refuses
+  when the admitted template's declared maximum is not the effective one. Every
+  `prismabuild.*` module the publication uses loads through
+  `staged_lease.sdk_submodule`, i.e. from the **same sealed generation** as the
+  reader SDK: production forwards `PRISMABUILD_READER_HELPER_ROOT` and mounts
+  it without populating `sys.path`, so a bare import can serve an older
+  container distribution or a mixture across modules, and qualified provenance
+  over bytes you cannot name is not provenance. The template is sealed at **submit**, not
+  at runtime: the deployed `pbrun --produced-output-template` ingests the
+  document as a declared input under `PRODUCED_OUTPUT_TEMPLATE_INPUT_ID`,
+  seals the matching declaration into the request params, carries the template
+  onto the queue row, and **derives the bounded window's tier demand from the
+  template**, so `tools/dispatch_joint_quanta.py` threads it as a pbrun
+  envelope option (`--stage-a-produced-output-template`) and restates no
+  demand. A client without that flag refuses
+  `ProducedOutputDeclarationUnsupported` — conditional on the client in hand,
+  because one that ignored the flag would admit a capture that writes its
+  entries and cannot read them. **Measured gap (2026-09-21):** on one
+  authorized live cycle the sealed mover was published, prepaid and left
+  `ready` unclaimed for its whole 600 s budget, and the named
+  `BoundaryStagingTimeout` fired; the end-to-end lifecycle is therefore
+  proven through publication and funding on the live fleet, and **not**
+  through a fleet-executed mover. Gates:
+  `tests/test_stage_a_produced_boundary_chain.py`.
 
 - **One resolver**, `prismaquant/residency_map.py`. It owns no bytes: it
   answers "where do I open this declared path", and the caller's own digest

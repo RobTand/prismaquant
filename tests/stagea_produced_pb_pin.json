@@ -1,0 +1,51 @@
+{
+  "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-stagea-produced-boundaries-20260921/83e8d502ad9305177ee6e0501ff7c88ee036579d",
+  "candidate_commit": "83e8d502ad9305177ee6e0501ff7c88ee036579d",
+  "candidate_source": "/home/rob/prismabuild",
+  "equivalent_commits": [
+    {
+      "commit": "3641e29332bfd7a091f35b5bd3875b6de294c86e",
+      "why": "the merged-main alternative root named. Interchangeable for this pin by measurement, not by assertion: all eleven pinned paths are byte-identical between it and 83e8d502ad9305177ee6e0501ff7c88ee036579d, digested file by file from both commits. The pin names 83e8 because that is the immutable candidate this lane built and tested against."
+    }
+  ],
+  "files": {
+    "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
+    "src/prismabuild/movement_actions.py": "fd3a76883033c4e955a9e6e5a939536390671064ed44132fd90835003683d2af",
+    "src/prismabuild/pool.py": "176cc02a976ec8cca8c3b2fa41974ee2ed0c4afbb0d8e576b3dc9b9c09de450a",
+    "src/prismabuild/produced_output.py": "b3999af60784c55f46e3a93ebb7a8cae7e7a34ca3eae2faac8bad7f4cfa084b7",
+    "src/prismabuild/reader_lease.py": "0e1eb63d43ab228e820a207c18c441e01c5fb0e9d497972322e626f49fa6f53f",
+    "src/prismabuild/residency_map.py": "fa77a5fbb2bb00a255a9967611ab07f633a77f2d3c383506436f22076a625276",
+    "src/prismabuild/resource_scope.py": "f9a85dd277042031ae42a234d947c5abcdf20790e491610961e380445e6503e0",
+    "src/prismabuild/storage_tiers.py": "a33faa564893f9c745a105bc9d6cfd84eba26cd7732a18375a08ffacfaced294",
+    "tools/fleet/prewarm_loop.py": "638f2aeda817037df4c2ea99c557ab9104172823351553849ad0cc3244b9634f",
+    "tools/fleet/stage_move.py": "3e67cb50c99e3e804a3b9a00c80cfe0b39a36517fcf2e2420e28ca8fd42960d2",
+    "tools/fleet/stage_release.py": "900436256d57a78a43620385b60b5934a8197d42d0037cffd4140f429eb059a7"
+  },
+  "fleet_observation_as_of": {
+    "observed_utc": "2026-09-21",
+    "what": "a DATED observation of the live fleet, not an invariant. On this date exactly one runtime generation under /mnt/shared/prismabuild-fleet/runtime-generations carried produced_output.py (d794839c589d-1789966072-c66c7f0568d0) and none carried the 'deferred_own' egress field. A newer generation carrying this candidate's behaviour was activated the same day.",
+    "what_does_not_decay": "classify_egress_outcome must keep an answer for a receipt with NO 'deferred_own' key for as long as any generation without it can serve one. Calling that silence 'no deferral' is the fail-open shape this lane exists to refuse, whatever is deployed today.",
+    "why_it_is_dated": "the fleet moves; a test artifact that asserts a live-fleet fact decays the moment it does, and a stale assertion in a fixture is worse than no assertion. Nothing here is scanned or enforced at test time."
+  },
+  "note": "The PrismaBuild produced-output API this lane's Stage A boundary publication is built against. The SOURCE is root-accepted; global application is a separate, pending step, and this pin does not assert what any particular runtime generation carries -- see fleet_observation_as_of for a dated observation rather than a claim that decays. Provenance is an IMMUTABLE bundle, not a live worktree: the bytes here were cut with `git archive` from the committed tree at the candidate commit and written read-only under the fleet's qualification root, and the digests below are what the tests check. The mutable lane checkouts are deliberately NOT a search path: a committed fixture must not resolve against a tree that exists to move. Both halves of the harness come from ONE bundle -- produced_output.py with the pool.PoolQueue authorization that funds a successor mover over an already committed batch -- because mixing this produced_output with the installed 461728e4 pool would refuse a successor's funding for a reason that is not this lane's. The reader half is separately pinned and deployed: acquire_for's material_namespace/residency_root parameters are already present at PQ's own reviewed reader-lease pin (staged_lease.PB_READER_LEASE_PIN_COMMIT), so only the produced-output half is unqualified. These tests skip loudly when nothing resolves against the digests; they never imply support that does not exist.",
+  "qualification": "ROOT-ACCEPTED SOURCE, GLOBAL APPLICATION PENDING QUALIFICATION",
+  "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
+  "search_paths": [
+    {
+      "env": "PRISMAQUANT_STAGEA_PRODUCED_PB_SRC"
+    },
+    {
+      "glob": "/mnt/shared/prismabuild-fleet/qualification/pq-stagea-produced-boundaries-20260921/*"
+    }
+  ],
+  "supersedes": [
+    {
+      "candidate_commit": "27c4fc2915a609518a149f90af67034282494429",
+      "why": "superseded before final qualification: src/prismabuild/produced_output.py differs between the two bundles (27c 53776077b231..., 42f cf3289bb1003...), so evidence from the two is not one result. The other ten pinned files are byte-identical across the pair, checked file by file rather than assumed."
+    },
+    {
+      "candidate_commit": "42f2cfb874077da66c27401e718d3636903a8a40",
+      "why": "superseded by the root-accepted egress repair (PB795, with 792 and 794). Two of the eleven pinned files moved and the other nine are byte-identical, checked file by file: src/prismabuild/produced_output.py cf3289bb1003... -> b3999af60784...; tools/fleet/stage_release.py 6b94e738f78a... -> 900436256d57.... The one-token acceptance measured at 42f is therefore NOT carried forward: it was re-run against this bundle, because the file that moved is the one whose _evict_owned/_claimed_paths interaction lost the stage token."
+    }
+  ]
+}
