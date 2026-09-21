@@ -445,10 +445,30 @@ def _argv_flag(argv: Sequence, flag: str) -> str | None:
     return None
 
 
+def _canonical_control_root(value: object, *, label: str = "metadata_root") -> str:
+    """A control-metadata root, validated once with the same discipline the
+    bound-readset binders enforce per path: absolute, already normalized, no
+    ``..`` traversal, no trailing slash. Control metadata (slice manifests,
+    record files, bound readsets) may live in a generation-specific
+    namespace beside the immutable data tree; loose strings and symlinks are
+    not a placement contract, so the root is checked, never reinterpreted.
+    """
+    if not isinstance(value, str) or not value.startswith("/"):
+        raise ValueError(f"{label} must be an absolute path: refusing")
+    import os
+    stripped = value.rstrip("/")
+    if not stripped or os.path.normpath(stripped) != stripped \
+            or ".." in stripped.split("/"):
+        raise ValueError(f"{label} must be a canonical absolute path "
+                         f"(normalized, no '..' segments): refusing")
+    return stripped
+
+
 def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                  chunk_target_bytes: int | None = None,
                  stride: int | None = None,
                  output_root: str | None = None,
+                 metadata_root: str | None = None,
                  plan_path: str | None = None,
                  plan_sha256: str | None = None,
                  prepared_path: str | None = None,
@@ -464,6 +484,20 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
     writes nothing (callers persist records, slices and the adjoint manifest
     at the paths the records name). Layers ascend; every list is sealed-order;
     only canonical JSON is digested.
+
+    ``metadata_root`` (optional, PQ #884) separates the DATA output root from
+    an explicit immutable control-metadata generation root. The data root
+    (``output_root``, default the plan's) keeps owning what execution writes
+    and what stage A seals: ``output_space`` stays
+    ``{output_root}/layer-quanta/{qid}`` and
+    ``adjoint.boundary_artifacts`` stays ``{output_root}/layer-quanta/adjoint``
+    — the consumer's identity gate pins exactly those derivations. The
+    control root owns what THIS producer seals: slice manifests land at
+    ``{control_root}/manifests/…`` and the record path sealed into the slice
+    argv is ``{control_root}/records/{qid}.json``. With no ``metadata_root``
+    the control root is the historical ``{output_root}/layer-quanta`` and
+    every sealed path is byte-identical to the previous layout (existing
+    calls and defaults unchanged).
     """
     if not isinstance(plan, dict) or not isinstance(prepared, dict):
         raise ValueError("layer_quanta needs the plan and prepared mappings")
@@ -540,6 +574,14 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                                            scope=scope, checkpoints=checkpoints)
     quanta_root = output_root.rstrip("/") + "/layer-quanta"
     adjoint_dir = quanta_root + "/adjoint"
+    # PQ #884: control metadata (slice manifests, record paths) may live in
+    # an explicit generation namespace; the data derivations above never
+    # move. Default control root = the historical layout, so the seam is
+    # invisible to every existing caller.
+    control_root = (_canonical_control_root(metadata_root)
+                    if metadata_root is not None else quanta_root)
+    control_manifest_dir = control_root + "/manifests"
+    control_record_dir = control_root + "/records"
 
     records = []
     slices = {}
@@ -568,8 +610,8 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         chunks = derive_chunks(qid, layer_bytes, ends, chunk_target_bytes)
         checkpoint, chain = adjoint_binding(layer, checkpoints)
         windows = [{"window_index": index} for index in range(window_count)]
-        manifest_path = f"{quanta_root}/manifests/{qid}.data-manifest.json.gz"
-        record_path = f"{quanta_root}/records/{qid}.json"
+        manifest_path = f"{control_manifest_dir}/{qid}.data-manifest.json.gz"
+        record_path = f"{control_record_dir}/{qid}.json"
         space = f"{quanta_root}/{qid}"
         argv_sealed = ["python3", "-m", SLICE_ENTRY_POINT, "--quantum", record_path,
                        "--output-root", output_root]
@@ -674,6 +716,16 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                 "checkpoints": checkpoints,
                 "num_checkpoints": derived_stride["num_checkpoints"],
                 "max_chain_layers": derived_stride["max_chain_layers"],
+                # PQ #884: provenance for an explicit control-metadata
+                # generation namespace, present ONLY when one was given --
+                # the default-layout derivation bytes stay exactly what the
+                # previous producer sealed. Nothing consumes an exhaustive
+                # key set here (the joiner cites derivation v2 for windows
+                # only); the field is additive provenance, not identity
+                # ceremony: the records and manifests already bind their
+                # actual paths.
+                **({"control_metadata_root": control_root}
+                   if metadata_root is not None else {}),
             }}
 
 
@@ -1355,11 +1407,36 @@ def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     }
 
 
+def bound_readset_directory(output_root: str, *,
+                            metadata_root: str | None = None) -> str:
+    """The directory holding newly bound readset manifests (PQ #884).
+
+    One derivation for both callers (binders and emitters), so a bound path
+    can never disagree with the record that names it. Default (no
+    ``metadata_root``): the historical
+    ``{output_root}/layer-quanta/adjoint/bound-readsets``. With an explicit
+    control-metadata generation root the bound readsets -- themselves
+    control metadata, never stage-A data -- land at the SAME relative
+    control layout inside that namespace:
+    ``{metadata_root}/adjoint/bound-readsets``. The relative control layout
+    is identical in both branches, so ``metadata_root ==
+    {output_root}/layer-quanta`` reproduces the default paths exactly,
+    while ``adjoint.boundary_artifacts`` (the stage-A DATA directory) keeps
+    deriving from the data output root alone and never points here.
+    """
+    if metadata_root is not None:
+        return _canonical_control_root(metadata_root) + "/adjoint/bound-readsets"
+    if type(output_root) is not str or not output_root.startswith("/"):
+        raise ValueError("an output root must be absolute: refusing")
+    return output_root.rstrip("/") + "/layer-quanta/adjoint/bound-readsets"
+
+
 def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
                                   manifest: Mapping, manifest_path: str,
                                   manifest_sha256: str, output_root: str,
                                   strided_boundaries: Sequence[int],
-                                  n_probes: int) -> dict:
+                                  n_probes: int,
+                                  metadata_root: str | None = None) -> dict:
     """Bind a sealed boundary readset manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying a ``boundary_readset`` block
@@ -1425,9 +1502,9 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
                          f"count, not {n_probes!r}")
     if type(output_root) is not str or not output_root.startswith("/"):
         raise ValueError("an output root must be absolute: refusing")
-    expected_path = (f"{output_root.rstrip('/')}/layer-quanta/adjoint/"
-                     f"bound-readsets/{quantum_id(layer)}"
-                     ".boundary-readset.json.gz")
+    expected_path = (
+        bound_readset_directory(output_root, metadata_root=metadata_root)
+        + f"/{quantum_id(layer)}.boundary-readset.json.gz")
     if manifest_path != expected_path or os.path.normpath(
             manifest_path) != manifest_path or ".." in manifest_path.split("/"):
         raise ValueError(
@@ -1836,12 +1913,16 @@ def emit_quantum_boundary_readsets(receipt: Mapping,
                                    records: Sequence[Mapping], *,
                                    strided_boundaries: Sequence[int],
                                    n_probes: int,
-                                   output_root: str) -> list[dict]:
+                                   output_root: str,
+                                   metadata_root: str | None = None) -> list[dict]:
     """The post-capture generation path: new records plus their manifests.
 
     For every record, derives the boundary readset manifest, seals it, and
     binds it to a new record generation under
-    ``{output_root}/layer-quanta/adjoint/bound-readsets/``. Returns one
+    ``{output_root}/layer-quanta/adjoint/bound-readsets/`` -- or, with an
+    explicit ``metadata_root`` (PQ #884), under that generation namespace's
+    ``adjoint/bound-readsets/`` (the same relative control layout), leaving
+    the immutable stage-A adjoint artifact tree untouched. Returns one
     ``{"record", "manifest", "manifest_path", "manifest_sha256"}`` per
     quantum, in record order. Emits nothing to disk and mutates nothing:
     the post-capture regen writes the returned bytes and adopts the
@@ -1853,6 +1934,7 @@ def emit_quantum_boundary_readsets(receipt: Mapping,
         raise ValueError("no quantum records to bind: refusing")
     if type(output_root) is not str or not output_root.startswith("/"):
         raise ValueError("an output root must be absolute: refusing")
+    bound_dir = bound_readset_directory(output_root, metadata_root=metadata_root)
     emitted: list[dict] = []
     seen: set[str] = set()
     for record in rows:
@@ -1860,8 +1942,7 @@ def emit_quantum_boundary_readsets(receipt: Mapping,
             record, receipt, strided_boundaries=strided_boundaries,
             n_probes=n_probes)
         quantum_id = record.get("quantum_id")
-        manifest_path = (f"{output_root.rstrip('/')}/layer-quanta/adjoint/"
-                         f"bound-readsets/{quantum_id}.boundary-readset.json.gz")
+        manifest_path = f"{bound_dir}/{quantum_id}.boundary-readset.json.gz"
         if quantum_id in seen or manifest_path in seen:
             raise ValueError(f"duplicate quantum binding {quantum_id!r}: "
                              "refusing")
@@ -1876,7 +1957,8 @@ def emit_quantum_boundary_readsets(receipt: Mapping,
                 manifest_sha256=manifest_sha256,
                 output_root=output_root,
                 strided_boundaries=strided_boundaries,
-                n_probes=n_probes),
+                n_probes=n_probes,
+                metadata_root=metadata_root),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,
@@ -1890,7 +1972,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             output_root: str,
                             strided_boundaries: Sequence[int], n_probes: int,
                             calib: Mapping,
-                            render_prerequisite: Mapping) -> dict:
+                            render_prerequisite: Mapping,
+                            metadata_root: str | None = None) -> dict:
     """Bind a sealed executable read manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying an ``executable_readset``
@@ -1940,9 +2023,9 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                          f"count, not {n_probes!r}")
     if type(output_root) is not str or not output_root.startswith("/"):
         raise ValueError("an output root must be absolute: refusing")
-    expected_path = (f"{output_root.rstrip('/')}/layer-quanta/adjoint/"
-                     f"bound-readsets/{quantum_id(layer)}"
-                     ".executable.json.gz")
+    expected_path = (
+        bound_readset_directory(output_root, metadata_root=metadata_root)
+        + f"/{quantum_id(layer)}.executable.json.gz")
     if manifest_path != expected_path or os.path.normpath(
             manifest_path) != manifest_path or ".." in manifest_path.split("/"):
         raise ValueError(
@@ -2006,13 +2089,15 @@ def emit_quantum_executable_readsets(
         receipt: Mapping, records: Sequence[Mapping],
         parent_manifest: Mapping, *, strided_boundaries: Sequence[int],
         n_probes: int, calib: Mapping, render_prerequisite: Mapping,
-        output_root: str) -> list[dict]:
+        output_root: str, metadata_root: str | None = None) -> list[dict]:
     """The post-capture generation path for executable read manifests.
 
     For every record, derives the executable manifest, seals it, and binds
     it to a new record generation under
-    ``{output_root}/layer-quanta/adjoint/bound-readsets/``. Returns one
-    ``{"record", "manifest", "manifest_path", "manifest_sha256"}`` per
+    ``{output_root}/layer-quanta/adjoint/bound-readsets/`` -- or, with an
+    explicit ``metadata_root`` (PQ #884), under that generation namespace's
+    ``adjoint/bound-readsets/`` (the same relative control layout). Returns
+    one ``{"record", "manifest", "manifest_path", "manifest_sha256"}`` per
     quantum, in record order. Emits nothing to disk and mutates nothing:
     the post-capture regen writes the returned bytes and adopts the
     returned records. Duplicate quantum ids or manifest paths refuse whole
@@ -2023,6 +2108,7 @@ def emit_quantum_executable_readsets(
         raise ValueError("no quantum records to bind: refusing")
     if type(output_root) is not str or not output_root.startswith("/"):
         raise ValueError("an output root must be absolute: refusing")
+    bound_dir = bound_readset_directory(output_root, metadata_root=metadata_root)
     emitted: list[dict] = []
     seen: set[str] = set()
     for record in rows:
@@ -2031,8 +2117,7 @@ def emit_quantum_executable_readsets(
             strided_boundaries=strided_boundaries, n_probes=n_probes,
             calib=calib, render_prerequisite=render_prerequisite)
         quantum_id = record.get("quantum_id")
-        manifest_path = (f"{output_root.rstrip('/')}/layer-quanta/adjoint/"
-                         f"bound-readsets/{quantum_id}.executable.json.gz")
+        manifest_path = f"{bound_dir}/{quantum_id}.executable.json.gz"
         if quantum_id in seen or manifest_path in seen:
             raise ValueError(f"duplicate quantum binding {quantum_id!r}: "
                              "refusing")
@@ -2047,7 +2132,8 @@ def emit_quantum_executable_readsets(
                 manifest_sha256=manifest_sha256,
                 output_root=output_root,
                 strided_boundaries=strided_boundaries, n_probes=n_probes,
-                calib=calib, render_prerequisite=render_prerequisite),
+                calib=calib, render_prerequisite=render_prerequisite,
+                metadata_root=metadata_root),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,
