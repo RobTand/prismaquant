@@ -1,7 +1,10 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/produced-render-870-20260921`.
+As of: 2026-09-21 - merged Stage B executable path (PQ #870 + accepted #900).
 Stamps follow, newest first, each recording its own branch and date.
+
+Merged (2026-09-21, `fix/produced-render-870-20260921`, merge of accepted PR910 head `2fabd11`) for the combined Stage B executable path: the produced-render writer/reader connection and validated executable binding (PQ #870) together with the actual source readset independent of the parent byte tiling (PQ #900). `build_quantum_executable_manifest`, `bind_quantum_executable` and `emit_quantum_executable_readsets` each take both `binding_validator` and `layer_source_spans`; the regen CLI seals a binding opt-in via `--render-binding` + `--render-binding-pool-root` and completes source phases opt-in via `--executable-readsets --source-layers-prefix PREFIX`.
+
 
 Re-stamped (2026-09-21, `fix/produced-render-870-20260921`) for **the
 produced-render writer/reader connection** (PQ #870) and the validated
@@ -69,6 +72,35 @@ publish/read via the real mover argv, cache reuse without charge or
 rewrite, idempotent retry, retire/release) plus the sequencing gates in
 `tests/test_quantum_executable_readset.py`.
 
+Re-stamped (2026-09-21, `fix/stageb-source-readset-900`) for **Stage B's
+actual source readset, independent of the parent byte tiling** (PQ #900).
+`build_quantum_executable_manifest(layer_source_spans=...)` completes every
+chain and own source phase using Stage A's `complete_source_extent` and
+`uncovered_source_spans`: each tensor must fit inside one entry of that
+phase, including a small tensor already declared in a neighbouring layer's
+phase. Missing or empty per-layer span sets refuse. Added entries follow all
+existing entries and use the first missing tensor's own offset; a duplicate
+`(path, offset)` refuses. The manifest records `annotations.source_completion`
+and the existing executable binder rederives the completed manifest against
+the same spans before binding its digest into a new record generation.
+
+`tools/regenerate_joint_quanta.py --executable-readsets
+--source-layers-prefix PREFIX` reads the sealed plan's source checkpoint
+index and shard headers once and passes all body-layer tensor spans through
+the builder, emitter and binder. This is opt-in so historical generations
+still reproduce exactly; `--metadata-root` gives the new control generation
+its own namespace and `--compare-existing` checks the retained scientific
+bindings before any publication. The frozen parent, slice entries and chunk
+tiling, plan/prepared identity, calibration draw, and Stage A artifact paths
+stay intact. A new executable record identity is expected, just as for every
+post-capture binding. Completing only four slices would both violate their
+parent tiling and miss source holes in the other layers a quantum walks.
+**The produced-output launch gate stays in place:** executable manifests
+remain sequencing-only until the accepted validator integration tracked by
+PQ #870 / PR #871 is available. This repair supplies no storage lease and
+does not make a Stage B GPU run qualified. Gate:
+`tests/test_stageb_readset_source_coverage.py`.
+
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 staged-range resolver asking every covering entry** (PQ #902). PrismaBuild
 refuses a repeated `(path, offset)` and allows an overlap, and stages each
@@ -133,8 +165,9 @@ in the first 80 KB of a shard whose first MiB a neighbouring layer's phase
 declares). PrismaBuild's `validate_data_manifest` and `manifest_phase_ranges`
 accept it. **Not changed:** the per-layer slice manifests and the quantum records
 that seal them. They tile the parent byte for byte (§3.1 of the distributed
-campaign contract), so they carry the same four holes into Stage B; that is
-filed separately. Gates: `tests/test_stagea_readset_source_coverage.py`.
+campaign contract). Stage B source coverage is completed separately in its
+bound executable readsets (PQ #900, above); slice coverage alone proves no
+reader coverage. Gates: `tests/test_stagea_readset_source_coverage.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 scope of Stage A's kernel-time profiler** (PQ #899). `run_adjoint_capture`

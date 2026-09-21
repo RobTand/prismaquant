@@ -8,14 +8,13 @@ coverage proofs refuse gaps rather than shrinking the layer set.
 Derivation decisions (the contract leaves these corners implicit; each is
 documented where it is implemented):
 
-D1. Slice phase tables name ``head`` as a zero-byte leading phase. ``chunks``
-    must tile ``[0, total_bytes)`` (§3.1) and the 45 read sets must be
-    pairwise disjoint (§2.3), so no parent-head entry and no other layer's
-    source extent may be copied into a slice. The quantum loads its head
-    inputs (plan, prepared, calibration, identity — digest-verified, ARC-warm)
-    by path from the shared mount, exactly as boundary artifacts are
-    receipt-addressed rather than manifest entries (§3.3); every tier-fed
-    byte flows through a chunk phase.
+D1. Slice phase tables contain only chunk phases (PQ #849); a zero-byte
+    leading ``head`` would invalidate the table for PrismaBuild. ``chunks``
+    tile ``[0, total_bytes)`` (§3.1) and the 45 slices are pairwise disjoint
+    (§2.3), so no parent-head entry or another layer's source extent may be
+    copied into a slice. The separately bound executable readset declares
+    calibration, checkpoint, chain/own source and boundary consumption;
+    its read phases do not change the slice's chunk tiling.
 D2. ``windows`` seals the ordered window-index slice of the plan's retained
     window partition (``windows_by_layer`` counts, copied verbatim). Per-window
     names and byte sizes are recomputed at runtime by the quantum through
@@ -65,8 +64,8 @@ COVERAGE_SCHEMA = "prismaquant.joint_layer_quanta.coverage.v1"
 ADJOINT_CAPTURE_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 MANIFEST_SCHEMA_V1 = "prismaquant.prismabuild.data_manifest.v1"
 MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
-#: The stage-A manifest's record of what was added to the parent's layer
-#: extents, and that the source-coverage gate ran (PQ #898).
+#: A stage-A or executable quantum manifest's record of additions to the
+#: parent's layer extents and the source-coverage gate (PQ #898 / #900).
 SOURCE_COMPLETION_SCHEMA = "prismaquant.joint_layer_quanta.source_completion.v1"
 
 #: The tail leg's telemetry name. It is NOT a read-plan phase: published
@@ -1865,7 +1864,8 @@ def build_quantum_executable_manifest(
         record: Mapping, receipt: Mapping, parent_manifest: Mapping, *,
         strided_boundaries: Sequence[int], n_probes: int, calib: Mapping,
         render_prerequisite: Mapping,
-        binding_validator=None) -> dict:
+        binding_validator=None,
+        layer_source_spans: Mapping[int, Sequence] | None = None) -> dict:
     """ONE executable v2 read manifest for a quantum row (PQ #862).
 
     Derived post-capture from the completed adjoint receipt, the record's
@@ -1880,6 +1880,13 @@ def build_quantum_executable_manifest(
     across phases are the v2 repeated-read mechanism (the own boundary
     corpus repeats across replay windows because every window re-reads
     it). Resume only ever reads a subset.
+
+    With ``layer_source_spans`` (PQ #900), complete and check every chain
+    and own source phase against the actual reader's tensor spans, using
+    the same completion rule as stage A. Coverage must hold in that phase
+    and in one entry per tensor. Added entries follow the existing entries;
+    the parent, slice tiling, chunks and campaign identity never change.
+    Without spans the historical manifest bytes reproduce unchanged.
 
     Rendered-weight bytes are NOT staged here: the PWC retained-window
     reads that need them name the PB732 produced-output scope in
@@ -2054,6 +2061,32 @@ def build_quantum_executable_manifest(
         boundary: [_take(entry, where=f"layer-{boundary} source extent")
                    for entry in source_raw[boundary]]
         for boundary in needed}
+    completed: list[dict] = []
+    if layer_source_spans is not None:
+        taken = {(os.path.normpath(path), offset)
+                 for path, offset in by_coordinates}
+        for boundary in needed:
+            spans = layer_source_spans.get(boundary)
+            if not spans:
+                raise ValueError(
+                    f"phase layer-{boundary} has no source spans: gap, refusing")
+            run = source_runs[boundary]
+            added = complete_source_extent(
+                [manifest_entries[index] for index in run], spans,
+                taken=taken, where=f"phase layer-{boundary}")
+            run.extend(_take(entry, where=f"layer-{boundary} completed source")
+                       for entry in added)
+            completed.extend(dict(layer=boundary, path=entry["path"],
+                                  offset=entry["offset"], bytes=entry["bytes"])
+                             for entry in added)
+            missing = uncovered_source_spans(
+                [manifest_entries[index] for index in run], spans)
+            if missing:
+                path, begin, end = missing[0]
+                raise ValueError(
+                    f"phase layer-{boundary} leaves {len(missing)} source "
+                    f"span(s) undeclared, first {path}:[{begin}, {end}): "
+                    "gap, refusing")
     read_phases: list[dict] = []
     cumulative = 0
 
@@ -2111,6 +2144,13 @@ def build_quantum_executable_manifest(
             "calib": {"path": calib_path, "bytes": calib_bytes,
                       "sha256": calib_sha256},
             "render_prerequisite": prerequisite,
+            **({"source_completion": {
+                "schema": SOURCE_COMPLETION_SCHEMA,
+                "layers_checked": len(needed),
+                "source_spans": sum(len(layer_source_spans[boundary])
+                                    for boundary in needed),
+                "added": completed}}
+               if layer_source_spans is not None else {}),
         },
         "read_plan": {"phases": read_phases, "read_bytes": cumulative},
     }
@@ -2181,7 +2221,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             calib: Mapping,
                             render_prerequisite: Mapping,
                             metadata_root: str | None = None,
-                            binding_validator=None) -> dict:
+                            binding_validator=None,
+                            layer_source_spans: Mapping[int, Sequence] | None = None) -> dict:
     """Bind a sealed executable read manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying an ``executable_readset``
@@ -2264,7 +2305,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
             record, receipt, parent_manifest,
             strided_boundaries=strided_boundaries, n_probes=n_probes,
             calib=calib, render_prerequisite=render_prerequisite,
-            binding_validator=binding_validator)
+            binding_validator=binding_validator,
+            layer_source_spans=layer_source_spans)
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         raise ValueError("the executable readset does not derive from its "
                          f"record, receipt and parent: refusing ({exc})") from exc
@@ -2299,7 +2341,8 @@ def emit_quantum_executable_readsets(
         parent_manifest: Mapping, *, strided_boundaries: Sequence[int],
         n_probes: int, calib: Mapping, render_prerequisite: Mapping,
         output_root: str, metadata_root: str | None = None,
-        binding_validator=None) -> list[dict]:
+        binding_validator=None,
+        layer_source_spans: Mapping[int, Sequence] | None = None) -> list[dict]:
     """The post-capture generation path for executable read manifests.
 
     For every record, derives the executable manifest, seals it, and binds
@@ -2326,7 +2369,8 @@ def emit_quantum_executable_readsets(
             record, receipt, parent_manifest,
             strided_boundaries=strided_boundaries, n_probes=n_probes,
             calib=calib, render_prerequisite=render_prerequisite,
-            binding_validator=binding_validator)
+            binding_validator=binding_validator,
+            layer_source_spans=layer_source_spans)
         quantum_id = record.get("quantum_id")
         manifest_path = f"{bound_dir}/{quantum_id}.executable.json.gz"
         if quantum_id in seen or manifest_path in seen:
@@ -2345,11 +2389,10 @@ def emit_quantum_executable_readsets(
                 strided_boundaries=strided_boundaries, n_probes=n_probes,
                 calib=calib, render_prerequisite=render_prerequisite,
                 metadata_root=metadata_root,
-                binding_validator=binding_validator),
+                binding_validator=binding_validator,
+                layer_source_spans=layer_source_spans),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,
         })
     return emitted
-
-

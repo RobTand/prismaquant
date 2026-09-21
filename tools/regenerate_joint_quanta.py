@@ -61,6 +61,12 @@ Gates, all fail closed with exit 3:
   record additionally get new bound generations (bulk readset, PQ #848;
   single executable manifest, PQ #862) whose files land under
   ``bound-readsets/`` -- the new tree's, or the metadata root's.
+  With ``--executable-readsets --source-layers-prefix PREFIX`` (PQ #900),
+  read the sealed plan's checkpoint index and shard headers once and
+  complete every chain/own source phase against the actual tensor spans.
+  The parent, slices, chunk tiling and plan/prepared bytes stay intact;
+  only the new executable manifest and its binding carry the completion.
+  Without the prefix the historical readset bytes reproduce unchanged.
   ``--check-only`` runs the gates and writes nothing, mirroring the
   external binder's dry run.
 
@@ -83,13 +89,13 @@ if __package__:
     from prismaquant.joint_layer_quanta import (
         check_quantum_for_campaign, derive_stride,
         emit_quantum_boundary_readsets, emit_quantum_executable_readsets,
-        layer_quanta, seal_manifest_bytes)
+        layer_quanta, read_layer_source_spans, seal_manifest_bytes)
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from prismaquant.joint_layer_quanta import (
         check_quantum_for_campaign, derive_stride,
         emit_quantum_boundary_readsets, emit_quantum_executable_readsets,
-        layer_quanta, seal_manifest_bytes)
+        layer_quanta, read_layer_source_spans, seal_manifest_bytes)
 
 EXIT_REFUSED = 3
 
@@ -709,9 +715,20 @@ def main(argv=None) -> int:
     ap.add_argument("--render-binding-pool-root", default=None, metavar="ROOT",
                     help="PrismaBuild pool root the render binding is "
                          "validated against (required with --render-binding)")
+    ap.add_argument("--source-layers-prefix", default=None,
+                    help="with --executable-readsets: complete each chain/own "
+                         "source phase from the actual checkpoint tensor "
+                         "spans under this reader prefix (e.g. "
+                         "model.language_model.layers.). Reads the sealed "
+                         "plan's model index and shard headers; slices, "
+                         "chunks and campaign identity stay unchanged")
     ap.add_argument("--check-only", action="store_true",
                     help="Gate 1 alone; write nothing")
     args = ap.parse_args(argv)
+    if args.source_layers_prefix is not None and (
+            not args.executable_readsets or not args.source_layers_prefix):
+        return _fail("--source-layers-prefix needs --executable-readsets "
+                     "and a nonempty checkpoint reader prefix")
     if args.expect_existing is not None and args.original_root is None:
         return _fail("Gate 1 needs --original-root beside --expect-existing")
     if args.expect_existing is not None and args.compare_existing is not None:
@@ -950,6 +967,20 @@ def main(argv=None) -> int:
                         raise ValueError(
                             f"cannot build the binding validator: {exc}"
                         ) from exc
+                source_spans = None
+                if args.source_layers_prefix is not None:
+                    model = plan.get("model")
+                    if type(model) is not str or not os.path.isabs(model):
+                        raise ValueError(
+                            "source completion needs the sealed plan's "
+                            "absolute source model directory: refusing")
+                    if sorted(layers) != list(range(len(layers))):
+                        raise ValueError(
+                            "source completion needs parent layers starting "
+                            "at zero: refusing")
+                    source_spans = read_layer_source_spans(
+                        model, len(layers),
+                        checkpoint_layers_prefix=args.source_layers_prefix)
                 emitted = emit_quantum_executable_readsets(
                     receipt, produced["records"], parent,
                     strided_boundaries=checkpoints, n_probes=n_probes,
@@ -957,12 +988,13 @@ def main(argv=None) -> int:
                            "sha256": calib_sha256},
                     render_prerequisite=prerequisite,
                     output_root=output_root, metadata_root=metadata_root,
-                    binding_validator=binding_validator)
+                    binding_validator=binding_validator,
+                    layer_source_spans=source_spans)
                 produced["records"] = [row["record"] for row in emitted]
                 bound_manifests.extend(
                     (row["manifest_path"], row["manifest"],
                      row["manifest_sha256"]) for row in emitted)
-        except (ValueError, KeyError, TypeError) as exc:
+        except (ValueError, KeyError, TypeError, OSError) as exc:
             return _fail(f"readset binding: {exc}")
     if args.compare_existing is not None:
         # Read-only scientific-binding comparison against a prior
