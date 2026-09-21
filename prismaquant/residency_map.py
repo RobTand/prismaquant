@@ -1092,9 +1092,10 @@ class ResidencyResolver:
 
         Returns ``tier_id``, ``leads`` (the mover keys that vouched this
         read set), ``manifest_sha256``, and the ram half's
-        ``ram_tier_id``/``ram_epoch``. A stage-tier acquire names every
-        lead as covers with this manifest; RAM movers are not in the
-        composed map (see ``staged_lease.ram_covers``).
+        ``ram_tier_id``/``ram_epoch``. The leads are heritage, not a
+        covering set: both tier legs resolve minimal per-key covers
+        through PB's ``covers_for_keys`` (RAM movers are not in the
+        composed map at all — see ``staged_lease.ram_covers``).
         """
         with self._lock:
             return {"tier_id": self._tier_id,
