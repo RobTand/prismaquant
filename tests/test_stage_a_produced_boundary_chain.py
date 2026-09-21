@@ -868,16 +868,32 @@ def test_repeated_distinct_group_turnover_on_a_single_stage_token(
     """Four distinct groups through ONE token, and only that.
 
     What this establishes: repeated credit turnover across distinct
-    publication groups. The tier mints a single stage token and the
-    template's window is one token, so the four groups cannot be resident
-    together -- each window's mover takes that token by exact transfer,
-    retirement returns it to free, and the next window refills from free.
-    If one stage copy were not returned, window 1 could not fund and this
-    stops. MEASURED, not assumed: tools/audit_produced_window_tokens.py
-    traced the ledger through all four windows and total occupancy is
-    conserved at one token with no per-window loss (the audit is why this
-    tier is one token and not two -- the earlier two-token fixture was
-    sized against a two-token WINDOW, and "headroom" was never the reason).
+    publication groups. The template's window is ONE token, so only one
+    group's stage copy is funded at a time -- each window's mover takes
+    that token by exact transfer, retirement returns it, and the next
+    window refills. Four groups against one window credit: if a stage copy
+    were not returned, window 1 could not fund and this stops.
+
+    Why the TIER mints two when the window is one, measured rather than
+    assumed (tools/audit_produced_window_tokens.py, and six repeats of
+    this test at one token). Steady-state occupancy is ONE: the ledger
+    shows held=1 while a group is staged and held=0 with the token back in
+    free at every window close, and at a two-token tier the second token
+    is never held by anyone. It is not an overlap of two staged copies.
+    It covers a RACE. `produced_output.refill_window` stops counting a
+    batch in ``outstanding`` when the producer's retirement returns, but
+    the physical token is released by MOVER key through the fleet's egress
+    ("the fleet never restores producer holdings"), which happens after.
+    A producer minted exactly at its window can refill inside that gap: at
+    one token this test failed 1 run in 6, on the fourth group, with
+    ``{'refusal': 'tier-reservation-unavailable', 'available': {},
+    'window_gib': 1, 'held': 0, 'outstanding': 0}`` -- room was 1 and the
+    tier had nothing free, i.e. the availability branch, NOT ``room <= 0``
+    (which returns ok with acquired 0). Had two credits genuinely been
+    occupied, ``outstanding`` would have read 1 and that other branch
+    would have fired. Do not shrink this tier back to one without
+    re-measuring: one token makes this test flaky, it does not make it
+    stricter.
 
     What this does NOT establish: full cotangent rollover. The previous
     group's entries are disposed inside the NEXT group's window, after the
@@ -889,7 +905,7 @@ def test_repeated_distinct_group_turnover_on_a_single_stage_token(
     import torch
     storage, publication, q, env, pb_repo = _bound_owner(
         tmp_path, n_batches=4 * GROUP_SIZE, payload_max_bytes=1 << 22,
-        window_gib=1, gib=1)
+        window_gib=1, gib=2)
     groups = [_write_group(storage, count=GROUP_SIZE, first=index * GROUP_SIZE)
               for index in range(4)]
     assert storage.telemetry["produced_groups_prewritten"] == 4
