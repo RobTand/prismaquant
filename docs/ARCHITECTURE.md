@@ -1,10 +1,21 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 - merged Stage B executable path (PQ #870 + accepted #900).
+As of: 2026-09-21 - merged Stage B executable path (PQ #870 + accepted #900 + #909).
 Stamps follow, newest first, each recording its own branch and date.
 
-Merged (2026-09-21, `fix/produced-render-870-20260921`, merge of accepted PR910 head `2fabd11`) for the combined Stage B executable path: the produced-render writer/reader connection and validated executable binding (PQ #870) together with the actual source readset independent of the parent byte tiling (PQ #900). `build_quantum_executable_manifest`, `bind_quantum_executable` and `emit_quantum_executable_readsets` each take both `binding_validator` and `layer_source_spans`; the regen CLI seals a binding opt-in via `--render-binding` + `--render-binding-pool-root` and completes source phases opt-in via `--executable-readsets --source-layers-prefix PREFIX`.
+Merged (2026-09-21, `fix/produced-render-870-20260921`, merge of accepted PR910 head `2fabd11`) for the combined Stage B executable path: the produced-render writer/reader connection and validated executable binding (PQ #870) together with the actual source readset independent of the parent byte tiling (PQ #900). `build_quantum_executable_manifest`, `bind_quantum_executable` and `emit_quantum_executable_readsets` each take `binding_validator`, `layer_source_spans` and `source_model_root`; the regen CLI seals a binding opt-in via `--render-binding` + `--render-binding-pool-root` and completes source phases opt-in via `--executable-readsets --source-layers-prefix PREFIX`.
 
+
+Re-stamped (2026-09-21, `fix/produced-render-870-20260921`) for **source-only
+executable phases** (PQ #909). `_source_extent_entries(source_model_root=...)`
+keeps only the parent entries under the sealed plan's source model directory
+(path-component boundary, the stage-A selection): rendered-cache files the
+parent also tiles never stage in a chain/own source phase and stay under the
+produced-output lifecycle. The tiling-agreement check still runs on the whole
+tiled group first, a phase left with no source entry refuses, and without a
+root the historical bytes reproduce unchanged. The regen CLI reads the root
+from the sealed plan's `model` and refuses without it. Gate:
+`tests/test_stageb_source_render_exclusion.py`.
 
 Re-stamped (2026-09-21, `fix/produced-render-870-20260921`) for **the
 produced-render writer/reader connection** (PQ #870) and the validated

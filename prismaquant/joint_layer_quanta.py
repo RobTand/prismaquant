@@ -1827,14 +1827,47 @@ def quantum_executable_phase_names(chain_layers: Sequence[int], layer: int,
     return tuple(names)
 
 
+def _is_source_model_path(path: object, model_root: str) -> bool:
+    """Whether a parent entry path is checkpoint source (PQ #909).
+
+    Component-boundary match against the sealed plan's source model
+    directory: the root itself or anything under ``root/``, compared on
+    normpath'd paths. A sibling such as ``root + "-evil"`` never matches,
+    which a bare ``startswith`` would admit; this is the stage-A source
+    selection (``build_adjoint_manifest``) spelled as the boundary it is.
+    A non-string or empty path is never source.
+    """
+    if type(path) is not str or not path:
+        return False
+    candidate = os.path.normpath(path)
+    base = os.path.normpath(model_root)
+    return candidate == base or candidate.startswith(base + os.sep)
+
+
 def _source_extent_entries(parent_manifest: Mapping, *,
-                           layers: Sequence[int]) -> dict[int, list[dict]]:
+                           layers: Sequence[int],
+                           source_model_root: str | None = None
+                           ) -> dict[int, list[dict]]:
     """The parent manifest's per-layer source-extent entries, re-based.
 
     Entry form is the parent's own ``{path, offset, bytes, sha256}`` --
     file coordinates, never readdressed. A layer phase missing from the
     parent table, or entries disagreeing with its byte range, refuses.
+
+    With ``source_model_root`` (PQ #909), each layer phase keeps only the
+    entries under the sealed plan's source model directory: rendered-cache
+    files the parent also tiles stay under the produced-output lifecycle
+    and never stage in a source phase. The agreement check still runs on
+    the whole tiled group first, so the parent tiling itself is never
+    reshaped here. A phase left with no source entry refuses. Without a
+    root every entry is kept and the historical bytes reproduce unchanged.
     """
+    if source_model_root is not None:
+        if type(source_model_root) is not str \
+                or not source_model_root \
+                or not os.path.isabs(source_model_root):
+            raise ValueError("a source model root must be an absolute "
+                             "directory: refusing")
     rows = {row["name"]: row for row in phase_ranges(parent_manifest)}
     entries = parent_manifest.get("entries")
     if not isinstance(entries, list) or not entries:
@@ -1853,6 +1886,14 @@ def _source_extent_entries(parent_manifest: Mapping, *,
         if not group:
             raise ValueError(f"phase layer-{int(layer)} holds no source "
                              "extent: gap, refusing")
+        if source_model_root is not None:
+            group = [entry for entry in group
+                     if _is_source_model_path(entry.get("path"),
+                                              source_model_root)]
+            if not group:
+                raise ValueError(
+                    f"phase layer-{int(layer)} holds no source extent under "
+                    f"{source_model_root}: gap, refusing")
         runs[int(layer)] = [
             dict(path=entry["path"], offset=entry["offset"],
                  bytes=entry["bytes"], sha256=entry.get("sha256"))
@@ -1865,7 +1906,8 @@ def build_quantum_executable_manifest(
         strided_boundaries: Sequence[int], n_probes: int, calib: Mapping,
         render_prerequisite: Mapping,
         binding_validator=None,
-        layer_source_spans: Mapping[int, Sequence] | None = None) -> dict:
+        layer_source_spans: Mapping[int, Sequence] | None = None,
+        source_model_root: str | None = None) -> dict:
     """ONE executable v2 read manifest for a quantum row (PQ #862).
 
     Derived post-capture from the completed adjoint receipt, the record's
@@ -1887,6 +1929,12 @@ def build_quantum_executable_manifest(
     and in one entry per tensor. Added entries follow the existing entries;
     the parent, slice tiling, chunks and campaign identity never change.
     Without spans the historical manifest bytes reproduce unchanged.
+
+    With ``source_model_root`` (PQ #909), chain and own source phases keep
+    only the parent entries under the sealed plan's source model directory
+    (path-component boundary, the stage-A selection): rendered-cache files
+    stay under the produced-output lifecycle and never stage here. Without
+    it the historical manifest bytes reproduce unchanged.
 
     Rendered-weight bytes are NOT staged here: the PWC retained-window
     reads that need them name the PB732 produced-output scope in
@@ -2011,7 +2059,8 @@ def build_quantum_executable_manifest(
     bulk = _collect_quantum_bulk_entries(
         receipt=receipt, checkpoint_boundary=checkpoint_boundary,
         needed=needed)
-    source_raw = _source_extent_entries(parent_manifest, layers=needed)
+    source_raw = _source_extent_entries(parent_manifest, layers=needed,
+                                        source_model_root=source_model_root)
     manifest_entries: list[dict] = []
     by_coordinates: dict[tuple[str, int], dict] = {}
 
@@ -2222,7 +2271,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             render_prerequisite: Mapping,
                             metadata_root: str | None = None,
                             binding_validator=None,
-                            layer_source_spans: Mapping[int, Sequence] | None = None) -> dict:
+                            layer_source_spans: Mapping[int, Sequence] | None = None,
+                            source_model_root: str | None = None) -> dict:
     """Bind a sealed executable read manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying an ``executable_readset``
@@ -2306,7 +2356,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
             strided_boundaries=strided_boundaries, n_probes=n_probes,
             calib=calib, render_prerequisite=render_prerequisite,
             binding_validator=binding_validator,
-            layer_source_spans=layer_source_spans)
+            layer_source_spans=layer_source_spans,
+            source_model_root=source_model_root)
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         raise ValueError("the executable readset does not derive from its "
                          f"record, receipt and parent: refusing ({exc})") from exc
@@ -2342,7 +2393,8 @@ def emit_quantum_executable_readsets(
         n_probes: int, calib: Mapping, render_prerequisite: Mapping,
         output_root: str, metadata_root: str | None = None,
         binding_validator=None,
-        layer_source_spans: Mapping[int, Sequence] | None = None) -> list[dict]:
+        layer_source_spans: Mapping[int, Sequence] | None = None,
+        source_model_root: str | None = None) -> list[dict]:
     """The post-capture generation path for executable read manifests.
 
     For every record, derives the executable manifest, seals it, and binds
@@ -2370,7 +2422,8 @@ def emit_quantum_executable_readsets(
             strided_boundaries=strided_boundaries, n_probes=n_probes,
             calib=calib, render_prerequisite=render_prerequisite,
             binding_validator=binding_validator,
-            layer_source_spans=layer_source_spans)
+            layer_source_spans=layer_source_spans,
+            source_model_root=source_model_root)
         quantum_id = record.get("quantum_id")
         manifest_path = f"{bound_dir}/{quantum_id}.executable.json.gz"
         if quantum_id in seen or manifest_path in seen:
@@ -2390,7 +2443,8 @@ def emit_quantum_executable_readsets(
                 calib=calib, render_prerequisite=render_prerequisite,
                 metadata_root=metadata_root,
                 binding_validator=binding_validator,
-                layer_source_spans=layer_source_spans),
+                layer_source_spans=layer_source_spans,
+                source_model_root=source_model_root),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,
