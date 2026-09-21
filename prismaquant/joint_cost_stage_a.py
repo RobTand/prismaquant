@@ -77,6 +77,28 @@ def stage_a_forward_observer(progress):
             progress.flush(force=True)
     return observe
 
+
+def stage_a_head_progress_start(progress):
+    """Enter the declared head phase before boundary-0 capture, moving no units.
+
+    The head walk commits its own per-unit records during
+    ``load_measured_anchor_input``; this reporter starts at that walk's
+    committed total (``base_units``) with no phase, and the storage
+    callback names the generic ``layer-<L>`` -- a phase the adjoint read
+    plan never declares -- so boundary-0 output committed nothing until the
+    first forward observer fired (the live f995 shape; Astra startup audit,
+    2026-09-20). Entering the declared ``head`` phase here lets those
+    durable writes report under it without inventing units: ``base_units``
+    is already the durable head count, only published entry files advance
+    it, and the forward observer stays the only thing that moves the phase
+    to ``forward-000``. The generic reporter's ``layer-*`` behaviour for
+    other callers is untouched.
+    """
+    if progress is None:
+        return
+    from .joint_run_progress import HEAD_PHASE
+    progress.enter(HEAD_PHASE)
+
 EXIT_OK = 0
 EXIT_FAILURE = 1
 EXIT_USAGE = 2
@@ -368,6 +390,10 @@ def run_adjoint_capture_core(
     with storage:
         storage.bind(bind_identity, n_probes=n_probes, published=True)
         if progress is not None:
+            # Before the watcher: the input-boundary loop that follows
+            # reports under the head phase until the first forward observer
+            # fires, so its durable writes count from the first cadence.
+            stage_a_head_progress_start(progress)
             storage.watch_progress(progress)
         log(f"boundary capture: calib {tuple(calib_ids.shape)} in "
             f"{len(row_offsets)} partition(s) across {num_layers} layers ...")
