@@ -1,7 +1,31 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/stagea-readset-898-profiler-899`.
+As of: 2026-09-21 · `fix/stagea-unpublished-905`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `fix/stagea-unpublished-905`) for **a lease that sees
+what a stage mover has published now** (PQ #905, PrismaBuild #823). A
+PrismaBuild stage mover republishes its fragment and its material sidecar as
+entries land, under one material generation for its whole run, and the reader
+SDK caches both documents in the caller's `context`: by generation in
+`covers_for_keys`, unconditionally in `acquire`. `staged_lease` kept one
+`context` for the life of the process, so a mover looked at once while it was
+mid-copy stayed frozen there. Stage A r2 leased a shard's 1 MiB header entry,
+waited 37 s for the same mover's 5 GB body entry, saw its map row, and was
+refused `unpublished` for bytes that were on the stage. Two changes. **(1)**
+Every SDK call gets a `context` of its own (`staged_lease._call_context`); a
+stale pair can only hide a key, never serve a wrong one, so nothing else
+changes. Cost: one small fragment read per mover per lease, and leases are per
+staged entry, never per tensor. **(2)** The layer readiness wait
+(`_await_layer_readset`, PQ #874) now also asks whether a covered entry's proof
+is published (`staged_lease.stage_cover_is_published`, selection only, nothing
+pinned): a mover writes the fragment, which puts the row in the map, before the
+sidecar a lease needs, so a row without its sidecar is a range still landing
+and is waited on under the same single deadline. Only `unpublished` waits;
+every other refusal is the read's to make, at once, as before. After the bound
+the refusal stands and nothing is read from the pool. No format, lane, pin,
+kernel order or ship gate changes. Gates:
+`tests/test_stage_cover_mid_copy_mover.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 staged-range resolver asking every covering entry** (PQ #902). PrismaBuild
@@ -314,7 +338,9 @@ future range is a worker the current layer's already-staged reads queue
 behind; a ready current-layer read now proceeds while every lookahead layer is
 cold. It waits under one deadline for the whole layer, however many shards it
 spans (`PRISMAQUANT_STAGED_RANGE_WAIT_S`, default 300 s, `0` restores the
-pre-#874 behaviour, and the value must be finite). It only ever waits: it
+pre-#874 behaviour, and the value must be finite). A covered entry whose
+material sidecar PrismaBuild has not written yet counts as not landed, asked
+once per staged entry per poll (PQ #905). It only ever waits: it
 never reads payload and never refuses, so an unreachable range still fails
 from the same line with the same error. It is scoped by
 `policy_is_active()`, so a non-strict reader holding a map is untouched, and
