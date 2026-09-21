@@ -1,7 +1,39 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/stagea-artifact-budget-20260921`.
+As of: 2026-09-21 · `fix/quantum-metadata-generation-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `fix/quantum-metadata-generation-20260921`) for
+**the quantum control-metadata generation seam** (PQ #884). No default,
+stage, format, lane, pin or ship-gate verdict changes; no dispatcher,
+joiner, Stage A core, cache or PB-side file changes; the strict
+readset/binding gates and `ExecutableBindingUnsupported` refuse exactly
+what they refused before. What changes is the placement contract of the
+producer's own CONTROL files: `layer_quanta` /
+`tools/regenerate_joint_quanta.py` accept an optional explicit immutable
+metadata-generation root (`--metadata-root`) that names where slice
+manifests (`{root}/manifests/`), the record set
+(`{root}/records/`, the `--records-out` default) and newly bound
+boundary/executable readset manifests (`{root}/adjoint/bound-readsets/`,
+one shared `bound_readset_directory` derivation) live -- while
+`output_space` and `adjoint.boundary_artifacts` keep deriving from the
+plan's data `output_root` alone (the consumer identity pin and stage A's
+receipt location unchanged). Absent the flag every sealed byte is
+identical to the previous layout; publication keeps first-writer
+semantics (same-bytes replay idempotent, differing bytes refuse, manifests
+before records) and Gate 1a exact reproduction is never weakened --
+`--expect-existing` + `--metadata-root` is only an authorized relocation
+over an exactly reproduced source generation with the data root retained,
+refused by name otherwise. A new read-only
+`--compare-existing` gate certifies a prior, non-reproducible generation
+(the pre-#852 pending set) against a fresh derivation from the same
+sealed inputs: prior records pass the existing canonical validator
+(duplicates and stale identities refuse; pre-bound priors refuse
+outright), every slice-manifest top-level field but `annotations`
+compares exactly, and `annotations` admits only the one known zero-byte
+head phase row and the exact `--quantum` record-path relocation. Design:
+`docs/design/quantum_metadata_generation_2026-09-21.md`. Gates:
+`tests/test_quantum_metadata_generation_884.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-artifact-budget-20260921`) for **the
 Stage A durable artifact budget seam** (PQ #882). No default, stage, format,
