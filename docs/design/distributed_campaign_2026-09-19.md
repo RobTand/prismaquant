@@ -314,6 +314,19 @@ unchanged. This does not supply an output storage lease or bypass
 `ExecutableBindingUnsupported`; PQ #870 / PR #871 owns the independent
 accepted produced-output validator integration.
 
+**Source-only executable phases (2026-09-21, PQ #909).** The parent tiles
+rendered-cache files alongside source weights, and the executable builder
+used to copy the whole tiled group into each chain/own source phase. Pass
+`source_model_root` (the sealed plan's `model` directory; the regen CLI
+reads it from the sealed plan and refuses without it) to
+`build_quantum_executable_manifest`, `bind_quantum_executable` and
+`emit_quantum_executable_readsets` to keep only the entries under that
+root, matched on a path-component boundary. The tiling proof still runs on
+the whole group first, a phase left with no source entry refuses, and the
+binder rederives with the same root so a root mismatch refuses. Without a
+root the historical bytes reproduce unchanged. Rendered weights remain
+exclusively under the produced-output lifecycle.
+
 ### 3.3 Stage-A receipt
 
 `<output_root>/layer-quanta/adjoint/adjoint-capture.json`,

@@ -930,19 +930,20 @@ def main(argv=None) -> int:
                 if not roster:
                     raise ValueError(
                         "the record campaign seals no unit roster: refusing")
+                source_model_root = plan.get("model")
+                if type(source_model_root) is not str or not os.path.isabs(
+                        source_model_root):
+                    raise ValueError(
+                        "executable readsets need the sealed plan's absolute "
+                        "source model directory: refusing")
                 source_spans = None
                 if args.source_layers_prefix is not None:
-                    model = plan.get("model")
-                    if type(model) is not str or not os.path.isabs(model):
-                        raise ValueError(
-                            "source completion needs the sealed plan's "
-                            "absolute source model directory: refusing")
                     if sorted(layers) != list(range(len(layers))):
                         raise ValueError(
                             "source completion needs parent layers starting "
                             "at zero: refusing")
                     source_spans = read_layer_source_spans(
-                        model, len(layers),
+                        source_model_root, len(layers),
                         checkpoint_layers_prefix=args.source_layers_prefix)
                 emitted = emit_quantum_executable_readsets(
                     receipt, produced["records"], parent,
@@ -954,7 +955,8 @@ def main(argv=None) -> int:
                         "production_pkl_sha256": production_sha,
                         "unit_roster_sha256": roster},
                     output_root=output_root, metadata_root=metadata_root,
-                    layer_source_spans=source_spans)
+                    layer_source_spans=source_spans,
+                    source_model_root=source_model_root)
                 produced["records"] = [row["record"] for row in emitted]
                 bound_manifests.extend(
                     (row["manifest_path"], row["manifest"],

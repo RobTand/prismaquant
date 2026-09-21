@@ -28,6 +28,16 @@ the refusal stands and nothing is read from the pool. No format, lane, pin,
 kernel order or ship gate changes. Gates:
 `tests/test_stage_cover_mid_copy_mover.py`.
 
+Re-stamped (2026-09-22, `fix/pq-917-static-prepared-inputs-20260922`, adapted #909 filter) for **source-only
+executable phases** (PQ #909). `_source_extent_entries(source_model_root=...)`
+keeps only the parent entries under the sealed plan's source model directory
+(path-component boundary, the stage-A selection): rendered-cache files the
+parent also tiles never stage in a chain/own source phase and stay under the
+produced-output lifecycle. The tiling-agreement check still runs on the whole
+tiled group first, a phase left with no source entry refuses, and without a
+root the historical bytes reproduce unchanged. The regen CLI reads the root
+from the sealed plan's `model` and refuses without it. Gate:
+`tests/test_stageb_source_render_exclusion.py`.
 
 Re-stamped (2026-09-21, `fix/stageb-source-readset-900`) for **Stage B's
 actual source readset, independent of the parent byte tiling** (PQ #900).
