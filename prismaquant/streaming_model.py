@@ -65,6 +65,8 @@ from .autoscale import (
 from .layer_streaming import (
     _build_fp8_scale_inv_map,
     LayerCache,
+    clear_staged_wait_cancel,
+    request_staged_wait_cancel,
     _build_concat_merger,
     _model_tensor_dtypes,
     _source_tensor_dtypes,
@@ -1066,12 +1068,42 @@ class StreamingContext:
                     unique_storage_bytes=sum(all_storages.values()))
 
     def shutdown(self):
-        self.prefetch_pool.shutdown(wait=True)
-        # Completed-but-unclaimed futures hold a reference to their layer
-        # tensors (that is the delivery guarantee); drop them so a torn-down
-        # context does not pin layer bytes until it is garbage-collected.
-        with self._inflight_lock:
-            self._inflight.clear()
+        # PQ #907: a failed capture must not sit in teardown until each
+        # prefetch worker's own staged-range bound runs out. Prefetch
+        # workers poll, so a shared event checked in the poll loop is
+        # enough: request cancellation before draining, cancel pending
+        # owned futures promptly, then join. Running workers abort their
+        # wait with the existing waitable verdict and refuse fast on the
+        # existing read path, so this join is bounded by cancellation,
+        # not by the staged-range bound.
+        try:
+            request_staged_wait_cancel()
+        except Exception:
+            pass
+        try:
+            with self._inflight_lock:
+                owned = list(self._inflight.values())
+            for fut in owned:
+                try:
+                    fut.cancel()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            self.prefetch_pool.shutdown(wait=True)
+        finally:
+            # Completed-but-unclaimed futures hold a reference to their
+            # layer tensors (that is the delivery guarantee); drop them so
+            # a torn-down context does not pin layer bytes until it is
+            # garbage-collected. No dangling thread, read, or lease: the
+            # pool is joined above and every owned future is released here.
+            with self._inflight_lock:
+                self._inflight.clear()
+            try:
+                clear_staged_wait_cancel()
+            except Exception:
+                pass
 
     def reset_between_chunks(self, retain_cache: bool = False) -> dict:
         """Drop accumulated state at chunk boundaries in the multi-chunk

@@ -104,7 +104,7 @@ STAGED_RANGE_WAIT_S = 300.0
 STAGED_RANGE_POLL_S = 1.0
 
 
-def await_staged_spans(resolver, wanted, *, deadline, published=None) -> str:
+def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=None) -> str:
     """Give PrismaBuild's movers until ``deadline`` to land ``wanted``.
 
     ``wanted`` is ``[(declared path, start, end, declared size), ...]`` --
@@ -137,13 +137,62 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None) -> str:
     not there yet is still landing, and is waited on exactly like an
     uncovered one (PQ #905). Asked once per staged entry per poll, never per
     tensor, and an entry that answered yes is not asked again.
+
+    ``cancel`` aborts a wait that is no longer needed (PQ #907: a failed
+    capture must not sit in teardown until the staged-range bound runs
+    out). A ``threading.Event`` (or a zero-argument callable returning
+    bool) checked before every poll and waited on instead of sleeping, so
+    cancellation wakes promptly with the existing waitable verdict
+    (``RANGE_UNCOVERED``) and the read below refuses fast on its existing
+    path. ``None`` preserves the historical bounded wait.
     """
+    def _cancelled() -> bool:
+        if cancel is None:
+            return False
+        is_set = getattr(cancel, "is_set", None)
+        if callable(is_set):
+            try:
+                return bool(is_set())
+            except Exception:
+                return False
+        if callable(cancel):
+            try:
+                return bool(cancel())
+            except Exception:
+                return False
+        return False
+
+    def _interruptible_sleep(timeout: float) -> None:
+        wait = getattr(cancel, "wait", None)
+        if callable(wait):
+            try:
+                wait(timeout)
+                return
+            except Exception:
+                pass
+        # A callable cancel has no wait primitive: slice the sleep so the
+        # next poll notices promptly without changing the bound.
+        if cancel is not None and callable(cancel):
+            end = time.monotonic() + timeout
+            while True:
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    return
+                time.sleep(min(0.05, remaining))
+                if _cancelled():
+                    return
+            return
+        time.sleep(timeout)
+
     started = time.monotonic()
     polls = 0
     pending = list(wanted)
     verdict = RANGE_HIT
     proven = set()
     while pending:
+        if _cancelled():
+            verdict = RANGE_UNCOVERED
+            break
         still = []
         unproven = set()
         for row in pending:
@@ -175,7 +224,13 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None) -> str:
             if remaining <= 0:
                 verdict = RANGE_UNCOVERED
                 break
-            time.sleep(min(STAGED_RANGE_POLL_S, remaining))
+            if _cancelled():
+                verdict = RANGE_UNCOVERED
+                break
+            _interruptible_sleep(min(STAGED_RANGE_POLL_S, remaining))
+            if _cancelled():
+                verdict = RANGE_UNCOVERED
+                break
             polls += 1
             continue
         break

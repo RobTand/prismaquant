@@ -1390,6 +1390,35 @@ def fill_packed_experts_from_source(
 # order. Only the order in which the *pages* are faulted in changes.
 _LAYER_READ_POOL: ThreadPoolExecutor | None = None
 _LAYER_READ_POOL_THREADS = 0
+
+
+# Shared cancellation for staged-range waits (PQ #907).
+#
+# A failed Stage A capture must cancel its prefetch workers' waits: they
+# poll, so a shared event checked in the poll loop is enough. The event is
+# set by ``StreamingContext.shutdown`` before it drains its owned futures;
+# ``_await_layer_readset`` forwards it to ``await_staged_spans``, which
+# wakes promptly with the existing waitable verdict so the read below
+# refuses fast on its existing path. Process-global because tensor payloads
+# are read on prefetch worker threads that inherit no context; tests reset
+# it explicitly via ``clear_staged_wait_cancel``.
+_STAGED_WAIT_CANCEL = threading.Event()
+
+
+def request_staged_wait_cancel() -> None:
+    """Signal staged-range waits to abort promptly."""
+    _STAGED_WAIT_CANCEL.set()
+
+
+def clear_staged_wait_cancel() -> None:
+    """Clear a previously requested staged-wait cancellation (tests)."""
+    _STAGED_WAIT_CANCEL.clear()
+
+
+def staged_wait_cancelled() -> bool:
+    """Whether a staged-wait cancellation has been requested."""
+    return _STAGED_WAIT_CANCEL.is_set()
+
 _LAYER_READ_POOL_LOCK = threading.Lock()
 
 # Below this many tensors a layer is a handful of big reads and the pool
@@ -1595,7 +1624,8 @@ def _await_layer_readset(by_shard, *, source_authentication=None):
     began = time.monotonic()
     from .staged_lease import stage_cover_is_published
     verdict = await_staged_spans(resolver, wanted, deadline=began + budget,
-                                 published=stage_cover_is_published)
+                                 published=stage_cover_is_published,
+                                 cancel=_STAGED_WAIT_CANCEL)
     if verdict != RANGE_HIT:
         # The time that actually elapsed, never the budget: an undeclared
         # span and a covering entry that failed a check both return from
