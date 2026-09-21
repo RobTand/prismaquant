@@ -537,6 +537,47 @@ def _prefetch_delivery_enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
+def _is_prefetch_availability(exc: BaseException) -> bool:
+    """Whether a failed prefetch may be retried once on actual demand (PQ #911).
+
+    Only availability is retryable: the mover had not landed yet and the
+    bounded declared wait ran out. Integrity fails clear with no alternate
+    copy and must raise at once. Fail closed: unknown refusals are not
+    availability. Mirrors ``staged_lease`` availability/integrity taxonomy
+    without importing it; no pool/HDD read, no swallow, exactly one retry
+    by the caller.
+    """
+    kind = getattr(exc, "kind", None)
+    if kind == "availability":
+        return True
+    if kind == "integrity":
+        return False
+    msg = str(exc)
+    integrity_tokens = (
+        "file-identity-changed",
+        "generation-changed",
+        "source-coverage-gap",
+        "ownership-uncertain",
+        "lease-open-size-changed",
+        "cover-proof-divergent",
+    )
+    if any(token in msg for token in integrity_tokens):
+        return False
+    availability_tokens = (
+        "readset-not-staged",
+        "pool-fallback",
+        "unpublished",
+        "stale-epoch",
+        "retiring",
+        "file-missing",
+        "no-file-identity",
+        "ram-covers-unresolved",
+        "lease-helper-unavailable",
+        "lease-context-unavailable",
+    )
+    return any(token in msg for token in availability_tokens)
+
+
 class StreamingContext:
     def __init__(self, *, model, base_model, layers, layers_prefix: str,
                  num_layers: int, install_resolvers: list[dict],
@@ -876,7 +917,21 @@ class StreamingContext:
         with self._inflight_lock:
             fut = self._inflight.get(L)
         if fut is not None:
-            delivered = fut.result()
+            try:
+                delivered = fut.result()
+            except Exception as exc:
+                # PQ #911: a speculative availability timeout must not
+                # poison the demand read. Retry availability once via the
+                # existing prefetch machinery with the bounded declared
+                # wait; preserve integrity at once. No pool read, no
+                # swallow, no unbounded retry: a second failure propagates.
+                if not _is_prefetch_availability(exc):
+                    raise
+                self._claim_inflight(L)
+                retried = self.schedule_prefetch(L)
+                if retried is None:
+                    raise
+                delivered = retried.result()
             self._claim_inflight(L)
             cached = self.layer_cache.get(L)
             if cached is not None:
