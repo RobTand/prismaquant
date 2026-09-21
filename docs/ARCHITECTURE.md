@@ -253,21 +253,12 @@ unchanged; no cache migration or re-prepare. Gate:
 `tests/test_source_identity_validate_derivation.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-head-progress-20260921`) for **Stage A
-head-phase boundary-0 progress** (Astra startup audit, 2026-09-20). The adjoint
-capture's reporter starts at the head walk's committed total with no phase, and
-the boundary-storage callback names the generic `layer-<L>` the adjoint read
-plan never declares — so the input-boundary-0 loop (all 512 writes, before the
-first forward observer) committed no progress at all; the live f995 capture
-showed the undeclared-`layer-0` warning and then nothing until
-`forward-000`/36935. `run_adjoint_capture_core` now enters the declared `head`
-phase before wiring the storage watcher (`stage_a_head_progress_start`), moving
-no units: `base_units` stays the head walk's durable count, only published
-entry files advance it, and the forward source observer remains the only
-transition to `forward-000`. The generic `JointRunProgress` `layer-*` contract
-for other callers is unchanged, and this is boundary-0 liveness/prefetch-unlock
-timing only — no transport, channel or heartbeat semantics change, and the
-~400 s pre-profiler head startup remains unmeasured cause for root. Gate:
-`tests/test_stage_a_head_progress.py`.
+head-phase boundary-0 progress**. The adjoint capture's reporter enters its
+declared `head` phase before the storage watcher is wired: the head base is
+the head walk's committed total, the initial durable boundary entries count
+cumulatively under `head`, and the forward source observer owns the
+transition to `forward-000`. The generic `layer-*` phase contract for other
+callers is unchanged. Gate: `tests/test_stage_a_head_progress.py`.
 
 Re-stamped (2026-09-20, `flash/slice-zero-head-20260920`) for
 **stageable quantum slice phases** (PQ #851). Both slice producers seal

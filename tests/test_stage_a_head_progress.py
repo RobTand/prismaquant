@@ -2,39 +2,42 @@
 
 The adjoint read plan declares ``head, forward-*, chain-*`` -- never the
 generic ``layer-<L>`` name the boundary-storage callback derives -- so a
-Stage A reporter that starts with no phase committed nothing for the whole
-input-boundary-0 loop: every ``entry(layer=0)`` tried the undeclared
-``layer-0`` and ``_report`` returned while ``phase is None``. The live f995
-capture showed exactly that (the undeclared-phase warning, then the first
-record only at ``forward-000``/36935 once the forward observer fired).
-The wiring fix enters the declared head phase before boundary capture --
-moving no units: the head walk's own committed total is already the
-reporter's ``base_units``, and only published entry files advance the
-count (Astra startup audit, 2026-09-20).
-
-RED-first: the helper imports live inside the tests that need them, and the
-wiring assertion reads the real core, so this module collects unmodified
-and fails before the source change.
+Stage A reporter that starts with no phase commits nothing for the whole
+input-boundary-0 loop: every ``entry(layer=0)`` tries the undeclared
+``layer-0`` and ``_report`` returns while ``phase is None``. These tests
+drive the REAL ``run_adjoint_capture_core`` wiring (the runtime fixtures
+from ``test_layer_major_boundary_capture``, CPU-only): a capture that
+publishes two boundary-0 entries across the report interval and then
+raises before any forward work must leave a ``head`` record behind, with
+the head walk's committed total as the base and only published entries
+counted. The forward source observer stays the only transition to
+``forward-000``.
 """
 from pathlib import Path
 import sys
 
 import pytest
+import torch
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from prismaquant.joint_cost_stage_a import (  # noqa: E402
+    run_adjoint_capture_core, stage_a_forward_observer)
 from prismaquant.joint_layer_quanta import (  # noqa: E402
     adjoint_read_plan_phase_names)
 from prismaquant.joint_run_progress import JointRunProgress  # noqa: E402
+from test_joint_cost_quantum_runtime import _execution  # noqa: E402
+from test_layer_major_boundary_capture import draw, fixture  # noqa: E402
+from test_streamed_cost_checkpoints import _model_identity  # noqa: E402
 
 
 class Clock:
     """A clock the test moves, so the cadence is tested and not the wall."""
 
     def __init__(self):
-        self.now = 0.0
+        self.now = 1000.0
 
     def __call__(self):
         return self.now
@@ -56,88 +59,62 @@ class Recorder:
         return True
 
 
-def stage_a_reporter(base_units, *, layers=3, partitions=2):
-    """The reporter Stage A constructs, under the adjoint phase list."""
+class StoppedBeforeForward(Exception):
+    """The sentinel: the fake capture ends before any forward work."""
+
+
+def test_the_core_reports_boundary_zero_under_head_before_forward_work(
+        tmp_path, monkeypatch):
+    """The real core wiring: durable boundary-0 output reports as head.
+
+    The capture writes two boundary-0 entries across one report interval
+    and then raises, so nothing after the input-boundary loop runs: no
+    forward observer fires, and the only record that may exist is the head
+    phase's, carrying the head walk's committed base plus exactly the two
+    published entries.
+    """
+    _model, context, runner, _cache = fixture()
+    context.settle_prefetched_layers = lambda layers: None
     recorder, clock = Recorder(), Clock()
     progress = JointRunProgress(
-        layers=layers, partitions=partitions, base_units=base_units,
+        layers=runner.num_layers, partitions=1, base_units=7,
         log=recorder.log, clock=clock, commit=recorder.commit,
-        interval_s=60.0, phases=adjoint_read_plan_phase_names(layers))
-    return recorder, clock, progress
+        interval_s=60.0, phases=adjoint_read_plan_phase_names(runner.num_layers))
+    wired = {}
 
+    def capture(partitions, *, storage, source_phase):
+        wired["observer"] = source_phase
+        for batch in range(2):
+            storage.write(torch.zeros(4), batch_index=batch,
+                          boundary_index=0)
+            clock.advance(61)
+        raise StoppedBeforeForward("input boundary loop complete")
 
-def stage_a_storage(tmp_path):
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
-
-    storage = StreamedBoundaryArtifacts({
-        "schema": BOUNDARY_STORAGE_SCHEMA,
-        "directory": str(tmp_path / "exact"),
-        "max_resident_bytes": 1 << 24, "max_auxiliary_bytes": 1 << 24,
-        "max_artifact_bytes": 1 << 24, "prefetch_batches": 1})
-    storage.bind({"source_model": "fixture"}, n_probes=1)
-    return storage
-
-
-def _head_wired(tmp_path, base_units=7, writes=2):
-    """Stage A's own wiring order: head phase first, then the watcher."""
-    from prismaquant.joint_cost_stage_a import stage_a_head_progress_start
-
-    recorder, clock, progress = stage_a_reporter(base_units)
-    storage = stage_a_storage(tmp_path)
-    stage_a_head_progress_start(progress)
-    storage.watch_progress(progress)
-    return recorder, clock, progress, storage
-
-
-def test_boundary_zero_commits_under_head_before_any_forward_observer(tmp_path):
-    """The input-boundary loop reports head units without the observer.
-
-    The head walk's committed total is the base; each published boundary-0
-    entry file adds one unit on top; the record lands on the cadence with
-    no forward observer in sight. Pre-fix the same sequence committed
-    nothing at all -- the live f995 shape.
-    """
-    torch = pytest.importorskip("torch")
-    recorder, clock, progress, storage = _head_wired(tmp_path, base_units=7)
-    for batch in range(2):
-        storage.write(torch.zeros(4), batch_index=batch, boundary_index=0)
-    assert progress.units == 9
-    assert progress.phase == "head"
-    assert recorder.records == []          # inside the report interval
-    clock.advance(61)
-    progress.flush(force=True)
+    monkeypatch.setattr(runner, "capture_layer_major_boundaries", capture)
+    with pytest.raises(StoppedBeforeForward):
+        run_adjoint_capture_core(
+            runner, draw(), execution=_execution(tmp_path),
+            output_root=tmp_path / "campaign", stride=2,
+            source_model_identity=_model_identity("joint-source"),
+            unit_roster_sha256="a" * 64, plan_sha256="d" * 64,
+            prepared_sha256="e" * 64, read_manifest_sha256="f" * 64,
+            implementation_sha256="0" * 64, progress=progress)
+    assert wired["observer"] is not None
     assert recorder.records == [("head", 9)]
 
 
-def test_forward_zero_comes_only_from_the_source_observer(tmp_path):
-    """The head phase holds until the runner's first forward callback."""
-    torch = pytest.importorskip("torch")
-    from prismaquant.joint_cost_stage_a import stage_a_forward_observer
-
-    recorder, clock, progress, storage = _head_wired(tmp_path, base_units=7)
-    storage.write(torch.zeros(4), batch_index=0, boundary_index=0)
-    clock.advance(61)
-    progress.flush(force=True)
-    assert recorder.records == [("head", 8)]
-    observe = stage_a_forward_observer(progress)
-    observe("source_loading", 0, 0)
-    assert recorder.records == [("head", 8), ("forward-000", 8)]
-    observe("something_else", 1, 0)
-    assert progress.phase == "forward-000"
-
-
-def test_head_base_and_intents_alone_move_no_units(tmp_path):
+def test_the_head_base_and_phases_alone_move_no_units():
     """Entering head fabricates nothing; only a published file moves the count.
 
-    Landed names only -- this pins the generic contract on both sides of
-    the wiring fix: the base is durable history, entering a phase is not a
-    unit, and a cadence with nothing new commits nothing.
+    Landed names only: the base is durable history, entering a phase is not
+    a unit, and a cadence with nothing new commits nothing twice.
     """
-    recorder, clock, progress = stage_a_reporter(base_units=7)
-    from prismaquant.joint_run_progress import HEAD_PHASE
-
-    progress.enter(HEAD_PHASE)
+    recorder, clock = Recorder(), Clock()
+    progress = JointRunProgress(
+        layers=2, partitions=1, base_units=7, log=recorder.log,
+        clock=clock, commit=recorder.commit, interval_s=60.0,
+        phases=adjoint_read_plan_phase_names(2))
+    progress.enter("head")
     assert progress.units == 7
     clock.advance(120)
     progress.flush(force=True)
@@ -146,15 +123,16 @@ def test_head_base_and_intents_alone_move_no_units(tmp_path):
     assert recorder.records == [("head", 7)]      # replay commits nothing
 
 
-def test_the_core_wires_the_head_phase_before_boundary_capture():
-    """The real call site: head enters before the storage watcher is set.
-
-    Reads the shipped core, so the wiring itself -- not a test's replica --
-    is what this pins.
-    """
-    source = (REPO / "prismaquant" / "joint_cost_stage_a.py").read_text(
-        encoding="utf-8")
-    core = source[source.index("def run_adjoint_capture_core"):]
-    start = core.index("stage_a_head_progress_start(progress)")
-    watcher = core.index("storage.watch_progress(progress)")
-    assert start < watcher
+def test_forward_zero_comes_only_from_the_source_observer():
+    """After head, the observer -- and nothing else -- names forward-000."""
+    recorder, clock = Recorder(), Clock()
+    progress = JointRunProgress(
+        layers=2, partitions=1, base_units=7, log=recorder.log,
+        clock=clock, commit=recorder.commit, interval_s=60.0,
+        phases=adjoint_read_plan_phase_names(2))
+    progress.enter("head")
+    observe = stage_a_forward_observer(progress)
+    observe("source_loading", 0, 0)
+    assert recorder.records == [("forward-000", 7)]
+    observe("something_else", 1, 0)
+    assert progress.phase == "forward-000"
