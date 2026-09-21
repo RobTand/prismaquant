@@ -396,7 +396,9 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
                 "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
     config = {"execution": {"production_act_scales": "scales",
                             "source_derivative": derivative,
-                            "n_calib_samples": 4, "calib_seqlen": 512},
+                            "n_calib_samples": 4, "calib_seqlen": 512,
+                            "boundary_storage": _boundary_policy(
+                                tmp_path / "deriv-boundaries")},
               "inputs": {}, "output_root": str(tmp_path),
               "model": "/models/x",
               "calibration_input": {"path": str(tmp_path / "cal.json"),
@@ -762,7 +764,9 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
     # #816 seam; _load_plan refuses without one), and the capture validates
     # it up front now that the #819 override resolves beside it -- so the
     # fixture config carries one like any real plan.
-    config = {"execution": {"production_act_scales": "scales"},
+    config = {"execution": {"production_act_scales": "scales",
+                            "boundary_storage": _boundary_policy(
+                                tmp_path / "reuse-boundaries")},
               "inputs": {}, "output_root": str(tmp_path),
               "source_prefetch": _prefetch_budget(),
               "historical_encoder_reuse": reuse_block}
