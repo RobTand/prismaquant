@@ -200,7 +200,10 @@ def _chain_cycle(publication, report, report_progress, *,
     storage = StreamedBoundaryArtifacts({
         "schema": BOUNDARY_STORAGE_SCHEMA,
         "directory": str(Path(publication.output_prefix) / "chain-cycle"),
-        "max_resident_bytes": max(1 << 22, 2 * group_size * entry_bytes + (1 << 20)),
+        # Two groups are resident in a chain window, and a write inside it
+        # reserves the entry it is writing on top of them.
+        "max_resident_bytes": max(
+            1 << 22, (2 * group_size + 2) * entry_bytes + (1 << 20)),
         "max_auxiliary_bytes": 1 << 22,
         "max_artifact_bytes": max(
             1 << 24, (layers + n_probes + 2) * n_batches * file_bytes),
