@@ -414,6 +414,14 @@ def _chain_cycle(publication, report, report_progress, *,
         report["charge_before_disposal"] = publication.durable_charge()
         for reference in list(storage._references.values()):
             storage.retire(reference)
+        # With a stager (RobTand/prismaquant#895) the charge reclaim that a
+        # group's last disposal triggers is queued, not done, when retire()
+        # returns. Cycle s2 read the charge before the queue was empty and
+        # found three groups still charged. The owner's close runs what is
+        # queued; this waits for the same thing before it reads.
+        drain = getattr(storage, "drain_produced_stager", None)
+        if drain is not None:
+            report["stager_drained_before_charge_read"] = drain(600.0)
         report["charge_after_disposal"] = publication.durable_charge()
         report["telemetry"] = dict(storage.telemetry)
         report["group_records"] = storage.produced_group_records()
