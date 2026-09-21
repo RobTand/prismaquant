@@ -91,13 +91,23 @@ def main() -> int:
               "root is derived exactly as a real Stage A capture derives "
               "it. The flag remains for a run with no declared input, "
               "where there is no map to derive from."))
+    ap.add_argument(
+        "--data-manifest-sha256", required=True,
+        help=("sha256 of the submitted data manifest's wire bytes, passed "
+              "by the launcher exactly as the dispatcher passes it to a real "
+              "Stage A capture. The resolver refuses every map until the "
+              "process names the manifest it was submitted with, so without "
+              "it the declared input is refused readset-not-staged. Taken "
+              "from the launcher and never from the map, which would make "
+              "the binding agree with whatever map was injected."))
     args = ap.parse_args()
 
     from prismaquant.calibration_data import _read_calibration_payload
     from prismaquant.cost_streaming import (
         BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
     from prismaquant.prismabuild_progress import report as report_progress
-    from prismaquant.residency_map import residency_resolver
+    from prismaquant.residency_map import (
+        bind_residency_manifest, residency_resolver)
     from prismaquant.stage_a_produced_output import BoundaryProducedPublication
     from prismaquant.staged_lease import lease_helper_root, sdk_submodule
     from prismaquant.staged_tier_policy import (
@@ -121,6 +131,10 @@ def main() -> int:
         return 1
 
     activate_staged_tier_policy("ram,ssd")
+    # The same call, from the same launcher-supplied flag, that a real
+    # capture makes (joint_cost_stage_a.run_adjoint_capture).
+    bind_residency_manifest(args.data_manifest_sha256)
+    report["data_manifest_sha256"] = args.data_manifest_sha256
 
     # ---- the input side, before anything is produced --------------------
     #
@@ -379,8 +393,18 @@ def main() -> int:
         "final_origin_disposal_reclaimed_the_charge":
             report["charge_after_disposal"] == {"payload": 0, "checkpoint": 0,
                                                 "temp": 0},
-        "instance_released":
-            bool(report["release_instance"].get("ok")),
+        # NOT "released". This runs inside the owner, and PrismaBuild's
+        # contract is that any live owner claim retains the instance: the
+        # release is authorized only after the claim ends, by the broker's
+        # containment certificate. ``safe_release_instance`` checks the
+        # owner LAST -- after active movers, funding intents and the pin
+        # census -- so this exact refusal says every other reason to retain
+        # is clear. ``ok`` here would mean PrismaBuild freed an instance
+        # under its live owner, and any other refusal names a real leftover.
+        "instance_retained_only_by_its_live_owner":
+            report["release_instance"].get("ok") is False
+            and report["release_instance"].get("refusal")
+            == "owner-active-retain",
     }
     report["checks"] = checks
     report["failed_checks"] = sorted(k for k, ok in checks.items() if not ok)
