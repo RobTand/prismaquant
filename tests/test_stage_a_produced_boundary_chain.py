@@ -874,26 +874,36 @@ def test_repeated_distinct_group_turnover_on_a_single_stage_token(
     window refills. Four groups against one window credit: if a stage copy
     were not returned, window 1 could not fund and this stops.
 
-    Why the TIER mints two when the window is one, measured rather than
-    assumed (tools/audit_produced_window_tokens.py, and six repeats of
-    this test at one token). Steady-state occupancy is ONE: the ledger
-    shows held=1 while a group is staged and held=0 with the token back in
-    free at every window close, and at a two-token tier the second token
-    is never held by anyone. It is not an overlap of two staged copies.
-    It covers a RACE. `produced_output.refill_window` stops counting a
-    batch in ``outstanding`` when the producer's retirement returns, but
-    the physical token is released by MOVER key through the fleet's egress
-    ("the fleet never restores producer holdings"), which happens after.
-    A producer minted exactly at its window can refill inside that gap: at
-    one token this test failed 1 run in 6, on the fourth group, with
-    ``{'refusal': 'tier-reservation-unavailable', 'available': {},
-    'window_gib': 1, 'held': 0, 'outstanding': 0}`` -- room was 1 and the
-    tier had nothing free, i.e. the availability branch, NOT ``room <= 0``
-    (which returns ok with acquired 0). Had two credits genuinely been
-    occupied, ``outstanding`` would have read 1 and that other branch
-    would have fired. Do not shrink this tier back to one without
-    re-measuring: one token makes this test flaky, it does not make it
-    stricter.
+    Why the TIER mints two when the window is one. Steady-state occupancy
+    is ONE -- the ledger shows held=1 while a group is staged, held=0 with
+    the token back in free at every window close, and at two tokens the
+    second is never held by anyone. The second token is not overlap. It
+    covers an INTERMITTENT STAGE-TOKEN LOSS in produced-output egress,
+    which is an open finding against PrismaBuild and not a property of
+    this test.
+
+    Measured, not inferred (tools/audit_produced_window_tokens.py, and
+    repeats of this test at one token: 1 failure in 6, then reproduced
+    under instrumentation on iteration 2 of 12). At the failure the tier
+    has NO token anywhere: free empty, every holder directory empty, and a
+    30 s poll never sees it return. The refusal is refill_window's
+    availability branch -- ``{'refusal': 'tier-reservation-unavailable',
+    'available': {}, 'window_gib': 1, 'held': 0, 'outstanding': 0}``, so
+    room = 1 - 0 - 0 = 1, NOT the ``room <= 0`` branch that returns ok
+    with acquired 0.
+
+    PrismaBuild's own egress receipt names the mechanism. A healthy
+    retirement reports ``tokens_released=1, tokens_decharged=0,
+    entries_deleted=4, entries_shared=0``. The failing one reports
+    ``tokens_released=0, tokens_decharged=1, entries_deleted=0,
+    entries_shared=4, shared_with=['in-flight-copy']``: the staged entries
+    were still shared with an in-flight copy, so nothing was deleted and
+    the token was DECHARGED out of the mint instead of released to free,
+    with nothing scheduled to return it (``retiring: false``,
+    ``deferred_handoffs: []``). The tier's capacity silently shrank by one.
+
+    So do not shrink this tier back to one. One token does not make this
+    test stricter; it makes it fail whenever that egress path is taken.
 
     What this does NOT establish: full cotangent rollover. The previous
     group's entries are disposed inside the NEXT group's window, after the
