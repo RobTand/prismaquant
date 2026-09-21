@@ -1201,18 +1201,20 @@ class StreamedBoundaryArtifacts:
         answers None instead of resolving to a group whose bytes are
         gone.
 
-        Profiled on both sides through PrismaBuild on dl380g10, at the
-        production panel's shape (1563 groups of 64, ~100k rotated
-        cotangent entries, twenty 64-entry windows), because a loop shape
-        is not evidence. The previous form walked every bound group
-        asking ``reference in group["references"]``, so a late window
-        cost O(groups x entries): **0.537 s** and 128M ``__eq__`` calls
-        per window, in front of a window that reads 1 GiB. This form
-        costs **19.4 us** per window on the same fixture. Read that as
-        CPU metadata on a fixture, not as Stage A throughput or energy.
-        Against a bare dict written inline the index measures 1.046x --
-        i.e. at parity, very slightly slower -- which says the win is
-        against the walk it replaced and nothing more.
+        It is also faster than what it replaced, measured on both sides
+        through PrismaBuild on dl380g10 at the production panel's shape
+        (1563 groups of 64, ~100k rotated cotangent entries, twenty
+        64-entry windows), because a loop shape is not evidence. The
+        previous implementation walked every bound group asking
+        ``reference in group["references"]``, so a late window cost
+        O(groups x entries): **0.537 s** per window and 128M ``__eq__``
+        calls, in front of a window that reads 1 GiB. This implementation
+        costs **19.4 us** per window on the same fixture. Beside it,
+        honestly: against a bare dict written inline it measures 1.046x,
+        so it carries ~4.6% overhead over an idealized control -- that
+        ratio is NOT the before/after delta, which is against the walk.
+        Narrow CPU metadata on a fixture; no GPU, throughput, energy or
+        whole-model claim follows from it.
         """
 
         key = self._produced_index.get(reference)
