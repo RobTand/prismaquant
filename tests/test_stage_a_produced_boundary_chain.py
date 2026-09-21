@@ -379,13 +379,29 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
     return storage, publication, q, env, pb_repo
 
 
-def _strict(monkeypatch, env, pb_repo, *, tiers="ram,ssd"):
-    """Activate the real strict policy with the real launch identity."""
+def _strict(monkeypatch, env, pb_repo, q, *, tiers="ram,ssd"):
+    """Activate the real strict policy with the real launch identity.
 
+    ``PRISMABUILD_RESIDENCY_MAP`` is part of that identity, not decoration:
+    the SDK's ``injected_context`` refuses ``no-map-context`` without it and
+    derives the QUEUE ROOT from it (``Path(map_path).parent.parent``). PB's
+    launcher sets it to the action's own input map, whose parent's parent is
+    the queue root, so a real action always has it. The fixture sets the
+    same thing. The file need not exist -- the context reads the string, not
+    the map -- and the produced reads never resolve through it: they carry
+    their own namespaced resolver as an argument. This is exactly why the
+    supplemental context cannot simply BE this variable: the queue root is
+    derived from its shape, so a produced batch's map pointed at here would
+    send the SDK looking for the queue somewhere else.
+    """
+
+    from prismaquant.residency_map import ENV_VAR
     from prismaquant.staged_lease import set_lease_helper_root
     from prismaquant.staged_tier_policy import activate_staged_tier_policy
     for name, value in env.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.setenv(ENV_VAR, str(q.residency_map_path(
+        env["PRISMABUILD_ACTION_KEY"])))
     set_lease_helper_root(str(pb_repo))
     activate_staged_tier_policy(tiers)
 
@@ -474,7 +490,7 @@ def test_own_boundary_group_publishes_stages_and_reads_back(
         "publishing at write time would spend the stage credit the first "
         "read needs")
     _stage_groups(storage, q)
-    _strict(monkeypatch, env, pb_repo)
+    _strict(monkeypatch, env, pb_repo, q)
     with storage.prefetch(references) as window:
         for index, reference in enumerate(references):
             assert torch.equal(storage.get(window, reference),
@@ -503,7 +519,7 @@ def test_multi_window_initial_writes_exceed_the_window_and_fit_durable(
     assert storage.telemetry["produced_groups_prewritten"] == 2
     assert storage.telemetry["produced_groups_published"] == 0
     _stage_groups(storage, q)
-    _strict(monkeypatch, env, pb_repo)
+    _strict(monkeypatch, env, pb_repo, q)
     for start in (0, GROUP_SIZE):
         window_refs = references[start:start + GROUP_SIZE]
         with storage.prefetch(window_refs) as window:
@@ -554,28 +570,45 @@ def test_an_entry_directory_outside_the_prefix_is_refused(tmp_path):
             max_entry_tensor_bytes=1 << 14)
 
 
-def test_a_mutated_origin_refuses_before_any_tensor_is_exposed(
+def test_a_mutated_origin_is_refused_before_it_can_be_staged(
         tmp_path, monkeypatch):
-    """The writer's own digest is the reader's fence, end to end.
+    """The writer's own inline digest is the contract PB enforces on copy.
 
-    The descriptor carries the inline digest the writer computed while
-    serializing, so a mutated origin cannot agree with the copy the map
-    publishes. The read refuses with no tensor exposed. The mutation keeps
-    the file's LENGTH, so this is a digest proof and not a size check.
+    The descriptor carries the digest ``write_exact_activation_cache_entry``
+    computed while serializing -- no reread, no sealing pass -- so it
+    travels into the batch's data manifest. Mutating the origin after the
+    batch is published, keeping its LENGTH, therefore has to be refused at
+    the copy: this is a digest proof, not a size check.
+
+    SCOPE, stated because it is easy to overclaim: this is the refusal
+    BEFORE staging. A mutation after the bytes are already staged is NOT
+    caught by a read, and honestly cannot be -- the reader is served the
+    staged copy, which still matches the receipt the producer signed, and
+    the origin it no longer reads is not re-examined. Re-checking the
+    origin's identity belongs to the re-materialization path, which
+    PrismaBuild does not publish yet (see the skipped acceptance below).
     """
 
-    storage, _publication, q, env, pb_repo = _bound_owner(tmp_path)
+    storage, _publication, q, _env, _pb = _bound_owner(tmp_path)
     references = _write_group(storage, count=1)
-    _stage_groups(storage, q)
-    _strict(monkeypatch, env, pb_repo)
+    key, group = next(iter(storage._produced_groups.items()))
+    storage._produced_publish(key, group)
     origin = Path(references[0].path)
     payload = bytearray(origin.read_bytes())
     payload[-1] ^= 0xFF
     origin.write_bytes(bytes(payload))
-    assert origin.stat().st_size == references[0].file_bytes
-    with pytest.raises(RuntimeError):
-        with storage.prefetch(references) as window:
-            storage.get(window, references[0])
+    assert origin.stat().st_size == references[0].file_bytes, (
+        "the mutation must preserve the length, or this proves a size "
+        "check rather than a digest")
+    from prismabuild import pool
+    mover = str(group["published"]["mover_key"])
+    claimed = q.claim(owner=f"w-mover-{mover[:8]}", tags=[_tier_host(q)])
+    assert claimed is not None and claimed["action_key"] == mover
+    row = pool._read_json(q.item_path(pool.CLAIMED, mover))
+    outcome = q.execute(row, timeout_s=240)
+    assert outcome.get("returncode") != 0, (
+        "a mover must not stage bytes that disagree with the digest the "
+        "producer signed", outcome.get("returncode"), outcome.get("stderr"))
 
 
 def test_a_read_only_attachment_cannot_declare_an_owner_prewrite(tmp_path):
