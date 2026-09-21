@@ -20,13 +20,20 @@ produced binding -- the staged-not-serving refusal, which is the whole
 defect. ``test_own_boundary_group_publishes_stages_and_reads_back`` is the
 same write and the same reader with the binding in place.
 
-NOT ESTABLISHED HERE, and deliberately not faked: re-staging an unchanged
-group after its stage copy is released. ``publish_prepaid_batch``
-short-circuits on the filed commitment, so a second publish answers the
-committed duplicate instead of sealing a successor mover, and this lane
-will not invent a successor key or a second durable charge to fake it. The
-scenario is declared, skipped and names the exact call it needs (see
-``test_repeat_read_after_release_needs_pb_rematerialization``).
+The BOUNDED CYCLE is closed and measured here rather than declared:
+``test_the_bounded_cycle_reads_retires_and_reads_again`` reads a group,
+lets the window exit return its stage copy, and reads the SAME unchanged
+references again through a successor mover PrismaBuild sealed over its own
+materialization generation -- one logical batch, one durable origin
+charge, no second publication and no origin read.
+
+NOT ESTABLISHED HERE, and said plainly rather than implied: the wait for
+an asynchronous mover polls PrismaBuild's own records
+(``materialization_state``'s receipt field) because PB publishes no
+blocking library wait for a produced mover's row. The budget is bounded
+and its expiry is a named ``BoundaryStagingTimeout``, but a blocking wait
+would be better than a polled one and is a PB capability request, not a
+thing this lane should build.
 
 HARNESS PROVENANCE. The produced-output API is an unqualified candidate:
 no deployed runtime generation carries ``produced_output.py`` at all. It is
@@ -789,21 +796,6 @@ def test_a_read_only_attachment_cannot_declare_an_owner_prewrite(tmp_path):
         attached.bind_produced_output(
             publication, group_size=GROUP_SIZE, n_batches=GROUP_SIZE,
             max_entry_tensor_bytes=1 << 14)
-
-
-@pytest.mark.skip(reason=(
-    "BLOCKED on the PrismaBuild repeat-materialization entry point (the "
-    "parallel produced-output lane). publish_prepaid_batch short-circuits "
-    "on the filed commitment, so a second publish after retire_batch "
-    "replays the committed duplicate instead of sealing a successor mover. "
-    "The CAPABILITY needed -- re-stage an unchanged logical batch from the "
-    "owner's bound (queue, instance, template) plus its EXISTING batch_id, "
-    "tier and cas_root, returning the successor mover key, the PB-sealed "
-    "materialization sequence and the batch namespace, idempotent on "
-    "replay. The NAME is the owning PB lane's to settle; this lane calls "
-    "no such symbol and invents none. Declared, never faked green."))
-def test_repeat_read_after_release_needs_pb_rematerialization(tmp_path):
-    raise AssertionError("declared acceptance, not implemented")
 
 
 def test_the_pinned_candidate_provenance_is_immutable():
