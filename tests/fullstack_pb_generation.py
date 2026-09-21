@@ -15,6 +15,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from fleet_sdk import require_prismabuild_sdk
+
 REPO_LINK = Path("/mnt/shared/prismabuild-fleet/repo")
 
 #: Resolved once per process (one admitted action); never re-resolved.
@@ -23,6 +25,7 @@ _ROOT: Path | None = None
 
 def _resolve_once() -> Path:
     """The single immutable root every PB import in this process comes from."""
+    require_prismabuild_sdk()
     global _ROOT
     if _ROOT is None:
         root = REPO_LINK.resolve()
@@ -44,6 +47,7 @@ def generation() -> str:
 
 def require_paths() -> dict[str, str]:
     """Insert the resolved root's src/fleet tools; verify imports land there."""
+    require_prismabuild_sdk()
     root = _resolve_once()
     src = root / "src"
     fleet = root / "tools" / "fleet"
