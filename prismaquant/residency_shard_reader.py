@@ -123,9 +123,13 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None) -> str:
     Stops early, without waiting, on anything that is neither a covered
     span nor a mid-flight miss: ``RANGE_UNDECLARED`` (PB's sealed readset
     never named these bytes, so no mover will ever produce them) and
-    ``RANGE_REFUSED`` (an entry covers the span and failed a check --
-    evidence in hand, which re-asking cannot improve). Waiting on either
-    would be the same conflation this exists to fix, pointed the other way.
+    ``RANGE_REFUSED`` (an entry covers the span and failed a hard check --
+    wrong size, non-regular, permission or integrity, evidence in hand which
+    re-asking cannot improve). A covering entry whose staged file is merely
+    missing reports ``RANGE_UNCOVERED`` when the span is declared (PQ #903)
+    and is waited on like any other mid-flight miss. Waiting on either
+    terminal verdict would be the same conflation this exists to fix,
+    pointed the other way.
 
     Cheap to poll: an uncovered span returns before ``staged_range``
     stats anything, and ``ResidencyResolver._read_map`` is identity-gated,

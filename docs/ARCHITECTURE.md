@@ -1,7 +1,9 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/stagea-unpublished-905`.
+As of: 2026-09-21 · `fix/pq-903-stale-missing-waitable`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `fix/pq-903-stale-missing-waitable`) for **a stale covering row waiting instead of refusing** (PQ #903). After #902 every covering entry is asked, but every covering staged file missing still refused at once, even when the sealed readset declares the span and the layer's own range has not landed yet: the map is behind the file system (partial eviction or recompose lag), not the bytes unavailable. `ResidencyResolver._range_answer` now carries a typed missing cause (`errno.ENOENT` on the staged `lstat` with no RAM offer, never a `strerror` substring match); `staged_range_outcome` reports all-missing + declared as `RANGE_UNCOVERED` (same silent `range_misses` waitable miss as no covering entry) and all-missing + undeclared as `RANGE_UNDECLARED`. Any hard failure -- entry runs past the declared file, staged copy not regular, wrong size, or unreadable for any other errno including permission -- still refuses at once and reports the first hard reason (integrity first). The layer pre-flight waits on the waitable miss under its single deadline and the read below still refuses after the bound with no pool read. No format, lane, pin, kernel order or ship gate changes. Gates: `tests/test_staged_range_every_covering_entry.py`, `tests/test_strict_reader_tier_enforcement.py` (mid-wait map rewrite with real PB writers and lease paths).
 
 Re-stamped (2026-09-21, `fix/stagea-unpublished-905`) for **a lease that sees
 what a stage mover has published now** (PQ #905, PrismaBuild #823). A
