@@ -1,7 +1,29 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `feat/stagea-owner-loop-readahead-20260921`.
+As of: 2026-09-21 · `fix/stagea-readset-898-profiler-899`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
+scope of Stage A's kernel-time profiler** (PQ #899). `run_adjoint_capture`
+wrapped the whole capture in one `torch.profiler` CUDA session
+(`KernelTimeProfiler`) and stopped it in its `finally`. Kineto holds every CUDA
+record in host memory until the stop, and the stop then builds the whole trace.
+On the 512-sample run of 2026-09-21 (PB action `e9840722d83d`, sparklina; pqteld)
+AnonPages grew 7.4 GB to 10.9 GB in 15 minutes of collecting and 10.9 GB to
+32.3 GB in the 135 s after the stop, on a box whose host and GPU share one pool.
+The capture had already raised; the kernel killed the process before the
+traceback printed, and PrismaBuild recorded exit 137 and an stdout ending at
+`profiler_stop`. GPU-side memory was flat at 78.8 GB, inside the 80 GiB budget.
+**Stage A now holds no profiler session unless
+`PRISMAQUANT_STAGE_A_KERNEL_PROFILE=1`.** `KernelTimeProfiler(not_measured=...)`
+opens nothing and reports `kernel_active_s: None` with the reason; `counters.json`
+and `results.json` read the value through `block()`, so a profiler that could
+not measure no longer reports `0.0`. The GPU power sampler is bounded and stays
+on, so the receipt still carries power against the envelope (principle 15).
+A failing capture prints `capture failed: <type>: <message>` before any
+teardown. Stage B's per-chain and per-window sessions are bounded scopes and are
+unchanged. No format, lane, pin, kernel order or ship gate changes. Gates:
+`tests/test_stage_a_kernel_profile_scope.py`.
 
 Re-stamped (2026-09-21, `feat/stagea-owner-loop-readahead-20260921`) for
 **read-ahead in the Stage A produced-boundary owner loop** (PQ #887). No
