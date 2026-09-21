@@ -1234,6 +1234,26 @@ says exactly that.
   `produced_stager_dropped`. A stager near full load is PrismaBuild's fixed
   action cost (PB #811) surfacing on the other thread, and the bound on
   read-ahead then.
+  **Evidence, and its limit.** Three chain cycles at production group size
+  (`tools/stagea_produced_live_cycle.py --mode chain --entry-mib 16
+  --group-size 64 --window-compute-s 7`: 64 entries of 16 MiB a group, 2
+  layers, 2 groups a plane, 4 probes, 24-group window, owner on a Spark, 2026-09-21), one
+  before the change and two after, all on an **idle fleet**. The driver times
+  its own calls into the owner and subtracts the raw tensor writes and reads,
+  so the figure does not depend on the owner's counters. Compute-thread time
+  blocked on the owner, before and after: 35.8 s, then 29.8 s and 31.1 s, of a
+  367 s, 341 s and 342 s cycle. Per group: first forward layer 0.60 s, then
+  0.03 s and 0.02 s; tail 2.26 s, then 0.88 s and 0.93 s; steady-state chain
+  layer 0.29 s, then 0.13 s and 0.14 s. The cold-start chain layer did not
+  move (3.33 s, then 3.29 s and 3.36 s a group): that wait is the mover's copy
+  of a plane whose retirement from the tail read was still in flight, which no
+  thread removes. No arm had a refusal, and the stager was busy 26 s of 342 s.
+  So on an idle fleet the change is worth about 5 s in 36 s. **That is not the
+  production case.** The 512-sample run's symptom, publish-ahead steps
+  overrunning 10 s under load and their groups published at first read, did
+  not occur in the before arm either, so these cycles do not measure what the
+  stager does to it. That needs a cycle beside running input movers, or the
+  next 512-sample run, whose receipt carries `produced_compute_blocked_s`.
   **Evidence** is five live chain cycles on the fleet
   (`tools/stagea_produced_live_cycle.py --mode chain`, owner on a Spark,
   24-group window, 3 s of stand-in compute per window; the last four in the
