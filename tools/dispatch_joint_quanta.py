@@ -604,18 +604,22 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
             raise DispatchRefused(
                 "stage-A artifact budget must be a positive integer byte "
                 f"count (bytes), got bool {artifact_budget_bytes!r}")
-        try:
-            _budget = int(str(artifact_budget_bytes).strip(), 10) if isinstance(
-                artifact_budget_bytes, str) else int(artifact_budget_bytes)
-        except (ValueError, TypeError, AttributeError) as exc:
+        if isinstance(artifact_budget_bytes, int):
+            _budget = artifact_budget_bytes
+        elif isinstance(artifact_budget_bytes, str):
+            text = artifact_budget_bytes.strip()
+            if not text or any(ch not in "0123456789" for ch in text):
+                raise DispatchRefused(
+                    "stage-A artifact budget must be a positive integer byte "
+                    "count (ASCII decimal bytes), got "
+                    f"{artifact_budget_bytes!r}")
+            _budget = int(text, 10)
+        else:
             raise DispatchRefused(
                 "stage-A artifact budget must be a positive integer byte "
-                f"count (bytes), got {artifact_budget_bytes!r}: {exc}") from exc
-        if isinstance(artifact_budget_bytes, str) and (
-                not str(artifact_budget_bytes).strip().isdigit()):
-            raise DispatchRefused(
-                "stage-A artifact budget must be a positive integer byte "
-                f"count (bytes), got {artifact_budget_bytes!r}")
+                "count (bytes) as int or decimal string, not "
+                f"{type(artifact_budget_bytes).__name__} "
+                f"{artifact_budget_bytes!r}")
         if _budget <= 0:
             raise DispatchRefused(
                 "stage-A artifact budget must be a positive integer byte "

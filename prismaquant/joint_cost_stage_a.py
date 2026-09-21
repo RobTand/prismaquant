@@ -307,6 +307,10 @@ def _parse_artifact_budget_bytes(value, *, where: str) -> int:
 
     Units are bytes, always. A bool is an int subclass but never a byte
     budget; a float string (``"1e9"``, ``"640.0"``) is never an exact count.
+    Strings must be ASCII decimal: ``str.isdigit`` also accepts non-ASCII
+    digits (superscripts, fullwidth) that ``int()`` then refuses with an
+    untyped error, so the ASCII check runs first and every invalid input
+    carries the named refusal.
     """
     if isinstance(value, bool):
         raise AdjointIdentityRefused(
@@ -316,10 +320,10 @@ def _parse_artifact_budget_bytes(value, *, where: str) -> int:
         parsed = value
     elif isinstance(value, str):
         text = value.strip()
-        if not text or not text.isdigit():
+        if not text or any(ch not in "0123456789" for ch in text):
             raise AdjointIdentityRefused(
                 f"{where} artifact budget must be a positive integer byte "
-                f"count (bytes), got {value!r}")
+                f"count (ASCII decimal bytes), got {value!r}")
         parsed = int(text, 10)
     else:
         raise AdjointIdentityRefused(
