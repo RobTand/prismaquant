@@ -289,7 +289,10 @@ def _execute_mover(q, cas_root: Path, mover: str, checkout: Path,
          str(cas_root), str(checkout)],
         env=scrub, capture_output=True, text=True, timeout=240)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.strip() in ("published", "cache_hit"), done.stdout
+    # The sealed mover prints its own JSON report; the executor's status
+    # is the last line.
+    assert done.stdout.strip().splitlines()[-1] in (
+        "published", "cache_hit"), done.stdout
     receipt = q.move_record(mover)
     assert isinstance(receipt, dict), "mover recorded no receipt"
     return receipt

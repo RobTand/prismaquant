@@ -366,6 +366,16 @@ class ProducedRenderPublication:
         return dict(out)
 
     def release(self) -> dict:
+        # The deployed release contract requires the coherent reader-lease
+        # SDK (same prismabuild package this adapter binds): a missing,
+        # foreign or unreadable SDK retains, never releases.
+        try:
+            from prismabuild import reader_lease as lease_sdk
+        except ImportError as exc:
+            raise ProducedRenderBindingError(
+                "the produced-render release needs the admitted "
+                f"prismabuild reader_lease SDK: {exc}") from exc
         out = self._po.safe_release_instance(
-            self.queue, self.instance, self.template)
+            self.queue, self.instance, self.template,
+            lease_sdk=lease_sdk)
         return dict(out) if isinstance(out, dict) else {"ok": True}
