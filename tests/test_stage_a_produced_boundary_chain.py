@@ -499,7 +499,11 @@ def test_own_boundary_group_publishes_stages_and_reads_back(
     report = storage.produced_group_records()
     assert len(report) == 1 and report[0]["staged"] is True
     released = storage.release_produced_group(references[0])
-    assert released.get("ok") is True, released
+    receipt = released.get("receipt") or {}
+    assert released.get("ok") is True, (
+        released.get("refusal"), receipt.get("errors"),
+        receipt.get("live_pins"), receipt.get("entries_deferred"),
+        receipt.get("entries_deleted"), receipt.get("deferred_handoffs"))
 
 
 def test_multi_window_initial_writes_exceed_the_window_and_fit_durable(
