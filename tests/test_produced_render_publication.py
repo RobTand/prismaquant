@@ -838,3 +838,41 @@ def test_dispatcher_admits_validated_binding(tmp_path: Path,
             tampered_row, record_path=tampered_record,
             output_root=tmp_path, adjoint_path=tampered_adjoint,
             binding_validator=validator)
+
+
+def test_emit_seals_stub_validated_binding_for_every_record(
+        tmp_path: Path) -> None:
+    """emit_ threads the validator through build_ and bind_ (PQ #870)."""
+    from prismaquant.joint_layer_quanta import (
+        bind_adjoint_receipt, canonical_sha256,
+        emit_quantum_executable_readsets)
+    from test_quantum_executable_readset import (  # noqa: E402
+        CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _layer2)
+    record, receipt, parent = _layer2(tmp_path)
+    campaign = record["campaign"]
+    digest = bind_adjoint_receipt(
+        receipt, plan_sha256=campaign["plan_sha256"],
+        prepared_sha256=campaign["prepared_sha256"],
+        scope=campaign["campaign_scope"], checkpoints=STRIDED)
+    record = dict(
+        record, adjoint=dict(record["adjoint"], receipt_sha256=digest))
+    body = {k: v for k, v in record.items() if k != "identity_sha256"}
+    record["identity_sha256"] = canonical_sha256(body, where="fixture")
+    binding = {"scope": "pb732", "material": "d" * 64}
+    kwargs = dict(
+        strided_boundaries=STRIDED, n_probes=N_PROBES, calib=dict(CALIB),
+        render_prerequisite={**RENDER_PREREQ, "binding": dict(binding)},
+        output_root=str(tmp_path))
+    emitted = emit_quantum_executable_readsets(
+        receipt, [record], parent, **kwargs,
+        binding_validator=_stub_accept)
+    assert len(emitted) == 1
+    row = emitted[0]
+    assert row["manifest"]["annotations"]["render_prerequisite"][
+        "binding"] == binding
+    assert row["record"]["executable_readset"][
+        "manifest_sha256"] == row["manifest_sha256"]
+    # Without a validator the same emission refuses whole: nothing
+    # seals, no partial campaign.
+    with pytest.raises(ValueError, match="binding validator"):
+        emit_quantum_executable_readsets(receipt, [record], parent, **kwargs)
