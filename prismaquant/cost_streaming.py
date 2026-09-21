@@ -2651,6 +2651,19 @@ class StreamedBoundaryArtifacts:
             {"refusal": out.get("refusal"), "step": out.get("step"),
              "receipt": out.get("receipt")}, deadline)
 
+    def _record_produced_release_failure(self, group, record, reason):
+        """Count ONE stage copy that did not come back, with its reason.
+
+        The counter answers exactly one question -- did this owner leave a
+        stage copy standing? -- so it is incremented where that is known,
+        not wherever a refusal is first seen.
+        """
+
+        self.telemetry["produced_group_release_failures"] += 1
+        self._produced_release_errors.append(
+            {"batch_id": group["batch_id"], "attempt": record["attempts"],
+             "reason": reason})
+
     def _handle_produced_release_outcome(self, key, group, record, out,
                                          reason, deadline):
         """Decide about ONE observed outcome. No second retirement here.
@@ -2660,15 +2673,19 @@ class StreamedBoundaryArtifacts:
         out" what it already knows costs an extra egress, hides the
         outcome that changed, and -- when the new answer is another
         deferral -- restarts a budget that is supposed to be absolute.
+
+        A deferral PrismaBuild owns is NOT recorded as a release failure
+        here. It is news that the copy is still coming back, and the wait
+        below is what decides: the same receipt is already not a failure
+        when the poll path (``wait=False``) sees it, so counting it here
+        made the counter say whether this owner happened to ask inside a
+        wait, not whether a stage copy came back. A deferral that runs its
+        budget out is recorded by the wait, under the reason it ended on.
         """
 
         record["last_reason"] = reason
         if record["first_reason"] is None:
             record["first_reason"] = reason
-        self.telemetry["produced_group_release_failures"] += 1
-        self._produced_release_errors.append(
-            {"batch_id": group["batch_id"], "attempt": record["attempts"],
-             "reason": reason})
         self._produced_log(
             f"retirement of {group['batch_id']} not taken (attempt "
             f"{record['attempts']}): {repr(reason)[:300]}")
@@ -2686,6 +2703,8 @@ class StreamedBoundaryArtifacts:
                 # the SAME deadline if one is already running.
                 return self._await_produced_release_deferral(
                     key, group, record, out, deadline)
+        self._record_produced_release_failure(group, record, reason)
+        if "error" not in reason:
             if kind in UNCLASSIFIED_OUTCOMES:
                 # Three receipts that are not a decision: no deferred_own
                 # key at all and no positive cause, a non-empty
@@ -2777,6 +2796,11 @@ class StreamedBoundaryArtifacts:
             record["deferred_waited_s"] = time.monotonic() - started
             self._produced_release_pending.pop(key, None)
             self._produced_release_abandoned[key] = dict(record)
+            # HERE is where a deferral becomes a release failure: the copy
+            # did not come back inside the budget. Until this point it was
+            # news, not a verdict.
+            self._record_produced_release_failure(
+                group, record, record["last_reason"])
             raise BoundaryProducedReleaseDeferred(
                 group["batch_id"],
                 waited_s=time.monotonic() - started, timeout_s=budget,

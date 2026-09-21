@@ -112,6 +112,19 @@ teardown. Stage B's per-chain and per-window sessions are bounded scopes and are
 unchanged. No format, lane, pin, kernel order or ship gate changes. Gates:
 `tests/test_stage_a_kernel_profile_scope.py`.
 
+Re-stamped (2026-09-21, `fix/pq-890-tests-20260921`) for **what counts as a
+produced-group release failure** (PQ #890). No format, lane, pin, ship-gate
+verdict or kernel order changes, and no default moves. One counter changes
+meaning: an own-copy deferral that the owner waits out and that then clears
+is no longer recorded in `produced_group_release_failures` or in the report's
+`release_errors`. The waited path now follows the rule the poll path already
+followed -- a deferral is news that PrismaBuild still holds the copy, not a
+stage copy left standing -- so the counter answers "did this owner leave a
+copy behind?" rather than "did this owner happen to ask inside a wait?". A
+deferral that runs its budget out is recorded where it is decided, in the
+wait, alongside the `BoundaryProducedReleaseDeferred` it raises; foreign
+pins, promotion handoffs and egress errors are recorded exactly as before.
+
 Re-stamped (2026-09-21, `feat/stagea-owner-loop-readahead-20260921`) for
 **read-ahead in the Stage A produced-boundary owner loop** (PQ #887). No
 format, lane, pin, ship-gate verdict or kernel order changes, and the
@@ -1197,7 +1210,9 @@ says exactly that.
   **asks** for the retirement and returns, and later window opens poll it, a
   poll of PrismaBuild's own in-flight egress being neither a failed attempt
   nor a recorded error (`produced_group_release_polls` counts them apart from
-  re-drives); (5) the owner **waits** in four places, all timed: for credit
+  re-drives), and a deferral seen inside a wait being neither one either
+  until the wait gives up on it (`produced_group_release_deferrals` counts
+  the waits, `produced_group_release_failures` the copies left standing); (5) the owner **waits** in four places, all timed: for credit
   when the window is full, for a pending retirement of a group a read wants
   (a copy is never read while an egress may be deleting it), for the mover's
   receipt before it unlinks an origin of a group staged ahead and never read

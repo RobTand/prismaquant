@@ -1735,12 +1735,29 @@ def test_an_own_copy_deferral_is_waited_out_and_then_succeeds(
                 return real(batch_id, **kwargs)
 
             monkeypatch.setattr(publication, "retire", deferring)
-        assert calls["n"] == 3, ("two deferrals, then the real retire", calls)
+        # The condition, not a count: both scripted deferrals were served
+        # and the retirement that followed them completed. The real
+        # ``retire`` behind call three may itself defer while the fleet's
+        # own mover is still live, and the adapter re-drives it through
+        # this same wrapper, so pinning ``calls["n"]`` to 3 asserted that
+        # the fleet was fast, not that the adapter waited (PQ #890).
+        assert calls["n"] >= 3, ("two deferrals, then the real retire", calls)
+        assert storage.produced_group_records()[0]["retired"] is True
     assert storage.produced_group_records()[0]["retired"] is True
     assert storage.produced_release_debt() == _NO_DEBT, (
         "a deferral that cleared owes nothing",
         storage.produced_release_debt())
     assert storage.telemetry["produced_group_release_deferrals"] == 1
+    # FAILING-BEFORE (PQ #890): a deferral that cleared left no stage copy
+    # standing, so it is not a release failure. Before the fix the counter
+    # recorded one here -- and recorded none for the identical receipt seen
+    # by the unwaited poll path, which is why
+    # ``test_own_boundary_group_publishes_stages_and_reads_back`` was red
+    # or green depending on how fast the in-process fleet was.
+    assert storage.telemetry["produced_group_release_failures"] == 0, (
+        "a deferral that cleared is not a stage copy left standing",
+        storage._produced_release_errors)
+    assert not storage.produced_output_report()["release_errors"]
 
 
 def test_an_own_copy_deferral_that_never_clears_raises_inside_its_budget(
@@ -1782,6 +1799,9 @@ def test_an_own_copy_deferral_that_never_clears_raises_inside_its_budget(
     assert storage.produced_release_debt()["abandoned"], (
         "the credit is still owed and says so",
         storage.produced_release_debt())
+    assert storage.telemetry["produced_group_release_failures"] >= 1, (
+        "a deferral that never cleared IS a stage copy left standing, and "
+        "the counter says so where the wait gives up")
 
 
 def test_a_receipt_without_the_deferred_own_key_is_surfaced_not_decided(
