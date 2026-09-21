@@ -34,21 +34,60 @@ evicted mover's own live claimed copy, keeping bytes, proof and full credit
 `staging_timeout_s` already bound at `bind_produced_output`, against one
 ABSOLUTE deadline that a re-driven retirement cannot reset. A live pin is a
 real foreign-reader failure, preserved and never waited on; a deferred
-handoff is a promotion lifecycle that is not this lane's. A receipt with no
-`deferred_own` KEY and no other positive cause is surfaced as
-`BoundaryEgressUnclassified`, never read as "no deferral": a missing key is
-not an empty list, and `receipt.get(field, [])` is the fail-open shape that
-destroyed a stage token per occurrence. Open finding, not closed by this
-branch: that token loss itself -- produced-output egress decharging a
-batch's stage token instead of releasing it when the staged entries are
-still shared with an in-flight copy, permanently shrinking the tier mint
-(`tools/audit_produced_window_tokens.py` reproduces it; the cause is a
-PrismaBuild one, traced by root to an egress eviction that does not exclude
-its own mover from the claimed-path check, and repaired outside this lane).
-The rollover fixture therefore mints two stage tokens although steady-state
-occupancy is one, and its one-token acceptance is pending a re-run against
-the accepted PrismaBuild pin. Gates:
-`tests/test_stage_a_produced_boundary_chain.py`.
+handoff is a promotion lifecycle that is not this lane's. The reason is matched as the EXACT string
+PrismaBuild writes (`own-copy-in-flight`), and three receipts are surfaced
+as `BoundaryEgressUnclassified` rather than decided: no `deferred_own` key
+at all with no other positive cause, a non-empty `deferred_own` naming an
+unrecognised reason, and a `deferred_own` that is not a list. A missing key
+is not an empty list -- `receipt.get(field, [])` is the fail-open shape
+that destroyed a stage token per occurrence -- and an unrecognised deferral
+is not one this lane knows will clear. A `deferred_own` present and EMPTY
+is the opposite and is NOT surfaced: PrismaBuild looked and found no
+own-copy deferral, which is a positive observation. The rule under all of
+it is act on positive observations, surface only true silence, which is
+also why a live pin still classifies on a receipt from a generation that
+publishes no `deferred_own`. Which generations those are is a dated
+observation in `tests/stagea_produced_pb_pin.json`, not an invariant: the
+requirement is that the classifier keep an answer for such a receipt for as
+long as one can be served at all.
+
+A SECOND PrismaBuild transient is waited out on the publish side, and
+nothing else is. `pool.fund_output_batch` and `pool.stage_output_intent`
+take their transition locks with `blocking=False` and answer
+`funding-race-deferred` when one is contended; both `publish_prepaid_batch`
+and `ensure_batch_materialized` surface it verbatim, stamped with the step
+that met it. The transient is narrow -- THAT non-blocking call
+moved no tokens -- and is not a claim that nothing happened: the request
+is sealed and filed, the intent staged and the READY row published before
+the funding step runs, and a deferral rolls none of it back. The re-drive
+is licensed by the content-addressed mover key and PrismaBuild's step-wise
+idempotency, so the adapter re-drives the IDENTICAL call -- same batch id,
+same descriptors, same instance -- which is resumption, not a second
+publication. It is
+keyed on the refusal, never on the step, and every other refusal is
+terminal at once. The budget is the same `staging_timeout_s`: ONE absolute
+deadline spans the publish, any re-materialization and the wait for the
+mover's receipt, so a transient waited out shortens the wait that follows
+instead of extending the total, and expiry is a named
+`BoundaryProducedFundingDeferred` that records the group in
+`produced_release_debt()["publish_deferred"]`. What that failure states is
+bounded on purpose: the logical batch's COMMIT is unfinished, the request,
+intent and mover row may already exist, and the credits stay
+PrismaBuild-accounted -- no rollback is inferred and none is performed.
+
+Closed by this branch, having been open in it: the intermittent stage-token
+loss (produced-output egress decharging a batch's stage token instead of
+releasing it when the staged entries are still shared with an in-flight
+copy, permanently shrinking the tier mint). The cause was a PrismaBuild
+one, traced by root to an egress eviction that did not exclude its own
+mover from the claimed-path check, and repaired outside this lane. This
+lane re-pinned its harness onto the repaired candidate
+(`83e8d502ad9305177ee6e0501ff7c88ee036579d`, byte-identical on all eleven
+pinned paths to merged `3641e29332bfd7a091f35b5bd3875b6de294c86e`) and the
+rollover fixture now runs at ONE stage token as well as two, as a
+parameter rather than a restored assumption -- at the superseded candidate
+that one-token run failed 1 in 6, so a single green is evidence and not
+proof. Gates: `tests/test_stage_a_produced_boundary_chain.py`.
 
 Re-stamped (2026-09-21, `fix/quantum-metadata-generation-20260921`) for
 **the quantum control-metadata generation seam** (PQ #884). No default,

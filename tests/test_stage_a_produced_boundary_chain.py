@@ -35,8 +35,11 @@ and its expiry is a named ``BoundaryStagingTimeout``, but a blocking wait
 would be better than a polled one and is a PB capability request, not a
 thing this lane should build.
 
-HARNESS PROVENANCE. The produced-output API is an unqualified candidate:
-no deployed runtime generation carries ``produced_output.py`` at all. It is
+HARNESS PROVENANCE. The produced-output API's SOURCE is root-accepted and
+its global application is a separate, pending step; what any particular
+runtime generation carries is a dated observation in the pin record, not a
+claim this file makes, because a fixture that asserts a live-fleet fact
+goes stale the moment the fleet moves. It is
 pinned by file digest against an IMMUTABLE bundle
 (``stagea_produced_pb_pin.json``) cut from the owning lane's committed
 tree, never against that lane's live worktree, and these tests skip loudly
@@ -51,6 +54,7 @@ produced-render harness records; it is not fixed blind here.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -59,6 +63,8 @@ import secrets
 import socket
 import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -79,7 +85,8 @@ GROUP_SIZE = 4
 #: An owner that owes nothing. Three buckets, not two: an egress refusal
 #: this lane cannot classify is reported in its own, because folding it
 #: into "abandoned" would say a decision was made when none was.
-_NO_DEBT = {"pending": {}, "abandoned": {}, "unclassified": {}}
+_NO_DEBT = {"pending": {}, "abandoned": {}, "unclassified": {},
+            "publish_deferred": {}}
 
 
 # -- pinned candidate resolution -------------------------------------------
@@ -869,8 +876,9 @@ def test_entries_disposed_INSIDE_a_window_still_return_their_credits(
                                             "temp": 0}
 
 
+@pytest.mark.parametrize("gib", [2, 1])
 def test_repeated_distinct_group_turnover_on_a_single_stage_token(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, gib):
     """Four distinct groups through ONE token, and only that.
 
     What this establishes: repeated credit turnover across distinct
@@ -880,13 +888,15 @@ def test_repeated_distinct_group_turnover_on_a_single_stage_token(
     window refills. Four groups against one window credit: if a stage copy
     were not returned, window 1 could not fund and this stops.
 
-    Why the TIER mints two when the window is one. Steady-state occupancy
-    is ONE -- the ledger shows held=1 while a group is staged, held=0 with
-    the token back in free at every window close, and at two tokens the
-    second is never held by anyone. The second token is not overlap. It
-    covers an INTERMITTENT STAGE-TOKEN LOSS in produced-output egress,
-    which is an open finding against PrismaBuild and not a property of
-    this test.
+    Run at TWO tier tokens and at ONE, because the difference between them
+    was a PrismaBuild defect and the one-token run is its acceptance.
+    Steady-state occupancy is ONE either way -- the ledger shows held=1
+    while a group is staged, held=0 with the token back in free at every
+    window close, and at two tokens the second is never held by anyone.
+    The second token was never overlap; it covered an INTERMITTENT
+    STAGE-TOKEN LOSS in produced-output egress. The one-token parameter is
+    what fails if that loss is back, and it is pinned against the repaired
+    candidate rather than asserted.
 
     Measured, not inferred (tools/audit_produced_window_tokens.py, and
     repeats of this test at one token: 1 failure in 6, then reproduced
@@ -916,11 +926,17 @@ def test_repeated_distinct_group_turnover_on_a_single_stage_token(
     move receipt exists before the row leaves CLAIMED. It drops its only
     proof and destroys its own token. That repair is assigned elsewhere.
 
-    So do not shrink this tier back to one. One token does not make this
-    test stricter; it makes it fail whenever that egress path is taken.
-    When the repair lands and a new PB candidate is pinned, re-run the
-    one-token acceptance against that candidate: this is NOT closed at the
-    42f2cfb8 candidate.
+    The repair landed in PrismaBuild and this lane re-pinned onto it:
+    ``tools/fleet/stage_release.py`` moves between the two bundles
+    (42f2cfb874077da66c27401e718d3636903a8a40
+    6b94e738f78af6b98d61107f129e1364aa0a3bec13a165996b535b63aaf53bce ->
+    83e8d502ad9305177ee6e0501ff7c88ee036579d
+    900436256d57a78a43620385b60b5934a8197d42d0037cffd4140f429eb059a7),
+    and ``src/prismabuild/produced_output.py`` with it. The one-token
+    parameter is therefore a real acceptance against the new candidate,
+    not a restored assumption: at the old one it failed 1 run in 6, so a
+    single green here is evidence and not proof, and the flake it would
+    catch is a regression of exactly that defect.
 
     What this does NOT establish: full cotangent rollover. The previous
     group's entries are disposed inside the NEXT group's window, after the
@@ -932,7 +948,7 @@ def test_repeated_distinct_group_turnover_on_a_single_stage_token(
     import torch
     storage, publication, q, env, pb_repo = _bound_owner(
         tmp_path, n_batches=4 * GROUP_SIZE, payload_max_bytes=1 << 22,
-        window_gib=1, gib=2)
+        window_gib=1, gib=gib)
     groups = [_write_group(storage, count=GROUP_SIZE, first=index * GROUP_SIZE)
               for index in range(4)]
     assert storage.telemetry["produced_groups_prewritten"] == 4
@@ -1262,6 +1278,401 @@ def test_the_pinned_candidate_provenance_is_immutable():
     assert Path(prismabuild.__file__).resolve().is_relative_to(src.resolve())
 
 
+# -- the funding transient -------------------------------------------------
+#
+# Several PrismaBuild steps take a transition lock with
+# ``blocking=False`` and answer ``{"ok": False, "refusal":
+# "funding-race-deferred"}`` when it is contended: ``stage_output_intent``
+# and ``fund_output_batch`` are the two on this path, and the same typed
+# answer appears on the drive, release and adoption paths. Both
+# ``publish_prepaid_batch`` and ``ensure_batch_materialized`` surface it
+# verbatim, stamped with the step that met the contention -- MEASURED here
+# as ``step="stage"`` when the owner lock is held before the publish, and
+# observed in production as ``step="fund"``. Which step meets it is a race;
+# that it was a lock and not a verdict is not. The transient is narrow:
+# THAT non-blocking call moved no tokens. It does not mean nothing
+# happened -- the request is sealed and filed, the funding intent staged
+# and the READY row published before the funding step runs, and a deferral
+# rolls none of that back. The re-drive is licensed by the content-
+# addressed mover key and PrismaBuild's step-wise idempotency, not by an
+# absence of side effects. The adapter therefore keys on the REFUSAL,
+# never on the step.
+#
+# The contention here is REAL and it is PrismaBuild's own lock, taken from
+# another PROCESS -- the fcntl leg, which is how a producer and the fleet's
+# claim loop actually collide. Nothing substitutes the refusal.
+
+
+_LOCK_HOLDER = """
+import sys, time
+from pathlib import Path
+root, key, ready, stop = (sys.argv[1], sys.argv[2],
+                          Path(sys.argv[3]), Path(sys.argv[4]))
+from prismabuild import pool
+q = pool.PoolQueue(Path(root))
+with q._transition_locked(key, blocking=True) as held:
+    if not held:
+        raise SystemExit("holder did not acquire the transition lock")
+    ready.write_text("held")
+    while not stop.exists():
+        time.sleep(0.02)
+"""
+
+
+@contextmanager
+def _owner_lock_held(q, action_key: str, tmp_path: Path):
+    """Hold PrismaBuild's own transition lock for one key, from elsewhere.
+
+    A separate process on purpose. ``posix_lock.held`` serializes threads
+    of ONE process on a per-path ``RLock`` before it ever reaches the
+    inode, so a holder thread would prove the thread leg and not the
+    ``fcntl.LOCK_EX | LOCK_NB`` leg that a real producer-versus-fleet
+    collision takes.
+
+    It calls ``_transition_locked`` -- private -- because that is the lock
+    PrismaBuild itself takes on the OWNER key at the site under test, and
+    the published ``mover_transition_lock`` is the other leg on a key that
+    does not exist until the publish this is contending with. Re-deriving
+    the lock path here would be inventing an interface instead of using
+    one.
+
+    Yields a ``release`` callable; also releases on exit.
+    """
+
+    ready = tmp_path / "owner-transition-lock.ready"
+    stop = tmp_path / "owner-transition-lock.stop"
+    for path in (ready, stop):
+        if path.exists():
+            path.unlink()
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
+                        "PRISMABUILD_ACTION_SCOPE",
+                        "PRISMABUILD_RESIDENCY_MAP")}
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER, str(q.root), str(action_key),
+         str(ready), str(stop)],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    released = False
+
+    def release():
+        nonlocal released
+        if released:
+            return
+        released = True
+        stop.write_text("stop")
+        try:
+            proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+
+    try:
+        _until(lambda: ready.exists() or proc.poll() is not None, 30.0,
+               "the holder process never took the transition lock")
+        if proc.poll() is not None:
+            out, err = proc.communicate()
+            raise AssertionError(f"holder exited early: {err or out}")
+        yield release
+    finally:
+        release()
+
+
+def _until(predicate, budget_s: float, message: str, poll_s: float = 0.02):
+    """Wait for a real state change, bounded. Never a bare sleep."""
+
+    deadline = time.monotonic() + float(budget_s)
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(poll_s)
+    raise AssertionError(f"{message} (within {budget_s}s)")
+
+
+def test_a_contended_funding_lock_is_waited_out_and_publishes_once(
+        tmp_path, monkeypatch):
+    """The observed transient, forced, and then survived without a double charge.
+
+    What was observed in a suite run and NOT handled: one group's
+    ``publish_prepaid_batch`` answered ``{'ok': False, 'refusal':
+    'funding-race-deferred', 'step': 'fund'}`` and the adapter raised,
+    ending the run. The adapter, not PrismaBuild, was the defect: every
+    not-ok was terminal, with no discrimination between a documented
+    transient and a real refusal.
+
+    Forced here, deterministically: another process holds the OWNER
+    transition lock, the read publishes into that contention, and the lock
+    is released only once the publication reports it actually waited on a
+    deferral -- a state change, never a sleep. The re-drive passes the same
+    batch id, the same descriptors and the same instance, so PrismaBuild
+    re-derives the same content-addressed mover key.
+
+    The no-double-charge claim is the tier's own arithmetic, before and
+    after: capacity unchanged (nothing minted, nothing decharged) and the
+    free pool back where it started once the group retires, with exactly
+    one group record and one mover.
+    """
+
+    import torch
+    storage, publication, q, env, pb_repo = _bound_owner(
+        tmp_path, staging_timeout_s=120.0)
+    references = _write_group(storage)
+    owner = env["PRISMABUILD_ACTION_KEY"]
+    ledger = q.tier_ledger(TIER)
+    capacity_before = ledger.capacity().get(KIND)
+    free_before = ledger.available().get(KIND)
+    outcome = {}
+
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with _owner_lock_held(q, owner, tmp_path) as release:
+
+            def read():
+                try:
+                    with storage.prefetch(references) as window:
+                        outcome["tensor"] = storage.get(window, references[0])
+                    outcome["ok"] = True
+                except BaseException as exc:            # noqa: BLE001
+                    outcome["error"] = exc
+
+            reader = threading.Thread(target=read, daemon=True)
+            reader.start()
+            _until(lambda: publication.funding_deferrals >= 1
+                   or "error" in outcome, 60.0,
+                   "a held owner lock must make PrismaBuild defer the funding")
+            assert "error" not in outcome, outcome.get("error")
+            release()
+            reader.join(180.0)
+
+    assert not reader.is_alive(), "the publish never returned after the lock went"
+    assert "error" not in outcome, outcome.get("error")
+    assert torch.equal(outcome["tensor"], torch.arange(8, dtype=torch.float32))
+    assert publication.funding_deferrals >= 1, (
+        "the transient must have actually fired; otherwise this test proves "
+        "nothing about waiting it out")
+    assert storage.telemetry["produced_group_funding_deferrals"] >= 1
+    assert storage.telemetry["produced_groups_published"] == 1, (
+        "one publication, not one per re-drive")
+    records = storage.produced_group_records()
+    assert len(records) == 1
+    assert storage.produced_release_debt() == _NO_DEBT
+    mover = str(storage._produced_groups[
+        next(iter(storage._produced_groups))]["published"]["mover_key"])
+    assert ledger.capacity().get(KIND) == capacity_before, (
+        "a retried funding must not mint or decharge capacity")
+    assert ledger.holder_tokens(mover).get(KIND, 0) == 0, (
+        "the one mover this published gave its token back")
+    # Conservation, which is what "no duplicate charge" means on a ledger
+    # that never mints: free plus this owner's remaining window is the
+    # whole tier. A second charge would be parked under some holder and
+    # this sum would fall short. It is NOT free_before: retirement returns
+    # the staged token to FREE rather than to the owner's holding, so the
+    # free pool ends HIGHER than it started by exactly that token --
+    # measured (2 -> 3 of 4 at the fixture's window of 2), not assumed.
+    assert (ledger.available().get(KIND)
+            + ledger.holder_tokens(owner).get(KIND, 0)) == capacity_before, (
+        "a token is parked somewhere it should not be", ledger.available(),
+        ledger.holder_tokens(owner))
+    assert ledger.available().get(KIND) > free_before, (
+        "the staged token came back to free", ledger.available())
+
+
+def test_an_inherited_spent_deadline_never_touches_prismabuild(
+        monkeypatch):
+    """ZERO calls when the budget arrived already spent. Not one.
+
+    The rule this pins, stated where it is easiest to break: a deadline
+    bounds SIDE EFFECTS, not attempts -- and that includes the FIRST one.
+    A step handed a deadline a previous step already spent has no licence
+    to seal a request, publish a row or take a reservation in order to be
+    handed a refusal it can already see. An expiry observed locally is a
+    fact; performing doomed work to have it confirmed is how a bounded run
+    stops being bounded.
+
+    The stub refuses EVERY attribute, so "no mutation" is not a count that
+    could be read wrong: touching PrismaBuild at all fails the test.
+    """
+
+    from prismaquant.stage_a_produced_output import (
+        BoundaryProducedPublication, BoundaryStagingTimeout)
+
+    class _RefusesEveryCall:
+        def __init__(self):
+            self.touched = []
+
+        def __getattr__(self, name):
+            self.touched.append(name)
+            raise AssertionError(
+                f"a spent deadline reached PrismaBuild: {name}")
+
+    clock = {"now": 100.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
+    publication = BoundaryProducedPublication.__new__(
+        BoundaryProducedPublication)
+    stub = _RefusesEveryCall()
+    publication._po = stub
+    spent = clock["now"] - 1.0
+
+    with pytest.raises(BoundaryStagingTimeout) as caught:
+        publication.publish(batch_id="b-inherited", descriptors=[{"x": 1}],
+                            deadline=spent)
+    assert stub.touched == [], stub.touched
+    assert "did not START" in str(caught.value)
+
+    with pytest.raises(BoundaryStagingTimeout):
+        publication.ensure_batch_materialized(batch_id="b-inherited",
+                                              deadline=spent)
+    assert stub.touched == [], stub.touched
+
+    # And the legacy one-shot is untouched: no budget, nothing bounded.
+    calls = []
+    assert publication._drive_prepaid_step(
+        lambda: calls.append(1) or {"ok": True},
+        batch_id="b-inherited", deadline=None) == {"ok": True}
+    assert len(calls) == 1
+
+
+def test_a_spent_budget_starts_no_further_prepaid_call(monkeypatch):
+    """Zero calls after the deadline. Checked where the side effect is.
+
+    The third variant of one bug class in this work, after the recursive
+    budget reset and the unpaced loop: a budget read AFTER the call, or
+    only after the sleep that reached it, still issues one more call past
+    expiry -- and each of these calls can seal a request, stage a funding
+    intent or publish a row. Counted on a FAKE clock, so what is asserted
+    is the ordering and not a wall-clock coincidence.
+
+    The method is driven directly on an unconstructed publication because
+    it touches nothing else on it: the poll floor and the per-instance
+    deferral count. Building a real owner here would measure the fixture.
+    """
+
+    from prismaquant.stage_a_produced_output import (
+        FUNDING_RACE_REFUSAL, BoundaryProducedFundingDeferred,
+        BoundaryProducedPublication)
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(time, "sleep",
+                        lambda seconds: clock.__setitem__(
+                            "now", clock["now"] + float(seconds)))
+    publication = BoundaryProducedPublication.__new__(
+        BoundaryProducedPublication)
+    deadline = 0.4
+    at = []
+
+    def deferred_call():
+        at.append(clock["now"])
+        return {"ok": False, "step": "fund", "refusal": FUNDING_RACE_REFUSAL,
+                "attempt": len(at)}
+
+    with pytest.raises(BoundaryProducedFundingDeferred) as caught:
+        publication._drive_prepaid_step(
+            deferred_call, batch_id="b-spent", deadline=deadline)
+
+    assert at, "it must have driven the step at least once"
+    assert [t for t in at if t >= deadline] == [], (
+        "no call may START once the absolute deadline has passed", at,
+        deadline)
+    assert caught.value.outcome == {
+        "ok": False, "step": "fund", "refusal": FUNDING_RACE_REFUSAL,
+        "attempt": len(at)}, (
+        "the LAST ACTUAL outcome is reported; a refusal nobody returned "
+        "would be a fabrication", caught.value.outcome)
+    assert caught.value.attempts == len(at)
+
+
+def test_a_terminal_publish_refusal_is_not_retried(tmp_path, monkeypatch):
+    """Everything that is not the typed transient fails at once.
+
+    The danger in fixing the transient is fixing too much: a retry loop
+    that treats any not-ok as retryable turns a real refusal -- an
+    unavailable reservation, a rejected descriptor -- into a silent stall
+    that ends in a timeout naming the wrong cause. One call, one failure,
+    no wait.
+    """
+
+    from prismaquant.stage_a_produced_output import (
+        BoundaryProducedPublicationFailed)
+
+    storage, publication, q, env, pb_repo = _bound_owner(
+        tmp_path, staging_timeout_s=120.0)
+    references = _write_group(storage)
+    calls = []
+
+    def refuse(*args, **kwargs):
+        calls.append(time.monotonic())
+        return {"ok": False, "step": "fund",
+                "refusal": "tier-reservation-unavailable"}
+
+    monkeypatch.setattr(publication._po, "publish_prepaid_batch", refuse)
+    _strict(monkeypatch, env, pb_repo, q)
+    started = time.monotonic()
+    with pytest.raises(BoundaryProducedPublicationFailed) as caught:
+        with storage.prefetch(references) as window:
+            storage.get(window, references[0])
+    elapsed = time.monotonic() - started
+    assert len(calls) == 1, ("a terminal refusal is not re-driven", calls)
+    assert elapsed < publication.FUNDING_DEFERRAL_POLL_S, (
+        "it returned immediately rather than after a poll", elapsed)
+    assert "tier-reservation-unavailable" in str(caught.value)
+    assert publication.funding_deferrals == 0
+    assert storage.produced_release_debt()["publish_deferred"] == {}
+
+
+def test_a_funding_lock_that_never_clears_leaves_diagnosed_debt(
+        tmp_path, monkeypatch):
+    """The budget runs out and the held window is NAMED, not dropped.
+
+    Contention that never clears is not a thing this lane may wait on
+    forever, and it is not a thing it may forget either: the batch's
+    commit is unfinished and its credit is still accounted somewhere, so a
+    held window that nothing names is the invisible half of a leak. One
+    absolute budget, a typed failure carrying what it waited for, and the
+    group in its own debt bucket.
+    """
+
+    from prismaquant.stage_a_produced_output import (
+        FUNDING_RACE_REFUSAL, BoundaryProducedFundingDeferred)
+
+    storage, publication, q, env, pb_repo = _bound_owner(
+        tmp_path, staging_timeout_s=1.0)
+    references = _write_group(storage)
+    owner = env["PRISMABUILD_ACTION_KEY"]
+    ledger = q.tier_ledger(TIER)
+    held_before = ledger.holder_tokens(owner).get(KIND, 0)
+    batch_id = storage.produced_group_records()[0]["batch_id"]
+
+    with _owner_lock_held(q, owner, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        started = time.monotonic()
+        with pytest.raises(BoundaryProducedFundingDeferred) as caught:
+            with storage.prefetch(references) as window:
+                storage.get(window, references[0])
+        elapsed = time.monotonic() - started
+
+    # The owner lock is taken at the staging step before the funding one,
+    # so this fixture meets the contention at "stage" while the production
+    # occurrence met it at "fund". Same refusal, same nothing-moved, same
+    # idempotent re-drive: the step is recorded, never dispatched on.
+    assert caught.value.step in ("stage", "fund"), caught.value.step
+    assert caught.value.attempts >= 2, (
+        "it must have re-driven, not just failed once", caught.value.attempts)
+    assert elapsed >= 1.0, ("it must have spent the budget it reports", elapsed)
+    assert elapsed < 30.0, ("and ONLY that budget", elapsed)
+    assert FUNDING_RACE_REFUSAL in str(caught.value)
+    debt = storage.produced_release_debt()["publish_deferred"]
+    assert list(debt) == [batch_id], debt
+    assert debt[batch_id]["step"] == caught.value.step
+    # MEASURED, not inferred: the owner's stage holding is what it was
+    # before the attempt. That is the fact; what it is NOT is a claim that
+    # the attempt left no trace. A sealed request, a staged intent and a
+    # published row may all exist -- this lane makes no statement about
+    # them and rolls nothing back.
+    assert ledger.holder_tokens(owner).get(KIND, 0) == held_before, (
+        "the owner still holds the credit it held, which is exactly why "
+        "the unfinished commit has to be reported rather than dropped")
+
+
 # -- the egress outcome seam ----------------------------------------------
 #
 # PrismaBuild's conservative egress fix makes an evicted mover's own live
@@ -1402,9 +1813,53 @@ def test_a_receipt_without_the_deferred_own_key_is_surfaced_not_decided(
                         "ok": False, "refusal": "egress-incomplete",
                         "receipt": dict(old_receipt)})
     assert "deferred_own" in str(caught.value)
+    assert caught.value.kind == "unknown"
     assert storage.produced_release_debt()["unclassified"], (
         "reported in its own bucket, because folding it into 'abandoned' "
         "would claim a decision was made")
+
+
+def test_an_unrecognised_deferral_reason_is_surfaced_not_waited_on(
+        tmp_path, monkeypatch):
+    """A deferral this lane cannot name is visible, never sat on.
+
+    The inverse fail-open of the missing key, and the more expensive one:
+    ``if receipt.get("deferred_own"):`` would read ANY non-empty list as
+    "PrismaBuild will clear this", and then spend the whole staging budget
+    waiting for something that was never that. The wait is licensed by one
+    known reason -- the evicted mover's own in-flight copy, which ordinary
+    retry returns -- and by nothing else.
+
+    Driven through the REAL release path. The malformed shape (a
+    ``deferred_own`` that is not a list) takes the same branch and is
+    covered at the classifier, because what differs there is the receipt,
+    not the handling.
+    """
+
+    from prismaquant.stage_a_produced_output import BoundaryEgressUnclassified
+
+    storage, publication, q, env, pb_repo, references = _staged_group(
+        tmp_path, monkeypatch, staging_timeout_s=30.0)
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        started = time.monotonic()
+        with pytest.raises(BoundaryEgressUnclassified) as caught:
+            with storage.prefetch(references) as window:
+                storage.get(window, references[0])
+                monkeypatch.setattr(
+                    publication, "retire",
+                    lambda batch_id, **kwargs: _incomplete(
+                        deferred_own=["frobnicated-hold"]))
+        elapsed = time.monotonic() - started
+    assert caught.value.kind == "egress-deferral-unrecognised"
+    assert "frobnicated-hold" in str(caught.value)
+    assert elapsed < 30.0, (
+        "it must not have spent the deferral budget on a reason it cannot "
+        "name", elapsed)
+    assert storage.telemetry["produced_group_release_deferrals"] == 0, (
+        "nothing here is a deferral this lane waits on")
+    assert storage.produced_release_debt()["unclassified"], (
+        "reported in its own bucket: no decision was made about it")
 
 
 def test_a_deferred_own_receipt_that_turns_into_a_foreign_pin_stops_waiting(
@@ -1441,13 +1896,48 @@ def test_a_deferred_own_receipt_that_turns_into_a_foreign_pin_stops_waiting(
 
 
 def test_the_egress_classifier_reads_the_confirmed_receipt_shape():
-    """The four cases, plus the one answer that is not a cause."""
+    """Every row of the table, and only the first one waits.
 
-    from prismaquant.stage_a_produced_output import classify_egress_outcome
+    The reason string is matched EXACTLY, against the one PrismaBuild's
+    egress writes (``stage_release.py``: ``"deferred_own":
+    ["own-copy-in-flight"] if own_deferred else []``). Truthiness is not a
+    match and neither is a substring: a deferral this lane has never seen
+    is not one it knows will clear, and a field of the wrong shape is not
+    a field at all.
+    """
 
+    from prismaquant.stage_a_produced_output import (
+        OWN_COPY_IN_FLIGHT, classify_egress_outcome)
+
+    assert OWN_COPY_IN_FLIGHT == "own-copy-in-flight"
     assert classify_egress_outcome({"ok": True}) == "retired"
+    # 1. The one that waits.
     assert classify_egress_outcome(_incomplete(
         deferred_own=["own-copy-in-flight"])) == "own-copy-deferral"
+    # 2. Non-empty, unrecognised reason: visible, never waited on.
+    assert classify_egress_outcome(_incomplete(
+        deferred_own=["some-other-hold"])) == "egress-deferral-unrecognised"
+    assert classify_egress_outcome(_incomplete(
+        deferred_own=["own-copy-in-flight", "some-other-hold"])) == (
+            "egress-deferral-unrecognised"), (
+        "one unrecognised reason in the list is still unrecognised")
+    # 3. Malformed -- not a list. A bare string that reads like the reason
+    #    is the trap: it is truthy, it contains the right characters, and
+    #    it is not this field.
+    assert classify_egress_outcome(_incomplete(
+        deferred_own="own-copy-in-flight")) == "egress-deferral-malformed"
+    assert classify_egress_outcome(_incomplete(
+        deferred_own={"reason": "own-copy-in-flight"})) == (
+            "egress-deferral-malformed")
+    assert classify_egress_outcome(_incomplete(
+        deferred_own=True)) == "egress-deferral-malformed"
+    # 4. Absent, with nothing else positive: an older PrismaBuild with no
+    #    opinion, not a negative answer.
+    assert classify_egress_outcome({
+        "ok": False, "refusal": "egress-incomplete",
+        "receipt": {"complete": False, "live_pins": [],
+                    "deferred_handoffs": [], "errors": []}}) == "unknown"
+    # 5. Empty with a live pin: a real foreign pin. Fail, do not wait.
     assert classify_egress_outcome(_incomplete(
         deferred_own=[], live_pins=[{"pin_id": "r"}])) == "foreign-pin"
     assert classify_egress_outcome(_incomplete(
@@ -1455,16 +1945,15 @@ def test_the_egress_classifier_reads_the_confirmed_receipt_shape():
         deferred_handoffs=["promotion-handoff"])) == "promotion-handoff"
     assert classify_egress_outcome(_incomplete(
         deferred_own=[], errors=["something"])) == "egress-error"
-    # deferred_own present and empty, nothing else: a complete answer.
+    # deferred_own present and EMPTY, nothing else: a complete answer.
+    # PrismaBuild looked and found no own-copy deferral, which is a
+    # positive observation and not the silence above.
     assert classify_egress_outcome(_incomplete(
         deferred_own=[])) == "egress-incomplete"
-    # deferred_own ABSENT and nothing else positive: not an answer at all.
-    assert classify_egress_outcome({
-        "ok": False, "refusal": "egress-incomplete",
-        "receipt": {"complete": False, "live_pins": [],
-                    "deferred_handoffs": [], "errors": []}}) == "unknown"
     # An older receipt that DOES name a cause still classifies by it: a
-    # live pin is observed, not inferred from the missing key.
+    # live pin is observed, not inferred from the missing key, and it is
+    # reported identically by every generation. This is also the deployed
+    # generation's only path, since none of them publishes deferred_own.
     assert classify_egress_outcome({
         "ok": False, "refusal": "egress-incomplete",
         "receipt": {"complete": False,

@@ -232,6 +232,11 @@ class StreamedBoundaryArtifacts:
         self._produced_release_pending = {}
         self._produced_release_abandoned = {}
         self._produced_release_unclassified = {}
+        # Groups whose PUBLISH never completed because PrismaBuild's
+        # funding lock stayed contended for the whole staging budget.
+        # Their prewrite credit is still held by this owner, so the
+        # debt is reported rather than dropped.
+        self._produced_publish_deferred = {}
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -248,6 +253,7 @@ class StreamedBoundaryArtifacts:
             "produced_group_release_failures": 0,
             "produced_group_release_retries": 0,
             "produced_group_release_deferrals": 0,
+            "produced_group_funding_deferrals": 0,
             "produced_groups_origin_reclaimed": 0}
 
     def __enter__(self):
@@ -1076,17 +1082,24 @@ class StreamedBoundaryArtifacts:
         ``max_entry_tensor_bytes`` is the bound per-entry tensor ceiling
         the prewrite's conservative per-group ceiling is derived from.
 
-        ``staging_timeout_s`` bounds the ONE asynchronous wait on this
-        path: a published or re-materialized group is staged by a mover the
-        fleet claims and runs, and the read waits on PrismaBuild's own
-        receipt for it. Exceeding it is a named
-        ``BoundaryStagingTimeout`` and a withdrawal -- never a direct
+        ``staging_timeout_s`` is ONE budget for a group's whole staging,
+        not one per step. A read opens a single absolute deadline and the
+        publish, any re-materialization and the wait for PrismaBuild's own
+        mover receipt all spend it: a funding transient waited out inside
+        the publish shortens the receipt wait rather than extending the
+        total, and nothing in that span mints a second budget. Exceeding it
+        is a named failure and a withdrawal -- ``BoundaryStagingTimeout``
+        when the mover never finished, ``BoundaryProducedFundingDeferred``
+        when PrismaBuild's funding lock never cleared -- never a direct
         origin read and never a second publication.
 
-        A refused retirement is named by PrismaBuild's own egress receipt
-        through :func:`classify_egress_outcome`; only an own-copy deferral
-        is waited on, and it is waited on against THIS budget rather than
-        a second one.
+        Two PrismaBuild transients are waited out inside that budget and
+        nothing else. On the publish side, ``funding-race-deferred`` is the
+        pool's typed answer for a contended transition lock, and the
+        re-drive is the documented identical-input idempotent call. On the
+        retirement side, an own-copy deferral is named by PrismaBuild's own
+        egress receipt through :func:`classify_egress_outcome`. Every other
+        refusal is terminal here and returns at once.
 
         A read-only attached generation can never take this binding: an
         attached owner does not write, so it has nothing to declare and its
@@ -1230,8 +1243,16 @@ class StreamedBoundaryArtifacts:
             return None, None
         return key, self._produced_groups[key]
 
-    def _produced_publish(self, key, group):
-        """Publish the group once, when a read first asks for it."""
+    def _produced_publish(self, key, group, deadline=None):
+        """Publish the group once, when a read first asks for it.
+
+        ``deadline`` is the absolute instant this group's WHOLE staging
+        must end by. It is passed down rather than re-derived so a funding
+        transient waited out inside the publish is spent from the same
+        budget the materialization wait then gets the remainder of.
+        """
+
+        from .stage_a_produced_output import BoundaryProducedFundingDeferred
 
         if group["published"] is not None:
             return group
@@ -1243,8 +1264,26 @@ class StreamedBoundaryArtifacts:
                 f"produced boundary group {group['batch_id']!r} has no "
                 "written entry to publish")
         group["manifest_digest"] = self._produced.manifest_digest_for(descriptors)
-        group["published"] = self._produced.publish(
-            batch_id=group["batch_id"], descriptors=descriptors)
+        before = int(getattr(self._produced, "funding_deferrals", 0))
+        try:
+            group["published"] = self._produced.publish(
+                batch_id=group["batch_id"], descriptors=descriptors,
+                deadline=deadline)
+        except BoundaryProducedFundingDeferred as exc:
+            # The budget is spent and the batch is NOT published: nothing
+            # was reserved and nothing transferred, so this owner still
+            # holds the group's prewrite credit. Recorded in its own bucket
+            # before the failure propagates, because a held window that
+            # nothing names is the invisible half of a leak.
+            self._produced_publish_deferred[key] = {
+                "batch_id": group["batch_id"], "step": exc.step,
+                "attempts": exc.attempts, "waited_s": exc.waited_s,
+                "timeout_s": exc.timeout_s, "outcome": exc.outcome}
+            raise
+        finally:
+            self.telemetry["produced_group_funding_deferrals"] += max(
+                int(getattr(self._produced, "funding_deferrals", 0)) - before,
+                0)
         self.telemetry["produced_groups_published"] += 1
         return group
 
@@ -1256,6 +1295,8 @@ class StreamedBoundaryArtifacts:
         vouched in its own material namespace. Nothing polls and nothing
         falls back -- an unstaged group raises PB's own incomplete signal.
         """
+
+        import time
 
         # Before anything new is published: give PrismaBuild another
         # chance to take back the windows an earlier exit could not.
@@ -1270,7 +1311,13 @@ class StreamedBoundaryArtifacts:
             wanted[key] = group
         contexts = {}
         for key, group in wanted.items():
-            self._produced_publish(key, group)
+            # ONE absolute instant for this group's whole staging: the
+            # publish, any re-materialization and the wait for PB's receipt
+            # all spend it and none of them resets it. A budget that starts
+            # again at each step is not a bound.
+            deadline = time.monotonic() + float(
+                self._produced_plan["staging_timeout_s"])
+            self._produced_publish(key, group, deadline=deadline)
             if group["retired"]:
                 # The same unchanged logical batch, taken back onto the
                 # tier. PB is asked first (``materialization_state``) and
@@ -1278,7 +1325,7 @@ class StreamedBoundaryArtifacts:
                 # copy is gone; the batch id, manifest, descriptors,
                 # namespace and durable charge are all unchanged.
                 self._produced.ensure_batch_materialized(
-                    batch_id=group["batch_id"])
+                    batch_id=group["batch_id"], deadline=deadline)
                 group["retired"] = False
                 group["context"] = None
                 self.telemetry["produced_groups_rematerialized"] += 1
@@ -1290,7 +1337,8 @@ class StreamedBoundaryArtifacts:
                 # whether the batch is whole or half there.
                 self._produced.await_materialized(
                     batch_id=group["batch_id"],
-                    timeout_s=self._produced_plan["staging_timeout_s"])
+                    timeout_s=self._produced_plan["staging_timeout_s"],
+                    deadline=deadline)
                 resolver, block = self._produced.reader_context(
                     batch_id=group["batch_id"],
                     manifest_digest=group["manifest_digest"])
@@ -1447,7 +1495,8 @@ class StreamedBoundaryArtifacts:
              "reason": reason})
         if "error" not in reason:
             from .stage_a_produced_output import (
-                BoundaryEgressUnclassified, classify_egress_outcome)
+                UNCLASSIFIED_OUTCOMES, BoundaryEgressUnclassified,
+                classify_egress_outcome)
             kind = classify_egress_outcome(out)
             record["class"] = kind
             if kind == "own-copy-deferral":
@@ -1458,15 +1507,19 @@ class StreamedBoundaryArtifacts:
                 # the SAME deadline if one is already running.
                 return self._await_produced_release_deferral(
                     key, group, record, out, deadline)
-            if kind == "unknown":
-                # The receipt has no deferred_own key and no positive
-                # cause: it could not have told us whether this deferred.
-                # Surfaced, not decided -- reading absence as "no
-                # deferral" is the fail-open shape this exists for.
+            if kind in UNCLASSIFIED_OUTCOMES:
+                # Three receipts that are not a decision: no deferred_own
+                # key at all and no positive cause, a non-empty
+                # deferred_own naming a reason this lane does not
+                # recognise, and a deferred_own of the wrong shape. Each is
+                # surfaced, not decided -- reading any of them as "no
+                # deferral" is the fail-open shape this exists for, and
+                # reading an unrecognised one as a deferral would sit on a
+                # wait that is not known to clear.
                 self._produced_release_pending.pop(key, None)
                 self._produced_release_unclassified[key] = dict(record)
                 raise BoundaryEgressUnclassified(
-                    group["batch_id"], out, out.get("receipt"))
+                    group["batch_id"], out, out.get("receipt"), kind)
             # foreign-pin, promotion-handoff, egress-error: real failures
             # on other lifecycles. Preserved exactly as before -- recorded,
             # re-driven on the next drain, credits retained, never waited
@@ -1617,7 +1670,10 @@ class StreamedBoundaryArtifacts:
                               for record in self._produced_release_abandoned.values()},
                 "unclassified": {str(record["batch_id"]): record["last_reason"]
                                  for record
-                                 in self._produced_release_unclassified.values()}}
+                                 in self._produced_release_unclassified.values()},
+                "publish_deferred": {
+                    str(record["batch_id"]): record
+                    for record in self._produced_publish_deferred.values()}}
 
     @contextmanager
     def prefetch(self, references):

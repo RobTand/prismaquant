@@ -251,30 +251,71 @@ class BoundaryStagingTimeout(TimeoutError):
 #: ``entries_deferred`` and ``errors`` -- not an entry inside any of them.
 DEFERRED_OWN_FIELD = "deferred_own"
 
+#: The ONE ``deferred_own`` reason this lane knows how to wait out, spelled
+#: exactly as PrismaBuild's egress writes it (stage_release.py, the
+#: ``"deferred_own": ["own-copy-in-flight"] if own_deferred else []`` line).
+#: Matched as a string, not as a substring and not as truthiness: a reason
+#: this lane has never seen is not a reason it may wait on.
+OWN_COPY_IN_FLIGHT = "own-copy-in-flight"
+
+#: Every reason a bounded wait is correct for. A non-empty ``deferred_own``
+#: carrying anything outside this set is surfaced, because "PrismaBuild
+#: deferred for a reason I do not recognise" and "PrismaBuild deferred on
+#: its own in-flight copy" are different facts and only the second one is
+#: known to clear on retry.
+RECOGNISED_DEFERRED_OWN_REASONS = frozenset({OWN_COPY_IN_FLIGHT})
+
+
+#: What each surfaced classification means, in the one place a reader of
+#: the exception will look. Every one of these is a receipt this lane
+#: cannot turn into a decision -- never a decision it made.
+UNCLASSIFIED_CAUSES = {
+    "unknown":
+        f"carries no {DEFERRED_OWN_FIELD!r} key at all and no other positive "
+        "cause (no live pins, no deferred handoffs, no errors). A receipt "
+        "that predates the field cannot say whether this was an own-copy "
+        "deferral, so it is neither waited on nor called final. That is an "
+        "older PrismaBuild with no opinion, not a negative answer",
+    "egress-deferral-unrecognised":
+        f"carries a non-empty {DEFERRED_OWN_FIELD!r} naming a reason this "
+        f"lane does not recognise (known: {sorted(RECOGNISED_DEFERRED_OWN_REASONS)}). "
+        "PrismaBuild deferred for something, and an unrecognised something "
+        "is not known to clear on retry",
+    "egress-deferral-malformed":
+        f"carries a {DEFERRED_OWN_FIELD!r} that is not a list. The shape is "
+        "wrong, so nothing may be read out of it -- neither a deferral nor "
+        "the absence of one",
+}
+
 
 class BoundaryEgressUnclassified(RuntimeError):
     """A retirement refused and the receipt could not say whether it deferred.
 
-    Raised for exactly one thing: an egress receipt with no
-    ``deferred_own`` key at all, and no other positive cause in it. That
-    receipt predates the field and could not have told us either way, so
-    the answer is "unknown", not "no deferral". Collapsing the two is the
-    fail-open shape that cost a stage token per occurrence, and the
-    handler written for it does not get to repeat it.
+    Raised for the three receipts that cannot be turned into a decision: no
+    ``deferred_own`` key at all and no other positive cause, a non-empty
+    ``deferred_own`` naming an unrecognised reason, and a ``deferred_own``
+    of the wrong shape. None of the three is "no deferral"; collapsing any
+    of them into that is the fail-open shape that cost a stage token per
+    occurrence, and the handler written for it does not get to repeat it.
+
+    Its opposite is deliberate and is NOT raised: a receipt that carries
+    ``deferred_own`` as an empty list has been asked and has answered. The
+    rule is act on positive observations, surface only true silence.
     """
 
-    def __init__(self, batch_id: str, outcome, receipt) -> None:
+    def __init__(self, batch_id: str, outcome, receipt,
+                 kind: str = "unknown") -> None:
         self.batch_id = batch_id
         self.outcome = outcome
         self.receipt = receipt
+        self.kind = kind
+        cause = UNCLASSIFIED_CAUSES.get(
+            kind, f"was classified {kind!r}, which is not a decision")
         super().__init__(
             f"produced-output boundary group {batch_id!r} was refused by an "
-            f"egress receipt carrying no {DEFERRED_OWN_FIELD!r} key and no "
-            "other positive cause (no live pins, no deferred handoffs, no "
-            "errors). A receipt that predates the field cannot say whether "
-            "this was an own-copy deferral, so it is neither waited on nor "
-            "called final. Run against a PrismaBuild generation that "
-            f"publishes {DEFERRED_OWN_FIELD!r}. Outcome: {outcome!r}")
+            f"egress receipt that {cause}. Surfaced rather than decided. "
+            "Run against a PrismaBuild generation that publishes "
+            f"{DEFERRED_OWN_FIELD!r} as documented. Outcome: {outcome!r}")
 
 
 class BoundaryProducedReleaseRefused(RuntimeError):
@@ -314,15 +355,21 @@ def classify_egress_outcome(outcome) -> str:
 
     ``retire_batch`` returns ``{ok: False, refusal: "egress-incomplete",
     receipt: <egress receipt>}`` for every incomplete egress, so the
-    refusal is a category and the receipt is the cause. Four causes, and a
-    fifth answer that is not a cause:
+    refusal is a category and the receipt is the cause. Exactly one of the
+    answers below is waited on; every other one is visible.
 
-    ``own-copy-deferral``
-        ``deferred_own`` is present and non-empty. PrismaBuild deferred
-        this retirement on the evicted mover's OWN still-live claimed copy:
-        bytes, proof and full credit are kept, and ordinary retry returns
-        the token once that child mover reaches terminal. The only case
-        this lane waits on.
+    ``own-copy-deferral`` -- WAIT
+        ``deferred_own`` is a list naming only :data:`OWN_COPY_IN_FLIGHT`.
+        PrismaBuild deferred this retirement on the evicted mover's OWN
+        still-live claimed copy: bytes, proof and full credit are kept, and
+        ordinary retry returns the token once that child mover reaches
+        terminal. The only case this lane waits on.
+    ``egress-deferral-unrecognised`` -- SURFACE
+        ``deferred_own`` is a non-empty list naming something else. A
+        deferral this lane has never seen is not one it may wait out.
+    ``egress-deferral-malformed`` -- SURFACE
+        ``deferred_own`` is present but is not a list. Nothing may be read
+        out of a shape that is wrong.
     ``foreign-pin``
         A live reader holds the staged bytes. A real failure to preserve,
         never something to wait out.
@@ -331,18 +378,26 @@ def classify_egress_outcome(outcome) -> str:
         lane's wait.
     ``egress-error``
         The receipt carries errors.
-    ``unknown``
+    ``egress-incomplete``
+        ``deferred_own`` is present and EMPTY, with no pin, handoff or
+        error. A complete answer: PrismaBuild looked and found no own-copy
+        deferral. Recorded and drained, never waited on.
+    ``unknown`` -- SURFACE
         The receipt has NO ``deferred_own`` key and no positive cause in
-        it. A missing key is not an empty list: this receipt could not
-        have reported an own-copy deferral, so it is surfaced rather than
-        read as "no deferral".
+        it. That is an older PrismaBuild with no opinion, not a negative
+        answer, and a missing key is not an empty list.
 
-    On a receipt with no ``deferred_own`` key, a non-empty ``live_pins`` or
-    ``deferred_handoffs`` still classifies, because each is a POSITIVE
-    observation of a different cause rather than an inference from an
-    absence -- an older generation reports those two exactly as a newer one
-    does. What the missing key removes is the ability to conclude anything
-    from silence, and that case alone returns ``unknown``.
+    The rule underneath all of it: **act on positive observations, and
+    surface only true silence.** A ``deferred_own`` this lane can read
+    decides first, because an unreadable or unrecognised deferral is the
+    one thing no other field can rule out. After that a non-empty
+    ``live_pins``, ``deferred_handoffs`` or ``errors`` classifies whether
+    or not ``deferred_own`` is there, because each is a POSITIVE
+    observation of a different cause that an older generation reports
+    exactly as a newer one does -- which is also what keeps the deployed
+    generation, whose receipts have no ``deferred_own`` at all, working.
+    What the missing key removes is the ability to conclude anything from
+    silence, and that case alone returns ``unknown``.
     """
 
     if isinstance(outcome, Mapping) and outcome.get("ok"):
@@ -350,9 +405,20 @@ def classify_egress_outcome(outcome) -> str:
     receipt = outcome.get("receipt") if isinstance(outcome, Mapping) else None
     if not isinstance(receipt, Mapping):
         return "unknown"
-    deferred_own = receipt.get(DEFERRED_OWN_FIELD)
-    if DEFERRED_OWN_FIELD in receipt and deferred_own:
-        return "own-copy-deferral"
+    if DEFERRED_OWN_FIELD in receipt:
+        deferred_own = receipt[DEFERRED_OWN_FIELD]
+        # A list, because that is what the egress writes. A string that
+        # happens to read "own-copy-in-flight" is NOT this field; reading
+        # one would be inventing an interface PrismaBuild does not have.
+        if not isinstance(deferred_own, list):
+            return "egress-deferral-malformed"
+        if deferred_own:
+            if all(reason in RECOGNISED_DEFERRED_OWN_REASONS
+                   for reason in deferred_own):
+                return "own-copy-deferral"
+            # Some reason outside the known set. Not "not a deferral", and
+            # not a deferral this lane may sit on either.
+            return "egress-deferral-unrecognised"
     if receipt.get("live_pins"):
         return "foreign-pin"
     if receipt.get("deferred_handoffs"):
@@ -362,6 +428,82 @@ def classify_egress_outcome(outcome) -> str:
     if DEFERRED_OWN_FIELD not in receipt:
         return "unknown"
     return "egress-incomplete"
+
+
+#: The classifications that are NOT a decision. Each is raised as
+#: :class:`BoundaryEgressUnclassified` and recorded in its own debt bucket,
+#: never folded into the abandoned one, which would claim a decision was
+#: made.
+UNCLASSIFIED_OUTCOMES = frozenset(UNCLASSIFIED_CAUSES)
+
+
+#: PrismaBuild's own name for a step that found a transition lock busy.
+#: ``pool.fund_output_batch`` takes the owner lock and then the mover lock
+#: with ``blocking=False`` and returns this refusal when either is
+#: contended; ``pool.stage_output_intent`` answers the same way on the same
+#: owner lock, and the refusal also appears on PrismaBuild's drive, release
+#: and adoption paths.
+#:
+#: It is an explicit transient, and the transient is narrow: THAT
+#: non-blocking call moved no tokens. It does NOT mean nothing happened.
+#: ``publish_prepaid_batch`` seals and files the request, stages the
+#: funding intent and publishes the READY row BEFORE the fund step runs,
+#: and a deferral rolls none of that back. What licenses the re-drive is
+#: not an absence of side effects; it is that the mover key is derived by
+#: content address and every step is idempotent, so identical inputs meet
+#: what already exists instead of duplicating it.
+#:
+#: It surfaces verbatim from both ``publish_prepaid_batch`` and
+#: ``ensure_batch_materialized``, stamped with the step that met the
+#: contention (produced_output.py, ``funded["step"] = "fund"``).
+FUNDING_RACE_REFUSAL = "funding-race-deferred"
+
+
+def is_funding_race_deferral(outcome) -> bool:
+    """True for PrismaBuild's typed funding transient, and nothing else.
+
+    Matched on the exact refusal string. Deliberately NOT a category: a
+    refusal that merely looks retryable, an ``errors`` list, a timeout or
+    any other step's refusal is terminal to this lane.
+
+    What makes the retry safe is NOT a belief that the deferred call did
+    nothing -- the sequence has already sealed a request, staged an intent
+    and published a row by the time the funding step runs. It is that the
+    mover key is derived by content address and every step is idempotent,
+    so identical inputs meet whatever already exists instead of
+    duplicating it. That is a property of the call, not of the refusal.
+    """
+
+    return (isinstance(outcome, Mapping)
+            and outcome.get("ok") is not True
+            and outcome.get("refusal") == FUNDING_RACE_REFUSAL)
+
+
+class BoundaryProducedFundingDeferred(TimeoutError):
+    """A funding transient did not clear inside the staging budget."""
+
+    def __init__(self, batch_id: str, *, step: str, waited_s: float,
+                 timeout_s: float, attempts: int, outcome) -> None:
+        self.batch_id = batch_id
+        self.step = step
+        self.waited_s = waited_s
+        self.timeout_s = timeout_s
+        self.attempts = attempts
+        self.outcome = outcome
+        super().__init__(
+            f"produced-output boundary group {batch_id!r} was deferred by "
+            f"PrismaBuild's funding lock ({FUNDING_RACE_REFUSAL!r} at step "
+            f"{step!r}) and did not clear in {waited_s:.1f}s of a "
+            f"{timeout_s:.1f}s staging budget over {attempts} identical "
+            "re-drives. What that establishes, and only this: the logical "
+            "batch's COMMIT is unfinished. The sealed request, the funding "
+            "intent and the mover row may already exist -- the deferred "
+            "step runs after them -- and nothing here rolled any of it "
+            "back, so the credits stay PrismaBuild-accounted wherever it "
+            "put them. Infer no rollback from this failure; re-driving the "
+            "identical inputs is the documented resumption. Reported "
+            "rather than waited on further -- this lane does not own "
+            f"scheduling. Last outcome: {outcome!r}")
 
 
 class BoundaryRepeatMaterializationUnsupported(RuntimeError):
@@ -843,25 +985,149 @@ class BoundaryProducedPublication:
         return str(self._po.batch_namespace(
             self.instance, batch_id, str(manifest_digest)))
 
-    def publish(self, *, batch_id: str, descriptors: list) -> dict:
+    #: How long one paced re-drive waits before asking PrismaBuild's
+    #: funding path again. A floor, not a schedule: without it a wait burns
+    #: the whole staging budget in milliseconds and reports a timeout that
+    #: never waited for anything.
+    FUNDING_DEFERRAL_POLL_S = 0.25
+
+    #: How many typed funding transients this publication has waited out,
+    #: over its whole life. Counted because an invisible retry is how a
+    #: contended fleet starts looking like a fast one.
+    funding_deferrals = 0
+
+    def _require_staging_budget(self, batch_id: str, deadline, *,
+                                step: str) -> None:
+        """Refuse to START a mutation on a budget that is already spent.
+
+        THE RULE, stated once because four variants of its violation have
+        been written in this lane: a deadline bounds SIDE EFFECTS, not
+        attempts. It is read immediately before the mutation -- not after
+        it, not once per iteration, and with no exemption for being the
+        first call. An expiry observed here is this process's own fact; it
+        does not need PrismaBuild to hand back a refusal, and it must not
+        perform a mutation in order to obtain one.
+
+        Every call this guards can change durable state: ``refill_window``
+        takes a reservation, ``publish_prepaid_batch`` seals a request and
+        publishes a row, ``ensure_batch_materialized`` seals a successor.
+        A deadline that stops the funding but not the refill is not one
+        budget.
+
+        ``deadline`` of ``None`` is the legacy one-shot: no budget was
+        opened, so nothing is bounded and nothing is refused.
+        """
+
+        import time
+
+        if deadline is None or time.monotonic() < deadline:
+            return
+        raise BoundaryStagingTimeout(
+            f"produced-output boundary group {batch_id!r} did not START its "
+            f"{step} step: the staging budget this group was given was "
+            "already spent when the step was reached. Nothing was called, "
+            "so there is no PrismaBuild outcome to report -- this is a "
+            "locally observed expiry, and doing work known to be doomed "
+            "just to be handed a refusal is how a bounded run stops being "
+            "bounded.")
+
+    def _drive_prepaid_step(self, call, *, batch_id: str, deadline):
+        """Re-drive ONE prepaid step while PrismaBuild says it is contended.
+
+        ``call`` is re-invoked with IDENTICAL inputs, which is the whole
+        licence for this: ``publish_prepaid_batch`` derives the mover key
+        by content address, so the same batch, descriptors and instance
+        re-derive the same key and every step of it is idempotent
+        (produced_output.py: "retrying with identical inputs re-derives the
+        same key and every step is idempotent"). Nothing here mints a
+        successor, relaxes a lock, or touches capacity.
+
+        Bounded by the caller's ABSOLUTE ``deadline`` -- the same one the
+        rest of this group's staging spends, never a fresh budget minted
+        here. ``deadline`` of ``None`` means no budget was opened, so this
+        drives exactly once and the transient surfaces like any other
+        refusal; this lane does not invent time to spend.
+
+        Only :func:`is_funding_race_deferral` is waited on. Every other
+        refusal returns immediately, to its caller, unchanged.
+        """
+
+        import time
+
+        started = time.monotonic()
+        attempts = 0
+        out = None
+        while True:
+            # READ THE DEADLINE IMMEDIATELY BEFORE THE SIDE EFFECT, on
+            # EVERY pass including the first. A budget checked only after
+            # the call -- or only after the sleep that reached it, or only
+            # for retries -- still issues a mutating call past expiry.
+            if attempts and deadline is not None and (
+                    time.monotonic() >= deadline):
+                # A retry past expiry: report the last ACTUAL outcome,
+                # never a refusal nobody returned.
+                raise BoundaryProducedFundingDeferred(
+                    batch_id, step=str(out.get("step") or "fund"),
+                    waited_s=time.monotonic() - started,
+                    timeout_s=max(deadline - started, 0.0),
+                    attempts=attempts, outcome=out)
+            if not attempts:
+                # The first call is bounded too. An inherited deadline
+                # that a previous step already spent stops this one before
+                # it touches PrismaBuild at all.
+                self._require_staging_budget(batch_id, deadline,
+                                             step="prepaid")
+            out = dict(call())
+            attempts += 1
+            if not is_funding_race_deferral(out):
+                return out
+            if deadline is None:
+                return out
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BoundaryProducedFundingDeferred(
+                    batch_id, step=str(out.get("step") or "fund"),
+                    waited_s=time.monotonic() - started,
+                    timeout_s=max(deadline - started, 0.0),
+                    attempts=attempts, outcome=out)
+            # Per instance, never on the class: a count shared between
+            # owners would report another owner's contention as this
+            # one's.
+            self.funding_deferrals = self.funding_deferrals + 1
+            time.sleep(min(self.FUNDING_DEFERRAL_POLL_S, remaining))
+
+    def publish(self, *, batch_id: str, descriptors: list,
+                deadline=None) -> dict:
         """Publish one finished group; PB seals the mover off this owner.
 
         The bounded window refill runs first: retirement returned spent
         credits to free, and the group ahead funds only by exact transfer
         from this owner's own holdings.
+
+        ``deadline`` is the absolute monotonic instant this group's WHOLE
+        staging must end by -- publish, any re-materialization and the wait
+        for the mover's receipt share it. It is spent, never reset, so a
+        funding transient waited out here shortens the wait that follows
+        instead of extending the total.
         """
 
+        # Before the refill, not after it: a refill takes a reservation,
+        # so it is a mutation and the budget governs it too.
+        self._require_staging_budget(batch_id, deadline, step="refill")
         refill = self.refill()
         if not refill.get("ok"):
             raise BoundaryProducedPublicationFailed(
                 batch_id=batch_id,
                 refusal={"step": "refill", "refusal": refill.get("refusal"),
                          "refill": refill})
-        out = dict(self._po.publish_prepaid_batch(
-            self.queue, self.instance, self.template, list(descriptors),
-            batch_id=batch_id, tier=self.tier, cas_root=self.cas_root,
-            producer_action_key=str(self.instance["owner_action_key"]),
-            command_extra=tuple(self.command_extra)))
+        descriptors = list(descriptors)
+        out = self._drive_prepaid_step(
+            lambda: self._po.publish_prepaid_batch(
+                self.queue, self.instance, self.template, list(descriptors),
+                batch_id=batch_id, tier=self.tier, cas_root=self.cas_root,
+                producer_action_key=str(self.instance["owner_action_key"]),
+                command_extra=tuple(self.command_extra)),
+            batch_id=batch_id, deadline=deadline)
         if not out.get("ok"):
             raise BoundaryProducedPublicationFailed(
                 batch_id=batch_id, refusal=out)
@@ -1094,7 +1360,7 @@ class BoundaryProducedPublication:
             self.queue, self.instance, self.template, batch_id=batch_id))
 
     def await_materialized(self, *, batch_id: str, timeout_s: float,
-                           poll_s: float = 0.25) -> dict:
+                           poll_s: float = 0.25, deadline=None) -> dict:
         """Wait, bounded, for PrismaBuild to say this group is whole.
 
         Staging is ASYNCHRONOUS: publishing seals a mover row and the fleet
@@ -1113,7 +1379,11 @@ class BoundaryProducedPublication:
 
         import time
 
-        deadline = time.monotonic() + max(float(timeout_s), 0.0)
+        # The caller's absolute instant when it opened one, so a funding
+        # transient already waited out inside publish() is spent from THIS
+        # budget rather than forgiven by a second one.
+        if deadline is None:
+            deadline = time.monotonic() + max(float(timeout_s), 0.0)
         last: dict = {}
         while True:
             last = self.materialization_state(batch_id=batch_id)
@@ -1132,7 +1402,8 @@ class BoundaryProducedPublication:
                     f"reads {last.get('mover_receipt_complete')!r}")
             time.sleep(min(poll_s, max(deadline - time.monotonic(), 0.0)))
 
-    def ensure_batch_materialized(self, *, batch_id: str) -> dict:
+    def ensure_batch_materialized(self, *, batch_id: str,
+                                  deadline=None) -> dict:
         """Make one already-committed group resident on its tier again.
 
         Asks first.  ``materialization_state`` is the intended gate: a
@@ -1153,6 +1424,7 @@ class BoundaryProducedPublication:
         logical batch, one charge, across the forward and reverse cycle.
         """
 
+        self._require_staging_budget(batch_id, deadline, step="ensure")
         po = self._po
         if not hasattr(po, "ensure_batch_materialized"):
             raise BoundaryRepeatMaterializationUnsupported(
@@ -1170,17 +1442,23 @@ class BoundaryProducedPublication:
                     "mover_key": state.get("mover_key"),
                     "generation": state.get("generation"),
                     "manifest_digest": state.get("manifest_digest")}
+        # Immediately before the mutation, again: asking PrismaBuild for
+        # the state above is a read and costs nothing, taking a
+        # reservation is not.
+        self._require_staging_budget(batch_id, deadline, step="refill")
         refill = self.refill()
         if not refill.get("ok"):
             raise BoundaryProducedPublicationFailed(
                 batch_id=batch_id,
                 refusal={"step": "refill", "refusal": refill.get("refusal"),
                          "refill": refill})
-        out = dict(po.ensure_batch_materialized(
-            self.queue, self.instance, self.template, batch_id=batch_id,
-            cas_root=self.cas_root,
-            producer_action_key=str(self.instance["owner_action_key"]),
-            command_extra=tuple(self.command_extra)))
+        out = self._drive_prepaid_step(
+            lambda: po.ensure_batch_materialized(
+                self.queue, self.instance, self.template, batch_id=batch_id,
+                cas_root=self.cas_root,
+                producer_action_key=str(self.instance["owner_action_key"]),
+                command_extra=tuple(self.command_extra)),
+            batch_id=batch_id, deadline=deadline)
         if not out.get("ok"):
             raise BoundaryProducedPublicationFailed(
                 batch_id=batch_id, refusal=out)
@@ -1210,10 +1488,13 @@ class BoundaryProducedPublication:
 __all__ = [
     "BoundaryProducedBindingError",
     "BoundaryProducedPrewriteRefused",
+    "BoundaryProducedFundingDeferred",
     "BoundaryProducedPublicationFailed",
     "BoundaryMaterializationIncomplete",
     "BoundaryRepeatMaterializationUnsupported",
     "BoundaryStagingTimeout",
+    "FUNDING_RACE_REFUSAL",
+    "is_funding_race_deferral",
     "launch_queue_root",
     "BOUNDARY_SLOT",
     "BOUNDARY_TEMPLATE_ID",
