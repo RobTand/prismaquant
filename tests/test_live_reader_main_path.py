@@ -15,6 +15,8 @@ import os
 import sys
 from pathlib import Path
 
+from fleet_sdk import require_prismabuild_sdk
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.live_reader_qualify import (  # noqa: E402
@@ -31,6 +33,7 @@ SCOPE = "s1"
 
 
 def _fixture(tmp_path):
+    require_prismabuild_sdk()
     from prismaquant.staged_lease import inject_installed_sdk_for_tests
     rl = inject_installed_sdk_for_tests()
     import prismabuild.pool as pool_mod

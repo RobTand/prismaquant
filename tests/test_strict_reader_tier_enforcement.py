@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 
 import pytest
+
+from fleet_sdk import require_prismabuild_sdk
 import torch
 from concurrent.futures import ThreadPoolExecutor
 from safetensors.torch import save_file
@@ -113,6 +115,7 @@ def _pb():
     surface is re-checked, so a passing suite always names what it ran
     against. Never silently skips on a missing dependency.
     """
+    require_prismabuild_sdk()
     from prismaquant.staged_lease import inject_installed_sdk_for_tests
     module = inject_installed_sdk_for_tests()
     import prismabuild.pool as pool_mod
@@ -544,6 +547,7 @@ def test_strict_source_unpublished_material_refuses(tmp_path, monkeypatch):
     """A map entry with no published material behind it refuses at
     acquisition (unpublished) instead of serving staged bytes unpinned
     or falling open to the pool. Context is live; the material is not."""
+    require_prismabuild_sdk()
     _pb()
     import prismabuild.pool as pool_mod
     consumer = _hex64(f"consumer-{tmp_path}")
@@ -948,6 +952,7 @@ def test_strict_exact_entry_unmapped_refuses(tmp_path, monkeypatch):
 
 def test_duplicate_acquire_token_adopts_one_ref(tmp_path, monkeypatch):
     """Same token twice adopts one ref; two exits release exactly once."""
+    require_prismabuild_sdk()
     from prismaquant.staged_lease import LeaseWindow, covers_for_leads
     _pb()
     consumer = _hex64(f"consumer-{tmp_path}")
@@ -995,6 +1000,7 @@ def test_release_failure_retains_retry_state_then_releases_exactly(tmp_path, mon
     ``False``, not an unlink exception): exit refuses loudly and retains
     full retry state — no silent strand, no marked release. Restoring the
     pin lets the retry release exactly."""
+    require_prismabuild_sdk()
     from prismaquant.staged_lease import LeaseRefused, LeaseWindow, covers_for_leads
     _pb()
     consumer = _hex64(f"consumer-{tmp_path}")
@@ -1040,6 +1046,7 @@ def test_forked_child_window_use_refused_loudly(tmp_path, monkeypatch):
     """Every window operation in a forked child raises: open (would outlive
     the parent's release), close, and exit. The pin stays intact and the
     parent's exact release still unlinks it."""
+    require_prismabuild_sdk()
     from prismaquant.staged_lease import LeaseWindow, covers_for_leads
     _pb()
     consumer = _hex64(f"consumer-{tmp_path}")
@@ -1204,6 +1211,7 @@ def test_lease_pin_module_reports_approved_commit():
 # -- window enter/exit contract: single-shot, no leaks ------------------------
 
 def _window_fixture(tmp_path, monkeypatch, blob=b"window-contract-bytes-00112233"):
+    require_prismabuild_sdk()
     from prismaquant.staged_lease import LeaseWindow, covers_for_leads
     _pb()
     consumer = _hex64(f"consumer-{tmp_path}")
@@ -1272,6 +1280,7 @@ def _build_coherent_tree(tmp_path):
     Build-only use of the install location: the servant under test is the
     ``gen/src`` tree via the authoritative helper root, never the install.
     """
+    require_prismabuild_sdk()
     import shutil
     import prismabuild.reader_lease as installed_rl
     src_pkg = Path(installed_rl.__file__).resolve().parent
@@ -1306,6 +1315,7 @@ def _restore_pb_modules(saved_mods, saved_path):
 def test_production_tree_discovery_serves_and_releases(tmp_path, monkeypatch):
     """Authoritative discovery: a coherent sealed source tree serves pinned
     bytes and releases exactly, with every PB submodule under one root."""
+    require_prismabuild_sdk()
     import sys
     from prismaquant.staged_lease import (
         HELPER_ROOT_ENV_VAR, LeaseWindow, _package_dir_of,
@@ -1362,6 +1372,7 @@ def test_production_tree_discovery_serves_and_releases(tmp_path, monkeypatch):
 def test_divergent_preimport_refuses_before_any_pin(tmp_path, monkeypatch):
     """A divergent ``pool``/``residency_map`` preimport refuses at enter,
     before any pin file exists — no strand, no teardown needed."""
+    require_prismabuild_sdk()
     import sys
     import types
     from prismaquant.staged_lease import (
@@ -2150,6 +2161,7 @@ def test_the_sealed_readset_refuses_an_oversize_manifest_without_reading_it(
     The blob here is tiny and is never opened: the refusal happens on the
     stated size, before any read.
     """
+    require_prismabuild_sdk()
     from prismabuild.core import DATA_MANIFEST_MAX_BYTES
 
     path, _ = _shard(tmp_path)
@@ -2244,6 +2256,7 @@ def test_a_non_strict_layer_read_with_a_map_still_never_waits(
     mere presence of a resolver would change a path this fix has no
     business touching.
     """
+    require_prismabuild_sdk()
     _pb()
     path, _ = _shard(tmp_path)
     consumer = _hex64(f"consumer-{tmp_path}")
