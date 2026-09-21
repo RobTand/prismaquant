@@ -111,9 +111,9 @@ def test_estimate_matches_actual_stage_a_retention_math():
     assert demand["n_checkpoints"] == 6
     assert demand["n_retained_boundary_groups"] == 45
     assert demand["per_file_envelope_bytes"] == 16777216 + 65536
-    # Hard floor: (23040 + 2048 + 12288) files x 16 MiB raw.
+    # Hard floor: (23040 + 2048 + 12288) files x 16 MiB raw = 584 GiB exact.
     assert demand["lower_bound_bytes"] == 37376 * 16777216
-    assert demand["lower_bound_bytes"] == 627114830336
+    assert demand["lower_bound_bytes"] == 627065225216
     assert PLAN_SEALED < demand["lower_bound_bytes"]
     # File envelopes alone (no shared/manifest) already exceed the plan.
     assert demand["conservative_bytes"] > PLAN_SEALED
@@ -189,15 +189,15 @@ def test_scaled_writer_late_failure_then_early_refusal_then_override_proceeds(
     def _shared():
         return {(0, 0): {"w": torch.zeros(4)}}
 
-    # Scaled demand: 2 retained groups x 2 batches + 1 live + 1 checkpoint,
-    # 4 KiB tensors. Conservative ~= 5 files x (4096+65536) + temp.
+    # Scaled demand: 3 retained groups x 2 batches + 1 live plane (1x2)
+    # + 2 checkpoint copies (2 boundaries x 1x2), 4 KiB tensors.
     demand = estimate_stage_a_artifact_demand(
         n_probes=1, n_batches=2, per_tensor_nbytes=4096,
-        num_layers=2, stride=2)
-    assert demand["boundaries"] == [2, 1]
+        num_layers=3, stride=2)
+    assert demand["boundaries"] == [3, 2]
     tiny_conservative = demand["conservative_bytes"]
     tiny_lower = demand["lower_bound_bytes"]
-    assert tiny_lower == 5 * 4096
+    assert tiny_lower == 12 * 4096
 
     # 1. Late failure: a ceiling between the lower floor and the envelope
     # lets the ordinary entry land, then refuses the checkpoint reservation.
@@ -251,6 +251,7 @@ def test_core_carries_override_stamp_and_ceiling(tmp_path, monkeypatch):
 
     _, _, runner, _ = fixture()
     runner.context.settle_prefetch_layers = lambda layers: None
+    from test_streamed_cost_checkpoints import _model_identity
     execution = {
         "n_probes": 1,
         "seed_base": 7000,
@@ -269,7 +270,7 @@ def test_core_carries_override_stamp_and_ceiling(tmp_path, monkeypatch):
     receipt = run_adjoint_capture_core(
         runner, draw(), execution=execution,
         output_root=tmp_path / "core-out", stride=8,
-        source_model_identity={"identity": "stub"},
+        source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256="a" * 64, plan_sha256="d" * 64,
         prepared_sha256="e" * 64, read_manifest_sha256="f" * 64,
         implementation_sha256="b" * 64,
@@ -290,6 +291,7 @@ def test_core_rejects_nonpositive_artifact_bytes(tmp_path, monkeypatch):
 
     _, _, runner, _ = fixture()
     runner.context.settle_prefetch_layers = lambda layers: None
+    from test_streamed_cost_checkpoints import _model_identity
     execution = {
         "n_probes": 1,
         "seed_base": 7000,
@@ -306,7 +308,7 @@ def test_core_rejects_nonpositive_artifact_bytes(tmp_path, monkeypatch):
             run_adjoint_capture_core(
                 runner, draw(), execution=execution,
                 output_root=tmp_path / f"core-bad-{bad}", stride=8,
-                source_model_identity={"identity": "stub"},
+                source_model_identity=_model_identity("joint-source"),
                 unit_roster_sha256="a" * 64, plan_sha256="d" * 64,
                 prepared_sha256="e" * 64, read_manifest_sha256="f" * 64,
                 implementation_sha256="b" * 64,
@@ -351,21 +353,41 @@ def test_stage_a_cli_threads_artifact_flag(tmp_path, monkeypatch):
     assert captured["artifact_budget_bytes"] is None
 
 
-def test_dispatcher_threads_artifact_flag(tmp_path):
+def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
     """The dispatcher forwards the NEW field as a payload flag (the PB
     channel), validates strict bytes, and leaves argv unchanged when
     absent -- mirroring the prefetch-override threading."""
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
     from dispatch_joint_quanta import DispatchRefused, stage_a_argv
+    import dispatch_joint_quanta
     import gzip
 
-    manifest = tmp_path / "adjoint.data-manifest.json.gz"
-    manifest.write_bytes(gzip.compress(json.dumps({
-        "schema": "prismaquant.data_manifest.v1",
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(
+        {"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
+    monkeypatch.setattr(dispatch_joint_quanta, "SPEC_PATH", spec)
+
+    parent = "d" * 64
+    manifest_doc = {
+        "schema": "prismaquant.prismabuild.data_manifest.v1",
+        "mount_prefix": "/mnt/shared",
         "entries": [],
-    }).encode()))
-    campaign = {"plan_path": "plan.json", "plan_sha256": "d" * 64,
+        "entry_count": 0,
+        "total_bytes": 0,
+        "annotations": {
+            "parent_manifest_sha256": parent,
+            "plan_sha256": "d" * 64,
+            "prepared_sha256": "e" * 64,
+            "phases": [{"name": "head", "bytes": 0, "cumulative_bytes": 0}],
+        },
+    }
+    manifest = tmp_path / "adjoint.data-manifest.json.gz"
+    manifest.write_bytes(gzip.compress(json.dumps(manifest_doc).encode()))
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(
+        {"output_root": str(tmp_path / "campaign-root")}))
+    campaign = {"plan_path": str(plan_path), "plan_sha256": "d" * 64,
                 "prepared_path": "prepared.json",
                 "prepared_sha256": "e" * 64}
 
