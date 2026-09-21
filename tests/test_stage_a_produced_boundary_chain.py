@@ -863,23 +863,33 @@ def test_entries_disposed_INSIDE_a_window_still_return_their_credits(
                                             "temp": 0}
 
 
-def test_a_rollover_longer_than_the_credit_bound_keeps_making_progress(
+def test_repeated_distinct_group_turnover_on_a_single_stage_token(
         tmp_path, monkeypatch):
-    """More windows than the stage window can hold at once.
+    """Four distinct groups through ONE token, and only that.
 
-    The template's window is ONE token against a two-token tier, so the
-    producer can hold exactly one publication group's stage copy at a
-    time. Four groups are then read in four windows, with the previous
-    group's entries disposed INSIDE the next window -- the cotangent
-    rollover. There are more groups than credits, so if a single stage
-    copy were not returned the next window could not fund and this stops;
-    that is the assertion.
+    What this establishes: repeated credit turnover across distinct
+    publication groups. The tier mints a single stage token and the
+    template's window is one token, so the four groups cannot be resident
+    together -- each window's mover takes that token by exact transfer,
+    retirement returns it to free, and the next window refills from free.
+    If one stage copy were not returned, window 1 could not fund and this
+    stops. MEASURED, not assumed: tools/audit_produced_window_tokens.py
+    traced the ledger through all four windows and total occupancy is
+    conserved at one token with no per-window loss (the audit is why this
+    tier is one token and not two -- the earlier two-token fixture was
+    sized against a two-token WINDOW, and "headroom" was never the reason).
+
+    What this does NOT establish: full cotangent rollover. The previous
+    group's entries are disposed inside the NEXT group's window, after the
+    previous group's stage copy has already been retired. Disposal of the
+    CURRENT staged group's own references is a different transition and is
+    test_entries_disposed_INSIDE_a_window_still_return_their_credits.
     """
 
     import torch
     storage, publication, q, env, pb_repo = _bound_owner(
         tmp_path, n_batches=4 * GROUP_SIZE, payload_max_bytes=1 << 22,
-        window_gib=1, gib=2)
+        window_gib=1, gib=1)
     groups = [_write_group(storage, count=GROUP_SIZE, first=index * GROUP_SIZE)
               for index in range(4)]
     assert storage.telemetry["produced_groups_prewritten"] == 4
