@@ -915,6 +915,17 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                              "payload's --artifact-budget-bytes; the run stamps "
                              "the deviation into its provenance; the sealed "
                              "plan is unchanged")
+    parser.add_argument("--stage-a-produced-output-template", type=Path,
+                        default=None,
+                        help="produced-output template JSON declaring the "
+                             "bounded window the stage-A action will stage "
+                             "for the boundary entries it produces itself "
+                             "(RobTand/prismaquant#881). Sealed by pbrun as "
+                             "a declared input plus request params and "
+                             "carried onto the queue row, so the capture can "
+                             "read its OWN entries back; its window demand is "
+                             "derived by pbrun from the template. Without it "
+                             "the capture writes entries it cannot read.")
     parser.add_argument("--spec", default=None,
                         help="campaign spec for the container wrapper (default: the joint-panel dev spec)")
     parser.add_argument("--state", default=None)
@@ -981,6 +992,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                                               tag=adjoint_tag,
                                               prefetch_override=args.stage_a_prefetch_override,
                                               artifact_budget_bytes=args.stage_a_artifact_budget_bytes,
+                                              produced_output_template=(
+                                                  args.stage_a_produced_output_template),
                                               binding=stage_a_binding)})
         if receipt_ok:
             for record_path, record in records:

@@ -402,13 +402,19 @@ class BoundaryProducedPublication:
     # -- binding -----------------------------------------------------------
 
     @classmethod
-    def bind_from_admitted_owner(cls, *, queue_root: str | Path,
+    def bind_from_admitted_owner(cls, *, queue_root: str | Path | None = None,
                                  tier: str | None = None,
                                  slot: str | None = None,
                                  env: Mapping[str, str] | None = None,
                                  command_extra: tuple[str, ...] = (),
                                  ) -> "BoundaryProducedPublication":
         """Bind template + instance from the admitted owner's request.
+
+        ``queue_root`` and ``tier`` are both normally omitted: the queue
+        root is derived from the launcher's own
+        ``PRISMABUILD_RESIDENCY_MAP`` and the tier from the declaration,
+        so a real action supplies neither and a caller that supplies one
+        is overriding, not configuring.
 
         The launch environment names this attempt; the submission's own
         ``--produced-output-template`` declaration provides the template

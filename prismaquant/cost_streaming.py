@@ -228,6 +228,7 @@ class StreamedBoundaryArtifacts:
         self._produced_groups = {}
         self._produced_release_errors = []
         self._produced_index = {}
+        self._produced_window_keys = ()
         self._produced_release_pending = {}
         self._produced_release_abandoned = {}
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
@@ -457,6 +458,7 @@ class StreamedBoundaryArtifacts:
         self._slots[slot] = reference
         if produced_group is not None:
             produced_group["references"].append(reference)
+            produced_group["live_references"] += 1
             self._produced_index[reference] = self._produced_group_key(
                 kind=kind, batch_index=batch_index,
                 boundary_index=boundary_index, probe_index=probe_index,
@@ -482,6 +484,10 @@ class StreamedBoundaryArtifacts:
         self.telemetry["live_artifact_bytes"] -= reference.file_bytes
         self.telemetry["retired_entries"] += 1
         if self._produced is not None:
+            key = self._produced_index.get(reference)
+            group = None if key is None else self._produced_groups.get(key)
+            if group is not None and group["live_references"] > 0:
+                group["live_references"] -= 1
             self._reclaim_produced_origin_if_final(reference)
             # The origin is gone, so the reference is dead: drop it from
             # the lookup index AFTER the reclaim gate has read it. The
@@ -504,9 +510,8 @@ class StreamedBoundaryArtifacts:
 
         if group.get("origin_reclaimed") or not group["retired"]:
             return
-        for held in group["references"]:
-            if Path(held.path).exists():
-                return
+        if group["live_references"]:
+            return
         out = self._produced.reclaim_origin(group["batch_id"])
         if out.get("ok"):
             group["origin_reclaimed"] = True
@@ -519,12 +524,15 @@ class StreamedBoundaryArtifacts:
     def _reclaim_produced_origin_if_final(self, reference):
         """Free a group's DURABLE charge once its last origin file is gone.
 
-        Two conditions, both required, and in this order. The origin files
-        must be absent -- the cotangent roll replaces a plane entry by
-        entry, so a group's charge is only releasable when its LAST entry
-        is unlinked -- and the group's stage copy must already be retired,
-        because a live materialization is material PrismaBuild is still
-        holding over those origins.
+        Two conditions, both required. This owner must have disposed of
+        every entry it wrote into the group -- the cotangent roll replaces
+        a plane entry by entry, so the charge is only releasable when the
+        LAST one goes -- and the group's stage copy must already be
+        retired, because a live materialization is material PrismaBuild is
+        still holding over those origins. The first condition is the
+        owner's own count of entries it has not yet unlinked, not a sweep
+        of the group's paths: the sweep re-stat'd every already-deleted
+        path on every retirement, and it was never the proof anyway.
 
         Why it matters at Stage A scale: the reverse walk rolls a
         cotangent plane across 45 boundaries. Without a group-final
@@ -1178,7 +1186,7 @@ class StreamedBoundaryArtifacts:
         group = {"batch_id": batch_id, "planned": planned,
                  "references": [], "published": None, "context": None,
                  "manifest_digest": None, "retired": False,
-                 "origin_reclaimed": False}
+                 "origin_reclaimed": False, "live_references": 0}
         self._produced_groups[key] = group
         self.telemetry["produced_groups_prewritten"] += 1
         return group
@@ -1275,6 +1283,16 @@ class StreamedBoundaryArtifacts:
         by_reference = {reference: contexts[key]
                         for key, group in wanted.items()
                         for reference in group["references"]}
+        # The window OWNS these groups for its whole lifetime. Resolving
+        # them again at exit through the reference index would lose any
+        # group whose entries were disposed while the window was live --
+        # and that is the ordinary production pattern, not an edge case:
+        # the tail retires an activation inside the read window, and the
+        # reverse roll retires the previous cotangent as it writes the
+        # next. Such a group would resolve to nothing, never be offered to
+        # the retirement, raise no release debt, and silently keep its
+        # stage credits.
+        self._produced_window_keys = tuple(wanted)
         return lambda reference: by_reference.get(reference)
 
     def produced_group_records(self):
@@ -1420,17 +1438,20 @@ class StreamedBoundaryArtifacts:
             self.telemetry["produced_group_release_retries"] += 1
             self._release_one_produced_group(key, group)
 
-    def _release_produced_window(self, references):
-        """Retire every stage copy this window borrowed."""
+    def _release_produced_window(self, keys):
+        """Retire every stage copy this window borrowed.
 
-        seen = []
-        for reference in references:
-            key, group = self._produced_group_for(reference)
-            if group is None or key in seen or group["retired"]:
+        By the KEYS the window captured when it opened, never by its
+        references: a reference disposed during the window is gone from
+        the lookup index, and a group found by nothing is a group whose
+        credits are never asked for.
+        """
+
+        for key in keys:
+            group = self._produced_groups.get(key)
+            if group is None or group["retired"]:
                 continue
-            seen.append(key)
-        for key in seen:
-            self._release_one_produced_group(key, self._produced_groups[key])
+            self._release_one_produced_group(key, group)
 
     def produced_release_debt(self):
         """Stage copies this owner asked PB to retire and PB did not.
@@ -1458,6 +1479,9 @@ class StreamedBoundaryArtifacts:
         # process input map exactly as before.
         resolver = (None if self._produced is None
                     else self._produced_reader_context(references))
+        # Captured HERE, while every group is still resolvable.
+        window_keys = self._produced_window_keys
+        self._produced_window_keys = ()
         with torch.profiler.record_function("aura.exact_activation.prefetch"):
             if self._scratch is None:
                 from .perturbed_x_cache import EntryReadScratch
@@ -1491,7 +1515,7 @@ class StreamedBoundaryArtifacts:
                     # copies it borrowed go back to free HERE -- that is
                     # the bounded-window contract, and holding them would
                     # accumulate every group the pass ever read.
-                    lambda: (self._release_produced_window(references)
+                    lambda: (self._release_produced_window(window_keys)
                              if self._produced is not None else None)):
                 try:
                     step()

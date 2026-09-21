@@ -934,13 +934,22 @@ says exactly that.
   reader SDK: production forwards `PRISMABUILD_READER_HELPER_ROOT` and mounts
   it without populating `sys.path`, so a bare import can serve an older
   container distribution or a mixture across modules, and qualified provenance
-  over bytes you cannot name is not provenance. **Not available:** sealing the
-  produced-output template at **submit** — the published `pbrun` exposes no
-  flag that ingests a template under `PRODUCED_OUTPUT_TEMPLATE_INPUT_ID`,
-  seals its declaration into `params`, and passes it to `queue.publish`, so
-  `tools/dispatch_joint_quanta.py` refuses
-  `ProducedOutputDeclarationUnsupported` rather than submitting a capture that
-  could write its entries and not read them. Gates:
+  over bytes you cannot name is not provenance. The template is sealed at **submit**, not
+  at runtime: the deployed `pbrun --produced-output-template` ingests the
+  document as a declared input under `PRODUCED_OUTPUT_TEMPLATE_INPUT_ID`,
+  seals the matching declaration into the request params, carries the template
+  onto the queue row, and **derives the bounded window's tier demand from the
+  template**, so `tools/dispatch_joint_quanta.py` threads it as a pbrun
+  envelope option (`--stage-a-produced-output-template`) and restates no
+  demand. A client without that flag refuses
+  `ProducedOutputDeclarationUnsupported` — conditional on the client in hand,
+  because one that ignored the flag would admit a capture that writes its
+  entries and cannot read them. **Measured gap (2026-09-21):** on one
+  authorized live cycle the sealed mover was published, prepaid and left
+  `ready` unclaimed for its whole 600 s budget, and the named
+  `BoundaryStagingTimeout` fired; the end-to-end lifecycle is therefore
+  proven through publication and funding on the live fleet, and **not**
+  through a fleet-executed mover. Gates:
   `tests/test_stage_a_produced_boundary_chain.py`.
 
 - **One resolver**, `prismaquant/residency_map.py`. It owns no bytes: it

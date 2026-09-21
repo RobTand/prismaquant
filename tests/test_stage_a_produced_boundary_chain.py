@@ -825,6 +825,89 @@ def test_a_refused_release_is_recorded_and_drained_not_dropped(
     assert publication.durable_charge()["payload"] == 0
 
 
+def test_entries_disposed_INSIDE_a_window_still_return_their_credits(
+        tmp_path, monkeypatch):
+    """The production pattern, and the one a late-disposal test misses.
+
+    Stage A disposes entries WHILE a read window is live: the tail retires
+    an activation inside ``prefetched_boundary_batches``, and the reverse
+    roll retires the previous cotangent as it writes the next. A retired
+    reference leaves the lookup index -- correctly, it is dead -- so a
+    window that resolved its groups again at exit would find nothing for a
+    group whose entries all went, offer it to no retirement, raise no
+    release debt, and keep its stage credits forever. The window therefore
+    owns its groups from the moment it opens.
+    """
+
+    import torch
+    storage, publication, q, env, pb_repo = _bound_owner(tmp_path)
+    references = _write_group(storage)
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with storage.prefetch(references) as window:
+            for index, reference in enumerate(references):
+                assert torch.equal(storage.get(window, reference),
+                                   torch.arange(8, dtype=torch.float32) + index)
+            for reference in references:
+                storage.retire(reference)
+            assert storage._produced_group_for(references[0]) == (None, None), (
+                "a disposed reference is out of the lookup index; that is "
+                "the condition this test exists for")
+    record = storage.produced_group_records()[0]
+    assert storage.telemetry["produced_groups_retired"] == 1, (
+        "the window's stage copy must come back even though nothing it "
+        "read is resolvable any more", storage.telemetry)
+    assert storage.produced_release_debt() == {"pending": {}, "abandoned": {}}
+    assert record["retired"] is True and record["origin_reclaimed"] is True
+    assert publication.durable_charge() == {"payload": 0, "checkpoint": 0,
+                                            "temp": 0}
+
+
+def test_a_rollover_longer_than_the_credit_bound_keeps_making_progress(
+        tmp_path, monkeypatch):
+    """More windows than the stage window can hold at once.
+
+    The tier is minted with ONE token and the template's window is one
+    token, so exactly one publication group can be staged at a time. Four
+    groups are then read in four windows, with the previous group's
+    entries disposed INSIDE the next window -- the cotangent rollover. If
+    a single stage copy were not returned, the next window could not fund
+    and this stops; that is the assertion.
+    """
+
+    import torch
+    storage, publication, q, env, pb_repo = _bound_owner(
+        tmp_path, n_batches=4 * GROUP_SIZE, payload_max_bytes=1 << 22,
+        window_gib=1, gib=1)
+    groups = [_write_group(storage, count=GROUP_SIZE, first=index * GROUP_SIZE)
+              for index in range(4)]
+    assert storage.telemetry["produced_groups_prewritten"] == 4
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        previous = None
+        for index, references in enumerate(groups):
+            with storage.prefetch(references) as window:
+                assert torch.equal(
+                    storage.get(window, references[0]),
+                    torch.arange(8, dtype=torch.float32) + index * GROUP_SIZE)
+                if previous is not None:
+                    for reference in previous:
+                        storage.retire(reference)
+            previous = references
+            assert storage.produced_release_debt() == {"pending": {},
+                                                       "abandoned": {}}, (
+                "a window that could not give its credit back would starve "
+                "the next one", index)
+    records = {record["batch_id"]: record
+               for record in storage.produced_group_records()}
+    assert len(records) == 4
+    assert storage.telemetry["produced_groups_retired"] == 4
+    assert sum(1 for record in records.values()
+               if record["origin_reclaimed"]) == 3, (
+        "the three rolled-over groups released their charge; the last one "
+        "still holds its entries", records)
+
+
 def test_a_groups_durable_charge_is_reclaimed_when_its_last_origin_goes(
         tmp_path, monkeypatch):
     """Group-final reclaim: files gone AND stage copy retired, in that order.
