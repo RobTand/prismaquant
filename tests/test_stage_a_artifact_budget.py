@@ -410,13 +410,11 @@ def test_stage_a_cli_threads_artifact_flag(tmp_path, monkeypatch):
     assert captured["artifact_budget_bytes"] is None
 
 
-def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
-    """The dispatcher forwards the NEW field as a payload flag (the PB
-    channel), validates strict bytes, and leaves argv unchanged when
-    absent -- mirroring the prefetch-override threading."""
+def _dispatcher_argv_fixture(tmp_path, monkeypatch):
+    """Minimal valid manifest + campaign for stage_a_argv budget tests."""
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-    from dispatch_joint_quanta import DispatchRefused, stage_a_argv
+    from dispatch_joint_quanta import stage_a_argv  # noqa: F401
     import dispatch_joint_quanta
     import gzip
 
@@ -448,6 +446,16 @@ def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
                 "prepared_path": "prepared.json",
                 "prepared_sha256": "e" * 64,
                 "read_manifest_sha256": parent}
+    return manifest, campaign
+
+
+def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
+    """The dispatcher forwards the NEW field as a payload flag (the PB
+    channel), validates strict bytes, and leaves argv unchanged when
+    absent -- mirroring the prefetch-override threading."""
+    from dispatch_joint_quanta import DispatchRefused, stage_a_argv
+
+    manifest, campaign = _dispatcher_argv_fixture(tmp_path, monkeypatch)
 
     plain = stage_a_argv(manifest, campaign)
     assert "--artifact-budget-bytes" not in plain
@@ -460,3 +468,39 @@ def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
     for bad in (True, 0, -5, "8 GiB"):
         with pytest.raises(DispatchRefused):
             stage_a_argv(manifest, campaign, artifact_budget_bytes=bad)
+
+
+def test_dispatcher_refuses_non_integer_numerics(tmp_path, monkeypatch):
+    """The dispatcher boundary permits only int (not bool) or ASCII-decimal
+    strings: a float like 640.9 must refuse, never truncate to 640 the way
+    a bare int() coercion would -- the capture resolver refuses floats, so
+    the dispatcher must not launder one."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from decimal import Decimal
+    from dispatch_joint_quanta import DispatchRefused, stage_a_argv
+
+    manifest, campaign = _dispatcher_argv_fixture(tmp_path, monkeypatch)
+
+    for bad in (687194767360.9, 640.0, Decimal("640"), "640.9", "0x10"):
+        with pytest.raises(DispatchRefused):
+            stage_a_argv(manifest, campaign, artifact_budget_bytes=bad)
+
+    threaded = stage_a_argv(manifest, campaign,
+                            artifact_budget_bytes=f" {RUN_640_GIB} ")
+    assert threaded[threaded.index("--artifact-budget-bytes") + 1] == str(
+        RUN_640_GIB)
+
+
+def test_parse_refuses_unicode_digits_named():
+    """`str.isdigit` accepts non-ASCII digits (superscripts, fullwidth)
+    that `int()` then refuses with a raw ValueError. The parser requires
+    ASCII decimal up front so every invalid input carries the named
+    AdjointIdentityRefused, never an untyped error."""
+    from prismaquant.joint_cost_stage_a import (
+        AdjointIdentityRefused, _parse_artifact_budget_bytes)
+
+    for bad in ("²", "⁶⁴⁰", "640²", "½"):
+        assert bad.isdigit()
+        with pytest.raises(AdjointIdentityRefused):
+            _parse_artifact_budget_bytes(bad, where="test")
