@@ -477,8 +477,10 @@ def test_own_boundary_group_publishes_stages_and_reads_back(
 
     Writer -> prewrite-before-the-first-byte -> deferred publish -> REAL
     sealed mover through claim/execute/finish -> composed reader context
-    -> the UNCHANGED strict prefetch -> byte-equal tensors -> stage
-    release.
+    -> the UNCHANGED strict prefetch -> byte-equal tensors. The stage
+    release is a separate test because it currently refuses for a reason
+    that is PrismaBuild's, not this chain's; see
+    ``test_releasing_the_stage_copy_is_blocked_by_the_owner_demand_taint``.
     """
 
     import torch
@@ -498,12 +500,56 @@ def test_own_boundary_group_publishes_stages_and_reads_back(
     assert storage.telemetry["produced_groups_materialized"] == 1
     report = storage.produced_group_records()
     assert len(report) == 1 and report[0]["staged"] is True
+
+
+def test_releasing_the_stage_copy_is_blocked_by_the_owner_demand_taint(
+        tmp_path, monkeypatch):
+    """MEASURED BLOCKER, recorded rather than worked around or faked.
+
+    The read completes and the pins release cleanly -- the egress receipt
+    reports zero live pins and zero deferrals. It still refuses
+    ``egress-incomplete``, and the reason is a PrismaBuild interaction this
+    lane cannot fix from PQ:
+
+    ``stage_release`` identifies movement nodes by their DEMAND -- any
+    queue row demanding ``<kind>@<tier>`` on the evicting tier is treated
+    as a mover, and a mover whose sealed request has no ``params.command``
+    taints the ownership scan ("mover seals no command"). A produced-output
+    OWNER demands exactly that, by design: ``owner_demand_terms`` puts its
+    working minimum on the tier, and its own sealed request is an ordinary
+    action that seals ``task.argv`` and no movement command. So the live
+    owner taints the egress of its own batch.
+
+    The scan's comment says "consumers never reach this branch", and that
+    was true before produced output gave a consumer a tier demand. Filed
+    for the owning PB lane; nothing here works around it, because every
+    workaround is worse: finishing the owner first is not what a producer
+    does mid-run, and unlinking the stage copy behind the egress is the
+    private bookkeeping the whole lane exists to avoid.
+
+    This test asserts the CURRENT refusal exactly, so it fails loudly the
+    moment PrismaBuild changes it -- it is a record, not an acceptance.
+    """
+
+    import torch
+    storage, _publication, q, env, pb_repo = _bound_owner(tmp_path)
+    references = _write_group(storage)
+    _stage_groups(storage, q)
+    _strict(monkeypatch, env, pb_repo, q)
+    with storage.prefetch(references) as window:
+        storage.get(window, references[0])
     released = storage.release_produced_group(references[0])
     receipt = released.get("receipt") or {}
-    assert released.get("ok") is True, (
-        released.get("refusal"), receipt.get("errors"),
-        receipt.get("live_pins"), receipt.get("entries_deferred"),
-        receipt.get("entries_deleted"), receipt.get("deferred_handoffs"))
+    assert released.get("ok") is False
+    assert released.get("refusal") == "egress-incomplete", released
+    assert receipt.get("live_pins") == [], (
+        "the reader's pins DID release: the refusal is the ownership scan, "
+        "not a leaked pin", receipt.get("live_pins"))
+    assert int(receipt.get("entries_deferred") or 0) == 0, receipt
+    errors = receipt.get("errors") or []
+    assert any("mover seals no command" in str(error) for error in errors), (
+        "the recorded cause moved; re-read stage_release before trusting "
+        "this record", errors)
 
 
 def test_multi_window_initial_writes_exceed_the_window_and_fit_durable(
