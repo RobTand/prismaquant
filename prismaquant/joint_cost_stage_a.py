@@ -1086,16 +1086,36 @@ def run_adjoint_capture_core(
         },
         "dev_mode": dev_mode_stamp(),
     }
-    produced = getattr(storage, "produced_output_report", None)
-    if callable(produced):
-        # After the owner closed: ``retention`` above was taken inside the
-        # ``with`` block, so it cannot see the settle, and a stage copy
-        # PrismaBuild would not retire must be on the artifact, not only
-        # on stdout.
-        report = produced()
-        if report is not None:      # an unbound owner's receipt is unchanged
-            receipt["telemetry"]["produced_output"] = report
+    # After the owner closed: ``retention`` above was taken inside the
+    # ``with`` block, so it cannot see the settle, and a stage copy
+    # PrismaBuild would not retire must be on the artifact, not only on
+    # stdout.
+    receipt["telemetry"].update(_produced_output_block(storage))
     return receipt
+
+
+def _produced_output_block(storage) -> dict:
+    """The owner's closing staging facts, as a receipt block that seals.
+
+    This runs after the last layer, so it may only add to the receipt. The
+    receipt is sealed with ``json.dumps(allow_nan=False)``: a reason
+    PrismaBuild worded with something JSON cannot carry travels as its repr,
+    and a report that cannot be taken or carried is recorded as its own
+    error. A finished capture is never failed by its own telemetry. An
+    unbound owner adds nothing, so its receipt is unchanged.
+    """
+
+    produced = getattr(storage, "produced_output_report", None)
+    if not callable(produced):
+        return {}
+    try:
+        report = produced()
+        if report is None:
+            return {}
+        return {"produced_output": json.loads(json.dumps(
+            report, sort_keys=True, default=repr, allow_nan=False))}
+    except Exception as exc:
+        return {"produced_output": {"report_error": repr(exc)[:400]}}
 
 
 def _io_counters() -> dict:

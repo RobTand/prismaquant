@@ -13,6 +13,7 @@ seals by default, and at two groups every rule below is inert.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -778,6 +779,13 @@ def test_what_the_owner_learned_as_it_closed_is_in_its_report(
     assert report["release_error_count"] >= 1
     assert report["window_groups"] == 8
     assert report["telemetry"]["produced_groups_published_ahead"] == 1
+    # The same facts as the receipt carries them: read after close from a
+    # bound owner, and sealable the way write_adjoint_receipt seals.
+    from prismaquant.joint_cost_stage_a import _produced_output_block
+    block = _produced_output_block(storage)
+    assert block["produced_output"]["release_debt"]["unclassified"]
+    assert block["produced_output"]["window_groups"] == 8
+    json.dumps(block, sort_keys=True, allow_nan=False)
 
 
 def test_an_unbound_owner_reports_nothing(tmp_path):
@@ -829,3 +837,84 @@ def test_the_capture_declares_its_last_roll_unread(tmp_path, monkeypatch):
     boundaries = sorted({boundary for boundary, _ in seen})
     assert boundaries[0] == 0 and len(boundaries) > 1
     assert all(read_back is (boundary > 0) for boundary, read_back in seen), seen
+
+
+def _capture_receipt(tmp_path, monkeypatch, report):
+    """The real capture core's receipt, with the owner's report stood in."""
+
+    from test_layer_major_boundary_capture import fixture, draw
+    from test_streamed_boundary_artifacts import _policy
+    from test_streamed_cost_checkpoints import _model_identity
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
+
+    closed = []
+    real_exit = StreamedBoundaryArtifacts.__exit__
+
+    def exiting(self, *args):
+        closed.append(True)
+        return real_exit(self, *args)
+
+    def reporting(self):
+        assert closed, "the report is read after the owner closed"
+        return report()
+
+    monkeypatch.setattr(StreamedBoundaryArtifacts, "__exit__", exiting)
+    monkeypatch.setattr(StreamedBoundaryArtifacts, "produced_output_report",
+                        reporting)
+    _, _, runner, _ = fixture()
+    runner.context.settle_prefetch_layers = lambda layers: None
+    return run_adjoint_capture_core(
+        runner, draw(), execution={
+            "n_probes": 1, "seed_base": 7000, "probe_microbatch": 0,
+            "boundary_storage": {
+                **_policy(tmp_path / "b", cap=1 << 24, aux=1 << 22,
+                          disk=1 << 26),
+                "schema": "prismaquant.aura.boundary_storage.v2",
+                "capture_order": "layer_major"}},
+        output_root=tmp_path / "out", stride=8,
+        source_model_identity=_model_identity("joint-source"),
+        unit_roster_sha256="a" * 64, plan_sha256="d" * 64,
+        prepared_sha256="e" * 64, read_manifest_sha256="f" * 64,
+        implementation_sha256="b" * 64)
+
+
+def test_the_closing_facts_reach_a_receipt_that_still_seals(
+        tmp_path, monkeypatch):
+    """A reason JSON cannot carry travels as its repr; the seal holds."""
+
+    from prismaquant.joint_adjoint_checkpoints import write_adjoint_receipt
+
+    receipt = _capture_receipt(tmp_path, monkeypatch, lambda: {
+        "window_groups": 56, "ahead_groups": 54,
+        "telemetry": {"produced_group_stage_wait_s": 1.5},
+        "release_debt": {"unclassified": {
+            "stagea-boundary-b3-g1": RuntimeError("egress-incomplete")}}})
+    block = receipt["telemetry"]["produced_output"]
+    assert block["window_groups"] == 56
+    assert block["telemetry"]["produced_group_stage_wait_s"] == 1.5
+    assert "egress-incomplete" in (
+        block["release_debt"]["unclassified"]["stagea-boundary-b3-g1"])
+    space = tmp_path / "sealed"
+    space.mkdir()
+    assert write_adjoint_receipt(space, receipt)
+
+
+@pytest.mark.parametrize("report, expected", [
+    (lambda: 1 / 0, "ZeroDivisionError"),
+    (lambda: {"telemetry": {"produced_group_stage_wait_s": float("nan")}},
+     "ValueError"),
+    (lambda: {"release_debt": {("boundary", 3): "a tuple is not a key"}},
+     "TypeError"),
+])
+def test_a_report_that_cannot_be_carried_never_fails_a_finished_capture(
+        report, expected):
+    from prismaquant.joint_cost_stage_a import _produced_output_block
+
+    class Owner:
+        def produced_output_report(self):
+            return report()
+
+    block = _produced_output_block(Owner())
+    assert expected in block["produced_output"]["report_error"]
+    json.dumps(block, sort_keys=True, allow_nan=False)
