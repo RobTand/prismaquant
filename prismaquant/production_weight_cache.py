@@ -414,6 +414,11 @@ class ProductionWeightCache:
                 "store_rendered_weight_published needs a bound produced "
                 "render publication (attach one, or keep the legacy "
                 "direct write)")
+        # The publication owns the dev/fixture-only mover argv passthrough
+        # (e.g. ``--unpaced`` where no pacer exists); an explicit caller
+        # argument overrides it, production stays empty either way.
+        extra = tuple(command_extra) or tuple(
+            getattr(bound, "command_extra", ()) or ())
         if not self.cache_dir:
             raise ProducedRenderBindingError(
                 "a published rendered weight needs the disk-streaming "
@@ -457,7 +462,7 @@ class ProductionWeightCache:
                     producer_generation=batch_id)
                 published = bound.publish(batch_id=batch_id,
                                           descriptors=[descriptor],
-                                          command_extra=tuple(command_extra))
+                                          command_extra=extra)
                 if not published.get("ok"):
                     raise ProducedRenderPublicationFailed(
                         batch_id=batch_id, refusal=published)
@@ -498,7 +503,7 @@ class ProductionWeightCache:
                 f"its admitted bound ({admitted}): refusing to publish "
                 "beyond the prewrite budget")
         published = bound.publish(batch_id=batch_id, descriptors=[descriptor],
-                                  command_extra=tuple(command_extra))
+                                  command_extra=extra)
         if not published.get("ok"):
             raise ProducedRenderPublicationFailed(
                 batch_id=batch_id, refusal=published)

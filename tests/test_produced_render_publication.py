@@ -657,7 +657,13 @@ def test_retry_publish_is_idempotent(tmp_path: Path) -> None:
 
 def test_retire_returns_capacity_and_releases(tmp_path: Path) -> None:
     """retire_batch cleans the staged batch; the instance releases."""
-    publication, q, _cas, _repo = _bound_publication(tmp_path)
+    publication, q, _cas, pb_repo = _bound_publication(tmp_path)
+    # The fixture process plays tier host here: the in-process egress
+    # needs the fleet tool importable, exactly as the tier host's own
+    # action environment provides it (deployed retire contract).
+    fleet_tools = str(pb_repo / "tools" / "fleet")
+    if fleet_tools not in sys.path:
+        sys.path.insert(0, fleet_tools)
     cache = _cache(publication)
     tensor = torch.arange(16, dtype=torch.float32).reshape(1, 16)
     out = cache.store_rendered_weight_published(
