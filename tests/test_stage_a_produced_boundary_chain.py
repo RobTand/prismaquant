@@ -318,7 +318,9 @@ def _execute_mover(q, mover: str) -> dict:
     row = pool._read_json(q.item_path(pool.CLAIMED, mover))
     assert isinstance(row, dict), "mover row must be claimed to execute"
     outcome = q.execute(row, timeout_s=240)
-    assert outcome.get("returncode") == 0, outcome
+    assert outcome.get("returncode") == 0, (
+        outcome.get("returncode"), outcome.get("stdout"),
+        outcome.get("stderr"), outcome.get("status"))
     receipt = q.move_record(mover)
     assert isinstance(receipt, dict), "mover recorded no receipt"
     q.finish(mover, status="executed")
