@@ -1,7 +1,30 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-20 · `fix/stage-a-speculative-prefetch-readset-20260920`.
+As of: 2026-09-21 · `fix/stagea-artifact-budget-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `fix/stagea-artifact-budget-20260921`) for **the
+Stage A durable artifact budget seam** (PQ #882). No default, stage, format,
+lane, pin or ship-gate verdict changes; the runtime reserve / write /
+commit guards refuse exactly what they refused before. What changes is the
+invocation contract around them: the sealed plan's
+`boundary_storage.max_artifact_bytes` (416 GiB on the GLM-5.3-Flash
+complete-512 panel) stays the campaign's identity, and one run may replace
+it with an explicitly recorded byte count --
+`joint_cost_stage_a --artifact-budget-bytes` /
+`PRISMAQUANT_STAGE_A_ARTIFACT_BUDGET_BYTES`, strict positive-integer bytes,
+threaded through the core's existing `boundary_artifact_bytes` and the
+dispatcher's `--stage-a-artifact-budget-bytes` payload flag, stamped
+(`artifact_budget.v1`: source, unit bytes, `plan_sealed_bytes`,
+`run_used_bytes`) into `results.json`, `counters.json` and the adjoint
+receipt. An under-budget invocation refuses in an early preflight from live
+geometry -- the hard raw-bytes floor (full batches plus the remainder
+batch at its true smaller size) is the mandatory gate, and a named
+planning allowance (file-header envelopes plus stated per-checkpoint
+shared/manifest assumptions, never a proven ceiling) sizes the proposed
+invocation -- before any expensive forward; the sealed plan is unchanged.
+Design: `docs/design/stage_a_artifact_budget_2026-09-21.md`. Gates:
+`tests/test_stage_a_artifact_budget.py`.
 
 Re-stamped (2026-09-20, `fix/stage-a-speculative-prefetch-readset-20260920`)
 for **the declared-but-unmoved staged range** (PQ #874). A strict source read
