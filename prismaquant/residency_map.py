@@ -978,7 +978,6 @@ class ResidencyResolver:
                         path, "declared file is unstatable, cannot bind the entry to it")
                     return None, RANGE_REFUSED
             refusal = None
-            missing_reason = None
             failed_before = False
             for entry in covering:
                 answer, reason, missing = self._range_answer(
@@ -988,9 +987,7 @@ class ResidencyResolver:
                         self._range_rows_passed_over += 1
                     return answer, RANGE_HIT
                 failed_before = True
-                if missing:
-                    missing_reason = missing_reason or reason
-                else:
+                if not missing:
                     refusal = refusal or reason
             if refusal is not None:
                 self._record_fallback(path, refusal)

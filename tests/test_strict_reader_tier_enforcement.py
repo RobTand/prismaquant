@@ -2398,3 +2398,34 @@ def test_a_nonregular_staged_entry_refuses_without_waiting(
     assert report['range_waits_refused'] == 0
     assert report['fallback_count'] >= 1
     assert report['bytes_from_pool'] == 0
+
+
+def test_a_stale_missing_entry_with_unbound_readset_does_not_wait(
+        tmp_path, monkeypatch):
+    """Missing file + unbound readset: resolver says UNCOVERED, caller declines.
+
+    PQ #903 maps all-missing to RANGE_UNCOVERED whenever `_declares` is not
+    False, which includes the unbound (None) case. The wait itself stays
+    gated on a bound sealed readset (`_await_layer_readset` returns early
+    when `declared_readset.state != "bound"`), so an unbound run keeps the
+    pre-#874 behaviour: immediate refusal, no polls, reason recorded.
+    """
+    path, _ = _shard(tmp_path)
+    staged_stale = _stage_whole(_stage_root(tmp_path), path)
+    resolver, _consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path), seal=False)
+    publish({'stale': (path, staged_stale)})
+    staged_stale.unlink()
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    assert time.monotonic() - started < 30.0
+
+    report = resolver.report()
+    assert report['declared_readset']['state'] == 'unbound'
+    assert report['range_wait_polls'] == 0
+    assert report['range_waits_served'] == 0
+    assert report['range_waits_refused'] == 0
+    assert report['bytes_from_pool'] == 0

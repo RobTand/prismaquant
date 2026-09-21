@@ -101,7 +101,10 @@ def test_a_span_every_covering_entry_fails_refuses_with_the_first_hard_reason(
         staged, capsys):
     # Header is missing (waitable on its own) but the own entry behind it is
     # truncated (hard): integrity first, so the span still refuses at once and
-    # reports the hard reason, not the missing one.
+    # reports the hard reason, not the missing one. This is the legitimate
+    # #903 change to the old expectation (which reported the missing file
+    # first): the policy is not weakened -- a hard refusal still refuses, is
+    # recorded as a fallback, serves nothing, and reads nothing from the pool.
     staged['files']['header'].unlink()
     own = staged['files']['own']
     own.write_bytes(own.read_bytes()[:-8])
@@ -111,6 +114,9 @@ def test_a_span_every_covering_entry_fails_refuses_with_the_first_hard_reason(
     assert report['fallback_count'] == 1
     assert report['range_rows_passed_over'] == 0
     assert report['fallbacks'][0]['reason'].startswith('staged copy size differs')
+    assert report['bytes_from_pool'] == 0
+    assert report['bytes_from_stage'] == 0
+    assert report['hits'] == 0
     assert '[residency] fallback' in capsys.readouterr().out
 
 
