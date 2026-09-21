@@ -500,7 +500,10 @@ def test_parse_refuses_unicode_digits_named():
     from prismaquant.joint_cost_stage_a import (
         AdjointIdentityRefused, _parse_artifact_budget_bytes)
 
-    for bad in ("²", "⁶⁴⁰", "640²", "½"):
+    for bad in ("²", "⁶⁴⁰", "640²"):
         assert bad.isdigit()
         with pytest.raises(AdjointIdentityRefused):
             _parse_artifact_budget_bytes(bad, where="test")
+    # Not even isdigit, still a named refusal (never untyped).
+    with pytest.raises(AdjointIdentityRefused):
+        _parse_artifact_budget_bytes("½", where="test")
