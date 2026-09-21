@@ -20,11 +20,14 @@ thing a correct tensor alone says nothing about:
   are compared to the identity the map publishes -- length and digest,
   not merely that something was returned. A staged input nobody reads
   proves nothing about staging.
-* the negative control REFUSES. A file that is physically present and
-  readable, and is not a declared staged input, must be refused rather
-  than read from its origin. That is the pending ACC07 item and it runs
-  BEFORE the payload, using the same helper and SDK, so a refusal that
-  stopped working is caught before anything is written.
+* ACC07: a DECLARED PRODUCED ORIGIN is refused when it is read directly.
+  Not an arbitrary undeclared file -- bytes this action wrote itself,
+  that exist, whose digest it already knows and that it could simply
+  open. Asserted after the write and BEFORE any publication or staging,
+  through the same reader helper, because that is the only moment the
+  claim means anything: strict policy forces even your own bytes through
+  the staged path. (An undeclared metadata file is also refused and is
+  recorded as a baseline; it is not this gate.)
 * the SERVING PATH and TIER are asserted, not just the value. Where the
   bytes were served from is the whole question.
 * PROGRESS is reported from durably committed group state -- the batch's
@@ -97,7 +100,8 @@ def main() -> int:
     from prismaquant.residency_map import residency_resolver
     from prismaquant.stage_a_produced_output import BoundaryProducedPublication
     from prismaquant.staged_lease import lease_helper_root, sdk_submodule
-    from prismaquant.staged_tier_policy import activate_staged_tier_policy
+    from prismaquant.staged_tier_policy import (
+        TierPolicyRefused, activate_staged_tier_policy)
 
     map_path = os.environ.get("PRISMABUILD_RESIDENCY_MAP")
     report: dict[str, object] = {
@@ -137,26 +141,37 @@ def main() -> int:
         "ram_path": declared_entry.get("ram_path"),
     }
 
-    # ACC07, the negative control, BEFORE the payload. The residency map
-    # itself is the origin: a real, readable, regular file that is NOT a
-    # declared staged input. A reader that served it would be serving from
-    # origin, which is the failure this check exists to catch -- and using
-    # a file this process has already read removes any chance of passing
-    # for the trivial reason that it was absent.
-    negative: dict[str, object] = {
+    # BASELINE ONLY, recorded and deliberately NOT the ACC07 gate. The
+    # residency map is an undeclared metadata file, so refusing it shows
+    # the policy rejects arbitrary files -- which is true and is not the
+    # claim that matters. ACC07's claim is stronger and is asserted below,
+    # on a DECLARED PRODUCED ORIGIN this action wrote itself: bytes it
+    # owns, that exist, whose digest it already knows, and that it could
+    # simply open. That is what proves strict policy forces the read
+    # through staging.
+    baseline: dict[str, object] = {
+        "kind": "baseline-only: an undeclared metadata file",
         "origin": map_path,
         "origin_readable": os.access(map_path, os.R_OK)}
     try:
         served = _read_calibration_payload(
             Path(map_path),
             expected_sha256=_digest(Path(map_path).read_bytes()))
-    except Exception as refusal:                        # noqa: BLE001
-        negative["refused"] = f"{type(refusal).__name__}: {refusal}"
-        negative["refused_ok"] = True
+    except TierPolicyRefused as refusal:
+        # The TYPED refusal only. A bare ``except Exception`` would let an
+        # ImportError, a typo or a crash read as "it refused", which is
+        # the trivial pass this control exists to avoid; and the reason
+        # has to be the not-staged one, not some other refusal that
+        # happens to be raised on the way.
+        baseline["refused"] = f"{type(refusal).__name__}: {refusal}"
+        baseline["refused_ok"] = "readset-not-staged" in str(refusal)
+    except Exception as other:                          # noqa: BLE001
+        baseline["refused"] = f"NOT A REFUSAL: {type(other).__name__}: {other}"
+        baseline["refused_ok"] = False
     else:
-        negative["refused_ok"] = False
-        negative["served_bytes"] = len(served)
-    report["negative_origin_control"] = negative
+        baseline["refused_ok"] = False
+        baseline["served_bytes"] = len(served)
+    report["undeclared_metadata_baseline"] = baseline
 
     resolver = residency_resolver()
     report["resolver_bound"] = resolver is not None
@@ -179,11 +194,16 @@ def main() -> int:
         else:
             input_read["read_bytes"] = len(raw)
             input_read["read_sha256"] = _digest(raw)
-        # Where it was served from, in the reader's own record: the
-        # resolver logs the tier, pin and range it actually used.
+        # Where it was served from, in the reader's own record. The row's
+        # keys are the ones ``residency_map.record_serving_tier`` writes --
+        # ``path`` (normalized with os.path.normpath, never resolved) and
+        # ``serving_tier`` -- read from that function rather than guessed;
+        # filtering on a key it does not write would make the check below
+        # pass vacuously by matching nothing.
+        want = os.path.normpath(declared)
         input_read["serving_rows"] = [
             row for row in resolver.report().get("serving_tiers", [])
-            if str(row.get("declared")) == str(declared)]
+            if os.path.normpath(str(row.get("path", ""))) == want]
     report["declared_input_read"] = input_read
 
     report["queue_root_source"] = ("explicit override (an operator override; "
@@ -222,6 +242,47 @@ def main() -> int:
         report["prewritten"] = storage.telemetry["produced_groups_prewritten"]
         report["published_before_first_read"] = storage.telemetry[
             "produced_groups_published"]
+
+        # ---- ACC07, at the only moment it means anything ----------------
+        #
+        # The origin exists RIGHT NOW: storage.write created it under the
+        # prewrite authorization and the reference carries the writer's own
+        # inline digest. Nothing has been published, staged or
+        # materialized yet. So this is a file this action owns, whose
+        # bytes are there and whose digest it already knows -- the exact
+        # case where opening it directly would be easiest and would be
+        # wrong. Under the strict policy it must refuse, and refuse with
+        # the not-staged reason rather than any other.
+        #
+        # The origin is described from METADATA ONLY: a stat and an access
+        # check. Reading it here to "confirm" it, or hashing it, would be
+        # the very read the policy forbids.
+        probe = references[0]
+        acc07: dict[str, object] = {
+            "gate": "ACC07: a declared produced origin is not readable "
+                    "directly before it is staged",
+            "origin_path": str(probe.path),
+            "origin_bytes": os.stat(probe.path).st_size,
+            "reference_file_bytes": int(probe.file_bytes),
+            "origin_readable_by_this_process": os.access(probe.path, os.R_OK),
+            "inline_sha256": str(probe.sha256),
+            "published_yet": storage.telemetry["produced_groups_published"],
+        }
+        try:
+            _read_calibration_payload(Path(probe.path),
+                                      expected_sha256=str(probe.sha256))
+        except TierPolicyRefused as refusal:
+            acc07["refused"] = f"{type(refusal).__name__}: {refusal}"
+            acc07["refused_ok"] = "readset-not-staged" in str(refusal)
+        except Exception as other:                      # noqa: BLE001
+            acc07["refused"] = (
+                f"NOT A REFUSAL: {type(other).__name__}: {other}")
+            acc07["refused_ok"] = False
+        else:
+            acc07["refused_ok"] = False
+            acc07["served"] = "the origin was READ directly; strict policy "
+            "did not force the read through staging"
+        report["produced_origin_refusal"] = acc07
 
         with storage.prefetch(references) as window:
             for reference, tensor in zip(references, wanted):
@@ -289,10 +350,14 @@ def main() -> int:
             and input_read.get("read_sha256") == declared_entry.get("sha256"),
         "declared_input_was_served_by_a_named_tier":
             bool(input_read.get("serving_rows"))
-            and all(str(row.get("tier")) in ("stage", "ram")
+            and all(str(row.get("serving_tier")) in ("stage", "ram")
+                    and bool(row.get("pin_id"))
                     for row in input_read.get("serving_rows") or []),
-        "an_undeclared_readable_origin_is_refused":
-            negative.get("refused_ok") is True,
+        "a_declared_produced_origin_is_refused_before_staging":
+            acc07.get("refused_ok") is True,
+        "the_same_reference_then_read_through_staging":
+            acc07.get("origin_bytes", -1) >= 0
+            and storage.telemetry["produced_groups_materialized"] >= 1,
         "stage_copy_was_retired_on_window_exit":
             first.get("stage_retired") is True,
         "repeat_read_used_a_fresh_materialization":

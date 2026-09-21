@@ -1590,17 +1590,30 @@ class StreamedBoundaryArtifacts:
             # the retirement said, and must not become the failure.
             record["deferred_state"] = {"error": repr(exc)}
         redrives = 0
+
+        def _spent():
+            """The budget is gone: record it and stop, calling nothing."""
+            record["deferred_waited_s"] = time.monotonic() - started
+            self._produced_release_pending.pop(key, None)
+            self._produced_release_abandoned[key] = dict(record)
+            raise BoundaryProducedReleaseDeferred(
+                group["batch_id"],
+                waited_s=time.monotonic() - started, timeout_s=budget,
+                attempts=redrives, outcome=outcome)
+
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                record["deferred_waited_s"] = time.monotonic() - started
-                self._produced_release_pending.pop(key, None)
-                self._produced_release_abandoned[key] = dict(record)
-                raise BoundaryProducedReleaseDeferred(
-                    group["batch_id"],
-                    waited_s=time.monotonic() - started, timeout_s=budget,
-                    attempts=redrives, outcome=outcome)
+                _spent()
             time.sleep(min(self.PRODUCED_DEFERRAL_POLL_S, remaining))
+            # THE DEADLINE IS READ AGAIN HERE, immediately before the
+            # retirement, because a retire is a mutation and the sleep
+            # above can have landed exactly on the deadline. Checking only
+            # at the top of the loop wakes at expiry and drives one more
+            # egress anyway. Same rule as the funding path: a deadline
+            # bounds SIDE EFFECTS, not iterations.
+            if time.monotonic() >= deadline:
+                _spent()
             redrives += 1
             self.telemetry["produced_group_release_retries"] += 1
             outcome = self._retire_produced_group(key, group)

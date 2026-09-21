@@ -1035,12 +1035,18 @@ class BoundaryProducedPublication:
         """Re-drive ONE prepaid step while PrismaBuild says it is contended.
 
         ``call`` is re-invoked with IDENTICAL inputs, which is the whole
-        licence for this: ``publish_prepaid_batch`` derives the mover key
-        by content address, so the same batch, descriptors and instance
-        re-derive the same key and every step of it is idempotent
-        (produced_output.py: "retrying with identical inputs re-derives the
-        same key and every step is idempotent"). Nothing here mints a
-        successor, relaxes a lock, or touches capacity.
+        licence for this, and BOTH callers document it themselves rather
+        than one being inferred from the other. ``publish_prepaid_batch``
+        derives the mover key by content address, so the same batch,
+        descriptors and instance re-derive the same key: "retrying with
+        identical inputs re-derives the same key and every step is
+        idempotent". ``ensure_batch_materialized`` seals its successor's
+        key over the filed materialization generation and says the same of
+        a restart: it "re-drives that exact row's sealed mover key through
+        the same idempotent stage/publish/fund steps", with the intent
+        filed under the ownership lock before any side effect and two
+        concurrent callers collapsing onto one generation. Nothing here
+        mints a successor, relaxes a lock, or touches capacity.
 
         Bounded by the caller's ABSOLUTE ``deadline`` -- the same one the
         rest of this group's staging spends, never a fresh budget minted
