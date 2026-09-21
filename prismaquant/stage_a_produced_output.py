@@ -111,6 +111,123 @@ class BoundaryMaterializationIncomplete(RuntimeError):
     """
 
 
+#: The Stage A boundary publication's template identity and its one slot.
+#: The slot name is what a bound owner's descriptors declare, so it is a
+#: contract between the pre-submit declaration and the runtime writer.
+BOUNDARY_TEMPLATE_ID = "pq-stagea-boundary-entries-v1"
+BOUNDARY_SLOT = "boundary_entries"
+
+#: PrismaBuild's own tier unit. Quoted, not assumed: `storage_tiers`
+#: prices a reservation per mover and rounds UP to a whole token, so every
+#: derivation here uses the same ceiling rather than a nearest or a floor.
+GIB = 1 << 30
+
+#: The writer's own per-entry envelope: `StreamedBoundaryArtifacts.write`
+#: bounds an entry at ``nbytes + 65536`` for the PyTorch zip header, and
+#: the prewrite ceiling is that same bound so the two cannot drift.
+HEADER_ENVELOPE_BYTES = 65536
+
+
+def boundary_group_ceiling_bytes(*, group_size: int,
+                                 max_entry_tensor_bytes: int,
+                                 header_envelope_bytes: int = HEADER_ENVELOPE_BYTES
+                                 ) -> int:
+    """The conservative payload ceiling of ONE publication group.
+
+    The group is the existing read window (``prefetch_batches`` entries),
+    and its ceiling is the writer's own per-entry bound times the entries
+    the group actually holds -- so the LAST, partial group is priced on
+    its own byte range and never on an assumed full window.
+    """
+
+    for name, value in (("group_size", group_size),
+                        ("max_entry_tensor_bytes", max_entry_tensor_bytes),
+                        ("header_envelope_bytes", header_envelope_bytes)):
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"boundary group {name} must be a positive int")
+    return group_size * (max_entry_tensor_bytes + header_envelope_bytes)
+
+
+def boundary_window_gib(*, group_size: int, max_entry_tensor_bytes: int,
+                        concurrent_groups: int = 2,
+                        header_envelope_bytes: int = HEADER_ENVELOPE_BYTES
+                        ) -> int:
+    """The tier window this producer reserves, in PrismaBuild tokens.
+
+    Derived from the ACTUAL MAXIMUM GROUP, never from the retained origin
+    peak -- two different quantities, and conflating them sizes the window
+    off the wrong number entirely. The origin peak is how many durable
+    bytes the whole capture keeps (hundreds of GiB); the window is how much
+    STAGE space the bounded reader borrows at once, which is the groups
+    that can be live together.
+
+    ``concurrent_groups`` is 2 because that is what the source does: a
+    window may not overlap another (``cost_streaming`` refuses it), and the
+    read window plus the incoming cotangent plane are the two groups a
+    single window can span. Each is priced with PrismaBuild's own per-mover
+    ceiling, ``ceil(bytes / GiB)``, so the production geometry -- 64 entries
+    of 16 MiB plus envelope -- is 2 tokens a group and 4 for the pair.
+    """
+
+    if type(concurrent_groups) is not int or concurrent_groups <= 0:
+        raise ValueError("boundary concurrent_groups must be a positive int")
+    per_group = boundary_group_ceiling_bytes(
+        group_size=group_size,
+        max_entry_tensor_bytes=max_entry_tensor_bytes,
+        header_envelope_bytes=header_envelope_bytes)
+    return -(-per_group // GIB) * concurrent_groups
+
+
+def build_boundary_template(*, output_prefix, tier: str,
+                            artifact_max_bytes: int,
+                            group_size: int, max_entry_tensor_bytes: int,
+                            checkpoint_max_bytes: int | None = None,
+                            concurrent_groups: int = 2,
+                            template_id: str = BOUNDARY_TEMPLATE_ID) -> dict:
+    """The pre-submit produced-output template for a Stage A capture.
+
+    Sealed BEFORE submission (it is an input of the owner's own action) and
+    bound after admission, so every number in it comes from geometry the
+    submitter already has.
+
+    ``artifact_max_bytes`` is THE configured artifact max -- the plan's
+    sealed ``boundary_storage.max_artifact_bytes`` or the run's explicit
+    override, whichever this invocation will actually run under -- and it
+    is the single source of the durable origin class maximum. Nothing here
+    carries a default budget, and no figure is written into this module:
+    a planning number that can move is an argument, not a constant.
+
+    The temp class matches the payload class because every final passes
+    through a staging file of its own size before the rename; stating the
+    relationship beats leaving it a coincidence of defaults.
+    """
+
+    po = _produced_output_module()
+    if type(artifact_max_bytes) is not int or artifact_max_bytes <= 0:
+        raise ValueError(
+            "the Stage A artifact max must be a positive integer byte count: "
+            "it is the configured budget this invocation runs under, never "
+            "a default this module supplies")
+    checkpoint = (artifact_max_bytes if checkpoint_max_bytes is None
+                  else int(checkpoint_max_bytes))
+    window = boundary_window_gib(
+        group_size=group_size,
+        max_entry_tensor_bytes=max_entry_tensor_bytes,
+        concurrent_groups=concurrent_groups)
+    return dict(po.validate_template({
+        "schema": po.TEMPLATE_SCHEMA_V1,
+        "version": 1,
+        "template_id": str(template_id),
+        "output_prefix": str(output_prefix),
+        "slots": {BOUNDARY_SLOT: {"class": "payload"}},
+        "durable_maxima": {"payload_max_bytes": int(artifact_max_bytes),
+                           "checkpoint_max_bytes": int(checkpoint),
+                           "temp_max_bytes": int(artifact_max_bytes)},
+        "working_demands": {tier: {"minimum_gib": max(window // 2, 1),
+                                   "window_gib": window}},
+        "permitted_tiers": [str(tier)]}))
+
+
 class BoundaryStagingTimeout(TimeoutError):
     """The batch's mover did not land inside this window's staging budget.
 
@@ -140,12 +257,15 @@ class BoundaryRepeatMaterializationUnsupported(RuntimeError):
 
 
 def _produced_output_module() -> Any:
+    from .staged_lease import LeaseRefused, sdk_submodule
     try:
-        from prismabuild import produced_output as po
-    except Exception as exc:  # pragma: no cover - environment-dependent
+        module = sdk_submodule("produced_output")
+    except LeaseRefused as exc:
         raise BoundaryProducedBindingError(
-            "the Stage A boundary publication needs PrismaBuild's "
-            f"produced_output API: {exc}") from exc
+            "the Stage A boundary publication needs PrismaBuild's\n"
+            "produced_output API from the SAME sealed generation as the\n"
+            f"reader SDK: {exc}") from exc
+    po = module
     for name in ("declared_template", "bind_declared_instance",
                  "declare_instance", "admit_instance", "admit_funded_window",
                  "require_prewrite", "abort_prewrite", "publish_prepaid_batch",
@@ -164,34 +284,65 @@ def _produced_output_module() -> Any:
 
 
 def _pool_module() -> Any:
+    from .staged_lease import LeaseRefused, sdk_submodule
     try:
-        from prismabuild import pool as pool_mod
-    except Exception as exc:  # pragma: no cover - environment-dependent
+        module = sdk_submodule("pool")
+    except LeaseRefused as exc:
         raise BoundaryProducedBindingError(
-            "the Stage A boundary publication needs PrismaBuild's pool "
-            f"module: {exc}") from exc
-    return pool_mod
+            "the Stage A boundary publication needs PrismaBuild's pool\n"
+            "module from the SAME sealed generation as the reader SDK: "
+            f"{exc}") from exc
+    return module
 
 
 def _residency_map_module() -> Any:
+    from .staged_lease import LeaseRefused, sdk_submodule
     try:
-        from prismabuild import residency_map as map_mod
-    except Exception as exc:  # pragma: no cover - environment-dependent
+        module = sdk_submodule("residency_map")
+    except LeaseRefused as exc:
         raise BoundaryProducedBindingError(
-            "composing a produced batch's reader context needs "
-            f"PrismaBuild's residency_map module: {exc}") from exc
-    return map_mod
+            "composing a produced batch's reader context needs\n"
+            "PrismaBuild's residency_map module from the SAME sealed\n"
+            f"generation as the reader SDK: {exc}") from exc
+    return module
 
 
-def open_pool_queue(queue_root: str | Path) -> Any:
+def launch_queue_root(env: Mapping[str, str] | None = None) -> Path:
+    """The queue root PrismaBuild gave THIS action, or a named refusal.
+
+    Derived exactly as the reader SDK derives it, from the shape of the
+    launcher's own ``PRISMABUILD_RESIDENCY_MAP``
+    (``<queue>/residency/<key>.json`` -> ``parent.parent``). Never guessed
+    from topology and never ``None``: a missing launch context is a
+    refusal with the variable named, not a ``Path(None)`` that fails three
+    calls later as something else.
+    """
+
+    source = dict(os.environ) if env is None else dict(env)
+    raw = source.get("PRISMABUILD_RESIDENCY_MAP", "")
+    if not raw:
+        raise BoundaryProducedBindingError(
+            "no PrismaBuild launch context: PRISMABUILD_RESIDENCY_MAP is "
+            "unset, so there is no queue root to bind an owner on")
+    root = Path(raw).parent.parent
+    if not root.is_dir():
+        raise BoundaryProducedBindingError(
+            f"the queue root derived from PRISMABUILD_RESIDENCY_MAP ({raw}) "
+            f"is not a directory: {root}")
+    return root
+
+
+def open_pool_queue(queue_root: str | Path | None,
+                    env: Mapping[str, str] | None = None) -> Any:
     """The queue the admitted owner lives on (fail closed, named error)."""
 
     pool_mod = _pool_module()
+    resolved = launch_queue_root(env) if queue_root is None else Path(queue_root)
     try:
-        return pool_mod.PoolQueue(Path(queue_root))
+        return pool_mod.PoolQueue(resolved)
     except Exception as exc:
         raise BoundaryProducedBindingError(
-            f"cannot open the PrismaBuild queue at {queue_root}: {exc}"
+            f"cannot open the PrismaBuild queue at {resolved}: {exc}"
         ) from exc
 
 
@@ -264,7 +415,7 @@ class BoundaryProducedPublication:
         po = _produced_output_module()
         pool_mod = _pool_module()
         owner = _launch_owner(env)
-        queue = open_pool_queue(queue_root)
+        queue = open_pool_queue(queue_root, env)
         try:
             template = po.declared_template(queue, owner)
         except Exception as exc:
@@ -920,6 +1071,12 @@ __all__ = [
     "BoundaryMaterializationIncomplete",
     "BoundaryRepeatMaterializationUnsupported",
     "BoundaryStagingTimeout",
+    "launch_queue_root",
+    "BOUNDARY_SLOT",
+    "BOUNDARY_TEMPLATE_ID",
+    "boundary_group_ceiling_bytes",
+    "boundary_window_gib",
+    "build_boundary_template",
     "BoundaryProducedPublication",
     "open_pool_queue",
 ]

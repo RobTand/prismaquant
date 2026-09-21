@@ -210,6 +210,49 @@ def _sdk():
     raise _refuse("lease-helper-unavailable", kind="availability")
 
 
+def sdk_submodule(name: str):
+    """One ``prismabuild.<name>`` from the SAME generation as the SDK.
+
+    Every PrismaBuild module this package uses must come from ONE sealed
+    generation. A bare ``import prismabuild.produced_output`` does not
+    guarantee that: production forwards an immutable
+    ``PRISMABUILD_READER_HELPER_ROOT`` and mounts it, but it does not
+    populate ``sys.path``, so a bare import can land on an older container
+    distribution -- or, worse, a MIXTURE, with produced_output from one
+    generation and pool from another. That is fatal to a lane whose whole
+    output is qualified provenance: bytes you cannot name are not a pin.
+
+    So the reader-lease SDK is resolved first (it owns the generation
+    discovery and its ``src`` insertion), the requested submodule is
+    imported after it, and the existing coherence check then proves every
+    imported ``prismabuild.*`` -- the new one included -- resolves inside
+    that one package directory. The refusal is the ordinary lease refusal,
+    named, never a fallback.
+    """
+
+    import importlib                                     # noqa: PLC0415
+
+    sdk = _sdk()
+    expected = _package_dir_of(sdk)
+    try:
+        module = importlib.import_module(f"prismabuild.{name}")
+    except ImportError as exc:
+        raise _refuse(f"lease-helper-unavailable: prismabuild.{name}: {exc}",
+                      kind="availability") from None
+    _check_package_coherence(expected)
+    served = Path(getattr(module, "__file__", ""))
+    try:
+        inside = served.resolve().is_relative_to(expected.resolve())
+    except OSError:
+        inside = False
+    if not inside:
+        raise _refuse(
+            f"lease-helper-divergent: prismabuild.{name} serves {served}, "
+            f"outside the SDK generation at {expected}",
+            kind="integrity")
+    return module
+
+
 def inject_installed_sdk_for_tests():
     """TEST-ONLY explicit injection of the reviewed installed distribution.
 

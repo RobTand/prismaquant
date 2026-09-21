@@ -227,6 +227,8 @@ class StreamedBoundaryArtifacts:
         self._produced_plan = None
         self._produced_groups = {}
         self._produced_release_errors = []
+        self._produced_release_pending = {}
+        self._produced_release_abandoned = {}
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -240,7 +242,9 @@ class StreamedBoundaryArtifacts:
             "produced_groups_prewritten": 0, "produced_groups_published": 0,
             "produced_groups_materialized": 0, "produced_groups_retired": 0,
             "produced_groups_rematerialized": 0,
-            "produced_group_release_failures": 0}
+            "produced_group_release_failures": 0,
+            "produced_group_release_retries": 0,
+            "produced_groups_origin_reclaimed": 0}
 
     def __enter__(self):
         return self
@@ -472,6 +476,49 @@ class StreamedBoundaryArtifacts:
         del self._references[reference.name]
         self.telemetry["live_artifact_bytes"] -= reference.file_bytes
         self.telemetry["retired_entries"] += 1
+        if self._produced is not None:
+            self._reclaim_produced_origin_if_final(reference)
+
+    def _reclaim_produced_origin_if_final(self, reference):
+        """Free a group's DURABLE charge once its last origin file is gone.
+
+        Two conditions, both required, and in this order. The origin files
+        must be absent -- the cotangent roll replaces a plane entry by
+        entry, so a group's charge is only releasable when its LAST entry
+        is unlinked -- and the group's stage copy must already be retired,
+        because a live materialization is material PrismaBuild is still
+        holding over those origins.
+
+        Why it matters at Stage A scale: the reverse walk rolls a
+        cotangent plane across 45 boundaries. Without a group-final
+        reclaim, every replaced plane keeps its durable charge for the life
+        of the instance and the origin class fills with bytes that are not
+        there any more. Note what this is NOT: the capture's origin peak is
+        the boundaries it RETAINS, not the sum of every cotangent it ever
+        wrote, so this gate is what keeps the two the same number.
+
+        The proof of absence stays PrismaBuild's own (``reclaim_origin``
+        lstats every filed origin path and retains on a present or
+        unstatable one). This only decides when it is worth asking, and a
+        refusal is recorded rather than retried into a loop.
+        """
+
+        key, group = self._produced_group_for(reference)
+        if group is None or group.get("origin_reclaimed"):
+            return
+        if not group["retired"]:
+            return
+        for held in group["references"]:
+            if Path(held.path).exists():
+                return
+        out = self._produced.reclaim_origin(group["batch_id"])
+        if out.get("ok"):
+            group["origin_reclaimed"] = True
+            self.telemetry["produced_groups_origin_reclaimed"] += 1
+        else:
+            self._produced_release_errors.append(
+                {"batch_id": group["batch_id"], "step": "reclaim_origin",
+                 "reason": {"refusal": out.get("refusal")}})
 
     def retire(self, reference):
         if self._readonly:
@@ -1105,7 +1152,8 @@ class StreamedBoundaryArtifacts:
             batch_id=batch_id, payload_ceiling_bytes=ceiling, paths=planned)
         group = {"batch_id": batch_id, "planned": planned,
                  "references": [], "published": None, "context": None,
-                 "manifest_digest": None, "retired": False}
+                 "manifest_digest": None, "retired": False,
+                 "origin_reclaimed": False}
         self._produced_groups[key] = group
         self.telemetry["produced_groups_prewritten"] += 1
         return group
@@ -1145,6 +1193,9 @@ class StreamedBoundaryArtifacts:
         falls back -- an unstaged group raises PB's own incomplete signal.
         """
 
+        # Before anything new is published: give PrismaBuild another
+        # chance to take back the windows an earlier exit could not.
+        self._drain_produced_releases()
         wanted = {}
         for reference in references:
             key, group = self._produced_group_for(reference)
@@ -1194,7 +1245,8 @@ class StreamedBoundaryArtifacts:
                  "entries": len(group["references"]),
                  "manifest_digest": group["manifest_digest"],
                  "staged": group["context"] is not None,
-                 "retired": group["retired"]}
+                 "retired": group["retired"],
+                 "origin_reclaimed": group["origin_reclaimed"]}
                 for group in self._produced_groups.values()]
 
     def _release_unpublished_prewrites(self):
@@ -1250,21 +1302,95 @@ class StreamedBoundaryArtifacts:
             self.telemetry["produced_groups_retired"] += 1
         return out
 
-    def _release_produced_window(self, references):
-        """Retire every stage copy this window borrowed. Best effort."""
+    #: How many times one group's stage retirement is re-driven through
+    #: PrismaBuild's own egress before the failure is recorded and left
+    #: standing. Bounded on purpose: a retry loop with no ceiling is a
+    #: scheduler, and this lane does not own scheduling.
+    PRODUCED_RELEASE_ATTEMPTS = 3
 
-        seen = set()
+    def _release_one_produced_group(self, key, group):
+        """Drive one group's stage retirement. Returns True when it is gone.
+
+        A returned ``{"ok": False}`` is a RESULT, not an absence of news:
+        PrismaBuild's egress refused for a reason, and that reason is
+        recorded against the group so the next attempt can see it. Nothing
+        here pretends the copy was retired and nothing refunds its credit
+        -- the tokens stay held by the material that is still there.
+        """
+
+        record = self._produced_release_pending.setdefault(
+            key, {"batch_id": group["batch_id"], "attempts": 0,
+                  "first_reason": None, "last_reason": None})
+        record["attempts"] += 1
+        try:
+            out = self.release_produced_group(group["references"][0])
+        except Exception as exc:                        # noqa: BLE001
+            reason = {"error": repr(exc)}
+        else:
+            if group["retired"]:
+                self._produced_release_pending.pop(key, None)
+                return True
+            reason = {"refusal": out.get("refusal"), "step": out.get("step"),
+                      "receipt": out.get("receipt")}
+        record["last_reason"] = reason
+        if record["first_reason"] is None:
+            record["first_reason"] = reason
+        self.telemetry["produced_group_release_failures"] += 1
+        self._produced_release_errors.append(
+            {"batch_id": group["batch_id"], "attempt": record["attempts"],
+             "reason": reason})
+        if record["attempts"] >= self.PRODUCED_RELEASE_ATTEMPTS:
+            # Cleared EXPLICITLY, with the original reason kept and the
+            # credits retained. The group stays unretired, so nothing
+            # downstream may treat its window as free, and a later read of
+            # it still finds its live copy rather than asking for a
+            # re-materialization that would be wrong.
+            self._produced_release_abandoned[key] = dict(record)
+            self._produced_release_pending.pop(key, None)
+        return False
+
+    def _drain_produced_releases(self):
+        """Re-drive every still-pending retirement before the next window.
+
+        Called BEFORE the next window publishes, because that is where a
+        stalled retirement actually costs something: the tier window is
+        small (the production geometry is four tokens -- current plus
+        next), so one group that failed to give its two tokens back is the
+        whole next advance. Draining here is the difference between
+        degrading and stalling.
+        """
+
+        for key in list(self._produced_release_pending):
+            group = self._produced_groups.get(key)
+            if group is None or group["retired"]:
+                self._produced_release_pending.pop(key, None)
+                continue
+            self.telemetry["produced_group_release_retries"] += 1
+            self._release_one_produced_group(key, group)
+
+    def _release_produced_window(self, references):
+        """Retire every stage copy this window borrowed."""
+
+        seen = []
         for reference in references:
             key, group = self._produced_group_for(reference)
             if group is None or key in seen or group["retired"]:
                 continue
-            seen.add(key)
-            try:
-                self.release_produced_group(reference)
-            except Exception as exc:                # noqa: BLE001
-                self.telemetry["produced_group_release_failures"] += 1
-                self._produced_release_errors.append(
-                    {"batch_id": group["batch_id"], "error": repr(exc)})
+            seen.append(key)
+        for key in seen:
+            self._release_one_produced_group(key, self._produced_groups[key])
+
+    def produced_release_debt(self):
+        """Stage copies this owner asked PB to retire and PB did not.
+
+        Reported rather than hidden: a caller that needs the window back
+        can see exactly which groups still hold it and why.
+        """
+
+        return {"pending": {str(record["batch_id"]): record["last_reason"]
+                            for record in self._produced_release_pending.values()},
+                "abandoned": {str(record["batch_id"]): record["first_reason"]
+                              for record in self._produced_release_abandoned.values()}}
 
     @contextmanager
     def prefetch(self, references):
@@ -1292,20 +1418,37 @@ class StreamedBoundaryArtifacts:
         self._active_window = window
         self.telemetry["prefetch_windows"] += 1
         self.telemetry["read_tensor_bytes"] += sum(ref.tensor_bytes for ref in references)
+        primary = None
         try:
             yield window
+        except BaseException as exc:
+            primary = exc
+            raise
         finally:
             self._active_window = None
-            context.__exit__(None, None, None)
-            # The pins are gone with the window, so the stage copies this
-            # window borrowed go back to free HERE -- that is the whole
-            # bounded-window contract, and holding them would accumulate
-            # every group the pass ever read. Retirement is PB's egress and
-            # it refuses while any pin is live, so the order is not
-            # optional. A failure to retire is telemetry, never a read
-            # error: the bytes were read, and the next sweep retries.
-            if self._produced is not None:
-                self._release_produced_window(references)
+            # Cleanup never MASKS the failure that caused it. A cleanup
+            # error raised out of a `finally` replaces the compute error as
+            # the exception the caller sees, which is worse than either
+            # fact alone -- so when something is already in flight, the
+            # cleanup failure is attached to it and the original
+            # propagates.
+            for step in (lambda: context.__exit__(
+                    type(primary) if primary is not None else None, primary,
+                    primary.__traceback__ if primary is not None else None),
+                    # The pins are gone with the window, so the stage
+                    # copies it borrowed go back to free HERE -- that is
+                    # the bounded-window contract, and holding them would
+                    # accumulate every group the pass ever read.
+                    lambda: (self._release_produced_window(references)
+                             if self._produced is not None else None)):
+                try:
+                    step()
+                except BaseException as cleanup:
+                    if primary is None:
+                        raise
+                    primary.add_note(
+                        "exact boundary window cleanup also failed: "
+                        f"{cleanup!r}")
 
     def get(self, window, reference):
         self._entry_identity(reference)

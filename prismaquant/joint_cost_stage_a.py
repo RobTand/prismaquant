@@ -734,7 +734,7 @@ def run_adjoint_capture_core(
     source_model_identity, unit_roster_sha256, plan_sha256, prepared_sha256,
     read_manifest_sha256, implementation_sha256, campaign_scope=None,
     boundary_artifact_bytes=None, artifact_budget_stamp=None,
-    min_free_gib=0.0, progress=None,
+    min_free_gib=0.0, progress=None, produced_output=None,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -750,6 +750,24 @@ def run_adjoint_capture_core(
     (optional, the :func:`resolve_artifact_budget_override` deviation stamp)
     is carried into the receipt provenance verbatim. Neither rewrites the
     sealed plan.
+
+    ``produced_output`` (optional) is a bound
+    ``stage_a_produced_output.BoundaryProducedPublication`` -- this
+    action's own PrismaBuild produced-output instance. With it, the
+    boundary entries this capture writes are declared, staged and read
+    back through PrismaBuild instead of being unreadable to their own
+    writer: an admitted action's outputs are not in the run's sealed input
+    map, so the strict allowed-tier reader refuses them, and there is no
+    own-session exemption. Without it the capture behaves exactly as
+    before and its entries resolve through the ordinary input map.
+
+    The publication's geometry is derived HERE, from the numbers this
+    invocation actually runs under, not from a planning figure: the
+    publication group is the storage policy's own read window
+    (``prefetch_batches``), the per-entry tensor ceiling is the boundary
+    tensor this panel produces, and the durable origin class maximum is
+    the EFFECTIVE ``max_artifact_bytes`` -- the plan's sealed value or
+    this run's override, whichever is in force.
     """
     from .cost_streaming import (
         StreamedBoundaryArtifacts,
@@ -840,6 +858,22 @@ def run_adjoint_capture_core(
 
     with storage:
         storage.bind(bind_identity, n_probes=n_probes, published=True)
+        if produced_output is not None:
+            # After bind, because the entry directory this owner chose is
+            # what must sit inside the publication's bound output prefix;
+            # the binding refuses an own-generation path outside it here
+            # rather than at the first descriptor.
+            storage.bind_produced_output(
+                produced_output,
+                group_size=int(storage_policy["prefetch_batches"]),
+                n_batches=len(calib_ids),
+                max_entry_tensor_bytes=_stage_a_per_tensor_nbytes(
+                    runner, batch_rows=batch_rows,
+                    seqlen=int(calib_ids.shape[1])))
+            log("boundary capture: produced-output binding "
+                f"{produced_output.instance['owner_action_key']} "
+                f"prefix={produced_output.output_prefix} "
+                f"group={int(storage_policy['prefetch_batches'])}")
         if progress is not None:
             # The initial boundary loop reports under the declared head
             # phase until the first forward observer fires. Entering moves
@@ -1052,6 +1086,71 @@ def _io_counters() -> dict:
         key, value = line.split(":", 1)
         values[key] = int(value)
     return values
+
+
+def bind_stage_a_produced_output(*, tier, artifact_max_bytes,
+                                 queue_root=None, env=None,
+                                 command_extra=()):
+    """This action's own PrismaBuild produced-output publication, or None.
+
+    The boundary entries Stage A writes are its OWN outputs, so they are
+    not in the run's sealed input map and the strict allowed-tier reader
+    refuses them (``staged-not-serving``) with no own-session exemption.
+    Binding here is what lets the same action read them back, through
+    PrismaBuild, without touching the input resolver.
+
+    The template is NOT built here. It is sealed pre-submit as an input of
+    this action's own request, and ``bind_from_admitted_owner`` reads the
+    declaration the submission made -- an operator dictionary assembled at
+    runtime would be a second source for a number admission already fixed.
+    What this DOES check is that the two agree: the declared durable
+    payload maximum must equal the EFFECTIVE artifact max this invocation
+    runs under (the plan's sealed ``max_artifact_bytes`` or this run's
+    override). A capture admitted against one budget and running under
+    another is producer/consumer drift and must refuse, not adapt.
+
+    ``None`` is returned in exactly ONE case: this process carries no
+    PrismaBuild launch context at all (a legacy or local invocation), so
+    there is no owner to bind and the capture behaves as it always did.
+    An ADMITTED action that fails to bind REFUSES, carrying the original
+    reason -- a missing SDK, a bad claim, a template mismatch. The
+    alternative is the shape that costs the most here: the binding is lost
+    silently, 512 boundary files are written again, and the failure
+    surfaces only when the first read asks for bytes nobody declared.
+    """
+
+    from .stage_a_produced_output import (
+        BoundaryProducedBindingError, BoundaryProducedPublication)
+
+    source = dict(os.environ) if env is None else dict(env)
+    admitted = bool(source.get("PRISMABUILD_ACTION_KEY"))
+    if not admitted:
+        if queue_root is not None:
+            raise AdjointIdentityRefused(
+                "stage A was given a PrismaBuild queue root but carries no "
+                "PRISMABUILD_ACTION_KEY: a produced-output owner is an "
+                "ADMITTED action, and binding one from a half-present "
+                "launch context is refused rather than guessed")
+        return None
+    try:
+        publication = BoundaryProducedPublication.bind_from_admitted_owner(
+            queue_root=queue_root, tier=tier, env=source,
+            command_extra=tuple(command_extra))
+    except BoundaryProducedBindingError as exc:
+        raise AdjointIdentityRefused(
+            "stage A is an admitted PrismaBuild action "
+            f"({source['PRISMABUILD_ACTION_KEY'][:12]}) and cannot bind its "
+            f"own produced output: {exc}") from exc
+    declared = int(publication.durable_maxima().get("payload_max_bytes", 0))
+    if declared != int(artifact_max_bytes):
+        raise AdjointIdentityRefused(
+            "stage A produced-output template declares a durable payload "
+            f"maximum of {declared} bytes, but this invocation runs under "
+            f"{int(artifact_max_bytes)}: the admitted budget and the "
+            "effective budget must be the same number (re-declare the "
+            "template, or drop the run override) -- refusing rather than "
+            "writing origin bytes against a budget nobody admitted")
+    return publication
 
 
 def run_adjoint_capture(

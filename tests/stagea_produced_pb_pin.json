@@ -1,12 +1,12 @@
 {
-  "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-stagea-produced-boundaries-20260921/27c4fc2915a609518a149f90af67034282494429",
-  "candidate_commit": "27c4fc2915a609518a149f90af67034282494429",
+  "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-stagea-produced-boundaries-20260921/42f2cfb874077da66c27401e718d3636903a8a40",
+  "candidate_commit": "42f2cfb874077da66c27401e718d3636903a8a40",
   "candidate_source": "/home/rob/tmp/pb-produced-output-current-20260921",
   "files": {
     "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
     "src/prismabuild/movement_actions.py": "fd3a76883033c4e955a9e6e5a939536390671064ed44132fd90835003683d2af",
     "src/prismabuild/pool.py": "176cc02a976ec8cca8c3b2fa41974ee2ed0c4afbb0d8e576b3dc9b9c09de450a",
-    "src/prismabuild/produced_output.py": "53776077b231686fbbfca0553ea4b5d15728966b7b8db2796756dd888a06d3a3",
+    "src/prismabuild/produced_output.py": "cf3289bb1003e8150ce73406029f41f4b83d05c642b11df733ccb64db3faedd1",
     "src/prismabuild/reader_lease.py": "0e1eb63d43ab228e820a207c18c441e01c5fb0e9d497972322e626f49fa6f53f",
     "src/prismabuild/residency_map.py": "fa77a5fbb2bb00a255a9967611ab07f633a77f2d3c383506436f22076a625276",
     "src/prismabuild/resource_scope.py": "f9a85dd277042031ae42a234d947c5abcdf20790e491610961e380445e6503e0",
@@ -24,6 +24,12 @@
     },
     {
       "glob": "/mnt/shared/prismabuild-fleet/qualification/pq-stagea-produced-boundaries-20260921/*"
+    }
+  ],
+  "supersedes": [
+    {
+      "candidate_commit": "27c4fc2915a609518a149f90af67034282494429",
+      "why": "superseded before final qualification: src/prismabuild/produced_output.py differs between the two bundles (27c 53776077b231..., 42f cf3289bb1003...), so evidence from the two is not one result. The other ten pinned files are byte-identical across the pair, checked file by file rather than assumed."
     }
   ]
 }

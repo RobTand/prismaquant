@@ -365,6 +365,12 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
     and a real ``StreamedBoundaryArtifacts`` writing inside its prefix."""
 
     _src, pb_repo = _pb_source()
+    from prismaquant.staged_lease import set_lease_helper_root
+    # The adapter resolves EVERY prismabuild.* module through the sealed
+    # generation the reader SDK names, so the generation has to be named
+    # before anything binds -- not later, when `_strict` activates the
+    # policy. Same bundle either way; this is where it is declared.
+    set_lease_helper_root(str(pb_repo))
     from prismabuild import produced_output as po
     from prismaquant.cost_streaming import (
         BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
@@ -660,6 +666,185 @@ def test_the_bounded_cycle_reads_retires_and_reads_again(
         "forward and reverse staging")
     assert storage.telemetry["produced_groups_published"] == 1, (
         "the repeat read must NOT be a second publication")
+
+
+def _claimed_consumer(tmp_path: Path, cas_root: Path, q, pb_repo: Path,
+                      *, name: str) -> str:
+    """A second, REAL claimed action: the holder the pin belongs to.
+
+    A reader pin names an owner, and PrismaBuild refuses one whose owner is
+    not a live claim (``ownership-uncertain: bad owner``) -- correctly, since
+    an unowned pin is a pin nothing can ever be held responsible for. So the
+    holder in this test is an actual published and claimed action, not a
+    string that looks like one.
+    """
+
+    from prismabuild import core as pb
+    checkout = tmp_path / "mover-checkout"
+    body = {
+        "schema": pb.ACTION_SCHEMA_V2,
+        "task": {"definition_id": f"tests/{name}",
+                 "definition_version": "v1", "task_class": "generation",
+                 "determinism": "deterministic",
+                 "artifact_family": "generic", "artifact_kind": "generic",
+                 "argv": ["/bin/true"], "working_directory": ".",
+                 "result_path": "result"},
+        "inputs": [],
+        "code_closure": pb.build_code_closure(
+            checkout, ["tools/fleet/stage_move.py"]),
+        "params": {"cwd": ".", "command": ["/bin/true"]},
+        "environment": {"variables": {"PATH": "/usr/bin:/bin"},
+                        "toolchain": {}},
+        "execution_scope": {"portability": "portable", "platform_key": None,
+                            "host_class": None}}
+    action = pb.seal_action(body)
+    pb.PrismaBuildCAS(cas_root).publish_action_request(action)
+    key = str(action["action_key"])
+    q.publish(action_key=key, cas_root=str(cas_root),
+              worker_script=str(pb_repo / "tools" / "prismabuild_worker.py"),
+              checkout_root=str(checkout),
+              resources={"cpu": 1, "mem_gb": 1})
+    claimed = q.claim(owner=f"w-{name}")
+    assert claimed is not None and claimed["action_key"] == key, claimed
+    return key
+
+
+def _extra_pin(q, publication, batch_id: str, state: dict, *,
+               holder_key: str) -> dict:
+    """A SECOND, independent reader pin on the group's staged bytes.
+
+    Not a mock refusal: PrismaBuild's egress refuses to evict material a
+    live reader still holds, so this is how a real ``egress-incomplete``
+    is produced on demand -- by being a real reader.
+    """
+
+    from prismabuild import produced_output as po
+    from prismabuild import reader_lease as rlc
+
+    manifest = str(state["manifest_digest"])
+    return rlc.acquire(
+        q, consumer_action_key=po.batch_namespace(
+            publication.instance, batch_id, manifest),
+        attempt={"nonce": secrets.token_hex(16), "scope_id": "holder-scope"},
+        tier_id=TIER, epoch="",
+        span={"start_bytes": 0, "end_bytes": int(state["total_bytes"])},
+        holder={"host": socket.gethostname(), "worker": "holder",
+                "pid": os.getpid()},
+        acquire_token=secrets.token_hex(16),
+        covers=[{"mover_action_key": str(state["mover_key"]),
+                 "manifest_sha256": manifest}],
+        expected=None, owner_action_key=holder_key,
+        residency_root=str(publication.fragment_root()))
+
+
+def test_a_refused_release_is_recorded_and_drained_not_dropped(
+        tmp_path, monkeypatch):
+    """A refusal first, then an allowed release, with the window accounted.
+
+    The failure shape this guards is specific: a returned ``{ok: False}``
+    is a RESULT. With a four-token window, one group that quietly failed
+    to give its two tokens back is the whole next advance, so a dropped
+    non-ok does not degrade -- it stalls. The refusal here is a real one:
+    an independent reader holds a pin on the staged bytes, and
+    PrismaBuild's own egress refuses to evict material a reader holds.
+    """
+
+    import torch
+    storage, publication, q, env, pb_repo = _bound_owner(tmp_path)
+    references = _write_group(storage)
+    holder_key = _claimed_consumer(tmp_path, tmp_path / "cas", q, pb_repo,
+                                   name="pq-stagea-boundary-holder")
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with storage.prefetch(references) as window:
+            storage.get(window, references[0])
+        batch_id = storage.produced_group_records()[0]["batch_id"]
+        state = publication.materialization_state(batch_id=batch_id)
+        assert state["stage_retired"] is True
+        # Take the group back, then hold a real pin on it so the next
+        # release cannot succeed.
+        with storage.prefetch(references) as window:
+            storage.get(window, references[0])
+        # ^ that window's exit already tried to retire and, with no other
+        # reader, succeeded. Re-materialize and hold a pin across the exit.
+        live = publication.materialization_state(batch_id=batch_id)
+        assert live["stage_retired"] is True
+
+        holder = None
+        try:
+            with storage.prefetch(references) as window:
+                storage.get(window, references[0])
+                held = _extra_pin(
+                    q, publication, batch_id,
+                    publication.materialization_state(batch_id=batch_id),
+                    holder_key=holder_key)
+                assert held.get("ok") is True, held
+                assert "pin_id" in held and "ref_id" in held, (
+                    "the holder must file a real pin, not a pinless proof",
+                    sorted(held))
+                # Copy the identifiers out NOW. The returned record is
+                # PrismaBuild's, and the egress this test is about touches
+                # the same pin: a test must not depend on a foreign dict
+                # still reading the same way later.
+                holder = (str(held["pin_id"]), str(held["ref_id"]))
+            debt = storage.produced_release_debt()
+            assert list(debt["pending"]) == [batch_id], debt
+            reason = debt["pending"][batch_id]
+            assert reason.get("refusal") == "egress-incomplete", reason
+            assert storage.telemetry["produced_group_release_failures"] >= 1
+            assert storage.produced_group_records()[0]["retired"] is False, (
+                "a refused retirement is never reported as retired")
+        finally:
+            from prismabuild import reader_lease as rlc
+            if holder is not None:
+                assert rlc.release(
+                    q, holder[0], holder[1],
+                    consumer_action_key=holder_key,
+                    residency_root=str(publication.fragment_root())) is True
+
+        # The pin is gone: the next window drains the debt through the SAME
+        # PrismaBuild retire before publishing anything new.
+        with storage.prefetch(references) as window:
+            storage.get(window, references[0])
+        assert storage.telemetry["produced_group_release_retries"] >= 1
+        assert storage.produced_release_debt() == {"pending": {},
+                                                   "abandoned": {}}
+    assert storage.produced_group_records()[0]["retired"] is True
+
+
+def test_a_groups_durable_charge_is_reclaimed_when_its_last_origin_goes(
+        tmp_path, monkeypatch):
+    """Group-final reclaim: files gone AND stage copy retired, in that order.
+
+    The rollover gate. A reverse walk replaces a cotangent plane boundary
+    by boundary; without this the replaced planes keep their durable charge
+    for the life of the instance and the origin class fills with bytes that
+    are not there. It fires only when the group's LAST origin is unlinked
+    and its stage copy is already retired -- a live materialization is
+    material PrismaBuild still holds over those origins.
+    """
+
+    import torch
+    storage, publication, q, env, pb_repo = _bound_owner(tmp_path)
+    references = _write_group(storage)
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with storage.prefetch(references) as window:
+            storage.get(window, references[0])
+    record = storage.produced_group_records()[0]
+    assert record["retired"] is True and record["origin_reclaimed"] is False
+    charged = publication.durable_charge()
+    assert charged["payload"] > 0, charged
+
+    for index, reference in enumerate(references):
+        storage.retire(reference)
+        expected = index == len(references) - 1
+        assert storage.produced_group_records()[0]["origin_reclaimed"] is expected, (
+            "the charge is released by the LAST origin going, never by the "
+            "first", index)
+    assert publication.durable_charge()["payload"] == 0, (
+        "a batch whose origins are provably absent stops counting against "
+        "the durable origin class")
 
 
 def test_multi_window_initial_writes_exceed_the_window_and_fit_durable(
