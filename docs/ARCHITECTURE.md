@@ -311,6 +311,27 @@ is unsupported), corruption failing clear. Serving records carry pin IDs
 where pinned. Capability/tag advertisement, containment, and campaign
 launch stay unclaimed.
 
+**SSD covers are minimal per key (2026-09-21, `fix/minimal-ssd-covers-20260921`,
+PQ #876).** Both tier legs now resolve covers through the same PB
+`covers_for_keys` lookup: the stage leg selects the minimal movers that
+actually cover the requested map key, bounded to the current consumer,
+manifest, stage tier and the SSD empty epoch, and cross-checks the
+helper's expected bytes/digest against the sealed composed-map entry
+before adoption. The composed map's leads are heritage, not a covering
+set — `acquire` requires every named cover's fragment to exist, and an
+egress legitimately retires a phase-past lead's fragment and material,
+so naming all leads let one retired, unrelated head refuse every later
+entry `unpublished` (Stage A `f9951e60`: 36,439 entries staged clean,
+then models 87–90 all refused while their own forward mover was
+complete). Selection stays separate from admission — the SDK's
+ownership-lock acquire remains the authority, movers are never invented
+from paths, and missing, contradictory or stale actual coverage refuses
+fail-closed with zero pool bytes. `covers_for_leads` remains as a legacy
+helper for callers naming one mover deliberately. Gate:
+`tests/test_stage_minimal_covers.py` beside
+`tests/test_strict_reader_tier_enforcement.py` (RAM-first preference and
+pin-lifetime behavior unchanged and still gated there).
+
 Re-stamped (2026-09-20, `flash/source-identity-portable-dev-20260920`) for
 **dev-portable source-identity reuse across hosts** (PQ #843). The six-field
 shard fingerprint still keys cached digests, but one shared predicate now
