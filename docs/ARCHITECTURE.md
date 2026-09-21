@@ -4,6 +4,24 @@ As of: 2026-09-21 · `fix/stagea-readset-898-profiler-899`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
+staged-range resolver asking every covering entry** (PQ #902). PrismaBuild
+refuses a repeated `(path, offset)` and allows an overlap, and stages each
+overlapping entry as a file of its own; its composed map can also name an entry
+whose staged file an eviction has already unlinked (a fragment is dropped only
+after a fully clean eviction, and the map is recomposed on events, not on every
+cycle). `ResidencyResolver.staged_range_outcome` took the lowest-offset
+covering entry and stopped, so a stale neighbour entry hid a healthy range
+behind it and the strict tier policy ended the run on bytes that were staged.
+It now asks every covering entry, lowest offset first; the first to pass serves
+the span, and `RANGE_REFUSED` means all of them failed (reporting the first
+reason, so a span with one covering entry behaves as before). A span served by
+a later entry is counted in `range_rows_passed_over` and is not a fallback.
+**Not changed:** a covering entry whose file is missing, while the layer's own
+range is declared but has not landed, still refuses instead of waiting. No
+format, lane, pin, kernel order or ship gate changes. Gates:
+`tests/test_staged_range_every_covering_entry.py`.
+
+Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 stage-A read manifest and the reader it describes** (PQ #898). A read manifest
 is a claim about what a reader will read, and nothing compared the two.
 `build_adjoint_manifest` copies each `layer-N` phase's source entries from the
@@ -27,7 +45,11 @@ phase and **gates** the result:
   contains its whole span. The staged reader serves a span from the one staged
   range that contains it; a span straddling two ranges is a pool read, which
   the strict policy refuses. Coverage by another layer's phase does not count
-  either, because PrismaBuild stages and evicts by phase.
+  toward this gate either, because PrismaBuild stages and evicts by phase. The
+  gate is about what is **declared**, not about which entry the reader picks:
+  the resolver asks every map entry that covers a span, lowest offset first, so
+  a neighbour's header entry still serves a layer's first tensors while it is
+  staged, and the layer's own entry serves them once it is not (PQ #902).
 - Each run of uncovered tensors becomes one entry from the first tensor's own
   file offset to the last one's end. The offset is derived, not aligned, so it
   cannot land on a header entry's `(path, 0)`.
