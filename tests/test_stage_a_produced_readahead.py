@@ -21,6 +21,11 @@ import pytest
 import torch
 
 import test_stage_a_produced_boundary_chain as chain
+# Autouse, and it must apply HERE too: it drops the outer PrismaBuild launch
+# tuple before each test and deactivates the strict tier policy after it, so
+# nothing these tests activate reaches the test that runs next.
+from test_stage_a_produced_boundary_chain import (  # noqa: F401
+    _isolated_launch_context)
 
 GROUP_SIZE = chain.GROUP_SIZE
 
