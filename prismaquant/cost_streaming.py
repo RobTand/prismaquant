@@ -237,6 +237,18 @@ class StreamedBoundaryArtifacts:
         # Their prewrite credit is still held by this owner, so the
         # debt is reported rather than dropped.
         self._produced_publish_deferred = {}
+        # Read-ahead (RobTand/prismaquant#887). ``_produced_held`` is every
+        # group holding stage credit right now: published or re-staged and
+        # not yet confirmed retired. ``_produced_ahead`` is the subset taken
+        # opportunistically -- published at write-complete, staged ahead of
+        # its read, or retained across probe passes -- and it never grows
+        # past the sealed window minus the two groups the synchronous read
+        # path may need, so that path always has credit and a full window is
+        # backpressure rather than a refused publication.
+        self._produced_held = set()
+        self._produced_ahead = set()
+        self._produced_ahead_refusals = []
+        self._produced_retained_boundary = None
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -254,7 +266,18 @@ class StreamedBoundaryArtifacts:
             "produced_group_release_retries": 0,
             "produced_group_release_deferrals": 0,
             "produced_group_funding_deferrals": 0,
-            "produced_groups_origin_reclaimed": 0}
+            "produced_groups_origin_reclaimed": 0,
+            "produced_groups_published_ahead": 0,
+            "produced_groups_staged_ahead": 0,
+            "produced_groups_retained": 0,
+            "produced_group_ahead_refusals": 0,
+            "produced_group_credit_waits": 0,
+            "produced_group_stage_wait_s": 0.0,
+            "produced_group_release_wait_s": 0.0,
+            "produced_group_ahead_wait_s": 0.0,
+            "produced_group_release_polls": 0,
+            "produced_group_read_refunds": 0,
+            "produced_groups_ahead_surrendered": 0}
 
     def __enter__(self):
         return self
@@ -409,7 +432,8 @@ class StreamedBoundaryArtifacts:
             raise RuntimeError("exact boundary reference has a stale generation")
         return identity
 
-    def write(self, tensor, *, batch_index, boundary_index, probe_index=None, previous=None):
+    def write(self, tensor, *, batch_index, boundary_index, probe_index=None, previous=None,
+              read_back=True):
         from .perturbed_x_cache import write_exact_activation_cache_entry
         if self._status != "running":
             raise RuntimeError("exact boundary generation is not running")
@@ -467,10 +491,20 @@ class StreamedBoundaryArtifacts:
         if produced_group is not None:
             produced_group["references"].append(reference)
             produced_group["live_references"] += 1
-            self._produced_index[reference] = self._produced_group_key(
+            produced_key = self._produced_group_key(
                 kind=kind, batch_index=batch_index,
                 boundary_index=boundary_index, probe_index=probe_index,
                 group_size=self._produced_plan["group_size"])
+            self._produced_index[reference] = produced_key
+            if (read_back and len(produced_group["references"])
+                    == len(produced_group["planned"]) // 2):
+                # The group's last entry is durable, and everything its
+                # publication needs is on the references already. Publishing
+                # here lets PrismaBuild's mover run while the GPU works.
+                # ``read_back=False`` is the writer saying no read follows
+                # (the walk's last roll): staging that group would be a copy
+                # nobody reads, racing the disposal of its origins.
+                self._produced_publish_ahead(produced_key, produced_group)
         self.telemetry["written_entries"] += 1
         self.telemetry["written_tensor_bytes"] += nbytes
         self.telemetry["live_artifact_bytes"] += reference.file_bytes
@@ -487,6 +521,8 @@ class StreamedBoundaryArtifacts:
     def _retire(self, reference, *, missing_ok=False):
         if self._references.get(reference.name) != reference:
             raise RuntimeError("exact boundary retirement has a stale reference")
+        if self._produced is not None and not missing_ok:
+            self._produced_await_copy_before_unlink(reference)
         Path(reference.path).unlink(missing_ok=missing_ok)
         del self._references[reference.name]
         self.telemetry["live_artifact_bytes"] -= reference.file_bytes
@@ -503,6 +539,37 @@ class StreamedBoundaryArtifacts:
             # descriptors are PrismaBuild's and are not rewritten by this
             # owner disposing of its files.
             self._produced_index.pop(reference, None)
+
+    def _produced_await_copy_before_unlink(self, reference):
+        """Do not unlink an origin PrismaBuild's mover may still be reading.
+
+        A group a read consumed was waited for (``context`` is set), so its
+        copy is whole and its origins are the owner's to dispose of, as
+        before. A group staged AHEAD of any read was only asked for: its
+        mover opens the origin when it runs, not when it was published, so
+        unlinking first hands the mover a missing source and the batch a
+        failed materialization. Wait for the receipt, inside the staging
+        budget. Not applied to the failed-run sweep (``missing_ok``), which
+        must not sit on movers for a generation nothing will read.
+        """
+
+        import time
+
+        key = self._produced_index.get(reference)
+        group = None if key is None else self._produced_groups.get(key)
+        if (group is None or key not in self._produced_ahead
+                or group["retired"] or group["context"] is not None
+                or group.get("copy_awaited")):
+            return
+        started = time.monotonic()
+        try:
+            self._produced.await_materialized(
+                batch_id=group["batch_id"],
+                timeout_s=self._produced_plan["staging_timeout_s"])
+            group["copy_awaited"] = True
+        finally:
+            self.telemetry["produced_group_stage_wait_s"] += (
+                time.monotonic() - started)
 
     def _reclaim_produced_origin_for_group(self, key, group):
         """Release a group's durable charge when both conditions hold.
@@ -1070,7 +1137,7 @@ class StreamedBoundaryArtifacts:
 
     def bind_produced_output(self, publication, *, group_size, n_batches,
                              max_entry_tensor_bytes,
-                             staging_timeout_s=900.0):
+                             staging_timeout_s=900.0, window_groups=None):
         """Stage this generation's entries through ``publication``.
 
         Called after :meth:`bind`, because the entry directory this owner
@@ -1100,6 +1167,21 @@ class StreamedBoundaryArtifacts:
         retirement side, an own-copy deferral is named by PrismaBuild's own
         egress receipt through :func:`classify_egress_outcome`. Every other
         refusal is terminal here and returns at once.
+
+        ``window_groups`` is how many groups the sealed template's window
+        funds at once. ``None`` reads it from the publication's own template
+        (``window_gib`` over one group's whole-GiB ceiling) and falls back to
+        two, the geometry ``build_boundary_template`` seals by default. Two
+        is the synchronous loop exactly as it was: publish at first read,
+        retire and wait at window exit. Every group beyond two is read-ahead
+        credit (RobTand/prismaquant#887): a group is published when its last
+        entry lands, a layer's input boundary groups stay staged across the
+        probe passes that re-read them, the next layer's plane is staged
+        ahead, and a window exit asks for a retirement without waiting for
+        it. None of that may exceed the sealed window, because exceeding it
+        is a refused publication and not backpressure, so two groups' worth
+        stays reserved for the read path and the rest is taken only while
+        it is free.
 
         A read-only attached generation can never take this binding: an
         attached owner does not write, so it has nothing to declare and its
@@ -1133,12 +1215,36 @@ class StreamedBoundaryArtifacts:
                 staging_timeout_s <= 0):
             raise ValueError(
                 "produced output staging_timeout_s must be a positive number")
+        if window_groups is None:
+            window_groups = self._sealed_window_groups(
+                publication, group_size=int(group_size),
+                max_entry_tensor_bytes=int(max_entry_tensor_bytes))
+        if type(window_groups) is not int or window_groups < 2:
+            raise ValueError(
+                "produced output window_groups must be an int of at least 2: "
+                "one read window holds a boundary group and a cotangent group")
         self._produced_plan = {"group_size": int(group_size),
                                "n_batches": int(n_batches),
                                "max_entry_tensor_bytes": int(max_entry_tensor_bytes),
-                               "staging_timeout_s": float(staging_timeout_s)}
+                               "staging_timeout_s": float(staging_timeout_s),
+                               "window_groups": int(window_groups),
+                               "ahead_groups": int(window_groups) - 2}
 
         self._produced_groups = {}
+
+    @staticmethod
+    def _sealed_window_groups(publication, *, group_size, max_entry_tensor_bytes):
+        """Groups the publication's sealed window funds at once; 2 if unknown."""
+
+        try:
+            window_gib = int(publication.template["working_demands"][
+                publication.tier]["window_gib"])
+            per_group = -(-int(publication.group_ceiling_bytes(
+                entries=group_size,
+                max_entry_tensor_bytes=max_entry_tensor_bytes)) // (1 << 30))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return 2
+        return max(window_gib // max(per_group, 1), 2)
 
     @staticmethod
     def _produced_group_key(*, kind, batch_index, boundary_index, probe_index,
@@ -1287,6 +1393,348 @@ class StreamedBoundaryArtifacts:
         self.telemetry["produced_groups_published"] += 1
         return group
 
+    #: How long an opportunistic publication may wait out PrismaBuild's
+    #: funding transient. Short on purpose: it runs on the writer, and the
+    #: read that needs the group publishes it under the full staging budget
+    #: if this gives up.
+    PRODUCED_AHEAD_PUBLISH_BUDGET_S = 10.0
+
+    def _produced_ahead_has_room(self, *, holding=False):
+        """May one more group count against the read-ahead share?
+
+        Two bounds, both required. The share itself, and the WHOLE window:
+        a group whose retirement PrismaBuild refused still holds its credit
+        without being read-ahead, so counting only the share would let
+        read-ahead spend the two groups the read path is owed.
+        ``holding`` is a group that already holds credit (a window's own
+        group being kept), which adds nothing to the window.
+        """
+
+        plan = self._produced_plan
+        return (len(self._produced_ahead) < plan["ahead_groups"]
+                and len(self._produced_held) + (0 if holding else 1)
+                <= plan["window_groups"] - 2)
+
+    def _produced_take_ahead(self, key, group, *, restage):
+        """Publish or re-stage one group ahead of its read. Never raises.
+
+        Opportunistic by construction: it runs only inside the read-ahead
+        share of the sealed window, and a refusal leaves the group exactly
+        as it was, for the read to publish under the full budget. A group
+        that already holds credit is left alone.
+        """
+
+        import time
+
+        if key in self._produced_held or not self._produced_ahead_has_room():
+            return False
+        started = time.monotonic()
+        deadline = started + min(
+            self.PRODUCED_AHEAD_PUBLISH_BUDGET_S,
+            float(self._produced_plan["staging_timeout_s"]))
+        try:
+            if restage:
+                self._produced.ensure_batch_materialized(
+                    batch_id=group["batch_id"], deadline=deadline)
+                group["retired"] = False
+                group["context"] = None
+                group["copy_awaited"] = False
+                self.telemetry["produced_groups_rematerialized"] += 1
+            else:
+                self._produced_publish(key, group, deadline=deadline)
+        except Exception as exc:                        # noqa: BLE001
+            # Every refusal, not a named few: this step is optional, so no
+            # outcome of it may end the capture. A funding refusal reserved
+            # nothing; a budget that ran out part way left at most a
+            # content-addressed publication the read re-drives with
+            # identical inputs under the whole staging budget. Either way
+            # the read decides, and raises under its own name if it must.
+            self._produced_publish_deferred.pop(key, None)
+            self.telemetry["produced_group_ahead_refusals"] += 1
+            self._produced_ahead_refusals.append(
+                {"batch_id": group["batch_id"], "restage": bool(restage),
+                 "reason": repr(exc)})
+            del self._produced_ahead_refusals[:-self.PRODUCED_AHEAD_REFUSAL_LOG]
+            return False
+        finally:
+            self.telemetry["produced_group_ahead_wait_s"] += (
+                time.monotonic() - started)
+        self._produced_held.add(key)
+        self._produced_ahead.add(key)
+        return True
+
+    #: How many read-ahead refusals are kept for the report. The count is
+    #: exact in telemetry; the reasons are a bounded tail.
+    PRODUCED_AHEAD_REFUSAL_LOG = 32
+
+    def produced_ahead_refusals(self):
+        """The most recent read-ahead steps PrismaBuild did not take."""
+
+        return [dict(entry) for entry in self._produced_ahead_refusals]
+
+    def _produced_publish_ahead(self, key, group):
+        if (self._produced_plan["ahead_groups"] <= 0
+                or group["published"] is not None):
+            return
+        if self._produced_take_ahead(key, group, restage=False):
+            self.telemetry["produced_groups_published_ahead"] += 1
+
+    def stage_produced_boundary_ahead(self, boundary_index):
+        """Ask PrismaBuild to stage one boundary plane before it is read.
+
+        For a plane written long before its read -- the reverse chain's
+        input boundaries, captured by the forward pass and retired since.
+        Asks and returns: the movers run on the tier host while this owner
+        computes, and the read still waits on each group's own receipt.
+        Stops at the first group that does not fit the read-ahead share.
+        """
+
+        if self._produced is None or self._produced_plan["ahead_groups"] <= 0:
+            return 0
+        # A plane whose retirement was asked for and has since finished can
+        # be staged again; one still in flight is left to its read.
+        self._drain_produced_releases()
+        staged = 0
+        keys = sorted(key for key in self._produced_groups
+                      if key[0] == "boundary" and key[1] == int(boundary_index)
+                      and key[2] < 0)
+        for key in keys:
+            group = self._produced_groups[key]
+            if key in self._produced_held or group["live_references"] <= 0:
+                continue
+            if not self._produced_ahead_has_room():
+                break
+            if self._produced_take_ahead(
+                    key, group, restage=group["published"] is not None):
+                staged += 1
+                self.telemetry["produced_groups_staged_ahead"] += 1
+        return staged
+
+    @contextmanager
+    def retain_produced_boundary(self, boundary_index):
+        """Keep one boundary plane's groups staged across the windows inside.
+
+        The reverse roll reads a layer's input boundary once per probe
+        pass. Without this the group is retired at each window exit and
+        staged again for the next pass: three avoidable stagings and three
+        avoidable retirements per group. A group is retained only while the
+        read-ahead share has room; otherwise it is retired at window exit
+        as before. Leaving the scope asks for every retained retirement.
+        """
+
+        if self._produced is None or self._produced_plan["ahead_groups"] <= 0:
+            yield
+            return
+        if self._produced_retained_boundary is not None:
+            raise RuntimeError("produced boundary retention does not nest")
+        self._produced_retained_boundary = int(boundary_index)
+        try:
+            yield
+        finally:
+            self._produced_retained_boundary = None
+            if self._active_window is None:
+                self._release_produced_window(
+                    [key for key in sorted(self._produced_held)
+                     if key[0] == "boundary" and key[1] == int(boundary_index)
+                     and key[2] < 0])
+
+    def _produced_wait_for_credit(self, need, keep=()):
+        """Get credit back until ``need`` more groups fit the window.
+
+        Pending retirements are waited out first. If that is not enough,
+        read-ahead gives back what it holds: the read path is owed its two
+        groups before any opportunistic one, so a group staged ahead and
+        not wanted by this window (``keep``) is retired, and its own read
+        stages it again. That is the synchronous loop, which is where this
+        degrades to -- never to a failure read-ahead caused.
+        """
+
+        import time
+
+        capacity = self._produced_plan["window_groups"]
+        if (self._produced_plan["ahead_groups"] <= 0
+                or len(self._produced_held) + need <= capacity):
+            # Without read-ahead every retirement was waited for at its
+            # window exit and the drain above re-drove the rest: there is
+            # nothing here to wait out that was not just asked.
+            return
+        self.telemetry["produced_group_credit_waits"] += 1
+        started = time.monotonic()
+        try:
+            self._produced_reclaim_credit(
+                keep, until=lambda: (
+                    len(self._produced_held) + need <= capacity))
+        finally:
+            self.telemetry["produced_group_release_wait_s"] += (
+                time.monotonic() - started)
+
+    def _produced_reclaim_credit(self, keep=(), *, until=None,
+                                 on_reclaim=None):
+        """Take stage credit back, waiting for each group. Returns the count.
+
+        Pending retirements first -- they were asked for already -- then
+        the groups read-ahead holds. ``keep`` is never touched; ``until``
+        stops as soon as it holds, and ``on_reclaim`` hears each key.
+        """
+
+        reclaimed = 0
+        for key in list(self._produced_release_pending):
+            if until is not None and until():
+                return reclaimed
+            group = self._produced_groups.get(key)
+            if group is None or group["retired"]:
+                self._produced_release_pending.pop(key, None)
+                continue
+            if key in keep:
+                continue
+            if self._release_one_produced_group(key, group):
+                reclaimed += 1
+                if on_reclaim is not None:
+                    on_reclaim(key)
+        for key in sorted(self._produced_ahead):
+            if until is not None and until():
+                break
+            if key in keep:
+                continue
+            group = self._produced_groups.get(key)
+            if group is None or group["retired"]:
+                self._produced_held.discard(key)
+                self._produced_ahead.discard(key)
+                continue
+            if self._release_one_produced_group(key, group):
+                reclaimed += 1
+                self.telemetry["produced_groups_ahead_surrendered"] += 1
+                if on_reclaim is not None:
+                    on_reclaim(key)
+        return reclaimed
+
+    #: How long a read waits before asking again after PrismaBuild could
+    #: not take a census of this owner's funding.
+    PRODUCED_CENSUS_POLL_S = 0.5
+
+    @staticmethod
+    def _produced_refill_refusal_kind(refused):
+        """Name a refused window refill this owner knows how to answer.
+
+        Only the refill step, and only PrismaBuild's own two answers
+        (``produced_output.refill_window``). ``tier-reservation-unavailable``
+        is a shortfall: the tier's free pool cannot supply the window, and
+        credit read-ahead gives back is credit the refill can take.
+        ``unknown-retain: ...`` is PrismaBuild failing closed on a census it
+        could not complete -- with many movers in flight a row is caught
+        mid-transition -- and the next ask sees it whole. Anything else,
+        including every refusal of the publication or re-materialization
+        itself, is not a credit question: giving credit back cannot fix it,
+        so it returns ``None`` and propagates as it always did.
+        """
+
+        from collections.abc import Mapping
+
+        refusal = getattr(refused, "refusal", None)
+        if not isinstance(refusal, Mapping) or refusal.get("step") != "refill":
+            return None
+        text = str(refusal.get("refusal") or "")
+        if text == "tier-reservation-unavailable":
+            return "shortfall"
+        if text.startswith("unknown-retain"):
+            return "census"
+        return None
+
+    def _produced_fund_for_read(self, step, keep, *, deadline):
+        """Run one read-path funding step, answering a refused refill.
+
+        The owner's count of what the window holds is an estimate of
+        PrismaBuild's ledger, not the ledger, and read-ahead puts many of
+        this owner's movers in flight at once where the synchronous loop
+        had two. A refill shortfall takes credit back from read-ahead, two
+        groups at a time, and runs the step again until it funds or nothing
+        is left to give. A census PrismaBuild could not complete is asked
+        again inside the group's own staging ``deadline``. Every other
+        refusal, and every refusal at the default window, propagates
+        exactly as it did before read-ahead existed. Each refusal answered
+        is counted (``produced_group_read_refunds``) and kept with its
+        reason (:meth:`produced_ahead_refusals`).
+        """
+
+        import time
+        from .stage_a_produced_output import BoundaryProducedPublicationFailed
+
+        while True:
+            try:
+                return step()
+            except BoundaryProducedPublicationFailed as refused:
+                kind = (self._produced_refill_refusal_kind(refused)
+                        if self._produced_plan["ahead_groups"] > 0 else None)
+                if kind is None:
+                    raise
+                self.telemetry["produced_group_read_refunds"] += 1
+                self._produced_ahead_refusals.append(
+                    {"batch_id": getattr(refused, "batch_id", None),
+                     "step": "read", "kind": kind, "reason": repr(refused)})
+                del self._produced_ahead_refusals[
+                    :-self.PRODUCED_AHEAD_REFUSAL_LOG]
+                started = time.monotonic()
+                if kind == "census":
+                    if started + self.PRODUCED_CENSUS_POLL_S >= deadline:
+                        raise
+                    time.sleep(self.PRODUCED_CENSUS_POLL_S)
+                    self.telemetry["produced_group_stage_wait_s"] += (
+                        time.monotonic() - started)
+                    continue
+                # Two groups at a time: the refusal does not say how much
+                # the tier is short, and giving everything back for a
+                # shortfall of one throws away the staging the next windows
+                # were about to use. Bounded by what is held.
+                taken = []
+                try:
+                    reclaimed = self._produced_reclaim_credit(
+                        keep, until=lambda: len(taken) >= 2,
+                        on_reclaim=taken.append)
+                finally:
+                    self.telemetry["produced_group_release_wait_s"] += (
+                        time.monotonic() - started)
+                if not reclaimed:
+                    raise
+
+    def settle_produced_releases(self, *, wait_for_each=True):
+        """Retire every group still holding stage credit, and wait for it.
+
+        The end of a run with read-ahead: retirements asked for without
+        waiting are waited out here, and a group published ahead that no
+        read ever consumed gives its credit back. ``wait_for_each=False``
+        only asks -- the form a failing run uses, which owes PrismaBuild
+        the request and must not sit on its answer.
+        """
+
+        import time
+
+        if (self._produced is None or self._active_window is not None
+                or self._produced_plan["ahead_groups"] <= 0):
+            # Without read-ahead every retirement was waited for where it
+            # was asked, and a refused one is reported as debt: asking
+            # again here would change that accounting.
+            return
+        started = time.monotonic()
+        try:
+            # Ask for all of them before waiting for any: each retirement
+            # is an action on the tier host, and asked together they run
+            # side by side instead of one queue round trip after another.
+            for wait in ((False, True) if wait_for_each else (False,)):
+                for key in sorted(self._produced_held):
+                    group = self._produced_groups.get(key)
+                    if group is None or group["retired"]:
+                        self._produced_held.discard(key)
+                        self._produced_ahead.discard(key)
+                        continue
+                    if key in self._produced_release_abandoned:
+                        # PrismaBuild refused it and the attempts are
+                        # spent: it is reported debt, not work to repeat.
+                        continue
+                    self._release_one_produced_group(key, group, wait=wait)
+        finally:
+            self.telemetry["produced_group_release_wait_s"] += (
+                time.monotonic() - started)
+
     def _produced_reader_context(self, references):
         """Publish and materialize every group this window reads.
 
@@ -1309,6 +1757,24 @@ class StreamedBoundaryArtifacts:
                     "exact boundary reference is not in any produced group: "
                     "a bound owner reads only entries it declared")
             wanted[key] = group
+        for key, group in wanted.items():
+            if (self._produced_plan["ahead_groups"] > 0
+                    and key in self._produced_release_pending
+                    and not group["retired"]):
+                # Its retirement was asked for and not waited for, so an
+                # egress may be deleting this very copy. Wait it out before
+                # the window reads: the group is then re-staged below, or,
+                # if PrismaBuild refused the retirement, read where it is.
+                waited = time.monotonic()
+                self._release_one_produced_group(key, group)
+                self.telemetry["produced_group_release_wait_s"] += (
+                    time.monotonic() - waited)
+        # Credit this window must take that it does not already hold. With
+        # retirements no longer waited for at window exit, the wait happens
+        # here, and only when the sealed window would otherwise be exceeded.
+        self._produced_wait_for_credit(
+            sum(1 for key in wanted if key not in self._produced_held),
+            keep=wanted)
         contexts = {}
         for key, group in wanted.items():
             # ONE absolute instant for this group's whole staging: the
@@ -1317,15 +1783,20 @@ class StreamedBoundaryArtifacts:
             # again at each step is not a bound.
             deadline = time.monotonic() + float(
                 self._produced_plan["staging_timeout_s"])
-            self._produced_publish(key, group, deadline=deadline)
+            self._produced_fund_for_read(
+                lambda: self._produced_publish(key, group, deadline=deadline),
+                wanted, deadline=deadline)
+            self._produced_held.add(key)
             if group["retired"]:
                 # The same unchanged logical batch, taken back onto the
                 # tier. PB is asked first (``materialization_state``) and
                 # drives the transition only if its own records say the
                 # copy is gone; the batch id, manifest, descriptors,
                 # namespace and durable charge are all unchanged.
-                self._produced.ensure_batch_materialized(
-                    batch_id=group["batch_id"], deadline=deadline)
+                self._produced_fund_for_read(
+                    lambda: self._produced.ensure_batch_materialized(
+                        batch_id=group["batch_id"], deadline=deadline),
+                    wanted, deadline=deadline)
                 group["retired"] = False
                 group["context"] = None
                 self.telemetry["produced_groups_rematerialized"] += 1
@@ -1335,10 +1806,13 @@ class StreamedBoundaryArtifacts:
                 # PB's own receipt -- bounded, named, no fallback -- before
                 # composing, because fragments alone compose the same
                 # whether the batch is whole or half there.
+                waited = time.monotonic()
                 self._produced.await_materialized(
                     batch_id=group["batch_id"],
                     timeout_s=self._produced_plan["staging_timeout_s"],
                     deadline=deadline)
+                self.telemetry["produced_group_stage_wait_s"] += (
+                    time.monotonic() - waited)
                 resolver, block = self._produced.reader_context(
                     batch_id=group["batch_id"],
                     manifest_digest=group["manifest_digest"])
@@ -1426,6 +1900,8 @@ class StreamedBoundaryArtifacts:
         if out.get("ok"):
             group["retired"] = True
             group["context"] = None
+            self._produced_held.discard(key)
+            self._produced_ahead.discard(key)
             self.telemetry["produced_groups_retired"] += 1
         return out
 
@@ -1435,8 +1911,16 @@ class StreamedBoundaryArtifacts:
     #: scheduler, and this lane does not own scheduling.
     PRODUCED_RELEASE_ATTEMPTS = 3
 
-    def _release_one_produced_group(self, key, group, deadline=None):
+    def _release_one_produced_group(self, key, group, deadline=None,
+                                    wait=True):
         """Drive one group's stage retirement. Returns True when it is gone.
+
+        ``wait=False`` asks and does not wait: when PrismaBuild defers the
+        retirement on its own in-flight work, the group stays pending and a
+        later call re-drives it. Such a poll is not an attempt and not a
+        failure, so it neither spends ``PRODUCED_RELEASE_ATTEMPTS`` nor
+        grows the error list. Every other outcome is handled exactly as a
+        waited retirement handles it.
 
         ``deadline`` is the absolute monotonic instant the whole wait must
         end by, threaded through so a retirement that is re-driven inside
@@ -1462,6 +1946,19 @@ class StreamedBoundaryArtifacts:
             record["attempts"] += 1
             return self._handle_produced_release_outcome(
                 key, group, record, None, {"error": repr(exc)}, deadline)
+        if not wait and not group["retired"]:
+            from .stage_a_produced_output import classify_egress_outcome
+            if classify_egress_outcome(out) == "own-copy-deferral":
+                reason = {"refusal": out.get("refusal"),
+                          "step": out.get("step"),
+                          "receipt": out.get("receipt")}
+                if record.get("class") != "own-copy-deferral":
+                    record["class"] = "own-copy-deferral"
+                    if record["first_reason"] is None:
+                        record["first_reason"] = reason
+                    self.telemetry["produced_group_release_deferrals"] += 1
+                record["last_reason"] = reason
+                return False
         record["attempts"] += 1
         if group["retired"]:
             self._produced_release_pending.pop(key, None)
@@ -1647,13 +2144,34 @@ class StreamedBoundaryArtifacts:
         degrading and stalling.
         """
 
+        import time
+
+        wait = self._produced_plan["ahead_groups"] <= 0
+        now = time.monotonic()
         for key in list(self._produced_release_pending):
             group = self._produced_groups.get(key)
             if group is None or group["retired"]:
                 self._produced_release_pending.pop(key, None)
                 continue
-            self.telemetry["produced_group_release_retries"] += 1
-            self._release_one_produced_group(key, group)
+            record = self._produced_release_pending[key]
+            if not wait and now < record.get("next_poll", 0.0):
+                # An egress takes seconds; asking again sooner only costs
+                # PrismaBuild a lock and this window a round trip.
+                continue
+            record["next_poll"] = now + self.PRODUCED_RELEASE_POLL_S
+            if wait:
+                self.telemetry["produced_group_release_retries"] += 1
+            else:
+                # A poll of a retirement already asked for: not a re-drive.
+                self.telemetry["produced_group_release_polls"] += 1
+            self._release_one_produced_group(key, group, wait=wait)
+        if not wait:
+            self.telemetry["produced_group_release_wait_s"] += (
+                time.monotonic() - now)
+
+    #: The soonest a retirement that was asked for without waiting is asked
+    #: about again.
+    PRODUCED_RELEASE_POLL_S = 2.0
 
     def _release_produced_window(self, keys):
         """Retire every stage copy this window borrowed.
@@ -1664,11 +2182,32 @@ class StreamedBoundaryArtifacts:
         credits are never asked for.
         """
 
+        import time
+
+        wait = self._produced_plan["ahead_groups"] <= 0
+        retained = self._produced_retained_boundary
+        started = time.monotonic()
         for key in keys:
             group = self._produced_groups.get(key)
             if group is None or group["retired"]:
                 continue
-            self._release_one_produced_group(key, group)
+            if (retained is not None and key[0] == "boundary"
+                    and key[1] == retained and key[2] < 0):
+                # Another probe pass reads this group. Keep it staged if the
+                # read-ahead share has room for it (or already holds it).
+                if key in self._produced_ahead:
+                    continue
+                if self._produced_ahead_has_room(holding=True):
+                    self._produced_ahead.add(key)
+                    self.telemetry["produced_groups_retained"] += 1
+                    continue
+            self._release_one_produced_group(key, group, wait=wait)
+            record = self._produced_release_pending.get(key)
+            if record is not None:
+                record["next_poll"] = (
+                    time.monotonic() + self.PRODUCED_RELEASE_POLL_S)
+        self.telemetry["produced_group_release_wait_s"] += (
+            time.monotonic() - started)
 
     def produced_release_debt(self):
         """Stage copies this owner asked PB to retire and PB did not.
@@ -1759,6 +2298,33 @@ class StreamedBoundaryArtifacts:
             self.telemetry["hot_read_misses"] += 1
             raise
 
+    def _settle_produced_releases_at_exit(self, primary):
+        """Give read-ahead's stage credit back as the owner closes.
+
+        Read-ahead asks for retirements without waiting and may hold groups
+        no read consumed; both end here. A clean run waits for each. A
+        failing run only asks. Neither may change the outcome of the run:
+        the capture's bytes are already durable when this runs, and a stage
+        copy PrismaBuild would not retire is reported debt
+        (``produced_release_debt``), not a reason to discard hours of
+        finished work or to mask the failure that is already propagating.
+        """
+
+        if self._produced is None or self._produced_plan is None:
+            return
+        try:
+            self.settle_produced_releases(wait_for_each=primary is None)
+        except Exception as cleanup:                    # noqa: BLE001
+            self._produced_release_errors.append(
+                {"batch_id": None, "step": "settle-at-exit",
+                 "reason": {"error": repr(cleanup)}})
+            note = ("produced-output settle at exit did not finish: "
+                    f"{cleanup!r}; debt: {self.produced_release_debt()!r}")
+            if primary is not None:
+                primary.add_note(note)
+            else:
+                print(f"exact boundary owner: {note}", flush=True)
+
     def __exit__(self, exc_type, exc, traceback):
         # No working tensor reference is resumable. Cost checkpoint shards own
         # successful measurements; a new attempt always uses a new generation.
@@ -1786,6 +2352,7 @@ class StreamedBoundaryArtifacts:
                     self._retire(reference, missing_ok=True)
                 self._slots.clear()
             self._reclaim_retained_checkpoints()
+            self._settle_produced_releases_at_exit(exc)
             self._release_unpublished_prewrites()
         except BaseException:
             self._status = "failed"

@@ -168,7 +168,8 @@ def _pbrun_seals_produced_output(pbrun: Path = PBRUN) -> bool:
 def build_stage_a_produced_template(*, output_prefix, tier: str,
                                     artifact_max_bytes: int,
                                     group_size: int,
-                                    max_entry_tensor_bytes: int) -> dict:
+                                    max_entry_tensor_bytes: int,
+                                    concurrent_groups: int = 2) -> dict:
     """The Stage A boundary template this submission would declare.
 
     Derived, never constant: ``artifact_max_bytes`` is the EFFECTIVE
@@ -178,6 +179,14 @@ def build_stage_a_produced_template(*, output_prefix, tier: str,
     and it becomes the durable origin class maximum. The tier window is
     derived from the ACTUAL maximum publication group, which is a
     different quantity from the retained origin peak.
+
+    ``concurrent_groups`` is how many groups' worth of stage space the
+    window funds. Two is the synchronous loop. Every group past two is
+    read-ahead credit the bound owner spends on publishing at
+    write-complete, retaining a layer's input boundary across probe passes
+    and staging the next plane ahead (#887); the owner derives the count
+    back from the sealed ``window_gib``, so this is the one place it is
+    chosen.
 
     The single implementation lives with the runtime binding
     (``prismaquant.stage_a_produced_output.build_boundary_template``) so
@@ -191,7 +200,8 @@ def build_stage_a_produced_template(*, output_prefix, tier: str,
         output_prefix=output_prefix, tier=tier,
         artifact_max_bytes=int(artifact_max_bytes),
         group_size=int(group_size),
-        max_entry_tensor_bytes=int(max_entry_tensor_bytes))
+        max_entry_tensor_bytes=int(max_entry_tensor_bytes),
+        concurrent_groups=int(concurrent_groups))
 
 
 def _sha_bytes(data: bytes) -> str:

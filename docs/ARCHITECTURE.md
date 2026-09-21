@@ -1,7 +1,32 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/stagea-produced-boundaries-20260921`.
+As of: 2026-09-21 · `feat/stagea-owner-loop-readahead-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `feat/stagea-owner-loop-readahead-20260921`) for
+**read-ahead in the Stage A produced-boundary owner loop** (PQ #887). No
+format, lane, pin, ship-gate verdict or kernel order changes, and the
+**default is unchanged**: `build_boundary_template` still seals a two-group
+window, and at two groups every rule below is inert and the loop is the
+synchronous one the stamp beneath this describes. What changes is what the
+bound owner does with a window sealed **wider** than two groups
+(`build_boundary_template(concurrent_groups=N)`, forwarded by
+`tools/dispatch_joint_quanta.build_stage_a_produced_template`). The owner
+derives the group count back from the sealed `window_gib`, keeps two groups
+of the **whole** window for the read path, and spends the rest as read-ahead
+credit: it publishes a group when its last entry is durable, keeps a layer's
+input boundary staged across the probe passes, stages the next plane a read
+will want, and asks for a retirement at window exit without waiting for it.
+Read-ahead is optional by construction: no outcome of a read-ahead step ends
+the capture, and a read whose window refill the tier cannot supply takes
+read-ahead's credit back and runs again, which is the synchronous loop. **No
+production caller
+chooses the width yet**: the dispatcher forwards an operator-supplied
+template file, so a run gets read-ahead only when its template was built
+with `concurrent_groups` above two. The reason is measured, not assumed: on
+the fleet a staging and a retirement each cost a queue claim plus 4 s to 5 s
+of PrismaBuild action (PB #811), and the 512-sample panel has about 3,240 of
+each.
 
 Re-stamped (2026-09-21, `fix/stagea-produced-boundaries-20260921`) for
 **Stage A reading its own boundary entries through PrismaBuild produced
@@ -1019,9 +1044,10 @@ says exactly that.
 
 - **The publication unit is the existing read window, and the stage copy is a
   loan.** A group is the 64 entries `prefetched_boundary_batches` already
-  yields, and the publish is **deferred to the first read**: a prewrite holds
-  no ledger tokens while a commit funds the stage window, so publishing at
-  write time would spend the stage credit the first read needs. Per-entry
+  yields, and **at the default two-group window** the publish is **deferred
+  to the first read**: a prewrite holds no ledger tokens while a commit funds
+  the stage window, so publishing at write time would spend the stage credit
+  the first read needs. Per-entry
   movers are rejected on PrismaBuild's own arithmetic, not on entry size —
   `storage_tiers.stage_tokens_for_bytes` rounds **per mover** up to a whole
   GiB token, so 64 movers of ~16 MiB cost 64 tokens where the one group that
@@ -1042,12 +1068,89 @@ says exactly that.
   bounded `BoundaryStagingTimeout` and a withdrawal — never a fallback or a
   direct origin read.
 
+- **A window wider than two groups is read-ahead credit (PQ #887).** The
+  synchronous loop above pays one PrismaBuild round trip to stage a group and
+  one to retire it, with the GPU waiting on each; measured on the fleet that
+  is a queue claim plus 4 s to 5 s of action per trip (PB #811), about 3,240
+  trips each way on the 512-sample panel. The owner reads the group count
+  back from the sealed window (`window_gib // ceil(group_bytes / GiB)`,
+  `cost_streaming._sealed_window_groups`) and treats every group past two as
+  credit for work no read has asked for yet. Five rules, no threads:
+  (1) a group is **published when its last entry is durable**, so its mover
+  runs while the writer computes — unless the writer says no read follows
+  (`write(read_back=False)`, the walk's last roll); (2)
+  `retain_produced_boundary` keeps a layer's input boundary groups staged
+  across the probe passes of `render_free_layer_roll`, which otherwise
+  re-stage the same group once per pass; (3) `stage_produced_boundary_ahead`
+  re-stages the next boundary plane before its read; (4) a window exit
+  **asks** for the retirement and returns, and later window opens poll it, a
+  poll of PrismaBuild's own in-flight egress being neither a failed attempt
+  nor a recorded error (`produced_group_release_polls` counts them apart from
+  re-drives); (5) the owner **waits** in four places, all timed: for credit
+  when the window is full, for a pending retirement of a group a read wants
+  (a copy is never read while an egress may be deleting it), for the mover's
+  receipt before it unlinks an origin of a group staged ahead and never read
+  (the mover opens the origin when it runs, not when it was asked), and in
+  `settle_produced_releases` as the owner closes, which asks for every
+  retirement before it waits for any.
+  **Read-ahead may not cost the run anything the synchronous loop would not.**
+  The share is bounded twice, by itself and by the whole window less the read
+  path's two groups, because a group whose retirement PrismaBuild refused
+  holds credit without being read-ahead. Every exception from an optional
+  step is a counted refusal (`produced_ahead_refusals()` keeps the reasons),
+  and the read then publishes under the full staging budget. A **read** whose
+  window refill PrismaBuild refuses is answered by kind
+  (`_produced_refill_refusal_kind`, counted in `produced_group_read_refunds`):
+  `tier-reservation-unavailable` is a shortfall, so pending retirements are
+  waited out and groups staged ahead are retired two at a time
+  (`produced_groups_ahead_surrendered`) until the step funds or nothing is
+  left to give; `unknown-retain: …` is PrismaBuild failing closed on a funding
+  census it could not complete, which many movers in flight make likelier
+  than the synchronous loop's two ever did, so the step is asked again inside
+  the group's own staging deadline and nothing is given up. Every other
+  refusal, and every refusal at the default window, propagates exactly as
+  before: giving credit back cannot fix what is not about credit. The settle
+  at owner close never changes the run's outcome: a clean run waits for each
+  retirement, a failing run only asks, and a settle that cannot finish is
+  printed and reported as `produced_release_debt()` rather than raised over a
+  finished capture or over the failure already propagating. The kernel order
+  is untouched — the probe loop moved verbatim into
+  `_render_free_probe_passes` — so §9.3's bitwise gate holds.
+  **Width.** The rules are fully effective when the share holds the plane
+  being read, the plane staged ahead and one cotangent plane per probe: at
+  the production geometry (8 groups a plane, 4 probes) that is 8 + 8 + 32
+  groups plus retirements in flight, so `concurrent_groups` of about 56
+  (`window_gib` 112). A narrower window degrades toward the synchronous loop;
+  it does not fail.
+  **Telemetry.** `produced_group_stage_wait_s`, `produced_group_release_wait_s`
+  and `produced_group_ahead_wait_s` are the owner's time blocked on, or
+  spent asking, the PrismaBuild queue.
+  **Evidence** is four live chain cycles on the fleet
+  (`tools/stagea_produced_live_cycle.py --mode chain`, owner on a Spark,
+  24-group window, 3 s of stand-in compute per window; the last three in the
+  capture's own dispose-then-settle order). Three were clean: every group
+  read back was published at write-complete, no refusals, no credit waits,
+  durable charge back at zero, and per layer of 24 s compute the wait on
+  staging was 0.04 s to 0.05 s in steady state and 12 s to 15 s on the
+  cold-start layer, whose top plane's retirement from the forward read is
+  still in flight when the chain asks for it. One was not: a read-path
+  funding step was refused, the recovery as first written gave back all nine
+  groups staged ahead one retirement at a time, and the layer took 172 s
+  instead of 48 s; it still finished with correct bytes and no debt, where
+  the code before the recovery would have ended the run. The refusal was not
+  recorded and did not recur in two further cycles, so its cause is an
+  inference (a funding census during ten concurrent movers), not a finding;
+  refusals are recorded with their reason since. That is a **screen of the
+  loop, not a measurement of Stage A**: the real compute per window is
+  unmeasured until the 512-sample run.
+
 - **Geometry is derived from the configured budget, never from a constant.**
   `build_boundary_template` takes the **effective** artifact max — the plan's
   sealed `boundary_storage.max_artifact_bytes` or the run's
   `--artifact-budget-bytes` override — as the durable origin class maximum,
   and derives the tier window from the **actual maximum publication group**
-  (64 × 16 MiB + envelope → 2 tokens; current plus next → 4), which is a
+  (64 × 16 MiB + envelope → 2 tokens; current plus next → 4, the default;
+  `concurrent_groups=N` seals `2N` for read-ahead), which is a
   different quantity from the retained origin peak. The runtime binder refuses
   when the admitted template's declared maximum is not the effective one. Every
   `prismabuild.*` module the publication uses loads through
