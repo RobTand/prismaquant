@@ -227,22 +227,43 @@ def _template(prefix: str, *, payload_max_bytes: int = 1 << 20,
 
 
 def _sealed_producer_request(tmp_path: Path, cas_root: Path,
-                             pb_repo: Path) -> str:
+                             pb_repo: Path, template: dict) -> str:
     """The owner's own sealed request, filed once (the parent identity).
 
     The movement template ``publish_prepaid_batch`` derives at runtime
     comes from exactly this request: the code closure covers a checkout
     carrying the fleet tools, sealed ONCE per producer and never re-sealed
     per group.
+
+    The request must also SEAL ITS PRODUCED-OUTPUT DECLARATION, and this is
+    load-bearing rather than ceremonial. A produced-output owner carries
+    its window as ordinary tier demand (``owner_demand_terms``), and the
+    egress classifies a claimed row as a movement node by tier demand
+    alone. The only thing that then distinguishes the producer from a
+    corrupt mover is the verified hold ``stage_release`` checks: the claim
+    row's ``produced_output`` ref against the declaration sealed in
+    ``params`` and validated against this request's own inputs. A request
+    without it is not a verified hold, taints the egress ownership pass,
+    and ``retire_batch`` answers ``egress-incomplete`` with zero live pins
+    -- which this fixture measured and briefly mistook for a PrismaBuild
+    defect. It is not one; it is what an unsealed producer looks like from
+    the egress's side.
     """
 
     from prismabuild import core as pb
+    from prismabuild import produced_output as po
     checkout = tmp_path / "mover-checkout"
     tools = checkout / "tools" / "fleet"
     tools.mkdir(parents=True, exist_ok=True)
     for name in ("stage_move.py", "prewarm_loop.py", "stage_release.py"):
         (tools / name).write_bytes(
             (pb_repo / "tools" / "fleet" / name).read_bytes())
+    cas = pb.PrismaBuildCAS(cas_root)
+    envelope = tmp_path / "produced-template.json"
+    envelope.write_text(json.dumps(template, sort_keys=True))
+    template_input, _ = cas.ingest_input(
+        envelope, input_id=pb.PRODUCED_OUTPUT_TEMPLATE_INPUT_ID)
+    declaration = po.build_declaration(template, template_input)
     body = {
         "schema": pb.ACTION_SCHEMA_V2,
         "task": {"definition_id": "tests/pq-stagea-boundary-producer",
@@ -251,18 +272,19 @@ def _sealed_producer_request(tmp_path: Path, cas_root: Path,
                  "artifact_family": "generic", "artifact_kind": "generic",
                  "argv": ["/bin/true"], "working_directory": ".",
                  "result_path": "result"},
-        "inputs": [],
+        "inputs": [template_input],
         "code_closure": pb.build_code_closure(
             checkout, ["tools/fleet/stage_move.py",
                        "tools/fleet/prewarm_loop.py",
                        "tools/fleet/stage_release.py"]),
-        "params": {"cwd": "."},
+        "params": {"cwd": ".", "command": ["/bin/true"],
+                   "produced_output_template": declaration},
         "environment": {"variables": {"PATH": "/usr/bin:/bin"},
                         "toolchain": {}},
         "execution_scope": {"portability": "portable", "platform_key": None,
                             "host_class": None}}
     action = pb.seal_action(body)
-    pb.PrismaBuildCAS(cas_root).publish_action_request(action)
+    cas.publish_action_request(action)
     return str(action["action_key"])
 
 
@@ -343,12 +365,13 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
         BoundaryProducedPublication)
 
     cas_root = tmp_path / "cas"
-    owner = _sealed_producer_request(tmp_path, cas_root, pb_repo)
     q = _queue(tmp_path, gib=gib)
     prefix = tmp_path / "outputs"
     prefix.mkdir(parents=True, exist_ok=True)
     template = _template(str(prefix), payload_max_bytes=payload_max_bytes,
                          window_gib=window_gib)
+    # The template first: the owner's sealed request carries its declaration.
+    owner = _sealed_producer_request(tmp_path, cas_root, pb_repo, template)
     terms = po.owner_demand_terms(template)
     q.publish(action_key=owner, cas_root=str(cas_root),
               worker_script=str(pb_repo / "tools" / "prismabuild_worker.py"),
@@ -413,6 +436,79 @@ def _write_group(storage, *, boundary_index=0, count=GROUP_SIZE, first=0):
             for index in range(first, first + count)]
 
 
+_FLEET_DRIVER = """
+import json, os, sys, time
+from pathlib import Path
+root, tag, stop, budget = sys.argv[1], sys.argv[2], Path(sys.argv[3]), float(sys.argv[4])
+from prismabuild import pool
+q = pool.PoolQueue(Path(root))
+end = time.monotonic() + budget
+while time.monotonic() < end and not stop.exists():
+    claimed = q.claim(owner="w-fleet", tags=[tag])
+    if claimed is None:
+        time.sleep(0.05)
+        continue
+    key = str(claimed["action_key"])
+    row = pool._read_json(q.item_path(pool.CLAIMED, key))
+    outcome = q.execute(row, timeout_s=240)
+    rc = outcome.get("returncode")
+    q.finish(key, status="executed" if rc == 0 else "failed")
+    print(json.dumps({"mover": key, "rc": rc,
+                      "stderr": (outcome.get("stderr") or "")[-800:]}),
+          flush=True)
+"""
+
+
+class _Fleet:
+    """A real, ASYNCHRONOUS fleet for this queue, in its own process.
+
+    Staging is asynchronous in production -- publishing seals a mover row
+    and some worker claims, places and runs it later -- and a fixture that
+    drives the mover by hand before the read hides exactly that. This runs
+    the pool's own claim/execute/finish loop CONCURRENTLY with the read, so
+    the read really does wait on PrismaBuild's receipt.
+
+    It is a separate PROCESS, not a thread, for one measured reason: the
+    worker the pool spawns derives its own strict identity from the
+    environment it inherits, and refuses "rather than binding a strict
+    identity from half of one" when an owner's launch tuple is present. A
+    thread shares ``os.environ`` with the reader, which needs that tuple;
+    a child process gets its own copy with the tuple removed.
+    """
+
+    def __init__(self, q, tag: str, tmp_path: Path, *, budget_s: float = 240.0):
+        self._q = q
+        self._tag = tag
+        self._stop = tmp_path / "fleet.stop"
+        self._budget = budget_s
+        self._proc = None
+
+    def __enter__(self):
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
+                            "PRISMABUILD_ACTION_SCOPE", "PRISMABUILD_RESIDENCY_MAP",
+                            "PRISMABUILD_READER_HELPER_ROOT")}
+        self._proc = subprocess.Popen(
+            [sys.executable, "-c", _FLEET_DRIVER, str(self._q.root), self._tag,
+             str(self._stop), str(self._budget)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._stop.write_text("stop")
+        try:
+            out, err = self._proc.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+            out, err = self._proc.communicate()
+        self.stdout, self.stderr = out, err
+        return False
+
+
+def _fleet(q, tmp_path: Path):
+    return _Fleet(q, _tier_host(q), tmp_path)
+
+
 def _stage_groups(storage, q):
     """Seal each pending group's mover and run it through the real pool.
 
@@ -473,14 +569,13 @@ def test_strict_read_of_an_unpublished_boundary_entry_refuses(
 
 def test_own_boundary_group_publishes_stages_and_reads_back(
         tmp_path, monkeypatch):
-    """The whole chain, with no fallback and one durable charge.
+    """The whole chain, asynchronous, with no fallback and one charge.
 
-    Writer -> prewrite-before-the-first-byte -> deferred publish -> REAL
-    sealed mover through claim/execute/finish -> composed reader context
-    -> the UNCHANGED strict prefetch -> byte-equal tensors. The stage
-    release is a separate test because it currently refuses for a reason
-    that is PrismaBuild's, not this chain's; see
-    ``test_releasing_the_stage_copy_is_blocked_by_the_owner_demand_taint``.
+    Writer -> prewrite-before-the-first-byte -> deferred publish at the
+    first read -> a REAL sealed mover claimed and run by a REAL fleet in
+    another process, concurrently -> the bounded wait on PrismaBuild's own
+    receipt -> composed reader context -> the UNCHANGED strict prefetch ->
+    byte-equal tensors. Nothing in this test stages anything by hand.
     """
 
     import torch
@@ -491,65 +586,73 @@ def test_own_boundary_group_publishes_stages_and_reads_back(
     assert storage.telemetry["produced_groups_published"] == 0, (
         "publishing at write time would spend the stage credit the first "
         "read needs")
-    _stage_groups(storage, q)
-    _strict(monkeypatch, env, pb_repo, q)
-    with storage.prefetch(references) as window:
-        for index, reference in enumerate(references):
-            assert torch.equal(storage.get(window, reference),
-                               torch.arange(8, dtype=torch.float32) + index)
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with storage.prefetch(references) as window:
+            for index, reference in enumerate(references):
+                assert torch.equal(storage.get(window, reference),
+                                   torch.arange(8, dtype=torch.float32) + index)
+    assert storage.telemetry["produced_groups_published"] == 1
     assert storage.telemetry["produced_groups_materialized"] == 1
+    assert storage.telemetry["produced_group_release_failures"] == 0, (
+        storage._produced_release_errors)
     report = storage.produced_group_records()
-    assert len(report) == 1 and report[0]["staged"] is True
+    assert len(report) == 1 and report[0]["retired"] is True, (
+        "the window's stage copy is a LOAN: it goes back when the pins do",
+        report)
 
 
-def test_releasing_the_stage_copy_is_blocked_by_the_owner_demand_taint(
+def test_the_bounded_cycle_reads_retires_and_reads_again(
         tmp_path, monkeypatch):
-    """MEASURED BLOCKER, recorded rather than worked around or faked.
+    """The acceptance chain: read -> release stage -> read again.
 
-    The read completes and the pins release cleanly -- the egress receipt
-    reports zero live pins and zero deferrals. It still refuses
-    ``egress-incomplete``, and the reason is a PrismaBuild interaction this
-    lane cannot fix from PQ:
-
-    ``stage_release`` identifies movement nodes by their DEMAND -- any
-    queue row demanding ``<kind>@<tier>`` on the evicting tier is treated
-    as a mover, and a mover whose sealed request has no ``params.command``
-    taints the ownership scan ("mover seals no command"). A produced-output
-    OWNER demands exactly that, by design: ``owner_demand_terms`` puts its
-    working minimum on the tier, and its own sealed request is an ordinary
-    action that seals ``task.argv`` and no movement command. So the live
-    owner taints the egress of its own batch.
-
-    The scan's comment says "consumers never reach this branch", and that
-    was true before produced output gave a consumer a tier demand. Filed
-    for the owning PB lane; nothing here works around it, because every
-    workaround is worse: finishing the owner first is not what a producer
-    does mid-run, and unlinking the stage copy behind the egress is the
-    private bookkeeping the whole lane exists to avoid.
-
-    This test asserts the CURRENT refusal exactly, so it fails loudly the
-    moment PrismaBuild changes it -- it is a record, not an acceptance.
+    One logical batch, ONE durable origin charge, across the forward and
+    the reverse read. The second read is not a second publication and not
+    a fallback: the group's stage copy went back to free when its pins
+    released, and the repeat read takes it again through PrismaBuild's own
+    repeat-materialization surface -- ``materialization_state`` to ask,
+    ``ensure_batch_materialized`` to drive -- under a NEW sealed mover that
+    the same real fleet claims and runs.
     """
 
     import torch
-    storage, _publication, q, env, pb_repo = _bound_owner(tmp_path)
+    storage, publication, q, env, pb_repo = _bound_owner(tmp_path)
     references = _write_group(storage)
-    _stage_groups(storage, q)
-    _strict(monkeypatch, env, pb_repo, q)
-    with storage.prefetch(references) as window:
-        storage.get(window, references[0])
-    released = storage.release_produced_group(references[0])
-    receipt = released.get("receipt") or {}
-    assert released.get("ok") is False
-    assert released.get("refusal") == "egress-incomplete", released
-    assert receipt.get("live_pins") == [], (
-        "the reader's pins DID release: the refusal is the ownership scan, "
-        "not a leaked pin", receipt.get("live_pins"))
-    assert int(receipt.get("entries_deferred") or 0) == 0, receipt
-    errors = receipt.get("errors") or []
-    assert any("mover seals no command" in str(error) for error in errors), (
-        "the recorded cause moved; re-read stage_release before trusting "
-        "this record", errors)
+    expected = [torch.arange(8, dtype=torch.float32) + index
+                for index in range(len(references))]
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        with storage.prefetch(references) as window:
+            for reference, want in zip(references, expected):
+                assert torch.equal(storage.get(window, reference), want)
+        batch_id = storage.produced_group_records()[0]["batch_id"]
+        charge_after_first = publication.durable_charge()
+        first = publication.materialization_state(batch_id=batch_id)
+        assert first["stage_retired"] is True, (
+            "the stage copy must be back in free before the repeat read "
+            "can be a re-materialization at all", first)
+        assert storage.telemetry["produced_groups_retired"] == 1
+
+        # The SAME unchanged references, through a NEW materialization.
+        with storage.prefetch(references) as window:
+            for reference, want in zip(references, expected):
+                assert torch.equal(storage.get(window, reference), want)
+
+    second = publication.materialization_state(batch_id=batch_id)
+    assert storage.telemetry["produced_groups_rematerialized"] == 1
+    assert int(second["generation"]) == 1, (
+        "PrismaBuild's own materialization generation, not a caller's",
+        second)
+    assert second["mover_key"] != first["mover_key"], (
+        "a successor mover, sealed by PB over the filed generation", second)
+    assert second["manifest_digest"] == first["manifest_digest"], (
+        "the same logical batch: same descriptors, same manifest", second)
+    assert second["batch_namespace"] == first["batch_namespace"]
+    assert publication.durable_charge() == charge_after_first, (
+        "one logical batch, one durable origin charge, constant across "
+        "forward and reverse staging")
+    assert storage.telemetry["produced_groups_published"] == 1, (
+        "the repeat read must NOT be a second publication")
 
 
 def test_multi_window_initial_writes_exceed_the_window_and_fit_durable(
@@ -568,16 +671,19 @@ def test_multi_window_initial_writes_exceed_the_window_and_fit_durable(
     references = _write_group(storage, count=2 * GROUP_SIZE)
     assert storage.telemetry["produced_groups_prewritten"] == 2
     assert storage.telemetry["produced_groups_published"] == 0
-    _stage_groups(storage, q)
-    _strict(monkeypatch, env, pb_repo, q)
-    for start in (0, GROUP_SIZE):
-        window_refs = references[start:start + GROUP_SIZE]
-        with storage.prefetch(window_refs) as window:
-            assert torch.equal(
-                storage.get(window, window_refs[0]),
-                torch.arange(8, dtype=torch.float32) + start)
+    with _fleet(q, tmp_path):
+        _strict(monkeypatch, env, pb_repo, q)
+        for start in (0, GROUP_SIZE):
+            window_refs = references[start:start + GROUP_SIZE]
+            with storage.prefetch(window_refs) as window:
+                assert torch.equal(
+                    storage.get(window, window_refs[0]),
+                    torch.arange(8, dtype=torch.float32) + start)
     assert storage.telemetry["produced_groups_published"] == 2
     assert storage.telemetry["produced_groups_materialized"] == 2
+    assert storage.telemetry["produced_groups_retired"] == 2, (
+        "each window gives its own stage copy back; holding both is how a "
+        "bounded window silently becomes an unbounded one")
 
 
 def test_a_foreign_session_reference_is_refused(tmp_path):

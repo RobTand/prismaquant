@@ -226,6 +226,7 @@ class StreamedBoundaryArtifacts:
         self._produced = None
         self._produced_plan = None
         self._produced_groups = {}
+        self._produced_release_errors = []
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -237,7 +238,9 @@ class StreamedBoundaryArtifacts:
             "written_entries": 0, "retired_entries": 0, "prefetch_windows": 0,
             "hot_read_misses": 0,
             "produced_groups_prewritten": 0, "produced_groups_published": 0,
-            "produced_groups_materialized": 0, "produced_groups_retired": 0}
+            "produced_groups_materialized": 0, "produced_groups_retired": 0,
+            "produced_groups_rematerialized": 0,
+            "produced_group_release_failures": 0}
 
     def __enter__(self):
         return self
@@ -948,10 +951,25 @@ class StreamedBoundaryArtifacts:
     # The unit is the EXISTING 64-entry logical publication group -- the
     # same window ``prefetched_boundary_batches`` already yields -- so a
     # group is prewritten once, published once, staged by one PB mover and
-    # read back through one namespaced reader context. Per-entry movers
-    # were considered and rejected: a boundary entry is ~1 GiB, and one
-    # mover each would be hundreds of sealed actions for a window PB can
-    # move as one.
+    # read back through one namespaced reader context.
+    #
+    # Per-entry movers were considered and REJECTED, and the reason is the
+    # ledger's own arithmetic rather than the size of an entry. At Stage A
+    # scale one boundary ENTRY is ~16 MiB and one 64-entry GROUP is ~1 GiB.
+    # PrismaBuild prices a stage reservation PER MOVER and rounds UP to a
+    # whole token: ``storage_tiers.stage_tokens_for_bytes`` returns
+    # ``-(-range_bytes // GIB)``, deliberately, because a token is the unit
+    # PB can refuse on and rounding down would leave the last partial GiB
+    # of every reservation unaccounted. So 64 movers of ~16 MiB each cost
+    # 64 tokens for ~1 GiB of bytes, while the one group that already is
+    # the read window costs ceil(group_bytes / GiB) -- 2 tokens once the
+    # zip envelopes are counted. That is the ~32x, and it is on top of
+    # replacing 64 sealed requests, admissions, claims and fragments with
+    # one for a single window the reader was going to take whole anyway.
+    #
+    # The LAST group is smaller and is priced as what it is: the ceiling
+    # rule applies to its own byte range (``group_ceiling_bytes`` over the
+    # entries that group actually holds), never to an assumed full 64.
     #
     # PUBLISH IS DEFERRED TO THE FIRST READ. ``require_prewrite`` charges
     # only the durable class budget and holds no ledger tokens, while the
@@ -963,7 +981,8 @@ class StreamedBoundaryArtifacts:
     # ------------------------------------------------------------------
 
     def bind_produced_output(self, publication, *, group_size, n_batches,
-                             max_entry_tensor_bytes):
+                             max_entry_tensor_bytes,
+                             staging_timeout_s=900.0):
         """Stage this generation's entries through ``publication``.
 
         Called after :meth:`bind`, because the entry directory this owner
@@ -974,6 +993,13 @@ class StreamedBoundaryArtifacts:
         group), ``n_batches`` bounds the last, partial group, and
         ``max_entry_tensor_bytes`` is the bound per-entry tensor ceiling
         the prewrite's conservative per-group ceiling is derived from.
+
+        ``staging_timeout_s`` bounds the ONE asynchronous wait on this
+        path: a published or re-materialized group is staged by a mover the
+        fleet claims and runs, and the read waits on PrismaBuild's own
+        receipt for it. Exceeding it is a named
+        ``BoundaryStagingTimeout`` and a withdrawal -- never a direct
+        origin read and never a second publication.
 
         A read-only attached generation can never take this binding: an
         attached owner does not write, so it has nothing to declare and its
@@ -1003,9 +1029,14 @@ class StreamedBoundaryArtifacts:
                 "own-generation path must sit inside the prefix its owner "
                 "declared")
         self._produced = publication
+        if not isinstance(staging_timeout_s, (int, float)) or (
+                staging_timeout_s <= 0):
+            raise ValueError(
+                "produced output staging_timeout_s must be a positive number")
         self._produced_plan = {"group_size": int(group_size),
                                "n_batches": int(n_batches),
-                               "max_entry_tensor_bytes": int(max_entry_tensor_bytes)}
+                               "max_entry_tensor_bytes": int(max_entry_tensor_bytes),
+                               "staging_timeout_s": float(staging_timeout_s)}
         self._produced_groups = {}
 
     @staticmethod
@@ -1125,7 +1156,26 @@ class StreamedBoundaryArtifacts:
         contexts = {}
         for key, group in wanted.items():
             self._produced_publish(key, group)
+            if group["retired"]:
+                # The same unchanged logical batch, taken back onto the
+                # tier. PB is asked first (``materialization_state``) and
+                # drives the transition only if its own records say the
+                # copy is gone; the batch id, manifest, descriptors,
+                # namespace and durable charge are all unchanged.
+                self._produced.ensure_batch_materialized(
+                    batch_id=group["batch_id"])
+                group["retired"] = False
+                group["context"] = None
+                self.telemetry["produced_groups_rematerialized"] += 1
             if group["context"] is None:
+                # Staging is asynchronous: the publish (or the ensure
+                # above) seals a mover row and the FLEET runs it. Wait on
+                # PB's own receipt -- bounded, named, no fallback -- before
+                # composing, because fragments alone compose the same
+                # whether the batch is whole or half there.
+                self._produced.await_materialized(
+                    batch_id=group["batch_id"],
+                    timeout_s=self._produced_plan["staging_timeout_s"])
                 resolver, block = self._produced.reader_context(
                     batch_id=group["batch_id"],
                     manifest_digest=group["manifest_digest"])
@@ -1172,10 +1222,15 @@ class StreamedBoundaryArtifacts:
 
         Stage retirement only: the durable origin survives, its charge is
         constant, and this owner still owns disposal of its own entries.
-        Deliberately explicit rather than automatic on window exit -- a
-        group read twice in one pass would otherwise need a re-staging
-        transition PrismaBuild does not publish yet (see
-        ``stage_a_produced_output.BoundaryRematerializationUnavailable``).
+        This is what makes the window BOUNDED -- the stage copy is a loan,
+        and a later read of the same unchanged logical batch takes it again
+        through PrismaBuild's repeat-materialization surface rather than
+        through a second publication or a second charge.
+
+        The cached reader context is dropped with the copy. Reusing a
+        composed map after its fragments are evicted would resolve a path
+        that is no longer there, which is the second failure shape of a
+        bounded window (the first being never releasing at all).
         """
 
         key, group = self._produced_group_for(reference)
@@ -1194,6 +1249,22 @@ class StreamedBoundaryArtifacts:
             group["context"] = None
             self.telemetry["produced_groups_retired"] += 1
         return out
+
+    def _release_produced_window(self, references):
+        """Retire every stage copy this window borrowed. Best effort."""
+
+        seen = set()
+        for reference in references:
+            key, group = self._produced_group_for(reference)
+            if group is None or key in seen or group["retired"]:
+                continue
+            seen.add(key)
+            try:
+                self.release_produced_group(reference)
+            except Exception as exc:                # noqa: BLE001
+                self.telemetry["produced_group_release_failures"] += 1
+                self._produced_release_errors.append(
+                    {"batch_id": group["batch_id"], "error": repr(exc)})
 
     @contextmanager
     def prefetch(self, references):
@@ -1226,6 +1297,15 @@ class StreamedBoundaryArtifacts:
         finally:
             self._active_window = None
             context.__exit__(None, None, None)
+            # The pins are gone with the window, so the stage copies this
+            # window borrowed go back to free HERE -- that is the whole
+            # bounded-window contract, and holding them would accumulate
+            # every group the pass ever read. Retirement is PB's egress and
+            # it refuses while any pin is live, so the order is not
+            # optional. A failure to retire is telemetry, never a read
+            # error: the bytes were read, and the next sweep retries.
+            if self._produced is not None:
+                self._release_produced_window(references)
 
     def get(self, window, reference):
         self._entry_identity(reference)

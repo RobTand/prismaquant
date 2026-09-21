@@ -46,10 +46,17 @@ launch environment PB injected for THIS attempt; the template comes from the
 submission's own ``--produced-output-template`` declaration; the instance
 comes from ``bind_declared_instance`` against the live claim.
 
-One transition is NOT implemented here because PrismaBuild does not publish
-it yet: re-materializing an unchanged, already-retired logical batch.  See
-:class:`BoundaryRematerializationUnavailable` for the exact call this lane
-needs and why no substitute is acceptable.
+The bounded cycle is closed: a group is published once, staged once,
+read, and its STAGE COPY released -- and a later read of the same unchanged
+logical batch goes through PrismaBuild's own repeat-materialization surface
+(``produced_output.materialization_state`` to ask, then
+``produced_output.ensure_batch_materialized`` only when the answer says the
+copy is gone).  One logical batch, one durable origin charge, across the
+forward and reverse cycle; the successor's mover and funding key are
+PrismaBuild's, sealed over the filed materialization generation, never a
+caller nonce.  A pinned candidate without those two entry points refuses
+loudly (:class:`BoundaryRepeatMaterializationUnsupported`); it never
+degrades to a new batch id or an origin read.
 """
 from __future__ import annotations
 
@@ -104,39 +111,31 @@ class BoundaryMaterializationIncomplete(RuntimeError):
     """
 
 
-class BoundaryRematerializationUnavailable(NotImplementedError):
-    """Re-staging an unchanged, already-retired batch is not yet publishable.
+class BoundaryStagingTimeout(TimeoutError):
+    """The batch's mover did not land inside this window's staging budget.
 
-    ``publish_prepaid_batch`` short-circuits on a filed commitments entry:
-    a second call after ``retire_batch`` replays the idempotent commit and
-    answers the duplicate rather than sealing a new mover, so the bytes are
-    never re-staged.  The two ways around that are both forbidden:
+    NAMED and BOUNDED, and it is the only thing this lane does about an
+    asynchronous mover. PrismaBuild schedules and places the movement; the
+    reader's only job is to not proceed until PB's own records say the
+    bytes are whole. There is no fallback read, no direct origin open and
+    no second publication on this path: the caller withdraws (the group's
+    prewrite/commit state is PB's and survives), and the next attempt
+    resumes the same logical batch.
+    """
 
-    * a NEW batch id for the same origin bytes is a caller-chosen successor
-      and a second durable charge (the PB ruling: unique successor key from
-      the PB-sealed materialization record, immutable origin charge constant
-      across forward and reverse staging); and
-    * reading the origin path directly is the pool read the strict policy
-      exists to refuse.
 
-    THE CAPABILITY REQUESTED, not a name this lane has chosen. The
-    spelling belongs to the PrismaBuild lane that owns produced output;
-    two lanes shipping different names for one call is a merge problem,
-    so nothing here calls, imports or depends on any such symbol. What
-    this lane needs is one entry point that takes the owner's bound
-    (queue, instance, template) plus the EXISTING ``batch_id``, tier and
-    cas_root, and re-stages that unchanged logical batch, returning the
-    new mover key, the PB-sealed materialization sequence and the batch
-    namespace its fragments will be vouched under -- idempotent on replay.
+class BoundaryRepeatMaterializationUnsupported(RuntimeError):
+    """The pinned PrismaBuild candidate has no repeat-materialization API.
 
-    The properties the produced-output ruling already fixes, restated so
-    the request is unambiguous: the successor mover and funding key derive
-    from PrismaBuild's own sealed materialization record and never from a
-    caller nonce; the old terminal key stays terminal and spent; at most
-    one live-or-pending materialization exists per logical batch; the
-    immutable origin identity tuple captured at first commit is re-checked
-    before funding; and the durable origin charge is constant across the
-    forward and reverse cycle.
+    A loud refusal, never a silent skip and never a substitute.  The two
+    ways around a missing entry point are both forbidden: a NEW batch id
+    over the same origin bytes is a caller-chosen successor and a second
+    durable charge, and reading the origin path directly is exactly the
+    pool read the strict policy exists to refuse.  The names are
+    PrismaBuild's own and are used unaliased --
+    ``produced_output.materialization_state`` and
+    ``produced_output.ensure_batch_materialized`` -- so a candidate that
+    lacks them is reported as the old candidate it is.
     """
 
 
@@ -634,6 +633,22 @@ class BoundaryProducedPublication:
             raise BoundaryMaterializationIncomplete(
                 f"boundary group {batch_id!r} (namespace {namespace[:12]}) "
                 "has no staged fragment yet: its mover has not published")
+        # Fragments cannot answer whether the batch is WHOLE. `stage_move`
+        # publishes one fragment per entry as the bytes land and files its
+        # receipt once at the end, so a half-staged batch composes exactly
+        # like a finished one. PrismaBuild's own receipt is the readiness
+        # fact, and this lane reads it rather than inferring completeness
+        # from what happens to be on the tier.
+        if hasattr(self._po, "materialization_state"):
+            state = self.materialization_state(batch_id=batch_id)
+            if state.get("mover_receipt_complete") is not True:
+                raise BoundaryMaterializationIncomplete(
+                    f"boundary group {batch_id!r} has fragments but no "
+                    f"complete mover receipt (mover "
+                    f"{str(state.get('mover_key'))[:12]}, queue state "
+                    f"{state.get('mover_queue_state')!r}): a half-staged "
+                    "batch composes like a whole one, so the receipt is "
+                    "what this read waits on")
         try:
             composed = map_mod.compose(fragments)
         except Exception as exc:
@@ -722,6 +737,38 @@ class BoundaryProducedPublication:
         return dict(self._po.reclaim_origin(
             self.queue, self.instance, self.template, batch_id=batch_id))
 
+    def durable_charge(self) -> dict:
+        """Committed origin bytes still charged, read from PB's own record.
+
+        The durable charge is a property of the LOGICAL batch, not of its
+        stage copy: retirement returns the tier window and leaves this
+        untouched, and only ``reclaim_origin`` -- which proves every origin
+        path absent -- stops a batch counting. Read here from the
+        instance's ``commitments.json`` (PrismaBuild's record, in the
+        instance directory it owns) rather than recomputed from
+        descriptors, so a drift between what this lane thinks it wrote and
+        what PB filed shows up as a difference instead of being
+        reconstructed away.
+        """
+
+        path = Path(self._po.instance_dir(
+            self.queue.root, self.instance)) / "commitments.json"
+        try:
+            batches = json.loads(path.read_text()).get("batches") or {}
+        except FileNotFoundError:
+            batches = {}
+        sums = {"payload": 0, "checkpoint": 0, "temp": 0}
+        for record in batches.values():
+            if not isinstance(record, Mapping) or record.get("origin_reclaimed"):
+                continue
+            classes = record.get("class_bytes")
+            if not isinstance(classes, Mapping):
+                raise BoundaryProducedBindingError(
+                    "a committed batch records no class bytes")
+            for name in sums:
+                sums[name] += int(classes.get(name) or 0)
+        return sums
+
     def recover_batch_states(self) -> dict:
         """What PrismaBuild's own records say about this owner's groups."""
 
@@ -733,21 +780,125 @@ class BoundaryProducedPublication:
                 states[batch_id] = str(event.get("event") or "")
         return states
 
-    def rematerialize(self, *, batch_id: str) -> dict:
-        """Re-stage an unchanged, already-retired group. NOT AVAILABLE.
+    def materialization_state(self, *, batch_id: str) -> dict:
+        """PrismaBuild's own read-only answer: which copy is current, where.
 
-        Refuses loudly rather than approximating.  See
-        :class:`BoundaryRematerializationUnavailable` for the exact call
-        this lane needs from PrismaBuild and why a new batch id, a caller
-        nonce or a direct origin read are each forbidden substitutes.
+        The question a bounded-window reader asks BEFORE deciding whether
+        it needs a re-materialization -- is a stage copy of this batch live
+        now, under which mover and generation, and has that mover's receipt
+        said the bytes landed whole.  Mutates nothing and takes no lock.
+        The spelling is PrismaBuild's, deliberately unaliased.
         """
 
-        raise BoundaryRematerializationUnavailable(
-            f"re-materializing retired boundary group {batch_id!r} needs "
-            "PrismaBuild's repeat-materialization entry point; "
-            "publish_prepaid_batch replays the committed duplicate instead "
-            "of sealing a successor mover, and this lane will not invent a "
-            "successor key, a second durable charge, or a pool read")
+        po = self._po
+        if not hasattr(po, "materialization_state"):
+            raise BoundaryRepeatMaterializationUnsupported(
+                "the pinned PrismaBuild candidate has no "
+                "produced_output.materialization_state: this lane reads a "
+                "batch's residency from PB's records or not at all")
+        return dict(po.materialization_state(
+            self.queue, self.instance, self.template, batch_id=batch_id))
+
+    def await_materialized(self, *, batch_id: str, timeout_s: float,
+                           poll_s: float = 0.25) -> dict:
+        """Wait, bounded, for PrismaBuild to say this group is whole.
+
+        Staging is ASYNCHRONOUS: publishing seals a mover row and the fleet
+        claims, places and runs it. Nothing here schedules, places, or
+        re-submits anything -- the only decision is when to stop waiting.
+
+        The readiness fact is PrismaBuild's own: ``materialization_state``
+        reports ``mover_receipt_complete`` from the mover's filed receipt,
+        which is the one signal that distinguishes a half-staged batch from
+        a finished one. PB publishes no blocking wait for a produced
+        mover's row (``pbwait`` is a client CLI over an action key, not a
+        library call this path may shell out to), so this polls those
+        records at a bounded budget and raises :class:`BoundaryStagingTimeout`
+        -- a named failure and a withdrawal, never a fallback.
+        """
+
+        import time
+
+        deadline = time.monotonic() + max(float(timeout_s), 0.0)
+        last: dict = {}
+        while True:
+            last = self.materialization_state(batch_id=batch_id)
+            if last.get("mover_receipt_complete") is True:
+                return last
+            if last.get("ok") is False:
+                raise BoundaryProducedBindingError(
+                    f"boundary group {batch_id!r} has no readable "
+                    f"materialization: {last.get('refusal')!r}")
+            if time.monotonic() >= deadline:
+                raise BoundaryStagingTimeout(
+                    f"boundary group {batch_id!r} was not staged within "
+                    f"{timeout_s}s: mover "
+                    f"{str(last.get('mover_key'))[:12]} is "
+                    f"{last.get('mover_queue_state')!r} and its receipt "
+                    f"reads {last.get('mover_receipt_complete')!r}")
+            time.sleep(min(poll_s, max(deadline - time.monotonic(), 0.0)))
+
+    def ensure_batch_materialized(self, *, batch_id: str) -> dict:
+        """Make one already-committed group resident on its tier again.
+
+        Asks first.  ``materialization_state`` is the intended gate: a
+        batch whose active copy is neither retired nor incomplete is
+        already readable, and calling the transition unconditionally would
+        ask PrismaBuild to re-answer a question its own records already
+        settle.  Only when the state says the copy is gone (or was never
+        completed) does this drive the transition.
+
+        Nothing here chooses an origin, a token or a successor id: the
+        descriptors come from the immutable batch record and the
+        successor's mover/funding key is the content-addressed key of a
+        request PrismaBuild seals over the filed materialization
+        generation.  The window is refilled first for the same reason
+        :meth:`publish` refills -- retirement returned the spent credit to
+        free, and a successor funds only by exact transfer from this
+        owner's own holdings.  The durable origin charge is untouched: one
+        logical batch, one charge, across the forward and reverse cycle.
+        """
+
+        po = self._po
+        if not hasattr(po, "ensure_batch_materialized"):
+            raise BoundaryRepeatMaterializationUnsupported(
+                "the pinned PrismaBuild candidate has no "
+                "produced_output.ensure_batch_materialized: re-staging a "
+                "retired group is not available, and this lane will not "
+                "invent a successor key, a second durable charge or a "
+                "pool read to fake it")
+        state = self.materialization_state(batch_id=batch_id)
+        if (state.get("ok") and not state.get("stage_retired")
+                and state.get("mover_receipt_complete")):
+            return {"ok": True, "state": "live", "step": "none",
+                    "ensured": False, "queried": state,
+                    "batch_id": str(batch_id),
+                    "mover_key": state.get("mover_key"),
+                    "generation": state.get("generation"),
+                    "manifest_digest": state.get("manifest_digest")}
+        refill = self.refill()
+        if not refill.get("ok"):
+            raise BoundaryProducedPublicationFailed(
+                batch_id=batch_id,
+                refusal={"step": "refill", "refusal": refill.get("refusal"),
+                         "refill": refill})
+        out = dict(po.ensure_batch_materialized(
+            self.queue, self.instance, self.template, batch_id=batch_id,
+            cas_root=self.cas_root,
+            producer_action_key=str(self.instance["owner_action_key"]),
+            command_extra=tuple(self.command_extra)))
+        if not out.get("ok"):
+            raise BoundaryProducedPublicationFailed(
+                batch_id=batch_id, refusal=out)
+        digest = str(out.get("manifest_digest") or "")
+        if len(digest) == 64:
+            # The same logical batch keeps the same manifest; re-record it
+            # so a reader that only ever saw the successor can still
+            # compose (the map is bound to the digest, not to the mover).
+            self._manifest_digests[str(batch_id)] = digest
+        out["ensured"] = True
+        out["queried"] = state
+        return out
 
     def release(self, lease_sdk=None) -> dict:
         """Close the instance and reclaim leftover holdings."""
@@ -767,7 +918,8 @@ __all__ = [
     "BoundaryProducedPrewriteRefused",
     "BoundaryProducedPublicationFailed",
     "BoundaryMaterializationIncomplete",
-    "BoundaryRematerializationUnavailable",
+    "BoundaryRepeatMaterializationUnsupported",
+    "BoundaryStagingTimeout",
     "BoundaryProducedPublication",
     "open_pool_queue",
 ]

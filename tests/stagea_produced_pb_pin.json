@@ -1,10 +1,23 @@
 {
-  "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
-  "qualification": "PENDING QUALIFICATION",
-  "note": "The PrismaBuild produced-output API this lane's Stage A boundary publication is built against. It is a CANDIDATE: not accepted, not qualified and not deployed -- no runtime generation under /mnt/shared/prismabuild-fleet/runtime-generations carries produced_output.py at all, which these tests verified rather than assumed. Provenance is an IMMUTABLE bundle, not a live worktree: the owning lane's tree is under active edit, so the bytes here were cut with `git archive` from its committed tree at the candidate commit below and written read-only under the fleet's qualification root. The mutable lane checkout is deliberately NOT a search path: a committed fixture must not resolve against a tree that exists to move. The reader half is separately pinned and deployed: acquire_for's material_namespace/residency_root parameters -- the owner/material-namespace split this lane's produced reads need -- are already present at PQ's own reviewed reader-lease pin (staged_lease.PB_READER_LEASE_PIN_COMMIT), so only the produced-output half is unqualified. These tests skip loudly when nothing resolves against the digests; they never imply support that does not exist.",
-  "candidate_commit": "ee297eac35bb8de8c81d8b464da711fde05bf137",
+  "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-stagea-produced-boundaries-20260921/27c4fc2915a609518a149f90af67034282494429",
+  "candidate_commit": "27c4fc2915a609518a149f90af67034282494429",
   "candidate_source": "/home/rob/tmp/pb-produced-output-current-20260921",
-  "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-stagea-produced-boundaries-20260921/ee297eac35bb8de8c81d8b464da711fde05bf137",
+  "files": {
+    "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
+    "src/prismabuild/movement_actions.py": "fd3a76883033c4e955a9e6e5a939536390671064ed44132fd90835003683d2af",
+    "src/prismabuild/pool.py": "176cc02a976ec8cca8c3b2fa41974ee2ed0c4afbb0d8e576b3dc9b9c09de450a",
+    "src/prismabuild/produced_output.py": "53776077b231686fbbfca0553ea4b5d15728966b7b8db2796756dd888a06d3a3",
+    "src/prismabuild/reader_lease.py": "0e1eb63d43ab228e820a207c18c441e01c5fb0e9d497972322e626f49fa6f53f",
+    "src/prismabuild/residency_map.py": "fa77a5fbb2bb00a255a9967611ab07f633a77f2d3c383506436f22076a625276",
+    "src/prismabuild/resource_scope.py": "f9a85dd277042031ae42a234d947c5abcdf20790e491610961e380445e6503e0",
+    "src/prismabuild/storage_tiers.py": "a33faa564893f9c745a105bc9d6cfd84eba26cd7732a18375a08ffacfaced294",
+    "tools/fleet/prewarm_loop.py": "638f2aeda817037df4c2ea99c557ab9104172823351553849ad0cc3244b9634f",
+    "tools/fleet/stage_move.py": "3e67cb50c99e3e804a3b9a00c80cfe0b39a36517fcf2e2420e28ca8fd42960d2",
+    "tools/fleet/stage_release.py": "6b94e738f78af6b98d61107f129e1364aa0a3bec13a165996b535b63aaf53bce"
+  },
+  "note": "The PrismaBuild produced-output API this lane's Stage A boundary publication is built against. It is a CANDIDATE: not accepted, not qualified and not deployed -- no runtime generation under /mnt/shared/prismabuild-fleet/runtime-generations carries produced_output.py at all, which these tests verified rather than assumed. Provenance is an IMMUTABLE bundle, not a live worktree: the owning lane's tree is under active edit, so the bytes here were cut with `git archive` from its COMMITTED tree at the candidate commit below and written read-only under the fleet's qualification root. The mutable lane checkout is deliberately NOT a search path: a committed fixture must not resolve against a tree that exists to move. This commit is the first that carries the settled repeat-materialization surface -- produced_output.materialization_state (:3018) and produced_output.ensure_batch_materialized (:3105) -- AND the pool.PoolQueue authorization that lets a successor mover be funded over an already committed batch (pool._output_batch_authorized consulting produced_output._live_materialization). Both halves must come from ONE bundle: produced_output from here with pool from the installed 461728e4 distribution would be a mixed-version harness, and the successor's funding would be refused for a reason that is not this lane's. The reader half is separately pinned and deployed: acquire_for's material_namespace/residency_root parameters are already present at PQ's own reviewed reader-lease pin (staged_lease.PB_READER_LEASE_PIN_COMMIT), so only the produced-output half is unqualified. These tests skip loudly when nothing resolves against the digests; they never imply support that does not exist.",
+  "qualification": "PENDING QUALIFICATION",
+  "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
   "search_paths": [
     {
       "env": "PRISMAQUANT_STAGEA_PRODUCED_PB_SRC"
@@ -12,18 +25,5 @@
     {
       "glob": "/mnt/shared/prismabuild-fleet/qualification/pq-stagea-produced-boundaries-20260921/*"
     }
-  ],
-  "files": {
-    "src/prismabuild/produced_output.py": "d3c0a1ca161dceac27d8e2199f95d9716be38963b11ef94c9339b653d86741b4",
-    "src/prismabuild/pool.py": "3cd10ddcb932bfaa95bda51774f869f1dc2b9db0ed52f2df35f0997132d3c152",
-    "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
-    "src/prismabuild/movement_actions.py": "fd3a76883033c4e955a9e6e5a939536390671064ed44132fd90835003683d2af",
-    "src/prismabuild/storage_tiers.py": "a33faa564893f9c745a105bc9d6cfd84eba26cd7732a18375a08ffacfaced294",
-    "src/prismabuild/resource_scope.py": "f9a85dd277042031ae42a234d947c5abcdf20790e491610961e380445e6503e0",
-    "src/prismabuild/reader_lease.py": "2a97bf523b032d0e714754cdeeb08fbcc7d0f52f70ca9688c47700771d893f1c",
-    "src/prismabuild/residency_map.py": "fa77a5fbb2bb00a255a9967611ab07f633a77f2d3c383506436f22076a625276",
-    "tools/fleet/stage_move.py": "3e67cb50c99e3e804a3b9a00c80cfe0b39a36517fcf2e2420e28ca8fd42960d2",
-    "tools/fleet/stage_release.py": "9c5aaf43adfda67f894a388f26e519407df04dde0a4f44e4814ef922389540bf",
-    "tools/fleet/prewarm_loop.py": "638f2aeda817037df4c2ea99c557ab9104172823351553849ad0cc3244b9634f"
-  }
+  ]
 }
