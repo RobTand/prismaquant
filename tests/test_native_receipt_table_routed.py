@@ -665,7 +665,7 @@ def _glm_routing():
             "swiglu_limit": 10.0, "n_group": 1, "topk_group": 1, "topk_method": "noaux_tc",
             "source_protocol": {"router_class": "Glm5NextTopKRouter",
                                 "router_source_sha256": "a" * 64, "scoring_func": "sigmoid",
-                                "topk_method": "noaux_tc", "normalization_epsilon": 1e-6,
+                                "topk_method": "noaux_tc", "normalization_epsilon": 1e-20,
                                 "correction_bias": {"content_sha256": "b" * 64,
                                                     "dtype": "torch.float32"},
                                 "expert_bias_affects": "selection_only", "norm_topk_prob": True}}
@@ -1238,3 +1238,36 @@ def test_the_cli_refuses_a_forged_or_changed_rank_report(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="rank 1 names model_sha256"):
         allocator.main()
     assert not (tmp_path / "layer.json").exists()
+
+
+def _late_bound_receipt(receipt, panel):
+    from prismaquant.native_moe_execution_binding import (
+        RAW_RECEIPT_SCHEMA,execution_panel_from_joint,bind_execution_receipt)
+    raw=copy.deepcopy(receipt);raw['schema']=RAW_RECEIPT_SCHEMA
+    raw['panel']=execution_panel_from_joint(panel)
+    raw['panel_sha256']=identity_sha256(raw['panel'])
+    return bind_execution_receipt(raw,panel)
+
+
+@pytest.mark.parametrize('world_size',[1,2])
+def test_routed_emitter_reads_rank_after_verifying_late_binding(joined,tmp_path,world_size):
+    spec,panel,cost,receipts=_write(joined,tmp_path,world_size=world_size)
+    for rank,receipt in enumerate(receipts):
+        (tmp_path/f'routed.receipt.{rank}.json').write_text(json.dumps(_late_bound_receipt(receipt,panel)))
+    item=emitter.bind_native_receipt(spec,cost_payload=cost,cost_sha256='4'*64,
+        manifest_dir=tmp_path,table_dir=tmp_path)
+    assert item['row']['resources']['world_size']==world_size
+
+
+@pytest.mark.parametrize('world_size',[1,2])
+def test_native_admission_reads_rank_after_verifying_late_binding(joined,tmp_path,world_size):
+    item,context,relation,panel,receipts=_routed_gate(joined,tmp_path,world_size=world_size)
+    for rank,receipt in enumerate(receipts):
+        path=tmp_path/f'routed.receipt.{rank}.json';path.write_text(json.dumps(_late_bound_receipt(receipt,panel)))
+        digest=hashlib.sha256(path.read_bytes()).hexdigest()
+        ref=(item['binding']['receipt'] if rank==0 else item['binding']['peer_receipts'][rank-1]['receipt'])
+        ref['sha256']=digest
+        for phase in ('prefill','decode'):
+            if Path(item['row'][phase]['receipt_path']).name==path.name:
+                item['row'][phase]['receipt_sha256']=digest
+    admit_native_rows(_gate_table(item,context,tmp_path),relation)

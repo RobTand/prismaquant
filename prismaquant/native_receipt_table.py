@@ -315,6 +315,8 @@ def _bind_routed_receipt(*, spec_binding: dict, panel: Mapping, panel_ref: dict,
                         "trace": peer_trace, "trace_ref": peer_trace_ref, "peer": peer})
     for entry in entries:
         receipt = _json(entry["receipt"], "native MoE receipt")
+        from .native_execution_binding import resolve_native_receipt_view
+        receipt = resolve_native_receipt_view(receipt, panel)
         entry["receipt_json"] = receipt
         declared = receipt.get("resources", {}).get("rank") if isinstance(receipt.get("resources"), Mapping) else None
         if type(declared) is not int or declared < 0:

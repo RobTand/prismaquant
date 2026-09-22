@@ -114,3 +114,17 @@ def resolve_execution_binding(binding, final_panel):
     view.update(schema='tessera.native_dense_operator_receipt.v1',
                 panel=copy.deepcopy(final_panel), panel_sha256=identity_sha256(final_panel))
     return view
+
+
+def resolve_native_receipt_view(receipt, panel):
+    """Verify an explicit envelope before readers inspect rank/resource fields.
+
+    The caller retains the original file reference and digest for all intake
+    checks. This in-memory view does not rewrite or rehash the measured file.
+    """
+    if receipt.get('schema') == BOUND_SCHEMA:
+        return resolve_execution_binding(receipt, panel)
+    from .native_moe_execution_binding import BOUND_SCHEMA as MOE_BOUND, resolve_execution_binding as resolve_moe
+    if receipt.get('schema') == MOE_BOUND:
+        return resolve_moe(receipt, panel)
+    return receipt
