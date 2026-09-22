@@ -158,3 +158,94 @@ def test_missing_or_changed_selected_evidence_refuses(tmp_path, change, match):
     with pytest.raises(TesseraExportLaneError, match=match):
         selected_cached_units_manifest(selected, metadata, handoff, data,
                                        schema="tessera.cached_units.v1")
+
+
+@pytest.mark.parametrize('change', [None, 'missing_extension', 'missing_proof', 'changed_wire', 'wrong_scale'])
+def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, change):
+    # Capture-reuse and full512 policy derivation have independent artifact-level
+    # tests. This bridge supplies their accepted boundary, then runs the real
+    # per-cell migration proof checker, builder and Tessera mixed-root reader.
+    import hashlib
+    from prismaquant import joint_catalog_extension as bridge, joint_served_activation as served
+    from test_joint_catalog_extension import _encoder_proof, _write
+    from tessera.cached_unit import CachedUnitBundle
+    source, names, records, handoff, metadata, data = fixture(tmp_path)
+    proof = _encoder_proof(tmp_path)
+    added = tmp_path / 'added'; added.mkdir()
+    rows, groups, assignment = [], {}, {}
+    data.manifest['identity']['encoder_source_sha256'] = '4'*64
+    for name in sorted(names):
+        record = records[name]
+        record['identity'].update(encoder_source_sha256='4'*64, encoder_fixture_id='f'*64)
+        assignment[name] = FMT
+        if name == DENSE: continue
+        reference = copy.deepcopy(record['identity'])
+        candidate = copy.deepcopy(record)
+        candidate['identity'].update(encoder_source_sha256='8'*64, recipe=copy.deepcopy(bridge.ADDED_RECIPE))
+        blob = (tmp_path / record['file']).read_bytes()
+        path = added / record['file']; path.write_bytes(blob)
+        render = added / (record['file'] + '.pt'); render.write_bytes(b'render')
+        adoption = {'schema': bridge.ADOPTION_SCHEMA, 'reference_pair': [name, FMT],
+                    'reference_encoding_identity': reference, 'candidate_encoding_identity': candidate['identity'],
+                    'encoder_source_proof': proof}
+        qualified = {'act_bits': 4, 'static_contract': {'measured_as_served': True},
+                     'activation_max_abs': 12.0, 'input_global_scale': 0.5}
+        row = {'qname': name, 'format': bridge.ADDED_FORMAT, 'record': candidate,
+               'wire': str(path), 'render': str(render), 'catalog_source_adoption': adoption,
+               'activation': qualified}
+        for key in ('wire', 'render'):
+            stat = Path(row[key]).stat()
+            row[key+'_stat'] = {'inode': stat.st_ino, 'bytes': stat.st_size,
+                'mtime_ns': stat.st_mtime_ns, 'ctime_ns': stat.st_ctime_ns}
+        rows.append(row); data.cells[name, bridge.ADDED_FORMAT] = copy.deepcopy(row)
+        data.payload['costs'][name][bridge.ADDED_FORMAT] = copy.deepcopy(data.payload['costs'][name][FMT])
+        metadata[tep.EXPERT_WIRES_KEY][name] = candidate
+        assignment[name] = bridge.ADDED_FORMAT
+        groups[name] = {'members': [name], 'max_abs': 24.0, 'input_global_scale': 0.25}
+    catalog = _write(tmp_path, 'selected-overlay.json', {'schema': 'prismaquant.t4_adopted_catalog.v1', 'cells': rows})
+    data.inputs = {'candidate_overlay': catalog}
+    data.payload['provenance']['candidate_overlay'] = catalog
+    policy = {'schema': served.SCHEMA, 'format': bridge.ADDED_FORMAT,
+              'effective_max_abs': {name: 24.0 for name in groups},
+              'qualification_max_abs': {name: 12.0 for name in groups},
+              'executed_grouping': {'groups': groups}}
+    policy_bound = _write(tmp_path, 'policy.json', policy)
+    for row in rows:
+        name = row['qname']; qualification = row['activation']
+        operator = {'source_weight': {'shape': [2, 2]},
+            'activation': {**qualification, 'activation_max_abs': 24.0, 'input_global_scale': 0.25},
+            'served_activation_policy': served.operator_policy_record(policy_bound, policy, name, bridge.ADDED_FORMAT, qualification)}
+        handoff['costs'][name][bridge.ADDED_FORMAT] = {'joint_operator_identity': operator, 'input_global_scale': 0.25}
+    plan = _write(tmp_path, 'accepted-plan.json', {'inputs': data.inputs, 'served_activation_policy': policy_bound})
+    capture = _write(tmp_path, 'accepted-capture.json', {'status': 'complete'})
+    extension = _write(tmp_path, 'accepted-extension.json', {'schema': bridge.SCHEMA, 'adjoint_capture': capture,
+                      'inputs': {'extended_plan': plan, 'original_prepared': {'path': '/accepted', 'sha256': '1'*64}}})
+    handoff['provenance']['catalog_extension'] = extension
+    handoff['provenance']['tessera_joint_allocation'].update(plan_sha256=plan['sha256'], prepared={'sha256': '2'*64})
+    seen = []
+    monkeypatch.setattr(bridge, 'require_extension', lambda *a, **kw: seen.append((a, kw)))
+    monkeypatch.setattr(served, 'verify_policy', lambda *a, **kw: policy)
+    packages = {'4'*64: {'path': str(tmp_path/'old-producer'), 'sha256': '4'*64},
+                '8'*64: {'path': str(tmp_path/'candidate-producer'), 'sha256': '8'*64}}
+    if change == 'missing_extension': extension = None
+    elif change == 'missing_proof': Path(proof['path']).write_text('{}')
+    elif change == 'changed_wire': Path(rows[0]['wire']).write_bytes(b'changed')
+    elif change == 'wrong_scale': handoff['costs'][rows[0]['qname']][bridge.ADDED_FORMAT]['input_global_scale'] = 0.5
+    def build():
+        return selected_cached_units_manifest(assignment, metadata, handoff, data,
+            schema='tessera.cached_units.v2', catalog_extension=extension, producer_packages=packages)
+    if change:
+        with pytest.raises((ValueError, RuntimeError)): build()
+        return
+    manifest = build()
+    assert len(seen) == 1
+    bundle = CachedUnitBundle(manifest, tmp_path, set(names), source)
+    assert len(bundle.roots) == 2 and bundle.producer_packages == packages
+    for name in names:
+        blob, record = bundle.read(name)
+        assert hashlib.sha256(blob).hexdigest() == record['blob_sha256']
+        assert record == manifest['units'][name]
+    assert bundle.served_activations == {name: {'group': name, 'input_global_scale': 0.25} for name in groups}
+    bundle.require_served_scales({name+'.input_global_scale': 0.25 for name in groups})
+    with pytest.raises(ValueError, match='served policy'):
+        bundle.require_served_scales({name+'.input_global_scale': 0.5 for name in groups})

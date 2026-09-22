@@ -204,7 +204,8 @@ def require_selected_catalog_cell(data, name, fmt, *, validation=None):
         _same({"inode": observed.st_ino, "bytes": observed.st_size,
                "mtime_ns": observed.st_mtime_ns, "ctime_ns": observed.st_ctime_ns},
               row[field + "_stat"], "selected current " + field + " fence")
-    return {"adoption": copy.deepcopy(adoption), "wire_root": str(Path(row["wire"]).resolve().parent),
+    return {"qualification_activation": copy.deepcopy(row["activation"]),
+            "adoption": copy.deepcopy(adoption), "wire_root": str(Path(row["wire"]).resolve().parent),
             "catalog": dict(bound), **proof}
 
 
@@ -522,6 +523,37 @@ def main(argv=None):
         adjoint_capture={"path": args.adjoint_capture, "sha256": args.adjoint_capture_sha256}, output=args.out)
     print(json.dumps(result, sort_keys=True))
     return 0
+
+
+def selected_cache_read_paths(manifest):
+    """Enumerate immutable mixed-cache export inputs for a PB read manifest.
+
+    This returns paths, not placement or authorization. The caller binds their
+    current bytes using PB's normal input-manifest machinery. Original wires
+    remain at their original roots; every historical package and proof arm is
+    explicit, including the served-policy source documents.
+    """
+    _same(manifest.get('schema'), 'tessera.cached_units.v2', 'rooted selected cache schema')
+    paths = {str(Path(manifest['wire_roots'][manifest['unit_roots'][name]]) / row['file'])
+             for name, row in manifest['units'].items()}
+    for package in manifest['producer_packages'].values():
+        root = Path(package['path'])
+        paths.update(str(path) for path in root.rglob('*') if path.is_file()
+                     and path.suffix in {'.py', '.cu', '.cuh', '.cpp', '.h'})
+    authority = manifest['reuse_authority']
+    for key in ('catalog_extension', 'candidate_overlay'):
+        paths.add(authority[key]['path'])
+    for bound in authority['encoder_source_proofs']:
+        document = _json(bound, 'selected encoder proof dependencies')
+        paths.add(bound['path'])
+        paths.add(document['fixture_id']['result'])
+        paths.update(arm['result'] for arm in document['arms'])
+    bound = manifest.get('served_activation_policy')
+    if bound:
+        policy = _json(bound, 'selected served policy dependencies')
+        paths.add(bound['path'])
+        paths.update(policy[key]['path'] for key in ('original_prepared', 'original_cache', 'census'))
+    return sorted(paths)
 
 
 if __name__ == "__main__":

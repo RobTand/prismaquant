@@ -37,12 +37,28 @@ def main(argv=None) -> int:
     parser.add_argument("--assignment", required=True)
     parser.add_argument("--assignment-sha256", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--read-paths-out", help="new JSON file listing all rooted export inputs for PB staging")
+    parser.add_argument("--catalog-extension")
+    parser.add_argument("--catalog-extension-sha256")
+    parser.add_argument("--producer-packages", help="bound JSON mapping exact encoder seals to archived packages")
+    parser.add_argument("--producer-packages-sha256")
     parser.add_argument("--research-proposal", default=None,
                         help="explicit sampled-pilot research proposal for validation export")
     parser.add_argument("--research-proposal-sha256", default=None)
     args = parser.parse_args(argv)
     if bool(args.research_proposal) != bool(args.research_proposal_sha256):
         raise ValueError('research proposal path and SHA-256 must be supplied together')
+    extension = None
+    packages = None
+    for name in ("catalog_extension", "producer_packages"):
+        if bool(getattr(args, name)) != bool(getattr(args, name + "_sha256")):
+            raise ValueError(name + " path and SHA-256 must be supplied together")
+    if bool(args.catalog_extension) != bool(args.producer_packages):
+        raise ValueError("rooted cache needs both extension and producer package bindings")
+    if args.catalog_extension:
+        extension = {"path": args.catalog_extension, "sha256": args.catalog_extension_sha256}
+        _bound(args.catalog_extension, args.catalog_extension_sha256, "catalog extension")
+        packages = json.loads(_bound(args.producer_packages, args.producer_packages_sha256, "producer packages"))
     pilot_binding = {'path': args.handoff, 'sha256': args.handoff_sha256}
     research = None
     if args.research_proposal:
@@ -80,21 +96,34 @@ def main(argv=None) -> int:
                                       require_existing_renders=True,
                                       progress_phase=None)
     manifest = selected_cached_units_manifest(
-        assignment, metadata, handoff, data, schema=CACHE_SCHEMA,
-        research_proposal=research)
+        assignment, metadata, handoff, data,
+        schema="tessera.cached_units.v2" if extension else CACHE_SCHEMA,
+        research_proposal=research, catalog_extension=extension, producer_packages=packages)
     directory = Path(provenance["wire_dir"]).resolve()
     out = Path(args.out)
-    if out.is_symlink() or out.resolve().parent != directory:
+    if out.is_symlink() or (extension is None and out.resolve().parent != directory):
         raise ValueError("selected manifest must be a new file in the original wire directory")
     CachedUnitBundle(manifest, directory, set(manifest["units"]), manifest["source"])
     raw = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    paths_raw = None
+    if args.read_paths_out:
+        if not extension:
+            raise ValueError("read-paths output requires a rooted selected manifest")
+        from prismaquant.joint_catalog_extension import selected_cache_read_paths
+        paths = sorted({str(out.resolve()), *selected_cache_read_paths(manifest)})
+        paths_raw = (json.dumps({"schema": "prismaquant.selected_cache_read_paths.v1", "paths": paths},
+                                sort_keys=True, indent=2) + "\n").encode()
     _atomic_write_new_bytes(out, raw)
+    if paths_raw is not None:
+        _atomic_write_new_bytes(Path(args.read_paths_out), paths_raw)
     print(json.dumps({"schema": "prismaquant.tessera_selected_cache_handoff.v1",
                       "status": "research_wires_only", "manifest": str(out.resolve()),
                       "manifest_sha256": hashlib.sha256(raw).hexdigest(),
                       "assignment_sha256": args.assignment_sha256,
                       "handoff_sha256": args.handoff_sha256,
                       "research_proposal_sha256": args.research_proposal_sha256,
+                      "catalog_extension": extension,
+                      "producer_packages_sha256": args.producer_packages_sha256,
                       "units": len(manifest["units"]),
                       "export_qualified": False, "serving_qualified": False}, sort_keys=True))
     return 0
