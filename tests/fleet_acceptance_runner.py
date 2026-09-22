@@ -38,8 +38,10 @@ import importlib.util
 import json
 import os
 import secrets
+import shutil
 import socket
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -184,6 +186,31 @@ def _candidate_modules(src: Path, tree: Path) -> dict:
             "stage_release": stage_release}
 
 
+#: ``sockaddr_un.sun_path`` on Linux: 108 bytes including the terminating NUL.
+_AF_UNIX_PATH_MAX = 107
+
+
+def _broker_socket_path() -> Path:
+    """A broker socket path short enough to bind, in a private directory.
+
+    The socket used to live under the scenario's work directory, whose depth
+    is whatever pytest and the scenario name make it:
+    ``.../pytest-4360/popen-gw1/candidate0/namespaces/sdk-namespace-separation/broker.sock``
+    is 108 bytes, one past ``sun_path``, so ``sdk-namespace-separation``
+    failed at harness setup with ``AF_UNIX path too long`` on every xdist
+    worker once pytest's run counter reached four digits.  A fresh
+    ``mkdtemp`` under ``TMPDIR`` keeps the path a few dozen bytes whatever
+    the work directory is; ``World.close`` removes it.
+    """
+    directory = Path(tempfile.mkdtemp(prefix="pqfa-"))
+    path = directory / "broker.sock"
+    if len(os.fsencode(path)) > _AF_UNIX_PATH_MAX:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise OSError(f"broker socket path {path} is longer than the {_AF_UNIX_PATH_MAX}-byte "
+                      "AF_UNIX limit; set TMPDIR to a shorter directory")
+    return path
+
+
 class World:
     """One hermetic scenario world: backend Authority + queue + modules."""
 
@@ -196,7 +223,7 @@ class World:
         self.authority = broker.Authority(
             work / "broker-state", os.getuid(), self.backend,
             max_memory_bytes=1 << 30)
-        self.socket_path = work / "broker.sock"
+        self.socket_path = _broker_socket_path()
         # Production connected tests patch resource_scope.BROKER_SOCKET to
         # the hermetic endpoint; _scope_from_record validates the filed
         # control against that global, so the same patch is required here.
@@ -206,7 +233,11 @@ class World:
             modules["scope_mod"].BROKER_SOCKET = Path(self.socket_path)
         except Exception:
             modules["scope_mod"].BROKER_SOCKET = self.socket_path
-        self.server = broker.Server(str(self.socket_path), broker.Handler)
+        try:
+            self.server = broker.Server(str(self.socket_path), broker.Handler)
+        except BaseException:
+            shutil.rmtree(self.socket_path.parent, ignore_errors=True)
+            raise
         self.server.authority = self.authority
         self.thread = threading.Thread(target=self.server.serve_forever,
                                        kwargs={"poll_interval": 0.1},
@@ -221,6 +252,7 @@ class World:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=10)
+        shutil.rmtree(self.socket_path.parent, ignore_errors=True)
 
     def broker_request(self, request: dict) -> dict:
         return self.mod["scope_mod"].broker_request(
