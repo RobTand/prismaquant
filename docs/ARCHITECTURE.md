@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Rooted selected cache (2026-09-22, PQ #939): `tools/build_tessera_selected_cache.py`
+builds a `tessera.cached_units.v2` manifest only from an accepted
+`joint_catalog_extension.v1` plus exact historical producer packages, binds
+each adopted A4 cell to the served-activation policy's priced group scale, and
+can emit the export's PB read paths. The v1 single-root path is unchanged. The
+reader is the pinned Tessera (`acf9eafa6a…`, #966); see "Selected cached wires
+from an additive historical catalog". No format, default, stage or ship gate
+changes.
+
 Tessera pin (2026-09-22, `ws-j2/tessera-pin-v34`, Refs #944 #939): the
 serving-runtime pin and the reader dev pin move from `cc739a5516…` (contract
 v32) to `acf9eafa6a…` (Tessera master after #588, #590 and #592; contract v34,
@@ -20036,6 +20045,25 @@ weight-only or dynamically scored cost does not depend on which A-side
 arithmetic the run bound, so its cache stays reusable for a mathematical reason
 rather than a convenient one. The key (`qname|FMT`) is unchanged, and no second
 cache, rehash or per-row resolution is introduced.
+
+### Selected cached wires from an additive historical catalog
+
+The selected-cache builder retains the v1 single-root contract. Explicit
+`--catalog-extension` and `--producer-packages` path/SHA-256 bindings enable
+`tessera.cached_units.v2` only for a completed joint handoff carrying that exact
+accepted extension. Every selected departure from the checkpoint encoder seal
+must authenticate its exact overlay row, historical migration proof and current
+wire/render fences. Proof bytes and dependency fences are shared within one
+bounded operation and rechecked before completion. Records are never resealed.
+
+The manifest names all selected immutable roots and exact historical producer
+packages. Tessera recomputes each expected identity with its original producer
+and keeps strict verification unchanged. Selected added A4 cells also require
+the explicit full512 served-activation policy and the exact Stage B priced group
+scale; wire calibration identity remains historical. `--read-paths-out` emits
+the selected wires, package sources, authority documents and proof/policy
+inputs required when constructing PB's normal export read manifest. It is not
+an export qualification receipt and does not claim a full model was exported.
 
 ### Selected executed-group activation export
 
