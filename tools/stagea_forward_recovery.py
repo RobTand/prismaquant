@@ -12,7 +12,13 @@ from prismaquant.joint_forward_resume import (
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--specification', required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument('--specification')
+    source.add_argument('--import-capsule',
+                        help='continue this contained recovery capsule (chained segment)')
+    parser.add_argument('--import-capsule-sha256')
+    parser.add_argument('--owner-request',
+                        help="sealed PB request of the action that imported --import-capsule")
     parser.add_argument('--spool-directory', required=True)
     parser.add_argument('--output')
     parser.add_argument('--inspect-live', action='store_true')
@@ -20,6 +26,18 @@ def main():
                         help='explicitly bind this reviewed snapshot as the recovery implementation')
     parser.add_argument('--frontier', type=int)
     args = parser.parse_args()
+    if args.import_capsule:
+        if not (args.import_capsule_sha256 and args.owner_request and args.output):
+            parser.error('--import-capsule needs --import-capsule-sha256, --owner-request '
+                         'and --output')
+        if args.inspect_live:
+            parser.error('--inspect-live takes a --specification')
+        print(json.dumps(build_forward_recovery(
+            imported={'path': args.import_capsule, 'sha256': args.import_capsule_sha256},
+            owner_request=args.owner_request, spool_directory=args.spool_directory,
+            output=args.output, bind_current_implementation=args.bind_current_implementation,
+            frontier=args.frontier), sort_keys=True))
+        return
     spec = _read(args.specification)[0]
     if not args.inspect_live:
         if not args.output:
