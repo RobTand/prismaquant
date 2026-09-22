@@ -194,3 +194,91 @@ def test_a_stuck_stager_retains_origins_and_reports_debt(
     assert all(not Path(ref.path).exists() for ref in refs)
     assert storage._references == {}
     assert _stager_threads() == []
+
+
+@pytest.mark.parametrize("primary_failure", [False, True])
+def test_settlement_cannot_overtake_publication_after_a_failed_drain(
+        tmp_path, monkeypatch, primary_failure):
+    """A real timed-out drain must not submit urgent work past publication.
+
+    G is inside the publication API, with the owner lock yielded; H is
+    queued behind it. The event handoff releases G only once settlement has
+    either refused or queued its urgent task. On the broken path the actual
+    execution order is G, settle, H, which returns credit before the queued
+    publication takes it again. The fixed path never enters settlement.
+    """
+    storage, publication, _q, _env, _pb = _wide_owner(
+        tmp_path, staging_timeout_s=0.1)
+    stager = storage._stager
+    entered, release, decided = (threading.Event() for _ in range(3))
+    steps, outcome = [], {}
+    publish = publication.publish
+    settle = storage._produced_settle_releases
+    submit = stager.submit
+
+    def gated_publish(**kwargs):
+        steps.append("publish")
+        entered.set()
+        assert release.wait(10.0), "test did not release publication"
+        return publish(**kwargs)
+
+    def observed_settle(wait_for_each):
+        steps.append("settle")
+        return settle(wait_for_each)
+
+    def observed_submit(*args, **kwargs):
+        task = submit(*args, **kwargs)
+        if kwargs["label"] == "settle":
+            decided.set()
+        return task
+
+    monkeypatch.setattr(publication, "publish", gated_publish)
+    monkeypatch.setattr(storage, "_produced_settle_releases", observed_settle)
+    monkeypatch.setattr(stager, "submit", observed_submit)
+    primary = RuntimeError("primary capture failure") if primary_failure else None
+
+    def settle_owner():
+        try:
+            if primary is None:
+                storage.settle_produced_releases(wait_for_each=False)
+            else:
+                storage._settle_produced_releases_at_exit(primary)
+        except BaseException as exc:
+            outcome["error"] = exc
+        finally:
+            decided.set()
+
+    runner = None
+    try:
+        refs = chain._write_group(storage, count=1, first=0)
+        refs += chain._write_group(storage, count=1, first=GROUP_SIZE)
+        refs += chain._write_group(storage, count=GROUP_SIZE - 1, first=1)
+        assert entered.wait(5.0)
+        refs += chain._write_group(
+            storage, count=GROUP_SIZE - 1, first=GROUP_SIZE + 1)
+        runner = threading.Thread(target=settle_owner, daemon=True)
+        runner.start()
+        assert decided.wait(5.0), "settlement made no bounded decision"
+        release.set()
+        runner.join(10.0)
+        assert not runner.is_alive()
+        assert stager.drain(10.0)
+        assert steps == ["publish", "publish"], (
+            "settlement must not overtake queued publication after drain=False", steps)
+        assert all(Path(ref.path).exists() for ref in refs)
+        assert storage.telemetry["produced_groups_retired"] == 0
+        if primary is None:
+            assert isinstance(outcome.get("error"), TimeoutError)
+            assert "idle before settlement" in str(outcome["error"])
+        else:
+            assert "error" not in outcome, "cleanup must not replace the primary"
+            assert any("idle before settlement" in note for note in primary.__notes__)
+            assert any(entry["step"] == "settle-at-exit"
+                       for entry in storage._produced_release_errors)
+    finally:
+        release.set()
+        if runner is not None:
+            runner.join(10.0)
+            assert not runner.is_alive()
+        storage._produced_stop_stager()
+        assert _stager_threads() == []

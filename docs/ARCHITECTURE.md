@@ -4,7 +4,7 @@ As of: 2026-09-21 · `muse/stager904-reconciled-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-21, `muse/stager904-reconciled-20260921`) for
-**retirement and close ownership** (PQ #918, #919, #920): an unresolved queued or running stager
+**retirement and close ownership** (PQ #918, #919, #920, #922): an unresolved queued or running stager
 publication refuses origin retirement with a timeout. The origin, live-byte
 charge, reference and slot stay owned, and the release report names the debt.
 No format, kernel order, or staging-budget default changes.
@@ -1363,7 +1363,11 @@ says exactly that.
   origins and bytes; a primary exception receives a note and keeps its identity.
   A later explicit close may clean up only after it establishes the thread
   has ended. No thread is forcibly terminated and retained credit is not freed
-  optimistically.
+  optimistically. Explicit settlement also requires a successful stager drain
+  before submitting its urgent task; a timed-out or failed drain refuses
+  settlement while retaining ownership, so it cannot overtake queued
+  publication (PQ #922). The existing closing-error path records that refusal
+  without replacing a primary failure.
   **Telemetry.** `produced_compute_blocked_s` is the compute thread's time
   blocked on this owner's PrismaBuild work, which is the GPU's cost of
   staging. It is the sum of one exclusive counter per reason

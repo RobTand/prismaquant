@@ -2289,9 +2289,11 @@ class StreamedBoundaryArtifacts:
             # and then the settle itself runs on the stager, the one thread
             # that drives retirements while it is alive.
             with self._produced_blocked("settle"):
-                self._stager.drain(
+                idle = self._stager.drain(
                     float(self._produced_plan["staging_timeout_s"]))
             self._produced_raise_stager_failure()
+            if not idle:
+                raise TimeoutError("stager did not become idle before settlement")
         return self._produced_submit(
             "urgent", "settle",
             lambda: self._produced_settle_releases(wait_for_each),
