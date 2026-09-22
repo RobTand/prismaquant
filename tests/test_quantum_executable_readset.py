@@ -488,7 +488,7 @@ def _acceptance_setup(tmp_path, monkeypatch):
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     torch.manual_seed(85)
     model, context, runner, cache = lm.fixture()
-    context.settle_prefetched_layers = lambda layers: None
+    context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         "owners": [], "unique_storage_bytes": sum(
             p.numel() * p.element_size() for p in model.parameters())}
@@ -963,7 +963,7 @@ def _acceptance_setup_expert(tmp_path, monkeypatch):
     monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     model, context, runner = _expert_fixture()
-    context.settle_prefetched_layers = lambda layers: None
+    context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         "owners": [], "unique_storage_bytes": sum(
             p.numel() * p.element_size() for p in model.parameters())}
