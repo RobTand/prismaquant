@@ -447,18 +447,28 @@ def live_pins() -> DomainPins:
 #:   re-transcription.  If that walk ever disagrees with
 #:   :data:`AUDITED_RATE_COUNTS` under ``9ae1f824…``, this is a
 #:   re-measurement, not a transcription, and the counts move by review.
+#:
+#: **Re-taken 2026-09-22 for the v34 pin, a re-transcription.**  The pin moved
+#: ``cc739a55`` -> ``acf9eafa`` (contract v32 -> v34), and both deciding files
+#: were hashed at the new commit: ``src/tessera/export.py`` is still
+#: ``d9c89d92…`` and ``src/tessera/grammar.py`` is still ``9ae1f824…``, so
+#: :func:`tessera_source_state` keeps naming ``reader-pin-cc739a55`` (state
+#: identity is the ``export.py`` digest, and a second entry with the same
+#: digest would make the match ambiguous) and no entry is added.  What v33
+#: and v34 changed -- the per-image quantiser list and four dense cells --
+#: is serving scope, which no number here reads.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab",
+    reader_dev_pin_commit="acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9",
     reader_dev_pin_contract_sha256=(
-        "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
+        "d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472"
     ),
-    serving_runtime_pinned_commit="cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab",
+    serving_runtime_pinned_commit="acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
+        "d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472"
     ),
     producer_installed_contract_sha256=(
-        "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
+        "d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472"
     ),
 )
 
