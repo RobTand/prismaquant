@@ -20,6 +20,7 @@ import json
 import os
 import pickle
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -482,6 +483,47 @@ def _checkpoint_manifest_envelope_bytes(*, boundary: int, session: dict,
                 + "\n").encode())
 
 
+def _checkpoint_tensor_spec(value, owner):
+    """Plan bytes without loading an owner's durable cotangent descriptor."""
+    from .perturbed_x_cache import ExactActivationReference
+
+    if isinstance(value, ExactActivationReference) and owner is not None:
+        # Refuse stale/foreign descriptors before reserving or creating files.
+        owner._entry_identity(value)
+        return value.tensor_bytes, list(value.shape), value.dtype
+    if (not isinstance(value, torch.Tensor) or value.layout != torch.strided
+            or value.is_meta):
+        raise TypeError(
+            "exact boundary checkpoint requires materialized strided tensors "
+            "or an owner's exact-entry references")
+    return value.numel() * value.element_size(), list(value.shape), str(value.dtype)
+
+
+def _checkpoint_plan_windows(plans, width):
+    """Metadata-only groups matching the owner's probe/batch read windows."""
+    from itertools import groupby
+
+    for _, group in groupby(
+            plans, key=lambda plan: (plan["probe_index"], plan["batch_index"] // width)):
+        yield list(group)
+
+
+def _checkpoint_tensor_window(cotangents, plans, owner):
+    """Reuse the owner's bounded read grouping, including PB group retirement.
+
+    A one-entry window would retire and restage a complete produced group
+    for each of its entries. Match the existing prefetch batch width, keeping
+    only that window plus one serializer's reservation resident.
+    """
+    from .perturbed_x_cache import ExactActivationReference
+
+    references = [cotangents[(plan["probe_index"], plan["batch_index"])]
+                  for plan in plans]
+    references = [value for value in references
+                  if isinstance(value, ExactActivationReference)]
+    return owner.prefetch(references) if references else nullcontext()
+
+
 def write_adjoint_checkpoint(
     space: str | os.PathLike, *, boundary: int, session: dict,
     cotangents, shared_adjoint, shared_pass, owner=None,
@@ -489,7 +531,11 @@ def write_adjoint_checkpoint(
     """Serialize one strided checkpoint; returns its §3.3 record.
 
     ``cotangents`` maps ``(probe, batch)`` -> CPU activation cotangent tensor
-    at ``boundary``. ``shared_adjoint`` maps ``(probe, batch)`` -> the
+    at ``boundary``, or (with an owner) its existing exact-entry reference.
+    Reference metadata plans admission without reading payloads; serialization
+    opens one accounted, digest-verified, lease-held owner window at a time,
+    bounded by the existing ``prefetch_batches`` policy.
+    No full tensor plane is retained. ``shared_adjoint`` maps ``(probe, batch)`` -> the
     ``SharedStateCotangents.state_dict()`` carried beside it. ``shared_pass``
     maps ``batch`` -> the captured forward shared-pass state each chain layer
     and the layer quantum recompute from.
@@ -548,11 +594,8 @@ def write_adjoint_checkpoint(
             type(part) is not int or part < 0 for part in shared_pass):
         raise RuntimeError(
             "exact boundary checkpoint shared_pass keys must be nonnegative integers")
-    for tensor in cotangents.values():
-        if (not isinstance(tensor, torch.Tensor) or tensor.layout != torch.strided
-                or tensor.is_meta):
-            raise TypeError(
-                "exact boundary checkpoint requires materialized strided tensors")
+    for value in cotangents.values():
+        _checkpoint_tensor_spec(value, owner)
     owner.check_transient_buffer("checkpoint shared-state serialization")
     estimates = {}
     for name, state in _iter_shared_states(shared_adjoint, shared_pass):
@@ -566,8 +609,8 @@ def write_adjoint_checkpoint(
 
     activation_plan = []
     for (probe_index, batch_index) in sorted(cotangents):
-        tensor = cotangents[(probe_index, batch_index)]
-        nbytes = tensor.numel() * tensor.element_size()
+        value = cotangents[(probe_index, batch_index)]
+        nbytes, shape, dtype = _checkpoint_tensor_spec(value, owner)
         name = f"cotangent-{probe_index}-{batch_index}"
         activation_plan.append({
             "probe_index": probe_index, "batch_index": batch_index,
@@ -575,8 +618,8 @@ def write_adjoint_checkpoint(
             "name": name,
             "path": str(checkpoint_dir / "entries" / activation_cache_filename(name)),
             "tensor_bytes": nbytes, "file_envelope": nbytes + 65536,
-            "shape": [int(dim) for dim in tensor.shape],
-            "dtype": str(tensor.dtype),
+            "shape": [int(dim) for dim in shape],
+            "dtype": str(dtype),
         })
     shared_plan = [{"name": name,
                     "path": str(checkpoint_dir / "entries" / f"{name}.pkl"),
@@ -627,21 +670,32 @@ def write_adjoint_checkpoint(
                 shared_state_entries.append(_write_shared_state_streaming(
                     checkpoint_dir, plan["name"], state,
                     max_file_bytes=plan["file_envelope"]))
+        from .perturbed_x_cache import ExactActivationReference
+
         activation_entries = []
-        for plan in activation_plan:
-            tensor = cotangents[(plan["probe_index"], plan["batch_index"])]
-            with owner.hold_transient_serialization(
-                    plan["tensor_bytes"],
-                    f"checkpoint tensor {plan['name']}"):
-                entry = write_checkpoint_cotangent_entry(
-                    checkpoint_dir, probe_index=plan["probe_index"],
-                    batch_index=plan["batch_index"], tensor=tensor,
-                    session=session, max_file_bytes=plan["file_envelope"])
-            if entry["file_bytes"] > plan["file_envelope"]:
-                raise RuntimeError(
-                    "exact boundary checkpoint tensor file exceeds its "
-                    f"admitted envelope for {plan['name']}")
-            activation_entries.append(entry)
+        for window_plans in _checkpoint_plan_windows(
+                activation_plan, int(owner.config["prefetch_batches"])):
+            with _checkpoint_tensor_window(cotangents, window_plans, owner) as window:
+                for plan in window_plans:
+                    value = cotangents[(plan["probe_index"], plan["batch_index"])]
+                    tensor = (owner.get(window, value)
+                              if isinstance(value, ExactActivationReference) else value)
+                    try:
+                        with owner.hold_transient_serialization(
+                                plan["tensor_bytes"],
+                                f"checkpoint tensor {plan['name']}"):
+                            entry = write_checkpoint_cotangent_entry(
+                                checkpoint_dir, probe_index=plan["probe_index"],
+                                batch_index=plan["batch_index"], tensor=tensor,
+                                session=session, max_file_bytes=plan["file_envelope"])
+                    finally:
+                        # Release before the window closes/reuses its scratch.
+                        tensor = None
+                    if entry["file_bytes"] > plan["file_envelope"]:
+                        raise RuntimeError(
+                            "exact boundary checkpoint tensor file exceeds its "
+                            f"admitted envelope for {plan['name']}")
+                    activation_entries.append(entry)
         record = {
             "schema": ADJOINT_CHECKPOINT_SCHEMA,
             "boundary": int(boundary),
