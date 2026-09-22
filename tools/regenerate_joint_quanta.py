@@ -731,6 +731,9 @@ def main(argv=None) -> int:
                          "combine with --expect-existing")
     ap.add_argument("--adjoint-receipt", type=Path, default=None,
                     help="Gate 2: stage-A adjoint-capture.json to bind")
+    ap.add_argument("--catalog-extension", type=Path, default=None,
+                    help="immutable additive-catalog proof retaining the original Stage A capture")
+    ap.add_argument("--catalog-extension-sha256", default=None)
     ap.add_argument("--boundary-readsets", action="store_true",
                     help="with Gate 2: derive each record's sealed bulk "
                          "readset manifest (PQ #848) into the new tree's "
@@ -806,6 +809,13 @@ def main(argv=None) -> int:
                     "original root (pass --output-root equal to "
                     "--original-root, or drop --metadata-root)")
 
+        if bool(args.catalog_extension) != bool(args.catalog_extension_sha256):
+            raise ValueError("catalog extension path and SHA256 must be supplied together")
+        if args.catalog_extension is not None and (args.adjoint_receipt is None or args.expect_existing is not None):
+            raise ValueError("catalog extension requires actual Stage A proof and a new metadata generation")
+        extension = (None if args.catalog_extension is None else {
+            "path": str(args.catalog_extension.resolve()), "sha256": args.catalog_extension_sha256})
+
         def _produce(root: str, receipt=None, metadata=None):
             return layer_quanta(
                 plan, prepared, parent,
@@ -820,7 +830,7 @@ def main(argv=None) -> int:
                 ram_window_gib=derivation.get("ram_window_gib"),
                 max_resident_consumers=derivation.get("max_resident_consumers"),
                 window_partition=partition,
-                adjoint_receipt=receipt)
+                adjoint_receipt=receipt, catalog_extension=extension)
     except (ValueError, OSError) as exc:
         return _fail(str(exc))
     receipt = None

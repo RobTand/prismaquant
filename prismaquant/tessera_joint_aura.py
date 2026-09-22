@@ -1312,9 +1312,13 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                   progress_committed=(0 if progress_phase is None else resolved),
                   render_mirror_root=None if render_mirror_root is None else str(render_mirror_root),
                   head_walk_workers=walk_workers, head_walk_resumed_units=len(banked))
+    result = MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
+                                formats, encoder_source_reuse=encoder_source_reuse, **scoped)
+    if inputs.get("candidate_overlay") is not None:
+        from .joint_catalog_extension import attach_candidate_overlay
+        attach_candidate_overlay(result, inputs["candidate_overlay"])
     if not verify_payloads:
-        return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
-                                   formats, encoder_source_reuse=encoder_source_reuse, **scoped)
+        return result
 
     def verify_files(item):
         pair, cell = item
@@ -1343,8 +1347,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             for pair, digest in workers.map(verify_files, cells.items()):
                 if digest is not None:
                     cells[pair]["render_file_sha256"] = digest
-    return MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
-                               formats, encoder_source_reuse=encoder_source_reuse, **scoped)
+    return result
 
 
 def calibrated_maxima(data, profile):
