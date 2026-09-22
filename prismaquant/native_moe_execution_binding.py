@@ -62,7 +62,7 @@ def freeze_execution_panel(inputs,preflight,*,source_sha256):
         'member_execution_identity_sha256':{m['unit']:identity_sha256(member_identity(m)) for m in members},
         'member_shapes':{m['unit']:owner.rank_local_member_shape(inputs['shape'],m['role']) for m in members},
         'operator_route':operator_route_identity(route)}
-    return copy.deepcopy({'schema':RAW_PANEL_SCHEMA,**({'reference_served_quantizer':reference} if reference is not None else {}),'unit':inputs['unit'],'format':inputs['format'],
+    return copy.deepcopy({'schema':RAW_PANEL_SCHEMA, **({'source_acquisition':inputs['source_acquisition']} if 'source_acquisition' in inputs else {}),**({'reference_served_quantizer':reference} if reference is not None else {}),'unit':inputs['unit'],'format':inputs['format'],
         'shape':inputs['shape'],'members':members,'profile_role_order':inputs['profile_role_order'],
         'routing':inputs['routing'],'routing_capture_sha256':inputs['routing_capture_sha256'],
         'source_sha256':source_sha256,'calibration_sha256':inputs['calibration']['calibration_sha256'],

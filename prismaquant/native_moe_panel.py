@@ -719,6 +719,46 @@ def _member_roster(unit, members, shape):
                                  pattern=None, where="native MoE members")
 
 
+def _validate_prefix_capture(capture, source_model_identity=None):
+    """A fresh source prefix is explicit evidence, never a full-load stamp."""
+    from .streaming_model import validate_streaming_prefix_initialization_contract
+    contract=validate_streaming_prefix_initialization_contract(capture['model_load_contract'])
+    if (capture['unit']!='model.language_model.layers.3.mlp.experts'
+            or geometry_family(capture['shape'])!='glm53_next_routed_stack_v1'
+            or contract['total_model_layers']!=45 or contract['observed_layers']!=[0,1,2,3]
+            or contract['dtype']!='torch.bfloat16'):
+        raise ValueError('fresh routing prefix scope differs from GLM source layers0..3')
+    if (contract['layers_prefix']!='model.language_model.layers.' or
+            not contract['model_class'].endswith('.Glm5NextForConditionalGeneration') or
+            not {'lm_head.weight','model.language_model.embed_tokens.weight',
+                 'model.language_model.norm.weight'} <= set(contract['head_state_names'])):
+        raise ValueError('fresh prefix lacks the actual GLM head/model initialization coverage')
+    replay=capture.get('replay',{})
+    if (replay.get('schema')!='prismaquant.glm_routing_boundary_replay.v1'
+            or replay.get('layer')!=3 or replay.get('sample')!=0
+            or replay.get('stop')!='before_original_packed_experts_forward'):
+        raise ValueError('fresh routing prefix lacks its exact original replay coordinates')
+    provenance=capture.get('source_acquisition',capture)
+    reuse=provenance.get('source_cache_reuse',{})
+    if (provenance.get('dev_uncertified') is not True
+            or provenance.get('dev_mode',{}).get('PRISMAQUANT_DEV_MODE')!='1'
+            or reuse.get('complete_checkpoint') is not True
+            or reuse.get('validator')!='validate_cached_streamed_model_identity'):
+        raise ValueError('fresh prefix requires explicit complete-cache DEV source authority')
+    _sha(reuse.get('content_sha256'),'prefix cached complete source')
+    binding=reuse.get('binding',{})
+    _sha(binding.get('sha256'),'prefix cache binding')
+    if not isinstance(binding.get('path'),str) or not binding['path']:
+        raise ValueError('prefix source cache binding lacks its path')
+    if source_model_identity is not None:
+        _equal(reuse['content_sha256'],source_model_identity['content_sha256'],'prefix complete source identity')
+        _equal(capture['producer_source']['tensors'],source_model_identity['checkpoint_weight_map'],'prefix checkpoint source map')
+        mapping={name:{'tensor':key,'file':Path(source_model_identity['checkpoint_weight_map'][key]).name}
+                 for name,key in source_model_identity['weight_map'].items()}
+        _equal(contract['source_map_sha256'],identity_sha256(mapping),'prefix live source map')
+    return contract
+
+
 def _calibration_and_capture(calibration, capture, *, unit, shape, routing):
     if calibration.get("schema") != "prismaquant.calibration_input.v1":
         raise ValueError("native MoE needs the exact calibration receipt")
@@ -740,7 +780,10 @@ def _calibration_and_capture(calibration, capture, *, unit, shape, routing):
         raise ValueError("native MoE capture needs its full producer source and actual runtime config")
     _sha(capture["capture_source_sha256"], "capture producer")
     from . import validate_pretrained_initialization_contract
-    validate_pretrained_initialization_contract(capture["model_load_contract"])
+    if isinstance(capture['model_load_contract'],dict) and capture['model_load_contract'].get('schema')=='prismaquant.streaming_prefix_initialization.v1':
+        _validate_prefix_capture(capture)
+    else:
+        validate_pretrained_initialization_contract(capture["model_load_contract"])
     if capture["attention_implementation"] != "eager":
         raise ValueError("native MoE capture must record the actual eager source backend")
     runtime = capture["capture_runtime"]
@@ -798,7 +841,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
                        wire_blobs, wire_records, encoding_identities, numerics,
                        max_resident_bytes, max_temporary_bytes, runtime_image, serving_config_sha256, probe_request,
                        format_name=FORMAT, probe_calibration_receipt=None, probe_scope=None,
-                       quality_prepared=None, quality_source_model=None):
+                       quality_prepared=None, quality_source_model=None, retain_source_tensors=True):
     """Prepare one complete routed reference from existing resident PWC data.
 
     Member records explicitly declare the expert/role order. Source tensors and
@@ -862,10 +905,10 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     device = phase_tensors["prefill"]["input"].device
     if phase_tensors["decode"]["input"].device != device:
         raise ValueError("native MoE phases must share the resident reference device")
-    packed_bytes = sum(source_weights[name].numel() * source_weights[name].element_size() for name in names)
+    packed_bytes = sum(math.prod(container_member_shape(shape, member['role'])) * 2 for member in members)
     # One gate/up+down pack plus the largest transient decoded member. Input,
     # output and GEMM activations are covered separately by PB's action budget.
-    required = packed_bytes + max(source_weights[name].numel() * source_weights[name].element_size() for name in names)
+    required = packed_bytes + max(math.prod(container_member_shape(shape, member['role'])) * 2 for member in members)
     if required > _bytes(max_temporary_bytes, "temporary packing budget"):
         raise ValueError("native MoE reference pack exceeds its explicit temporary budget")
     prefetch = prefetch_joint_cache(cache, names, {name: [format_name] for name in names},
@@ -920,7 +963,9 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
                      "blob_bytes": len(wire_blobs[name]), "record": wire_records[name]}})
         if rank_local:
             actual_members[-1]["quality_rendered_weight"] = _cb_cache_tensor_identity(full_render)
-        tensors["source_weight/" + name], tensors["rendered_weight/" + name] = source, render
+        if retain_source_tensors:
+            tensors["source_weight/" + name] = source
+        tensors["rendered_weight/" + name] = render
         rendered[name] = render
     if spec.static_activation_contract is not None:
         for stage_roles in (("w1", "w3"), ("w2",)):
@@ -972,6 +1017,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     del gate_up, down
     reference_file = Path(inspect.getfile(type(experts_module)))
     return {"schema": INPUT_SCHEMA, "unit": unit, "format": format_name, "shape": dict(shape),
+            **({"source_acquisition":routing_capture["source_acquisition"]} if "source_acquisition" in routing_capture else {}),
             **({"quality_preparation": quality_context} if quality_context is not None else {}),
             "members": actual_members, "profile_role_order": list(ROLES), "routing": dict(routing), "execution": execution,
             "calibration": calibration_receipt, "probe_calibration": probe_calibration_receipt,
@@ -1316,6 +1362,7 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         member_shapes,
         operator_route_identity(route))
     return json.loads(json.dumps({"schema": PANEL_SCHEMA, "unit": inputs["unit"],
+        **({"source_acquisition":inputs["source_acquisition"]} if "source_acquisition" in inputs else {}),
         **({"reference_served_quantizer": reference_quantizer} if reference_quantizer is not None else {}),
         **({"quality_preparation": inputs["quality_preparation"]} if quality_members is not None else {}),
         "format": inputs["format"],
@@ -1525,7 +1572,7 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
                        + ([] if complete else ["native_operator_scratch"])}
 
 
-def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, device):
+def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, device, source_model_identity=None):
     """Transport an independently hashed PAC boundary into the native protocol.
 
     Storage may be on CPU, but metadata describes the original CUDA invocation.
@@ -1547,7 +1594,13 @@ def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, de
     validate_routing(metadata["routing"])
     _equal(metadata["profile_role_order"], list(ROLES), "captured profile role order")
     identity = capture_manifest["identity"]
-    for key in ("model_load_contract", "attention_implementation", "capture_runtime"):
+    prefix=isinstance(metadata['model_load_contract'],dict) and metadata['model_load_contract'].get('schema')=='prismaquant.streaming_prefix_initialization.v1'
+    if prefix:
+        if source_model_identity is None:
+            raise ValueError('fresh prefix intake requires independently bound original source identity')
+        _validate_prefix_capture(metadata,source_model_identity)
+    for key in (("attention_implementation", "capture_runtime") if prefix else
+                ("model_load_contract", "attention_implementation", "capture_runtime")):
         _equal(metadata[key], identity[key], f"boundary/capture {key}")
     original = {}
     for key in ("inputs", "top_k_index", "top_k_weights", "coordinates", "expert_bias"):
@@ -1594,8 +1647,14 @@ def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, de
         "calibration_shape", "calibration_dtype", "producer_source", "runtime_config", "capture_source_sha256",
         "model_load_contract", "attention_implementation", "capture_runtime", "scope")}
     capture.update(schema="prismaquant.routed_boundary_capture.v1", routing=routing, phases=phases)
+    if 'replay' in metadata:capture['replay']=copy.deepcopy(metadata['replay'])
     if "source_execution" in metadata:
         capture["source_execution"] = copy.deepcopy(metadata["source_execution"])
+    if metadata.get("dev_uncertified") is not None:
+        if metadata["dev_uncertified"] is not True:
+            raise ValueError("source acquisition must retain its uncertified DEV declaration")
+        capture["source_acquisition"]={key:copy.deepcopy(metadata[key]) for key in
+            ("dev_uncertified","dev_mode","source_cache_reuse","capture_device_envelope") if key in metadata}
     _calibration_and_capture(calibration_receipt, capture, unit=unit, shape=shape, routing=routing)
     source = capture["producer_source"]
     for name, digest in {**source["files"], **source["auxiliary_sha256"], "config.json": source["config_sha256"]}.items():

@@ -61,7 +61,7 @@ def project(panel):
         'routes':{phase:copy.deepcopy(value['expected_route']) for phase,value in panel['phases'].items()}}
     for key in ('workspace','routing','routing_capture_sha256','serving_config_sha256','source_execution',
                 'config_sha256','scheme_sha256','native_tensors_sha256','execution','runtime_binding',
-                'joint_operator_identity_sha256','source_sha256','calibration_sha256'):
+                'joint_operator_identity_sha256','source_sha256','calibration_sha256','source_acquisition'):
         if key in panel:operator[key]=copy.deepcopy(panel[key])
     return {'common':copy.deepcopy(common),'libraries':dict(libraries),'operator':operator}
 
