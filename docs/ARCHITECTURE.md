@@ -19827,3 +19827,19 @@ weight-only or dynamically scored cost does not depend on which A-side
 arithmetic the run bound, so its cache stays reusable for a mathematical reason
 rather than a convenient one. The key (`qname|FMT`) is unchanged, and no second
 cache, rehash or per-row resolution is introduced.
+
+### Selected executed-group activation export
+
+The routed-scale export gate accepts `executed_group.v1` only with the exact
+bound served-activation policy, independently rederived groups, selected A4
+member/format coverage, and the policy's priced fp32 values and formula. The
+build anchor preserves this binding and records pricing/input equality as
+verified; serving qualification remains false. Legacy per-unit declarations
+and refusal of unbound executed labels remain unchanged.
+
+`tools/write_tessera_selected_scales.py --assignment FILE --assignment-sha256
+SHA --out-dir NEW_DIRECTORY` reads that immutable allocation once and writes
+only its selected priced static scales through `write_export_inputs` with
+`hessians=None`. It does not recompute per-expert maxima or alter retained H.
+The output receipt binds the assignment, serialized scale file and served
+policy. An existing output directory is refused before any write.
