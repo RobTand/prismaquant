@@ -1,7 +1,7 @@
 """Capture original GLM MoE arguments in one authenticated BF16 layer replay.
 
-The caller supplies an independently owned exact Stage A boundary. This module
-does not borrow live producer files, reconstruct routes or execute experts.
+The caller supplies an owned completed boundary or a fresh BF16 source prefix.
+This module records actual router arguments before executing the expert owner.
 """
 from __future__ import annotations
 
@@ -62,6 +62,9 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
     if (calibration_ids.shape != (1, 512) or hidden.shape[0] != 1 or hidden.shape[1] != 512
             or calibration.get("shape") != [512, 512] or hidden.dtype != torch.bfloat16):
         raise ValueError("routing replay requires sample zero of the exact 512x512 calibration")
+    attention = getattr(runner.base_model.config, '_attn_implementation', None)
+    if attention != 'eager':
+        raise ValueError('routing replay requires the actual BF16 source eager attention selector')
     source = _require_source_identity(producer_source)
     unit = f"model.language_model.layers.{layer}.mlp.experts"
     module = runner.model.get_submodule(unit)
@@ -77,13 +80,20 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
     del unused
     batch = StreamedForwardBoundaries(ids, positions, embeddings, mask, [], None)
     captured = {}
+    captured_device = None
 
     class Captured(BaseException):
         pass
 
     def hook(actual, args, kwargs):
+        nonlocal captured_device
         if actual is not module or captured:
             raise RuntimeError("unexpected repeated routed boundary")
+        bound = inspect.signature(type(actual).forward).bind(actual, *args, **kwargs)
+        devices = {str(bound.arguments[k].device) for k in ('hidden_states', 'top_k_index', 'top_k_weights')}
+        if len(devices) != 1 or not next(iter(devices)).startswith('cuda:'):
+            raise ValueError('original routed tensors must share their actual CUDA device')
+        captured_device = next(iter(devices))
         captured.update(select_original_routes(actual, args, kwargs, sequence_length=512))
         raise Captured()
 
@@ -106,7 +116,7 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
         routed_scaling_factor=router.routed_scaling_factor, apply_router_weight_on_input=False,
         expert_map=None, input_dtype=str(captured["inputs"].dtype),
         topk_weights_dtype=str(captured["top_k_weights"].dtype),
-        topk_ids_dtype=str(captured["top_k_index"].dtype), device=str(runner.device),
+        topk_ids_dtype=str(captured["top_k_index"].dtype), device=captured_device,
         weights_contract="post_renormalization_and_routed_scaling", topk_method="noaux_tc",
         n_group=router.num_group, topk_group=router.topk_group, swiglu_limit=module.swiglu_limit,
         source_protocol=dict(router_class=f"{type(router).__module__}.{type(router).__qualname__}",
@@ -114,10 +124,22 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
             scoring_func="sigmoid", topk_method="noaux_tc", normalization_epsilon=epsilon,
             correction_bias={k: tensor_identity["expert_bias"][k] for k in ("content_sha256", "dtype")},
             expert_bias_affects="selection_only", norm_topk_prob=router.norm_topk_prob))
+    from .native_moe_panel import GEOMETRY_VERSION, validate_geometry
+    shape = {"geometry_version":GEOMETRY_VERSION,"geometry_id":"glm53_next_routed_stack_v1",
+        "source_id":"glm5_next","n_routed_experts":module.num_experts,"top_k":router.top_k,
+        "hidden_size":module.hidden_dim,"intermediate_size":module.intermediate_dim,
+        "shared_experts":runner.base_model.config.n_shared_experts,"n_group":router.num_group,
+        "topk_group":router.topk_group,"topk_method":routing["topk_method"],
+        "scoring_func":routing["scoring_func"],"norm_topk_prob":router.norm_topk_prob,
+        "routed_scaling_factor":router.routed_scaling_factor,"swiglu_limit":module.swiglu_limit,
+        "gated":True,"tensor_parallel":1,"tensor_parallel_cut_axis":"intermediate"}
+    # The actual module stores a fused gate/up tensor; refusal precedes any geometry claim.
+    if tuple(module.gate_up_proj.shape) != (module.num_experts,2*module.intermediate_dim,module.hidden_dim):
+        raise ValueError("actual GLM expert gate/up geometry differs")
+    validate_geometry(shape)
     return {"tensors": captured, "metadata": {
         "schema": "prismaquant.native_moe_raw_boundary.v1", "unit": unit,
-        "shape": {"experts": module.num_experts, "hidden_size": module.hidden_dim,
-                  "intermediate_size": module.intermediate_dim, "top_k": router.top_k},
+        "shape": shape,
         "routing": routing, "profile_role_order": ["w1", "w3", "w2"],
         "scope": "first calibration sequence; decode uses its first row, not autoregressive generation",
         "calibration_sha256": calibration["calibration_sha256"],
@@ -125,7 +147,7 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
         "producer_source": source, "runtime_config": runner.model.config.to_dict(),
         "source_execution": source_execution_identity(runner.model),
         "model_load_contract": pretrained_initialization_contract(runner.model),
-        "attention_implementation": "eager",
+        "attention_implementation": attention,
         "capture_runtime": {"torch": str(torch.__version__), "cuda": torch.version.cuda,
                             "transformers": __import__("transformers").__version__},
         "capture_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
