@@ -27,16 +27,43 @@ def _write(root, name, value, *, binary=False):
     return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
 
 
+def _encoder_proof(tmp_path):
+    from tests.test_reseal_campaign_identity import _arm_result, _fixture_result
+    old = {'prismaquant_source_sha256': 'a'*64, 'encoder_source_sha256': '4'*64}
+    new = {**old, 'encoder_source_sha256': '8'*64}
+    arm_path = _arm_result(tmp_path/'source-proof-arm.json', old, new)
+    arm = json.loads(arm_path.read_text())
+    routed = copy.deepcopy(arm['comparison']['cells'][-1])
+    routed['qname'] = 'model.layers.0.mlp.experts.0.down_proj'
+    arm['comparison']['cells'].append(routed)
+    arm_bound = _write(tmp_path, arm_path.name, arm)
+    fixture_path = _fixture_result(tmp_path/'source-fixture.json', old['encoder_source_sha256'], new['encoder_source_sha256'])
+    fixture_bound = {'path': str(fixture_path), 'sha256': hashlib.sha256(fixture_path.read_bytes()).hexdigest()}
+    cells, strata = [], {}
+    for cell in arm['comparison']['cells']:
+        kind = 'routed' if '.experts.' in cell['qname'] else 'dense'
+        cells.append({**cell, 'kind': kind})
+        strata.setdefault(kind, {}).setdefault(cell['family'], []).append(cell['body_rate_q256'])
+    proof = {'schema': 'prismaquant.reseal_proof_bundle.v1', 'ok': True,
+        'pins': {'old': old, 'new': new}, 'encoder_fixture_id_equal': True,
+        'arms': [{'result': arm_bound['path'], 'result_sha256': arm_bound['sha256']}],
+        'fixture_id': {'result': fixture_bound['path'], 'result_sha256': fixture_bound['sha256'],
+                       'ids': {'old': 'f'*64, 'new': 'f'*64}},
+        'source_checks': {'encoder': {'sha256': '8'*64, 'tree': str(tmp_path/'candidate-producer')}},
+        'cells': cells, 'strata': strata, 'cell_count': len(cells), 'min_cells': 24}
+    return _write(tmp_path, 'source-proof.json', proof)
+
+
 def _pair(tmp_path, campaign, probe):
     qnames = campaign['roster']
     oldfmt = 'TESSERA_E4M3_K1_R1024'
     source = {'content_sha256': '1'*64, 'shape': [4, 4], 'dtype': 'torch.bfloat16', 'logical_bytes': 32}
-    proof = _write(tmp_path, 'source-proof.json', {'synthetic': True})
+    proof = _encoder_proof(tmp_path)
     old_weights, old_cells, new_weights, new_cells = {}, {}, {}, {}
     for name in qnames:
         identity = {'unit': name, 'source': {'sha256': '2'*64, 'shape': [4, 4]},
             'projection': {'kind': 'synthetic'}, 'calibration': {'hessian_sha256': '3'*64},
-            'encoder_fixture_id': 'synthetic', 'encoder_source': '4'*64,
+            'encoder_fixture_id': 'f'*64, 'encoder_source_sha256': '4'*64,
             'recipe': {**ADDED_RECIPE, 'grid': 'E4M3', 'q256': 1024, 'span': 1}}
         oldcell = {'source_weight': source, 'rendered_weight': {**source, 'content_sha256': '5'*64},
             'activation': {'input_global_scale': None}, 'encoding_identity_sha256': canonical_json_sha256(identity, where="synthetic identity"),
@@ -44,7 +71,7 @@ def _pair(tmp_path, campaign, probe):
             'render_origin': 'encoded', 'render_comparison': 'independent_render_vs_wire'}
         old_weights[name, oldfmt] = '/fixture/' + name + '.old.pt'
         old_cells[name, oldfmt] = oldcell
-        candidate = {**copy.deepcopy(identity), 'recipe': copy.deepcopy(ADDED_RECIPE), 'encoder_source': '8'*64}
+        candidate = {**copy.deepcopy(identity), 'recipe': copy.deepcopy(ADDED_RECIPE), 'encoder_source_sha256': '8'*64}
         newcell = {**copy.deepcopy(oldcell), 'activation': {'input_global_scale': 0.5},
             'encoding_identity_sha256': canonical_json_sha256(candidate, where="synthetic candidate"),
             'catalog_source_adoption': {'schema': ADOPTION_SCHEMA,
