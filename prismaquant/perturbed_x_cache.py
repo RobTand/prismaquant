@@ -195,6 +195,7 @@ class SerializedEntryDigest:
 
     def __init__(self, *, max_bytes=None):
         self.max_bytes = max_bytes
+        self.file_identity = None
         self._hash = hashlib.sha256()
         self._handle = None
         self.bytes = 0
@@ -235,6 +236,8 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
                 raise ValueError("preallocated entry ceiling must be positive")
             if serialized_digest is None or serialized_digest.max_bytes != preallocate_bytes:
                 raise ValueError("preallocation requires the matching bounded digest sink")
+            created = os.fstat(handle.fileno())
+            serialized_digest.file_identity = (created.st_dev, created.st_ino)
             os.posix_fallocate(handle.fileno(), 0, preallocate_bytes)
         torch.save({**metadata, "inputs": inputs.contiguous(), "name": name,
                     "source": source},
@@ -245,7 +248,13 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
         if durable:
             handle.flush()
             os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    if preallocate_bytes is None:
+        os.replace(temporary, path)
+    else:
+        # Publish this precommit inode without overwriting an unexpected
+        # destination created after the initial existence check.
+        os.link(temporary, path, follow_symlinks=False)
+        temporary.unlink()
     if durable:
         directory = os.open(path.parent, os.O_RDONLY)
         try:
@@ -888,6 +897,7 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
     if path.exists() or path.with_suffix(".pt.tmp").exists():
         raise RuntimeError("exact activation entry already exists")
     compact = None
+    digest = None
     try:
         compact = inputs.detach().to(device="cpu", copy=True,
             memory_format=torch.contiguous_format)
@@ -911,8 +921,16 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
         return ExactActivationReference(str(path), name, encoded, tuple(inputs.shape),
             str(inputs.dtype), nbytes, signature[2], digest.hexdigest())
     except BaseException:
-        path.unlink(missing_ok=True)
-        path.with_suffix(".pt.tmp").unlink(missing_ok=True)
+        for candidate in (path, path.with_suffix(".pt.tmp")):
+            if preallocate:
+                owned = getattr(digest, "file_identity", None)
+                try:
+                    current = candidate.lstat()
+                except FileNotFoundError:
+                    continue
+                if owned != (current.st_dev, current.st_ino):
+                    continue
+            candidate.unlink(missing_ok=True)
         raise
     finally:
         compact = None

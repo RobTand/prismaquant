@@ -206,3 +206,18 @@ def test_local_entry_refuses_group_geometry_overrun_before_allocation(tmp_path, 
         owner.write(torch.zeros(5000), batch_index=0, boundary_index=0)
     assert backend.groups == {}
     assert not list((tmp_path / "local").rglob("*.pt*"))
+
+
+def test_local_atomic_publication_never_overwrites_or_deletes_foreign_file(tmp_path, monkeypatch):
+    real_link = os.link
+    foreign = b"unrelated file appeared before publication"
+    def raced_link(source, destination, **kwargs):
+        Path(destination).write_bytes(foreign)
+        return real_link(source, destination, **kwargs)
+    monkeypatch.setattr(os, "link", raced_link)
+    with pytest.raises(FileExistsError):
+        write_exact_activation_cache_entry(
+            tmp_path, "raced", torch.arange(8), identity={"session": "fixture"},
+            max_tensor_bytes=64, max_file_bytes=65536, preallocate=True)
+    assert (tmp_path / "raced.pt").read_bytes() == foreign
+    assert not (tmp_path / "raced.pt.tmp").exists()
