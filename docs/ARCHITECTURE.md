@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Declared-output client (2026-09-22, PQ #870): the precommit local output
+spool is one generic client, `prismaquant/produced_output_spool.py`
+(`ProducedOutputSpool`), for every writer that runs under PrismaBuild and
+declares its outputs through a produced-output template. It was never specific
+to Stage A; `prismaquant/stage_a_local_spool.py` now only re-exports the former
+names. Each recorded entry may declare PB's `checkpoint` artifact class, which
+PB charges to the checkpoint prewrite budget instead of the payload one. Stage
+A boundary entries are its only caller today; routing adjoint checkpoints and
+renders through it is owed work. No format, default, stage or ship gate
+changes.
+
 Source-digest adoption (2026-09-22, PQ #944):
 `tools/adopt_tessera_source_digests.py` carries an existing, SHA-bound
 streamed-model identity cache into Tessera's source digest cache after the
@@ -267,7 +278,9 @@ the existing RAM/SSD lease policy. Failed/incomplete exports retain local files
 and prewrite credit, and successful capture receipts drain outstanding exports.
 The container requires an explicitly declared writable bind preserving host
 path identity. This is per-owner bounded precommit storage, not a global host
-disk ledger; checkpoint serialization is unchanged. Tests distinguish adapter
+disk ledger; checkpoint serialization is unchanged. (The client is now
+`produced_output_spool.ProducedOutputSpool`; see the 2026-09-22 declared-output
+note at the top.) Tests distinguish adapter
 transport doubles from qualification of PB's actual exporter. Deployment is
 separate from source qualification.
 

@@ -1440,8 +1440,8 @@ class StreamedBoundaryArtifacts:
                                "window_groups": int(window_groups),
                                "ahead_groups": int(window_groups) - 2}
 
-        from .stage_a_local_spool import BoundaryOutputSpool
-        self._local_output_spool = BoundaryOutputSpool.from_publication(
+        from .produced_output_spool import ProducedOutputSpool
+        self._local_output_spool = ProducedOutputSpool.from_publication(
             publication, timeout_s=staging_timeout_s)
         if self._local_output_spool is not None and not self._published:
             raise RuntimeError("local output spool requires a published Stage A owner")
