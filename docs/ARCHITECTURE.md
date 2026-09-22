@@ -4,7 +4,7 @@ As of: 2026-09-21 · `muse/stager904-reconciled-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-21, `muse/stager904-reconciled-20260921`) for
-**retirement ownership** (PQ #918): an unresolved queued or running stager
+**retirement and close ownership** (PQ #918, #920): an unresolved queued or running stager
 publication refuses origin retirement with a timeout. The origin, live-byte
 charge, reference and slot stay owned, and the release report names the debt.
 No format, kernel order, or staging-budget default changes.
@@ -1349,7 +1349,10 @@ says exactly that.
   queued optional steps are dropped (a queued publication as a refusal with
   reason `owner-closing`, because a mover for a group nobody will read is not
   worth starting), retirement asks and charge reclaims still run, and the
-  thread is joined inside the staging budget plus 60 s. After the join there
+  thread is joined inside the staging budget plus 60 s. Every dropped waiter
+  is released even if a drop callback raises; close attempts its join with the
+  remaining budget and then raises the first callback error (PQ #920), with
+  subsequent callback errors attached as notes. After the join there
   is no thread, so the settle at close is the synchronous code, unchanged,
   and still never changes the run's outcome. A failure kept at that point is
   recorded as a release error. A failing run waits for that join too, where

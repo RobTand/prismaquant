@@ -110,7 +110,7 @@ class ProducedStager:
         return self._thread.ident
 
     def alive(self):
-        return self._thread.is_alive() and self._dead is None
+        return self._thread.is_alive()
 
     def submit(self, call, *, kind, label, keys=(), on_drop=None,
                keep_on_close=False, waited=False):
@@ -189,6 +189,7 @@ class ProducedStager:
         Returns True when the thread ended inside ``timeout``.
         """
 
+        deadline = time.monotonic() + timeout
         with self._cond:
             self._closing = True
             kept, dropped = deque(), []
@@ -196,15 +197,22 @@ class ProducedStager:
                 (kept if task.keep_on_close else dropped).append(task)
             self._lane2 = kept
             self._cond.notify_all()
+        errors = []
         for task in dropped:
             task.dropped = True
             task.finished = time.monotonic()
             try:
                 if task.on_drop is not None:
                     task.on_drop()
+            except BaseException as exc:                  # noqa: BLE001
+                errors.append(exc)
             finally:
                 task._done.set()
-        self._thread.join(timeout)
+        self._thread.join(max(0.0, deadline - time.monotonic()))
+        if errors:
+            for error in errors[1:]:
+                errors[0].add_note(f"another stager drop callback failed: {error!r}")
+            raise errors[0]
         return not self._thread.is_alive()
 
     # -- the thread --------------------------------------------------------

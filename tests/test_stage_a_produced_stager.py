@@ -424,3 +424,47 @@ def test_closing_drops_a_queued_publication_and_leaves_no_thread(
         "owner-closing"]
     # With no thread, the owner is the synchronous code again.
     assert storage._produced_on_compute_with_stager() is False
+
+
+def test_close_releases_every_waiter_and_joins_when_a_drop_callback_raises(monkeypatch):
+    from prismaquant.produced_stager import OPTIONAL, StagerClosed
+
+    gate, entered = threading.Event(), threading.Event()
+    stager = _stager()
+    joins = []
+    join = stager._thread.join
+    def tracked_join(timeout=None):
+        joins.append(timeout)
+        gate.set()
+        return join(timeout)
+    monkeypatch.setattr(stager._thread, "join", tracked_join)
+    first_error = RuntimeError("first bookkeeping failure")
+    drops = []
+    try:
+        def hold():
+            entered.set()
+            assert gate.wait(10.0)
+        stager.submit(hold, kind=OPTIONAL, label="hold")
+        assert entered.wait(5.0)
+        def bad_drop():
+            drops.append("first")
+            raise first_error
+        def second_drop():
+            drops.append("second")
+            raise ValueError("second bookkeeping failure")
+        first = stager.submit(lambda: None, kind=OPTIONAL, label="first",
+                              on_drop=bad_drop)
+        second = stager.submit(lambda: None, kind=OPTIONAL, label="second",
+                               on_drop=second_drop)
+        with pytest.raises(RuntimeError) as caught:
+            stager.close(timeout=5.0)
+        assert caught.value is first_error
+        assert drops == ["first", "second"]
+        assert len(joins) == 1 and 0 <= joins[0] <= 5.0
+        assert not stager.alive()
+        for task in (first, second):
+            with pytest.raises(StagerClosed):
+                task.wait(0.0)
+    finally:
+        gate.set()
+        stager.close(timeout=10.0)
