@@ -104,8 +104,8 @@ def test_v10_joins_every_set_v9_is_in():
 # ---------------------------------------------------------------------------
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
-def test_the_packaged_contract_is_v32_at_the_pinned_digest():
-    """v24 through v32 are additive for a v10 reader, so the schema string does not move.
+def test_the_packaged_contract_is_v34_at_the_pinned_digest():
+    """v24 through v34 are additive for a v10 reader, so the schema string does not move.
 
     The contract version and the lane schema are two different clocks, and
     v24 was the bump that separated them: it added cells and filled a
@@ -113,8 +113,9 @@ def test_the_packaged_contract_is_v32_at_the_pinned_digest():
     reads the document with the code it already has. v25-v32 did the same
     (a quantiser table, a loader axis, format structures, two routed-MoE
     cells, a TP2 receipt, eight dense-cell WITHDRAWALS, the routed reader
-    domain widen and the KL receipts' ``q256`` scoping), and none moved the
-    lane schema.  A bump that changed what
+    domain widen and the KL receipts' ``q256`` scoping), and so did v33-v34
+    (a per-image quantiser list and four re-minted dense cells); none moved
+    the lane schema.  A bump that changed what
     a field MEANS would move the schema string and fail this reader closed, as
     v10 itself did to v9 below.
     """
@@ -124,7 +125,7 @@ def test_the_packaged_contract_is_v32_at_the_pinned_digest():
         "the installed Tessera is not the pinned one; install the pinned "
         "commit rather than relaxing this check")
     payload = json.loads(raw)
-    assert payload["contract_version"] == 32
+    assert payload["contract_version"] == 34
     assert (payload["lane_eligibility"]["schema"]
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10)
 
@@ -141,7 +142,9 @@ def test_the_v10_table_parses_and_publishes_the_three_platforms():
     ``TESSERA_BF16_K1`` dense cells on ``gfx1201``); v31 withdrew them with
     the rest of the non-``E2M1_K2`` dense roster (Tessera #538 and the A4
     retirement), so the table again carries cells on ``sm_121`` only -- six
-    of them -- while still DECLARING all three platforms.  A declared
+    of them through v32, ten since v34 re-minted the E4M3 R1024 and BF16
+    R1792 dense pairs on ``sm_121`` -- while still DECLARING all three
+    platforms.  A declared
     platform with no cell is a refusal to claim, not an absence from the
     grammar, and the test below pins what it answers.
     """
@@ -150,7 +153,7 @@ def test_the_v10_table_parses_and_publishes_the_three_platforms():
     assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
     assert {"sm_121", "gfx1151", "gfx1201"} <= set(table.platforms)
     assert {cell.platform for cell in table.cells} == {"sm_121"}
-    assert len(table.cells) == 6
+    assert len(table.cells) == 10
     # The withdrawal is total off sm_121: both AMD platforms ship no cell.
     assert not [c for c in table.cells if c.platform != "sm_121"]
 
@@ -166,7 +169,10 @@ def test_the_withdrawn_dense_roster_is_gone_and_the_routed_pair_did_not_move():
     [128..896] on the same ``route_only`` grade.  What moved is what the
     lane LOSES: the eight dense cells that carried the only ``gfx1201``
     route and the streamed dense residency, so those rungs answer
-    ``unattested`` again.
+    ``unattested`` again.  v34 (Tessera #579) re-mints four of them on
+    ``sm_121`` only, on ``tessera::window_gemm_dense``: E4M3 R1024 and BF16
+    R1792, batch and decode, ``route_only`` / ``not_recorded``.  ``gfx1201``
+    stays empty.
     """
     table = _packaged_table()
     routed = [c for c in table.cells if c.structure == "routed_moe"]
@@ -188,10 +194,15 @@ def test_the_withdrawn_dense_roster_is_gone_and_the_routed_pair_did_not_move():
             assert tuple(cell.rungs_q256) == (1024,)
     dense = [c for c in table.cells if c.structure == "dense"]
     assert sorted(c.id for c in dense) == [
-        "tessera_e2m1_k2_dense_sm121_batch", "tessera_e2m1_k2_dense_sm121_decode"]
+        "tessera_bf16_k1_dense_sm121_batch", "tessera_bf16_k1_dense_sm121_decode",
+        "tessera_e2m1_k2_dense_sm121_batch", "tessera_e2m1_k2_dense_sm121_decode",
+        "tessera_e4m3_k1_dense_sm121_batch", "tessera_e4m3_k1_dense_sm121_decode"]
+    rungs = {"TESSERA_E2M1_K2": (896,), "TESSERA_E4M3_K1": (1024,),
+             "TESSERA_BF16_K1": (1792,)}
     for cell in dense:
-        # D2 kept the dense pair at the rung its receipts cover.
-        assert tuple(cell.rungs_q256) == (896,)
+        # D2 kept the E2M1 dense pair at the rung its receipts cover; v34's
+        # re-minted pairs carry one rung each.
+        assert tuple(cell.rungs_q256) == rungs[cell.family], cell.id
 
 
 def test_a_declared_platform_with_no_cell_is_still_a_refusal_to_claim():
