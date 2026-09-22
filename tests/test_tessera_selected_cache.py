@@ -217,10 +217,20 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
             'activation': {**qualification, 'activation_max_abs': 24.0, 'input_global_scale': 0.25},
             'served_activation_policy': served.operator_policy_record(policy_bound, policy, name, bridge.ADDED_FORMAT, qualification)}
         handoff['costs'][name][bridge.ADDED_FORMAT] = {'joint_operator_identity': operator, 'input_global_scale': 0.25}
-    plan = _write(tmp_path, 'accepted-plan.json', {'inputs': data.inputs, 'served_activation_policy': policy_bound})
+    old_plan = _write(tmp_path, 'accepted-old-plan.json', {'inputs': {}})
+    old_pwc = _write(tmp_path, 'accepted-old-pwc.json', {})
+    old_prepared = _write(tmp_path, 'accepted-old-prepared.json', {'production_cache': old_pwc})
+    resource = _write(tmp_path, 'accepted-resources.json', {'inputs': {'original_plan': old_plan,
+        'original_prepared': old_prepared, 'candidate_overlay': catalog, 'served_activation_policy': policy_bound}})
+    plan = _write(tmp_path, 'accepted-plan.json', {'inputs': data.inputs, 'served_activation_policy': policy_bound,
+                                                 'stage_b_resource_policy': resource})
+    new_pwc = _write(tmp_path, 'accepted-new-pwc.json', {})
+    new_prepared = _write(tmp_path, 'accepted-new-prepared.json', {'production_cache': new_pwc,
+        'served_activation_policy': policy_bound, 'stage_b_resource_policy': resource})
     capture = _write(tmp_path, 'accepted-capture.json', {'status': 'complete'})
     extension = _write(tmp_path, 'accepted-extension.json', {'schema': bridge.SCHEMA, 'adjoint_capture': capture,
-                      'inputs': {'extended_plan': plan, 'original_prepared': {'path': '/accepted', 'sha256': '1'*64}}})
+                      'inputs': {'extended_plan': plan, 'original_plan': old_plan, 'original_prepared': old_prepared,
+                                 'extended_prepared': new_prepared}})
     handoff['provenance']['catalog_extension'] = extension
     handoff['provenance']['tessera_joint_allocation'].update(plan_sha256=plan['sha256'], prepared={'sha256': '2'*64})
     seen = []
@@ -244,6 +254,7 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
         directory = Path(package['path']); directory.mkdir()
         (directory/'__init__.py').write_text('# source fixture')
     reads = set(bridge.selected_cache_read_paths(manifest))
+    assert {item['path'] for item in (old_plan, plan, old_prepared, new_prepared, old_pwc, new_pwc, resource, capture)} <= reads
     assert {row['wire'] for row in rows} <= reads
     assert str(tmp_path/records[DENSE]['file']) in reads
     assert {proof['path'], str(tmp_path/'source-proof-arm.json'), str(tmp_path/'source-fixture.json')} <= reads
