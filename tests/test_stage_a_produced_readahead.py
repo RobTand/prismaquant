@@ -220,6 +220,9 @@ def test_a_retired_plane_is_staged_ahead_of_its_read(tmp_path, monkeypatch):
     with chain._fleet(q, tmp_path):
         chain._strict(monkeypatch, env, pb_repo, q)
         _read(storage, references, _expected())
+        # Window exit asks without waiting for egress. This test needs an
+        # already-retired plane, so establish that precondition explicitly.
+        storage.settle_produced_releases()
         assert storage.produced_group_records()[0]["retired"] is True
 
         assert storage.stage_produced_boundary_ahead(3) == 1
