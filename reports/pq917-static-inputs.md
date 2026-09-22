@@ -1,4 +1,10 @@
-# PQ #917 static prepared-input route — executor report
+# PQ #917 static prepared-input route — original partial executor report
+
+Historical evidence for the explicit-input implementation only. The original
+completion claim below was superseded: normal generator derivation, bounded
+runtime readiness, and the integrated delayed-staging test were missing.
+The 2026-09-22 completion follow-up implements those three requirements; see
+`reports/pq917-completion.md` for its validation and remaining campaign gates.
 
 Branch: `fix/pq-917-static-prepared-inputs-20260922`, HEAD `34f8e0ccbf`
 (implementation commit; this report follows as a second commit).
@@ -6,7 +12,7 @@ Base: fresh current main carrying accepted #910 (`2fabd11d7b`) ancestry
 via `88fcdd4ce8` plus the adapted #909 source-only filter (`0dcec1a991`),
 without #914's dynamic writer/gate ancestors. Trees/branches for #914
 and #871 untouched (`muse-pq870-20260921` still clean at `c0e627d2d2`);
-root handles PR disposition. Closes #917; attributes #900/#909; does not
+root handles PR disposition. Initial partial scope for #917; attributes #900/#909; does not
 close #870 and does not promote #914/#871.
 
 ## What was built

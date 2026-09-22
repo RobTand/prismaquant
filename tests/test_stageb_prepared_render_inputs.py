@@ -483,9 +483,9 @@ def test_strict_pwc_serves_two_windows_with_phase_order(
         cache.plan_retained_window(
             keys, max_resident_bytes=1 << 20, max_workers=1,
             max_load_buffer_bytes=1 << 20)
-        # Production before_window body: the render phase is entered
-        # before the PWC retained load starts (the retained_window
-        # context below performs the actual loading-pool reads).
+        # This isolated PWC fixture announces its phase directly. The
+        # generator/dispatcher and actual production readiness callback
+        # are exercised by test_stageb_prepared_inputs_bridge.py.
         enter_phase(name)
         with cache.retained_window(
                 keys, max_resident_bytes=1 << 20, max_workers=1,

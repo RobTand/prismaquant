@@ -1333,23 +1333,24 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
 def _exec_campaign(tmp_path):
     """Tiny campaign files with a calibration input for the regen CLI."""
     import regenerate_joint_quanta as _regen  # noqa: F401
+    from test_stageb_prepared_inputs_bridge import (
+        _execution, _render_files, _production_pkl, _qnames, FMT)
+    files = _render_files(tmp_path)
+    pkl_path = _production_pkl(tmp_path, files)
     root = tmp_path / "campaign"
     calib_path = tmp_path / "calib.pt"
     calib_path.write_bytes(b"\x00" * 512)
     plan = {"output_root": str(root), "model": "/fixture/model",
             "distributed_campaign": {},
-            "execution": {"n_probes": N_PROBES},
+            "execution": _execution(),
             "calibration_input": {
                 "path": str(calib_path), "sha256": "a" * 64}}
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(plan, sort_keys=True))
     prepared = {"formats_by_qname": {
-        "model.layers.0.mlp.gate_proj": {},
-        "model.layers.1.mlp.gate_proj": {},
-        "model.layers.2.mlp.gate_proj": {},
-        "model.layers.3.mlp.gate_proj": {}},
-        "production_cache": {"path": str(tmp_path / "production.pkl"),
-                             "sha256": "b" * 64}}
+        name: [FMT] for layer in range(4) for name in _qnames(layer)},
+        "production_cache": {"path": str(pkl_path),
+                             "sha256": hashlib.sha256(pkl_path.read_bytes()).hexdigest()}}
     prepared_path = tmp_path / "prepared.json"
     prepared_path.write_text(json.dumps(prepared, sort_keys=True))
     entries = [{"path": "/fixture/model/shard-h.pt", "offset": 0,

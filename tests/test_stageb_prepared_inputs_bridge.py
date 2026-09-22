@@ -45,9 +45,10 @@ for _entry in (ROOT, ROOT / "tools"):
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.production_weight_cache import ProductionWeightCache
 from test_quantum_executable_readset import (
-    N_PROBES, STRIDED, _tiny_parent, _tiny_receipt,
+    N_PROBES, N_BATCHES, STRIDED, _tiny_parent, _tiny_receipt, _write_boundary,
 )
 import test_strict_reader_tier_enforcement as strict
+from test_strict_reader_tier_enforcement import _forget_state  # noqa: F401
 
 LAYERS = [0, 1, 2, 3]
 FMT = "NVFP4"
@@ -146,6 +147,9 @@ def _campaign_files(tmp_path):
         "distributed_campaign": {},
     }
     parent = _tiny_parent()
+    parent["mount_prefix"] = str(tmp_path)
+    for entry in parent["entries"]:
+        entry["path"] = entry["path"].replace("/fixture/model", str(model_dir))
     prepared = {
         "formats_by_qname": {
             name: [FMT] for layer in LAYERS for name in _qnames(layer)},
@@ -173,6 +177,9 @@ def _campaign_files(tmp_path):
         "campaign_scope": parent["annotations"]["campaign_scope"],
     }
     receipt = _tiny_receipt(tmp_path, campaign)
+    receipt["boundary_entries"]["0"] = [
+        _write_boundary(tmp_path / "adjoint", 0, batch)
+        for batch in range(N_BATCHES)]
     receipt["plan_sha256"] = campaign["plan_sha256"]
     receipt["prepared_sha256"] = campaign["prepared_sha256"]
     receipt_path = tmp_path / "adjoint-capture.json"
@@ -361,13 +368,25 @@ def _offset_files(tmp_path):
     return out
 
 
-def test_generator_dispatch_waits_for_delayed_leased_render(tmp_path, monkeypatch):
+@pytest.fixture
+def shared_bridge_path():
+    # Executable manifests declare /mnt/shared. Keep actual fixture bytes
+    # under that mount so the real PB validator accepts the unchanged wire.
+    import tempfile
+    root = Path("/mnt/shared/prismaquant-test-fixtures")
+    root.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="pq917-", dir=root) as directory:
+        yield Path(directory)
+
+
+def test_generator_dispatch_waits_for_delayed_leased_render(shared_bridge_path, monkeypatch):
     """Generated declarations reach production readiness before strict pool loads.
 
     Submission and progress transport are the only replaced boundaries. The
     private admitted queue uses PB's fragment/material writers and map composer;
     window 1 has no staged file or publication until its read phase is entered.
     """
+    tmp_path = shared_bridge_path
     import dispatch_joint_quanta as dispatch
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumProgress, prepare_retained_window_read)
@@ -436,7 +455,7 @@ def test_generator_dispatch_waits_for_delayed_leased_render(tmp_path, monkeypatc
     bind_residency_manifest(digest)
     activate_staged_tier_policy("ram,ssd")
     resolver = residency_resolver()
-    assert resolver.declared_readset()["state"] == "bound"
+    assert resolver.declared_readset()["state"] == "bound", resolver.declared_readset()
     monkeypatch.setenv(strict.STAGED_RANGE_WAIT_ENV, "10")
     monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PHASES", json.dumps(phases))
     render_one = threading.Event()

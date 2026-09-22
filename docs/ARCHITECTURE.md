@@ -3,6 +3,22 @@
 As of: 2026-09-22 · `fix/pq-917-static-prepared-inputs-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-22, `fix/pq-917-static-prepared-inputs-20260922`) for
+**static prepared renders at retained-window read boundaries** (PQ #917).
+The executable-readset generator loads the digest-bound production cache once,
+derives complete candidate rosters through the existing retained admission
+planners, and seals each window's verified render digests, current sizes and
+whole-file paths. Planner disagreement refuses instead of regrouping windows.
+Each `render-NN` phase precedes that window's replay phases. Dispatch verifies
+the complete prepared contract and exact bound entries against the manifest;
+legacy sequencing-only rows still refuse. At runtime the production window
+callback enters the render phase and awaits those entries using the existing
+bounded staged-read readiness API before the PWC loading pool starts. Strict
+leases remain authoritative for actual reads. This introduces no dynamic
+rendering, second mover, source fallback, or production metadata regeneration.
+Gates: `test_stageb_prepared_inputs_bridge.py` and
+`test_stageb_prepared_render_inputs.py` (CPU synthetic tensor fixtures).
+
 Re-stamped (2026-09-22, `diagnose/r4-retiring-cover-20260922`) for **a retiring
 cover yielding to an independently leased overlap** (PQ #916). A broad head
 entry may still pass every file check while PB has closed its material

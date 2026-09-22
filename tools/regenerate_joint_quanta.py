@@ -740,9 +740,10 @@ def main(argv=None) -> int:
     ap.add_argument("--executable-readsets", action="store_true",
                     help="with Gate 2: derive each record's single "
                          "executable read manifest (PQ #862: checkpoint, "
-                         "chain and own source extents plus boundary/probe/"
-                         "replay reads) into bound-readsets/ and bind it to "
-                         "a new record generation; needs --adjoint-receipt")
+                         "chain and own source extents, prepared renders, and "
+                         "boundary/probe/replay reads) into bound-readsets/; "
+                         "derives retained rosters from the bound production "
+                         "cache; needs --adjoint-receipt")
     ap.add_argument("--source-layers-prefix", default=None,
                     help="with --executable-readsets: complete each chain/own "
                          "source phase from the actual checkpoint tensor "
