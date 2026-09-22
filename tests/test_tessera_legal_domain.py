@@ -287,28 +287,31 @@ def test_every_fact_names_the_table_that_answered_it():
 # Native qualification is exact membership, and does not shrink the domain
 # ---------------------------------------------------------------------------
 
-def test_native_qualification_is_exactly_one_cell_for_the_primary_families():
-    """Exact membership at the pin: E4 R1024 routed.  Nothing else.
+def test_native_qualification_is_exactly_three_cells_for_the_primary_families():
+    """Exact membership at the pin: E4 R1024 dense and routed, BF R1792 dense.
 
-    Until the v31 withdrawals this was three triples (E4 R1024 dense and
-    routed, BF R1792 dense); the withdrawal removed the dense E4 rows and the
-    whole BF16 roster -- the only cells that family ever had.  Nothing else,
-    and in particular no neighbouring rate: attestation does not extrapolate
-    from a singleton.
+    Until the v31 withdrawals this was the same three triples; the withdrawal
+    removed the dense E4 rows and the whole BF16 roster, leaving E4 R1024
+    routed alone through the v32 pin.  v34 (Tessera #579) re-mints the two
+    dense rows on ``tessera::window_gemm_dense``, so the set is three again.
+    Nothing else, and in particular no neighbouring rate: attestation does
+    not extrapolate from a singleton.
     """
     triples = domain.native_qualification_set()
     primary = {t for t in triples if t[0] in domain.PRIMARY_FAMILIES}
     assert primary == {
         (E4, 1024, "routed_moe"),
+        (E4, 1024, "dense"),
+        (BF, 1792, "dense"),
     }
 
 
 def test_the_native_set_does_not_shrink_the_legal_domain(rates):
     """The count is computed without the attestation and is unaffected by it.
 
-    The strong form: the rate that is natively qualified is a one-element
-    subset of a 5,634-element domain, and the domain walk never reads the
-    attestation.  A regression that let the menu's attested mode leak into the
+    The strong form: the rates that are natively qualified are a two-element
+    subset of a 5,634-element domain (E4 R1024 and BF R1792 at the v34 pin),
+    and the domain walk never reads the attestation.  A regression that let the menu's attested mode leak into the
     domain would collapse these counts to 0.
     """
     triples = domain.native_qualification_set()
@@ -316,7 +319,7 @@ def test_the_native_set_does_not_shrink_the_legal_domain(rates):
         (family, rate) for (family, rate, _s) in triples
         if family in domain.PRIMARY_FAMILIES
     }
-    assert len(qualified_rates) == 1
+    assert qualified_rates == {(E4, 1024), (BF, 1792)}
     total = sum(len(legal) for legal, _holes in rates.values())
     assert total == 1793 + 3841
     for family, rate in qualified_rates:

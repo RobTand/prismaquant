@@ -6,15 +6,16 @@ artifact, fragments/material/map composed through the real installed
 SDK writers into isolated tmp dirs, and the accepted test-only SDK
 injection. Covers the refuse-mode pass with proven zero pool reads,
 pool-read exit 1, uncertain counters, forbidden-pool and wrong-digest
-typed refusals, the no-claim block (pins never forged), the public
-(window, key) unpack contract, and fallback evidence on a real
-resolver. Only platform mount observations are simulated; no live
+typed refusals, the no-claim block (pins never forged) and fallback
+evidence on a real resolver. The public (window, key) unpack
+contract needs a live claim, so it lives in
+``tests/test_live_reader_positive.py`` (PQ #897).
+Only platform mount observations are simulated; no live
 queue mutation, no fake SDK, no CLAIMED rows. Run via published pbtest
 at -10 in the scoped PQ environment.
 """
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 import os
@@ -260,56 +261,6 @@ def test_read_mode_no_claim_blocks_without_forged_pin(
     leases = queue.root / "residency" / "leases"
     leftovers = list(leases.rglob("*.lease.json")) if leases.is_dir() else []
     assert leftovers == []
-
-
-def test_acquire_returns_window_and_key_tuple(tmp_path, monkeypatch) -> None:
-    """The public contract main unpacks: (LeaseWindow, key), entered once.
-
-    Entering the whole tuple (the R5 defect shape) raises TypeError, so
-    only the unpacked window may serve as the context manager; main's
-    source unpacks the public return and opens the returned key.
-    """
-
-    from prismaquant.residency_map import residency_resolver
-    from prismaquant.residency_map import bind_residency_manifest
-    from prismaquant.staged_lease import LeaseWindow, acquire_entry_window
-    from prismaquant.staged_tier_policy import activate_staged_tier_policy
-
-    artifact, digest, _draw = _artifact(tmp_path)
-    _queue, _root, declared, key = _composed(tmp_path, artifact, digest)
-    monkeypatch.setenv("PRISMABUILD_RESIDENCY_MAP",
-                       str(tmp_path / "residency.map.json"))
-    activate_staged_tier_policy("ram,ssd")
-    bind_residency_manifest(MANIFEST)
-    resolver = residency_resolver()
-    assert resolver is not None
-    entry = resolver.staged_read(str(declared), expected_sha256=digest)
-    assert entry is not None
-    produced = acquire_entry_window(resolver, str(declared), entry)
-    assert isinstance(produced, tuple) and len(produced) == 2
-    window, map_key = produced
-    assert isinstance(window, LeaseWindow)
-    assert map_key == key
-    with pytest.raises(TypeError):
-        with produced:  # noqa: F841 -- the exact R5 defect shape
-            pass
-    source = Path(probe.__file__).read_text()
-    tree = ast.parse(source)
-
-    def _calls_acquire(call: ast.Call) -> bool:
-        func = call.func
-        if isinstance(func, ast.Name):
-            return func.id == "acquire_entry_window"
-        return getattr(func, "attr", "") == "acquire_entry_window"
-
-    unpacked = any(
-        any(isinstance(target, ast.Tuple) for target in node.targets)
-        and isinstance(node.value, ast.Call)
-        and _calls_acquire(node.value)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign))
-    assert unpacked, "main must unpack (window, key)"
-    assert "entered.open(map_key)" in source
 
 
 def test_fallback_evidence_reads_real_resolver(tmp_path, monkeypatch) -> None:

@@ -977,6 +977,43 @@ def prepare_retained_window_read(window_index: int, *, record: Mapping,
 # --------------------------------------------------------------------------
 
 
+def bind_joint_served_quantizer(formats_by_qname):
+    """Require the actual served static-A4 operator before Stage B pricing.
+
+    A registered binding includes the inspected image and extension build.
+    A missing operator refuses; the Torch arithmetic model is never a price.
+    A16/dynamic-only rosters do not load the serving extension.
+    """
+    from . import format_registry as fr
+    from .nvfp4_activation_contract import bind_served_quantizer_identity
+    from .perturbed_x_cache import _served_nvfp4_act_qdq_enabled
+
+    served_override = _served_nvfp4_act_qdq_enabled()
+    for fmt in sorted({fmt for formats in formats_by_qname.values() for fmt in formats}):
+        contract = fr.get_format(fmt).static_activation_contract
+        if contract is not None and (contract.measured_as_served or served_override):
+            identity = bind_served_quantizer_identity(
+                require=True, context="joint Stage B activation pricing")
+            if contract.served_quantizer is not None and contract.served_quantizer != identity:
+                raise RuntimeError("joint Stage B format overrides the served quantizer binding")
+            return identity.as_record()
+    return None
+
+
+def build_quantum_source_runner(config, *, offload_folder):
+    """Rebuild the same sealed BF16 source used by Stage A."""
+    from .cost_streaming import build_streamed_causal_lm
+    from .model_profiles import detect_profile
+    from .tessera_joint_aura import _source_prefetch
+
+    return build_streamed_causal_lm(
+        config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
+        offload_folder=str(offload_folder), profile=detect_profile(config["model"]),
+        attn_implementation="eager", source_authentication=None,
+        source_derivative=config["execution"].get("source_derivative"),
+        **_source_prefetch(config))
+
+
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
     record, receipt, execution, output_root,
@@ -1052,6 +1089,7 @@ def run_layer_quantum_core(
     unit_formats, fmts, render_formats = (
         roster.unit_formats, roster.fmts, roster.render_formats)
     packed_members = roster.packed_members
+    served_quantizer = bind_joint_served_quantizer(unit_formats)
     # The record seals window indices only (D2); membership comes from the
     # resolved handshake the caller ran, which refuses stale records. What is
     # checked here is coverage: the sealed budget must admit exactly this
@@ -1107,6 +1145,8 @@ def run_layer_quantum_core(
     joint_probe_identity["arithmetic"]["operator_windows"] = operator_windows
     joint_probe_identity["arithmetic"]["gradient_diagnostics"] = (
         "sum_output_operators_fp32_before_norm")
+    if served_quantizer is not None:
+        joint_probe_identity["arithmetic"]["served_quantizer"] = served_quantizer
     if probe_layout is not None:
         joint_probe_identity["noise_layout"] = probe_layout
         joint_probe_identity["arithmetic"]["execution_partition"] = execution_partition
@@ -1133,6 +1173,8 @@ def run_layer_quantum_core(
             for name in names
         },
     }
+    if served_quantizer is not None:
+        joint_run_identity["served_quantizer"] = served_quantizer
 
     # ---- journal ---------------------------------------------------------
     checkpoint_git_commit = _checkpoint_git_commit()
@@ -1170,7 +1212,8 @@ def run_layer_quantum_core(
     storage_policy = normalize_boundary_storage(execution["boundary_storage"])
     storage_policy["directory"] = str(boundary_entry_directory(adjusted_space(output_root)))
     storage = StreamedBoundaryArtifacts(storage_policy)
-    storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes)
+    storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes,
+                   forward_recovery=receipt["boundary_storage"].get("forward_recovery"))
     extra["streamed_boundary_storage"] = storage.identity
 
     identity = _build_aura_checkpoint_identity(
@@ -1248,19 +1291,22 @@ def run_layer_quantum_core(
             f"{record['adjoint']['checkpoint_boundary']}")
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
-    cotangent_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-        adjusted_space(output_root), checkpoint_record)
-    grad_plane: dict[tuple[int, int], torch.Tensor] = dict(cotangent_plane)
-    cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
-                         for _ in row_offsets] for _ in range(n_probes)]
-    for (probe, batch), state in shared_adjoint.items():
-        cotangent_owners[probe][batch].load_state_dict(state)
-
     with storage:
+        grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+            adjusted_space(output_root), checkpoint_record,
+            cotangent_factory=storage.checkpoint_cotangent_sink,
+            shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+        cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
+                             for _ in row_offsets] for _ in range(n_probes)]
+        for (probe, batch), state in shared_adjoint.items():
+            cotangent_owners[probe][batch].load_state_dict(state)
+        state = None
+        del shared_adjoint
         partitions = [calib_ids[offset:offset + batch_rows]
                       for offset in row_offsets]
         batches = _rebuild_batches(runner, partitions=partitions,
                                    shared_pass=shared_pass)
+        del shared_pass
         needed = sorted({int(c) for c in record["adjoint"]["chain_layers"]} | {layer})
         for batch_index, batch in enumerate(batches):
             batch.activations_cpu = [
@@ -1818,6 +1864,11 @@ def run_layer_quantum(
     counters = None
     resolved_windows: list[dict] | None = None
     try:
+        # Bind before cache/intake work. The core repeats this idempotently
+        # for direct callers and stamps the actual arithmetic in row identity.
+        prepared_header = json.loads(_bound(prepared, "prepared anchors").read_text())
+        result["served_quantizer"] = bind_joint_served_quantizer(
+            prepared_header["formats_by_qname"])
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         implementation = _aura_source_sha256()
@@ -1874,11 +1925,7 @@ def run_layer_quantum(
         result["wire_validation"] = "historical-qualified-wire"
 
         identity_cache_path = _seed_source_identity_cache(config, space / "run")
-        runner = build_streamed_causal_lm(
-            config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
-            offload_folder=str(space / "run" / "offload"),
-            profile=detect_profile(config["model"]), attn_implementation="eager",
-            source_authentication=None)
+        runner = build_quantum_source_runner(config, offload_folder=space / "run" / "offload")
         from .cost_streaming import build_streamed_model_identity
 
         source = build_streamed_model_identity(runner, config["model"],

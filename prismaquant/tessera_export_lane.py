@@ -1731,7 +1731,10 @@ def require_priced_export_inputs(
         if routed_units:
             _require_routed_scale_grouping_declaration(
                 priced_block.get("activation_scale_grouping"),
-                routed_units=routed_units, report=report)
+                routed_units=routed_units, report=report,
+                served_activation_policy=priced_block.get("served_activation_policy"),
+                priced_units=priced_units, selected=selected,
+                scale_formula=priced_block.get("input_global_scale_policy"))
     return report
 
 
@@ -1816,8 +1819,9 @@ def _require_input_global_scale_policy(header, priced_block, *,
 
 
 def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
-                                              report: dict) -> None:
-    """Refuse routed per-expert static scales unless they declare ``per_unit.v1``.
+                                              report: dict, served_activation_policy=None,
+                                              priced_units=None, selected=None, scale_formula=None) -> None:
+    """Require the original declaration or an independently verified served policy.
 
     The campaign prices one static ``input_global_scale`` per expert
     projection.  The routed stage these units would execute on takes one scale
@@ -1831,12 +1835,13 @@ def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
     * ``per_unit.v1`` exports, and the report records it as not qualified.
       The export CLI copies that onto the build anchor, so the ship record
       says the artifact's A-side prices do not represent the executed scale.
-    * Anything else is refused.  The executed grouping needs rescored rows and
-      a runtime-attested table, and neither exists
-      (``docs/design/routed_executed_scale_grouping_2026-09-14.md``).
+    * ``executed_group.v1`` requires the complete bound served policy, exact
+      group declaration, selected format/member coverage and priced fp32 scales.
+      This proves pricing/input equality, not runtime qualification.
+    * Other or unbound declarations are refused.
     """
     from .nvfp4_activation_contract import (
-        ACTIVATION_SCALE_GROUPING_PER_UNIT,
+        ACTIVATION_SCALE_GROUPING_PER_UNIT, ACTIVATION_SCALE_GROUPING_EXECUTED,
         ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
     )
     where = "tessera_activation_static_scales.activation_scale_grouping"
@@ -1859,6 +1864,29 @@ def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
             f"{where} schema is {grouping.get('schema')!r}; this producer "
             f"reads only {ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA!r}")
     declared = grouping.get("grouping")
+    if declared == ACTIVATION_SCALE_GROUPING_EXECUTED and served_activation_policy is not None:
+        from .joint_served_activation import verify_policy, policy_group
+        import struct
+        policy = verify_policy(served_activation_policy)
+        if grouping != policy["executed_grouping"]:
+            raise TesseraExportLaneError("executed activation grouping differs from its verified policy")
+        if scale_formula != grouping["input_global_scale_policy"]:
+            raise TesseraExportLaneError("executed activation scale formula differs from its verified policy")
+        for name in routed_units:
+            group = policy_group(policy, name, (selected or {}).get(name))
+            if group is None:
+                raise TesseraExportLaneError(f"{name}: selected routed format is outside the served activation policy")
+            actual = (priced_units or {}).get(name)
+            expected = group[1]["input_global_scale"]
+            if (isinstance(actual, bool) or not isinstance(actual, (int, float))
+                    or struct.pack("<f", actual) != struct.pack("<f", expected)):
+                raise TesseraExportLaneError(f"{name}: priced activation scale differs from verified executed group")
+        report["activation_scale_grouping"] = ACTIVATION_SCALE_GROUPING_EXECUTED
+        report["activation_scale_grouping_qualified"] = False
+        report["activation_scale_grouping_routed_units"] = len(routed_units)
+        report["served_activation_policy"] = dict(served_activation_policy)
+        report["activation_scale_pricing_input_equality_verified"] = True
+        return
     if declared != ACTIVATION_SCALE_GROUPING_PER_UNIT:
         raise TesseraExportLaneError(
             f"{where} declares grouping {declared!r}; this producer exports "
@@ -2003,6 +2031,9 @@ def preflight(model_path: str | Path, *, target=None,
                 "routed_units": priced_inputs[
                     "activation_scale_grouping_routed_units"],
             }
+        if priced_inputs.get("served_activation_policy") is not None:
+            build["served_activation_policy"] = priced_inputs["served_activation_policy"]
+            build["activation_scale_pricing_input_equality_verified"] = True
         if scope is not None:
             build["tessera_serving_scope"] = read_layer_config_metadata(
                 assignment_path)["tessera_serving_scope"]
