@@ -2,7 +2,7 @@
 
 Does not issue any Stage A capture reuse authority or activate Stage B.
 """
-import copy,hashlib,json,os,pickle
+import argparse,copy,hashlib,json,os,pickle
 from pathlib import Path
 from prismaquant.tessera_joint_aura import render_origin_census
 ROOT=Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/t4-reuse-20260922')
@@ -18,10 +18,12 @@ def publish(path,raw):
  with tmp.open('xb') as f:f.write(raw);f.flush();os.fsync(f.fileno())
  os.link(tmp,path);tmp.unlink();return {'path':str(path),'sha256':sha(raw)}
 def main():
+ parser=argparse.ArgumentParser();parser.add_argument('--served-activation-policy',required=True);parser.add_argument('--served-activation-policy-sha256',required=True);args=parser.parse_args();policy={'path':args.served_activation_policy,'sha256':args.served_activation_policy_sha256};assert sha(Path(policy['path']).read_bytes())==policy['sha256']
  catalogpath=ROOT/'adopted-catalog.json';raw=catalogpath.read_bytes();assert sha(raw)==CATALOG_SHA;catalog=json.loads(raw);oldprep=json.loads(OLDPREP.read_bytes());plan=json.loads(OLDPLAN.read_bytes());raw=Path(oldprep['production_cache']['path']).read_bytes();assert sha(raw)==oldprep['production_cache']['sha256'];cache=pickle.loads(raw);del raw
  overlay=ROOT/'proposed-overlay';assert not overlay.exists(),'immutable proposed overlay already exists'
  plan['inputs']['candidate_overlay']={'path':str(catalogpath),'sha256':CATALOG_SHA};plan['output_root']=str(overlay)
- prepared=copy.deepcopy(oldprep)
+ plan['served_activation_policy']=policy
+ prepared=copy.deepcopy(oldprep);prepared['served_activation_policy']=policy
  for cell in catalog['cells']:
   q,fmt=cell['qname'],cell['format'];pair=(q,fmt);assert pair not in cache.weights
   value=json.loads((ROOT/'qualified'/(sha(q.encode())+'.json')).read_bytes());assert value['cell_sha256']==sha(json.dumps(cell,sort_keys=True,separators=(',',':')).encode());receipt=value['verified_cell']

@@ -1,5 +1,5 @@
 """Bounded whole-operator inputs: metadata only, no wire/render/H payload reads."""
-import hashlib,json,pickle,os
+import argparse,hashlib,json,pickle,os
 from pathlib import Path
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_aura import activation_identity
@@ -13,9 +13,10 @@ def binding(path):return {'path':str(path),'sha256':sha(path.read_bytes())}
 def unit(root,q):
  path=root/'cost.anchors.json.parts/units'/(sha(q.encode())+'.pkl');raw=path.read_bytes();env=pickle.loads(raw);assert sha(env['payload'])==env['payload_sha256'];return pickle.loads(env['payload']),{'path':str(path),'sha256':sha(raw),'payload_sha256':env['payload_sha256']}
 def main():
+ parser=argparse.ArgumentParser();parser.add_argument('--layer',type=int,default=8);args=parser.parse_args();layer=args.layer;assert 3<=layer<=44
  prepared=json.loads(PREP.read_bytes());pwc=prepared['production_cache'];raw=Path(pwc['path']).read_bytes();assert sha(raw)==pwc['sha256'];cache=pickle.loads(raw);del raw
  oldroot=BASE/'extension-r1024-02/workspace/merged';a4root=BASE/'extension-e2m1-01/workspace/merged-c92826fa4';planpath=BASE/'extension-e2m1-01/workspace/plan.json';plan=json.loads(planpath.read_bytes());owners={q:Path(row['dir']) for row in plan['rows'] for q in row['members']}
- names=sorted(q for q in prepared['formats_by_qname'] if q.startswith('model.language_model.layers.8.mlp.experts.'));assert len(names)==864
+ names=sorted(q for q in prepared['formats_by_qname'] if q.startswith(f'model.language_model.layers.{layer}.mlp.experts.'));assert len(names)==864
  rows=[];groups={'w13':{'activation_max_abs':set(),'a4_input_global_scale':set()},'w2':{'activation_max_abs':set(),'a4_input_global_scale':set()}}
  for q in names:
   old,oldbound=unit(oldroot,q);a4,a4bound=unit(a4root,q);byfmt={r['format_name']:r for r in a4['anchors']};formats={}
@@ -33,6 +34,6 @@ def main():
  for group in groups.values():
   for key,value in list(group.items()):group[key]=sorted(value)
   group['uniform_group_maximum']=len(group['activation_max_abs'])==1;group['uniform_a4_input_scale']=len(group['a4_input_global_scale'])==1
- result={'schema':'prismaquant.glm_native_operator_inputs.v1','layer':8,'experts':288,'projections_per_expert':3,'qnames':864,'formats':list(FORMATS),'inputs':{'prepared':binding(PREP),'production_cache':pwc,'a4_plan':binding(planpath),'adopted_catalog':{'path':str(ROOT/'adopted-catalog.json'),'sha256':'71238bdab85bdccabed921ce94b03459d5aba3607021b85007bf41f3e376fbc8'}},'source_model_identity':prepared['source_model_identity'],'calibration_input':prepared['calibration_input'],'executed_group_static_scales':groups,'rows':rows,'scope':'metadata census only; no wire/render/H payload reads; pending A4 render hashes remain null'}
- out=ROOT/'layer8-native-metadata.json';assert not out.exists();raw=(json.dumps(result,sort_keys=True,separators=(',',':'))+'\n').encode();out.write_bytes(raw);print(json.dumps({'path':str(out),'sha256':sha(raw),'qnames':len(rows),'cells':len(rows)*len(FORMATS),'group_static_scales':groups}),flush=True)
+ result={'schema':'prismaquant.glm_native_operator_inputs.v1','layer':layer,'experts':288,'projections_per_expert':3,'qnames':864,'formats':list(FORMATS),'inputs':{'prepared':binding(PREP),'production_cache':pwc,'a4_plan':binding(planpath),'adopted_catalog':{'path':str(ROOT/'adopted-catalog.json'),'sha256':'71238bdab85bdccabed921ce94b03459d5aba3607021b85007bf41f3e376fbc8'}},'source_model_identity':prepared['source_model_identity'],'calibration_input':prepared['calibration_input'],'executed_group_static_scales':groups,'rows':rows,'scope':'metadata census only; no wire/render/H payload reads; pending A4 render hashes remain null'}
+ out=ROOT/f'layer{layer}-native-metadata.json';assert not out.exists();raw=(json.dumps(result,sort_keys=True,separators=(',',':'))+'\n').encode();out.write_bytes(raw);print(json.dumps({'path':str(out),'sha256':sha(raw),'qnames':len(rows),'cells':len(rows)*len(FORMATS),'group_static_scales':groups}),flush=True)
 if __name__=='__main__':main()
