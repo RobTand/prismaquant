@@ -12,7 +12,7 @@ import torch
 from prismaquant.calibration_data import load_calibration_input
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.cost_streaming import build_streamed_model_identity
-from prismaquant.glm_routing_replay import capture_replayed_glm_routes
+from prismaquant.glm_routing_replay import capture_replayed_glm_routes, require_cached_prefix_source_identity
 from prismaquant.joint_adjoint_checkpoints import reference_from_record
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.joint_cost_quantum import build_quantum_source_runner
@@ -72,6 +72,8 @@ def main():
     if (producer_source["files"] != expected_files
             or producer_source["tensors"] != prepared["source_model_identity"]["checkpoint_weight_map"]):
         raise ValueError("native producer file/tensor identity differs from original qualified source")
+    cache_path = _seed_source_identity_cache(plan, root)
+    require_cached_prefix_source_identity(plan["model"], cache_path, prepared["source_model_identity"])
     from prismaquant.memory_management import enforce_device_envelope
     envelope = enforce_device_envelope("cuda", args.device_bytes, where="native GLM routing prefix")
     torch.set_num_threads(1)
@@ -94,7 +96,7 @@ def main():
     try:
         runner = build_quantum_source_runner(plan, offload_folder=root / "offload")
         source = build_streamed_model_identity(runner, plan["model"],
-            identity_cache_path=_seed_source_identity_cache(plan, root))
+            identity_cache_path=cache_path)
         if source != prepared["source_model_identity"]:
             raise ValueError("replayed BF16 source identity differs")
         if source_execution_identity(runner.model) != prepared["source_execution"]:
@@ -135,6 +137,9 @@ def main():
                     calibration=calibration, producer_source=producer_source,
                     parent_boundary={"capture":spec["capture"],"original_entry":matches[0],
                                      "owned_copy":copied,"spec":spec_binding})
+        from prismaquant.dev_mode import dev_stamp
+        result["metadata"].update(dev_stamp(timestamped=False))
+        result["metadata"]["source_cache_reuse"] = {"binding":plan["source_identity_cache"], "validator":"validate_cached_streamed_model_identity", "complete_checkpoint":True, "content_sha256":source["content_sha256"]}
         result["metadata"]["capture_device_envelope"] = envelope
         buffer = io.BytesIO()
         torch.save(result, buffer)
@@ -145,6 +150,7 @@ def main():
         receipt = {"schema": "prismaquant.glm_routing_replay_receipt.v1", "status": "complete",
                    "spec": spec_binding, "boundary": {"path": str(target), "sha256": hashlib.sha256(raw).hexdigest()},
                    "metadata": result["metadata"]}
+        receipt.update(dev_stamp(timestamped=False))
         if not publish_new_bytes(root / "receipt.json", (json.dumps(receipt, sort_keys=True) + "\n").encode()):
             raise ValueError("routing capture receipt already exists")
         if phases:report(phases[-1], 1, unit="routing_captures")

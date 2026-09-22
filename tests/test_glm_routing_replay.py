@@ -38,3 +38,25 @@ def test_source_router_epsilon_is_inspected_and_never_assumed_lfm():
     assert router_normalization_epsilon(Router()) == 1e-20
     with pytest.raises(ValueError, match="denominator differs"):
         router_normalization_epsilon(WrongRouter())
+
+
+def test_bounded_prefix_refuses_certified_fallback_before_cache_or_payload(monkeypatch):
+    from prismaquant.glm_routing_replay import require_cached_prefix_source_identity
+    from prismaquant import cost_streaming
+    monkeypatch.delenv('PRISMAQUANT_DEV_MODE',raising=False)
+    monkeypatch.setattr(cost_streaming,'validate_cached_streamed_model_identity',lambda *a,**k:pytest.fail('cache validation preceded explicit mode gate'))
+    with pytest.raises(RuntimeError,match='automatic source rehash is forbidden'):
+        require_cached_prefix_source_identity('source','cache',{})
+
+
+def test_bounded_prefix_keeps_owner_complete_checkpoint_and_exact_identity(monkeypatch):
+    from prismaquant.glm_routing_replay import require_cached_prefix_source_identity
+    from prismaquant import cost_streaming
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE','1')
+    def validate(source,cache,*,require_complete_checkpoint):
+        assert require_complete_checkpoint is True
+        return {'identity':'actual'}
+    monkeypatch.setattr(cost_streaming,'validate_cached_streamed_model_identity',validate)
+    assert require_cached_prefix_source_identity('source','cache',{'identity':'actual'})=={'identity':'actual'}
+    with pytest.raises(RuntimeError,match='differs from original preparation'):
+        require_cached_prefix_source_identity('source','cache',{'identity':'foreign'})

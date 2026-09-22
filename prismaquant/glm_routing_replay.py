@@ -14,6 +14,19 @@ import textwrap
 import torch
 
 
+def require_cached_prefix_source_identity(source_model, cache_path, expected_identity):
+    """Bounded capture reuses an authenticated cache or refuses before payload IO."""
+    from .dev_mode import dev_mode_enabled
+    from .cost_streaming import validate_cached_streamed_model_identity
+    if not dev_mode_enabled():
+        raise RuntimeError("bounded routing prefix requires explicit DEV_MODE cache reuse; automatic source rehash is forbidden")
+    identity = validate_cached_streamed_model_identity(
+        source_model, cache_path, require_complete_checkpoint=True)
+    if identity != expected_identity:
+        raise RuntimeError("routing source cache identity differs from original preparation")
+    return identity
+
+
 def select_original_routes(module, args, kwargs, *, sequence_length):
     """Select the complete first sequence without casting any routed tensor."""
     bound = inspect.signature(type(module).forward).bind(module, *args, **kwargs)
