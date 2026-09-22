@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Recovered Stage A campaign receipts (2026-09-22, PQ #947): an explicit recovery
+capsule may carry the existing campaign record by path and SHA-256. The new
+receipt binding is checked against that record's canonical seal, original
+plan/prepared/read-manifest hashes, complete measured unit roster and full
+calibration geometry. The original caller's absent scope and trailing-newline
+roster digest remain evidence; only those precise legacy spellings, or an
+already canonical caller, are accepted. The new receipt uses the campaign's
+existing scope and shared roster-digest helper. The original forward session,
+source/calibration/probe identity and every tensor remain unchanged. This is
+an explicit recovery binding, not permission to relabel arbitrary captures.
+
 Stage A checkpoint residency (2026-09-22, `fix/stagea-checkpoint-memory-20260922`):
 the tail and reverse chain retain their existing exact-entry descriptors,
 not a second full CPU cotangent plane. Checkpoint admission derives tensor
