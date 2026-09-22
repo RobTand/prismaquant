@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import pickle
+import re
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -112,6 +113,33 @@ def boundary_entry_directory(space: str | os.PathLike) -> Path:
 
 def checkpoint_directory(space: str | os.PathLike, boundary: int) -> Path:
     return Path(space) / "checkpoints" / f"boundary-{int(boundary):03d}"
+
+
+_CHECKPOINT_NAME = re.compile(r"boundary-(\d{3,})")
+
+
+def occupied_checkpoint_directories(space: str | os.PathLike) -> list[Path]:
+    """Every ``checkpoints/boundary-NNN`` path that already exists in ``space``.
+
+    ``write_adjoint_checkpoint`` creates each checkpoint directory with
+    ``mkdir(exist_ok=False)`` and nothing else writes under ``checkpoints/``,
+    so a name in the writer's own spelling (``checkpoint_directory``) is a
+    path a capture of this campaign writes and no capture ever reuses. The
+    layer count, and with it the tail boundary, is known only after the model
+    is built, so the check matches the spelling rather than one stride's set:
+    a stale tail checkpoint (R10 left ``boundary-045``, the 45-layer tail) is
+    exactly the one a stride-only set would miss. A path renamed aside
+    (``boundary-045.superseded``) no longer matches and does not block.
+    """
+    root = Path(space) / "checkpoints"
+    if not root.is_dir():
+        return []
+    occupied = []
+    for path in root.iterdir():
+        match = _CHECKPOINT_NAME.fullmatch(path.name)
+        if match and checkpoint_directory(space, int(match[1])).name == path.name:
+            occupied.append(path)
+    return sorted(occupied)
 
 
 def adjoint_receipt_path(space: str | os.PathLike) -> Path:
