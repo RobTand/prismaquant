@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Stage A checkpoint residency (2026-09-22, `fix/stagea-checkpoint-memory-20260922`):
+the tail and reverse chain retain their existing exact-entry descriptors,
+not a second full CPU cotangent plane. Checkpoint admission derives tensor
+envelopes from owned descriptors before opening payloads. Serialization uses
+the existing owner's digest-verified, lease-held `prefetch_batches` windows,
+grouped by probe and batch window, plus one charged serialization buffer.
+This preserves produced-group retirement boundaries and avoids repeatedly
+restaging a group for each tensor. Write failure closes the resident window
+and retains the admitted durable reservation under the existing failure
+contract. Tensor payloads, checkpoint schema, calibration and probe arithmetic
+are unchanged; checkpoint files still use their existing durable writer.
+
 Stage A allocator envelope (2026-09-22, PQ #934): an explicit positive finite
 `PRISMAQUANT_MAX_GPU_MEM_GB` now calls the existing
 `enforce_device_envelope` before backend preparation or model construction.
