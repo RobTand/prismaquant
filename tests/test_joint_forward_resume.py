@@ -403,13 +403,17 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
     assert all(Path(r.path).exists() for r in [*first.values(), *second.values()])
 
     # Stage B attaches through the same chain: one reference from each owner.
+    # In this two-layer fixture R10's boundary 2 is the final forward boundary,
+    # which only the tail reads, so the receipt names R9 entries only. The
+    # attached owner still authorizes every chain reference; at GLM scale
+    # Stage B reads R10's boundary 44 this way.
     settings = dict(resumed['boundary_storage']['policy'])
     settings['directory'] = resumed['boundary_storage']['directory']
     attached = StreamedBoundaryArtifacts(settings)
     attached.attach(resumed['boundary_storage']['session'], n_probes=4,
                     forward_recovery=resumed['boundary_storage']['forward_recovery'])
     older = reference_from_record(resumed['boundary_entries']['1'][0])
-    newer = reference_from_record(resumed['boundary_entries']['2'][0])
+    newer = reference_from_record(recovery_mod.chain_records(chained)['2'][0])
     assert older.path == first[1, 0].path and newer.path == second[2, 0].path
     with attached, attached.prefetch([older, newer]) as window:
         assert attached.get(window, older).shape == older.shape
