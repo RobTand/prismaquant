@@ -938,8 +938,9 @@ def test_every_post_campaign_manifest_satisfies_the_prismabuild_contract(
     assert json.loads(json.dumps(manifest)) == manifest
 
 
+@pytest.mark.parametrize("distributed", [False, True])
 def test_the_allocation_manifest_is_the_handoff_files_then_the_head(
-    scratch, shared_mount,
+    scratch, shared_mount, distributed,
 ):
     fixture = _workspace(scratch)
     prepared = scratch / "prepared.json"
@@ -951,10 +952,14 @@ def test_the_allocation_manifest_is_the_handoff_files_then_the_head(
         "production_cache": {"path": str(cache), "sha256": None},
     }))
     joint_cost = scratch / "joint-cost.pkl"
-    joint_cost.write_bytes(pickle.dumps(
-        {"provenance": {"tessera_joint_anchors": {
-            "prepared": {"path": str(prepared), "sha256": None}}}},
-        protocol=pickle.HIGHEST_PROTOCOL))
+    provenance = {"tessera_joint_anchors": {
+            "prepared": {"path": str(prepared), "sha256": None}}}
+    if distributed:
+        provenance = {"join_schema": "prismaquant.joint_layer_quanta.joined_results.v1",
+            "prepared": {"path": str(prepared), "sha256": None},
+            "coverage": {"status": "complete", "gaps": []}}
+    joint_cost.write_bytes(pickle.dumps({"provenance": provenance},
+                                       protocol=pickle.HIGHEST_PROTOCOL))
 
     manifest = glm_data_manifests.build_allocation_manifest(
         str(joint_cost), str(fixture["plan"]), produced_by=PRODUCED_BY)

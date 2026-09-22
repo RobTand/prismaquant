@@ -1807,7 +1807,13 @@ def build_allocation_manifest(joint_cost, plan, *, produced_by, argv=None):
     joint_cost = os.path.abspath(joint_cost)
     plan_path = os.path.abspath(plan)
     payload = _read_pickle(joint_cost, "joint cost")
-    evidence = (payload.get("provenance") or {}).get("tessera_joint_anchors")
+    provenance = payload.get("provenance") or {}
+    evidence = provenance.get("tessera_joint_anchors")
+    if evidence is None and provenance.get("join_schema") == "prismaquant.joint_layer_quanta.joined_results.v1":
+        coverage = provenance.get("coverage", {})
+        if coverage.get("status") != "complete" or coverage.get("gaps"):
+            raise SystemExit(f"{joint_cost}: joined costs are gapped; allocation handoff refuses")
+        evidence = {"prepared": provenance.get("prepared")}
     if not isinstance(evidence, dict) or "prepared" not in evidence:
         raise SystemExit(
             f"{joint_cost}: no tessera_joint_anchors record, so the prepared "
