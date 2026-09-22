@@ -1,0 +1,157 @@
+"""${LABEL} ${campaign_name} Stage A: admitted local output spool with explicit CPU/device budgets."""
+import argparse
+import contextlib
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parent
+PANEL = Path(${panel})
+RUN = PANEL / ${run}
+HEAD = ${source_head}
+MANIFEST = ROOT / ${manifest_name}
+MANIFEST_SHA = ${manifest_sha256}
+
+# The JSON bytes, expected digest and this program are in the command PB seals.
+# Materialization is inside the admitted container, immediately before exec.
+MATERIALIZE = '''import hashlib, os, pathlib, sys, tempfile
+target, raw, expected = pathlib.Path(sys.argv[1]), sys.argv[2].encode(), sys.argv[3]
+if hashlib.sha256(raw).hexdigest() != expected:
+    raise RuntimeError("sealed prefetch override digest mismatch")
+target.parent.mkdir(parents=True, exist_ok=True)
+fd, temporary = tempfile.mkstemp(prefix=".prefetch-", dir=target.parent)
+try:
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(raw)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o400)
+    os.replace(temporary, target)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+os.environ["PRISMAQUANT_STAGE_A_PREFETCH_OVERRIDE"] = str(target)
+os.execvp(sys.argv[4], sys.argv[4:])
+'''
+
+
+def bind_override(argv, spec, raw):
+    result = list(argv)
+    demand_index = result.index('--demand') + 1
+    if result[demand_index] != ${reviewed_demand}:
+        raise RuntimeError('unreviewed Stage A base demand')
+    result[demand_index] = ${bound_demand}
+    cpu_index = result.index('--cpus') + 1
+    if result[cpu_index] != ${reviewed_cpus}:
+        raise RuntimeError('unreviewed Stage A CPU demand')
+    result[cpu_index] = ${bound_cpus}
+    first_separator = result.index('--')
+    for name in ('PRISMABUILD_PRODUCED_SPOOL_ROOT', 'PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES'):
+        result[first_separator:first_separator] = ['--env', name + '=' + spec['env'][name]]
+        first_separator += 2
+    inner_separator = result.index('--', first_separator + 1)
+    original = result[inner_separator + 1:]
+    original += ['--forward-recovery', ${capsule_path}, '--forward-recovery-sha256', ${capsule_sha256}]
+    path = spec['env']['PRISMAQUANT_STAGE_A_PREFETCH_OVERRIDE']
+    original[original.index('--prefetch-override') + 1] = path
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    return result[:inner_separator + 1] + [
+        'python3', '-c', MATERIALIZE, path, raw, digest, *original]
+
+
+def dispatch_args():
+    return ['--records', str(PANEL / ${records}),
+            '--output-root', str(RUN), '--adjoint-manifest', str(MANIFEST),
+            '--stage-a-prefetch-override', str(ROOT / 'prefetch-override-r7.json'),
+            '--stage-a-artifact-budget-bytes', ${artifact_budget_bytes},
+            '--stage-a-produced-output-template', str(ROOT / 'stagea-512-template-r7.json'),
+            '--spec', str(ROOT / 'stage-a-spec-r7.json'),
+            '--plan', str(ROOT / 'stage-a-dispatch-config.json')]
+
+
+def bound_gateway(dispatch, checkout, document, base=None):
+    raw = (ROOT / 'prefetch-override-r7.json').read_text()
+
+    class BoundGateway(base or dispatch.Gateway):
+        def submit(self, argv):
+            bound = bind_override(argv, document['spec'], raw)
+            bound[2:2] = ['--cwd', str(checkout)]
+            if bound != document['argv']:
+                raise RuntimeError('dispatch changed after reviewed Stage A plan')
+            return super().submit(bound)
+
+    return BoundGateway()
+
+
+def plan(checkout):
+    pins = json.loads((ROOT / 'package-pins.json').read_text())
+    for name, digest in pins.items():
+        if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest:
+            raise RuntimeError('package input changed: ' + name)
+    if hashlib.sha256(MANIFEST.read_bytes()).hexdigest() != MANIFEST_SHA:
+        raise RuntimeError('scientific read manifest changed')
+    record = json.loads((PANEL / ${first_record}).read_text())
+    campaign = record['campaign']
+    scope = campaign['campaign_scope']
+    for name, expected in ${campaign_scope}.items():
+        if scope.get(name) != expected:
+            raise RuntimeError(${scope_refusal} + name)
+    for name, expected in ${campaign_bindings}.items():
+        if campaign.get(name) != expected:
+            raise RuntimeError('scientific campaign binding changed: ' + name)
+    spec = json.loads((ROOT / 'stage-a-spec-r7.json').read_text())
+    raw = (ROOT / 'prefetch-override-r7.json').read_text()
+    cmd = [sys.executable, 'tools/dispatch_joint_quanta.py', *dispatch_args(), '--dry-run']
+    proc = subprocess.run(cmd, cwd=checkout, capture_output=True, text=True)
+    if proc.returncode:
+        raise RuntimeError(proc.stderr)
+    document = json.loads(proc.stdout)
+    if len(document['rows']) != 1 or document['rows'][0]['kind'] != 'stage-a':
+        raise RuntimeError('${LABEL} must submit Stage A alone')
+    argv = bind_override(document['rows'][0]['argv'], spec, raw)
+    # Snapshot exactly the reviewed source, regardless of the launcher's cwd.
+    argv[2:2] = ['--cwd', str(checkout)]
+    return {'schema': 'prismaquant.stagea.${label}.forward_recovery.v1', 'argv': argv,
+            'prefetch_sha256': hashlib.sha256(raw.encode()).hexdigest(),
+            'source_head': HEAD, 'spec': spec, 'prefetch': json.loads(raw)}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('checkout', type=Path)
+    parser.add_argument('--launch', action='store_true')
+    args = parser.parse_args()
+    if args.launch:
+        head = subprocess.check_output(['git', '-C', str(args.checkout), 'rev-parse', 'HEAD'], text=True).strip()
+        dirty = subprocess.check_output(['git', '-C', str(args.checkout), 'status', '--short'], text=True).strip()
+        if head != HEAD or dirty:
+            raise RuntimeError('launch requires clean accepted ${LABEL} source')
+        runtime = Path('/mnt/shared/prismabuild-fleet/repo').resolve()
+        if str(runtime) != (ROOT / 'accepted-runtime.txt').read_text().strip():
+            raise RuntimeError('parent must accept and pin the deployed runtime')
+        stale = sorted((RUN / 'layer-quanta/adjoint/checkpoints').glob('boundary-[0-9][0-9][0-9]'))
+        if stale:
+            raise RuntimeError('adjoint checkpoint paths are occupied: ' + ', '.join(map(str, stale)))
+    document = plan(args.checkout)
+    if not args.launch:
+        print(json.dumps(document, sort_keys=True, indent=2))
+        return
+    attempt = Path(tempfile.mkdtemp(prefix='attempt-${label}-', dir=ROOT))
+    (attempt / 'sealed-command.json').write_text(json.dumps(document, sort_keys=True, indent=2) + '\n')
+    with (attempt / 'submit.stdout').open('w') as out, (attempt / 'submit.stderr').open('w') as err:
+        sys.path.insert(0, str(args.checkout))
+        from tools import dispatch_joint_quanta as dispatch
+        gateway = bound_gateway(dispatch, args.checkout, document)
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = dispatch.main(dispatch_args(), _gateway=gateway)
+    (attempt / 'result.json').write_text(json.dumps({'returncode': code}) + '\n')
+    print(attempt)
+    raise SystemExit(code)
+
+
+if __name__ == '__main__':
+    main()

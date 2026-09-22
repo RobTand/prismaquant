@@ -1,0 +1,24 @@
+{
+  "artifact_budget_bytes": "687194767360",
+  "bound_cpus": "9",
+  "bound_demand": "gpu=1,mem_gb=100",
+  "campaign_bindings": {
+    "plan_sha256": "0b2cc0066bb612e32af6d0c8c809912d325b2975583297eedeee97851ee545da",
+    "prepared_sha256": "962207a3385e9531adaf951b823871a2fb7ff4684320e7a8e19a1d0aa85d8f16",
+    "read_manifest_sha256": "71fd8f5688c649d90d6645489cd298eeac7add761f216aab90902948f241e988"
+  },
+  "campaign_name": "full512",
+  "campaign_scope": {
+    "window_count": 512,
+    "campaign_window_count": 512,
+    "calib_seqlen": 512,
+    "source_unit_count": 36423
+  },
+  "original_manifest_sha256": "ea0b9f4b7e8ca1d4224cabff6a7e8d1dad5cf7f7173cef0f5a900f50ea23a1a8",
+  "panel": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/allocation/joint-panel",
+  "records": "stage-a-recovery-20260920/records",
+  "reviewed_cpus": "10",
+  "reviewed_demand": "gpu=1,mem_gb=104",
+  "run": "complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02",
+  "scope_refusal": "full512 campaign scope changed: "
+}
