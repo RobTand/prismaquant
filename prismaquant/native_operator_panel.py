@@ -333,6 +333,8 @@ def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
     joint = cost_row["joint_operator_identity"]
     operator = preflight["operator"]
     probe = cost_row["probe_identity"]
+    from .native_execution_binding import require_reference_quantizer
+    reference_quantizer = require_reference_quantizer(inputs, joint["activation"], probe)
     request = inputs["probe_request"]
     for key in ("n_probes", "seed_base", "token_scope", "temperature", "distribution", "normalization"):
         _equal(probe[key], request[key], f"predeclared probe {key}")
@@ -361,7 +363,9 @@ def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
     route = operator["declared_route"]
     _equal(route["contract"], operator["activation_contract"], "activation route")
     panel = {
-        "schema": PANEL_SCHEMA, "unit": inputs["unit"], "format": inputs["format"],
+        "schema": PANEL_SCHEMA,
+        **({"reference_served_quantizer": reference_quantizer} if reference_quantizer is not None else {}),
+        "unit": inputs["unit"], "format": inputs["format"],
         "shape": inputs["shape"], "source_sha256": probe["source_model"]["content_sha256"],
         "calibration_sha256": probe["calibration_sha256"], "cost_sha256": cost_sha256,
         "probe_identity_sha256": cost_row["probe_identity_sha256"],
@@ -386,6 +390,9 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
     raw = Path(path).read_bytes()
     _equal(hashlib.sha256(raw).hexdigest(), _sha(expected_sha256, "receipt"), "receipt file")
     receipt = json.loads(raw)
+    if receipt.get("schema") == "prismaquant.native_dense_late_binding.v1":
+        from .native_execution_binding import resolve_execution_binding
+        receipt = resolve_execution_binding(receipt, expected_panel)
     if receipt.get("schema") != "tessera.native_dense_operator_receipt.v1" or receipt.get("status") != "timing_admissible":
         raise ValueError("native receipt has no admitted numerical/timing observation")
     _equal(receipt["panel"], expected_panel, "receipt panel")

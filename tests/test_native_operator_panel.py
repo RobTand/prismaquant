@@ -259,3 +259,16 @@ def test_a_present_but_empty_schedule_is_a_defect():
     assert kernel_arch_status("cutlass_80_x", platform=None) == "unknown"
     assert kernel_arch_status("nvjet_sm121_tss_mma_x", platform="sm_121") == "native"
     assert kernel_arch_status("cutlass_80_x", platform="sm_121") == "older_arch"
+
+
+def test_execution_panel_equals_final_joint_execution_projection(joined):
+    from prismaquant.native_execution_binding import freeze_execution_panel,execution_panel_from_joint
+    inputs,preflight,row=joined
+    final=freeze_native_panel(*joined,cost_sha256='4'*64)
+    raw=freeze_execution_panel(inputs,preflight,
+        source_sha256=row['probe_identity']['source_model']['content_sha256'])
+    assert raw==execution_panel_from_joint(final)
+    assert 'cost_sha256' not in raw
+    changed=copy.deepcopy(preflight);changed['operator']['wire_sha256']='0'*64
+    with pytest.raises(ValueError,match='wire bytes'):
+        freeze_execution_panel(inputs,changed,source_sha256=final['source_sha256'])

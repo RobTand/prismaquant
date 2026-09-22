@@ -166,3 +166,25 @@ def test_handoff_keeps_qualified_activation_but_exports_priced_group_value(polic
         assert result['costs'][name][FORMAT]['input_global_scale'] == expected
         assert result['costs'][name][FORMAT]['joint_operator_identity'] == joint['costs'][name][FORMAT]['joint_operator_identity']
         assert result['costs'][name][FORMAT]['predicted_dloss'] == joint['costs'][name][FORMAT]['predicted_dloss']
+
+
+def test_alternate_reader_is_hash_bound_and_used_for_every_dependency(policy_fixture, monkeypatch):
+    from pathlib import Path
+    from prismaquant import joint_served_activation as owner
+    bound, policy, cache, names = policy_fixture
+    monkeypatch.setattr(owner, '_VERIFIED', {})
+    reads = []
+    def pinned_read(binding):
+        reads.append(binding['path'])
+        return Path(binding['path']).read_bytes()
+    assert owner.verify_policy(bound, read_bound=pinned_read) == policy
+    # The policy and all three of its calibrated dependencies came through the reader.
+    assert set(reads) == {bound['path'], policy['original_prepared']['path'],
+                          policy['original_cache']['path'], policy['census']['path']}
+
+    monkeypatch.setattr(owner, '_VERIFIED', {})
+    def drifting_read(binding):
+        raw = Path(binding['path']).read_bytes()
+        return raw + b' ' if binding['path'] == policy['census']['path'] else raw
+    with pytest.raises(ValueError, match='alternate pinned reader changed bound content'):
+        owner.verify_policy(bound, read_bound=drifting_read)

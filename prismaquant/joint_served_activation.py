@@ -20,18 +20,29 @@ def _require(value, message):
         raise ValueError("served activation policy: " + message)
 
 
-def derive_policy(original_prepared):
+def _policy_bytes(bound, label, read_bound):
+    if read_bound is None:
+        from .tessera_joint_allocation import _read_bound
+        return _read_bound(bound,label)
+    import hashlib
+    raw=read_bound(bound)
+    _require(isinstance(raw,(bytes,bytearray)) and hashlib.sha256(raw).hexdigest()==bound["sha256"],
+             "alternate pinned reader changed bound content: "+label)
+    return raw
+
+
+def derive_policy(original_prepared, *, read_bound=None):
     """Derive the existing runtime's scale reduction from authenticated full draw."""
     from .tessera_joint_allocation import _read_bound
     from .cost_stage_checkpoint import canonical_json_sha256
     from .model_profiles import detect_profile
     from .nvfp4_activation_contract import routed_executed_max_abs, LEGACY_INPUT_GLOBAL_SCALE_POLICY
-    prepared = json.loads(_read_bound(original_prepared, "served-group original prepared"))
+    prepared = json.loads(_policy_bytes(original_prepared, "served-group original prepared", read_bound))
     _require(prepared.get("status") == "complete" and prepared["calibration_input"]["shape"] == [512, 512],
              "requires the original complete 512x512 qualification")
-    cache = pickle.loads(_read_bound(prepared["production_cache"], "served-group original PWC"))
+    cache = pickle.loads(_policy_bytes(prepared["production_cache"], "served-group original PWC", read_bound))
     census_binding = cache.metadata["inputs"]["census"]
-    census = json.loads(_read_bound(census_binding, "served-group source census"))
+    census = json.loads(_policy_bytes(census_binding, "served-group source census", read_bound))
     _require(set(census["unit_shapes"]) == set(prepared["formats_by_qname"]), "source roster differs")
     maxima = cache.activation_max_abs
     effective, declaration = routed_executed_max_abs(
@@ -54,7 +65,7 @@ def derive_policy(original_prepared):
     return result
 
 
-def verify_policy(bound, *, original_prepared=None):
+def verify_policy(bound, *, original_prepared=None, read_bound=None):
     from .tessera_joint_allocation import _read_bound, _bound_stat_fence
     key = (bound["path"], bound["sha256"], _bound_stat_fence(Path(bound["path"])))
     cached = _VERIFIED.get(key)
@@ -62,12 +73,12 @@ def verify_policy(bound, *, original_prepared=None):
             (b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in cached["dependencies"]):
         policy = cached["policy"]
     else:
-        policy = json.loads(_read_bound(bound, "served activation policy"))
+        policy = json.loads(_policy_bytes(bound, "served activation policy", read_bound))
         _require(policy.get("schema") == SCHEMA and policy.get("format") == FORMAT, "unknown policy scope")
         dependencies = [dict(bound)] + [policy[k] for k in ("original_prepared", "original_cache", "census")]
         before = tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies)
         _require(before[0] == key, "policy changed while it was read")
-        _require(policy == derive_policy(policy["original_prepared"]), "group maxima or calibrated source evidence changed")
+        _require(policy == derive_policy(policy["original_prepared"], **({} if read_bound is None else {"read_bound":read_bound})), "group maxima or calibrated source evidence changed")
         _require(before == tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"])))
                                  for b in dependencies), "calibrated policy inputs changed during verification")
         _VERIFIED.clear()

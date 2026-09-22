@@ -1608,8 +1608,9 @@ def _packed_experts_forward_with_weights(
     """
     num_experts = int(getattr(experts_mod, "num_experts", gate_up_weight.size(0)))
     act_fn = getattr(experts_mod, "act_fn", None)
-    if act_fn is None:
-        raise ValueError("packed experts module exposes no act_fn")
+    apply_gate = getattr(experts_mod, "_apply_gate", None)
+    if act_fn is None and not callable(apply_gate):
+        raise ValueError("packed experts module exposes no activation operation")
     final_hidden_states = torch.zeros_like(hidden_states)
     with torch.no_grad():
         expert_mask = F.one_hot(top_k_index.to(torch.long), num_classes=num_experts)

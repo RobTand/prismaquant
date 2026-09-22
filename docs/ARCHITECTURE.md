@@ -263,8 +263,17 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `ws-h/overlay-hessian-identity-20260922`.
+As of: 2026-09-22 · `feat/glm-native-unpriced-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `feat/glm-native-unpriced-20260922`) for **native
+execution evidence before final joint costs** (PQ #936): raw dense and routed
+native receipts bind to the final joint panel through a late-binding envelope;
+see the section of that name. `joint_served_activation.verify_policy` gains an
+optional hash-bound `read_bound=` reader for the native acquisition driver. No
+format, default, stage or ship gate changes. Merged over the Tessera pin move
+to `07bfcc0e9b…` (PQ #987), whose GLM router epsilon check this branch now
+uses in place of its own `1e-20` constant.
 
 Re-stamped (2026-09-22, `ws-h/overlay-hessian-identity-20260922`) for **the
 overlay loader's Hessian identity** (PQ #985). `attach_candidate_overlay`
@@ -281,8 +290,10 @@ the loop are unchanged. No format, default, stage or ship gate changes. Gate:
 `tests/test_joint_catalog_extension.py`.
 
 Re-stamped (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`) for the
-Tessera pin move to `07bfcc0e9b…` (contract unchanged at v34). Previous stamp:
-2026-09-22 · `fix/joint-catalog-extension-20260922`.
+Tessera pin move to `07bfcc0e9b…` (contract unchanged at v34).
+
+Re-stamped (2026-09-22, `fix/joint-catalog-extension-20260922`) for **executed-group
+A4 pricing of added catalog candidates** (PQ #937).
 
 Re-stamped (2026-09-22, `flash/926-activation-quantizer-v2-reader`) for **the
 activation-quantizer table's second grammar** (PQ #926, Tessera contract v33 /
@@ -20164,6 +20175,61 @@ weight-only or dynamically scored cost does not depend on which A-side
 arithmetic the run bound, so its cache stays reusable for a mathematical reason
 rather than a convenient one. The key (`qname|FMT`) is unchanged, and no second
 cache, rehash or per-row resolution is introduced.
+
+### Native execution evidence before final joint costs (#936)
+
+`native_execution_binding` and `native_moe_execution_binding` preserve immutable
+raw dense and whole routed-owner receipts without a cost-table or probe digest.
+A subsequent explicit late-binding envelope retains that raw receipt verbatim
+and compares every measured source, calibration, wire/render, activation,
+routing, phase, runtime, and operator coordinate with the final joint panel.
+Only this verified view enters the existing native consumer; a filename or a
+geometry match cannot substitute for a final cost-row identity.
+
+Static A4 references additionally name the actually registered quality-image
+quantizer. Final cost rows must carry that exact arithmetic identity. Native
+execution still compares its observed QDQ output exactly with the independent
+reference; successful samples establish agreement for those inputs, not a
+universal equivalence between different image builds. Whole routed A4 owners
+require one executed group scale for gate/up and one for down. GLM source
+routing uses its actual normalization epsilon of 1e-20; LFM remains unchanged.
+
+The acquisition adapters retain original PWC wires and renders. Whole-owner
+reference preparation uses the source module's `_apply_gate` when exposed,
+including GLM's clamp, and the serving producer alone owns native launch-table
+validation. No PrismaQuant production module imports Tessera serving runtime.
+
+The opt-in measured runtime context v3 names `mixed_native.v1` only at the
+price-table composition boundary. It does not add a mixed lane eligibility
+cell. Its `native_cohort` v1 record retains each operator's complete runtime,
+collective declaration, source bundle, route, shape, workspace, and frozen
+operator identities. A producer bundle hashes both dense and routed harnesses
+and both resource-analysis and collector sources. Shared image, device UUID,
+arithmetic, package, execution mode, and collector identity must match; any
+library path shared by any two rows must have identical bytes. The intake
+gate recomputes this record from the independently consumed actual panels.
+Legacy contexts keep their existing single-structure grammar and equality.
+
+Fresh GLM native routing can carry a completed `streaming_prefix_initialization.v1`
+witness for source layers 0 through 3. This is a proper-prefix observation from
+`StreamingContext`'s existing initialization auditor, not a full pretrained-load
+contract. Intake checks the complete source identity and live checkpoint map,
+actual head coverage, all four predecessor layers, original calibration sample
+zero, eager capture runtime, and the exact stop before the layer-3 expert call.
+DEV source-cache reuse remains explicitly uncertified in the raw receipt and the
+retained per-operator context of a mixed runtime cohort.
+
+The acquisition adapter transports leased source spans, wire bytes and PWC renders
+into a private local directory owned by the same admitted action. Same-inode
+preallocation and bounded writes enforce a 40 GiB local disk ceiling; this is
+short-lived transport, not a resumable scientific checkpoint or PB distribution
+mechanism. The independent Tessera reader checks the action key, closed file
+roster, anchored no-follow descriptors and exact byte digests. Each source tensor
+is borrowed separately instead of retaining a second full source layer in RAM.
+The pilot declares 96 GiB aggregate memory: 40 GiB container CPU memory, a 48 GiB
+Torch allocator limit enforced in both processes, and 8 GiB for other allocations.
+Native/driver allocations outside Torch remain visible in the actual resource
+trace and are not claimed to be bounded by Torch's allocator limit.
 
 ### Selected cached wires from an additive historical catalog
 

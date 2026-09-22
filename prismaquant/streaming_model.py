@@ -112,6 +112,66 @@ def validate_streaming_initialization_contract(value):
     return dict(value)
 
 
+def validate_streaming_prefix_initialization_contract(value):
+    """Validate an observed proper prefix without admitting it as a full load."""
+    keys = {"schema", "scope", "status", "transformers_version", "model_class",
+            "dtype", "layers_prefix", "total_model_layers", "observed_layers",
+            "head_state_names", "state", "persistent_tensors", "derived_buffers",
+            "state_sha256", "source_map_sha256"}
+    if (not isinstance(value, dict) or set(value) != keys or
+            value.get("schema") != "prismaquant.streaming_prefix_initialization.v1" or
+            value.get("scope") != "streamed_text_source_prefix" or
+            value.get("status") != "completed"):
+        raise ValueError("Missing or invalid streaming prefix initialization contract")
+    for key in ("transformers_version", "model_class", "dtype", "layers_prefix"):
+        if not isinstance(value[key], str) or not value[key]:
+            raise ValueError("Invalid streaming prefix identity")
+    layers = value["observed_layers"]
+    if (type(value["total_model_layers"]) is not int or
+            not isinstance(layers, list) or not layers or
+            any(type(layer) is not int for layer in layers) or
+            layers != list(range(len(layers))) or
+            len(layers) >= value["total_model_layers"]):
+        raise ValueError("Streaming prefix must cover every predecessor and remain a proper prefix")
+    state, heads = value["state"], value["head_state_names"]
+    if (not isinstance(state, dict) or not state or not isinstance(heads, list)
+            or not heads or any(not isinstance(name, str) for name in heads)
+            or heads != sorted(set(heads)) or not set(heads) <= set(state)):
+        raise ValueError("Streaming prefix has incomplete head coverage")
+    prefix = value["layers_prefix"]
+    seen, checkpoint, derived = set(), 0, 0
+    for name, record in state.items():
+        if not isinstance(name, str) or not isinstance(record, dict):
+            raise ValueError("Invalid streaming prefix state")
+        kind = record.get("kind")
+        expected = {"shape", "dtype", "kind"} | ({"sha256"} if kind == "derived_buffer" else set())
+        if (kind not in {"checkpoint", "derived_buffer"} or set(record) != expected
+                or not isinstance(record["shape"], list)
+                or any(type(n) is not int or n < 0 for n in record["shape"])
+                or not isinstance(record["dtype"], str) or not record["dtype"]):
+            raise ValueError("Invalid streaming prefix tensor witness")
+        if name in heads:
+            if name.startswith(prefix):
+                raise ValueError("Body state cannot stand in for prefix head coverage")
+        else:
+            match = re.fullmatch(re.escape(prefix) + r"(\d+)\..+", name)
+            if match is None or int(match[1]) not in layers:
+                raise ValueError("Streaming prefix includes state outside its observed scope")
+            seen.add(int(match[1]))
+        checkpoint += kind == "checkpoint"
+        derived += kind == "derived_buffer"
+        if kind == "derived_buffer" and not re.fullmatch(r"[0-9a-f]{64}", str(record["sha256"])):
+            raise ValueError("Invalid derived-buffer digest")
+    if seen != set(layers) or not any(state[name]["kind"] == "checkpoint" for name in heads):
+        raise ValueError("Streaming prefix omitted a head or body layer")
+    if (type(value["persistent_tensors"]) is not int or value["persistent_tensors"] != checkpoint
+            or type(value["derived_buffers"]) is not int or value["derived_buffers"] != derived
+            or value["state_sha256"] != _initialization_digest(state)
+            or not re.fullmatch(r"[0-9a-f]{64}", str(value["source_map_sha256"]))):
+        raise ValueError("Streaming prefix state digest/counts differ")
+    return dict(value)
+
+
 class _StreamingInitializationAudit:
     """Observe the shared loader's actual installed state before consumption.
 
@@ -132,6 +192,7 @@ class _StreamingInitializationAudit:
             base_prefix = ""
         heads = _head_prefixes(context.model, base_prefix)
         self._observe(heads, delivered=None)
+        self.head_state_names = sorted(self.records)
 
     def _observe(self, prefixes, *, delivered):
         model = self.context.model
@@ -195,6 +256,31 @@ class _StreamingInitializationAudit:
             "persistent_tensors": sum(r["kind"] == "checkpoint" for r in self.records.values()),
             "derived_buffers": sum(r["kind"] == "derived_buffer" for r in self.records.values()),
             "state_sha256": _initialization_digest(self.records),
+            "source_map_sha256": _initialization_digest(mapping),
+        })
+
+    def complete_prefix(self, last_layer):
+        import transformers
+        if (type(last_layer) is not int or last_layer < 0 or
+                last_layer >= self.context.num_layers - 1 or
+                self.layers_seen != set(range(last_layer + 1))):
+            raise RuntimeError("streaming prefix has not observed exactly its contiguous source layers")
+        mapping = {name: {"tensor": key, "file": os.path.basename(self.context.weight_shard[name])}
+                   for name, key in self.context.weight_ckpt.items()}
+        model_class = type(self.context.model)
+        state = json.loads(json.dumps(self.records))
+        return validate_streaming_prefix_initialization_contract({
+            "schema": "prismaquant.streaming_prefix_initialization.v1",
+            "scope": "streamed_text_source_prefix", "status": "completed",
+            "transformers_version": transformers.__version__,
+            "model_class": f"{model_class.__module__}.{model_class.__qualname__}",
+            "dtype": str(self.context.dtype), "layers_prefix": self.context.layers_prefix,
+            "total_model_layers": self.context.num_layers,
+            "observed_layers": sorted(self.layers_seen), "head_state_names": self.head_state_names,
+            "state": state,
+            "persistent_tensors": sum(r["kind"] == "checkpoint" for r in state.values()),
+            "derived_buffers": sum(r["kind"] == "derived_buffer" for r in state.values()),
+            "state_sha256": _initialization_digest(state),
             "source_map_sha256": _initialization_digest(mapping),
         })
 
@@ -981,6 +1067,12 @@ class StreamingContext:
         if audit is None:
             raise RuntimeError("streaming initialization audit was not started")
         return audit.complete()
+
+    def source_prefix_initialization_contract(self, last_layer):
+        audit = getattr(self, "_source_initialization_audit", None)
+        if audit is None:
+            raise RuntimeError("streaming initialization audit was not started")
+        return audit.complete_prefix(last_layer)
 
     def unload(self, L: int, *, trim_cache: bool = True):
         _unload(self.model, [f"{self.layers_prefix}{L}."])
