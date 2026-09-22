@@ -145,7 +145,8 @@ def native_platform(device=None) -> str:
     return f"sm_{major}{minor}"
 
 
-def require_attested_activation_oracle(activation, *, platform, table=None):
+def require_attested_activation_oracle(activation, *, platform, table=None,
+                                       executing_image=""):
     """Refuse to freeze a ``reference_qdq`` this producer cannot attest.
 
     ``reference_qdq`` is not a runtime artifact: it is PrismaQuant's own
@@ -157,6 +158,14 @@ def require_attested_activation_oracle(activation, *, platform, table=None):
 
     A unit whose format does not quantise its input has no such rule and
     freezes nothing to attest; it returns ``None`` and is unaffected.
+
+    ``executing_image`` is the registry digest the panel will run in, and it
+    SELECTS the attestation when the contract publishes more than one for the
+    platform -- one per serving image since Tessera contract v33.  Left empty
+    against a single-table platform, nothing changes: the stamp carries that
+    table's image and :func:`require_panel_execution_scope` still refuses the
+    frozen panel when the two disagree.  Left empty against a platform that
+    publishes several, the reader refuses rather than picking one.
     """
     if not activation.get("quantizes_input"):
         return None
@@ -197,13 +206,14 @@ def require_attested_activation_oracle(activation, *, platform, table=None):
     from .tessera_runtime_contract import require_activation_quantizer_attested
 
     return require_activation_quantizer_attested(
-        contract, platform=platform, table=table)
+        contract, platform=platform, table=table,
+        executing_image=executing_image or "")
 
 
 def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format_name,
                           calibration_receipt, wire_blob, wire_record, encoding_identity,
                           prefill_rows, decode_rows, max_resident_bytes,
-                          activation_quantizers=None):
+                          activation_quantizers=None, runtime_image=""):
     """Prepare independent references from existing resident PWC/activation data.
 
     ``encoding_identity`` must be derived by the producer from the actual
@@ -223,6 +233,14 @@ def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format
 
     ``activation_quantizers`` is a seam for tests only: left ``None``, the
     attestation is read from the installed runtime's packaged contract.
+
+    ``runtime_image`` is the image this panel will be measured in, the same
+    reference the driver writes into ``inputs["runtime_image"]`` and
+    ``consume_native_receipt`` later compares the receipt against. It is
+    passed here because the contract may publish one quantiser attestation
+    per serving image (Tessera contract v33), and which one covers this
+    measurement is decided by the image, never by list order
+    (RobTand/prismaquant#926).
     """
     import torch
     from tessera.cached_unit import verify_cached_unit
@@ -262,7 +280,7 @@ def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format
         raise ValueError("native operator does not implement PQ's optional activation preclip")
     attestation = require_attested_activation_oracle(
         activation, platform=native_platform(source_weight.device),
-        table=activation_quantizers)
+        table=activation_quantizers, executing_image=runtime_image or "")
     tensors = {"source_weight": source_weight, "rendered_weight": rendered}
     phases = {}
     magnitude = 0.0

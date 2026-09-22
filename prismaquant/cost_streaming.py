@@ -207,6 +207,8 @@ class StreamedBoundaryArtifacts:
         self._published = False
         self._references = {}
         self._slots = {}
+        self._forward_inputs = {}
+        self._attached_forward_inputs = frozenset()
         self._active_window = None
         self._check_memory = None
         self._progress = None
@@ -215,6 +217,7 @@ class StreamedBoundaryArtifacts:
         self._cotangents = None
         self._status = "unused"
         self._scratch = None
+        self._cotangent_scratch = None
         self._checkpoint_reservations = {}
         self._checkpoint_committed = {}
         self._checkpoint_active = None
@@ -263,6 +266,8 @@ class StreamedBoundaryArtifacts:
         self._stager = None
         self._stager_stuck = False
         self._stager_failures = []
+        self._stager_death_recorded = False
+        self._stager_death_raised = False
         self._stager_preclaimed = set()
         self._produced_release_queued = set()
         self._produced_live_keys = frozenset()
@@ -353,7 +358,7 @@ class StreamedBoundaryArtifacts:
         self._status = "running"
         self._publish_status()
 
-    def attach(self, session, *, n_probes):
+    def attach(self, session, *, n_probes, forward_recovery=None):
         """Read-only bind to a published generation's exact entries.
 
         The distributed campaign's layer quanta read the adjoint capture's
@@ -376,6 +381,57 @@ class StreamedBoundaryArtifacts:
         self.directory = directory
         self._readonly = True
         self._status = "attached"
+        if forward_recovery is not None:
+            from .joint_forward_resume import SCHEMA, _read, _records
+            from .joint_adjoint_checkpoints import reference_from_record
+            if forward_recovery.get("schema") != SCHEMA:
+                raise RuntimeError("unsupported attached forward recovery authority")
+            capsule = forward_recovery["capsule"]
+            document, _ = _read(capsule["path"], capsule["sha256"])
+            if (document.get("schema") != SCHEMA or
+                    document["session"] != forward_recovery["original_session"] or
+                    document["frontier"] != forward_recovery["frontier"] or
+                    document["instance"]["owner_action_key"] != forward_recovery["original_owner"] or
+                    document["instance"]["owner_attempt"] != forward_recovery["original_attempt"]):
+                raise RuntimeError("attached forward recovery session changed")
+            records = _records(document, [entry for group in document["groups"]
+                for entry in group["manifest"]["entries"]])
+            self._attached_forward_inputs = frozenset(reference_from_record(row)
+                for rows in records.values() for row in rows)
+
+    def authorize_forward_inputs(self, references):
+        """Borrow already authenticated recovery inputs without taking ownership."""
+        if self._readonly or self._status != "running" or self._forward_inputs:
+            raise RuntimeError("forward input authority requires a fresh writable owner")
+        for reference in references:
+            identity = json.loads(reference.metadata_json)["identity"]
+            if identity["kind"] != "boundary" or identity["slot"] in self._slots:
+                raise RuntimeError("forward recovery repeats an occupied boundary slot")
+            self._forward_inputs[reference] = identity
+            self._references[reference.name] = reference
+            self._slots[identity["slot"]] = reference
+            self.telemetry["live_artifact_bytes"] += reference.file_bytes
+        if self.telemetry["live_artifact_bytes"] > self.config["max_artifact_bytes"]:
+            raise RuntimeError("recovered boundaries exceed artifact budget")
+        self.telemetry["peak_artifact_bytes"] = max(
+            self.telemetry["peak_artifact_bytes"], self.telemetry["live_artifact_bytes"])
+
+    def _retained_debt(self):
+        """What a stuck stager still owns, for the status and the receipt.
+
+        ``None`` on every run whose stager joined, so a clean generation
+        record is unchanged.
+        """
+
+        if not self._stager_stuck:
+            return None
+        return {"reason": "stuck-stager-exit-retain",
+                "detail": ("the stager thread did not end inside the staging "
+                           "budget; teardown was skipped, so this generation "
+                           "still owns its origins, checkpoint reservations "
+                           "and produced-output credit"),
+                "origins": len(self._references),
+                "origin_bytes": self.telemetry["live_artifact_bytes"]}
 
     def _publish_status(self):
         if self.directory is None or self._readonly:
@@ -384,8 +440,27 @@ class StreamedBoundaryArtifacts:
         data = {"schema": self.config["schema"], "session": self.session,
                 "policy": self.identity, "status": self._status,
                 "working_artifacts_reusable": False, "telemetry": self.telemetry}
+        retained = self._retained_debt()
+        if retained is not None:
+            data["retained"] = retained
         atomic_write_bytes(self.directory / "generation.json",
             (json.dumps(data, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
+
+    def checkpoint_cotangent_sink(self, records):
+        """Optional sealed local workspace for one quantum's cotangent plane."""
+        root = os.environ.get("PRISMAQUANT_STAGE_B_COTANGENT_ROOT")
+        ceiling = os.environ.get("PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
+        if root is None and ceiling is None:
+            return {}
+        if not root or not ceiling or not ceiling.isdecimal() or int(ceiling) <= 0:
+            raise ValueError("cotangent scratch requires explicit root and positive max bytes")
+        if self._cotangent_scratch is not None:
+            raise RuntimeError("boundary owner already holds cotangent scratch")
+        from .perturbed_x_cache import ExactCotangentScratch
+        self._cotangent_scratch = ExactCotangentScratch(
+            records, directory=root, max_bytes=int(ceiling),
+            max_tensor_bytes=self.config["max_resident_bytes"])
+        return self._cotangent_scratch
 
     def _reserve(self, delta):
         value = self.telemetry["resident_tensor_bytes"] + delta
@@ -473,7 +548,9 @@ class StreamedBoundaryArtifacts:
                 and self._references.get(reference.name) != reference):
             raise RuntimeError("exact boundary reference is stale or belongs to another generation")
         identity = json.loads(reference.metadata_json)["identity"]
-        if identity["session"] != self.session or (
+        foreign = self._forward_inputs.get(reference) == identity or (
+            self._readonly and reference in self._attached_forward_inputs)
+        if (identity["session"] != self.session and not foreign) or (
                 not self._readonly and self._slots.get(identity["slot"]) != reference):
             raise RuntimeError("exact boundary reference has a stale generation")
         return identity
@@ -602,6 +679,13 @@ class StreamedBoundaryArtifacts:
     def _retire(self, reference, *, missing_ok=False):
         if self._references.get(reference.name) != reference:
             raise RuntimeError("exact boundary retirement has a stale reference")
+        if reference in self._forward_inputs:
+            # Borrowed files and original ACKs remain owned by the old attempt.
+            del self._references[reference.name]
+            del self._forward_inputs[reference]
+            self.telemetry["live_artifact_bytes"] -= reference.file_bytes
+            self.telemetry["retired_entries"] += 1
+            return
         if self._local_output_spool is not None and not missing_ok:
             _key, group = self._produced_group_for(reference)
             self._local_output_spool.await_group(group["batch_id"])
@@ -1553,16 +1637,60 @@ class StreamedBoundaryArtifacts:
             f"stager step {task.label} failed and will be raised by the "
             f"owner's next call: {exc!r}")
 
-    def _produced_raise_stager_failure(self):
-        """Raise the oldest kept stager failure, under its own type."""
+    def _produced_record_stager_death(self):
+        """Record a dead stager worker as owner-visible debt, once.
 
-        if not self._stager_failures or self._produced_on_stager():
+        A worker that dies takes its whole queue with it. The stranded
+        tasks are dropped with their own callbacks on the way out, and
+        the death itself is news the owner cannot act on silently: a
+        stranded reclaim is a durable charge nobody gives back (PQ #959).
+        Returns the death, or None. Never raises, so the close path can
+        call it too.
+        """
+
+        stager = self._stager
+        death = None if stager is None else stager.death()
+        if death is None or self._stager_death_recorded:
+            return death
+        self._stager_death_recorded = True
+        stranded = stager.stranded()
+        self._produced_release_errors.append(
+            {"batch_id": None, "step": "stager-died",
+             "reason": {"error": repr(death), "stranded": list(stranded)}})
+        dropped = stager.stranded_error()
+        if dropped is not None:
+            self._produced_release_errors.append(
+                {"batch_id": None, "step": "stager-died-drop",
+                 "reason": {"error": repr(dropped)}})
+        self._produced_log(
+            f"the stager thread died: {death!r}; it stranded "
+            f"{len(stranded)} queued step(s) "
+            f"({', '.join(stranded) if stranded else 'none'}), each dropped "
+            "with its own callback; this owner runs its PrismaBuild calls "
+            "itself from here")
+        return death
+
+    def _produced_raise_stager_failure(self):
+        """Raise the oldest kept stager failure, under its own type.
+
+        A dead worker is raised the same way, after the failures it
+        already kept: the owner hears about the death at its next call
+        instead of finding a silently empty lane (PQ #959).
+        """
+
+        if self._produced_on_stager():
             return
-        with self._produced_lock.held():
-            label, exc = self._stager_failures.pop(0)
-        exc.add_note(f"raised on the produced-output stager thread by its "
-                     f"{label} step, and surfaced here")
-        raise exc
+        death = self._produced_record_stager_death()
+        if self._stager_failures:
+            with self._produced_lock.held():
+                label, exc = self._stager_failures.pop(0)
+            exc.add_note(f"raised on the produced-output stager thread by its "
+                         f"{label} step, and surfaced here")
+            raise exc
+        if death is None or self._stager_death_raised:
+            return
+        self._stager_death_raised = True
+        raise death
 
     def _produced_stager_poll(self):
         with self._produced_lock.held():
@@ -1625,6 +1753,7 @@ class StreamedBoundaryArtifacts:
             # Do not drain its failures or dispose of any shared state here.
             return
         self._stager_stuck = False
+        self._produced_record_stager_death()
         self._stager = None
         for label, exc in self._stager_failures:
             self._produced_release_errors.append(
@@ -3044,12 +3173,21 @@ class StreamedBoundaryArtifacts:
         references = tuple(references)
         for reference in references:
             self._entry_identity(reference)
+        foreign = tuple(ref for ref in references
+                        if ref in self._forward_inputs or ref in self._attached_forward_inputs)
+        if foreign:
+            from .joint_forward_resume import await_forward_inputs
+            await_forward_inputs(foreign)
         # A bound owner publishes and materializes this window's groups
         # here, at the FIRST read, and hands the read their namespaced
         # contexts. An unbound owner passes None and resolves through the
         # process input map exactly as before.
-        resolver = (None if self._produced is None
-                    else self._produced_reader_context(references))
+        owned = tuple(ref for ref in references if ref not in self._forward_inputs)
+        resolver = (None if self._produced is None or not owned
+                    else self._produced_reader_context(owned))
+        if resolver is not None and len(owned) != len(references):
+            own_resolver = resolver
+            resolver = lambda ref: (None if ref in self._forward_inputs else own_resolver(ref))
         # Captured HERE, while every group is still resolvable.
         window_keys = self._produced_window_keys
         self._produced_window_keys = ()
@@ -3060,7 +3198,9 @@ class StreamedBoundaryArtifacts:
             context = prefetch_exact_activation_cache_entries(references,
                 expected_session=self.session, max_tensor_bytes=self.config["max_resident_bytes"],
                 residency_check=self._reserve, scratch=self._scratch,
-                resolver=resolver)
+                resolver=resolver,
+                session_for_reference=(lambda ref: self._entry_identity(ref)["session"])
+                    if self._forward_inputs or self._attached_forward_inputs else None)
             window = context.__enter__()
         self._active_window = window
         self.telemetry["prefetch_windows"] += 1
@@ -3141,8 +3281,9 @@ class StreamedBoundaryArtifacts:
                 print(f"exact boundary owner: {note}", flush=True)
 
     def __exit__(self, exc_type, exc, traceback):
-        # No working tensor reference is resumable. Cost checkpoint shards own
-        # successful measurements; a new attempt always uses a new generation.
+        # Unfinished generations do not authorize reuse. A separately verified
+        # forward-recovery capsule can lend exact inputs to a fresh generation;
+        # borrowed files remain owned by their original, contained producer.
         self._status = "failed" if exc_type is not None else (
             "attached" if self._readonly else ("complete" if self.session else "unused"))
         try:
@@ -3160,6 +3301,14 @@ class StreamedBoundaryArtifacts:
                                 "origin_bytes": self.telemetry["live_artifact_bytes"]}})
                 if exc is not None:
                     exc.add_note(note)
+                # A run whose stager never joined is not a complete one.
+                # Its origins, checkpoint reservations and produced-output
+                # credit are still owned by a thread this process cannot
+                # account for, so the status says ``retained`` and the
+                # receipt names the debt (PQ #960). A run that was already
+                # failing keeps that verdict.
+                if self._status != "failed":
+                    self._status = "retained"
                 return False
             if exc_type is None:
                 self.settle_local_output()
@@ -3190,6 +3339,9 @@ class StreamedBoundaryArtifacts:
             self._status = "failed"
             raise
         finally:
+            if self._cotangent_scratch is not None:
+                self._cotangent_scratch.close()
+                self._cotangent_scratch = None
             if not self._stager_stuck:
                 if self._scratch is not None:
                     self._scratch.release()
@@ -3210,9 +3362,13 @@ class StreamedBoundaryArtifacts:
             self._publish_status()
 
     def receipt(self):
-        return {"policy": self.identity, "session": self.session, "status": self._status,
+        out = {"policy": self.identity, "session": self.session, "status": self._status,
                 "generation_manifest": str(self.directory / "generation.json") if self.directory else None,
                 "working_artifacts_reusable": False, "telemetry": dict(self.telemetry)}
+        retained = self._retained_debt()
+        if retained is not None:
+            out["retained"] = retained
+        return out
 
 
 @contextmanager
@@ -3610,7 +3766,8 @@ class StreamedCausalLM:
     def shutdown(self) -> None:
         self.context.shutdown()
 
-    def capture_layer_major_boundaries(self, input_batches, *, storage, source_phase=None):
+    def capture_layer_major_boundaries(self, input_batches, *, storage, source_phase=None,
+                                       forward_recovery=None):
         """Capture exact baseline boundaries through the existing layer visitor."""
         if storage.config.get("capture_order") != "layer_major":
             raise ValueError("layer-major boundary capture requires the explicit v2 policy")
@@ -3619,10 +3776,10 @@ class StreamedCausalLM:
             for input_ids in input_batches:
                 forward_batch(input_ids)
         return self.visit_layer_batches(input_batches, visit, boundary_storage=storage,
-                                        source_phase=source_phase)
+                                        source_phase=source_phase, forward_recovery=forward_recovery)
 
     def visit_layer_batches(self, input_batches, visitor, *, output_consumer=None,
-                            boundary_storage=None, source_phase=None):
+                            boundary_storage=None, source_phase=None, forward_recovery=None):
         """Visit one resident source layer over the original ordered batches.
 
         The original visitor retains one current hidden tensor per batch. With
@@ -3636,6 +3793,15 @@ class StreamedCausalLM:
         if self._pinned_layer is not None:
             raise RuntimeError("layer-batch traversal cannot start with a pinned layer")
         exact = boundary_storage is not None
+        start_layer = 0
+        if forward_recovery is not None:
+            from .joint_forward_resume import require_stateless_profile
+            require_stateless_profile(self)
+            if not exact or len(input_batches) != forward_recovery.n_batches:
+                raise RuntimeError("forward recovery changed the calibration partition count")
+            start_layer = forward_recovery.frontier
+            if not 0 < start_layer <= self.num_layers:
+                raise RuntimeError("forward recovery frontier is outside this model")
         if source_phase is not None and (not exact or not callable(source_phase)):
             raise ValueError('source phase admission requires exact boundaries and a callable observer')
         if exact:
@@ -3712,8 +3878,15 @@ class StreamedCausalLM:
                         batches.append(batch)
                         states.append([ids, None, pass_state])
                         check_state()
-                        batch.activations_cpu.append(boundary_storage.write(hidden,
-                            batch_index=batch_index, boundary_index=0))
+                        if forward_recovery is None:
+                            batch.activations_cpu.append(boundary_storage.write(hidden,
+                                batch_index=batch_index, boundary_index=0))
+                        else:
+                            refs = forward_recovery.batch_references(batch_index)
+                            if any(ref.shape != tuple(hidden.shape) or ref.dtype != str(hidden.dtype)
+                                   for ref in refs):
+                                raise RuntimeError("forward recovery boundary tensor geometry differs")
+                            batch.activations_cpu.extend(refs)
                         del hidden, pass_state
                     else:
                         states.append([ids, hidden, pass_state])
@@ -3721,14 +3894,18 @@ class StreamedCausalLM:
                 if not states:
                     raise ValueError("layer-batch traversal requires calibration batches")
                 if exact:
-                    report_source_phase('source_loading', 0)
-                    for depth in range(min(self.num_layers, max(1, self.prefetch_lookahead))):
+                    if start_layer < self.num_layers:
+                        report_source_phase('source_loading', start_layer)
+                    elif forward_recovery is not None:
+                        report_source_phase('capture_forward', self.num_layers - 1)
+                    for depth in range(start_layer, min(self.num_layers,
+                            start_layer + max(1, self.prefetch_lookahead))):
                         speculate(depth)
                 else:
                     for depth in range(min(self.num_layers, self.prefetch_lookahead + 1)):
                         self.context.schedule_prefetch(depth)
-                for layer in range(self.num_layers):
-                    if layer:
+                for layer in range(start_layer, self.num_layers):
+                    if layer > start_layer:
                         report_source_phase('source_loading', layer)
                     if exact:
                         check_state()

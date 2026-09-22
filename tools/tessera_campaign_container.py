@@ -506,8 +506,17 @@ def _canonical_absolute(value: object) -> "str | None":
     return value
 
 
+COTANGENT_SCRATCH_ENV = ("PRISMAQUANT_STAGE_B_COTANGENT_ROOT",
+                         "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
+
 PRODUCED_SPOOL_ENV = ("PRISMABUILD_PRODUCED_SPOOL_ROOT",
                       "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES")
+
+
+def cotangent_scratch_environment(spec: dict, environ) -> dict:
+    """Forward only an explicitly sealed, identity-mounted local workspace."""
+    return _bounded_local_environment(spec, environ, COTANGENT_SCRATCH_ENV,
+                                      "cotangent scratch")
 
 
 def produced_spool_environment(spec: dict, environ) -> dict:
@@ -517,33 +526,38 @@ def produced_spool_environment(spec: dict, environ) -> dict:
     would name different bytes there, so the most specific covering mount must
     expose the same host path read-write. No host directory is mounted here.
     """
+    return _bounded_local_environment(spec, environ, PRODUCED_SPOOL_ENV,
+                                      "local output spool")
+
+
+def _bounded_local_environment(spec, environ, names, label):
     declared = spec.get("env", {})
-    if not any(environ.get(name) or declared.get(name) for name in PRODUCED_SPOOL_ENV):
+    if not any(environ.get(name) or declared.get(name) for name in names):
         return {}
-    root, maximum = (environ.get(name) for name in PRODUCED_SPOOL_ENV)
+    root, maximum = (environ.get(name) for name in names)
     if _canonical_absolute(root) is None or root in ("/", "/mnt/shared"):
-        raise RuntimeError("local output spool needs a sealed canonical absolute root")
+        raise RuntimeError(f"{label} needs a sealed canonical absolute root")
     if not isinstance(maximum, str) or not maximum.isdecimal() or int(maximum) <= 0:
-        raise RuntimeError("local output spool needs a sealed positive byte ceiling")
-    for name, value in zip(PRODUCED_SPOOL_ENV, (root, maximum)):
+        raise RuntimeError(f"{label} needs a sealed positive byte ceiling")
+    for name, value in zip(names, (root, maximum)):
         if name in declared and declared[name] != value:
-            raise RuntimeError("local output spool spec disagrees with the sealed launch")
+            raise RuntimeError(f"{label} spec disagrees with the sealed launch")
     path = PurePosixPath(root)
     candidates = [mount for mount in spec["container"].get("mounts", [])
                   if (PurePosixPath(mount["target"]) == path
                       or PurePosixPath(mount["target"]) in path.parents)]
     if not candidates:
-        raise RuntimeError("local output spool requires an explicit writable identity bind")
+        raise RuntimeError(f"{label} requires an explicit writable identity bind")
     mount = max(candidates, key=lambda item: len(PurePosixPath(item["target"]).parts))
     translated = PurePosixPath(mount["source"]) / path.relative_to(mount["target"])
     if str(translated) != root or mount.get("readonly", False):
-        raise RuntimeError("local output spool requires an explicit writable identity bind")
+        raise RuntimeError(f"{label} requires an explicit writable identity bind")
     # A nested bind can replace individual payload groups after the root
     # check. Refuse it rather than sealing ambiguous source-host paths.
     if any(path in PurePosixPath(mount["target"]).parents
            for mount in spec["container"].get("mounts", [])):
-        raise RuntimeError("local output spool cannot contain nested container mounts")
-    return dict(zip(PRODUCED_SPOOL_ENV, (root, maximum)))
+        raise RuntimeError(f"{label} cannot contain nested container mounts")
+    return dict(zip(names, (root, maximum)))
 
 
 def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
@@ -848,6 +862,7 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
                  **bounded_defaults,
                  **progress_environment(spec, environ if environ is not None else {}),
                  **residency_env, **reader_env,
+                 **cotangent_scratch_environment(spec, environ if environ is not None else {}),
                  **produced_spool_environment(spec, environ if environ is not None else {})}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]

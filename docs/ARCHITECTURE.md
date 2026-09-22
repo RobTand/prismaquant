@@ -1,5 +1,70 @@
 # PrismaQuant Architecture
 
+Stager lifecycle (2026-09-22, PQ #959, #960): a Stage A stager worker that
+dies drops the tasks it stranded with their own `on_drop` callbacks, keeps the
+first callback failure, and reports the death to the owner, which raises it at
+its next call and records it as `stager-died` release debt. A run whose stager
+never joined publishes `status: retained` instead of `complete`, and its
+generation record and receipt carry a `retained` block naming the origins and
+bytes still owned. No format, lane, pin, kernel order, ship-gate verdict or
+default changes.
+
+Stage B may explicitly seal `PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
+`PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` to keep its cotangent working plane
+on local disk. The existing boundary owner preallocates the exact tensor-byte
+extent in a private disposable file, loads authenticated checkpoint entries
+one at a time through the existing strict pinned reader, and owns cleanup.
+Every coordinate has a fixed dtype/shape slot; replay reads owned CPU tensors
+and overwrites the same slot, syncing and dropping file pages after I/O.
+There are no mmap tensor views and no second retained checkpoint plane.
+Checkpoint/source/bound/replay phases and layer/probe/batch arithmetic order
+remain unchanged. The container requires the explicitly sealed same-path
+writable mount; NFS, tmpfs and overlay scratch roots refuse. The per-job disk
+ceiling is checked before physical allocation and is not a global disk ledger.
+Interrupted scratch is discarded; original authenticated checkpoints and
+committed cost journals remain the recovery authority. No GPU throughput or
+large-model peak claim follows from the tiny CPU equality qualification.
+
+Stage A forward recovery (2026-09-22, PQ #949): `joint_cost_stage_a`
+accepts an optional `--forward-recovery` capsule plus its SHA-256. The capsule
+is a separate explicit authority (`prismaquant.joint_forward_recovery.v1`,
+`joint_forward_resume.py`); it does not make an unfinished generation reusable.
+It admits a complete forward prefix only when PrismaBuild proves the original
+owner action contained, every immutable group descriptor and export
+acknowledgement matches, every calibration partition is present at every
+boundary from zero through the frontier, and the source, calibration, probe and
+execution identity is unchanged under an explicitly declared implementation
+compatibility. Imported files keep their original session and owner; the new
+generation borrows them as immutable inputs and its receipt carries the capsule
+binding, which Stage B reads as the exact foreign-reference whitelist. Profiles
+whose forward pass-state hooks are not the inherited stateless ones refuse.
+Without the flag the capture path is unchanged.
+`docs/design/distributed_campaign_2026-09-19.md` §3.3.1 holds the full
+contract.
+
+Recovered Stage A campaign receipts (2026-09-22, PQ #947): an explicit recovery
+capsule may carry the existing campaign record by path and SHA-256. The new
+receipt binding is checked against that record's canonical seal, original
+plan/prepared/read-manifest hashes, complete measured unit roster and full
+calibration geometry. The original caller's absent scope and trailing-newline
+roster digest remain evidence; only those precise legacy spellings, or an
+already canonical caller, are accepted. The new receipt uses the campaign's
+existing scope and shared roster-digest helper. The original forward session,
+source/calibration/probe identity and every tensor remain unchanged. This is
+an explicit recovery binding, not permission to relabel arbitrary captures.
+
+Stage A checkpoint residency (2026-09-22, `fix/stagea-checkpoint-memory-20260922`):
+the tail and reverse chain retain their existing exact-entry descriptors,
+not a second full CPU cotangent plane. Checkpoint admission derives tensor
+envelopes from owned descriptors before opening payloads. Serialization uses
+the existing owner's digest-verified, lease-held `prefetch_batches` windows,
+grouped by probe and batch window, plus one charged serialization buffer.
+This preserves produced-group retirement boundaries and avoids repeatedly
+restaging a group for each tensor. Write failure closes the resident window
+and retains the admitted durable reservation under the existing failure
+contract. Tensor payloads, checkpoint schema, calibration and probe arithmetic
+are unchanged; checkpoint files still use their existing durable writer.
+
 Stage A allocator envelope (2026-09-22, PQ #934): an explicit positive finite
 `PRISMAQUANT_MAX_GPU_MEM_GB` now calls the existing
 `enforce_device_envelope` before backend preparation or model construction.
@@ -10,6 +75,14 @@ absence preserves the legacy path. This caps Torch allocations, not native
 CUDA/context allocations, which remain covered by PB's GPU and aggregate
 action backstops. A lower envelope may refuse a later allocation; it never
 silently grows to complete the capture. No scientific plan is rewritten.
+
+Stage B binds the registered served static-A4 quantizer before cache or pricing
+work. An absent extension or image identity refuses; there is no Torch-model
+fallback. The observed operator, platform, Torch/vLLM build and inspected image
+digest are retained in the joint probe arithmetic and run identity, so rows and
+resumed checkpoints cannot silently change quantizer implementations. Dynamic
+or A16-only rosters do not require the serving extension.
+
 An explicit `joint_catalog_extension.v1` may add qualified E2M1-K2 q896
 candidates across the original qname roster while retaining the original
 completed BF16 Stage A capture. It binds the old/new plans and prepared PWCs,
@@ -78,8 +151,65 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `codex/glm-r8-integration-20260922`.
+As of: 2026-09-22 · `fix/served-group-export-root-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `flash/926-activation-quantizer-v2-reader`) for **the
+activation-quantizer table's second grammar** (PQ #926, Tessera contract v33 /
+tessera#555). `platforms[<platform>]` became a LIST of attestations, one per
+serving image, because the fp4 rounding decision belongs to the runtime's
+compiled operator and two builds of one operator are two objects. The reader
+now accepts `tessera.activation-quantizer.v1` and `.v2` and refuses every other
+name, parsing both into one three-level table
+`[platform][image][activation_contract]` keyed by the image's content digest
+(a v1 block is a v2 list of one). Which table covers a measurement is decided
+by the image it EXECUTES in: `require_activation_quantizer_attested` takes
+`executing_image`, `prepare_native_inputs` passes the panel's `runtime_image`,
+and a platform that publishes several tables with no image named is REFUSED --
+there is no first entry. Refusals: a non-list under v2, an object under v1, an
+empty list, two tables for one image, a second table naming no `generated`
+block, a tag where a digest is needed, and an executing image no table covers
+(naming both sides). The consume-side gate
+`require_panel_execution_scope` is unchanged and still bites: selecting
+correctly at freeze time does not retire it. `generated.image` joins
+`contract_answer`'s activation row as its third column and its drift key,
+because it now selects rather than labels -- two byte-identical tables would
+otherwise project one row. The dev pin is NOT moved here; only the answer
+literal's new column is transcribed. Gates:
+`test_activation_quantizer_attestation.py`,
+`test_native_panel_execution_scope.py`, against
+`tests/fixtures/tessera_activation_quantizers_v34.json` -- Tessera master
+`e42c0593d2`'s block verbatim, with its digest recorded.
+
+Same branch, same commit, for **a qualified launch that rides no extension**
+(PQ #958). `lane_eligibility._parse_table` read every `prefix::symbol` a cell
+executes as a launch through `native_extensions[prefix]` and refused the whole
+contract when no row declared the prefix. Contract v34 mints four dense cells
+on `tessera::window_gemm_dense` under decoder `native_window_gemm` and states
+that the launch carries no lane because it is a launch, not an extension lane;
+its `native_extensions` publishes only `tessera_window_gemv`. Such a launch now
+reads as the route's own path, exactly as `torch._scaled_mm` does, with no wire
+predicate to apply (`lane_claim_for_cell` already returned `None` for it). The
+guard moves to the field the lane gate keys on: a launch that takes a decoder
+some lane SERVES while naming an extension no row declares is REFUSED, naming
+the cell, the launch, the decoder and that extension. A launch whose prefix is
+a declared extension still must carry that extension's decoder. With no
+`native_extensions` table at all, any qualified launch is still refused --
+there is nothing to read the decoder against. Gates:
+`test_tessera_lane_requires.py`.
+
+Re-stamped (2026-09-22, `fix/stageb-bounded-cotangent-950-20260922`) for
+**a bounded Stage B cotangent working plane** (PQ #950). Checkpoint
+restoration reads one authenticated entry at a time through the existing
+strict pinned reader instead of materializing all 4x512 cotangents at once,
+and `load_adjoint_checkpoint` takes an optional caller-owned cotangent
+factory plus an auxiliary byte ceiling for the shared-state payloads. When
+`PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
+`PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` are sealed, the boundary owner
+preallocates one fixed-slot local file and the quantum reuses that slot per
+coordinate; unset, the historical in-memory plane is unchanged. Phase order,
+layer/probe/batch arithmetic, calibration draw and checkpoint identity are
+untouched. Gate: `tests/test_stageb_cotangent_scratch.py`.
 
 Re-stamped (2026-09-22, `feat/pq-local-output-shuttle-20260922`) for
 **PB-owned precommit local output spooling** (PQ #928, PB #857). The default
@@ -1150,9 +1280,10 @@ commit's contract. The union digest predicted while the gate was written
 (`712a15e4…e8c61c`) went stale — #563's rework resolved two master conflicts
 on its branch, so the landed union bytes differ from the prediction;
 `prismaquant/tessera_runtime/README.md` carries the verification command.
-Tessera master has since advanced to contract v33 (#568, activation-quantizer
-schema v2); this pin does not chase it, and the v33 reader migration belongs
-to the next bump.
+Tessera master has since advanced past contract v33 (#568, activation-quantizer
+schema v2); this pin does not chase it. The READER no longer blocks that: it
+reads schema v1 and v2 since PQ #926 (below), so which commit to pin is a
+review of the answer diff rather than a migration.
 
 Re-stamped (2026-09-18, `flash/747-retained-budget-transition-20260918`) for
 **a run transition that admits a retained-budget-only plan correction**
@@ -1619,7 +1750,19 @@ says exactly that.
   origins and bytes; a primary exception receives a note and keeps its identity.
   A later explicit close may clean up only after it establishes the thread
   has ended. No thread is forcibly terminated and retained credit is not freed
-  optimistically. Explicit settlement also requires a successful stager drain
+  optimistically. Such a run is not a complete one: the generation's status is
+  `retained`, not `complete`, and the generation record and the owner's receipt
+  carry a `retained` block with the reason, the origin count and the origin
+  bytes (PQ #960). A run that was already failing keeps `failed`.
+  **A dead worker.** A worker thread that dies takes its queue with it. Every
+  task it strands is dropped with the `on_drop` callback `close` would have
+  given it, `keep_on_close` included, because a dead worker cannot run the
+  task that flag protects; the first drop-callback failure is preserved with
+  the rest attached to it as notes, and the death carries a note naming what
+  it stranded. The owner reads the death through `ProducedStager.death()`,
+  records it as a `stager-died` release error with the stranded labels, and
+  raises it at its next call, once, after any failure already kept (PQ #959).
+  The owner then runs its PrismaBuild calls itself, as it does with no stager. Explicit settlement also requires a successful stager drain
   before submitting its urgent task; a timed-out or failed drain refuses
   settlement while retaining ownership, so it cannot overtake queued
   publication (PQ #922). The existing closing-error path records that refusal
@@ -6826,8 +6969,10 @@ executes (`native_operator_panel.py` -> `perturbed_x_cache._activation_qdq` ->
 contract published only the rule's NAME. Two mechanisms close that:
 
 * `tessera_runtime_contract.require_activation_quantizer_attested` reads the
-  runtime's own `activation_quantizers` block (`tessera.activation-quantizer.v1`,
-  keyed by platform then activation contract): probe **groups** of
+  runtime's own `activation_quantizers` block
+  (`tessera.activation-quantizer.v1` and `.v2`, keyed by platform, then by the
+  image the table was generated in, then by activation contract): probe
+  **groups** of
   `unit_length` bf16 inputs at a published global scale, with the UE4M3 byte
   the kernel stored and the code it emitted for each element, generated by
   running `torch.ops._C.scaled_fp4_quant` and by nothing else. PrismaQuant
@@ -6859,7 +7004,11 @@ and the contract says in which image:
 `activation_quantizers.platforms.sm_121.generated` -- `image`, `vllm`, `torch`,
 `device`, `compute_capability`, `driver`, `generator_sha256`, published beside
 `contracts` at the **platform** level, one generation for every contract that
-platform attests. That scope is read by `_parse_activation_generated`
+platform attests. Since Tessera contract v33 (activation-quantizer schema v2,
+tessera#555) a platform publishes a **list** of those attestations, one per
+serving image; PQ #926 reads both grammars into one three-level table
+(`[platform][image][activation_contract]`) and makes the image the SELECTOR
+rather than a label -- see the #926 stamp. That scope is read by `_parse_activation_generated`
 (`tessera_runtime_contract.py`) straight from the contract bytes, never
 asserted by a driver or an environment variable, and travels into the panel
 stamp as `generated` (plus `generated_absent_because` when the table publishes
@@ -19896,3 +20045,19 @@ scale; wire calibration identity remains historical. `--read-paths-out` emits
 the selected wires, package sources, authority documents and proof/policy
 inputs required when constructing PB's normal export read manifest. It is not
 an export qualification receipt and does not claim a full model was exported.
+
+### Selected executed-group activation export
+
+The routed-scale export gate accepts `executed_group.v1` only with the exact
+bound served-activation policy, independently rederived groups, selected A4
+member/format coverage, and the policy's priced fp32 values and formula. The
+build anchor preserves this binding and records pricing/input equality as
+verified; serving qualification remains false. Legacy per-unit declarations
+and refusal of unbound executed labels remain unchanged.
+
+`tools/write_tessera_selected_scales.py --assignment FILE --assignment-sha256
+SHA --out-dir NEW_DIRECTORY` reads that immutable allocation once and writes
+only its selected priced static scales through `write_export_inputs` with
+`hessians=None`. It does not recompute per-expert maxima or alter retained H.
+The output receipt binds the assignment, serialized scale file and served
+policy. An existing output directory is refused before any write.

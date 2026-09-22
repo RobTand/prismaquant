@@ -20,6 +20,7 @@ import json
 import os
 import pickle
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -199,7 +200,8 @@ def read_exact_entry_tensors(records, *, expected_session) -> dict:
     """Read whole exact entries back, digest-verified, name -> CPU tensor.
 
     Uses the activation owner's verified window reader (hash-then-load in one
-    pass), sized so a whole checkpoint cotangent plane is one window.
+    pass), sized to the caller's entry list. Checkpoint restoration passes one
+    entry at a time so no read window owns the complete cotangent plane.
     """
     from .perturbed_x_cache import prefetch_exact_activation_cache_entries
 
@@ -482,6 +484,47 @@ def _checkpoint_manifest_envelope_bytes(*, boundary: int, session: dict,
                 + "\n").encode())
 
 
+def _checkpoint_tensor_spec(value, owner):
+    """Plan bytes without loading an owner's durable cotangent descriptor."""
+    from .perturbed_x_cache import ExactActivationReference
+
+    if isinstance(value, ExactActivationReference) and owner is not None:
+        # Refuse stale/foreign descriptors before reserving or creating files.
+        owner._entry_identity(value)
+        return value.tensor_bytes, list(value.shape), value.dtype
+    if (not isinstance(value, torch.Tensor) or value.layout != torch.strided
+            or value.is_meta):
+        raise TypeError(
+            "exact boundary checkpoint requires materialized strided tensors "
+            "or an owner's exact-entry references")
+    return value.numel() * value.element_size(), list(value.shape), str(value.dtype)
+
+
+def _checkpoint_plan_windows(plans, width):
+    """Metadata-only groups matching the owner's probe/batch read windows."""
+    from itertools import groupby
+
+    for _, group in groupby(
+            plans, key=lambda plan: (plan["probe_index"], plan["batch_index"] // width)):
+        yield list(group)
+
+
+def _checkpoint_tensor_window(cotangents, plans, owner):
+    """Reuse the owner's bounded read grouping, including PB group retirement.
+
+    A one-entry window would retire and restage a complete produced group
+    for each of its entries. Match the existing prefetch batch width, keeping
+    only that window plus one serializer's reservation resident.
+    """
+    from .perturbed_x_cache import ExactActivationReference
+
+    references = [cotangents[(plan["probe_index"], plan["batch_index"])]
+                  for plan in plans]
+    references = [value for value in references
+                  if isinstance(value, ExactActivationReference)]
+    return owner.prefetch(references) if references else nullcontext()
+
+
 def write_adjoint_checkpoint(
     space: str | os.PathLike, *, boundary: int, session: dict,
     cotangents, shared_adjoint, shared_pass, owner=None,
@@ -489,7 +532,11 @@ def write_adjoint_checkpoint(
     """Serialize one strided checkpoint; returns its §3.3 record.
 
     ``cotangents`` maps ``(probe, batch)`` -> CPU activation cotangent tensor
-    at ``boundary``. ``shared_adjoint`` maps ``(probe, batch)`` -> the
+    at ``boundary``, or (with an owner) its existing exact-entry reference.
+    Reference metadata plans admission without reading payloads; serialization
+    opens one accounted, digest-verified, lease-held owner window at a time,
+    bounded by the existing ``prefetch_batches`` policy.
+    No full tensor plane is retained. ``shared_adjoint`` maps ``(probe, batch)`` -> the
     ``SharedStateCotangents.state_dict()`` carried beside it. ``shared_pass``
     maps ``batch`` -> the captured forward shared-pass state each chain layer
     and the layer quantum recompute from.
@@ -548,11 +595,8 @@ def write_adjoint_checkpoint(
             type(part) is not int or part < 0 for part in shared_pass):
         raise RuntimeError(
             "exact boundary checkpoint shared_pass keys must be nonnegative integers")
-    for tensor in cotangents.values():
-        if (not isinstance(tensor, torch.Tensor) or tensor.layout != torch.strided
-                or tensor.is_meta):
-            raise TypeError(
-                "exact boundary checkpoint requires materialized strided tensors")
+    for value in cotangents.values():
+        _checkpoint_tensor_spec(value, owner)
     owner.check_transient_buffer("checkpoint shared-state serialization")
     estimates = {}
     for name, state in _iter_shared_states(shared_adjoint, shared_pass):
@@ -566,8 +610,8 @@ def write_adjoint_checkpoint(
 
     activation_plan = []
     for (probe_index, batch_index) in sorted(cotangents):
-        tensor = cotangents[(probe_index, batch_index)]
-        nbytes = tensor.numel() * tensor.element_size()
+        value = cotangents[(probe_index, batch_index)]
+        nbytes, shape, dtype = _checkpoint_tensor_spec(value, owner)
         name = f"cotangent-{probe_index}-{batch_index}"
         activation_plan.append({
             "probe_index": probe_index, "batch_index": batch_index,
@@ -575,8 +619,8 @@ def write_adjoint_checkpoint(
             "name": name,
             "path": str(checkpoint_dir / "entries" / activation_cache_filename(name)),
             "tensor_bytes": nbytes, "file_envelope": nbytes + 65536,
-            "shape": [int(dim) for dim in tensor.shape],
-            "dtype": str(tensor.dtype),
+            "shape": [int(dim) for dim in shape],
+            "dtype": str(dtype),
         })
     shared_plan = [{"name": name,
                     "path": str(checkpoint_dir / "entries" / f"{name}.pkl"),
@@ -627,21 +671,32 @@ def write_adjoint_checkpoint(
                 shared_state_entries.append(_write_shared_state_streaming(
                     checkpoint_dir, plan["name"], state,
                     max_file_bytes=plan["file_envelope"]))
+        from .perturbed_x_cache import ExactActivationReference
+
         activation_entries = []
-        for plan in activation_plan:
-            tensor = cotangents[(plan["probe_index"], plan["batch_index"])]
-            with owner.hold_transient_serialization(
-                    plan["tensor_bytes"],
-                    f"checkpoint tensor {plan['name']}"):
-                entry = write_checkpoint_cotangent_entry(
-                    checkpoint_dir, probe_index=plan["probe_index"],
-                    batch_index=plan["batch_index"], tensor=tensor,
-                    session=session, max_file_bytes=plan["file_envelope"])
-            if entry["file_bytes"] > plan["file_envelope"]:
-                raise RuntimeError(
-                    "exact boundary checkpoint tensor file exceeds its "
-                    f"admitted envelope for {plan['name']}")
-            activation_entries.append(entry)
+        for window_plans in _checkpoint_plan_windows(
+                activation_plan, int(owner.config["prefetch_batches"])):
+            with _checkpoint_tensor_window(cotangents, window_plans, owner) as window:
+                for plan in window_plans:
+                    value = cotangents[(plan["probe_index"], plan["batch_index"])]
+                    tensor = (owner.get(window, value)
+                              if isinstance(value, ExactActivationReference) else value)
+                    try:
+                        with owner.hold_transient_serialization(
+                                plan["tensor_bytes"],
+                                f"checkpoint tensor {plan['name']}"):
+                            entry = write_checkpoint_cotangent_entry(
+                                checkpoint_dir, probe_index=plan["probe_index"],
+                                batch_index=plan["batch_index"], tensor=tensor,
+                                session=session, max_file_bytes=plan["file_envelope"])
+                    finally:
+                        # Release before the window closes/reuses its scratch.
+                        tensor = None
+                    if entry["file_bytes"] > plan["file_envelope"]:
+                        raise RuntimeError(
+                            "exact boundary checkpoint tensor file exceeds its "
+                            f"admitted envelope for {plan['name']}")
+                    activation_entries.append(entry)
         record = {
             "schema": ADJOINT_CHECKPOINT_SCHEMA,
             "boundary": int(boundary),
@@ -783,13 +838,33 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
     return raw
 
 
+def _await_checkpoint_entry(entry, *, deadline):
+    """Wait within the entered checkpoint phase; the exact reader keeps its pin checks."""
+    from .staged_tier_policy import policy_is_active
+    if not policy_is_active():
+        return
+    from .residency_map import residency_resolver
+    from .residency_shard_reader import await_staged_spans
+    from .staged_lease import stage_cover_is_published
+    resolver = residency_resolver()
+    if resolver is None:
+        return  # The strict reader supplies its existing missing-context refusal.
+    size = entry["file_bytes"]
+    return await_staged_spans(
+        resolver, [(entry["path"], 0, size, size)], deadline=deadline,
+        published=stage_cover_is_published)
+
+
 def load_adjoint_checkpoint(
-    space: str | os.PathLike, record: dict,
+    space: str | os.PathLike, record: dict, *, cotangent_factory=None,
+    shared_state_max_bytes=None,
 ) -> tuple[dict, dict, dict]:
     """Read one checkpoint back, verifying every digest it claims.
 
     Returns ``(cotangents, shared_adjoint, shared_pass)`` with CPU tensors and
-    deserialized state. Refuses on any digest or shape mismatch: a checkpoint
+    deserialized state. A caller-owned cotangent factory may provide bounded
+    working storage; verified entry windows are released before the next load.
+    Refuses on any digest or shape mismatch: a checkpoint
     whose bytes moved is a new identity, never a silent partial read.
     """
     checkpoint_dir = checkpoint_directory(space, int(record["boundary"]))
@@ -811,16 +886,29 @@ def load_adjoint_checkpoint(
             raise RuntimeError(
                 f"adjoint checkpoint {field} differ from its receipt entry "
                 f"(boundary {record.get('boundary')})")
+    if shared_state_max_bytes is not None:
+        if type(shared_state_max_bytes) is not int or shared_state_max_bytes <= 0:
+            raise ValueError("adjoint shared-state ceiling must be positive")
+        sizes = [entry.get("file_bytes") for entry in stored["shared_state_entries"]]
+        if (any(type(size) is not int or size <= 0 for size in sizes)
+                or sum(sizes) > shared_state_max_bytes):
+            raise RuntimeError("adjoint shared-state payloads exceed auxiliary byte ceiling")
+    from .residency_shard_reader import staged_range_wait_s
+    deadline = time.monotonic() + staged_range_wait_s()
     session = stored["session"]
-    cotangents = {}
-    tensors = read_exact_entry_tensors(
-        stored["activation_entries"], expected_session=session)
-    for entry in stored["activation_entries"]:
+    entries = stored["activation_entries"]
+    cotangents = {} if cotangent_factory is None else cotangent_factory(entries)
+    for entry in entries:
+        _await_checkpoint_entry(entry, deadline=deadline)
+        tensors = read_exact_entry_tensors([entry], expected_session=session)
         probe, batch = (int(part) for part in
                         entry["name"].removeprefix("cotangent-").split("-"))
-        cotangents[(probe, batch)] = tensors[entry["name"]]
+        cotangents[(probe, batch)] = tensors.pop(entry["name"])
+        del tensors
     shared_adjoint, shared_pass = {}, {}
+    shared_tensor_bytes = 0
     for entry in stored["shared_state_entries"]:
+        _await_checkpoint_entry(entry, deadline=deadline)
         path = Path(entry["path"])
         payload = _read_shared_state_payload(path, entry)
         digest = hashlib.sha256(payload).hexdigest()
@@ -828,11 +916,17 @@ def load_adjoint_checkpoint(
             raise RuntimeError(
                 f"adjoint checkpoint shared-state entry changed: {entry['name']}")
         state = pickle.loads(payload)
+        del payload
         parts = entry["name"].split("-")
         if entry["name"].startswith("shared-adjoint-"):
             shared_adjoint[(int(parts[2]), int(parts[3]))] = state
         else:
             shared_pass[int(parts[2])] = state
+        if shared_state_max_bytes is not None:
+            from .cost_streaming import _state_storage_bytes
+            shared_tensor_bytes += _state_storage_bytes(state)
+            if shared_tensor_bytes > shared_state_max_bytes:
+                raise RuntimeError("adjoint shared-state tensors exceed auxiliary byte ceiling")
     return cotangents, shared_adjoint, shared_pass
 
 
