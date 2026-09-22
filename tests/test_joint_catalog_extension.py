@@ -240,17 +240,25 @@ def test_cached_pair_revalidates_source_proof_and_publication_is_no_clobber(tmp_
         verify_catalog_pair(inputs)
 
 
-@pytest.mark.parametrize('change', [None, 'hessian', 'scalar', 'missing', 'render_changed'])
-def test_overlay_intake_preserves_base_and_consumes_only_bound_measured_additions(tmp_path, campaign, probe, change):
+_SYNTHETIC_HESSIAN = {'supplied': True, 'capture_sha256': 'f'*64, 'text_sha256': 'e'*64,
+                      'fit_ids_sha256': 'd'*64, 'fit_tokens': 4}
+
+
+def _overlay_case(tmp_path, campaign, probe, *, row_hessian=_SYNTHETIC_HESSIAN,
+                  panel_hessian=_SYNTHETIC_HESSIAN, overlay_hessian=None):
+    """A bound candidate overlay over the synthetic pair, and the base it attaches to.
+
+    ``row_hessian`` is what every overlay scalar row carries,
+    ``panel_hessian`` the base payload's ``provenance.hessian`` and
+    ``overlay_hessian`` the overlay cost payload's own ``provenance.hessian``.
+    """
     from types import SimpleNamespace
-    from prismaquant.joint_catalog_extension import attach_candidate_overlay
+    tmp_path.mkdir(parents=True, exist_ok=True)
     inputs, _, _ = _pair(tmp_path, campaign, probe)
     original = json.loads(Path(inputs['original_prepared']['path']).read_bytes())
     extended = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
     cache = pickle.loads(Path(extended['production_cache']['path']).read_bytes())
     base_cells, rows, scalar_costs = {}, [], {}
-    hessian = {'supplied': True, 'capture_sha256': 'f'*64, 'text_sha256': 'e'*64,
-               'fit_ids_sha256': 'd'*64, 'fit_tokens': 4}
     for (name, fmt), verified in sorted(cache.metadata['verified_cells'].items()):
         if fmt != ADDED_FORMAT:
             continue
@@ -264,7 +272,7 @@ def test_overlay_intake_preserves_base_and_consumes_only_bound_measured_addition
             'tessera_provenance': 'measured', 'currency': 'output_mse_under_route_activation_contract',
             'output_mse': 1.0, 'tessera_family': anchor['family'], 'tessera_body_rate_q256': 896,
             'input_global_scale': 0.5, 'wire_bytes': 4, 'activation_contract': anchor['activation_contract'],
-            'activation_quantized': True, 'hessian_identity': hessian}}
+            'activation_quantized': True, 'hessian_identity': copy.deepcopy(row_hessian)}}
         paths = {}
         for field in ('wire', 'render'):
             path = tmp_path/(name+'.'+field)
@@ -277,28 +285,157 @@ def test_overlay_intake_preserves_base_and_consumes_only_bound_measured_addition
             'anchor': anchor, 'adopted_source_hessian': {'synthetic': True},
             'record': {'identity': adoption['candidate_encoding_identity'],
                        'blob_sha256': hashlib.sha256(b'wire').hexdigest()}})
-    if change == 'scalar': scalar_costs[rows[0]['qname']][ADDED_FORMAT]['output_mse'] = 2.0
-    elif change == 'hessian':
-        rows[0]['record']['identity']['calibration']['hessian_sha256'] = '0'*64
-    elif change == 'missing': rows.pop()
-    elif change == 'render_changed': Path(rows[0]['render']).write_bytes(b'drifted')
-    catalog = {'schema': 'prismaquant.t4_adopted_catalog.v1', 'format': ADDED_FORMAT,
-        'old_prepared': inputs['original_prepared'], 'old_pwc': original['production_cache'],
-        'cost': _write(tmp_path, 'scalar.pkl', {'costs': scalar_costs}, binary=True),
-        'reseal_proof': rows[0]['catalog_source_adoption']['encoder_source_proof'], 'cells': rows,
-        **{key: original[key] for key in ('source_model_identity', 'source_execution', 'calibration_input',
-                                         'reader_identity', 'projection_backend')}}
-    bound = _write(tmp_path, 'catalog.json', catalog)
-    data = SimpleNamespace(inputs={'fixture': 'old', 'candidate_overlay': bound},
-        cells=copy.deepcopy(base_cells), formats_by_qname=copy.deepcopy(original['formats_by_qname']),
-        payload={'provenance': {'hessian': hessian},
-                 'costs': {name: {} for name in original['formats_by_qname']}})
+
+    def bind(mutate=None):
+        if mutate is not None:
+            mutate(rows, scalar_costs)
+        cost = {'costs': scalar_costs}
+        if overlay_hessian is not None:
+            cost['provenance'] = {'hessian': overlay_hessian}
+        catalog = {'schema': 'prismaquant.t4_adopted_catalog.v1', 'format': ADDED_FORMAT,
+            'old_prepared': inputs['original_prepared'], 'old_pwc': original['production_cache'],
+            'cost': _write(tmp_path, 'scalar.pkl', cost, binary=True),
+            'reseal_proof': rows[0]['catalog_source_adoption']['encoder_source_proof'], 'cells': rows,
+            **{key: original[key] for key in ('source_model_identity', 'source_execution', 'calibration_input',
+                                             'reader_identity', 'projection_backend')}}
+        bound = _write(tmp_path, 'catalog.json', catalog)
+        data = SimpleNamespace(inputs={'fixture': 'old', 'candidate_overlay': bound},
+            cells=copy.deepcopy(base_cells), formats_by_qname=copy.deepcopy(original['formats_by_qname']),
+            payload={'provenance': {'hessian': copy.deepcopy(panel_hessian)},
+                     'costs': {name: {} for name in original['formats_by_qname']}})
+        return data, bound
+
+    return SimpleNamespace(bind=bind, rows=rows, scalar_costs=scalar_costs, base_cells=base_cells,
+                           qnames=sorted(original['formats_by_qname']))
+
+
+@pytest.mark.parametrize('change', [None, 'hessian', 'scalar', 'missing', 'render_changed'])
+def test_overlay_intake_preserves_base_and_consumes_only_bound_measured_additions(tmp_path, campaign, probe, change):
+    from prismaquant.joint_catalog_extension import attach_candidate_overlay
+    case = _overlay_case(tmp_path, campaign, probe)
+
+    def mutate(rows, scalar_costs):
+        if change == 'scalar': scalar_costs[rows[0]['qname']][ADDED_FORMAT]['output_mse'] = 2.0
+        elif change == 'hessian':
+            rows[0]['record']['identity']['calibration']['hessian_sha256'] = '0'*64
+        elif change == 'missing': rows.pop()
+        elif change == 'render_changed': Path(rows[0]['render']).write_bytes(b'drifted')
+
+    data, bound = case.bind(mutate)
     if change is not None:
         with pytest.raises(ValueError):
             attach_candidate_overlay(data, bound, verify_payloads=True)
     else:
         result = attach_candidate_overlay(data, bound, verify_payloads=True)
-        assert {pair: result.cells[pair] for pair in base_cells} == base_cells
+        assert {pair: result.cells[pair] for pair in case.base_cells} == case.base_cells
         assert len(result.cells) == 12
         assert all(ADDED_FORMAT in row for row in result.formats_by_qname.values())
-        assert result.payload['costs'] == scalar_costs
+        assert result.payload['costs'] == case.scalar_costs
+
+
+# Two workspaces commit Hessians from one canonical capture: the overlay's cost
+# run covers the routed experts it priced, the panel covers every unit plus a
+# dense unit the overlay never prices. The run of 2026-09-22 (PB 53a9d3399086)
+# had exactly this shape and the loader refused it on the references files'
+# capture seals, which differ whenever the unit rosters do.
+_EXTRA_DENSE = 'model.layers.0.mlp.shared_expert.down_proj'
+_REFERENCE_POLICY = dict(schema='tessera.hessian_reference_load.v1', max_metadata_bytes=1024**2,
+                         max_file_bytes=1024**2, max_hessian_bytes=1024**2)
+
+
+def _canonical_capture(root, names, *, max_abs=4.0, act_value=1.0, census=None):
+    """Publish one complete canonical capture; ``census`` reuses an existing census file."""
+    import torch
+    from prismaquant import tessera_calibration_cache as cc
+    from tests.test_tessera_calibration_cache import canonical_fields, identity
+    from tests.test_tessera_priced_export_inputs import TRIPLE
+    root.mkdir(parents=True)
+    if census is None:
+        model = root/'source'
+        model.mkdir()
+        (model/'config.json').write_text('{}')
+        (model/'model.safetensors').write_bytes(b'fixture')
+        document = dict(model=str(model), counts=dict.fromkeys(names, 5), max_abs=dict.fromkeys(names, max_abs),
+                        unit_shapes={name: [3, 2] for name in names}, layer_stride=1,
+                        anchor_groups={'u:'+name: [name] for name in names}, **canonical_fields())
+        census = root/'census.json'
+        census.write_text(json.dumps(document))
+    document = json.loads(census.read_text())
+    calibration = dict(TRIPLE, model=document['model'], seqlen=8, source='fixture')
+    H = {name: torch.eye(2)*(3+i) for i, name in enumerate(names)}
+    record = cc.publish_capture(root/'capture', census_path=census,
+        identity=identity(census, calibration=calibration, max_act_rows=2),
+        acts={name: torch.full((2, 2), act_value) for name in names}, hessians=H,
+        counts=document['counts'], maxima=document['max_abs'])
+    return dict(record=record, census=census, calibration=calibration, H=H, counts=document['counts'])
+
+
+def _workspace_hessian(root, canonical, units, *, census_copy=False, override=None):
+    """One workspace's reference file over ``units`` and the H provenance its cost run stamps."""
+    import shutil
+    from prismaquant import tessera_calibration_cache as cc
+    from prismaquant import tessera_campaign as tc
+    root.mkdir(parents=True)
+    census = canonical['census']
+    if census_copy:
+        # Same census bytes under another workspace's path, as each GLM
+        # extension workspace keeps its own census.json.
+        census = root/'census.json'
+        shutil.copyfile(canonical['census'], census)
+    hessians = {name: canonical['H'][name] for name in units}
+    hessians.update(override or {})
+    path, _, digest = tc.write_export_inputs(root, hessians=hessians, hessian_rows=canonical['counts'],
+        hessian_identity=canonical['calibration'], static_scales={}, static_scale_policy='fixture',
+        hessian_reference=dict(canonical_capture=canonical['record'], census_path=census,
+                               load_policy=_REFERENCE_POLICY))
+    binding = cc.hessian_reference_binding(canonical['record']['sha256'], cc.sha256(census))
+    triple = {key: canonical['calibration'][key] for key in ('text_sha256', 'fit_ids_sha256', 'fit_tokens')}
+    row = dict(triple, supplied=True, capture_sha256=digest, reference_binding=binding)
+    return row, dict(row, capture_path=str(path))
+
+
+@pytest.mark.parametrize('change', [None, 'unit_digest', 'canonical', 'census', 'absent_from_panel',
+                                    'stale_row_seal', 'unbound_panel'])
+def test_overlay_intake_compares_hessian_content_not_reference_files(tmp_path, campaign, probe, change):
+    """The H an overlay row was priced under is its content, not a references file's seal."""
+    from prismaquant.joint_catalog_extension import attach_candidate_overlay
+    # ``_pair`` adds the overlay format to every roster unit, so the overlay
+    # prices all of them; the panel additionally commits one dense unit.
+    qnames = priced = sorted(campaign['roster'])
+    shared = _canonical_capture(tmp_path/'canonical', [*qnames, _EXTRA_DENSE])
+    overlay_units = priced
+    panel_units = [*qnames, _EXTRA_DENSE]
+    if change == 'absent_from_panel':
+        panel_units = [name for name in panel_units if name != priced[0]]
+    override = {priced[0]: shared['H'][priced[0]]*7} if change == 'unit_digest' else None
+    row, overlay_prov = _workspace_hessian(tmp_path/'overlay', shared, overlay_units, census_copy=True,
+                                           override=override)
+    panel_capture = shared
+    if change == 'canonical':
+        # Same census and same H, sealed as a different canonical capture.
+        panel_capture = _canonical_capture(tmp_path/'canonical-2', [*qnames, _EXTRA_DENSE],
+                                           act_value=2.0, census=shared['census'])
+    elif change == 'census':
+        panel_capture = _canonical_capture(tmp_path/'canonical-3', [*qnames, _EXTRA_DENSE], max_abs=9.0)
+    _, panel_prov = _workspace_hessian(tmp_path/'panel', panel_capture, panel_units)
+    if change == 'stale_row_seal':
+        row = dict(row, capture_sha256='0'*64)
+    elif change == 'unbound_panel':
+        panel_prov = {key: value for key, value in panel_prov.items() if key != 'reference_binding'}
+    # The shape the loader met: one draw, different reference files and seals.
+    assert overlay_prov['capture_path'] != panel_prov['capture_path']
+    assert row['capture_sha256'] != panel_prov['capture_sha256']
+    case = _overlay_case(tmp_path/'case', campaign, probe, row_hessian=row,
+                         panel_hessian=panel_prov, overlay_hessian=overlay_prov)
+    data, bound = case.bind()
+    if change is None:
+        result = attach_candidate_overlay(data, bound, verify_payloads=True)
+        assert len(result.cells) == 12
+        assert all(ADDED_FORMAT in formats for formats in result.formats_by_qname.values())
+        assert result.payload['costs'] == case.scalar_costs
+        return
+    expected = {'unit_digest': 'unit Hessian', 'canonical': 'canonical capture and census',
+                'census': 'canonical capture and census', 'absent_from_panel': 'no Hessian in the panel',
+                'stale_row_seal': 'capture seal', 'unbound_panel': 'capture_sha256 differs'}[change]
+    with pytest.raises(ValueError, match=expected):
+        attach_candidate_overlay(data, bound, verify_payloads=True)
