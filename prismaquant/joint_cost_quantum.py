@@ -1317,19 +1317,22 @@ def run_layer_quantum_core(
             f"{record['adjoint']['checkpoint_boundary']}")
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
-    cotangent_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-        source_adjoint_space, checkpoint_record)
-    grad_plane: dict[tuple[int, int], torch.Tensor] = dict(cotangent_plane)
-    cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
-                         for _ in row_offsets] for _ in range(n_probes)]
-    for (probe, batch), state in shared_adjoint.items():
-        cotangent_owners[probe][batch].load_state_dict(state)
-
     with storage:
+        grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+            source_adjoint_space, checkpoint_record,
+            cotangent_factory=storage.checkpoint_cotangent_sink,
+            shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+        cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
+                             for _ in row_offsets] for _ in range(n_probes)]
+        for (probe, batch), state in shared_adjoint.items():
+            cotangent_owners[probe][batch].load_state_dict(state)
+        state = None
+        del shared_adjoint
         partitions = [calib_ids[offset:offset + batch_rows]
                       for offset in row_offsets]
         batches = _rebuild_batches(runner, partitions=partitions,
                                    shared_pass=shared_pass)
+        del shared_pass
         needed = sorted({int(c) for c in record["adjoint"]["chain_layers"]} | {layer})
         for batch_index, batch in enumerate(batches):
             batch.activations_cpu = [

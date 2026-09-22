@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+Stage B may explicitly seal `PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
+`PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` to keep its cotangent working plane
+on local disk. The existing boundary owner preallocates the exact tensor-byte
+extent in a private disposable file, loads authenticated checkpoint entries
+one at a time through the existing strict pinned reader, and owns cleanup.
+Every coordinate has a fixed dtype/shape slot; replay reads owned CPU tensors
+and overwrites the same slot, syncing and dropping file pages after I/O.
+There are no mmap tensor views and no second retained checkpoint plane.
+Checkpoint/source/bound/replay phases and layer/probe/batch arithmetic order
+remain unchanged. The container requires the explicitly sealed same-path
+writable mount; NFS, tmpfs and overlay scratch roots refuse. The per-job disk
+ceiling is checked before physical allocation and is not a global disk ledger.
+Interrupted scratch is discarded; original authenticated checkpoints and
+committed cost journals remain the recovery authority. No GPU throughput or
+large-model peak claim follows from the tiny CPU equality qualification.
+
 An explicit `joint_served_activation_policy.v1` permits newly added routed
 E2M1-K2 q896 candidates to be priced at the fused MoE runtime's executed-stage
 scale. Its bound original full-512 preparation and census independently derive
@@ -122,7 +138,7 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `integrate/stageb-final-astra-20260922`.
+As of: 2026-09-22 · `fix/stageb-bounded-cotangent-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-22, `feat/pq-local-output-shuttle-20260922`) for
