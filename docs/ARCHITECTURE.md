@@ -104,6 +104,19 @@ CUDA/context allocations, which remain covered by PB's GPU and aggregate
 action backstops. A lower envelope may refuse a later allocation; it never
 silently grows to complete the capture. No scientific plan is rewritten.
 
+An explicit `joint_served_activation_policy.v1` permits newly added routed
+E2M1-K2 q896 candidates to be priced at the fused MoE runtime's executed-stage
+scale. Its bound original full-512 preparation and census independently derive
+the complete w13/w2 maxima through `routed_executed_max_abs`. The old PWC maxima,
+candidate qualification activations, renders, wires and source/H identities stay
+unchanged. Only a transient A4-specific pricing view applies the grouped maxima;
+A8/A16 and existing dense A4 retain their prior activations. Each new operator
+separately records its original qualification activation, the verified policy
+binding and executed group. Handoff requires the completed-capture catalog
+extension and exact policy arithmetic, then carries the actual priced scale
+into allocator/export metadata. Original qualification equality remains the
+default and no historical scalar cost is relabelled as a grouped joint price.
+
 Stage B binds the registered served static-A4 quantizer before cache or pricing
 work. An absent extension or image identity refuses; there is no Torch-model
 fallback. The observed operator, platform, Torch/vLLM build and inspected image
@@ -179,7 +192,7 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `fix/served-group-export-root-20260922`.
+As of: 2026-09-22 · `fix/joint-catalog-extension-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-22, `flash/926-activation-quantizer-v2-reader`) for **the

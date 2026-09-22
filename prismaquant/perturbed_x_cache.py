@@ -155,6 +155,8 @@ def _activation_qdq(
     two different quantizers (#227).  Absent -- no production cache, or a cache
     with no served rows -- there is nothing to disagree with and the hook is
     unchanged."""
+    from .joint_served_activation import format_activation_maxima
+    activation_max_abs = format_activation_maxima(activation_max_abs, act_spec)
     contract = getattr(act_spec, "static_activation_contract", None)
     if contract is not None:
         max_abs = _activation_max_abs_lookup(activation_max_abs, param_name)

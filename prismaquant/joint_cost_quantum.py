@@ -1090,6 +1090,9 @@ def run_layer_quantum_core(
         roster.unit_formats, roster.fmts, roster.render_formats)
     packed_members = roster.packed_members
     served_quantizer = bind_joint_served_quantizer(unit_formats)
+    from .joint_served_activation import joint_activation_maxima, operator_policy_record
+    pricing_maxima = joint_activation_maxima(production_cache)
+    activation_policy = getattr(production_cache, "_joint_served_activation", None)
     # The record seals window indices only (D2); membership comes from the
     # resolved handshake the caller ran, which refuses stale records. What is
     # checked here is coverage: the sealed budget must admit exactly this
@@ -1147,6 +1150,8 @@ def run_layer_quantum_core(
         "sum_output_operators_fp32_before_norm")
     if served_quantizer is not None:
         joint_probe_identity["arithmetic"]["served_quantizer"] = served_quantizer
+    if activation_policy is not None:
+        joint_probe_identity["arithmetic"]["served_activation_policy"] = activation_policy[0]
     if probe_layout is not None:
         joint_probe_identity["noise_layout"] = probe_layout
         joint_probe_identity["arithmetic"]["execution_partition"] = execution_partition
@@ -1168,7 +1173,7 @@ def run_layer_quantum_core(
         "cached_rendered_weights": joint_cache_renders,
         "activation_contracts": {
             name: {fmt: activation_identity(fr.get_format(fmt),
-                                            production_cache.activation_max_abs or {}, name)
+                                            pricing_maxima or {}, name)
                    for fmt in unit_formats[name]}
             for name in names
         },
@@ -1435,7 +1440,7 @@ def run_layer_quantum_core(
                 x2_probe.setdefault(key, [])
 
         def _record_joint_operator(name, fmt, source, rendered):
-            scales = production_cache.activation_max_abs or {}
+            scales = pricing_maxima or {}
             activation = activation_identity(fr.get_format(fmt), scales, name)
             rendered_identity = _cb_cache_tensor_identity(rendered)
             if fmt in render_formats[name]:
@@ -1456,6 +1461,11 @@ def run_layer_quantum_core(
                 "arithmetic": joint_probe_identity["arithmetic"],
                 "probe_identity_sha256": identity_sha256(joint_probe_identity),
             }
+            if activation_policy is not None and fmt != "BF16":
+                policy_record = operator_policy_record(
+                    *activation_policy, name, fmt, prepared_render_identities[name, fmt]["activation"])
+                if policy_record is not None:
+                    joint_operators[(name, fmt)]["served_activation_policy"] = policy_record
             joint_components.setdefault((name, fmt), [])
 
         # Zero-cost passthrough rows carry the source as their own render,
@@ -1720,6 +1730,7 @@ def run_layer_quantum_core(
         "checkpoint_identity_sha256": checkpoint_identity_sha256,
         **({"catalog_extension": record["catalog_extension"]}
            if record.get("catalog_extension") is not None else {}),
+        **({"served_activation_policy": activation_policy[0]} if activation_policy is not None else {}),
     })
     if set(joint_rows) != set(names):
         raise RuntimeError("layer quantum incomplete unit coverage")
@@ -1916,6 +1927,13 @@ def run_layer_quantum(
         if not isinstance(cache, ProductionWeightCache):
             raise RuntimeError("prepared cache is not ProductionWeightCache")
         _same(cache.metadata["inputs"], data.inputs, "prepared source bindings")
+        _same(completion.get("served_activation_policy"), config.get("served_activation_policy"),
+              "prepared served activation policy")
+        if config.get("served_activation_policy") is not None:
+            if record.get("catalog_extension") is None:
+                raise RuntimeError("served activation policy requires an explicit catalog extension")
+            from .joint_served_activation import activate_policy
+            activate_policy(cache, config["served_activation_policy"])
         expected_renders = {pair: cache.metadata["verified_cells"][pair]["render_file_sha256"]
                             for pair in data.cells}
         cache.require_file_load_sha256(
