@@ -1486,7 +1486,8 @@ def _stage_checkpoint_entries(tmp_path, monkeypatch, record):
     return residency_resolver(), consumer, paths
 
 
-def test_strict_checkpoint_roundtrip_pinned_never_opens_pool(tmp_path, monkeypatch):
+@pytest.mark.parametrize("local_scratch", [False, True])
+def test_strict_checkpoint_roundtrip_pinned_never_opens_pool(tmp_path, monkeypatch, local_scratch):
     from prismaquant.joint_adjoint_checkpoints import (
         adjoint_space, load_adjoint_checkpoint)
     record, tensor, state = _write_checkpoint(tmp_path)
@@ -1500,9 +1501,21 @@ def test_strict_checkpoint_roundtrip_pinned_never_opens_pool(tmp_path, monkeypat
         return real_open(target, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", counting)
-    cotangents, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-        adjoint_space(tmp_path), record)
-    assert torch.equal(cotangents[(0, 0)], tensor)
+    arena = None
+    def factory(entries):
+        nonlocal arena
+        from prismaquant.perturbed_x_cache import ExactCotangentScratch
+        arena = ExactCotangentScratch(entries, directory=tmp_path, max_bytes=1 << 20)
+        return arena
+    try:
+        cotangents, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+            adjoint_space(tmp_path), record,
+            cotangent_factory=factory if local_scratch else None)
+        actual = cotangents[(0, 0)]
+    finally:
+        if arena is not None:
+            arena.close()
+    assert torch.equal(actual, tensor)
     assert _states_equal(shared_adjoint[(0, 0)], state)
     assert shared_pass == {0: {"captured": None}}
     assert not any(opened_path in paths for opened_path in opened)
