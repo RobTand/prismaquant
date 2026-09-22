@@ -404,6 +404,43 @@ def require_extension(bound, *, receipt, plan_sha256, prepared_sha256):
     return capture["run_identity"]
 
 
+def _hessian_reference_commitments(hessian, where):
+    """One workspace's authenticated canonical binding and per-unit H digests.
+
+    The reference file is opened through the producer's own reader, which
+    recomputes the capture seal from the per-unit commitments and checks the
+    canonical capture and census it names. Requiring that seal to equal the
+    ``capture_sha256`` the workspace's cost rows carry binds the file to the
+    prices, so the digests returned are the ones those rows were priced under.
+    """
+    from .tessera_calibration_cache import open_hessian_reference
+    path = hessian.get("capture_path") if isinstance(hessian, dict) else None
+    _require(isinstance(path, str) and bool(path), where + " Hessian reference path is missing")
+    with open_hessian_reference(path) as owner:
+        _same(owner.descriptor["capture_sha256"], hessian.get("capture_sha256"), where + " Hessian reference seal")
+        _same(owner.binding(), hessian.get("reference_binding"), where + " Hessian reference binding")
+        return owner.binding(), owner.committed_units()
+
+
+def _overlay_hessian_commitments(overlay_hessian, panel_hessian):
+    """Per-unit H digests of the overlay's cost run and of the panel, from one capture.
+
+    A reference file's capture seal covers the unit roster it commits, so two
+    workspaces that reference one canonical capture under different rosters
+    or census paths carry different seals for identical Hessians. The identity
+    of a measured H is its content: the canonical capture digest, the census
+    digest and each unit's tensor digest. Without a reference binding on both
+    sides there is nothing finer than the seal, and a differing seal refuses.
+    """
+    _require(isinstance(overlay_hessian, dict) and overlay_hessian.get("reference_binding") is not None
+             and panel_hessian.get("reference_binding") is not None,
+             "overlay measured H capture_sha256 differs")
+    overlay_binding, overlay_units = _hessian_reference_commitments(overlay_hessian, "overlay measured")
+    panel_binding, panel_units = _hessian_reference_commitments(panel_hessian, "panel")
+    _same(overlay_binding, panel_binding, "overlay measured H canonical capture and census")
+    return overlay_units, panel_units
+
+
 def attach_candidate_overlay(data, bound, *, verify_payloads=False):
     """Attach an authenticated historical catalog without rewriting its base.
 
@@ -436,6 +473,9 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
     _same(set(pairs), expected, "complete added candidate roster")
     _same(len(pairs), len(expected), "unique added candidate roster")
     selected_names = set(data.formats_by_qname)
+    panel_hessian = data.payload["provenance"]["hessian"]
+    overlay_hessian = (costs.get("provenance") or {}).get("hessian")
+    reference_units = None
     with EncoderAdoptionValidation() as proof_checks:
         for row in rows:
             name, fmt = row["qname"], row["format"]
@@ -479,9 +519,20 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
                                    ("activation_quantized", "activation_quantized"),
                                    ("input_global_scale", "input_global_scale"), ("wire_bytes", "wire_bytes")):
                 _same(scalar.get(target), anchor.get(source), "overlay measured " + target)
-            for key in ("supplied", "capture_sha256", "text_sha256", "fit_ids_sha256", "fit_tokens"):
-                _same(scalar.get("hessian_identity", {}).get(key),
-                  data.payload["provenance"]["hessian"].get(key), "overlay measured H " + key)
+            row_hessian = scalar.get("hessian_identity", {})
+            for key in ("supplied", "text_sha256", "fit_ids_sha256", "fit_tokens"):
+                _same(row_hessian.get(key), panel_hessian.get(key), "overlay measured H " + key)
+            if row_hessian.get("capture_sha256") != panel_hessian.get("capture_sha256"):
+                if reference_units is None:
+                    reference_units = _overlay_hessian_commitments(overlay_hessian, panel_hessian)
+                overlay_units, panel_units = reference_units
+                _same(row_hessian.get("capture_sha256"), overlay_hessian.get("capture_sha256"),
+                      "overlay measured H capture seal")
+                _same(row_hessian.get("reference_binding"), overlay_hessian.get("reference_binding"),
+                      "overlay measured H reference binding")
+                _require(name in overlay_units, "overlay measured H commits no Hessian for " + name)
+                _require(name in panel_units, "overlay unit has no Hessian in the panel capture: " + name)
+                _same(overlay_units[name], panel_units[name], "overlay measured unit Hessian " + name)
             _same(row["activation"].get("input_global_scale"), anchor.get("input_global_scale"),
                   "overlay activation scale")
             for field in ("wire", "render"):

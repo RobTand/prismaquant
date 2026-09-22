@@ -182,7 +182,14 @@ The optional digest-bound `inputs.candidate_overlay` augments the complete
 historical anchor intake without rewriting the original merged journal or
 inventing historical fanout receipts. Its rows must cover exactly the missing
 E2M1 candidates and match an authenticated original cell's source, projection,
-calibration/H and fixture commitments. Historical scalar rows remain scalar;
+calibration/H and fixture commitments. A measured row's Hessian identity is
+its content: the draw triple, then either an equal capture seal or, when the
+overlay's cost run and the panel reference one canonical capture under
+different unit rosters or census paths, an equal canonical capture digest,
+census digest and per-unit H digest for every unit the overlay prices; both
+reference files are opened through Tessera's reader, which recomputes each seal
+from its commitments. A unit absent from the panel's references refuses.
+Historical scalar rows remain scalar;
 Stage B measures their joint costs. File fences detect changed retained
 artifacts, PWC validates the qualified render digests on consumption, and
 export independently authenticates selected wires. The PB head manifest
@@ -231,8 +238,22 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `fix/joint-catalog-extension-20260922`.
+As of: 2026-09-22 · `ws-h/overlay-hessian-identity-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `ws-h/overlay-hessian-identity-20260922`) for **the
+overlay loader's Hessian identity** (PQ #985). `attach_candidate_overlay`
+compared each overlay row's `capture_sha256` with the panel's. That value is
+the seal of one workspace's `hessian_capture.references.json`, computed over
+the unit roster that file commits, so the T4 overlay (PB 53a9d3399086) was
+refused although both files bind one canonical capture and census and all
+36,288 shared per-unit digests are equal. When the seals differ, the loader now
+opens both reference files, requires each seal to match its cost payload, and
+compares the canonical capture digest, the census digest and the per-unit H
+digest of every unit the overlay prices. Without a reference binding on both
+sides a differing seal still refuses. The draw triple and every other check in
+the loop are unchanged. No format, default, stage or ship gate changes. Gate:
+`tests/test_joint_catalog_extension.py`.
 
 Re-stamped (2026-09-22, `flash/926-activation-quantizer-v2-reader`) for **the
 activation-quantizer table's second grammar** (PQ #926, Tessera contract v33 /
