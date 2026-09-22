@@ -9,6 +9,19 @@ publication refuses origin retirement with a timeout. The origin, live-byte
 charge, reference and slot stay owned, and the release report names the debt.
 No format, kernel order, or staging-budget default changes.
 
+Re-stamped (2026-09-21, `fix/pq-890-tests-20260921`) for **what counts as a
+produced-group release failure** (PQ #890). No format, lane, pin, ship-gate
+verdict or kernel order changes, and no default moves. One counter changes
+meaning: an own-copy deferral that the owner waits out and that then clears
+is no longer recorded in `produced_group_release_failures` or in the report's
+`release_errors`. The waited path now follows the rule the poll path already
+followed -- a deferral is news that PrismaBuild still holds the copy, not a
+stage copy left standing -- so the counter answers "did this owner leave a
+copy behind?" rather than "did this owner happen to ask inside a wait?". A
+deferral that runs its budget out is recorded where it is decided, in the
+wait, alongside the `BoundaryProducedReleaseDeferred` it raises; foreign
+pins, promotion handoffs and egress errors are recorded exactly as before.
+
 Re-stamped (2026-09-21, `feat/stagea-background-stager-895`) for **the Stage A
 owner's background stager** (PQ #895). No format, lane, pin, ship-gate verdict
 or kernel order changes, and the **default is unchanged**: at the sealed
@@ -141,20 +154,6 @@ A failing capture prints `capture failed: <type>: <message>` before any
 teardown. Stage B's per-chain and per-window sessions are bounded scopes and are
 unchanged. No format, lane, pin, kernel order or ship gate changes. Gates:
 `tests/test_stage_a_kernel_profile_scope.py`.
-
-Re-stamped (2026-09-21, `fix/pq-890-tests-20260921`) for **what counts as a
-produced-group release failure** (PQ #890). No format, lane, pin, ship-gate
-verdict or kernel order changes, and no default moves. One counter changes
-meaning: an own-copy deferral that the owner waits out and that then clears
-is no longer recorded in `produced_group_release_failures` or in the report's
-`release_errors`. The waited path now follows the rule the poll path already
-followed -- a deferral is news that PrismaBuild still holds the copy, not a
-stage copy left standing -- so the counter answers "did this owner leave a
-copy behind?" rather than "did this owner happen to ask inside a wait?". A
-deferral that runs its budget out is recorded where it is decided, in the
-wait, alongside the `BoundaryProducedReleaseDeferred` it raises; foreign
-pins, promotion handoffs and egress errors are recorded exactly as before.
-
 Re-stamped (2026-09-21, `feat/stagea-owner-loop-readahead-20260921`) for
 **read-ahead in the Stage A produced-boundary owner loop** (PQ #887). No
 format, lane, pin, ship-gate verdict or kernel order changes, and the
