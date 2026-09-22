@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Stage A allocator envelope (2026-09-22, PQ #934): an explicit positive finite
+`PRISMAQUANT_MAX_GPU_MEM_GB` now calls the existing
+`enforce_device_envelope` before backend preparation or model construction.
+It can only tighten the plan's `max_gpu_bytes`. The applied byte limit,
+allocator device and fraction are recorded in results, counters and the
+sealed adjoint receipt. Invalid explicit values refuse before device work;
+absence preserves the legacy path. This caps Torch allocations, not native
+CUDA/context allocations, which remain covered by PB's GPU and aggregate
+action backstops. A lower envelope may refuse a later allocation; it never
+silently grows to complete the capture. No scientific plan is rewritten.
+
 Distributed joint-cost joins retain the runtime's measured per-unit statistics,
 unaltered cost rows, and each quantum's original provenance. Production-shaped
 payloads must agree on schema and probe identity and cover exactly their own
