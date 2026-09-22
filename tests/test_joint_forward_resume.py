@@ -419,6 +419,27 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
         assert attached.get(window, older).shape == older.shape
         assert attached.get(window, newer).shape == newer.shape
 
+    # A second owner attaching the same chain reads no capsule again: the
+    # verified chain is cached by each capsule's (path, sha256).
+    reads = []
+    real_read = recovery_mod._read
+    def counted(path, *args, **kwargs):
+        reads.append(str(path))
+        return real_read(path, *args, **kwargs)
+    monkeypatch.setattr(recovery_mod, '_read', counted)
+    again = StreamedBoundaryArtifacts(settings)
+    again.attach(resumed['boundary_storage']['session'], n_probes=4,
+                 forward_recovery=resumed['boundary_storage']['forward_recovery'])
+    assert reads == []
+    assert again._attached_forward_inputs == attached._attached_forward_inputs
+    # The cache never skips the session check against the receipt's binding.
+    changed = copy.deepcopy(resumed['boundary_storage']['forward_recovery'])
+    changed['frontier'] += 1
+    with pytest.raises(RuntimeError, match='session changed'):
+        StreamedBoundaryArtifacts(settings).attach(
+            resumed['boundary_storage']['session'], n_probes=4, forward_recovery=changed)
+    monkeypatch.setattr(recovery_mod, '_read', real_read)
+
     # The freezer derives the same chained capsule from the spool and PB records.
     import prismaquant.aura_cost as aura_cost
     monkeypatch.setattr(aura_cost, '_aura_source_sha256', lambda: '3' * 64)
@@ -430,6 +451,16 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
         output=derived, frontier=2, bind_current_implementation=True)
     assert summary['entries'] == 3 * len(draw()) and summary['segments'] == 2
     assert json.loads(derived.read_text()) == json.loads(capsule.read_text())
+
+    # --inspect-live accepts the contained chained owner before any freeze.
+    from tools.stagea_forward_recovery import inspect_owner
+    report = inspect_owner(recovery_mod.chained_specification(
+        r9_to_r10, spool_directory=spool, owner_request=request), spool, sdk=_chain_sdk())
+    assert report == {'schema': recovery_mod.SCHEMA, 'inspect_only': True,
+                      'authority_to_resume': False, 'contained': True,
+                      'first_boundary': 2, 'frontier': 2, 'groups': 1,
+                      'entries': len(draw()), 'segments': 2,
+                      'payload_bytes': sum(r.file_bytes for r in second.values())}
 
 
 def _chained_pair(tmp_path):
