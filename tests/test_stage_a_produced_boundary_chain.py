@@ -246,7 +246,8 @@ def _template(prefix: str, *, payload_max_bytes: int = 1 << 20,
 
 
 def _sealed_producer_request(tmp_path: Path, cas_root: Path,
-                             pb_repo: Path, template: dict) -> str:
+                             pb_repo: Path, template: dict, *,
+                             producer_environment=None) -> str:
     """The owner's own sealed request, filed once (the parent identity).
 
     The movement template ``publish_prepaid_batch`` derives at runtime
@@ -298,7 +299,8 @@ def _sealed_producer_request(tmp_path: Path, cas_root: Path,
                        "tools/fleet/stage_release.py"]),
         "params": {"cwd": ".", "command": ["/bin/true"],
                    "produced_output_template": declaration},
-        "environment": {"variables": {"PATH": "/usr/bin:/bin"},
+        "environment": {"variables": {"PATH": "/usr/bin:/bin",
+                                      **(producer_environment or {})},
                         "toolchain": {}},
         "execution_scope": {"portability": "portable", "platform_key": None,
                             "host_class": None}}
@@ -372,7 +374,8 @@ def _execute_mover(q, mover: str) -> dict:
 
 def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
                  payload_max_bytes: int = 1 << 20, window_gib: int = 2,
-                 gib: int = 4, staging_timeout_s: float = 900.0):
+                 gib: int = 4, staging_timeout_s: float = 900.0,
+                 published=False, producer_environment=None, claim_capacity=None):
     """A real queue, admitted owner, declared template, bound publication,
     and a real ``StreamedBoundaryArtifacts`` writing inside its prefix."""
 
@@ -396,19 +399,22 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
     template = _template(str(prefix), payload_max_bytes=payload_max_bytes,
                          window_gib=window_gib)
     # The template first: the owner's sealed request carries its declaration.
-    owner = _sealed_producer_request(tmp_path, cas_root, pb_repo, template)
+    owner = _sealed_producer_request(
+        tmp_path, cas_root, pb_repo, template,
+        producer_environment=producer_environment)
     terms = po.owner_demand_terms(template)
     q.publish(action_key=owner, cas_root=str(cas_root),
               worker_script=str(pb_repo / "tools" / "prismabuild_worker.py"),
               checkout_root=str(tmp_path / "mover-checkout"),
               resources={"cpu": 1, "mem_gb": 1, **terms},
               produced_output_template=template)
-    claimed = q.claim(owner="w-owner")
+    claimed = q.claim(owner="w-owner", capacity=claim_capacity)
     assert claimed is not None and claimed["action_key"] == owner
     control = _broker_control(q, owner)
     env = {"PRISMABUILD_ACTION_KEY": owner,
            "PRISMABUILD_ACTION_NONCE": control["nonce"],
-           "PRISMABUILD_ACTION_SCOPE": control["scope_id"]}
+           "PRISMABUILD_ACTION_SCOPE": control["scope_id"],
+           **(producer_environment or {})}
     po.declare_template(q.root, template)
     publication = BoundaryProducedPublication.bind_from_admitted_owner(
         queue_root=q.root, tier=TIER, env=env, command_extra=("--unpaced",))
@@ -420,7 +426,7 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
         "directory": str(prefix / "exact"),
         "max_resident_bytes": 1 << 24, "max_auxiliary_bytes": 1 << 24,
         "max_artifact_bytes": 1 << 24, "prefetch_batches": GROUP_SIZE})
-    storage.bind({"source_model": "fixture"}, n_probes=1)
+    storage.bind({"source_model": "fixture"}, n_probes=1, published=published)
     storage.bind_produced_output(
         publication, group_size=GROUP_SIZE, n_batches=n_batches,
         max_entry_tensor_bytes=1 << 14,
@@ -468,9 +474,10 @@ from pathlib import Path
 root, tag, stop, budget = sys.argv[1], sys.argv[2], Path(sys.argv[3]), float(sys.argv[4])
 from prismabuild import pool
 q = pool.PoolQueue(Path(root))
+capacity = json.loads(sys.argv[5]) if len(sys.argv) > 5 else None
 end = time.monotonic() + budget
 while time.monotonic() < end and not stop.exists():
-    claimed = q.claim(owner="w-fleet", tags=[tag])
+    claimed = q.claim(owner="w-fleet", tags=[tag], capacity=capacity)
     if claimed is None:
         time.sleep(0.05)
         continue
@@ -502,11 +509,12 @@ class _Fleet:
     a child process gets its own copy with the tuple removed.
     """
 
-    def __init__(self, q, tag: str, tmp_path: Path, *, budget_s: float = 240.0):
+    def __init__(self, q, tag: str, tmp_path: Path, *, budget_s: float = 240.0, capacity=None):
         self._q = q
         self._tag = tag
         self._stop = tmp_path / "fleet.stop"
         self._budget = budget_s
+        self._capacity = capacity
         self._proc = None
 
     def __enter__(self):
@@ -516,7 +524,7 @@ class _Fleet:
                             "PRISMABUILD_READER_HELPER_ROOT")}
         self._proc = subprocess.Popen(
             [sys.executable, "-c", _FLEET_DRIVER, str(self._q.root), self._tag,
-             str(self._stop), str(self._budget)],
+             str(self._stop), str(self._budget), json.dumps(self._capacity)],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         return self
 
@@ -531,8 +539,8 @@ class _Fleet:
         return False
 
 
-def _fleet(q, tmp_path: Path):
-    return _Fleet(q, _tier_host(q), tmp_path)
+def _fleet(q, tmp_path: Path, *, capacity=None):
+    return _Fleet(q, _tier_host(q), tmp_path, capacity=capacity)
 
 
 def _stage_groups(storage, q):

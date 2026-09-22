@@ -601,3 +601,57 @@ def test_host_residency_name_matches_the_consumer():
     source = (Path(__file__).resolve().parents[1] / "prismaquant" / "residency_map.py").read_text()
     match = re.search(r'^ENV_VAR = "([A-Z_]+)"$', source, re.M)
     assert match and match.group(1) == runner.RESIDENCY_MAP_ENV
+
+
+@pytest.mark.parametrize("mode", ["good", "missing", "readonly", "remapped", "nested", "conflict"])
+def test_cotangent_scratch_preserves_sealed_local_path_identity(mode):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    declared = spec()
+    root = "/home/rob/pb-scratch/glm-stageb"
+    env = {runner.COTANGENT_SCRATCH_ENV[0]: root,
+           runner.COTANGENT_SCRATCH_ENV[1]: str(36 << 30)}
+    if mode != "missing":
+        declared["container"]["mounts"].append({
+            "source": root if mode != "remapped" else "/different/host-path",
+            "target": root, "readonly": mode == "readonly"})
+    if mode == "nested":
+        declared["container"]["mounts"].append({
+            "source": "/other", "target": root + "/payload"})
+    if mode == "conflict":
+        declared["env"][runner.COTANGENT_SCRATCH_ENV[0]] = "/different"
+    if mode == "good":
+        argv = runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
+            uid=1000, gid=1000, image_id="sha256:resolved", environ=env)
+        assert f"{runner.COTANGENT_SCRATCH_ENV[0]}={root}" in argv
+        assert f"{runner.COTANGENT_SCRATCH_ENV[1]}={36 << 30}" in argv
+    else:
+        with pytest.raises(RuntimeError, match="cotangent scratch"):
+            runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
+                uid=1000, gid=1000, image_id="sha256:resolved", environ=env)
+
+
+@pytest.mark.parametrize("mode", ["good", "missing", "readonly", "remapped", "nested", "conflict"])
+def test_local_spool_preserves_source_host_path_identity(mode):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    declared = spec()
+    root = "/home/rob/local-spool"
+    env = {runner.PRODUCED_SPOOL_ENV[0]: root,
+           runner.PRODUCED_SPOOL_ENV[1]: str(32 << 30)}
+    if mode != "missing":
+        declared["container"]["mounts"].append({
+            "source": root if mode != "remapped" else "/different/host-path",
+            "target": root, "readonly": mode == "readonly"})
+    if mode == "nested":
+        declared["container"]["mounts"].append({
+            "source": "/other", "target": root + "/payload"})
+    if mode == "conflict":
+        declared["env"][runner.PRODUCED_SPOOL_ENV[0]] = "/different"
+    if mode == "good":
+        argv = runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
+            uid=1000, gid=1000, image_id="sha256:resolved", environ=env)
+        assert f"{runner.PRODUCED_SPOOL_ENV[0]}={root}" in argv
+        assert f"{runner.PRODUCED_SPOOL_ENV[1]}={32 << 30}" in argv
+    else:
+        with pytest.raises(RuntimeError, match="local output spool"):
+            runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
+                uid=1000, gid=1000, image_id="sha256:resolved", environ=env)

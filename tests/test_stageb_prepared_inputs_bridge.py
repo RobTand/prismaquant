@@ -372,6 +372,8 @@ def _offset_files(tmp_path):
 def shared_bridge_path():
     # Executable manifests declare /mnt/shared. Keep actual fixture bytes
     # under that mount so the real PB validator accepts the unchanged wire.
+    from fleet_sdk import require_prismabuild_sdk
+    require_prismabuild_sdk()
     import tempfile
     root = Path("/mnt/shared/prismaquant-test-fixtures")
     root.mkdir(exist_ok=True)

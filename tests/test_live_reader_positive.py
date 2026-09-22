@@ -22,11 +22,14 @@ calibration→lease→open→release path; no acquire/open/release is replaced.
 Covers: the true positive (exit 0 with exact-attempt held refs and clean
 post-release census, explicit SSD-only), wrong-draw rejection after a real
 read, a foreign attempt's ref never counting as ours, a tainted census
-refusing while open, RAM-first serving, and the typed RAM-availability
-fallback accepted only on the resolver's own recorded evidence.
+refusing while open, RAM-first serving, the typed RAM-availability
+fallback accepted only on the resolver's own recorded evidence, and the
+public ``(window, key)`` unpack contract, which moved here from
+``test_live_reader_main.py`` for the same reason (PQ #897).
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 from pathlib import Path
@@ -709,3 +712,76 @@ def test_default_mode_unknown_io_still_unqualified(
     assert result["pool_reads_observed"] is False
     assert result["finding"] == \
         "draw, observed pool accounting, or both failed"
+
+
+def test_acquire_returns_window_and_key_tuple(
+        world, monkeypatch, tmp_path, helper_root) -> None:
+    """The public contract main unpacks: (LeaseWindow, key), entered once.
+
+    Entering the whole tuple (the R5 defect shape) raises TypeError, so
+    only the unpacked window may serve as the context manager; main's
+    source unpacks the public return and opens the returned key.
+
+    This lives here, not in ``test_live_reader_main.py``, because
+    ``acquire_entry_window`` resolves the launch identity through the
+    SDK's ``injected_context``, and that module deliberately has none:
+    its autouse fixture scrubs ``PRISMABUILD_ACTION_*`` and its sibling
+    test asserts the resulting ``lease-context-unavailable`` refusal is
+    correct. Asserting the tuple shape there therefore required the
+    refusal not to happen, and it failed on the fleet with
+    ``staged-tier-forbidden: lease-context-unavailable: no-action-context``
+    (PQ #897). The claim this module already builds is the missing piece,
+    so the contract is now observed on a real acquired window instead of
+    around the identity check.
+
+    The window is built and never entered, which is the contract under
+    test, so no lease is filed on the isolated queue.
+    """
+
+    from prismaquant.residency_map import (bind_residency_manifest,
+                                           residency_resolver)
+    from prismaquant.staged_lease import LeaseWindow, acquire_entry_window
+    from prismaquant.staged_tier_policy import activate_staged_tier_policy
+
+    assert helper_root.is_dir()  # the reviewed install, provenance proven
+    artifact, digest, _draw = _artifact(tmp_path)
+    staged = _stage(world, tmp_path, artifact, digest)
+    record = far._publish_claim(world, key=KEY)
+    _scope, control = far._open_scope(world, key=KEY, nonce=NONCE)
+    far._record_scope(world, KEY, control, claim=record)
+    _identity_env(world, monkeypatch, staged["map_path"], control)
+    activate_staged_tier_policy("ssd")
+    bind_residency_manifest(MANIFEST)
+    resolver = residency_resolver()
+    assert resolver is not None
+    declared = str(staged["declared"])
+    entry = resolver.staged_read(declared, expected_sha256=digest)
+    assert entry is not None
+    produced = acquire_entry_window(resolver, declared, entry)
+    assert isinstance(produced, tuple) and len(produced) == 2
+    window, map_key = produced
+    assert isinstance(window, LeaseWindow)
+    assert map_key == staged["declared_key"]
+    with pytest.raises(TypeError):
+        with produced:  # noqa: F841 -- the exact R5 defect shape
+            pass
+    leases = staged["residency_root"] / "leases"
+    assert not leases.exists() or not list(leases.rglob("*.lease.json"))
+
+    source = Path(probe.__file__).read_text()
+    tree = ast.parse(source)
+
+    def _calls_acquire(call: ast.Call) -> bool:
+        func = call.func
+        if isinstance(func, ast.Name):
+            return func.id == "acquire_entry_window"
+        return getattr(func, "attr", "") == "acquire_entry_window"
+
+    unpacked = any(
+        any(isinstance(target, ast.Tuple) for target in node.targets)
+        and isinstance(node.value, ast.Call)
+        and _calls_acquire(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign))
+    assert unpacked, "main must unpack (window, key)"
+    assert "entered.open(map_key)" in source
