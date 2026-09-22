@@ -743,7 +743,7 @@ def run_adjoint_capture_core(
     source_model_identity, unit_roster_sha256, plan_sha256, prepared_sha256,
     read_manifest_sha256, implementation_sha256, campaign_scope=None,
     boundary_artifact_bytes=None, artifact_budget_stamp=None,
-    min_free_gib=0.0, progress=None, produced_output=None,
+    min_free_gib=0.0, progress=None, produced_output=None, forward_recovery=None,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -891,12 +891,22 @@ def run_adjoint_capture_core(
             from .joint_run_progress import HEAD_PHASE
             progress.enter(HEAD_PHASE)
             storage.watch_progress(progress)
+        from .joint_forward_resume import load_forward_recovery
+        recovery = load_forward_recovery(forward_recovery, bind_identity=bind_identity,
+            campaign_identity={"plan_sha256": plan_sha256, "prepared_sha256": prepared_sha256,
+                "read_manifest_sha256": read_manifest_sha256,
+                "unit_roster_sha256": unit_roster_sha256, "campaign_scope": campaign_scope},
+            runner=runner, storage=storage)
+        if recovery is not None:
+            log(f"verified forward recovery through boundary {recovery.frontier}, "
+                f"{recovery.n_batches} complete calibration partitions")
         log(f"boundary capture: calib {tuple(calib_ids.shape)} in "
             f"{len(row_offsets)} partition(s) across {num_layers} layers ...")
         capture_started = time.time()
         batches = runner.capture_layer_major_boundaries(
             [calib_ids[offset:offset + batch_rows] for offset in row_offsets],
             storage=storage,
+            **({"forward_recovery": recovery} if recovery is not None else {}),
             source_phase=(stage_a_forward_observer(progress)
                           if progress is not None else None))
         log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} min; "
@@ -1079,6 +1089,7 @@ def run_adjoint_capture_core(
             "session": storage.session,
             "policy": storage.identity,
             "directory": str(boundary_entry_directory(space)),
+            **({"forward_recovery": recovery.receipt_binding} if recovery is not None else {}),
         },
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
@@ -1256,7 +1267,7 @@ def _stage_a_device_envelope(config, *, environ=None):
 def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
-    prefetch_override=None, artifact_budget_bytes=None,
+    prefetch_override=None, artifact_budget_bytes=None, forward_recovery=None,
 ) -> dict:
     """Load the head phase and run the adjoint capture (one PB action)."""
     from .aura_cost import _aura_source_sha256
@@ -1403,6 +1414,17 @@ def run_adjoint_capture(
                       measured_cells=len(data.cells))
         roster_digest = hashlib.sha256("".join(
             f"{name}\n" for name in sorted(data.formats_by_qname)).encode()).hexdigest()
+        capture_scope = config.get("campaign_scope")
+        if forward_recovery is not None:
+            from .joint_forward_resume import _read
+            from .joint_forward_campaign import resolve_forward_campaign
+            recovery_document, _ = _read(forward_recovery["path"], forward_recovery["sha256"])
+            recovered_campaign = resolve_forward_campaign(recovery_document,
+                plan_sha256=plan_sha256, prepared_sha256=prepared["sha256"],
+                read_manifest_sha256=read_manifest_sha256 or "0" * 64,
+                formats_by_qname=data.formats_by_qname, calibration_shape=list(ids.shape))
+            roster_digest = recovered_campaign["unit_roster_sha256"]
+            capture_scope = recovered_campaign["campaign_scope"]
 
         result["artifact_preflight"] = _run_artifact_preflight(
             runner, ids, execution, stride_value, space, artifact)
@@ -1422,11 +1444,11 @@ def run_adjoint_capture(
             read_manifest_sha256=(read_manifest_sha256
                                   or "0" * 64),
             implementation_sha256=implementation,
-            campaign_scope=config.get("campaign_scope"),
+            campaign_scope=capture_scope,
             boundary_artifact_bytes=int(artifact["run_used"]),
             artifact_budget_stamp=artifact["override"],
             min_free_gib=config.get("min_free_gib", 0.0), progress=progress,
-            produced_output=publication)
+            produced_output=publication, forward_recovery=forward_recovery)
         receipt["stride"]["source"] = stride_source
         receipt["device_envelope"] = result["device_envelope"]
         torch.cuda.synchronize()
@@ -1541,7 +1563,11 @@ def main(argv=None) -> int:
                              "results.json, counters.json and the adjoint "
                              "receipt; the sealed plan is unchanged")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--forward-recovery", type=Path)
+    parser.add_argument("--forward-recovery-sha256")
     args = parser.parse_args(argv)
+    if bool(args.forward_recovery) != bool(args.forward_recovery_sha256):
+        parser.error("--forward-recovery and --forward-recovery-sha256 must be paired")
     try:
         require_dev_mode("joint_cost_stage_a")
         from .tessera_joint_aura import _load_plan
@@ -1561,7 +1587,10 @@ def main(argv=None) -> int:
             read_manifest_sha256=args.read_manifest_sha256,
             data_manifest_sha256=args.data_manifest_sha256, resume=args.resume,
             prefetch_override=args.prefetch_override,
-            artifact_budget_bytes=args.artifact_budget_bytes)
+            artifact_budget_bytes=args.artifact_budget_bytes,
+            forward_recovery=({"path": str(args.forward_recovery),
+                               "sha256": args.forward_recovery_sha256}
+                              if args.forward_recovery else None))
     except AdjointIdentityRefused as exc:
         print(f"adjoint_identity_refused: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED

@@ -977,7 +977,7 @@ class _ExactActivationPrefetch:
 def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                                             expected_session, residency_check=None,
                                             release_file_pages=True, scratch=None,
-                                            resolver=None):
+                                            resolver=None, session_for_reference=None):
     """Read/verify the entire bounded window before exposing any tensor.
 
     This is the existing activation artifact owner's exact-input read seam.
@@ -1017,8 +1017,10 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         owned = EntryReadScratch() if scratch is None else scratch
         for ref in references:
             metadata = json.loads(ref.metadata_json)
+            bound_session = (expected_session if session_for_reference is None
+                             else session_for_reference(ref))
             if (metadata.get("schema") != EXACT_ACTIVATION_SCHEMA
-                    or metadata.get("identity", {}).get("session") != expected_session):
+                    or metadata.get("identity", {}).get("session") != bound_session):
                 raise RuntimeError("exact activation reference has a different session identity")
             path = Path(ref.path)
             prefetched_stat = path.lstat()
