@@ -762,3 +762,31 @@ def test_extended_catalog_cannot_launch_historical_bare_parent_readset(tmp_path,
     with pytest.raises(DispatchRefused, match='requires executable prepared-input'):
         quantum_argv(record, record_path=tmp_path/'record', output_root=tmp_path/'out',
                      adjoint_path=tmp_path/'receipt')
+
+
+@pytest.mark.parametrize('readonly', [False, True])
+def test_cotangent_scratch_is_validated_and_sealed_in_outer_request(
+        tmp_path, campaign, readonly):
+    import dispatch_joint_quanta as dispatch
+    from tools.tessera_campaign_container import cotangent_scratch_environment
+    root = '/home/rob/pb-scratch/glm-stageb'
+    env = {'PRISMAQUANT_STAGE_B_COTANGENT_ROOT': root,
+           'PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES': str(36 << 30)}
+    spec = {'container': {'image': 'sha256:' + '0' * 64,
+             'mounts': [{'source': root, 'target': root, 'readonly': readonly}]}, 'env': env}
+    dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    record = _record(campaign, 1, slice_dir=tmp_path)
+    path = tmp_path / 'record.json'; path.write_text(json.dumps(record))
+    receipt = tmp_path / 'receipt.json'; receipt.write_text('{}')
+    args = dict(record_path=path, output_root=tmp_path / 'out', adjoint_path=receipt)
+    if readonly:
+        with pytest.raises(dispatch.DispatchRefused, match='writable identity bind'):
+            quantum_argv(record, **args)
+        return
+    argv = quantum_argv(record, **args)
+    outer = argv[:argv.index('--')]
+    sealed = dict(outer[i + 1].split('=', 1) for i, value in enumerate(outer[:-1])
+                  if value == '--env' and '=' in outer[i + 1])
+    assert all(sealed.get(name) == value for name, value in env.items())
+    actual = json.loads(argv[argv.index('--spec') + 1])
+    assert cotangent_scratch_environment(actual, sealed) == env

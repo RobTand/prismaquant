@@ -45,6 +45,7 @@ if __package__:
     from tools.tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
+        cotangent_scratch_environment,
     )
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
@@ -54,6 +55,7 @@ else:
     from tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
+        cotangent_scratch_environment,
     )
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
@@ -756,6 +758,13 @@ def _container_wrap(spec_path: Path,
     before the payload separator), never inside the payload.
     """
     spec = json.loads(Path(spec_path).read_text())
+    # Validate a declared workspace before publishing the row. These same
+    # inlined spec bytes supply its outer PB environment below; no ambient
+    # coordinator environment or second spec read participates.
+    try:
+        cotangent_scratch_environment(spec, spec.get("env", {}))
+    except (ValueError, RuntimeError) as exc:
+        raise DispatchRefused(str(exc)) from exc
     if resource_policy is not None:
         limits = resource_policy["limits"]
         if (float(spec.get("cpu_memory_gb", -1)) * 1024 ** 3 != limits["host_bytes"]
@@ -884,11 +893,11 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
              "--residency", "stage", "--residency-ram", "auto"]
     for name, grace in progress:
         argv += ["--progress-phase", f"{name}={grace}"]
+    sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
     mem_gib, gpu_gib, cpus = "104", "80", 10
     if resource_policy is not None:
         limits = resource_policy["limits"]
         mem_gib, gpu_gib = (f"{limits[key] / 1024 ** 3:g}" for key in ("physical_bytes", "gpu_bytes"))
-        sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
         cpus = max(int(sealed_spec.get("env", {}).get("PRISMAQUANT_LAYER_READ_THREADS", 1)),
                    int(plan["source_prefetch"]["prefetch_workers"]) + 1,
                    int(plan["execution"]["operator_windows"]["prefetch_workers"]) + 1)
@@ -900,6 +909,9 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         # must admit the row only where this image is already present, or
         # leave it ready for a box that has it (RobTand/prismabuild#714).
         argv += [CONTAINER_IMAGE_FLAG, container_image]
+    for name, value in cotangent_scratch_environment(
+            sealed_spec, sealed_spec.get("env", {})).items():
+        argv += ["--env", f"{name}={value}"]
     argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
     return argv
 

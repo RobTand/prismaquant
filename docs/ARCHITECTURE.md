@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Stage B scratch dispatch (2026-09-22, campaign integration): the dispatcher
+validates an explicitly declared cotangent workspace against its exact writable
+identity mount before publishing. The same inlined container-spec bytes seal
+both scratch variables into the outer PB request; no ambient coordinator
+environment or second spec read can choose the path or capacity. An absent
+scratch declaration retains the existing legacy invocation. The full GLM
+campaign explicitly declares its local workspace and disk ceiling.
+
 Stage B may explicitly seal `PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
 `PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` to keep its cotangent working plane
 on local disk. The existing boundary owner preallocates the exact tensor-byte
