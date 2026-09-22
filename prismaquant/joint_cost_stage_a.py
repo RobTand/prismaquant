@@ -906,7 +906,6 @@ def run_adjoint_capture_core(
         cotangents = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
                        for _ in batches] for _ in range(n_probes)]
         grad_outs = [[] for _ in range(n_probes)]
-        tail_plane: dict[tuple[int, int], torch.Tensor] = {}
         storage.watch_auxiliary(batches, cotangents)
         storage.check_auxiliary(batches, cotangents=cotangents)
         tail_started = time.time()
@@ -933,7 +932,6 @@ def run_adjoint_capture_core(
                         if tail.grad is None:
                             raise RuntimeError(
                                 "adjoint capture tail produced no cotangent")
-                        tail_plane[(probe_index, batch_index)] = tail.grad.detach().to("cpu")
                         grad_outs[probe_index].append(storage.write(
                             tail.grad, batch_index=batch_index,
                             boundary_index=num_layers, probe_index=probe_index))
@@ -945,7 +943,13 @@ def run_adjoint_capture_core(
         log(f"tail cotangents done in {(time.time() - tail_started) / 60:.1f} min; "
             f"publishing the tail checkpoint at boundary {num_layers}")
 
-        def serialize_checkpoint(boundary: int, plane) -> None:
+        def serialize_checkpoint(boundary: int) -> None:
+            # The rolling entries already own durable, digest-bound bytes.
+            # Keep only descriptors: a full probe/batch plane can exceed
+            # host memory even when each existing resident window fits.
+            plane = {(probe, batch): reference
+                     for probe, entries in enumerate(grad_outs)
+                     for batch, reference in enumerate(entries)}
             shared_pass = {batch: batches[batch].shared_pass_state
                            for batch in range(len(batches))}
             record = write_checkpoint_with_snapshot(
@@ -960,8 +964,7 @@ def run_adjoint_capture_core(
 
         # The tail set is the first checkpoint: layer num_layers-1's quantum
         # chains nothing (§3.1).
-        serialize_checkpoint(num_layers, tail_plane)
-        tail_plane.clear()
+        serialize_checkpoint(num_layers)
         if progress is not None:
             # The tail checkpoint is durable work landed while the read plan
             # stays on forward-last: count it without leaving the phase the
@@ -1009,8 +1012,6 @@ def run_adjoint_capture_core(
                     elif torch.device(runner.device).type == "cuda":
                         raise RuntimeError(
                             "render-free chain requires source prefetch settlement")
-                stash: dict[tuple[int, int], torch.Tensor] = {}
-
                 def roll(tensor, batch_index, probe_index):
                     # Layer 0 is the walk's last roll: no read follows it,
                     # and its entries are retired right after the loop.
@@ -1019,7 +1020,6 @@ def run_adjoint_capture_core(
                         probe_index=probe_index,
                         previous=grad_outs[probe_index][batch_index],
                         **({} if layer > 0 else {"read_back": False}))
-                    stash[(probe_index, batch_index)] = tensor
 
                 chain_backwards += render_free_layer_roll(
                     runner, storage=storage, batches=batches, layer=layer,
@@ -1027,7 +1027,7 @@ def run_adjoint_capture_core(
                     incoming_entries=grad_outs, incoming_tensor=None,
                     roll=roll, min_free_gib=min_free_gib)
                 if layer in boundaries:
-                    serialize_checkpoint(layer, stash)
+                    serialize_checkpoint(layer)
                 chain_telemetry.append({
                     "layer": layer, "wall_s": time.time() - layer_started,
                     "checkpoint": layer in boundaries,
