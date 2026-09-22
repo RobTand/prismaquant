@@ -1,0 +1,135 @@
+"""Capture original GLM MoE arguments in one authenticated BF16 layer replay.
+
+The caller supplies an independently owned exact Stage A boundary. This module
+does not borrow live producer files, reconstruct routes or execute experts.
+"""
+from __future__ import annotations
+
+import ast
+import hashlib
+import inspect
+from pathlib import Path
+import textwrap
+
+import torch
+
+
+def select_original_routes(module, args, kwargs, *, sequence_length):
+    """Select the complete first sequence without casting any routed tensor."""
+    bound = inspect.signature(type(module).forward).bind(module, *args, **kwargs)
+    tensors = [bound.arguments[k] for k in ("hidden_states", "top_k_index", "top_k_weights")]
+    x, ids, weights = tensors
+    if (any(not isinstance(t, torch.Tensor) or t.ndim != 2 for t in tensors)
+            or x.shape[0] != sequence_length or ids.shape != weights.shape
+            or ids.shape[0] != sequence_length):
+        raise ValueError("routing replay must contain exactly the original first sequence")
+    if ids.dtype not in (torch.int32, torch.int64) or weights.dtype not in (torch.float32, torch.bfloat16):
+        raise ValueError("routing replay refuses a cast or unsupported original route dtype")
+    coordinates = torch.stack((torch.zeros(sequence_length, dtype=torch.int64),
+                               torch.arange(sequence_length, dtype=torch.int64)), dim=1)
+    return {"inputs": x.detach().cpu().contiguous(), "top_k_index": ids.detach().cpu().contiguous(),
+            "top_k_weights": weights.detach().cpu().contiguous(), "coordinates": coordinates}
+
+
+def router_normalization_epsilon(router):
+    """Read the original router's denominator constant, rather than invent it."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(type(router).forward)))
+    values = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "denominator"
+                                               for t in node.targets):
+            value = node.value
+            if (isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add)
+                    and isinstance(value.right, ast.Constant)
+                    and isinstance(value.right.value, (int, float))):
+                values.append(float(value.right.value))
+    if len(values) != 1 or values[0] != 1e-20:
+        raise ValueError("GLM source router denominator differs from its inspected noaux_tc implementation")
+    return values[0]
+
+
+def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calibration,
+                               producer_source, parent_boundary):
+    """Run a source layer only until the real packed-expert call is reached."""
+    from . import pretrained_initialization_contract
+    from .cost_streaming import StreamedForwardBoundaries
+    from .joint_aura import source_execution_identity
+    from .production_weight_cache import _cb_cache_tensor_identity
+    from .tessera_expert_projection import _require_source_identity
+
+    if runner.profile.name != "glm5_next" or not (3 <= layer < runner.num_layers):
+        raise ValueError("routing replay requires a body GLM MoE layer")
+    if (calibration_ids.shape != (1, 512) or hidden.shape[0] != 1 or hidden.shape[1] != 512
+            or calibration.get("shape") != [512, 512] or hidden.dtype != torch.bfloat16):
+        raise ValueError("routing replay requires sample zero of the exact 512x512 calibration")
+    source = _require_source_identity(producer_source)
+    unit = f"model.language_model.layers.{layer}.mlp.experts"
+    module = runner.model.get_submodule(unit)
+    parent = runner.model.get_submodule(unit.rsplit(".", 1)[0])
+    router = parent.gate
+    if type(module).__name__ != "Glm5NextTextExperts" or type(router).__name__ != "Glm5NextTextTopkRouter":
+        raise ValueError("routing replay target is not the actual GLM packed expert/router pair")
+    epsilon = router_normalization_epsilon(router)
+    pass_state = runner.profile.isolated_layer_pass_state(None, runner.layers[layer])
+    if pass_state:
+        raise ValueError("routing replay requires a separately bound shared forward state")
+    ids, positions, unused, embeddings, mask = runner._prepare(calibration_ids)
+    del unused
+    batch = StreamedForwardBoundaries(ids, positions, embeddings, mask, [], None)
+    captured = {}
+
+    class Captured(BaseException):
+        pass
+
+    def hook(actual, args, kwargs):
+        if actual is not module or captured:
+            raise RuntimeError("unexpected repeated routed boundary")
+        captured.update(select_original_routes(actual, args, kwargs, sequence_length=512))
+        raise Captured()
+
+    handle = module.register_forward_pre_hook(hook, with_kwargs=True)
+    try:
+        with torch.no_grad():
+            runner.isolated_layer(batch, layer, hidden.to(runner.device), pass_state=pass_state)
+    except Captured:
+        pass
+    finally:
+        handle.remove()
+    if not captured:
+        raise RuntimeError("source layer did not reach its packed MoE boundary")
+    bias = router.e_score_correction_bias
+    if bias.dtype != torch.float32 or list(bias.shape) != [module.num_experts] or not torch.isfinite(bias).all():
+        raise ValueError("GLM routing capture requires the original finite FP32 correction bias")
+    captured["expert_bias"] = bias.detach().cpu().contiguous()
+    tensor_identity = {k: _cb_cache_tensor_identity(v) for k, v in captured.items()}
+    routing = dict(activation="silu", scoring_func="sigmoid", renormalize=router.norm_topk_prob,
+        routed_scaling_factor=router.routed_scaling_factor, apply_router_weight_on_input=False,
+        expert_map=None, input_dtype=str(captured["inputs"].dtype),
+        topk_weights_dtype=str(captured["top_k_weights"].dtype),
+        topk_ids_dtype=str(captured["top_k_index"].dtype), device=str(runner.device),
+        weights_contract="post_renormalization_and_routed_scaling", topk_method="noaux_tc",
+        n_group=router.num_group, topk_group=router.topk_group, swiglu_limit=module.swiglu_limit,
+        source_protocol=dict(router_class=f"{type(router).__module__}.{type(router).__qualname__}",
+            router_source_sha256=hashlib.sha256(inspect.getsource(type(router)).encode()).hexdigest(),
+            scoring_func="sigmoid", topk_method="noaux_tc", normalization_epsilon=epsilon,
+            correction_bias={k: tensor_identity["expert_bias"][k] for k in ("content_sha256", "dtype")},
+            expert_bias_affects="selection_only", norm_topk_prob=router.norm_topk_prob))
+    return {"tensors": captured, "metadata": {
+        "schema": "prismaquant.native_moe_raw_boundary.v1", "unit": unit,
+        "shape": {"experts": module.num_experts, "hidden_size": module.hidden_dim,
+                  "intermediate_size": module.intermediate_dim, "top_k": router.top_k},
+        "routing": routing, "profile_role_order": ["w1", "w3", "w2"],
+        "scope": "first calibration sequence; decode uses its first row, not autoregressive generation",
+        "calibration_sha256": calibration["calibration_sha256"],
+        "calibration_shape": calibration["shape"], "calibration_dtype": calibration["dtype"],
+        "producer_source": source, "runtime_config": runner.model.config.to_dict(),
+        "source_execution": source_execution_identity(runner.model),
+        "model_load_contract": pretrained_initialization_contract(runner.model),
+        "attention_implementation": "eager",
+        "capture_runtime": {"torch": str(torch.__version__), "cuda": torch.version.cuda,
+                            "transformers": __import__("transformers").__version__},
+        "capture_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "replay": {"schema": "prismaquant.glm_routing_boundary_replay.v1", "layer": layer,
+                   "parent_boundary": parent_boundary, "source": "fresh_isolated_bf16_layer_replay",
+                   "sample": 0, "stop": "before_original_packed_experts_forward"},
+        "tensors": tensor_identity}}

@@ -1136,10 +1136,24 @@ def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
     """
     inputs = plan["inputs"]
     track.add(plan_path, 0, _required_size(plan_path, "joint plan"), "plan")
+    if plan.get("served_activation_policy") is not None:
+        policy_path = _bound(plan["served_activation_policy"], "served activation policy")
+        track.add(policy_path, 0, _required_size(policy_path, "served activation policy"), "head")
+        policy = _read_json(policy_path, "served activation policy")
+        for key in ("original_prepared", "original_cache", "census"):
+            path = _bound(policy[key], "served activation policy " + key)
+            track.add(path, 0, _required_size(path, "served activation policy " + key), "head")
     for key in ("census", "campaign_plan", "campaign_receipts", "merged_cost",
                 "merged_checkpoint"):
         path = _bound(inputs[key], f"plan inputs.{key}")
         track.add(path, 0, _required_size(path, f"plan inputs.{key}"), "head")
+    if inputs.get("candidate_overlay") is not None:
+        overlay_path = _bound(inputs["candidate_overlay"], "candidate overlay")
+        track.add(overlay_path, 0, _required_size(overlay_path, "candidate overlay"), "head")
+        overlay = _read_json(overlay_path, "candidate overlay")
+        for key in ("old_prepared", "old_pwc", "cost", "reseal_proof"):
+            path = _bound(overlay[key], "candidate overlay " + key)
+            track.add(path, 0, _required_size(path, "candidate overlay " + key), "head")
 
     checkpoint = _bound(inputs["merged_checkpoint"], "plan inputs.merged_checkpoint")
     parts = checkpoint + ".parts"

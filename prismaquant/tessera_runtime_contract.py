@@ -79,6 +79,7 @@ from typing import Any, Mapping, Sequence
 
 from .lane_eligibility import (
     CellEvidence,
+    _DIGEST_IMAGE,
     SCOPED_LANE_SCHEMAS,
     cell_evidence_admits,
     cell_lane_admits,
@@ -115,6 +116,9 @@ __all__ = [
     "ActivationQuantizerGeneration",
     "ActivationQuantizerVector",
     "ACTIVATION_QUANTIZER_SCHEMA",
+    "ACTIVATION_QUANTIZER_SCHEMAS",
+    "ACTIVATION_QUANTIZER_SCHEMA_V1",
+    "ACTIVATION_QUANTIZER_SCHEMA_V2",
     "contract_answer",
     "packaged_activation_quantizers",
     "require_activation_quantizer_attested",
@@ -329,16 +333,23 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: predicted while the gate was written (`712a15e4…`) went stale because
 #: #563's rework resolved two master conflicts on its branch; the measured
 #: bytes at the union head are what this pin names.  Tessera master has
-#: since advanced to contract v33 (#568); the v33 reader migration belongs
-#: to the next bump, not this one.
-TESSERA_DEV_PIN_COMMIT = "cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab"
+#: since advanced past contract v33 (#568), whose activation-quantizer
+#: schema v2 this reader now reads (RobTand/prismaquant#926): the READER no
+#: longer blocks a bump, and which commit to pin stays a separate review
+#: with its own answer diff.
+#: Re-pinned 2026-09-22 to acf9eafa6 -- Tessera master after #588, #590 and
+#: #592 -- so PrismaQuant #940 (the rooted ``tessera.cached_units.v2``
+#: reader) and #945 (fenced source-digest adoption) are tested against the
+#: pin rather than a vendored tree.  Contract v32 -> v34, lane schema v10.
+#: The answer diff below is the review: see the v34 note inside the literal.
+TESSERA_DEV_PIN_COMMIT = "acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
+    "d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -352,7 +363,13 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: field-level diff naming it.  The git diff of this literal is the review.
 #:
 #: It also re-stales when the PROJECTION widens, which is the other half of
-#: the same property: reading lane schema v9 gave ``CellEvidence.answer()`` a
+#: the same property -- and it just did, at this same pin and without a
+#: Tessera byte moving: reading activation-quantizer schema v2 (#926) made
+#: ``generated.image`` the value that SELECTS which quantiser table covers a
+#: measurement, so it joined ``ActivationQuantizerAttestation.answer()`` as
+#: its third column.  The row below carries the image the v32 table was
+#: generated in; nothing else about it moved.  Earlier: reading lane schema
+#: v9 gave ``CellEvidence.answer()`` a
 #: seventh member for the smoke's record, and a reader that widened what it
 #: looks at without re-reviewing would be admitting a field nobody had read.
 #:
@@ -419,6 +436,18 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: A column added on either tuple is a WIDENED projection, and the rule above
 #: applies to it: it re-stales this pin even when no published value moved.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
+ # Against the v34 contract the review is five additions and no removals.
+ # (1) v33/#568 publishes the sm_121 fp4 activation-quantiser table as a list
+ # of per-image attestations; the stock-image row below is byte-identical to
+ # v32's, and a second row for the glm53-nope-sm121 serving image arrives
+ # with the same rounding vectors.  (2)-(5) v34/#579 attests the fused window
+ # GEMM and mints four dense sm_121 cells on tessera::window_gemm_dense:
+ # TESSERA_BF16_K1 q1792 and TESSERA_E4M3_K1 q1024, batch and decode, graded
+ # route_only with smoke.status not_recorded, which the status-only evidence
+ # gate does not refuse.  Accepting this answer therefore ADMITS those two
+ # dense rungs on sm_121 (backed_with_serve_flag, TESSERA_SERVE_MODE) where
+ # the v32 pin answered unattested/no_cell.  Every other row is unchanged.
+ # The v32 review follows, as history; its 'only cells' count is superseded.
  # Against the v32 contract the review is exactly four moves, and the
  # WITHDRAWALS are the headline, not the widenings.  Tessera master (its #538
  # and the A4 retirement) withdrew all eight dense cells that were not
@@ -474,6 +503,414 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                               'grid_arities': [1]}}}],
  'activation_quantizers': [['sm_121',
                             'e2m1_group16_ue4m3_static',
+                            'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc'
+                            '4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
+                            'torch.ops._C.scaled_fp4_quant',
+                            'group',
+                            16,
+                            'E2M1',
+                            'UE4M3',
+                            'static_per_module',
+                            [['midpoint_dyadic',
+                              'e2m1_midpoint_dyadic',
+                              1065353216,
+                              [16576,
+                               16000,
+                               16192,
+                               16288,
+                               16352,
+                               16416,
+                               16480,
+                               16544,
+                               48768,
+                               48960,
+                               49056,
+                               49120,
+                               49184,
+                               49248,
+                               49312,
+                               0],
+                              56,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['code_identity',
+                              'e2m1_code_identity',
+                              1065353216,
+                              [0,
+                               32768,
+                               16128,
+                               16256,
+                               16320,
+                               16384,
+                               16448,
+                               16512,
+                               16576,
+                               48896,
+                               49024,
+                               49088,
+                               49152,
+                               49216,
+                               49280,
+                               49344],
+                              56,
+                              [0,
+                               8,
+                               1,
+                               2,
+                               3,
+                               4,
+                               5,
+                               6,
+                               7,
+                               9,
+                               10,
+                               11,
+                               12,
+                               13,
+                               14,
+                               15]],
+                             ['midpoint_reciprocal',
+                              'e2m1_midpoint_reciprocal',
+                              1065353216,
+                              [16656,
+                               16064,
+                               16272,
+                               16368,
+                               16424,
+                               16496,
+                               16552,
+                               16624,
+                               48832,
+                               49040,
+                               49136,
+                               49192,
+                               49264,
+                               49320,
+                               49392,
+                               0],
+                              60,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['midpoint_global_scale',
+                              'e2m1_midpoint_global_scale',
+                              1069547520,
+                              [16656,
+                               16064,
+                               16272,
+                               16368,
+                               16424,
+                               16496,
+                               16552,
+                               16624,
+                               48832,
+                               49040,
+                               49136,
+                               49192,
+                               49264,
+                               49320,
+                               49392,
+                               0],
+                              65,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['midpoint_seven_fourths',
+                              'e2m1_midpoint_reciprocal',
+                              1065353216,
+                              [16680,
+                               16096,
+                               16296,
+                               16396,
+                               16452,
+                               16524,
+                               16580,
+                               16652,
+                               48864,
+                               49064,
+                               49164,
+                               49220,
+                               49292,
+                               49348,
+                               49420,
+                               0],
+                              62,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['midpoint_reciprocal_ulp_below',
+                              'e2m1_midpoint_ulp_below',
+                              1065353216,
+                              [16656,
+                               16063,
+                               16271,
+                               16367,
+                               16423,
+                               16495,
+                               16551,
+                               16623,
+                               48831,
+                               49039,
+                               49135,
+                               49191,
+                               49263,
+                               49319,
+                               49391,
+                               0],
+                              60,
+                              [7,
+                               0,
+                               1,
+                               2,
+                               3,
+                               4,
+                               5,
+                               6,
+                               8,
+                               9,
+                               10,
+                               11,
+                               12,
+                               13,
+                               14,
+                               0]],
+                             ['midpoint_reciprocal_ulp_above',
+                              'e2m1_midpoint_ulp_above',
+                              1065353216,
+                              [16656,
+                               16065,
+                               16273,
+                               16369,
+                               16425,
+                               16497,
+                               16553,
+                               16625,
+                               48833,
+                               49041,
+                               49137,
+                               49193,
+                               49265,
+                               49321,
+                               49393,
+                               0],
+                              60,
+                              [7,
+                               1,
+                               2,
+                               3,
+                               4,
+                               5,
+                               6,
+                               7,
+                               9,
+                               10,
+                               11,
+                               12,
+                               13,
+                               14,
+                               15,
+                               0]],
+                             ['element_saturation',
+                              'e2m1_saturation',
+                              1065353216,
+                              [16584,
+                               49352,
+                               16580,
+                               49348,
+                               16576,
+                               49344,
+                               16574,
+                               49342,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              56,
+                              [7,
+                               15,
+                               7,
+                               15,
+                               7,
+                               15,
+                               7,
+                               15,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]],
+                             ['block_scale_underflow_tie',
+                              'block_scale_underflow_tie',
+                              1065353216,
+                              [15296,
+                               48064,
+                               15168,
+                               47936,
+                               15040,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              0,
+                              [0,
+                               8,
+                               0,
+                               8,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]],
+                             ['block_scale_underflow_above',
+                              'block_scale_underflow_above',
+                              1065353216,
+                              [15297,
+                               48065,
+                               15168,
+                               47936,
+                               15040,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              1,
+                              [5,
+                               13,
+                               3,
+                               11,
+                               2,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]],
+                             ['block_scale_overflow',
+                              'block_scale_overflow',
+                              1065353216,
+                              [17728,
+                               50496,
+                               17600,
+                               50368,
+                               17472,
+                               17344,
+                               16128,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              126,
+                              [7,
+                               15,
+                               5,
+                               13,
+                               3,
+                               2,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]]]],
+                           ['sm_121',
+                            'e2m1_group16_ue4m3_static',
+                            '192.168.1.107/prismaquant/glm53-nope-sm121@sha256:'
+                            '6941847351647ca714bbe7115ce6f627131bf78fc7eff86ddb98b11e6d25b46e',
                             'torch.ops._C.scaled_fp4_quant',
                             'group',
                             16,
@@ -897,7 +1334,55 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                   'max_world_size': 2,
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}}},
- 'cells': [['tessera_e2m1_k2_dense_sm121_batch',
+ 'cells': [['tessera_bf16_k1_dense_sm121_batch',
+            'sm_121',
+            'TESSERA_BF16_K1',
+            'dense',
+            'batch',
+            [1792],
+            'bf16_unquantized',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident|streamed'],
+            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            ['resident', 'streamed'],
+            {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
+             'execution_modes': ['eager']},
+            '0.28.0',
+            '2.13.0+cu130',
+            ['route_only',
+             'not_recorded',
+             [],
+             'unattributed',
+             None,
+             None,
+             None]],
+           ['tessera_bf16_k1_dense_sm121_decode',
+            'sm_121',
+            'TESSERA_BF16_K1',
+            'dense',
+            'decode',
+            [1792],
+            'bf16_unquantized',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident|streamed'],
+            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            ['resident', 'streamed'],
+            {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
+             'execution_modes': ['eager']},
+            '0.28.0',
+            '2.13.0+cu130',
+            ['route_only',
+             'not_recorded',
+             [],
+             'unattributed',
+             None,
+             None,
+             None]],
+           ['tessera_e2m1_k2_dense_sm121_batch',
             'sm_121',
             'TESSERA_E2M1_K2',
             'dense',
@@ -985,6 +1470,54 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:a5424378322071f4c33e63d1372a2bb028e46b03f0da0e5edb0cdd7418e2cebb',
              'execution_modes': ['eager']},
             '0.28.1rc1.dev397+gfd4a15126.d20260904',
+            '2.13.0+cu130',
+            ['route_only',
+             'not_recorded',
+             [],
+             'unattributed',
+             None,
+             None,
+             None]],
+           ['tessera_e4m3_k1_dense_sm121_batch',
+            'sm_121',
+            'TESSERA_E4M3_K1',
+            'dense',
+            'batch',
+            [1024],
+            'fp8_per_token_dynamic',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident|streamed'],
+            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            ['resident', 'streamed'],
+            {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
+             'execution_modes': ['eager']},
+            '0.28.0',
+            '2.13.0+cu130',
+            ['route_only',
+             'not_recorded',
+             [],
+             'unattributed',
+             None,
+             None,
+             None]],
+           ['tessera_e4m3_k1_dense_sm121_decode',
+            'sm_121',
+            'TESSERA_E4M3_K1',
+            'dense',
+            'decode',
+            [1024],
+            'fp8_per_token_dynamic',
+            'backed_with_serve_flag',
+            'device_qualified',
+            'tessera',
+            ['TESSERA_SERVE_MODE=resident|streamed'],
+            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            ['resident', 'streamed'],
+            {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
+             'execution_modes': ['eager']},
+            '0.28.0',
             '2.13.0+cu130',
             ['route_only',
              'not_recorded',
@@ -1439,8 +1972,17 @@ class TesseraContract:
     #: still parses and every other gate on it keeps working; the PREFLIGHT is
     #: where absence bites, and it bites only the lane that is about to price
     #: an activation residual with PrismaQuant's own re-implementation.
-    activation_quantizers: Mapping[str, Mapping[
-        str, "ActivationQuantizerAttestation"]] = field(default_factory=dict)
+    #:
+    #: Three levels since Tessera contract v33 (activation-quantizer schema
+    #: v2): ``[platform][image][activation_contract]``.  The middle level is
+    #: the IMAGE the table was generated in -- its content digest when the
+    #: contract names one, the reference verbatim when it does not -- because
+    #: a platform may publish one table per serving image and the consumer
+    #: admits a cell only under the attestation whose image is the executing
+    #: one.  A v1 contract parses into the same shape with exactly one image
+    #: level, so nothing below reads two schemas.
+    activation_quantizers: Mapping[str, Mapping[str, Mapping[
+        str, "ActivationQuantizerAttestation"]]] = field(default_factory=dict)
 
     @property
     def requires_serving_context(self) -> bool:
@@ -1648,9 +2190,10 @@ def contract_answer(contract: "TesseraContract") -> dict:
                               key=lambda e: e.module_name_prefix)
         ],
         "activation_quantizers": [
-            contract.activation_quantizers[platform][name].answer()
+            contract.activation_quantizers[platform][image][name].answer()
             for platform in sorted(contract.activation_quantizers)
-            for name in sorted(contract.activation_quantizers[platform])
+            for image in sorted(contract.activation_quantizers[platform])
+            for name in sorted(contract.activation_quantizers[platform][image])
         ],
         "families": {
             family: {
@@ -1762,9 +2305,13 @@ def _answer_drift(reviewed: Mapping[str, Any], installed: Mapping[str, Any]
                         f"  native_extensions[{prefix}].{key}: reviewed "
                         f"{r_ext[prefix].get(key)!r}, installed "
                         f"{i_ext[prefix].get(key)!r}")
-    r_quant = {(row[0], row[1]): row
+    # Keyed by (platform, contract name, generated image): a platform may
+    # publish one table per serving image since Tessera contract v33, and a
+    # two-field key would fold them onto each other -- the second image's
+    # table would then drift with nothing to compare it against.
+    r_quant = {(row[0], row[1], row[2]): row
                for row in reviewed.get("activation_quantizers", ())}
-    i_quant = {(row[0], row[1]): row
+    i_quant = {(row[0], row[1], row[2]): row
                for row in installed.get("activation_quantizers", ())}
     for name in sorted(set(r_quant) | set(i_quant)):
         if name not in r_quant:
@@ -2015,12 +2562,26 @@ def require_pin_native_extensions_match_contract(
             "commit."
         )
 
-#: The one ``activation_quantizers`` grammar this reader implements.  A block
-#: naming another schema is REFUSED rather than read with this one: the whole
-#: point of the block is that nothing here guesses at a runtime's arithmetic,
-#: and guessing at the shape it published it in is the same mistake one level
-#: up.
-ACTIVATION_QUANTIZER_SCHEMA = "tessera.activation-quantizer.v1"
+#: The ``activation_quantizers`` grammars this reader implements.  A block
+#: naming any other schema is REFUSED rather than read with one of these: the
+#: whole point of the block is that nothing here guesses at a runtime's
+#: arithmetic, and guessing at the shape it published it in is the same
+#: mistake one level up.
+#:
+#: v1 (Tessera contract v25) publishes ``platforms[p]`` as one attestation
+#: object.  v2 (Tessera contract v33, tessera#555) publishes a LIST of them,
+#: one per serving image, because the fp4 rounding decision belongs to the
+#: runtime's compiled operator and two builds of one operator are two objects.
+#: Both are read here, into the same three-level table: a v1 block is a v2
+#: list of one.  What the list costs is that "which attestation" stops being
+#: obvious, and the answer is never "the first one" -- see
+#: :func:`require_activation_quantizer_attested`.
+ACTIVATION_QUANTIZER_SCHEMA_V1 = "tessera.activation-quantizer.v1"
+ACTIVATION_QUANTIZER_SCHEMA_V2 = "tessera.activation-quantizer.v2"
+#: Kept as the v1 spelling for callers that import it by its old name.
+ACTIVATION_QUANTIZER_SCHEMA = ACTIVATION_QUANTIZER_SCHEMA_V1
+ACTIVATION_QUANTIZER_SCHEMAS = (ACTIVATION_QUANTIZER_SCHEMA_V1,
+                                ACTIVATION_QUANTIZER_SCHEMA_V2)
 
 #: The vocabulary of one ``contracts[]`` entry this reader transcribes.  Each
 #: is a fact about what the published vectors MEAN, and a different value is a
@@ -2159,10 +2720,23 @@ class ActivationQuantizerAttestation:
         would admit the same families while attesting strictly less, so the
         vectors ARE answer, not identity.  ``op`` is in it too: the same table
         produced by a different symbol is a different claim about what a serve
-        runs.  ``generated`` and ``generator`` stay out -- they name the box
-        and the script, which is provenance.
+        runs.
+
+        ``generated.image`` joined it at Tessera contract v33 (schema v2),
+        when a platform started publishing one table per serving image: the
+        image is what SELECTS which table covers a measurement
+        (:func:`require_activation_quantizer_attested`), so it is a value an
+        admission decision is made of rather than provenance -- and without it
+        two byte-identical tables project two identical rows, which the
+        answer's drift key would then read as one.  The rest of ``generated``
+        stays out: ``vllm`` and ``torch`` are inside the image the digest
+        already pins, ``device``, ``compute_capability`` and ``driver`` are
+        host facts nothing here compares, and ``generator_sha256`` names the
+        script.  ``generator`` stays out for the same reason.
         """
-        return [self.platform, self.activation_contract, self.op, self.unit,
+        return [self.platform, self.activation_contract,
+                self.generated.image if self.generated else None,
+                self.op, self.unit,
                 int(self.unit_length), self.grid, self.block_scale,
                 self.global_scale, [v.as_row() for v in self.vectors]]
 
@@ -2186,39 +2760,113 @@ def _parse_activation_quantizers(payload: Mapping[str, Any], path: str
     if not isinstance(block, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
     schema = block.get("schema")
-    if schema != ACTIVATION_QUANTIZER_SCHEMA:
+    if schema not in ACTIVATION_QUANTIZER_SCHEMAS:
         raise TesseraContractError(
             f"{where}.schema is {schema!r}; this reader implements only "
-            f"{ACTIVATION_QUANTIZER_SCHEMA!r}. A quantiser table in a grammar "
-            "this reader has not been taught is a review, not a thing to read "
-            "with the grammar it happens to have.")
+            f"{list(ACTIVATION_QUANTIZER_SCHEMAS)}. A quantiser table in a "
+            "grammar this reader has not been taught is a review, not a thing "
+            "to read with the grammar it happens to have.")
     platforms = _require(block, "platforms", where)
     if not isinstance(platforms, Mapping):
         raise TesseraContractError(f"{where}.platforms must be a JSON object")
-    table: dict[str, dict[str, ActivationQuantizerAttestation]] = {}
+    table: dict[str, dict[str, dict[str, ActivationQuantizerAttestation]]] = {}
     for platform, published in platforms.items():
         spot = f"{where}.platforms[{platform}]"
-        if not isinstance(published, Mapping):
-            raise TesseraContractError(f"{spot} must be a JSON object")
-        unknown = sorted(set(published) - set(_ACTIVATION_PLATFORM_MEMBERS))
-        if unknown:
+        if schema == ACTIVATION_QUANTIZER_SCHEMA_V2:
+            if not isinstance(published, Sequence) or isinstance(
+                    published, (str, bytes, Mapping)):
+                raise TesseraContractError(
+                    f"{spot} must be a JSON array under "
+                    f"{ACTIVATION_QUANTIZER_SCHEMA_V2!r}: v2 publishes one "
+                    "attestation per serving image, and a reader that also "
+                    "accepted the v1 object here would be guessing which "
+                    "grammar it was handed.")
+            if not published:
+                raise TesseraContractError(
+                    f"{spot} is an empty array. A platform that publishes no "
+                    "attestation at all says nothing this reader can price "
+                    "against; publish one or publish no platform entry.")
+            entries = [(f"{spot}[{i}]", item)
+                       for i, item in enumerate(published)]
+        else:
+            if not isinstance(published, Mapping):
+                raise TesseraContractError(f"{spot} must be a JSON object")
+            entries = [(spot, published)]
+        by_image: dict[str, dict[str, ActivationQuantizerAttestation]] = {}
+        for at, entry in entries:
+            key, rows = _parse_activation_platform_entry(
+                entry, platform=str(platform), where=at)
+            if key in by_image:
+                raise TesseraContractError(
+                    f"{at} publishes a second attestation for image {key!r}, "
+                    "which the reader already read on this platform. Two "
+                    "tables for one image are two answers to one question, "
+                    "and picking either is a guess; publish one attestation "
+                    "per image.")
+            by_image[key] = rows
+        if len(by_image) > 1 and "" in by_image:
             raise TesseraContractError(
-                f"{spot} publishes {unknown} which this reader does not know. "
-                "A field beside a platform's quantiser tables that nothing "
-                "here reads is either a value a gate should decide on or "
-                "prose that does not belong; either way it is a review.")
-        contracts = _require(published, "contracts", spot)
-        if not isinstance(contracts, Mapping):
-            raise TesseraContractError(f"{spot}.contracts must be a JSON object")
-        generated = _parse_activation_generated(published.get("generated"),
-                                                f"{spot}.generated")
-        rows: dict[str, ActivationQuantizerAttestation] = {}
-        for name, entry in contracts.items():
-            rows[str(name)] = _parse_activation_contract(
-                entry, platform=str(platform), name=str(name),
-                where=f"{spot}.contracts[{name}]", generated=generated)
-        table[str(platform)] = rows
+                f"{spot} publishes {len(by_image)} attestations and one of "
+                "them names no `generated` block, so nothing says which image "
+                "it covers. With more than one table on a platform the image "
+                "is what selects, and an unscoped table cannot be selected "
+                "(RobTand/prismaquant#715).")
+        table[str(platform)] = by_image
     return table
+
+
+def _parse_activation_platform_entry(entry: Any, *, platform: str, where: str
+                                     ) -> "tuple[str, dict]":
+    """One ``platforms[p]`` attestation: its image key and its contract rows.
+
+    The same object under both grammars -- v1 publishes exactly one of these
+    and v2 a list of them -- so the member vocabulary, the scope block and the
+    contract rows are read here once and the caller only decides how many to
+    expect.
+
+    The KEY is the image the table was generated in: its content digest when
+    the contract names a digest reference, and the reference verbatim when it
+    does not.  A digest is what the consumer compares (a tag moves, and one
+    digest can sit behind two repository names), so keying on it makes two
+    tables for one build a refusal at read time rather than an ambiguity at
+    selection time.  A table with no ``generated`` block keys on ``""``: it
+    names no image, which is permitted for a lone v1 table -- the consumer
+    refuses it as unscoped -- and refused beside a second table above.
+    """
+    if not isinstance(entry, Mapping):
+        raise TesseraContractError(f"{where} must be a JSON object")
+    unknown = sorted(set(entry) - set(_ACTIVATION_PLATFORM_MEMBERS))
+    if unknown:
+        raise TesseraContractError(
+            f"{where} publishes {unknown} which this reader does not know. "
+            "A field beside a platform's quantiser tables that nothing "
+            "here reads is either a value a gate should decide on or "
+            "prose that does not belong; either way it is a review.")
+    contracts = _require(entry, "contracts", where)
+    if not isinstance(contracts, Mapping):
+        raise TesseraContractError(f"{where}.contracts must be a JSON object")
+    generated = _parse_activation_generated(entry.get("generated"),
+                                            f"{where}.generated")
+    rows: dict[str, ActivationQuantizerAttestation] = {}
+    for name, row in contracts.items():
+        rows[str(name)] = _parse_activation_contract(
+            row, platform=platform, name=str(name),
+            where=f"{where}.contracts[{name}]", generated=generated)
+    return (activation_image_key(generated.image) if generated else "", rows)
+
+
+def activation_image_key(reference: Any) -> str:
+    """The key one image reference is read under, digest first.
+
+    ``repository@sha256:<64 hex>`` keys on the 64 hex digits alone, because
+    that is the only part that names bytes: the same build reaches a local
+    registry under another repository name, and the GLM-5.3 campaign image is
+    exactly that case.  Anything else -- a tag, a bare name -- keys on the
+    reference verbatim, so it parses and can never be selected by a digest
+    comparison.
+    """
+    text = str(reference)
+    return text.split("@sha256:", 1)[1] if _DIGEST_IMAGE.fullmatch(text) else text
 
 
 def _parse_activation_generated(entry: Any, where: str
@@ -2374,12 +3022,71 @@ def packaged_activation_quantizers() -> tuple[str, dict]:
     return sha, _parse_activation_quantizers(payload, str(contract_path()))
 
 
+def _select_activation_attestation_set(
+    table: Mapping[str, Any], *, platform: str, executing_image: str,
+) -> "Mapping[str, ActivationQuantizerAttestation]":
+    """The one attestation this run may price against, or a refusal.
+
+    Since Tessera contract v33 a platform may publish several tables, one per
+    serving image, and the rule is the one the consumer already enforces on a
+    frozen panel: a cell is covered only by the attestation whose
+    ``generated.image`` is the image it EXECUTES in (#715).  Reading that rule
+    forward to the point the stamp is produced is what makes the list safe:
+
+    * one table, no image named by the caller -- read it, exactly as a v1
+      contract has always been read.  The image still travels into the stamp,
+      and ``native_operator_panel.require_panel_execution_scope`` still
+      refuses the panel when the executing image is another one, so this is
+      the same verdict taken later rather than a gap.
+    * an image named -- select by CONTENT DIGEST.  Exactly one table may
+      match; none is a refusal that names both sides, and a reference with no
+      digest is a refusal rather than a comparison made on a name.
+    * several tables and no image named -- REFUSED.  There is no first entry
+      here: picking one would be the producer asserting which build it ran,
+      which is the assertion principle 14 exists to refuse.
+    """
+    by_image = table.get(platform) or {}
+    if not by_image:
+        return {}
+    if executing_image:
+        if not _DIGEST_IMAGE.fullmatch(executing_image):
+            raise TesseraContractError(
+                f"the executing image {executing_image!r} is not a digest "
+                "reference (repository@sha256:<64 lowercase hex>), so there "
+                "is nothing here to compare against the attested image: a tag "
+                "names a moving target. Name the digest the serve resolved "
+                "(RobTand/prismaquant#715).")
+        key = activation_image_key(executing_image)
+        if key in by_image:
+            return by_image[key]
+        raise TesseraContractError(
+            f"the pinned Tessera contract publishes no quantiser attestation "
+            f"generated in the executing image on {platform!r}.\n"
+            f"  executing image: {executing_image}\n"
+            f"  attested images: {sorted(by_image) or 'none'}\n"
+            "Two builds of one operator are two objects (#567), so a table "
+            "taken in another image does not cover this run. Re-measure in an "
+            "attested image, or publish a table generated in this one; there "
+            "is no tolerance and no allow-list here.")
+    if len(by_image) > 1:
+        raise TesseraContractError(
+            f"the pinned Tessera contract publishes {len(by_image)} quantiser "
+            f"attestations on {platform!r}, one per serving image "
+            f"({sorted(by_image)}), and this call named none. Which rounding "
+            "rule covers a measurement is decided by the image it executes "
+            "in, never by the order the contract lists them in: pass "
+            "executing_image=<repository@sha256:...> "
+            "(RobTand/prismaquant#715, #926).")
+    return next(iter(by_image.values()))
+
+
 def require_activation_quantizer_attested(
     activation_contract: str,
     *,
     platform: str,
-    table: "Mapping[str, Mapping[str, ActivationQuantizerAttestation]] | None" = None,
+    table: "Mapping[str, Mapping[str, Mapping[str, ActivationQuantizerAttestation]]] | None" = None,
     contract_sha256: str = "",
+    executing_image: str = "",
 ) -> dict:
     """Refuse to price an activation residual the runtime never attested.
 
@@ -2397,6 +3104,11 @@ def require_activation_quantizer_attested(
     * no table, no platform, or no row for this contract string --
       **unattested**.  The name ``"e2m1_group16_ue4m3_static"`` says which
       quantiser; it never said what that quantiser does at a tie.
+    * a platform that publishes several tables -- one per serving image since
+      Tessera contract v33 -- and no ``executing_image`` to select with, or
+      one that matches none of them.  Which build ran is a fact about this
+      run, and there is no first entry here
+      (:func:`_select_activation_attestation_set`).
     * a vocabulary this reader does not transcribe -- another unit, grid or
       block-scale format is a different quantiser, not a thing to read with
       this one's arithmetic.
@@ -2430,13 +3142,14 @@ def require_activation_quantizer_attested(
     sha = contract_sha256
     if table is None:
         sha, table = packaged_activation_quantizers()
-    published = table.get(str(platform)) or {}
+    published = _select_activation_attestation_set(
+        table, platform=str(platform), executing_image=str(executing_image or ""))
     row = published.get(str(activation_contract))
     if row is None:
         raise TesseraContractError(
             "the pinned Tessera contract publishes no quantiser attestation "
             f"for {activation_contract!r} on {platform!r} (it publishes "
-            f"{ {p: sorted(c) for p, c in table.items()} or 'nothing at all'}"
+            f"{ {p: {i: sorted(c) for i, c in by_image.items()} for p, by_image in table.items()} or 'nothing at all'}"
             ").\n"
             "PrismaQuant prices this contract's activation residual with its "
             "OWN re-implementation of the rounding rule "

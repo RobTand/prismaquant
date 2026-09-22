@@ -1486,7 +1486,8 @@ def _stage_checkpoint_entries(tmp_path, monkeypatch, record):
     return residency_resolver(), consumer, paths
 
 
-def test_strict_checkpoint_roundtrip_pinned_never_opens_pool(tmp_path, monkeypatch):
+@pytest.mark.parametrize("local_scratch", [False, True])
+def test_strict_checkpoint_roundtrip_pinned_never_opens_pool(tmp_path, monkeypatch, local_scratch):
     from prismaquant.joint_adjoint_checkpoints import (
         adjoint_space, load_adjoint_checkpoint)
     record, tensor, state = _write_checkpoint(tmp_path)
@@ -1500,9 +1501,21 @@ def test_strict_checkpoint_roundtrip_pinned_never_opens_pool(tmp_path, monkeypat
         return real_open(target, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", counting)
-    cotangents, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-        adjoint_space(tmp_path), record)
-    assert torch.equal(cotangents[(0, 0)], tensor)
+    arena = None
+    def factory(entries):
+        nonlocal arena
+        from prismaquant.perturbed_x_cache import ExactCotangentScratch
+        arena = ExactCotangentScratch(entries, directory=tmp_path, max_bytes=1 << 20)
+        return arena
+    try:
+        cotangents, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+            adjoint_space(tmp_path), record,
+            cotangent_factory=factory if local_scratch else None)
+        actual = cotangents[(0, 0)]
+    finally:
+        if arena is not None:
+            arena.close()
+    assert torch.equal(actual, tensor)
     assert _states_equal(shared_adjoint[(0, 0)], state)
     assert shared_pass == {0: {"captured": None}}
     assert not any(opened_path in paths for opened_path in opened)
@@ -2429,3 +2442,46 @@ def test_a_stale_missing_entry_with_unbound_readset_does_not_wait(
     assert report['range_waits_served'] == 0
     assert report['range_waits_refused'] == 0
     assert report['bytes_from_pool'] == 0
+
+
+def test_clearing_the_injection_removes_only_the_modules_it_imported():
+    """The teardown leaves no venv ``prismabuild`` behind (PQ #963).
+
+    This file injects the installed SDK and imports ``prismabuild.pool``
+    and ``prismabuild.residency_map`` from it. Those entries used to
+    outlive the fixture, and ``_sdk_from_tree`` serves a preimported
+    ``prismabuild.reader_lease`` as it is, so every later test in the
+    same pytest worker that resolves the SDK out of a sealed generation
+    tree refused ``lease-helper-divergent``. Whether a test was hit was
+    a pure function of shard packing.
+    """
+    require_prismabuild_sdk()
+    from prismaquant.staged_lease import (
+        clear_injected_sdk_for_tests, inject_installed_sdk_for_tests)
+
+    def loaded():
+        return {name for name in sys.modules
+                if name == 'prismabuild' or name.startswith('prismabuild.')}
+
+    # Start from a known state: nothing prismabuild imported, then one
+    # module this test imports itself, which the teardown must keep.
+    clear_injected_sdk_for_tests()
+    for name in loaded():
+        del sys.modules[name]
+    import prismabuild.reader_lease  # noqa: F401,PLC0415
+    kept = loaded()
+    assert kept, 'the pinned SDK import is the module the teardown keeps'
+
+    inject_installed_sdk_for_tests()
+    import prismabuild.pool  # noqa: F401,PLC0415
+    assert 'prismabuild.pool' in loaded()
+
+    clear_injected_sdk_for_tests()
+    assert 'prismabuild.pool' not in loaded(), (
+        'a leftover venv prismabuild.* refuses every later sealed-tree '
+        'resolution in this pytest worker')
+    assert loaded() == kept, (
+        'the teardown removed a module the injection did not import')
+
+    for name in loaded():
+        del sys.modules[name]

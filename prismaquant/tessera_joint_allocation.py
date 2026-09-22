@@ -105,6 +105,21 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
           'anchor calibration draw')
     source_by_unit = {}
     result = copy.deepcopy(joint)
+    policy_binding = prepared.get('served_activation_policy')
+    _same(joint['provenance'].get('served_activation_policy'), policy_binding, 'joint served activation policy')
+    policy = None
+    if policy_binding is not None:
+        from .joint_served_activation import verify_policy, require_priced_activation
+        from .joint_catalog_extension import require_extension
+        extension = joint['provenance'].get('catalog_extension')
+        _require(isinstance(extension, dict), 'served policy requires an authenticated catalog extension')
+        # The full extension independently binds the old capture and new plan.
+        extension_doc = json.loads(_read_bound(extension, 'served policy catalog extension'))
+        _same(extension_doc['inputs']['extended_prepared'], prepared_binding, 'served policy extended preparation')
+        _same(extension_doc['inputs']['extended_plan']['sha256'], plan_sha256, 'served policy extended plan')
+        require_extension(extension, receipt=json.loads(_read_bound(extension_doc['adjoint_capture'], 'original completed capture')),
+                          plan_sha256=plan_sha256, prepared_sha256=prepared_binding['sha256'])
+        policy = verify_policy(policy_binding, original_prepared=extension_doc['inputs']['original_prepared'])
     for name, formats in roster.items():
         _same(set(joint['costs'][name]), set(formats), f'{name}: measured candidate roster')
         shape = data.census['unit_shapes'][name]
@@ -114,6 +129,8 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
         for fmt in formats:
             row = joint['costs'][name][fmt]
             operator, probe = row['joint_operator_identity'], row['probe_identity']
+            _same(operator['arithmetic'].get('served_activation_policy'), policy_binding,
+                  f'{name}@{fmt}: priced served policy arithmetic')
             _same(probe['source_model'], prepared['source_model_identity'], f'{name}: source model')
             _same(probe['source_model']['source'], original['model'], f'{name}: source model path')
             _same(probe['calibration_sha256'],
@@ -133,8 +150,14 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
                 continue
             pair = (name, fmt)
             receipt = verified[pair]
-            for key in ('source_weight', 'rendered_weight', 'activation'):
+            for key in ('source_weight', 'rendered_weight'):
                 _same(operator[key], receipt[key], f'{name}@{fmt}: prepared {key}')
+            priced_scale = None
+            if policy is None:
+                _same(operator['activation'], receipt['activation'], f'{name}@{fmt}: prepared activation')
+                _require(operator.get('served_activation_policy') is None, 'unbound served activation override')
+            else:
+                priced_scale = require_priced_activation(policy_binding, policy, name, fmt, receipt['activation'], operator)
             _same(receipt['render_comparison'],
                   RENDER_COMPARISON_BY_ORIGIN[data.cells[pair]['render_origin']],
                   f'{name}@{fmt}: prepared render comparison')
@@ -153,10 +176,13 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
             _same(source['shape'], source_record['shape'], f'{name}: original source dimensions')
             _same(source['dtype'].removeprefix('torch.'), source_record['dtype'].removeprefix('torch.'), f'{name}: original source dtype')
             anchor_row = data.payload['costs'][name][fmt]
-            _same(operator['activation']['input_global_scale'], anchor_row.get('input_global_scale'), f'{name}@{fmt}: original static scale')
+            _same(receipt['activation']['input_global_scale'], anchor_row.get('input_global_scale'), f'{name}@{fmt}: qualified original static scale')
+            if priced_scale is None:
+                _same(operator['activation']['input_global_scale'], anchor_row.get('input_global_scale'), f'{name}@{fmt}: original static scale')
             for key in ROW_FIELDS:
                 if key in anchor_row:
-                    _add(result['costs'][name][fmt], key, anchor_row[key], f'{name}@{fmt}')
+                    value = priced_scale if key == 'input_global_scale' and priced_scale is not None else anchor_row[key]
+                    _add(result['costs'][name][fmt], key, value, f'{name}@{fmt}')
     for key in PROVENANCE_FIELDS:
         if key in original:
             _add(result['provenance'], key, original[key], 'joint provenance')
@@ -248,6 +274,7 @@ def handoff(*, joint_binding, plan_binding, output_path):
     _same(evidence['inputs'], plan['inputs'], 'joint plan original inputs')
     prepared_binding = evidence['prepared']
     prepared = json.loads(_read_bound(prepared_binding, 'prepared completion'))
+    _same(prepared.get('served_activation_policy'), plan.get('served_activation_policy'), 'planned served activation policy')
     _same(prepared['calibration_input']['artifact_sha256'], plan['calibration_input']['sha256'], 'planned calibration artifact')
     cache = pickle.loads(_read_bound(prepared['production_cache'], 'prepared cache'))
     _require(isinstance(cache, ProductionWeightCache), 'prepared cache owner is not ProductionWeightCache')
