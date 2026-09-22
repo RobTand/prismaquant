@@ -1,17 +1,15 @@
 """Recover failed logical members; PB retains all partition and placement ownership."""
 import argparse,copy,hashlib,json,os
 from pathlib import Path
-ROOT=Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/t4-reuse-20260922')
-PARENT='7ba9f2e4120e8067e7aa6cc9a7fa16e2c87c766b376ad5817dd392f845d51d82'
 QUEUE=Path('/mnt/shared/prismabuild-fleet/pb-queue')
 def sha(raw):return hashlib.sha256(raw).hexdigest()
 def main():
- p=argparse.ArgumentParser();p.add_argument('--out',required=True);p.add_argument('--all-members',action='store_true');p.add_argument('--qualifier-checkout',default='/home/rob/tmp/pq-t4-readiness-20260922');args=p.parse_args();out=Path(args.out);assert not out.exists()
+ p=argparse.ArgumentParser();p.add_argument('--out',required=True);p.add_argument('--all-members',action='store_true');p.add_argument('--qualifier-checkout',required=True);p.add_argument('--parent',required=True,help='PB decomposition parent key of the logical request');p.add_argument('--request',required=True,help='logical request built by build_t4_logical_request.py');p.add_argument('--request-sha256',required=True);args=p.parse_args();PARENT=args.parent;out=Path(args.out);assert not out.exists()
  dep=Path('/mnt/shared/prismabuild-fleet/cas/decompositions')/PARENT[:2]/PARENT
  publication=json.loads((dep/'publication.json').read_bytes());plan=json.loads((dep/'plan.json').read_bytes());keys=publication['child_action_keys'];assert len(keys)==len(plan['partitions'])
  failed={e.name[:-5] for e in os.scandir(QUEUE/'failed') if e.name.endswith('.json')}
  selected={q for key,part in zip(keys,plan['partitions']) if args.all_members or key in failed for q in part};assert selected
- raw=(ROOT/'logical-qualification-37.json').read_bytes();assert sha(raw)=='1902e677b456b0a6e40da2fe45fe0bd38fccee5226e238359d4f9b060a963bf5';request=json.loads(raw);del raw
+ raw=Path(args.request).read_bytes();assert sha(raw)==args.request_sha256;request=json.loads(raw);del raw
  tasks=[];reused=0
  for task in request['roster']['tasks']:
   if task['id'] not in selected:continue
