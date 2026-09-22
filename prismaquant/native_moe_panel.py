@@ -1660,7 +1660,8 @@ def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, de
         if metadata["dev_uncertified"] is not True:
             raise ValueError("source acquisition must retain its uncertified DEV declaration")
         capture["source_acquisition"]={key:copy.deepcopy(metadata[key]) for key in
-            ("dev_uncertified","dev_mode","source_cache_reuse","capture_device_envelope") if key in metadata}
+            ("dev_uncertified","dev_mode","source_cache_reuse","capture_device_envelope",
+             "model_load_contract","replay","capture_source_sha256","capture_runtime","scope") if key in metadata}
     _calibration_and_capture(calibration_receipt, capture, unit=unit, shape=shape, routing=routing)
     source = capture["producer_source"]
     for name, digest in {**source["files"], **source["auxiliary_sha256"], "config.json": source["config_sha256"]}.items():
