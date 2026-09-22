@@ -9,6 +9,7 @@ interleavings are forced, not raced.
 """
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 
@@ -181,6 +182,21 @@ def test_a_stuck_stager_retains_origins_and_reports_debt(
         assert "stager-close" in steps
         assert "stuck-stager-exit-retain" in steps, (
             "retained origins and unreleased credit are reported debt")
+        # A run whose stager never joined is not complete, whatever it
+        # would have been called (PQ #960). A failing run keeps its own
+        # verdict; a clean one is demoted, and the debt is named where a
+        # reader of the receipt sees it.
+        assert storage._status == ("failed" if primary_failure
+                                   else "retained"), storage._status
+        receipt = storage.receipt()
+        assert receipt["status"] == storage._status
+        assert receipt["retained"]["reason"] == "stuck-stager-exit-retain"
+        assert receipt["retained"]["origins"] == len(storage._references)
+        assert receipt["retained"]["origin_bytes"] == live_bytes
+        record = json.loads(
+            (storage.directory / "generation.json").read_text())
+        assert record["status"] == storage._status
+        assert record["retained"]["reason"] == "stuck-stager-exit-retain"
     finally:
         release.set()
     assert close(timeout=10.0)

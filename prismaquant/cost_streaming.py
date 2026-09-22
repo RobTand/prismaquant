@@ -266,6 +266,8 @@ class StreamedBoundaryArtifacts:
         self._stager = None
         self._stager_stuck = False
         self._stager_failures = []
+        self._stager_death_recorded = False
+        self._stager_death_raised = False
         self._stager_preclaimed = set()
         self._produced_release_queued = set()
         self._produced_live_keys = frozenset()
@@ -414,6 +416,23 @@ class StreamedBoundaryArtifacts:
         self.telemetry["peak_artifact_bytes"] = max(
             self.telemetry["peak_artifact_bytes"], self.telemetry["live_artifact_bytes"])
 
+    def _retained_debt(self):
+        """What a stuck stager still owns, for the status and the receipt.
+
+        ``None`` on every run whose stager joined, so a clean generation
+        record is unchanged.
+        """
+
+        if not self._stager_stuck:
+            return None
+        return {"reason": "stuck-stager-exit-retain",
+                "detail": ("the stager thread did not end inside the staging "
+                           "budget; teardown was skipped, so this generation "
+                           "still owns its origins, checkpoint reservations "
+                           "and produced-output credit"),
+                "origins": len(self._references),
+                "origin_bytes": self.telemetry["live_artifact_bytes"]}
+
     def _publish_status(self):
         if self.directory is None or self._readonly:
             return
@@ -421,6 +440,9 @@ class StreamedBoundaryArtifacts:
         data = {"schema": self.config["schema"], "session": self.session,
                 "policy": self.identity, "status": self._status,
                 "working_artifacts_reusable": False, "telemetry": self.telemetry}
+        retained = self._retained_debt()
+        if retained is not None:
+            data["retained"] = retained
         atomic_write_bytes(self.directory / "generation.json",
             (json.dumps(data, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
 
@@ -1615,16 +1637,60 @@ class StreamedBoundaryArtifacts:
             f"stager step {task.label} failed and will be raised by the "
             f"owner's next call: {exc!r}")
 
-    def _produced_raise_stager_failure(self):
-        """Raise the oldest kept stager failure, under its own type."""
+    def _produced_record_stager_death(self):
+        """Record a dead stager worker as owner-visible debt, once.
 
-        if not self._stager_failures or self._produced_on_stager():
+        A worker that dies takes its whole queue with it. The stranded
+        tasks are dropped with their own callbacks on the way out, and
+        the death itself is news the owner cannot act on silently: a
+        stranded reclaim is a durable charge nobody gives back (PQ #959).
+        Returns the death, or None. Never raises, so the close path can
+        call it too.
+        """
+
+        stager = self._stager
+        death = None if stager is None else stager.death()
+        if death is None or self._stager_death_recorded:
+            return death
+        self._stager_death_recorded = True
+        stranded = stager.stranded()
+        self._produced_release_errors.append(
+            {"batch_id": None, "step": "stager-died",
+             "reason": {"error": repr(death), "stranded": list(stranded)}})
+        dropped = stager.stranded_error()
+        if dropped is not None:
+            self._produced_release_errors.append(
+                {"batch_id": None, "step": "stager-died-drop",
+                 "reason": {"error": repr(dropped)}})
+        self._produced_log(
+            f"the stager thread died: {death!r}; it stranded "
+            f"{len(stranded)} queued step(s) "
+            f"({', '.join(stranded) if stranded else 'none'}), each dropped "
+            "with its own callback; this owner runs its PrismaBuild calls "
+            "itself from here")
+        return death
+
+    def _produced_raise_stager_failure(self):
+        """Raise the oldest kept stager failure, under its own type.
+
+        A dead worker is raised the same way, after the failures it
+        already kept: the owner hears about the death at its next call
+        instead of finding a silently empty lane (PQ #959).
+        """
+
+        if self._produced_on_stager():
             return
-        with self._produced_lock.held():
-            label, exc = self._stager_failures.pop(0)
-        exc.add_note(f"raised on the produced-output stager thread by its "
-                     f"{label} step, and surfaced here")
-        raise exc
+        death = self._produced_record_stager_death()
+        if self._stager_failures:
+            with self._produced_lock.held():
+                label, exc = self._stager_failures.pop(0)
+            exc.add_note(f"raised on the produced-output stager thread by its "
+                         f"{label} step, and surfaced here")
+            raise exc
+        if death is None or self._stager_death_raised:
+            return
+        self._stager_death_raised = True
+        raise death
 
     def _produced_stager_poll(self):
         with self._produced_lock.held():
@@ -1687,6 +1753,7 @@ class StreamedBoundaryArtifacts:
             # Do not drain its failures or dispose of any shared state here.
             return
         self._stager_stuck = False
+        self._produced_record_stager_death()
         self._stager = None
         for label, exc in self._stager_failures:
             self._produced_release_errors.append(
@@ -3234,6 +3301,14 @@ class StreamedBoundaryArtifacts:
                                 "origin_bytes": self.telemetry["live_artifact_bytes"]}})
                 if exc is not None:
                     exc.add_note(note)
+                # A run whose stager never joined is not a complete one.
+                # Its origins, checkpoint reservations and produced-output
+                # credit are still owned by a thread this process cannot
+                # account for, so the status says ``retained`` and the
+                # receipt names the debt (PQ #960). A run that was already
+                # failing keeps that verdict.
+                if self._status != "failed":
+                    self._status = "retained"
                 return False
             if exc_type is None:
                 self.settle_local_output()
@@ -3287,9 +3362,13 @@ class StreamedBoundaryArtifacts:
             self._publish_status()
 
     def receipt(self):
-        return {"policy": self.identity, "session": self.session, "status": self._status,
+        out = {"policy": self.identity, "session": self.session, "status": self._status,
                 "generation_manifest": str(self.directory / "generation.json") if self.directory else None,
                 "working_artifacts_reusable": False, "telemetry": dict(self.telemetry)}
+        retained = self._retained_debt()
+        if retained is not None:
+            out["retained"] = retained
+        return out
 
 
 @contextmanager
