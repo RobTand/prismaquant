@@ -819,10 +819,14 @@ def test_receipt_and_readsets_bind_under_metadata_namespace(tmp_path):
     assert _snapshot(meta) == first
 
 
-def test_dispatcher_accepts_prepared_executable_rows(tmp_path):
+def test_dispatcher_accepts_prepared_executable_rows(tmp_path, monkeypatch):
     """Metadata placement retains the complete prepared-input binding."""
     pytest.importorskip("torch")
     import dispatch_joint_quanta as dispatch
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({"container": {"image": "sha256:" + "0" * 64},
+                                "env": {}}))
+    monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
     campaign = _tiny_campaign(tmp_path)
     adjoint_space = campaign["root"] / "layer-quanta" / "adjoint"
     receipt_path = _tiny_receipt(campaign, adjoint_space)

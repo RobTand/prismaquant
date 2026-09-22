@@ -312,7 +312,8 @@ def prepare(args):
                 calibration_receipt=calibration_receipt, wire_blob=blob, wire_record=render["wire_record"],
                 encoding_identity=render["encoding_identity"],
                 prefill_rows=args.prefill_rows, decode_rows=args.decode_rows,
-                max_resident_bytes=args.max_resident_bytes)
+                max_resident_bytes=args.max_resident_bytes,
+                runtime_image=args.runtime_image)
             cell = cell_dir(out, name, fmt)
             cell.mkdir(parents=True, exist_ok=False)
             (cell / "weight.tessera").write_bytes(blob)

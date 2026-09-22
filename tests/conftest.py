@@ -314,3 +314,35 @@ def _no_staged_range_wait_unless_asked(monkeypatch):
     meaningful, and there are none under pytest.
     """
     monkeypatch.setenv("PRISMAQUANT_STAGED_RANGE_WAIT_S", "0")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """A run whose only tests skipped at collection is green, not empty.
+
+    pytest returns ``EXIT_NO_TESTS_COLLECTED`` (5) whenever
+    ``session.testscollected`` is zero. A module that skips at *collection*
+    time -- ``pytest.importorskip`` at module scope, directly or through an
+    imported sibling test module -- reports its skip and collects nothing, so
+    the run prints ``1 skipped`` and still exits 5.
+
+    That is invisible in a full-suite run, because some other file collects.
+    It matters under PrismaBuild, where ``pbtest`` gives each shard its own
+    pytest: a shard whose only file skips at collection exits 5, and the shard
+    reads as failed even though pytest reported the skip and nothing went
+    wrong (RobTand/prismaquant#915, seen on
+    ``tests/test_tessera_stack_group_cli.py``, which imports
+    ``test_glm_campaign_streaming`` -> ``test_glm5_next_streamed_forward_parity``
+    -> ``pytest.importorskip("transformers.models.glm5_next")``).
+
+    The conversion is deliberately narrow. It fires only when pytest itself
+    reported at least one skip, so an empty collection with no skip -- a typo
+    in a path, a ``-k`` that matched nothing, a deselect that emptied the run
+    -- still exits 5 and still reads as a defect. Failures, errors and usage
+    errors have their own exit codes and are never touched.
+    """
+    if exitstatus != pytest.ExitCode.NO_TESTS_COLLECTED:
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None or not reporter.stats.get("skipped"):
+        return
+    session.exitstatus = pytest.ExitCode.OK

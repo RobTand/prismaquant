@@ -1,0 +1,26 @@
+{
+  "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
+  "bundle_root": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/pb-local-export-3eda6a0f0688",
+  "candidate_commit": "3eda6a0f0688",
+  "files": {
+    "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
+    "src/prismabuild/movement_actions.py": "fd3a76883033c4e955a9e6e5a939536390671064ed44132fd90835003683d2af",
+    "src/prismabuild/pool.py": "39fbfe898f75dd6f80226ed815a3b24d5100c01b145a83e9464b8723cc561aea",
+    "src/prismabuild/produced_output.py": "7269029ccad245e652d3a8decd072975734c2de1e9cf1188ed62135f23959854",
+    "src/prismabuild/reader_lease.py": "d8ddc822eb56939e7b44c4bcdba858bd16aa5dd20659b838544ddd43e356fe92",
+    "src/prismabuild/residency_map.py": "fa77a5fbb2bb00a255a9967611ab07f633a77f2d3c383506436f22076a625276",
+    "src/prismabuild/resource_scope.py": "f9a85dd277042031ae42a234d947c5abcdf20790e491610961e380445e6503e0",
+    "src/prismabuild/storage_tiers.py": "a33faa564893f9c745a105bc9d6cfd84eba26cd7732a18375a08ffacfaced294",
+    "tools/fleet/prewarm_loop.py": "638f2aeda817037df4c2ea99c557ab9104172823351553849ad0cc3244b9634f",
+    "tools/fleet/stage_move.py": "4dab41a6bda7e59799308720e2d1d2413021c67e830dd30f4af0a443566d161f",
+    "tools/fleet/stage_release.py": "642409966f3e551c62d197701e2fe29890cb28e14bb092a77052a6bb8c977be7",
+    "src/prismabuild/produced_spool.py": "9ba61e972cbfee07c7a8d890ed7e649ab1ee5cbc6853e95d4b3c3a54f235c40f",
+    "tools/fleet/produced_export.py": "0bc4159cf5d4d4955bc83c10d6676df42108a281a4b0b6e9024d5c4c73a30efc"
+  },
+  "search_paths": [
+    {
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/pb-local-export-3eda6a0f0688"
+    }
+  ],
+  "note": "Immutable PB857 security-hardened candidate archive; source qualification only, no live deployment claim."
+}

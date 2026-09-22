@@ -162,6 +162,25 @@ Absent from a fresh clone. Do not cite outward; treat every claim in them as a l
 
 ---
 
+## Retained instruments — annotated tags, not branches
+
+Work that exists nowhere on `main` and whose branch was deleted or is not worth
+rebasing is kept as an annotated tag, so the commit survives `git gc` and has a
+name instead of a SHA in a comment thread. Fetch one with
+`git fetch origin tag <name>`; read the tag message with `git show <name>`.
+
+None of these is integrated, and none was executed against current `main`.
+Cherry-pick from the tagged commit if the instrument is wanted, rather than
+resurrecting the branch — every one of them is hundreds of commits behind.
+
+| Tag | Commit | What it holds | Why it is a tag |
+|---|---|---|---|
+| `retained/tr3-repeated-window-diagnostic` | `ca0dd65b585896109b8574e694230e3472097b66` | The TR3 repeated-window logits diagnostic: `DiagnosticPromptLogitsCapture` and `--diagnostic-repeat-first-window` in `experiments/measure_glm_tr3_vllm.py` and `tests/test_glm_tr3_full_vocab.py`. | Tip of the deleted branch `experiment/tr3-repeatability`. Absent from `main`, whose copies of both files landed in evolved form without them. Issue #468 closed it as deferred, not unnecessary; landing it is a vLLM-coupled port onto rewritten files that needs a served run to gate (#705) |
+| `retained/reader-byte-unpack-ab` | `1089589114410d310a978a7eaf07ee370689c10b` | The reader byte-unpack A/B harness: `experiments/reader_unpack_ab.py` and its `.sh` driver. | Tip of the deleted branch `codex/pq-reader-byte-unpack-ab`. The library half is superseded — `prismaquant/tessera_reader.py` is byte-identical to `main` and `bind_checkpoint_unit_identity` landed. The harness pins several private internals and has no runnable gate without campaign artifacts (#705) |
+| `retained/aqua-render-conditioned-act-cost` | `da92565660d03c839c4e53f3efe8b84886b2f969` | The AQUA render-conditioned activation term: the opt-in lever `PRISMAQUANT_AQUA_ACT_WEIGHT_BASIS` / `--act-weight-basis` (`{rtn, compensated}`), byte-identical no-op when unset, with `tests/test_aqua_render_conditioned_act_cost.py` and `tests/test_aqua_activation_cost.py` as its gates. | The one unique commit on `flash/aqua-render-conditioned-act-cost-main-20260917`, which is still on origin. `main`'s AQUA cost path was restructured underneath it, so a cherry-pick hits six semantic conflict regions and the lever would then need the full Qwen3-0.6B/4B A/B ladder. Issue #709 is open for that decision; the recommendation on record is to keep it archived and not rebase now |
+
+---
+
 ## Satellite docs
 
 | Path | What it is |
