@@ -20,3 +20,9 @@ def test_qualified_record_carries_actual_file_and_tensor_hash(cell):
  assert result['render_file_sha256']==m.digest(Path(cell['render']).read_bytes())
  assert result['rendered_weight']['shape']==[2,4]
  assert result['render_comparison']=='independent_render_vs_wire'
+def test_partial_checkpoint_corruption_is_not_adopted(cell,tmp_path,monkeypatch):
+ import json,sys
+ out=tmp_path/'result.json';out.write_text(json.dumps({'cell_sha256':m.digest(json.dumps(cell,sort_keys=True,separators=(',',':')).encode()),'verified_cell':{'qualification_seconds':0.1},'verified_cell_sha256':'0'*64}))
+ batch={'schema':'prismaquant.t4_qualification_pilot.v1','tasks':[{'id':'unit','output_id':'unit','payload':{'cell':cell,'output':str(out)}}],'result_manifest_path':str(tmp_path/'manifest.json')};path=tmp_path/'batch.json';path.write_text(json.dumps(batch));monkeypatch.setattr(sys,'argv',['qualify','--pilot-batch',str(path)])
+ with pytest.raises(AssertionError):m.main()
+ assert not (tmp_path/'manifest.json').exists()
