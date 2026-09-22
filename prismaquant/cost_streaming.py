@@ -217,6 +217,7 @@ class StreamedBoundaryArtifacts:
         self._cotangents = None
         self._status = "unused"
         self._scratch = None
+        self._cotangent_scratch = None
         self._checkpoint_reservations = {}
         self._checkpoint_committed = {}
         self._checkpoint_active = None
@@ -422,6 +423,22 @@ class StreamedBoundaryArtifacts:
                 "working_artifacts_reusable": False, "telemetry": self.telemetry}
         atomic_write_bytes(self.directory / "generation.json",
             (json.dumps(data, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
+
+    def checkpoint_cotangent_sink(self, records):
+        """Optional sealed local workspace for one quantum's cotangent plane."""
+        root = os.environ.get("PRISMAQUANT_STAGE_B_COTANGENT_ROOT")
+        ceiling = os.environ.get("PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
+        if root is None and ceiling is None:
+            return {}
+        if not root or not ceiling or not ceiling.isdecimal() or int(ceiling) <= 0:
+            raise ValueError("cotangent scratch requires explicit root and positive max bytes")
+        if self._cotangent_scratch is not None:
+            raise RuntimeError("boundary owner already holds cotangent scratch")
+        from .perturbed_x_cache import ExactCotangentScratch
+        self._cotangent_scratch = ExactCotangentScratch(
+            records, directory=root, max_bytes=int(ceiling),
+            max_tensor_bytes=self.config["max_resident_bytes"])
+        return self._cotangent_scratch
 
     def _reserve(self, delta):
         value = self.telemetry["resident_tensor_bytes"] + delta
@@ -3247,6 +3264,9 @@ class StreamedBoundaryArtifacts:
             self._status = "failed"
             raise
         finally:
+            if self._cotangent_scratch is not None:
+                self._cotangent_scratch.close()
+                self._cotangent_scratch = None
             if not self._stager_stuck:
                 if self._scratch is not None:
                     self._scratch.release()
