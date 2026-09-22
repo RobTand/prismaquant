@@ -555,3 +555,36 @@ def test_a_world_of_one_binds_no_separate_full_quality_preparation(joined):
     assert "quality_rendered_weight" not in member and "rank_render_proof" not in member
     joint = rows[member["unit"]]["joint_operator_identity"]
     assert joint["rendered_weight"] == member["rendered_weight"]
+
+
+def test_late_whole_owner_binding_preserves_router_and_member_execution(joined):
+    from prismaquant.native_moe_execution_binding import (
+        execution_panel_from_joint,bind_execution_receipt,resolve_execution_binding,RAW_RECEIPT_SCHEMA)
+    final=freeze_moe_panel(*joined,cost_sha256='4'*64)
+    execution=execution_panel_from_joint(final)
+    raw={'schema':RAW_RECEIPT_SCHEMA,'status':'timing_admissible','panel':execution,
+         'panel_sha256':identity_sha256(execution),'phases':{'fixture':'not GPU evidence'}}
+    bound=bind_execution_receipt(raw,final)
+    assert bound['raw_receipt']==raw
+    assert resolve_execution_binding(bound,final)['panel']==final
+    for field in ('routing_capture_sha256','calibration_sha256','source_sha256'):
+        changed=copy.deepcopy(final);changed[field]='0'*64
+        with pytest.raises(ValueError,match='changes measured execution'):
+            bind_execution_receipt(raw,changed)
+    changed=copy.deepcopy(final);changed['members'][0]['rendered_weight']['content_sha256']='0'*64
+    with pytest.raises(ValueError,match='changes measured execution'):
+        bind_execution_receipt(raw,changed)
+
+
+def test_packed_reference_uses_glm_apply_gate_without_inventing_act_fn():
+    from prismaquant.measure_quant_cost import _packed_experts_forward_with_weights
+    class GlmLike(torch.nn.Module):
+        num_experts=1
+        def _apply_gate(self,value):
+            gate,up=value.chunk(2,dim=-1)
+            return torch.nn.functional.silu(gate.clamp(max=.5))*up.clamp(-1,1)
+    x=torch.ones(1,4)
+    gate_up=torch.cat((torch.eye(4),2*torch.eye(4))).unsqueeze(0)
+    out=_packed_experts_forward_with_weights(GlmLike(),x,torch.zeros(1,1,dtype=torch.long),
+        torch.ones(1,1),gate_up,torch.eye(4).unsqueeze(0))
+    assert torch.equal(out,torch.full((1,4),torch.nn.functional.silu(torch.tensor(.5)).item()))

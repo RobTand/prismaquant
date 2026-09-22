@@ -315,6 +315,8 @@ def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
     joint = cost_row["joint_operator_identity"]
     operator = preflight["operator"]
     probe = cost_row["probe_identity"]
+    from .native_execution_binding import require_reference_quantizer
+    reference_quantizer = require_reference_quantizer(inputs, joint["activation"], probe)
     request = inputs["probe_request"]
     for key in ("n_probes", "seed_base", "token_scope", "temperature", "distribution", "normalization"):
         _equal(probe[key], request[key], f"predeclared probe {key}")
@@ -343,7 +345,9 @@ def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
     route = operator["declared_route"]
     _equal(route["contract"], operator["activation_contract"], "activation route")
     panel = {
-        "schema": PANEL_SCHEMA, "unit": inputs["unit"], "format": inputs["format"],
+        "schema": PANEL_SCHEMA,
+        **({"reference_served_quantizer": reference_quantizer} if reference_quantizer is not None else {}),
+        "unit": inputs["unit"], "format": inputs["format"],
         "shape": inputs["shape"], "source_sha256": probe["source_model"]["content_sha256"],
         "calibration_sha256": probe["calibration_sha256"], "cost_sha256": cost_sha256,
         "probe_identity_sha256": cost_row["probe_identity_sha256"],

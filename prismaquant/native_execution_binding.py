@@ -16,6 +16,19 @@ BOUND_SCHEMA = 'prismaquant.native_dense_late_binding.v1'
 _OPERATOR_FIELDS = ('qname', 'format', 'source_weight', 'rendered_weight', 'activation')
 
 
+def require_reference_quantizer(data, activation, probe=None):
+    """A served static oracle is bound to the actual quality producer build."""
+    if not (activation.get('static_contract') or {}).get('measured_as_served'):
+        return None
+    reference=data.get('reference_served_quantizer')
+    if not isinstance(reference,dict) or reference.get('backend')!='registered_scaled_fp4_quant':
+        raise ValueError('static native references require their registered served quantizer identity')
+    if probe is not None and identity_sha256(reference)!=identity_sha256(
+            probe.get('arithmetic',{}).get('served_quantizer')):
+        raise ValueError('native reference quantizer differs from actual joint quality arithmetic')
+    return copy.deepcopy(reference)
+
+
 def execution_panel_from_joint(panel):
     if panel.get('schema') != 'tessera.native_dense_panel.v1':
         raise ValueError('late binding requires final joint dense panel')
@@ -39,6 +52,7 @@ def freeze_execution_panel(inputs, preflight, *, source_sha256):
     if (preflight.get('schema') != 'tessera.native_dense_preflight.v1'
             or preflight.get('status') != 'untimed_preparation'):
         raise ValueError('execution panel needs untimed native preflight')
+    reference=require_reference_quantizer(inputs,inputs['activation'])
     operator = preflight['operator']
     for key in ('source_weight', 'rendered_weight'):
         _equal(operator[key], inputs[key], key)
@@ -56,7 +70,7 @@ def freeze_execution_panel(inputs, preflight, *, source_sha256):
     identity = {'qname': inputs['unit'], 'format': inputs['format'],
                 **{key: inputs[key] for key in ('source_weight','rendered_weight','activation')}}
     return copy.deepcopy({
-        'schema': RAW_PANEL_SCHEMA, 'unit': inputs['unit'], 'format': inputs['format'],
+        'schema': RAW_PANEL_SCHEMA, **({'reference_served_quantizer':reference} if reference is not None else {}), 'unit': inputs['unit'], 'format': inputs['format'],
         'shape': inputs['shape'], 'source_sha256': source_sha256,
         'calibration_sha256': inputs['calibration']['calibration_sha256'],
         'operator_identity': identity, 'operator_identity_sha256': identity_sha256(identity),
@@ -73,6 +87,7 @@ def bind_execution_receipt(raw_receipt, final_panel):
     if (raw_receipt.get('schema') != RAW_RECEIPT_SCHEMA
             or raw_receipt.get('status') != 'timing_admissible'):
         raise ValueError('late binding requires numerically admitted execution receipt')
+    require_reference_quantizer(final_panel,final_panel['joint_operator_identity']['activation'])
     panel = execution_panel_from_joint(final_panel)
     if (raw_receipt['panel'] != panel
             or raw_receipt['panel_sha256'] != identity_sha256(panel)):

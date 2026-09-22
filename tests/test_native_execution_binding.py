@@ -58,3 +58,15 @@ def test_consumer_refuses_modified_raw_evidence_and_inconsistent_binding():
     bound['panel_sha256']='different'
     with pytest.raises(ValueError,match='binding differs'):
         resolve_execution_binding(bound,final)
+
+
+def test_static_reference_refuses_missing_or_other_quality_quantizer_build():
+    from prismaquant.native_execution_binding import require_reference_quantizer
+    activation={'static_contract':{'measured_as_served':True}}
+    with pytest.raises(ValueError,match='require their registered'):
+        require_reference_quantizer({},activation)
+    identity={'backend':'registered_scaled_fp4_quant','image_content_sha256':'a'*64}
+    data={'reference_served_quantizer':identity}
+    assert require_reference_quantizer(data,activation,{'arithmetic':{'served_quantizer':identity}})==identity
+    with pytest.raises(ValueError,match='differs from actual joint quality arithmetic'):
+        require_reference_quantizer(data,activation,{'arithmetic':{'served_quantizer':{**identity,'image_content_sha256':'b'*64}}})

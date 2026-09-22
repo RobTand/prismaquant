@@ -562,7 +562,7 @@ def validate_glm_routing(routing):
     source = routing["source_protocol"]
     if (not isinstance(source, dict) or set(source) != GLM_SOURCE_PROTOCOL_FIELDS
             or not isinstance(source["router_class"], str) or not source["router_class"]
-            or source["normalization_epsilon"] != 1e-6
+            or source["normalization_epsilon"] != 1e-20
             or source["expert_bias_affects"] != "selection_only"):
         raise ValueError("GLM routed owner requires the actual GLM source router protocol")
     if source["scoring_func"] != "sigmoid" or source["topk_method"] != GLM_SOURCE_GEOMETRY["topk_method"]:
@@ -725,7 +725,8 @@ def _calibration_and_capture(calibration, capture, *, unit, shape, routing):
     _sha(calibration["calibration_sha256"], "calibration")
     if capture.get("schema") != "prismaquant.routed_boundary_capture.v1":
         raise ValueError("native MoE needs an actual routed-boundary capture")
-    for key, expected in (("unit", unit), ("shape", shape), ("routing", routing),
+    _equal(geometry_only(capture["shape"]), geometry_only(shape), "capture source geometry")
+    for key, expected in (("unit", unit), ("routing", routing),
                           ("calibration_sha256", calibration["calibration_sha256"]),
                           ("calibration_shape", calibration["shape"]),
                           ("calibration_dtype", calibration["dtype"])):
@@ -769,13 +770,14 @@ def _validate_phase_tensors(x, ids, weights, shape, *, cuda):
     if len({value.device for value in (x, ids, weights)}) != 1 or (cuda and x.device.type != "cuda"):
         raise ValueError("native MoE routed invocation must be resident on one CUDA device")
     if (not bool(torch.isfinite(x).all()) or not bool(torch.isfinite(weights).all())
-            or bool((weights < 0).any()) or bool((ids < 0).any()) or bool((ids >= shape["experts"]).any())):
+            or bool((weights < 0).any()) or bool((ids < 0).any()) or bool((ids >= _shape_for_roster(shape)["experts"]).any())):
         raise ValueError("native MoE routed invocation has nonfinite values or invalid assignments")
     if shape["top_k"] > 1 and bool((ids.sort(dim=-1).values.diff(dim=-1) == 0).any()):
         raise ValueError("native MoE capture repeats an expert within a token's top-k")
 
 
-def packed_reference(experts_module, x, ids, weights, gate_up_weight, down_weight, *, spec, cache):
+def packed_reference(experts_module, x, ids, weights, gate_up_weight, down_weight, *, spec, cache,
+                     input_unit=None, intermediate_unit=None):
     """Use the shared packed-expert operation at both existing QDQ boundaries.
 
     Packing below is transient preparation, not a second residency/cache path.
@@ -787,8 +789,8 @@ def packed_reference(experts_module, x, ids, weights, gate_up_weight, down_weigh
     _no_preclip()
     return _packed_experts_forward_with_weights(
         experts_module, x, ids, weights, gate_up_weight, down_weight,
-        input_quantize=lambda value: _activation_qdq(value, spec, cache.activation_max_abs or {}, None),
-        intermediate_quantize=lambda value: _activation_qdq(value, spec, cache.activation_max_abs or {}, None))
+        input_quantize=lambda value: _activation_qdq(value, spec, cache.activation_max_abs or {}, input_unit),
+        intermediate_quantize=lambda value: _activation_qdq(value, spec, cache.activation_max_abs or {}, intermediate_unit))
 
 
 def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, shape, routing,
@@ -887,7 +889,9 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
         # render is THIS rank's cut of it. The two are the same tensor only at a
         # world of one, so comparing them as one shape would refuse every real
         # TP2 panel and accept only the TP1 spelling that hides the cut.
-        if (source.device != device or render.device != device or source.dtype != torch.bfloat16
+        if ((source.device.type not in ("cpu", "cuda") or
+             source.device.type == "cuda" and source.device != device)
+                or render.device != device or source.dtype != torch.bfloat16
                 or render.dtype != torch.bfloat16
                 or list(source.shape) != container_member_shape(shape, role)
                 or list(render.shape) != rank_local_member_shape(shape, role)
@@ -906,8 +910,10 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
         _equal(_cb_cache_tensor_identity(decoded), _cb_cache_tensor_identity(render), f"{name} wire/PWC")
         del decoded
         activation = activation_identity(spec, cache.activation_max_abs or {}, name)
-        if activation["clip_enabled"] or activation["input_global_scale"] is not None:
-            raise ValueError("native MoE reference requires the shared dynamic E4M3 activation contract")
+        if activation["clip_enabled"]:
+            raise ValueError("native MoE reference refuses activation preclip")
+        if spec.static_activation_contract is not None and activation["input_global_scale"] is None:
+            raise ValueError("native A4 reference requires executed static scales")
         actual_members.append({**member, "source_weight": _cb_cache_tensor_identity(source),
             "rendered_weight": _cb_cache_tensor_identity(render), "activation": activation,
             "wire": {"blob_sha256": hashlib.sha256(wire_blobs[name]).hexdigest(),
@@ -916,6 +922,11 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
             actual_members[-1]["quality_rendered_weight"] = _cb_cache_tensor_identity(full_render)
         tensors["source_weight/" + name], tensors["rendered_weight/" + name] = source, render
         rendered[name] = render
+    if spec.static_activation_contract is not None:
+        for stage_roles in (("w1", "w3"), ("w2",)):
+            scales = {m["activation"]["input_global_scale"] for m in actual_members if m["role"] in stage_roles}
+            if len(scales) != 1:
+                raise ValueError("native A4 references require one executed group scale per stage")
     quality_context = None
     if rank_local:
         # The historical render was qualified under the campaign's own full
@@ -951,8 +962,9 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
         for phase in PHASES:
             values = {key: phase_tensors[phase][key] for key in ("input", "topk_ids", "topk_weights")}
             output = packed_reference(experts_module, values["input"], values["topk_ids"], values["topk_weights"],
-                                      gate_up, down, spec=spec, cache=cache)
-            qdq = _activation_qdq(values["input"], spec, cache.activation_max_abs or {}, None)
+                                      gate_up, down, spec=spec, cache=cache,
+                                      input_unit=by_role[(0, "w1")], intermediate_unit=by_role[(0, "w2")])
+            qdq = _activation_qdq(values["input"], spec, cache.activation_max_abs or {}, by_role[(0, "w1")])
             for key, value in {**values, "reference_qdq": qdq, "reference_output": output}.items():
                 tensors[f"{phase}.{key}"] = value
             phases[phase] = {"m": values["input"].shape[0], "transport": routing_capture["phases"][phase]["transport"], **{key: _cb_cache_tensor_identity(tensors[f"{phase}.{key}"])
@@ -1052,7 +1064,8 @@ def _workspace_identity(workspace):
 
 
 def _native_member_identity(member):
-    return {**{key: member[key] for key in ("unit", "expert", "role", "format", "shape", "source_weight", "rendered_weight")},
+    return {**({"input_global_scale": member["activation"]["input_global_scale"]}
+               if member["activation"].get("input_global_scale") is not None else {}), **{key: member[key] for key in ("unit", "expert", "role", "format", "shape", "source_weight", "rendered_weight")},
             "wire_sha256": member["wire"]["blob_sha256"],
             "wire_record_sha256": identity_sha256(member["wire"]["record"])}
 
@@ -1127,6 +1140,30 @@ def _qualified_source_execution(inputs, probe, path, expected_sha256):
     return execution
 
 
+def validate_compact_native_route(inputs, route):
+    """Check preflight route facts without importing the serving runtime.
+
+    Tessera checks the actual launch against its own versioned table. This
+    consumer checks that the frozen declaration has the format's same owner
+    and activation contract, and explicitly refuses stock materialisation.
+    """
+    fmt = inputs["format"]
+    families = (("TESSERA_E2M1_", "TESSERA_NVFP4", "e2m1_group16_ue4m3_static"),
+                ("TESSERA_E4M3_", "TESSERA_FP8", "fp8_per_token_dynamic"),
+                ("TESSERA_BF16_", "TESSERA_BF16", "bf16_unquantized"))
+    matches = [(family, contract) for prefix, family, contract in families if fmt.startswith(prefix)]
+    if len(matches) != 1:
+        raise ValueError("whole native owner format has no declared family")
+    family, contract = matches[0]
+    if (route.get("kind") != "moe" or route.get("policy") != f"{family}:resident"
+            or route.get("contract") != contract):
+        raise ValueError("native MoE route family/residency/activation differs")
+    if (not isinstance(route.get("decoder"), str) or not route["decoder"].startswith("native_")
+            or not isinstance(route.get("symbol"), str) or not route["symbol"]):
+        raise ValueError("packed native MoE receipt requires an explicit native launch")
+    return family
+
+
 def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
                      source_execution_qualification_path=None, source_execution_qualification_sha256=None):
     """Bind all aligned member rows to one actual whole-stack native operator.
@@ -1154,6 +1191,8 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         raise ValueError("native MoE runtime binding must cover exactly all 96 members")
     first = rows[members[0]["unit"]]
     probe, request = first["probe_identity"], inputs["probe_request"]
+    from .native_execution_binding import require_reference_quantizer
+    reference_quantizer = require_reference_quantizer(inputs, members[0]["activation"], probe)
     if (source_execution_qualification_path is None) != (source_execution_qualification_sha256 is None):
         raise ValueError("source execution qualification requires paired file and digest")
     captured_execution = inputs["routing_capture"].get("source_execution")
@@ -1220,8 +1259,8 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
                               ("source_weight", member["source_weight"]), ("rendered_weight", quality_render),
                               ("activation", member["activation"])):
             _equal(joint[key], expected, f"{member['unit']} joint {key}")
-        if joint["activation"].get("clip_enabled") is not False or joint["activation"].get("input_global_scale") is not None:
-            raise ValueError("native MoE refuses clipped or statically scaled member joint rows")
+        if joint["activation"].get("clip_enabled") is not False:
+            raise ValueError("native MoE refuses clipped member joint rows")
     operator = preflight["operator"]
     _equal(operator["members"], [_native_member_identity(member) for member in members], "native member roster")
     for key, expected in (("shape", inputs["shape"]), ("routing", inputs["routing"]),
@@ -1238,11 +1277,16 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     _workspace_identity(preflight["workspace"])
     _equal(preflight["workspace_sha256"], identity_sha256(preflight["workspace"]), "workspace digest")
     route = operator["declared_route"]
-    for key, expected in (("kind", "moe"), ("policy", "TESSERA_FP8:resident"),
-                          ("decoder", "torch_materialize_stock"), ("contract", "fp8_per_token_dynamic")):
-        _equal(route[key], expected, f"native route {key}")
-    if not isinstance(route["symbol"], str) or re.fullmatch(r"vllm\.fused_moe\.modular_kernel:.+", route["symbol"]) is None:
-        raise ValueError("native MoE route must name the actual modular backend")
+    if route.get("decoder") == "torch_materialize_stock":
+        # Retain historical FP8 receipt intake. New packed execution preparation
+        # explicitly refuses this route in validate_compact_native_route.
+        for key, expected in (("kind", "moe"), ("policy", "TESSERA_FP8:resident"),
+                              ("contract", "fp8_per_token_dynamic")):
+            _equal(route[key], expected, f"native route {key}")
+        if not isinstance(route["symbol"], str) or re.fullmatch(r"vllm\.fused_moe\.modular_kernel:.+", route["symbol"]) is None:
+            raise ValueError("native MoE route must name the actual modular backend")
+    else:
+        validate_compact_native_route(inputs, route)
     phases = {}
     for phase in PHASES:
         expected = inputs["phases"][phase]
@@ -1272,6 +1316,7 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         member_shapes,
         operator_route_identity(route))
     return json.loads(json.dumps({"schema": PANEL_SCHEMA, "unit": inputs["unit"],
+        **({"reference_served_quantizer": reference_quantizer} if reference_quantizer is not None else {}),
         **({"quality_preparation": inputs["quality_preparation"]} if quality_members is not None else {}),
         "format": inputs["format"],
         "shape": inputs["shape"], "members": members, "profile_role_order": list(ROLES),
@@ -1389,6 +1434,9 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     raw = Path(path).read_bytes()
     _equal(hashlib.sha256(raw).hexdigest(), _sha(expected_sha256, "receipt"), "receipt file")
     receipt = json.loads(raw)
+    if receipt.get("schema") == "prismaquant.native_moe_late_binding.v1":
+        from .native_moe_execution_binding import resolve_execution_binding
+        receipt = resolve_execution_binding(receipt, expected_panel)
     if (receipt.get("schema") != "tessera.native_moe_operator_receipt.v1"
             or receipt.get("status") != "timing_admissible"):
         raise ValueError("native MoE receipt has no admitted whole-apply observation")
@@ -1519,9 +1567,14 @@ def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, de
     for key, value in (("input_dtype", x), ("topk_ids_dtype", ids), ("topk_weights_dtype", weights)):
         _equal(str(value.dtype), metadata["routing"][key], f"original {key}")
     bias = original["expert_bias"]
-    if bias.dtype != torch.float32 or list(bias.shape) != [shape["experts"]] or not bool(torch.isfinite(bias).all()):
+    if bias.dtype != torch.float32 or list(bias.shape) != [_shape_for_roster(shape)["experts"]] or not bool(torch.isfinite(bias).all()):
         raise ValueError("native MoE original router bias must remain finite FP32")
-    _equal(tensor_identity(bias), metadata["routing"]["source_protocol"]["selection_bias"], "original router bias")
+    protocol = metadata["routing"]["source_protocol"]
+    if geometry_family(shape) == "glm53_next_routed_stack_v1":
+        _equal({key: tensor_identity(bias)[key] for key in ("dtype", "content_sha256")},
+               protocol["correction_bias"], "original GLM correction bias")
+    else:
+        _equal(tensor_identity(bias), protocol["selection_bias"], "original router bias")
     routing = copy.deepcopy(metadata["routing"])
     routing.update(topk_ids_dtype="torch.int32", topk_weights_dtype="torch.float32")
     phases, values = {}, {}

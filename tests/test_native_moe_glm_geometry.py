@@ -59,7 +59,7 @@ def glm_routing(**overrides):
                "source_protocol": {"router_class": "Glm5NextTopKRouter",
                                    "router_source_sha256": "a" * 64,
                                    "scoring_func": "sigmoid", "topk_method": "noaux_tc",
-                                   "normalization_epsilon": 1e-6,
+                                   "normalization_epsilon": 1e-20,
                                    "correction_bias": {"content_sha256": "b" * 64,
                                                        "dtype": "torch.float32"},
                                    "expert_bias_affects": "selection_only",
