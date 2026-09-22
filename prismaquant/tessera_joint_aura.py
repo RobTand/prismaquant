@@ -2319,6 +2319,20 @@ def _prepared_digest_recorded(key, stored, expected):
     return True
 
 
+def require_prepared_digests(completion, *, plan_sha256, implementation_sha256):
+    """Compare a prepared completion's plan and implementation digests.
+
+    For callers outside this module that re-check a prepared completion
+    after intake (the Stage B quantum runtime). Certified mode refuses a
+    mismatch; dev mode records it through ``_prepared_digest_recorded``, the
+    same reader the startup preflight uses.
+    """
+    for key, value in (("plan_sha256", plan_sha256),
+                       ("implementation_sha256", implementation_sha256)):
+        if not _prepared_digest_recorded(key, completion.get(key), value):
+            _same(completion.get(key), value, f"prepared {key}")
+
+
 def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
                            reader_identity, projection_backend):
     """Refuse a stale small completion before reading the campaign metadata.

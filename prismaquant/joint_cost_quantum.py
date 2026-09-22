@@ -1854,6 +1854,7 @@ def run_layer_quantum(
         _same,
         _seed_source_identity_cache,
         load_measured_anchor_input,
+        require_prepared_digests,
     )
     from .tessera_reader import load_declared_reader
 
@@ -1939,9 +1940,8 @@ def run_layer_quantum(
         completion = json.loads(_bound(prepared, "prepared anchors").read_text())
         _same(completion.get("schema"), "prismaquant.tessera_joint_aura.prepared.v3",
               "prepared schema")
-        _same(completion.get("plan_sha256"), plan_sha256, "prepared plan")
-        _same(completion.get("implementation_sha256"), implementation,
-              "prepared implementation")
+        require_prepared_digests(completion, plan_sha256=plan_sha256,
+                                 implementation_sha256=implementation)
         _same(completion.get("calibration_input"), calibration,
               "prepared calibration")
         _same(completion["formats_by_qname"],
