@@ -1403,12 +1403,14 @@ def admit_native_rows(table, relation):
             raise RuntimePriceError("duplicate native row receipt binding")
         by_key[key] = item
     _equal(set(by_key), {row.key for row in table.rows}, "native row receipt coverage")
+    cohort_panels = []
     for row in table.rows:
         binding = by_key[row.key]
         run_id = binding["run_id"]
         if run_id not in relation["runs"] or run_id == relation["full_engine_run_id"]:
             raise RuntimePriceError("native row requires its original native runtime")
         _, panel = reader.json(binding["panel"], "independent native panel")
+        cohort_panels.append(panel)
         receipt_path, receipt = reader.json(binding["receipt"], "native receipt")
         from .native_execution_binding import resolve_native_receipt_view
         receipt = resolve_native_receipt_view(receipt, panel)
@@ -1516,6 +1518,10 @@ def admit_native_rows(table, relation):
         if not ranked:
             _equal(row.resources.peak_scratch_bytes, max(scratch), "native maximum phase scratch")
             _equal(row.resources.activation_bytes, max(activation), "native maximum phase input residency")
+    if getattr(table.context, "native_cohort", None) is not None:
+        from .native_runtime_cohort import bind_cohort
+        _equal(bind_cohort(cohort_panels), table.context.native_cohort,
+               "actual native operator contexts and shared runtime cohort")
     # D39 leg (b) residual (#570): byte coverage cannot see a route class that
     # loads no library, so the served artifact's manifest must carry every
     # priced route's family. Read-only -- this adds refusals, never admission.

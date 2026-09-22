@@ -27,6 +27,8 @@ from .serve_dispatch_table import DispatchTableError
 SCHEMA = "prismaquant.measured_runtime_prices.v1"
 CONTEXT_SCHEMA = "prismaquant.measured_runtime_context.v1"
 PROVENANCE_CONTEXT_SCHEMA = "prismaquant.measured_runtime_context.v2"
+COHORT_CONTEXT_SCHEMA = "prismaquant.measured_runtime_context.v3"
+MIXED_NATIVE_STRUCTURE = "mixed_native.v1"
 PROVENANCE_TABLE_SCHEMA = "prismaquant.measured_runtime_prices.v2"
 PROVENANCE_IDENTITY_KIND = "prismaquant.runtime_provenance_relation.v1"
 RESOURCE_FIELDS = ("prefill_ms", "decode_ms", "serialized_bytes", "resident_bytes",
@@ -183,6 +185,28 @@ def identity_sha256(payload: Any) -> str:
 
 
 @dataclass(frozen=True)
+class MixedNativeServingContext:
+    """Measured-table composition only; never a lane-eligibility cell target."""
+    platform: str
+    structure: str
+    residency: str
+    runtime_image: str
+    execution_mode: str
+
+    def __post_init__(self):
+        if self.structure != MIXED_NATIVE_STRUCTURE:
+            raise RuntimePriceError("mixed native context requires its explicit versioned structure")
+        # Both real structures share these target coordinates. Do not expand
+        # ServingContext's lane grammar or invent a mixed contract cell.
+        for structure in ("dense", "routed_moe"):
+            ServingContext(self.platform, structure, self.residency, self.runtime_image, self.execution_mode)
+
+    def as_dict(self):
+        return {name:getattr(self,name) for name in
+            ("platform","structure","residency","runtime_image","execution_mode")}
+
+
+@dataclass(frozen=True)
 class RuntimeContext:
     """Workload/source identity extending the existing lane ServingContext.
 
@@ -214,9 +238,10 @@ class RuntimeContext:
     #: re-emits byte-identically and keeps its digest. A table that names none
     #: prices operators and nothing else: its fixed charge refuses by name.
     transient_charge_boundary: str | None = None
+    native_cohort: Mapping | None = None
 
     def __post_init__(self):
-        if not isinstance(self.serving_context, ServingContext):
+        if not isinstance(self.serving_context, (ServingContext, MixedNativeServingContext)):
             raise RuntimePriceError("serving_context must be a ServingContext")
         _string(self.gpu_identity, "gpu_identity")
         if self.runtime_identity_kind not in (None, PROVENANCE_IDENTITY_KIND):
@@ -238,6 +263,30 @@ class RuntimeContext:
             routes[unit] = MappingProxyType({_string(fmt, "route format"): _string(route, "operator route")
                                             for fmt, route in sorted(formats.items())})
         object.__setattr__(self, "operator_routes", MappingProxyType(routes))
+        if self.native_cohort is not None:
+            from .native_runtime_cohort import validate_cohort
+            validate_cohort(self.native_cohort)
+            if self.runtime_identity_kind != PROVENANCE_IDENTITY_KIND:
+                raise RuntimePriceError("native cohort requires an explicit provenance relation")
+            contexts=self.native_cohort["operator_contexts"]
+            expected={unit+"@"+fmt for unit,formats in routes.items() for fmt in formats}
+            if set(contexts)!=expected:
+                raise RuntimePriceError("native cohort operator coverage differs from routes")
+            structures={value["structure"] for value in contexts.values()}
+            expected_structure=MIXED_NATIVE_STRUCTURE if len(structures)>1 else next(iter(structures))
+            if self.serving_context.structure!=expected_structure:
+                raise RuntimePriceError("native cohort structure differs from retained operators")
+            for value in contexts.values():
+                for route in value["routes"].values():
+                    if identity_sha256(route)!=identity_sha256(json.loads(routes[value["unit"]][value["format"]])):
+                        raise RuntimePriceError("native cohort route differs from retained operator")
+            common=self.native_cohort["common"]
+            if (common["gpu"]["uuid"]!=self.gpu_identity or common["image"]!=self.serving_context.runtime_image
+                    or common["execution"]!={"mode":self.serving_context.residency,
+                        "execution_mode":self.graph_mode,"tensor_parallel":self.tensor_parallel}):
+                raise RuntimePriceError("native cohort shared runtime differs from context")
+        elif isinstance(self.serving_context, MixedNativeServingContext):
+            raise RuntimePriceError("mixed native context requires retained operator contexts")
 
     def operator_route(self, unit: str, fmt: str) -> str:
         try:
@@ -246,7 +295,8 @@ class RuntimeContext:
             raise RuntimePriceError(f"missing expected operator route for {(unit, fmt)}") from exc
 
     def as_dict(self) -> dict:
-        return {"schema": PROVENANCE_CONTEXT_SCHEMA if self.runtime_identity_kind else CONTEXT_SCHEMA,
+        return {"schema": COHORT_CONTEXT_SCHEMA if self.native_cohort is not None else (PROVENANCE_CONTEXT_SCHEMA if self.runtime_identity_kind else CONTEXT_SCHEMA),
+                **({"native_cohort":self.native_cohort} if self.native_cohort is not None else {}),
                 **({"runtime_identity_kind": self.runtime_identity_kind} if self.runtime_identity_kind else {}),
                 "serving_context": self.serving_context.as_dict(),
                 **{name: getattr(self, name) for name in (
@@ -262,21 +312,24 @@ def parse_runtime_context(payload: Mapping) -> RuntimeContext:
               "calibration_sha256", "prompt_tokens", "batch_size", "tensor_parallel", "graph_mode", "operator_routes")
     if not isinstance(payload, Mapping):
         raise RuntimePriceError("runtime context: expected an object")
-    if payload.get("schema") == PROVENANCE_CONTEXT_SCHEMA:
+    if payload.get("schema") in (PROVENANCE_CONTEXT_SCHEMA, COHORT_CONTEXT_SCHEMA):
         fields += ("runtime_identity_kind",)
         if payload.get("runtime_identity_kind") != PROVENANCE_IDENTITY_KIND:
             raise RuntimePriceError("v2 runtime context requires an explicit provenance relation identity")
+    if payload.get("schema")==COHORT_CONTEXT_SCHEMA:
+        fields += ("native_cohort",)
     if CONTEXT_BOUNDARY_FIELD in payload:
         # Optional on the wire, never defaulted: a context that omits it names
         # no boundary, and a null value is refused rather than read as none.
         fields += (CONTEXT_BOUNDARY_FIELD,)
         _string(payload[CONTEXT_BOUNDARY_FIELD], "runtime context " + CONTEXT_BOUNDARY_FIELD)
     _object(payload, fields, "runtime context")
-    if payload["schema"] not in (CONTEXT_SCHEMA, PROVENANCE_CONTEXT_SCHEMA):
+    if payload["schema"] not in (CONTEXT_SCHEMA, PROVENANCE_CONTEXT_SCHEMA, COHORT_CONTEXT_SCHEMA):
         raise RuntimePriceError(f"runtime context schema must be {CONTEXT_SCHEMA}")
     serving = _object(payload["serving_context"], ("platform", "structure", "residency", "runtime_image", "execution_mode"), "serving_context")
     try:
-        return RuntimeContext(serving_context=ServingContext(**serving),
+        factory=MixedNativeServingContext if serving.get("structure")==MIXED_NATIVE_STRUCTURE else ServingContext
+        return RuntimeContext(serving_context=factory(**serving),
                               **{field: payload[field] for field in fields if field not in ("schema", "serving_context")})
     except (ValueError, TypeError) as exc:
         raise RuntimePriceError(f"runtime context: {exc}") from exc

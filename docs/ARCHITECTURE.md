@@ -20021,3 +20021,14 @@ The acquisition adapters retain original PWC wires and renders. Whole-owner
 reference preparation uses the source module's `_apply_gate` when exposed,
 including GLM's clamp, and the serving producer alone owns native launch-table
 validation. No PrismaQuant production module imports Tessera serving runtime.
+
+The opt-in measured runtime context v3 names `mixed_native.v1` only at the
+price-table composition boundary. It does not add a mixed lane eligibility
+cell. Its `native_cohort` v1 record retains each operator's complete runtime,
+collective declaration, source bundle, route, shape, workspace, and frozen
+operator identities. A producer bundle hashes both dense and routed harnesses
+and both resource-analysis and collector sources. Shared image, device UUID,
+arithmetic, package, execution mode, and collector identity must match; any
+library path shared by any two rows must have identical bytes. The intake
+gate recomputes this record from the independently consumed actual panels.
+Legacy contexts keep their existing single-structure grammar and equality.
