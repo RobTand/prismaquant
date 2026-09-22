@@ -480,7 +480,7 @@ def test_a_dead_worker_drops_every_queued_task_and_records_the_death():
     """
     from prismaquant.produced_stager import OPTIONAL, ORDERED, StagerClosed
 
-    gate = threading.Event()
+    gate, entered = threading.Event(), threading.Event()
     boom = RuntimeError("bookkeeping died on the stager")
     dropped = []
 
@@ -488,9 +488,16 @@ def test_a_dead_worker_drops_every_queued_task_and_records_the_death():
         if task.label == "hold":
             raise boom
 
+    def hold():
+        entered.set()
+        assert gate.wait(10.0)
+
     stager = _stager(on_done=on_done)
     try:
-        stager.submit(lambda: gate.wait(10.0), kind=OPTIONAL, label="hold")
+        stager.submit(hold, kind=OPTIONAL, label="hold")
+        # The worker is inside the hold before anything else is queued, so
+        # every task below is still queued when it dies.
+        assert entered.wait(10.0)
         queued = [
             stager.submit(lambda: None, kind=ORDERED, label="release",
                           on_drop=lambda: dropped.append("release")),
@@ -525,13 +532,17 @@ def test_a_drop_callback_that_fails_on_the_death_path_is_preserved():
     """The first failure survives; the rest are attached to it (#959)."""
     from prismaquant.produced_stager import OPTIONAL, StagerClosed
 
-    gate = threading.Event()
+    gate, entered = threading.Event(), threading.Event()
     boom = RuntimeError("bookkeeping died on the stager")
     first = RuntimeError("first drop failure")
 
     def on_done(task):
         if task.label == "hold":
             raise boom
+
+    def hold():
+        entered.set()
+        assert gate.wait(10.0)
 
     def bad_drop():
         raise first
@@ -541,7 +552,8 @@ def test_a_drop_callback_that_fails_on_the_death_path_is_preserved():
 
     stager = _stager(on_done=on_done)
     try:
-        stager.submit(lambda: gate.wait(10.0), kind=OPTIONAL, label="hold")
+        stager.submit(hold, kind=OPTIONAL, label="hold")
+        assert entered.wait(10.0)
         one = stager.submit(lambda: None, kind=OPTIONAL, label="first",
                             on_drop=bad_drop)
         two = stager.submit(lambda: None, kind=OPTIONAL, label="second",
