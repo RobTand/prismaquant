@@ -744,7 +744,9 @@ CACHED_EXPERT_UNITS_PREFIX = "cached_expert_units"
 
 def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapping[str, Any],
                                    handoff: Mapping[str, Any], data: Any, *, schema: str,
-                                   research_proposal: Mapping[str, Any] | None = None) -> dict:
+                                   research_proposal: Mapping[str, Any] | None = None,
+                                   catalog_extension: Mapping[str, str] | None = None,
+                                   producer_packages: Mapping[str, Any] | None = None) -> dict:
     """Close the exact measured dense and expert wires selected by an allocation.
 
     This is metadata publication, never an encoder. The joint preparation has
@@ -807,61 +809,127 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
     selected_expert_receipts = metadata.get(EXPERT_WIRES_KEY, {})
     if not isinstance(selected_expert_receipts, Mapping):
         raise TesseraExportLaneError("selected cache expert receipts are missing")
-    records = {}
-    for name, fmt in sorted(selected.items()):
-        if fmt == "BF16":
-            continue
-        parsed = parse_tessera_format_name(fmt)
-        if parsed is None:
-            raise TesseraExportLaneError(f"{name}: selected {fmt} is not a Tessera cached wire")
-        family, q256 = parsed
-        row = handoff["costs"][name].get(fmt)
-        measured_row = data.payload["costs"][name].get(fmt)
-        cell = data.cells.get((name, fmt))
-        if (not isinstance(row, Mapping) or not isinstance(measured_row, Mapping)
-                or cell is None or measured_row.get("output_mse_measured") is not True):
-            raise TesseraExportLaneError(
-                f"{name}@{fmt}: selected rung has no exact measured joint wire; "
-                "acquire and qualify that wire before export")
-        record = cell["record"]
-        sealed_unit = data.manifest["identity"]["units"][name]
-        if record["identity"].get("source") != sealed_unit["weight"]:
-            raise TesseraExportLaneError(f"{name}@{fmt}: selected wire source differs from checkpoint seal")
-        if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
-            raise TesseraExportLaneError(f"{name}@{fmt}: selected wire encoder differs from checkpoint seal")
-        expected_hessian = (sealed_unit.get("hessian") if
-                            measured_row.get("hessian_identity", {}).get("applied") is True else None)
-        if (record["identity"].get("calibration") or {}).get("hessian") != expected_hessian:
-            raise TesseraExportLaneError(f"{name}@{fmt}: selected wire Hessian differs from checkpoint seal")
-        expected_schema = INPUT_SCHEMA if name in units else ENCODING_INPUT_SCHEMA
-        if record["identity"].get("schema") != expected_schema:
-            raise TesseraExportLaneError(f"{name}@{fmt}: cached identity schema differs from unit kind")
-        if row.get("joint_operator_identity", {}).get("source_weight", {}).get("shape") != list(
-                data.census["unit_shapes"][name]):
-            raise TesseraExportLaneError(f"{name}@{fmt}: joint source geometry differs from campaign")
-        if name in units:
-            if selected_expert_receipts.get(name) != record:
-                raise TesseraExportLaneError(f"{name}@{fmt}: selected expert receipt differs from measured wire")
-            try:
-                record = check_expert_wire_receipt(
-                    record, name=name, unit=units[name], q256=int(q256),
-                    grid=family.payload_grid().name)
-                locate_expert_wire(record, name=name, wire_dir=wire_dir)
-            except ExpertProjectionError as exc:
-                raise TesseraExportLaneError(f"{name}@{fmt}: {exc}") from exc
-        else:
-            recipe = record["identity"].get("recipe", {})
-            if (record["identity"].get("unit") != name or
-                    recipe.get("grid") != family.payload_grid().name or
-                    recipe.get("q256") != int(q256)):
-                raise TesseraExportLaneError(f"{name}@{fmt}: dense wire identity differs from selected rung")
-            try:
-                locate_expert_wire(record, name=name, wire_dir=wire_dir)
-            except ExpertProjectionError as exc:
-                raise TesseraExportLaneError(f"{name}@{fmt}: {exc}") from exc
-        records[name] = record
+    from contextlib import nullcontext
+    from .joint_catalog_extension import (EncoderAdoptionValidation,
+        require_selected_catalog_cell, require_extension, _json)
+    rooted = schema == "tessera.cached_units.v2"
+    if rooted:
+        if (research_proposal is not None or not catalog_extension
+                or provenance.get("catalog_extension") != catalog_extension):
+            raise TesseraExportLaneError("rooted selected cache requires the accepted catalog extension")
+        extension = _json(catalog_extension, "selected catalog extension")
+        allocation = provenance["tessera_joint_allocation"]
+        require_extension(catalog_extension,
+            receipt=_json(extension["adjoint_capture"], "selected original capture"),
+            plan_sha256=allocation["plan_sha256"],
+            prepared_sha256=allocation["prepared"]["sha256"])
+        extended_plan = _json(extension["inputs"]["extended_plan"], "selected extended plan")
+        if extended_plan["inputs"].get("candidate_overlay") != data.inputs.get("candidate_overlay"):
+            raise TesseraExportLaneError("selected overlay differs from the accepted extended plan")
+        if not isinstance(producer_packages, Mapping):
+            raise TesseraExportLaneError("rooted selected cache requires exact producer packages")
+    elif catalog_extension is not None or producer_packages is not None:
+        raise TesseraExportLaneError("catalog adoption requires the rooted selected cache schema")
+    policy_bound = extended_plan.get("served_activation_policy") if rooted else None
+    policy = None
+    if policy_bound is not None:
+        from .joint_served_activation import verify_policy, require_priced_activation
+        policy = verify_policy(policy_bound, original_prepared=extension["inputs"]["original_prepared"])
+    records, wire_roots, unit_roots, adoptions, proofs = {}, {}, {}, {}, {}
+    served_activations = {}
+    with EncoderAdoptionValidation() if rooted else nullcontext() as validation:
+        for name, fmt in sorted(selected.items()):
+            if fmt == "BF16":
+                continue
+            parsed = parse_tessera_format_name(fmt)
+            if parsed is None:
+                raise TesseraExportLaneError(f"{name}: selected {fmt} is not a Tessera cached wire")
+            family, q256 = parsed
+            row = handoff["costs"][name].get(fmt)
+            measured_row = data.payload["costs"][name].get(fmt)
+            cell = data.cells.get((name, fmt))
+            if (not isinstance(row, Mapping) or not isinstance(measured_row, Mapping)
+                    or cell is None or measured_row.get("output_mse_measured") is not True):
+                raise TesseraExportLaneError(
+                    f"{name}@{fmt}: selected rung has no exact measured joint wire; "
+                    "acquire and qualify that wire before export")
+            record = cell["record"]
+            sealed_unit = data.manifest["identity"]["units"][name]
+            if record["identity"].get("source") != sealed_unit["weight"]:
+                raise TesseraExportLaneError(f"{name}@{fmt}: selected wire source differs from checkpoint seal")
+            cell_wire_dir = wire_dir
+            if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
+                if not rooted:
+                    raise TesseraExportLaneError(f"{name}@{fmt}: selected wire encoder differs from checkpoint seal")
+                accepted = require_selected_catalog_cell(data, name, fmt, validation=validation)
+                adoptions[name] = accepted["adoption"]
+                if policy is None:
+                    raise TesseraExportLaneError(f"{name}: added A4 selection needs the accepted served activation policy")
+                scale = require_priced_activation(policy_bound, policy, name, fmt,
+                    accepted["qualification_activation"], row.get("joint_operator_identity", {}))
+                if scale is None or row.get("input_global_scale") != scale:
+                    raise TesseraExportLaneError(f"{name}: selected price differs from served policy scale")
+                served_activations[name] = {
+                    "group": row["joint_operator_identity"]["served_activation_policy"]["group"],
+                    "input_global_scale": scale}
+                cell_wire_dir = Path(accepted["wire_root"])
+                seal = record["identity"]["encoder_source_sha256"]
+                if producer_packages.get(seal) != accepted["producer_package"]:
+                    raise TesseraExportLaneError(f"{name}: producer package differs from accepted migration proof")
+                proof = accepted["proof"]
+                proofs[proof["sha256"]] = proof
+            expected_hessian = (sealed_unit.get("hessian") if
+                                measured_row.get("hessian_identity", {}).get("applied") is True else None)
+            if (record["identity"].get("calibration") or {}).get("hessian") != expected_hessian:
+                raise TesseraExportLaneError(f"{name}@{fmt}: selected wire Hessian differs from checkpoint seal")
+            expected_schema = INPUT_SCHEMA if name in units else ENCODING_INPUT_SCHEMA
+            if record["identity"].get("schema") != expected_schema:
+                raise TesseraExportLaneError(f"{name}@{fmt}: cached identity schema differs from unit kind")
+            if row.get("joint_operator_identity", {}).get("source_weight", {}).get("shape") != list(
+                    data.census["unit_shapes"][name]):
+                raise TesseraExportLaneError(f"{name}@{fmt}: joint source geometry differs from campaign")
+            if name in units:
+                if selected_expert_receipts.get(name) != record:
+                    raise TesseraExportLaneError(f"{name}@{fmt}: selected expert receipt differs from measured wire")
+                try:
+                    record = check_expert_wire_receipt(
+                        record, name=name, unit=units[name], q256=int(q256),
+                        grid=family.payload_grid().name)
+                    locate_expert_wire(record, name=name, wire_dir=cell_wire_dir)
+                except ExpertProjectionError as exc:
+                    raise TesseraExportLaneError(f"{name}@{fmt}: {exc}") from exc
+            else:
+                recipe = record["identity"].get("recipe", {})
+                if (record["identity"].get("unit") != name or
+                        recipe.get("grid") != family.payload_grid().name or
+                        recipe.get("q256") != int(q256)):
+                    raise TesseraExportLaneError(f"{name}@{fmt}: dense wire identity differs from selected rung")
+                try:
+                    locate_expert_wire(record, name=name, wire_dir=cell_wire_dir)
+                except ExpertProjectionError as exc:
+                    raise TesseraExportLaneError(f"{name}@{fmt}: {exc}") from exc
+            records[name] = record
+            if rooted:
+                import hashlib
+                root_id = hashlib.sha256(str(cell_wire_dir).encode()).hexdigest()
+                wire_roots[root_id] = str(cell_wire_dir)
+                unit_roots[name] = root_id
     if not records:
         raise TesseraExportLaneError("selected cache has no selected Tessera wires")
+    if rooted:
+        seals = {record["identity"]["encoder_source_sha256"] for record in records.values()}
+        if not seals <= set(producer_packages):
+            raise TesseraExportLaneError("selected cache is missing an exact historical producer package")
+        return {"schema": schema, "source": source, "units": records,
+                "wire_roots": wire_roots, "unit_roots": unit_roots,
+                "producer_packages": {seal: producer_packages[seal] for seal in sorted(seals)},
+                "encoder_adoptions": adoptions,
+                "served_activation_policy": policy_bound,
+                "served_activations": served_activations,
+                "reuse_authority": {"catalog_extension": dict(catalog_extension),
+                    "candidate_overlay": dict(data.inputs["candidate_overlay"]),
+                    "checkpoint_encoder_source_sha256": data.manifest["identity"]["encoder_source_sha256"],
+                    "encoder_source_proofs": [proofs[key] for key in sorted(proofs)]}}
     try:
         return cached_units_manifest(source, records, schema=schema)
     except ExpertProjectionError as exc:
@@ -1663,7 +1731,10 @@ def require_priced_export_inputs(
         if routed_units:
             _require_routed_scale_grouping_declaration(
                 priced_block.get("activation_scale_grouping"),
-                routed_units=routed_units, report=report)
+                routed_units=routed_units, report=report,
+                served_activation_policy=priced_block.get("served_activation_policy"),
+                priced_units=priced_units, selected=selected,
+                scale_formula=priced_block.get("input_global_scale_policy"))
     return report
 
 
@@ -1748,8 +1819,9 @@ def _require_input_global_scale_policy(header, priced_block, *,
 
 
 def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
-                                              report: dict) -> None:
-    """Refuse routed per-expert static scales unless they declare ``per_unit.v1``.
+                                              report: dict, served_activation_policy=None,
+                                              priced_units=None, selected=None, scale_formula=None) -> None:
+    """Require the original declaration or an independently verified served policy.
 
     The campaign prices one static ``input_global_scale`` per expert
     projection.  The routed stage these units would execute on takes one scale
@@ -1763,12 +1835,13 @@ def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
     * ``per_unit.v1`` exports, and the report records it as not qualified.
       The export CLI copies that onto the build anchor, so the ship record
       says the artifact's A-side prices do not represent the executed scale.
-    * Anything else is refused.  The executed grouping needs rescored rows and
-      a runtime-attested table, and neither exists
-      (``docs/design/routed_executed_scale_grouping_2026-09-14.md``).
+    * ``executed_group.v1`` requires the complete bound served policy, exact
+      group declaration, selected format/member coverage and priced fp32 scales.
+      This proves pricing/input equality, not runtime qualification.
+    * Other or unbound declarations are refused.
     """
     from .nvfp4_activation_contract import (
-        ACTIVATION_SCALE_GROUPING_PER_UNIT,
+        ACTIVATION_SCALE_GROUPING_PER_UNIT, ACTIVATION_SCALE_GROUPING_EXECUTED,
         ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA,
     )
     where = "tessera_activation_static_scales.activation_scale_grouping"
@@ -1791,6 +1864,29 @@ def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
             f"{where} schema is {grouping.get('schema')!r}; this producer "
             f"reads only {ROUTED_EXECUTED_SCALE_GROUPING_SCHEMA!r}")
     declared = grouping.get("grouping")
+    if declared == ACTIVATION_SCALE_GROUPING_EXECUTED and served_activation_policy is not None:
+        from .joint_served_activation import verify_policy, policy_group
+        import struct
+        policy = verify_policy(served_activation_policy)
+        if grouping != policy["executed_grouping"]:
+            raise TesseraExportLaneError("executed activation grouping differs from its verified policy")
+        if scale_formula != grouping["input_global_scale_policy"]:
+            raise TesseraExportLaneError("executed activation scale formula differs from its verified policy")
+        for name in routed_units:
+            group = policy_group(policy, name, (selected or {}).get(name))
+            if group is None:
+                raise TesseraExportLaneError(f"{name}: selected routed format is outside the served activation policy")
+            actual = (priced_units or {}).get(name)
+            expected = group[1]["input_global_scale"]
+            if (isinstance(actual, bool) or not isinstance(actual, (int, float))
+                    or struct.pack("<f", actual) != struct.pack("<f", expected)):
+                raise TesseraExportLaneError(f"{name}: priced activation scale differs from verified executed group")
+        report["activation_scale_grouping"] = ACTIVATION_SCALE_GROUPING_EXECUTED
+        report["activation_scale_grouping_qualified"] = False
+        report["activation_scale_grouping_routed_units"] = len(routed_units)
+        report["served_activation_policy"] = dict(served_activation_policy)
+        report["activation_scale_pricing_input_equality_verified"] = True
+        return
     if declared != ACTIVATION_SCALE_GROUPING_PER_UNIT:
         raise TesseraExportLaneError(
             f"{where} declares grouping {declared!r}; this producer exports "
@@ -1935,6 +2031,9 @@ def preflight(model_path: str | Path, *, target=None,
                 "routed_units": priced_inputs[
                     "activation_scale_grouping_routed_units"],
             }
+        if priced_inputs.get("served_activation_policy") is not None:
+            build["served_activation_policy"] = priced_inputs["served_activation_policy"]
+            build["activation_scale_pricing_input_equality_verified"] = True
         if scope is not None:
             build["tessera_serving_scope"] = read_layer_config_metadata(
                 assignment_path)["tessera_serving_scope"]

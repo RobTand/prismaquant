@@ -29,6 +29,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import pickle
 import socket
 import time
@@ -55,10 +56,14 @@ from .joint_adjoint_checkpoints import (
 )
 from .joint_layer_quanta import (
     CHECKPOINT_LOAD_PHASE,
+    PREPARED_INPUT_SCHEMA,
+    check_prepared_windows_against_resolved,
     executable_bound_phase_name,
     executable_own_source_phase_name,
+    executable_render_phase_name,
     executable_replay_phase_name,
     executable_source_phase_name,
+    qname_layer,
 )
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
@@ -166,6 +171,10 @@ def verify_quantum_identity(
         if receipt.get("status") != "complete":
             raise QuantumIdentityRefused(
                 f"adjoint receipt status is {receipt.get('status')!r}, not complete")
+        if record.get("catalog_extension") is not None:
+            from .joint_catalog_extension import require_extension
+            require_extension(record["catalog_extension"], receipt=receipt,
+                              plan_sha256=plan_sha256, prepared_sha256=prepared_sha256)
         chunks = record["chunks"]
         total = int(record["read_set"]["total_bytes"])
         cursor = 0
@@ -716,8 +725,293 @@ def quantum_layer_roster(runner, formats_by_qname, layer):
 
 
 # --------------------------------------------------------------------------
+# Static prepared-input bridge (PQ #917)
+# --------------------------------------------------------------------------
+
+
+def derive_layer_prepared_inputs(record: dict, *, execution: Mapping,
+                                 formats_by_qname: Mapping,
+                                 production_cache,
+                                 prepared_sha256: str,
+                                 production_pkl_sha256: str,
+                                 unit_roster_sha256: str) -> dict:
+    """Derive the static prepared-input contract for one quantum record.
+
+    The offline metadata bridge the post-capture generator uses: the
+    once-loaded production pickle's verified cells supply each render's
+    digest, the PWC's own key resolution supplies each whole-file path,
+    and a current stat supplies each size -- no payload is rehashed and
+    nothing is re-prepared or re-rendered. Per-window rosters come from
+    the existing retained planners run on shape-only twins (the planners
+    only read shapes, candidate file sizes and the sealed budget), and
+    are compared with :func:`resolve_quantum_windows` before anything
+    seals: a drift between the two planner paths refuses rather than
+    sealing a regrouped 360-window partition. Every roster unit stages
+    its complete render formats (the runtime's zero-cost exclusion);
+    whole-file entries seal offset 0 with the verified digest.
+
+    Raises ``ValueError`` (never a partial contract) when the roster,
+    the verified cells, the PWC files, the planners or the digests
+    disagree.
+    """
+    import stat as _stat
+
+    from .aura_cost import _ZERO_COST_FORMATS
+    from .joint_statistics_replay import preflight_joint_operator_admission
+
+    layer = record.get("layer")
+    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
+        raise ValueError(
+            f"prepared inputs need a record layer, not {layer!r}: refusing")
+    if not isinstance(formats_by_qname, Mapping) or not formats_by_qname:
+        raise ValueError("prepared inputs need the prepared unit roster: "
+                         "refusing")
+    for digest, label in ((prepared_sha256, "prepared_sha256"),
+                          (production_pkl_sha256, "production_pkl_sha256"),
+                          (unit_roster_sha256, "unit_roster_sha256")):
+        if type(digest) is not str or not re.fullmatch(
+                r"[0-9a-f]{64}", digest):
+            raise ValueError(f"prepared inputs seal no {label}: refusing")
+    unassigned = sorted(
+        name for name in formats_by_qname if qname_layer(name) is None)
+    if unassigned:
+        raise ValueError(
+            f"prepared roster units outside the layer grammar: "
+            f"{unassigned[:4]!r} -- refusing")
+    names = sorted(name for name in formats_by_qname
+                   if qname_layer(name) == layer)
+    if not names:
+        raise ValueError(
+            f"the prepared roster holds no unit for layer {layer}: refusing")
+    render_formats: dict[str, list[str]] = {}
+    for name in names:
+        fmts = [fmt for fmt in formats_by_qname[name]
+                if fmt not in _ZERO_COST_FORMATS]
+        if not fmts:
+            raise ValueError(
+                f"unit {name!r} has no measured render format: refusing")
+        render_formats[name] = fmts
+    metadata = getattr(production_cache, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        raise ValueError("the production cache carries no metadata: refusing")
+    raw_verified = metadata.get("verified_cells")
+    if not isinstance(raw_verified, Mapping) or not raw_verified:
+        raise ValueError(
+            "the production cache carries no verified cells: refusing")
+    verified: dict[tuple[str, str], dict] = {}
+    for key, value in raw_verified.items():
+        if not isinstance(key, (list, tuple)) or len(key) != 2:
+            raise ValueError(
+                "a verified cell names no (qname, format) pair: refusing")
+        verified[(str(key[0]), str(key[1]))] = value
+    weights = getattr(production_cache, "weights", None)
+    if not isinstance(weights, Mapping):
+        raise ValueError("the production cache carries no weights: refusing")
+    stubs: dict[str, SimpleNamespace] = {}
+    for name in names:
+        shapes = set()
+        for fmt in render_formats[name]:
+            cell = verified.get((name, fmt))
+            if not isinstance(cell, dict):
+                raise ValueError(
+                    f"prepared renders hold no verified cell for "
+                    f"{name}@{fmt}: refusing")
+            cell_digest = cell.get("render_file_sha256")
+            if type(cell_digest) is not str or not re.fullmatch(
+                    r"[0-9a-f]{64}", cell_digest):
+                raise ValueError(
+                    f"verified cell {name}@{fmt} carries no render digest: "
+                    "refusing")
+            shape = (cell.get("rendered_weight") or {}).get("shape")
+            if (not isinstance(shape, (list, tuple)) or len(shape) != 2
+                    or any(type(dim) is not int or dim <= 0
+                           for dim in shape)):
+                raise ValueError(
+                    f"verified cell {name}@{fmt} carries no render shape: "
+                    "refusing")
+            shapes.add(tuple(shape))
+        if len(shapes) != 1:
+            raise ValueError(
+                f"verified cell shapes disagree across {name!r} formats: "
+                "refusing")
+        rows, columns = shapes.pop()
+        stubs[name] = SimpleNamespace(
+            weight=SimpleNamespace(shape=(rows, columns)))
+    try:
+        retained = quantum_retained_state(execution)
+        admitted = preflight_joint_operator_admission(
+            {layer: names}, stubs,
+            {name: list(render_formats[name]) for name in names},
+            production_cache, policy=retained.operator_windows,
+            retained_budget=retained.retained_budget,
+            source_bytes=retained.source_bytes)
+        preflight_windows = list((admitted or {}).get(layer, ()))
+        if not preflight_windows:
+            raise ValueError(
+                f"the sealed budget admits no retained window for layer "
+                f"{layer}: refusing")
+        resolved = resolve_quantum_windows(
+            record, layer=layer, names=names, linears=stubs,
+            render_formats={name: list(render_formats[name])
+                            for name in names},
+            production_cache=production_cache,
+            operator_windows=retained.operator_windows,
+            retained_budget=retained.retained_budget,
+            source_bytes=retained.source_bytes)
+    except (RuntimeError, TypeError, KeyError, AttributeError) as exc:
+        raise ValueError(f"prepared roster derivation refuses: "
+                         f"{exc}") from exc
+    if [list(window.original_full_target_names)
+            for window in preflight_windows] != [
+                window["names"] for window in resolved]:
+        raise ValueError(
+            f"quantum {record.get('quantum_id')!r} preflight and resolved "
+            "window rosters drift: refusing to seal a regrouping")
+    windows = []
+    for window in resolved:
+        members = []
+        entries = []
+        for qname in window["names"]:
+            for fmt in render_formats[qname]:
+                key = production_cache.resolve_key(qname, fmt)
+                if key is None:
+                    raise ValueError(
+                        f"PWC candidate entry missing for {qname}@{fmt}: "
+                        "refusing")
+                value = weights.get(key)
+                if not isinstance(value, (str, Path)):
+                    raise ValueError(
+                        f"prepared render {qname}@{fmt} is not file-backed: "
+                        "refusing")
+                path = str(Path(
+                    production_cache._path_for_value(value)).absolute())
+                try:
+                    observed = os.lstat(path)
+                except OSError as exc:
+                    raise ValueError(
+                        f"prepared render file unreadable at {path}: "
+                        f"{exc}") from exc
+                if not _stat.S_ISREG(observed.st_mode):
+                    raise ValueError(
+                        f"prepared render at {path} is not a regular file: "
+                        "refusing")
+                if observed.st_size <= 0:
+                    raise ValueError(
+                        f"prepared render at {path} is empty: refusing")
+                members.append([qname, fmt])
+                entries.append({
+                    "qname": qname, "fmt": fmt, "path": path, "offset": 0,
+                    "bytes": observed.st_size,
+                    "sha256": verified[(qname, fmt)][
+                        "render_file_sha256"]})
+        windows.append({"window_index": window["window_index"],
+                        "members": members, "entries": entries})
+    return {"schema": PREPARED_INPUT_SCHEMA,
+            "production_pkl_sha256": production_pkl_sha256,
+            "unit_roster_sha256": unit_roster_sha256,
+            "prepared_sha256": prepared_sha256,
+            "windows": windows}
+
+
+def prepare_retained_window_read(window_index: int, *, record: Mapping,
+                                 progress) -> str:
+    """Enter the window's render phase and await its staged renders (PQ #917).
+
+    The production ``before_window`` body, factored so the same code runs
+    in the quantum and in tests: the render phase is entered first (read
+    transitions never price units), then the window's exact sealed
+    entries are awaited through the existing bounded strict readiness
+    API -- one deadline for the whole window, movers still owned
+    entirely by PrismaBuild, no HDD fallback, no global barrier. The
+    sealed executable manifest is the declaration: these few entries are
+    what the dispatched row stages, so an uncovered span waits the bound
+    and a foreign span refuses immediately.
+
+    Returns ``"ready"`` when every entry is covered and published,
+    ``"legacy"`` for rows without a sealed prepared contract (phase
+    announced, nothing to await), ``"unavailable"`` when no resolver is
+    bound (the load's own lease checks decide), and
+    ``"unready-<verdict>"`` otherwise (the load below still owns every
+    check and refuses on unlanded bytes).
+    """
+    import time as _time
+
+    from .residency_map import RANGE_HIT, residency_resolver
+    from .residency_shard_reader import (
+        await_staged_spans,
+        staged_range_wait_s,
+    )
+    from .staged_lease import stage_cover_is_published
+
+    window_index = int(window_index)
+    block = record.get("executable_readset")
+    prepared = block.get("prepared_input") if isinstance(block, dict) else None
+    progress.enter_read_phase(executable_render_phase_name(window_index))
+    windows = prepared.get("windows") if isinstance(prepared, dict) else None
+    entry = next((window for window in (windows or [])
+                  if isinstance(window, dict)
+                  and window.get("window_index") == window_index), None)
+    if entry is None:
+        return "legacy"
+    resolver = residency_resolver()
+    if resolver is None:
+        return "unavailable"
+    wanted = [(item["path"], int(item.get("offset", 0)),
+               int(item.get("offset", 0)) + int(item["bytes"]),
+               int(item["bytes"]))
+              for item in entry.get("entries", [])]
+    if not wanted:
+        return "legacy"
+    verdict = await_staged_spans(
+        resolver, wanted,
+        deadline=_time.monotonic() + staged_range_wait_s(),
+        published=stage_cover_is_published)
+    print(f"[residency] retained render window {window_index:02d}: "
+          f"{verdict} for {len(wanted)} staged entr"
+          f"{'y' if len(wanted) == 1 else 'ies'}", flush=True)
+    return "ready" if verdict == RANGE_HIT else f"unready-{verdict}"
+
+
+# --------------------------------------------------------------------------
 # The layer quantum core (§6.2 steps 2-6)
 # --------------------------------------------------------------------------
+
+
+def bind_joint_served_quantizer(formats_by_qname):
+    """Require the actual served static-A4 operator before Stage B pricing.
+
+    A registered binding includes the inspected image and extension build.
+    A missing operator refuses; the Torch arithmetic model is never a price.
+    A16/dynamic-only rosters do not load the serving extension.
+    """
+    from . import format_registry as fr
+    from .nvfp4_activation_contract import bind_served_quantizer_identity
+    from .perturbed_x_cache import _served_nvfp4_act_qdq_enabled
+
+    served_override = _served_nvfp4_act_qdq_enabled()
+    for fmt in sorted({fmt for formats in formats_by_qname.values() for fmt in formats}):
+        contract = fr.get_format(fmt).static_activation_contract
+        if contract is not None and (contract.measured_as_served or served_override):
+            identity = bind_served_quantizer_identity(
+                require=True, context="joint Stage B activation pricing")
+            if contract.served_quantizer is not None and contract.served_quantizer != identity:
+                raise RuntimeError("joint Stage B format overrides the served quantizer binding")
+            return identity.as_record()
+    return None
+
+
+def build_quantum_source_runner(config, *, offload_folder):
+    """Rebuild the same sealed BF16 source used by Stage A."""
+    from .cost_streaming import build_streamed_causal_lm
+    from .model_profiles import detect_profile
+    from .tessera_joint_aura import _source_prefetch
+
+    return build_streamed_causal_lm(
+        config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
+        offload_folder=str(offload_folder), profile=detect_profile(config["model"]),
+        attn_implementation="eager", source_authentication=None,
+        source_derivative=config["execution"].get("source_derivative"),
+        **_source_prefetch(config))
 
 
 def run_layer_quantum_core(
@@ -795,6 +1089,7 @@ def run_layer_quantum_core(
     unit_formats, fmts, render_formats = (
         roster.unit_formats, roster.fmts, roster.render_formats)
     packed_members = roster.packed_members
+    served_quantizer = bind_joint_served_quantizer(unit_formats)
     # The record seals window indices only (D2); membership comes from the
     # resolved handshake the caller ran, which refuses stale records. What is
     # checked here is coverage: the sealed budget must admit exactly this
@@ -850,6 +1145,8 @@ def run_layer_quantum_core(
     joint_probe_identity["arithmetic"]["operator_windows"] = operator_windows
     joint_probe_identity["arithmetic"]["gradient_diagnostics"] = (
         "sum_output_operators_fp32_before_norm")
+    if served_quantizer is not None:
+        joint_probe_identity["arithmetic"]["served_quantizer"] = served_quantizer
     if probe_layout is not None:
         joint_probe_identity["noise_layout"] = probe_layout
         joint_probe_identity["arithmetic"]["execution_partition"] = execution_partition
@@ -876,6 +1173,8 @@ def run_layer_quantum_core(
             for name in names
         },
     }
+    if served_quantizer is not None:
+        joint_run_identity["served_quantizer"] = served_quantizer
 
     # ---- journal ---------------------------------------------------------
     checkpoint_git_commit = _checkpoint_git_commit()
@@ -913,7 +1212,8 @@ def run_layer_quantum_core(
     storage_policy = normalize_boundary_storage(execution["boundary_storage"])
     storage_policy["directory"] = str(boundary_entry_directory(adjusted_space(output_root)))
     storage = StreamedBoundaryArtifacts(storage_policy)
-    storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes)
+    storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes,
+                   forward_recovery=receipt["boundary_storage"].get("forward_recovery"))
     extra["streamed_boundary_storage"] = storage.identity
 
     identity = _build_aura_checkpoint_identity(
@@ -991,19 +1291,22 @@ def run_layer_quantum_core(
             f"{record['adjoint']['checkpoint_boundary']}")
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
-    cotangent_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-        adjusted_space(output_root), checkpoint_record)
-    grad_plane: dict[tuple[int, int], torch.Tensor] = dict(cotangent_plane)
-    cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
-                         for _ in row_offsets] for _ in range(n_probes)]
-    for (probe, batch), state in shared_adjoint.items():
-        cotangent_owners[probe][batch].load_state_dict(state)
-
     with storage:
+        grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+            adjusted_space(output_root), checkpoint_record,
+            cotangent_factory=storage.checkpoint_cotangent_sink,
+            shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+        cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
+                             for _ in row_offsets] for _ in range(n_probes)]
+        for (probe, batch), state in shared_adjoint.items():
+            cotangent_owners[probe][batch].load_state_dict(state)
+        state = None
+        del shared_adjoint
         partitions = [calib_ids[offset:offset + batch_rows]
                       for offset in row_offsets]
         batches = _rebuild_batches(runner, partitions=partitions,
                                    shared_pass=shared_pass)
+        del shared_pass
         needed = sorted({int(c) for c in record["adjoint"]["chain_layers"]} | {layer})
         for batch_index, batch in enumerate(batches):
             batch.activations_cpu = [
@@ -1306,6 +1609,16 @@ def run_layer_quantum_core(
         def before_window(window_index, window_names):
             nonlocal window_kernel, window_started, replay_window
             del window_names
+            if executable:
+                # PQ #917: the production window-readiness body -- the
+                # render phase first, then the bounded staged-render
+                # wait over the window's exact sealed entries, before
+                # observe_and_project_retained_windows opens the PWC
+                # retained window. The retained load below still owns
+                # every lease check. Skipped/resumed windows still
+                # enter the phase: the sealed list never changes.
+                prepare_retained_window_read(
+                    window_index, record=record, progress=progress)
             replay_window = int(window_index)
             window_kernel = KernelTimeProfiler()
             window_kernel.__enter__()
@@ -1405,6 +1718,8 @@ def run_layer_quantum_core(
         },
         "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
         "checkpoint_identity_sha256": checkpoint_identity_sha256,
+        **({"catalog_extension": record["catalog_extension"]}
+           if record.get("catalog_extension") is not None else {}),
     })
     if set(joint_rows) != set(names):
         raise RuntimeError("layer quantum incomplete unit coverage")
@@ -1549,6 +1864,11 @@ def run_layer_quantum(
     counters = None
     resolved_windows: list[dict] | None = None
     try:
+        # Bind before cache/intake work. The core repeats this idempotently
+        # for direct callers and stamps the actual arithmetic in row identity.
+        prepared_header = json.loads(_bound(prepared, "prepared anchors").read_text())
+        result["served_quantizer"] = bind_joint_served_quantizer(
+            prepared_header["formats_by_qname"])
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         implementation = _aura_source_sha256()
@@ -1605,11 +1925,7 @@ def run_layer_quantum(
         result["wire_validation"] = "historical-qualified-wire"
 
         identity_cache_path = _seed_source_identity_cache(config, space / "run")
-        runner = build_streamed_causal_lm(
-            config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
-            offload_folder=str(space / "run" / "offload"),
-            profile=detect_profile(config["model"]), attn_implementation="eager",
-            source_authentication=None)
+        runner = build_quantum_source_runner(config, offload_folder=space / "run" / "offload")
         from .cost_streaming import build_streamed_model_identity
 
         source = build_streamed_model_identity(runner, config["model"],
@@ -1635,6 +1951,18 @@ def run_layer_quantum(
             operator_windows=retained.operator_windows,
             retained_budget=retained.retained_budget,
             source_bytes=retained.source_bytes)
+        executable_block = record.get("executable_readset")
+        if isinstance(executable_block, dict) and isinstance(
+                executable_block.get("prepared_input"), dict):
+            # PQ #917: the sealed prepared membership must equal the live
+            # geometry recomputed above, before any GPU work or progress.
+            try:
+                check_prepared_windows_against_resolved(
+                    executable_block["prepared_input"].get("windows", []),
+                    resolved_windows,
+                    quantum_id=record.get("quantum_id"))
+            except ValueError as exc:
+                raise QuantumIdentityRefused(str(exc)) from exc
         result["resolved_windows"] = len(resolved_windows)
         counters = QuantumCounters(
             quantum_id=record["quantum_id"], identity_sha256=record["identity_sha256"],

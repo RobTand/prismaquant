@@ -91,6 +91,8 @@ class ProducedStager:
         self._inflight = None
         self._closing = False
         self._dead = None
+        self._stranded = ()
+        self._stranded_error = None
         self._capacity = capacity
         self._poll = poll
         self._poll_s = float(poll_s)
@@ -111,6 +113,25 @@ class ProducedStager:
 
     def alive(self):
         return self._thread.is_alive()
+
+    def death(self):
+        """The exception that ended the worker, or None.
+
+        A worker that dies takes the whole lane with it: the tasks it
+        strands are dropped here and the owner has to hear about it, or a
+        durable charge nobody gives back is lost in silence (PQ #959).
+        The labels of the stranded tasks and any failure from their drop
+        callbacks are attached to this exception as notes.
+        """
+
+        with self._cond:
+            return self._dead
+
+    def stranded(self):
+        """The labels of the tasks the worker's death dropped, in order."""
+
+        with self._cond:
+            return self._stranded
 
     def submit(self, call, *, kind, label, keys=(), on_drop=None,
                keep_on_close=False, waited=False):
@@ -268,7 +289,8 @@ class ProducedStager:
                         self._cond.notify_all()
                     task._done.set()
         except BaseException as exc:                        # noqa: BLE001
-            self._dead = exc
+            with self._cond:
+                self._dead = exc
             raise
         finally:
             with self._cond:
@@ -276,10 +298,60 @@ class ProducedStager:
                 self._lane1.clear()
                 self._lane2.clear()
                 self._inflight = None
+                self._stranded = tuple(task.label for task in orphans)
                 self._cond.notify_all()
+            # A stranded task gets what ``close`` gives a dropped one: its
+            # own drop callback, so the bookkeeping a durable charge or a
+            # refusal count depends on still happens, and its waiter is
+            # released. ``keep_on_close`` is no exemption here -- close
+            # keeps those tasks because the worker can still RUN them, and
+            # a dead worker cannot (PQ #959).
+            errors = []
             for task in orphans:
                 task.dropped = True
-                task._done.set()
+                task.finished = time.monotonic()
+                try:
+                    if task.on_drop is not None:
+                        task.on_drop()
+                except BaseException as exc:              # noqa: BLE001
+                    errors.append(exc)
+                finally:
+                    task._done.set()
+            self._note_stranded(errors)
+
+    def _note_stranded(self, errors):
+        """Preserve the first drop failure where the owner can read it.
+
+        This runs on a thread that is ending, so there is nowhere to
+        raise: the first failure is kept in ``_stranded_error`` with the
+        rest attached to it as notes -- the shape ``close`` uses for the
+        error it raises -- and the death itself gets a note naming what
+        it stranded. The owner reads both when it stops the stager.
+        """
+
+        if errors:
+            for error in errors[1:]:
+                errors[0].add_note(
+                    f"another stager drop callback failed: {error!r}")
+        with self._cond:
+            if errors and self._stranded_error is None:
+                self._stranded_error = errors[0]
+            dead, stranded = self._dead, self._stranded
+        if dead is None:
+            return
+        if stranded:
+            dead.add_note(
+                f"the stager worker died holding {len(stranded)} queued "
+                f"task(s), dropped here: {', '.join(stranded)}")
+        if errors:
+            dead.add_note(
+                f"a stager drop callback failed: {errors[0]!r}")
+
+    def stranded_error(self):
+        """The first drop-callback failure from the death path, or None."""
+
+        with self._cond:
+            return self._stranded_error
 
 
 class OwnerLock:

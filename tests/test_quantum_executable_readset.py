@@ -363,11 +363,14 @@ def test_binder_refuses_forged_triples_consistent_rehash(tmp_path):
 
 
 def _dispatcher_record(tmp_path, manifest, wire_sha):
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text("{}")
     adjoint_path = tmp_path / "adjoint.json"
     adjoint_path.write_text("{}")
     record_path = tmp_path / "record.json"
     record = {"quantum_id": "layer-002", "layer": 2,
-              "campaign": {"plan_path": "plan.json", "plan_sha256": "0" * 64,
+              "campaign": {"plan_path": str(plan_path), "plan_sha256": hashlib.sha256(
+                               plan_path.read_bytes()).hexdigest(),
                            "prepared_path": "prep.json",
                            "prepared_sha256": "1" * 64},
               "read_set": {"manifest_path": str(tmp_path / "slice.gz"),
@@ -748,9 +751,9 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
 
     monkeypatch.setattr(runner.context, "install", install_logged)
 
-    def load_logged(space, checkpoint_record):
+    def load_logged(space, checkpoint_record, **kwargs):
         events.append(("checkpoint-open",))
-        return orig_load(space, checkpoint_record)
+        return orig_load(space, checkpoint_record, **kwargs)
 
     import prismaquant.joint_adjoint_checkpoints as _chk_mod
     monkeypatch.setattr(_chk_mod, "load_adjoint_checkpoint", load_logged)
@@ -1333,23 +1336,24 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
 def _exec_campaign(tmp_path):
     """Tiny campaign files with a calibration input for the regen CLI."""
     import regenerate_joint_quanta as _regen  # noqa: F401
+    from test_stageb_prepared_inputs_bridge import (
+        _execution, _render_files, _production_pkl, _qnames, FMT)
+    files = _render_files(tmp_path)
+    pkl_path = _production_pkl(tmp_path, files)
     root = tmp_path / "campaign"
     calib_path = tmp_path / "calib.pt"
     calib_path.write_bytes(b"\x00" * 512)
     plan = {"output_root": str(root), "model": "/fixture/model",
             "distributed_campaign": {},
-            "execution": {"n_probes": N_PROBES},
+            "execution": _execution(),
             "calibration_input": {
                 "path": str(calib_path), "sha256": "a" * 64}}
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(plan, sort_keys=True))
     prepared = {"formats_by_qname": {
-        "model.layers.0.mlp.gate_proj": {},
-        "model.layers.1.mlp.gate_proj": {},
-        "model.layers.2.mlp.gate_proj": {},
-        "model.layers.3.mlp.gate_proj": {}},
-        "production_cache": {"path": str(tmp_path / "production.pkl"),
-                             "sha256": "b" * 64}}
+        name: [FMT] for layer in range(4) for name in _qnames(layer)},
+        "production_cache": {"path": str(pkl_path),
+                             "sha256": hashlib.sha256(pkl_path.read_bytes()).hexdigest()}}
     prepared_path = tmp_path / "prepared.json"
     prepared_path.write_text(json.dumps(prepared, sort_keys=True))
     entries = [{"path": "/fixture/model/shard-h.pt", "offset": 0,

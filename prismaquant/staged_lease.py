@@ -89,6 +89,13 @@ _HELPER_ROOT: str | None = None
 #: Production never sets this: it resolves the sealed tree or refuses.
 _INJECTED = None
 
+#: The ``prismabuild.*`` modules the process already had when the current
+#: test-only injection imported the installed distribution. The teardown
+#: removes exactly what the injection added and nothing else (PQ #963).
+#: ``None`` means no injection is on record, and then ``sys.modules`` is
+#: left alone.
+_INJECTED_MODULES_BEFORE: frozenset[str] | None = None
+
 #: Authoritative PB-injected helper root: the sealed generation path PB
 #: forwards core+container read-only. Read automatically as the production
 #: discovery — never a user knob, never mutable-`/repo` resolution, never
@@ -273,7 +280,7 @@ def inject_installed_sdk_for_tests():
     the environment does not provide it: tests fail loudly on a missing
     dependency, never silently skip. Production never calls this.
     """
-    global _INJECTED
+    global _INJECTED, _INJECTED_MODULES_BEFORE
     import importlib.metadata as metadata
     import json as _json
     owners = metadata.packages_distributions().get("prismabuild", [])
@@ -294,6 +301,13 @@ def inject_installed_sdk_for_tests():
         raise RuntimeError(
             "test SDK injection needs a non-editable Git install at "
             f"{PB_READER_LEASE_PIN_COMMIT}, found {vcs}")
+    # Before the import, so the teardown can tell the modules this
+    # injection adds from the ones the process already had (PQ #963).
+    # A second injection with one still on record keeps the first
+    # snapshot: the teardown is what clears it.
+    with _HELPER_LOCK:
+        if _INJECTED_MODULES_BEFORE is None:
+            _INJECTED_MODULES_BEFORE = frozenset(_prismabuild_modules())
     import prismabuild.reader_lease as module  # noqa: PLC0415
     try:
         expected = _package_dir_of(module)
@@ -314,11 +328,33 @@ def inject_installed_sdk_for_tests():
     return module
 
 
+def _prismabuild_modules():
+    """Every ``prismabuild`` entry ``sys.modules`` holds right now."""
+    return [name for name in list(sys.modules)
+            if name == "prismabuild" or name.startswith("prismabuild.")]
+
+
 def clear_injected_sdk_for_tests() -> None:
-    """Drop the test-only injection (fixture hygiene)."""
-    global _INJECTED
+    """Drop the test-only injection, and the modules it imported.
+
+    Resetting the module reference alone is not enough (PQ #963). The
+    injection also leaves the installed distribution in ``sys.modules``,
+    and :func:`_sdk_from_tree` returns a preimported
+    ``prismabuild.reader_lease`` as it is: a leftover venv module then
+    fails containment against the sealed generation tree, so every later
+    test in the same pytest worker refuses ``lease-helper-divergent``.
+    Only the modules an injection added are removed, and with no
+    injection on record ``sys.modules`` is left alone.
+    """
+    global _INJECTED, _INJECTED_MODULES_BEFORE
     with _HELPER_LOCK:
         _INJECTED = None
+        before, _INJECTED_MODULES_BEFORE = _INJECTED_MODULES_BEFORE, None
+        if before is None:
+            return
+        for name in _prismabuild_modules():
+            if name not in before:
+                del sys.modules[name]
 
 
 def _package_dir_of(module) -> Path:

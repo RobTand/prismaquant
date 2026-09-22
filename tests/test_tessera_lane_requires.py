@@ -71,6 +71,11 @@ CLAIMING_FAMILY = "TESSERA_E2M1_K2"
 CLAIMING_NAME = "TESSERA_E2M1_K2_R896"
 CLAIMING_RATE = 896
 WINDOW_LAUNCH = {"symbol": "tessera_window_gemv::gemv", "decoder": "window_gemv"}
+#: Contract v34's dense window-GEMM launch, verbatim: a qualified symbol
+#: that is NOT an extension launch -- no native_extensions row declares
+#: `tessera`, and no lane serves `native_window_gemm`.
+IN_PLUGIN_LAUNCH = {"symbol": "tessera::window_gemm_dense",
+                    "decoder": "native_window_gemm"}
 
 
 def _claiming_lane(payload):
@@ -210,6 +215,64 @@ def test_a_table_whose_cells_launch_only_through_torch_needs_no_extension_table(
     with pytest.raises(lane.LaneEligibilityError, match="tessera_window_gemv::gemv"):
         lane._parse_table(gated["lane_eligibility"], gated["formats"],
                           "", "", "x", native_extensions=None)
+
+
+def test_an_in_plugin_qualified_launch_is_not_an_extension_launch(payload):
+    """A ``::``-qualified symbol is not by itself a launch through an extension.
+
+    Tessera's contract v34 mints four dense cells on
+    ``tessera::window_gemm_dense`` under decoder ``native_window_gemm`` and
+    says, in the same changelog entry, that the launch "carries lane null
+    because it is a launch, not an extension lane"; its ``native_extensions``
+    still publishes the one ``tessera_window_gemv`` row and nothing else.
+    (Tessera ``e42c0593d257c374315a4ace22db1907921337b0``,
+    ``src/tessera/serving/runtime_contract.json``, sha256
+    ``d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472``.)
+    The reader used to read every prefix as an extension name and refuse the
+    whole contract. Such a launch stands where ``torch._scaled_mm`` stands:
+    the route's own path, no wire predicate to read.
+    """
+    moved = copy.deepcopy(payload)
+    _cell(moved, CLAIMING)["executes"] = [IN_PLUGIN_LAUNCH]
+    table = _table(moved)
+    cell = _parsed_cell(table, CLAIMING)
+    assert cell.executes == ((IN_PLUGIN_LAUNCH["symbol"],
+                              IN_PLUGIN_LAUNCH["decoder"]),)
+    assert lane.lane_claim_for_cell(cell, table.lanes) is None
+    admits, why = lane.cell_lane_admits(cell, CLAIMING_RATE, table.lanes)
+    assert admits and why == ""
+
+
+def test_a_qualified_launch_under_a_lanes_decoder_must_name_its_extension(payload):
+    """The guard the prefix rule really carried, on the field the gate keys on.
+
+    A cell that takes a decoder some lane SERVES while naming an extension no
+    row declares would be read by that lane at serve time and escape its
+    predicate here. That is still refused, and the refusal names the cell, the
+    launch, the decoder and the extension whose lane serves it."""
+    moved = copy.deepcopy(payload)
+    _cell(moved, CLAIMING)["executes"] = [
+        {"symbol": "tessera::window_gemm_dense", "decoder": "window_gemv"}]
+    with pytest.raises(lane.LaneEligibilityError) as refused:
+        _table(moved)
+    message = str(refused.value)
+    for name in (CLAIMING, "tessera::window_gemm_dense", "window_gemv",
+                 WINDOW_LANE, "tessera"):
+        assert name in message, (name, message)
+
+
+def test_a_launch_through_an_extension_under_another_decoder_is_refused(payload):
+    """The unchanged leg: a symbol whose prefix IS a declared extension must
+    carry that extension's decoder, or the cell would slip past the lane."""
+    moved = copy.deepcopy(payload)
+    _cell(moved, CLAIMING)["executes"] = [
+        {"symbol": "tessera_window_gemv::gemv", "decoder": "native_window_gemm"}]
+    with pytest.raises(lane.LaneEligibilityError) as refused:
+        _table(moved)
+    message = str(refused.value)
+    for name in (CLAIMING, "tessera_window_gemv::gemv", "native_window_gemm",
+                 "window_gemv"):
+        assert name in message, (name, message)
 
 
 def _mutate(payload, **changes):

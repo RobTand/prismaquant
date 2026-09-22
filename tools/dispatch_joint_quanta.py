@@ -119,6 +119,14 @@ class DispatchRefused(Exception):
     """Fail closed: no receipt, a stale receipt, or a mixed campaign."""
 
 
+#: The sealed static prepared-input annotation a production-accepted
+#: executable manifest carries (PQ #917). Mirrors
+#: ``prismaquant.joint_layer_quanta.PREPARED_INPUT_SCHEMA``; this submitter
+#: deliberately does not import the producer package, so the comparison is
+#: by exact string (a mover-reference validator output never carries it).
+PREPARED_INPUT_SCHEMA = "prismaquant.joint_layer_quanta.prepared_input.v1"
+
+
 class ExecutableBindingUnsupported(DispatchRefused):
     """An executable quantum row names no acceptable output binding.
 
@@ -464,6 +472,212 @@ def _executable_manifest_digest(record: dict, *, output_root: Path) -> str:
     return actual
 
 
+def _executable_prepared_input(record: dict, *,
+                                 output_root: Path) -> tuple[dict, dict]:
+    """Load and validate the sealed static prepared-input contract (PQ #917).
+
+    Returns the bound manifest document and its ``prepared_input``
+    annotation. The wire bytes must hash to the sealed digest (checked
+    first, through the existing owner); the document must then carry a
+    complete prepared-input contract bound to this exact row:
+
+    * the annotation schema is the sealed prepared-input schema (a
+      produced-output mover reference never carries it);
+    * its production-pickle and unit-roster digests equal the manifest's
+      own sealed render prerequisite (a foreign roster refuses);
+    * its prepared digest equals the row's sealed campaign digest;
+    * its windows cover exactly the row's sealed retained-window indices
+      with non-empty member rosters and entry references;
+    * every window's ``render-{w:02d}`` phase exists with exactly the
+      window's entries, immediately before that window's first replay
+      phase (source phases stay source-only);
+    * the row's bound block agrees with the manifest (phases and the
+      prepared-input annotation itself).
+
+    Anything else raises :class:`ExecutableBindingUnsupported`: legacy
+    sequencing-only rows (no annotation at all) keep the historical
+    refusal message, while a malformed or foreign prepared contract
+    names its own gate. No mover-reference validator is consulted here:
+    passing ``validate_produced_output_batch`` proves a mover reference,
+    never a consumer read capability.
+    """
+    quantum_id = record.get("quantum_id")
+    block = record.get("executable_readset")
+    if not isinstance(block, dict):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} carries no executable readset block")
+    staged_sha256 = _executable_manifest_digest(
+        record, output_root=output_root)
+    manifest = block.get("manifest_path")
+    path = Path(manifest) if isinstance(manifest, str) else None
+    if path is None or not manifest:
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} names no executable manifest")
+    if not path.is_absolute():
+        path = Path(output_root) / path
+    try:
+        wire = path.read_bytes()
+    except OSError as exc:
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} executable manifest unreadable at "
+            f"{path}: {exc}") from exc
+    if hashlib.sha256(wire).hexdigest() != staged_sha256:
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} executable manifest at {path} does "
+            "not hash to the sealed digest")
+    try:
+        manifest_doc = json.loads(gzip.decompress(wire).decode("utf-8"))
+    except (OSError, EOFError, ValueError) as exc:
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} executable manifest at {path} is not "
+            f"the sealed manifest wire: {exc}") from exc
+    if not isinstance(manifest_doc, dict):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} executable manifest is not an object")
+    annotations = manifest_doc.get("annotations")
+    if not isinstance(annotations, dict):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} executable manifest has no annotations")
+    prepared = annotations.get("prepared_input")
+    if not isinstance(prepared, dict) or \
+            prepared.get("schema") != PREPARED_INPUT_SCHEMA:
+        # R3: no invented admission. No accepted PB output-binding
+        # validator exists (PB732/735 are still unaccepted stacks), so a
+        # sequencing-only executable plan proves no capability. Refuse
+        # before any staged read.
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} carries an executable readset, but no "
+            "accepted PB produced-output binding validator exists "
+            "(PB732/735 stacks unaccepted): executable plans are "
+            "sequencing-only and not production-runnable -- refusing")
+    prerequisite = annotations.get("render_prerequisite")
+    if not isinstance(prerequisite, dict):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} prepared contract names no sealed "
+            "render prerequisite: refusing")
+    for key in ("production_pkl_sha256", "unit_roster_sha256"):
+        if prepared.get(key) != prerequisite.get(key):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} prepared contract names a foreign "
+                f"{key}, not the sealed render prerequisite: refusing")
+    campaign = record.get("campaign")
+    if not isinstance(campaign, dict) or \
+            prepared.get("prepared_sha256") != campaign.get("prepared_sha256"):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} prepared contract names another "
+            "prepared payload, not the sealed campaign: refusing")
+    bound_receipt = block.get("receipt_sha256")
+    adjoint = record.get("adjoint")
+    if annotations.get("receipt_sha256") != bound_receipt or \
+            not isinstance(adjoint, dict) or \
+            adjoint.get("receipt_sha256") != bound_receipt:
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} prepared contract binds another "
+            "stage-A receipt, not this row's sealed capture: refusing")
+    windows = record.get("windows")
+    if not isinstance(windows, list) or not windows:
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} seals no retained windows: refusing")
+    indices = [window.get("window_index") if isinstance(window, dict)
+               else None for window in windows]
+    sealed_windows = prepared.get("windows")
+    if not isinstance(sealed_windows, list) or \
+            [window.get("window_index") if isinstance(window, dict)
+             else None for window in sealed_windows] != indices:
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} prepared contract does not cover the "
+            f"sealed retained windows {indices!r}: refusing")
+    phases = manifest_doc.get("read_plan", {}).get("phases")
+    if not isinstance(phases, list) or not phases:
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} executable manifest has no read plan: "
+            "refusing")
+    by_name = {phase.get("name"): phase for phase in phases
+               if isinstance(phase, dict)}
+    order = [phase.get("name") for phase in phases
+             if isinstance(phase, dict)]
+    entries = manifest_doc.get("entries")
+    if not isinstance(entries, list):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} executable manifest has no entries: "
+            "refusing")
+    for window in sealed_windows:
+        window_index = window.get("window_index")
+        members = window.get("members")
+        refs = window.get("entry_indices")
+        if not isinstance(members, list) or not members or any(
+                not isinstance(pair, (list, tuple)) or len(pair) != 2
+                for pair in members):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} prepared window {window_index!r} "
+                "seals no member roster: refusing")
+        if not isinstance(refs, list) or not refs or any(
+                type(index) is not int or isinstance(index, bool)
+                or not 0 <= index < len(entries) for index in refs):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} prepared window {window_index!r} "
+                "seals no render entries: refusing")
+        render_name = f"render-{window_index:02d}"
+        replay_name = f"replay-{window_index:02d}-p0"
+        render_phase = by_name.get(render_name)
+        if not isinstance(render_phase, dict) or \
+                list(render_phase.get("entry_indices", None)
+                     or []) != list(refs):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} prepared window {window_index!r} "
+                f"stages no {render_name} phase with exactly its render "
+                "entries: refusing")
+        if render_name not in order or replay_name not in order or \
+                order.index(render_name) + 1 != order.index(replay_name):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} prepared window {window_index!r} "
+                f"does not stage {render_name} immediately before its "
+                "replay phases: refusing")
+    manifest_names = [phase.get("name") for phase in phases
+                      if isinstance(phase, dict)]
+    if list(block.get("phases", None) or []) != manifest_names:
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} bound phase list is not the sealed "
+            "manifest order: refusing")
+    block_prepared = block.get("prepared_input")
+    if not isinstance(block_prepared, dict):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} names no bound prepared contract: "
+            "refusing")
+    for key in ("schema", "production_pkl_sha256", "unit_roster_sha256",
+                "prepared_sha256"):
+        if block_prepared.get(key) != prepared.get(key):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} bound prepared contract is not "
+                "the sealed manifest annotation: refusing")
+    block_windows = block_prepared.get("windows")
+    if not isinstance(block_windows, list) or len(block_windows) != len(
+            sealed_windows):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} bound prepared contract is not the "
+            "sealed manifest annotation: refusing")
+    for bound_window, sealed_window in zip(block_windows, sealed_windows):
+        if not isinstance(bound_window, dict):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} bound prepared contract is not "
+                "the sealed manifest annotation: refusing")
+        for key in ("window_index", "members", "entry_indices"):
+            if bound_window.get(key) != sealed_window.get(key):
+                raise ExecutableBindingUnsupported(
+                    f"quantum {quantum_id!r} bound prepared contract is "
+                    "not the sealed manifest annotation: refusing")
+        staged = []
+        for index in sealed_window.get("entry_indices", []):
+            staged.append(
+                {key: entries[index][key]
+                 for key in ("path", "offset", "bytes", "sha256")})
+        if bound_window.get("entries") != staged:
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} bound prepared entries are not "
+                "the sealed manifest entries: refusing")
+    return manifest_doc, prepared
+
+
 def _slice_manifest_digest(record: dict, *, output_root: Path) -> str:
     """The sealed slice digest a quantum row actually binds.
 
@@ -500,6 +714,19 @@ def _slice_manifest_digest(record: dict, *, output_root: Path) -> str:
             f"quantum {record.get('quantum_id')!r} slice manifest bytes "
             f"do not hash to the sealed {declared[:12]} at {path}")
     return declared
+
+
+def _row_manifest_sha256(record: dict) -> str:
+    """The digest the submitted row actually stages (PQ #917).
+
+    Prepared-input executable rows stage their bound executable manifest;
+    every other row stages its legacy slice manifest.
+    """
+    executable = record.get("executable_readset")
+    if isinstance(executable, dict) and _is_hex64(
+            executable.get("manifest_sha256")):
+        return executable["manifest_sha256"]
+    return record["read_set"]["manifest_sha256"]
 
 
 def _plan_output_root(campaign: Mapping) -> Path:
@@ -551,26 +778,33 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     wire digest as ``--adjoint-sha256``, the verified staged-manifest
     digest, and ``--resume``. Files are read where the row reads them; an
     unreadable or drifting file refuses before anything publishes (#838).
-    A record carrying ``executable_readset`` is refused with
+    A record carrying ``executable_readset`` without the sealed
+    static prepared-input contract (PQ #917) is refused with
     :class:`ExecutableBindingUnsupported`: no PB produced-output binding
-    validator is accepted yet, so executable rows are sequencing/phase
-    artifacts only, never production-runnable. Without the block the row
-    keeps the legacy slice manifest with head/chunk progress. Tier flags,
-    tags, demand and environment are identical in both lanes.
+    validator is accepted yet, so those executable rows are
+    sequencing/phase artifacts only, never production-runnable. A row
+    whose bound manifest carries the complete prepared-input contract --
+    the sealed prepared/production-pickle digest and roster, one render
+    phase per retained window sealed before its replays, and a bound
+    block that agrees with the manifest -- submits through the existing
+    ``pbrun --data-manifest`` path with manifest-order progress. Without
+    the block the row keeps the legacy slice manifest with head/chunk
+    progress. Tier flags, tags, demand and environment are identical in
+    all lanes.
     """
     quantum_id = record["quantum_id"]
     executable = record.get("executable_readset")
     if executable is not None:
-        # R3: no invented admission. No accepted PB output-binding validator
-        # exists (PB732/735 are still unaccepted stacks), so even a
-        # plausible-looking render-prerequisite dictionary proves no
-        # capability. Refuse before any staged read. Manifest/phase
-        # propagation is exercised through _executable_row_parts directly.
-        raise ExecutableBindingUnsupported(
-            f"quantum {quantum_id!r} carries an executable readset, but no "
-            "accepted PB produced-output binding validator exists "
-            "(PB732/735 stacks unaccepted): executable plans are "
-            "sequencing-only and not production-runnable -- refusing")
+        # PQ #917: the complete static prepared-input contract is an
+        # ordinary immutable input staging -- the manifest names existing
+        # prepared bytes, and PWC's strict resolver/lease read stays the
+        # single read mechanism. Anything less (sequencing-only rows, a
+        # foreign or malformed prepared contract, a bare mover reference)
+        # refuses below with the typed refusal; manifest/phase propagation
+        # stays exercised through _executable_row_parts directly.
+        _executable_prepared_input(record, output_root=output_root)
+        manifest, staged_sha256, progress = _executable_row_parts(
+            record, output_root=output_root, head_grace_s=head_grace_s)
     else:
         manifest = Path(record["read_set"]["manifest_path"])
         if not manifest.is_absolute():
@@ -1013,7 +1247,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                     continue
                 rows.append({"kind": "quantum", "quantum_id": quantum_id,
                              "identity_sha256": record["identity_sha256"],
-                             "manifest_sha256": record["read_set"]["manifest_sha256"],
+                             "manifest_sha256": _row_manifest_sha256(record),
                              "argv": quantum_argv(
                                  record, record_path=record_path,
                                  output_root=output_root, priority=priority,

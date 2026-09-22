@@ -1140,6 +1140,13 @@ def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
                 "merged_checkpoint"):
         path = _bound(inputs[key], f"plan inputs.{key}")
         track.add(path, 0, _required_size(path, f"plan inputs.{key}"), "head")
+    if inputs.get("candidate_overlay") is not None:
+        overlay_path = _bound(inputs["candidate_overlay"], "candidate overlay")
+        track.add(overlay_path, 0, _required_size(overlay_path, "candidate overlay"), "head")
+        overlay = _read_json(overlay_path, "candidate overlay")
+        for key in ("old_prepared", "old_pwc", "cost", "reseal_proof"):
+            path = _bound(overlay[key], "candidate overlay " + key)
+            track.add(path, 0, _required_size(path, "candidate overlay " + key), "head")
 
     checkpoint = _bound(inputs["merged_checkpoint"], "plan inputs.merged_checkpoint")
     parts = checkpoint + ".parts"
@@ -1807,7 +1814,13 @@ def build_allocation_manifest(joint_cost, plan, *, produced_by, argv=None):
     joint_cost = os.path.abspath(joint_cost)
     plan_path = os.path.abspath(plan)
     payload = _read_pickle(joint_cost, "joint cost")
-    evidence = (payload.get("provenance") or {}).get("tessera_joint_anchors")
+    provenance = payload.get("provenance") or {}
+    evidence = provenance.get("tessera_joint_anchors")
+    if evidence is None and provenance.get("join_schema") == "prismaquant.joint_layer_quanta.joined_results.v1":
+        coverage = provenance.get("coverage", {})
+        if coverage.get("status") != "complete" or coverage.get("gaps"):
+            raise SystemExit(f"{joint_cost}: joined costs are gapped; allocation handoff refuses")
+        evidence = {"prepared": provenance.get("prepared")}
     if not isinstance(evidence, dict) or "prepared" not in evidence:
         raise SystemExit(
             f"{joint_cost}: no tessera_joint_anchors record, so the prepared "
