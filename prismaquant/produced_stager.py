@@ -24,6 +24,15 @@ a per-path ``threading.RLock`` before the file lock). A second thread would
 wait on that lock and gain nothing. The cost is stated rather than hidden: an
 urgent task waits for the task in flight to finish, and ``urgent_delay_s``
 measures it.
+
+That cost is only acceptable while the task in flight is working. An
+optional task that finds it must wait for something outside this owner (a
+local export that has not landed, say) returns ``Requeue(delay_s)`` instead
+of sleeping: it leaves the lane, goes back to the end of lane 2, and is not
+taken again for ``delay_s``. Lane 1 runs in the meantime (PQ #989). A
+deferred task is still queued for ``pending``, ``drain`` and
+``wait_keys_idle``, and ``close`` drops it like any other queued optional
+task.
 """
 from __future__ import annotations
 
@@ -40,12 +49,31 @@ class StagerClosed(RuntimeError):
     """The stager takes no more work; the caller runs the step itself."""
 
 
+class Requeue:
+    """An optional task's answer: run me again in ``delay_s``, off the lane.
+
+    Returned, not raised, by the call of an ``OPTIONAL`` task that has to
+    wait on something it does not own. The task keeps its identity, its
+    keys and its waiter; nothing it counted is released, so a task returns
+    this only before it has taken anything it would have to give back.
+    """
+
+    __slots__ = ("delay_s",)
+
+    def __init__(self, delay_s):
+        delay_s = float(delay_s)
+        if not delay_s > 0.0:
+            raise ValueError("a requeue delay must be positive")
+        self.delay_s = delay_s
+
+
 class StagerTask:
     """One submitted closure, with its outcome once it has run."""
 
     __slots__ = ("call", "kind", "label", "keys", "on_drop", "keep_on_close",
                  "waited", "submitted", "started", "finished", "result",
-                 "error", "dropped", "_done")
+                 "error", "dropped", "not_before", "requeues", "busy_s",
+                 "_done")
 
     def __init__(self, call, *, kind, label, keys, on_drop, keep_on_close,
                  waited):
@@ -62,6 +90,12 @@ class StagerTask:
         self.result = None
         self.error = None
         self.dropped = False
+        #: A requeued task is not taken before this instant.
+        self.not_before = None
+        #: How many times the task gave the lane back (``Requeue``).
+        self.requeues = 0
+        #: Time spent running, over every run; the deferrals are not in it.
+        self.busy_s = 0.0
         self._done = threading.Event()
 
     def wait(self, timeout=None):
@@ -99,8 +133,10 @@ class ProducedStager:
         self._next_poll = time.monotonic() + self._poll_s
         self._on_done = on_done
         self._on_error = on_error
+        self._late_drop_errors = []
         self.started = time.monotonic()
         self.queue_peak = 0
+        self.requeues = 0
         self._thread = threading.Thread(target=self._run, name=name,
                                         daemon=True)
         self._thread.start()
@@ -230,6 +266,11 @@ class ProducedStager:
             finally:
                 task._done.set()
         self._thread.join(max(0.0, deadline - time.monotonic()))
+        with self._cond:
+            # A task that asked to be requeued after close began is dropped
+            # on the worker thread; its callback's failure is raised here.
+            errors.extend(self._late_drop_errors)
+            self._late_drop_errors = []
         if errors:
             for error in errors[1:]:
                 errors[0].add_note(f"another stager drop callback failed: {error!r}")
@@ -254,16 +295,75 @@ class ProducedStager:
                                       keys=(), on_drop=None,
                                       keep_on_close=False, waited=False)
                     break
-                if self._lane2:
-                    task = self._lane2.popleft()
+                task = self._take_optional(now)
+                if task is not None:
                     break
-                if self._closing:
+                if self._closing and not self._lane2:
                     return None
-                self._cond.wait(None if self._poll is None else max(
-                    min(self._next_poll - now, self._poll_s), 0.01))
+                timeout = None
+                if self._poll is not None and not self._closing:
+                    timeout = max(min(self._next_poll - now, self._poll_s),
+                                  0.01)
+                wake = min((queued.not_before for queued in self._lane2
+                            if queued.not_before is not None), default=None)
+                if wake is not None:
+                    until = max(wake - now, 0.001)
+                    timeout = until if timeout is None else min(timeout,
+                                                                until)
+                self._cond.wait(timeout)
             self._inflight = task
             self._cond.notify_all()
             return task
+
+    def _take_optional(self, now):
+        """The first lane-2 task not deferred past ``now``, or None."""
+
+        for index, task in enumerate(self._lane2):
+            if task.not_before is None or task.not_before <= now:
+                del self._lane2[index]
+                return task
+        return None
+
+    def _requeue(self, task):
+        """Put a task that answered ``Requeue`` back on lane 2.
+
+        True when the task was requeued or dropped here, so the caller does
+        not finish it. The move from in-flight to queued happens under one
+        hold of the condition: nothing that waits on the lanes ever sees
+        the task in neither place. After ``close`` began, a task close would
+        have dropped is dropped the same way instead.
+        """
+
+        answer = task.result
+        if not isinstance(answer, Requeue):
+            return False
+        task.result = None
+        if task.kind != OPTIONAL:
+            task.error = TypeError(
+                f"stager task {task.label!r} asked to be requeued from the "
+                f"{task.kind} lane; only an optional task may wait off the "
+                "lane")
+            return False
+        task.requeues += 1
+        with self._cond:
+            self._inflight = None
+            self.requeues += 1
+            if not self._closing or task.keep_on_close:
+                task.not_before = task.finished + answer.delay_s
+                self._lane2.append(task)
+                self._cond.notify_all()
+                return True
+            self._cond.notify_all()
+        task.dropped = True
+        try:
+            if task.on_drop is not None:
+                task.on_drop()
+        except BaseException as exc:                      # noqa: BLE001
+            with self._cond:
+                self._late_drop_errors.append(exc)
+        finally:
+            task._done.set()
+        return True
 
     def _run(self):
         try:
@@ -277,6 +377,9 @@ class ProducedStager:
                 except BaseException as exc:                # noqa: BLE001
                     task.error = exc
                 task.finished = time.monotonic()
+                task.busy_s += max(task.finished - task.started, 0.0)
+                if self._requeue(task):
+                    continue
                 try:
                     if task.error is not None and not task.waited and (
                             self._on_error is not None):
@@ -420,5 +523,5 @@ class _Yielded:
         return False
 
 
-__all__ = ["URGENT", "ORDERED", "OPTIONAL", "StagerClosed", "StagerTask",
-           "ProducedStager", "OwnerLock"]
+__all__ = ["URGENT", "ORDERED", "OPTIONAL", "StagerClosed", "Requeue",
+           "StagerTask", "ProducedStager", "OwnerLock"]

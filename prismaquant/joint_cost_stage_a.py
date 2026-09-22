@@ -1036,7 +1036,10 @@ def run_adjoint_capture_core(
                     runner, storage=storage, batches=batches, layer=layer,
                     cotangents=cotangents, n_probes=n_probes,
                     incoming_entries=grad_outs, incoming_tensor=None,
-                    roll=roll, min_free_gib=min_free_gib)
+                    roll=roll, min_free_gib=min_free_gib,
+                    # The next layer's first window reads probe 0's rolled
+                    # entries; ``grad_outs`` holds them once probe 0 ran.
+                    then=((layer - 1, grad_outs[0]) if layer > 0 else None))
                 if layer in boundaries:
                     serialize_checkpoint(layer)
                 chain_telemetry.append({

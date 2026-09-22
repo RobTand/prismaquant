@@ -253,6 +253,15 @@ class StreamedBoundaryArtifacts:
         self._produced_ahead = set()
         self._produced_ahead_refusals = []
         self._produced_retained_boundary = None
+        # The read path's lookahead (RobTand/prismaquant#989): the groups
+        # the NEXT window reads, asked for while this one computes. The set
+        # is what that request still wants; a window that opens takes its
+        # own keys out of it, and a newer request replaces it. The reserve
+        # is the share every opportunistic admission above leaves free, so
+        # the nearest read is never queued behind a group read a layer
+        # later (``_produced_ahead_has_room``).
+        self._produced_read_ahead_wanted = set()
+        self._produced_lookahead_reserve = 0
         # The background stager (RobTand/prismaquant#895). ``None`` on every
         # unbound owner and at the default two-group window: there is then no
         # thread, and every step below runs where it is called, as before.
@@ -315,6 +324,13 @@ class StreamedBoundaryArtifacts:
             "produced_stager_step_overruns": 0,
             "produced_stager_dropped": 0,
             "produced_stager_failures": 0,
+            "produced_stager_requeues": 0,
+            "produced_group_ahead_export_deferrals": 0,
+            "produced_group_ahead_no_room": 0,
+            "produced_read_ahead_requests": 0,
+            "produced_groups_read_ahead": 0,
+            "produced_read_ahead_deferrals": 0,
+            "produced_read_ahead_missed": 0,
             "produced_compute_blocked_s": 0.0,
             **{f"produced_compute_blocked_{reason}_s": 0.0
                for reason in self.PRODUCED_BLOCKED_REASONS}}
@@ -736,7 +752,8 @@ class StreamedBoundaryArtifacts:
                 with self._produced_blocked("copy_before_unlink"), (
                         self._produced_lock.yielded()):
                     idle = self._stager.wait_keys_idle(
-                        (key,), labels=("publish-ahead", "stage-ahead"),
+                        (key,), labels=("publish-ahead", "stage-ahead",
+                                        "read-ahead"),
                         timeout=self._produced_plan["staging_timeout_s"])
                 if not idle:
                     reason = "publication did not become idle before origin retirement"
@@ -1601,10 +1618,13 @@ class StreamedBoundaryArtifacts:
 
         stager = self._stager
         with self._produced_lock.held():
-            ran = (task.finished or 0.0) - (task.started or 0.0)
+            # Time spent running, over every run: a task that gave the lane
+            # back while it waited was not busy in between (PQ #989).
+            ran = task.busy_s
             if task.label != "poll":
                 self.telemetry["produced_stager_tasks"] += 1
             self.telemetry["produced_stager_busy_s"] += max(ran, 0.0)
+            self.telemetry["produced_stager_requeues"] += task.requeues
             self.telemetry["produced_stager_queue_peak"] = max(
                 self.telemetry["produced_stager_queue_peak"],
                 stager.queue_peak if stager is not None else 0)
@@ -1986,7 +2006,7 @@ class StreamedBoundaryArtifacts:
     #: if this gives up.
     PRODUCED_AHEAD_PUBLISH_BUDGET_S = 10.0
 
-    def _produced_ahead_has_room(self, *, holding=False):
+    def _produced_ahead_has_room(self, *, holding=False, lookahead=False):
         """May one more group count against the read-ahead share?
 
         Two bounds, both required. The share itself, and the WHOLE window:
@@ -1995,35 +2015,60 @@ class StreamedBoundaryArtifacts:
         read-ahead spend the two groups the read path is owed.
         ``holding`` is a group that already holds credit (a window's own
         group being kept), which adds nothing to the window.
+
+        ``lookahead`` is the read path's own lookahead, the groups the next
+        window reads (PQ #989). Every other admission is opportunistic and
+        leaves the lookahead's reserve free: a group published at write
+        time is read a layer later, and it must not take the slot the next
+        window's read needs now.
         """
 
         plan = self._produced_plan
-        return (len(self._produced_ahead) < plan["ahead_groups"]
+        reserve = 0 if lookahead else self._produced_lookahead_reserve
+        return (len(self._produced_ahead) + reserve < plan["ahead_groups"]
                 and len(self._produced_held) + (0 if holding else 1)
-                <= plan["window_groups"] - 2)
+                + reserve <= plan["window_groups"] - 2)
 
-    def _produced_take_ahead(self, key, group, *, restage):
+    def _produced_ahead_deadline(self, started):
+        """The instant an optional step that began at ``started`` must end.
+
+        On the stager nobody is waiting for the step, so it gets a budget
+        that rides out a loaded fleet; on the calling thread it keeps the
+        short one, because there the GPU waits for it.
+        """
+
+        budget = (self.PRODUCED_STAGER_STEP_BUDGET_S
+                  if self._produced_on_stager()
+                  else self.PRODUCED_AHEAD_PUBLISH_BUDGET_S)
+        return budget, started + min(
+            budget, float(self._produced_plan["staging_timeout_s"]))
+
+    def _produced_take_ahead(self, key, group, *, restage, deadline=None,
+                             lookahead=False):
         """Publish or re-stage one group ahead of its read. Never raises.
 
         Opportunistic by construction: it runs only inside the read-ahead
         share of the sealed window, and a refusal leaves the group exactly
         as it was, for the read to publish under the full budget. A group
-        that already holds credit is left alone.
+        that already holds credit is left alone. ``deadline`` is the step's
+        own, fixed when a step that gave the lane back first ran; without
+        it the budget starts now. ``lookahead`` is the read path's own step
+        (``_produced_ahead_has_room``).
         """
 
         import time
 
-        if key in self._produced_held or not self._produced_ahead_has_room():
+        if key in self._produced_held:
+            return False
+        if not self._produced_ahead_has_room(lookahead=lookahead):
+            # Counted, not silent: a step skipped for want of room leaves
+            # the group to its read.
+            self.telemetry["produced_group_ahead_no_room"] += 1
             return False
         started = time.monotonic()
-        # On the stager nobody is waiting for this step, so it gets a budget
-        # that rides out a loaded fleet; on the calling thread it keeps the
-        # short one, because there the GPU waits for it.
-        budget = (self.PRODUCED_STAGER_STEP_BUDGET_S
-                  if self._produced_on_stager()
-                  else self.PRODUCED_AHEAD_PUBLISH_BUDGET_S)
-        deadline = started + min(
-            budget, float(self._produced_plan["staging_timeout_s"]))
+        budget, own_deadline = self._produced_ahead_deadline(started)
+        if deadline is None:
+            deadline = own_deadline
         # Counted before the call, not after it: while the call runs without
         # the lock, the other thread's credit arithmetic must see this group.
         self._produced_held.add(key)
@@ -2134,16 +2179,63 @@ class StreamedBoundaryArtifacts:
                         -self.PRODUCED_AHEAD_REFUSAL_LOG:]],
                 "release_error_count": len(self._produced_release_errors)}
 
+    def _produced_may_defer(self):
+        """May this step give the lane back and run again later?
+
+        Only on the stager, and never while every task is waited for where
+        it was submitted (tests): the waiting thread is then the one that
+        frees room or acknowledges the export, and a deferral would wait
+        for itself.
+        """
+
+        return self._produced_on_stager() and not self._PRODUCED_STAGER_WAIT_ALL
+
+    def _produced_export_landed(self, group):
+        """Stager: has this group's local export landed? Looks once.
+
+        A failed export answers True, so the publication that follows
+        raises it under the refusal accounting it always had.
+        """
+
+        try:
+            with self._produced_lock.yielded():
+                return self._local_output_spool.landed(group["batch_id"])
+        except Exception:                               # noqa: BLE001
+            return True
+
     def _produced_publish_ahead(self, key, group):
+        import time
+        from .produced_stager import Requeue
+
         if (self._produced_plan["ahead_groups"] <= 0
                 or group["published"] is not None):
             return
+        step = {"deadline": None}
 
         def publish():
             if group["published"] is not None:
-                return
-            if self._produced_take_ahead(key, group, restage=False):
+                return None
+            if self._produced_may_defer():
+                # Do not hold the lane on the local export (PQ #989). While
+                # it has not landed, look once and give the lane back, so a
+                # read queued behind this step runs now. Nothing is counted
+                # before the export lands, so a deferral holds no credit;
+                # the step's budget runs from its first run, and a step
+                # that outlives it goes on to the same refusal as before.
+                now = time.monotonic()
+                if step["deadline"] is None:
+                    step["deadline"] = self._produced_ahead_deadline(now)[1]
+                if (self._local_output_spool is not None
+                        and now < step["deadline"]
+                        and key not in self._produced_held
+                        and self._produced_ahead_has_room()
+                        and not self._produced_export_landed(group)):
+                    self.telemetry["produced_group_ahead_export_deferrals"] += 1
+                    return Requeue(self.PRODUCED_DEFERRAL_POLL_S)
+            if self._produced_take_ahead(key, group, restage=False,
+                                         deadline=step["deadline"]):
                 self.telemetry["produced_groups_published_ahead"] += 1
+            return None
 
         def dropped():
             with self._produced_lock.held():
@@ -2202,6 +2294,124 @@ class StreamedBoundaryArtifacts:
                 staged += 1
                 self.telemetry["produced_groups_staged_ahead"] += 1
         return staged
+
+    def stage_produced_reads_ahead(self, references):
+        """Ask for the groups the NEXT window reads, while this one computes.
+
+        The read path's lookahead (PQ #989). ``references`` are the entries
+        the next window will read; the owner's own produced groups among
+        them are published, or staged again, on the stager now, so their
+        movers run under this window's compute and the next window opens on
+        the fast path. Asks and returns: the read still waits on each
+        group's receipt, and a group this step did not reach in time is
+        staged by its read as before. Foreign inputs and groups that already
+        hold credit are left alone. A newer request replaces an older one,
+        and the step never takes credit for a group its window has opened.
+
+        Only with a stager: on the calling thread this would be the read's
+        own work done one window early, with the GPU waiting for it either
+        way. Returns the number of the owner's groups named.
+        """
+
+        if (self._produced is None or self._produced_plan is None
+                or self._produced_plan["ahead_groups"] <= 0):
+            return 0
+        from .perturbed_x_cache import ExactActivationReference
+
+        self._produced_raise_stager_failure()
+        if not self._produced_on_compute_with_stager():
+            return 0
+        with self._produced_lock.held():
+            keys = []
+            for reference in references:
+                if (not isinstance(reference, ExactActivationReference)
+                        or reference in self._forward_inputs
+                        or reference in self._attached_forward_inputs):
+                    continue
+                key, group = self._produced_group_for(reference)
+                if group is not None and key not in keys:
+                    keys.append(key)
+            if not keys:
+                return 0
+            self._produced_read_ahead_wanted = set(keys)
+            # Beyond the open window, the read path holds two windows'
+            # groups at once: the next window's, asked for here, and the
+            # previous window's, whose retirement was asked at its exit and
+            # gives its credit back only when PrismaBuild confirms it. Leave
+            # room for both, so this request never waits on that
+            # confirmation for a slot a write-time publication took.
+            self._produced_lookahead_reserve = 2 * len(keys)
+            self.telemetry["produced_read_ahead_requests"] += 1
+        keys = tuple(keys)
+        step = {"deadline": None}
+
+        def stage():
+            return self._produced_stage_reads_ahead(keys, step)
+
+        self._produced_submit("optional", "read-ahead", stage, keys=keys,
+                              reason="stage_ahead")
+        return len(keys)
+
+    def _produced_stage_reads_ahead(self, keys, step):
+        """Stager: stage what a lookahead still wants; requeue for the rest.
+
+        A group waits, off the lane, while its local export has not landed,
+        while its retirement is in flight (it is staged again once that
+        retirement is done), or while the share has no room. It stops
+        waiting when its window opens, when a newer lookahead replaces this
+        one, or when the step's budget runs out; then its read stages it.
+        Nothing is counted before a group is taken, so a deferral holds no
+        credit.
+        """
+
+        import time
+        from .produced_stager import Requeue
+
+        now = time.monotonic()
+        if step["deadline"] is None:
+            step["deadline"] = self._produced_ahead_deadline(now)[1]
+        defer = self._produced_may_defer()
+        # A retirement that was asked for and has since finished frees its
+        # credit, and its group can be staged again.
+        self._drain_produced_releases()
+        waiting = False
+        for key in keys:
+            if key not in self._produced_read_ahead_wanted:
+                continue
+            group = self._produced_groups.get(key)
+            if (group is None or group["live_references"] <= 0
+                    or len(group["references"]) < len(group["planned"]) // 2):
+                # Nothing left to read, or a group still being written: its
+                # publication belongs to its last write, never to a guess.
+                self._produced_read_ahead_wanted.discard(key)
+                continue
+            if (key in self._produced_release_pending
+                    or key in self._produced_release_queued):
+                waiting = True
+                continue
+            if key in self._produced_held:
+                self._produced_read_ahead_wanted.discard(key)
+                continue
+            if not self._produced_ahead_has_room(lookahead=True):
+                waiting = True
+                continue
+            if (defer and group["published"] is None
+                    and self._local_output_spool is not None
+                    and time.monotonic() < step["deadline"]
+                    and not self._produced_export_landed(group)):
+                waiting = True
+                continue
+            if self._produced_take_ahead(
+                    key, group, restage=group["published"] is not None,
+                    deadline=step["deadline"], lookahead=True):
+                self.telemetry["produced_groups_read_ahead"] += 1
+            self._produced_read_ahead_wanted.discard(key)
+        if (waiting and defer and time.monotonic() < step["deadline"]
+                and any(key in self._produced_read_ahead_wanted
+                        for key in keys)):
+            self.telemetry["produced_read_ahead_deferrals"] += 1
+            return Requeue(self.PRODUCED_DEFERRAL_POLL_S)
+        return None
 
     @contextmanager
     def retain_produced_boundary(self, boundary_index):
@@ -2457,6 +2667,11 @@ class StreamedBoundaryArtifacts:
             # was asked, and a refused one is reported as debt: asking
             # again here would change that accounting.
             return
+        with self._produced_lock.held():
+            # No read follows a settle: a lookahead still waiting stops now
+            # instead of taking credit the settle is about to give back.
+            self._produced_read_ahead_wanted.clear()
+            self._produced_lookahead_reserve = 0
         if self._produced_on_compute_with_stager():
             # Everything queued runs first -- a publication still queued
             # would otherwise take credit after the settle gave it back --
@@ -2525,6 +2740,12 @@ class StreamedBoundaryArtifacts:
                         "exact boundary reference is not in any produced group: "
                         "a bound owner reads only entries it declared")
                 wanted[key] = group
+            if self._produced_read_ahead_wanted:
+                # This window is open: a lookahead that has not staged its
+                # groups by now leaves them to this read.
+                missed = self._produced_read_ahead_wanted.intersection(wanted)
+                self.telemetry["produced_read_ahead_missed"] += len(missed)
+                self._produced_read_ahead_wanted.difference_update(wanted)
             budget = float(self._produced_plan["staging_timeout_s"])
             if not self._produced_on_compute_with_stager():
                 with self._produced_blocked("read_fund"):
@@ -3367,11 +3588,31 @@ class StreamedBoundaryArtifacts:
         return out
 
 
+def _boundary_window_references(batches, boundary_index, incoming, indices):
+    """What one window of ``prefetched_boundary_batches`` reads, in order."""
+
+    references = [batches[index].activations_cpu[boundary_index] for index in indices]
+    if incoming is not None:
+        references.extend(incoming[index] for index in indices)
+    return references
+
+
 @contextmanager
-def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None):
-    """Preserve original batch order while leasing exact tensors in windows."""
+def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None,
+                                then=None):
+    """Preserve original batch order while leasing exact tensors in windows.
+
+    A storage that stages its reads through PrismaBuild is asked, as soon as
+    a window is open, for the groups the NEXT window reads, so their movers
+    run under this window's compute (RobTand/prismaquant#989). ``then``
+    names the pass read after this one, as ``(boundary_index, incoming)``:
+    its first window is asked for from this pass's last window. Staging
+    only: the order, the reads and the tensors are unchanged.
+    """
     def iterate():
         size = len(batches) if storage is None else storage.config["prefetch_batches"]
+        lookahead = (None if storage is None
+                     else getattr(storage, "stage_produced_reads_ahead", None))
         for start in range(0, len(batches), size):
             indices = range(start, min(start + size, len(batches)))
             if storage is None:
@@ -3379,10 +3620,23 @@ def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None)
                     yield index, batches[index], batches[index].activations_cpu[boundary_index], (
                         None if incoming is None else incoming[index])
             else:
-                references = [batches[index].activations_cpu[boundary_index] for index in indices]
-                if incoming is not None:
-                    references.extend(incoming[index] for index in indices)
+                references = _boundary_window_references(
+                    batches, boundary_index, incoming, indices)
                 with storage.prefetch(references) as window:
+                    if lookahead is not None:
+                        if start + size < len(batches):
+                            following = _boundary_window_references(
+                                batches, boundary_index, incoming,
+                                range(start + size,
+                                      min(start + 2 * size, len(batches))))
+                        elif then is not None:
+                            following = _boundary_window_references(
+                                batches, then[0], then[1],
+                                range(0, min(size, len(batches))))
+                        else:
+                            following = ()
+                        if following:
+                            lookahead(following)
                     for index in indices:
                         yield index, batches[index], storage.get(window, batches[index].activations_cpu[boundary_index]), (
                             None if incoming is None else storage.get(window, incoming[index]))

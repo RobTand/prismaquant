@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Stage A keeps the GPU fed (2026-09-22, PQ #989): R12 left the GPU idle about
+20 s of every 60 s window, for two staging reasons. First, an optional
+write-time publication held the owner's one stager lane while it
+sleep-polled its group's local export receipt, so a read the compute thread
+was waiting for queued behind it. Such a step now looks once
+(`ProducedOutputSpool.landed`) and returns `produced_stager.Requeue`, and the
+stager runs urgent work while it waits. Second, nothing staged the groups a
+window reads before that window opened. Each open window of
+`prefetched_boundary_batches` now asks for the next window's groups
+(`stage_produced_reads_ahead`), and while that request is outstanding,
+write-time publication leaves it room inside the existing read-ahead share.
+Credit bounds, refusal reasons, the settle at close and the bytes written are
+unchanged. Gate: `tests/test_stage_a_produced_lookahead.py`.
+
 GLM router epsilon (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`, PQ
 #938): `native_moe_panel.validate_glm_routing` no longer requires the router
 normalization epsilon to be `1e-6`, LFM's value. It accepts the value the
@@ -263,8 +277,18 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `feat/glm-native-unpriced-20260922`.
+As of: 2026-09-22 · `fix/989-stagea-staging-overlap`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `fix/989-stagea-staging-overlap`) for **the Stage A
+read path's lookahead and the stager's `Requeue`** (PQ #989). An optional
+stager step that finds its group's local export not landed now looks once
+and gives the lane back (`produced_stager.Requeue`), and each open read
+window asks for the next window's groups (`stage_produced_reads_ahead`);
+see "The read path's lookahead" and "An optional step never waits on the
+lane" under the produced-boundary owner. No format, default, lane, pin,
+kernel order or ship gate changes; the bytes written are unchanged. Gate:
+`tests/test_stage_a_produced_lookahead.py`.
 
 Re-stamped (2026-09-22, `feat/glm-native-unpriced-20260922`) for **native
 execution evidence before final joint costs** (PQ #936): raw dense and routed
@@ -1830,6 +1854,44 @@ says exactly that.
   groups plus retirements in flight, so `concurrent_groups` of about 56
   (`window_gib` 112). A narrower window degrades toward the synchronous loop;
   it does not fail.
+  **The read path's lookahead (PQ #989).** Rules (1) to (3) stage what the
+  walk reads later; none of them stages what the next window reads. At R12's
+  geometry (a 24-group window, a 22-group share, 32 cotangent groups a layer)
+  write-time publication filled the share with groups read a layer later,
+  and a plane read again after its retirement (the checkpoint serializer
+  retires every group of the plane the next layer reads) was staged again
+  window by window at its read, with the GPU waiting on each mover. Now each
+  open window of `prefetched_boundary_batches` asks for the next window's
+  groups (`stage_produced_reads_ahead`), and the last window of a pass asks
+  for the first window of the pass after it (`then=`: the next probe pass of
+  `render_free_layer_roll`, or the next layer's first pass, which the chain
+  names). The checkpoint serializer asks the same way between its own
+  windows. The request is optional work on the stager. It publishes, or
+  stages again, each of the owner's own groups it names that holds no credit
+  yet, and requeues itself (below) while a group waits for its local export
+  or for a retirement still in flight. It draws on the same share as rules
+  (1) to (3), with one change to how the share is divided: while a request
+  is outstanding, the opportunistic steps (write-time publication, staging a
+  plane ahead, retention) leave room for two windows' groups, the next
+  window's and the previous window's, whose credit comes back only when
+  PrismaBuild confirms its retirement. A write-time publication therefore
+  never takes the slot the next read needs. The read path is still owed its
+  two groups first, and the bound on held credit is unchanged. A newer
+  request replaces an older one, and a window that opens removes its own
+  groups from the request. A group the request did not reach in time is
+  staged by its read, as before (`produced_read_ahead_missed`). Without a
+  stager the request does nothing, because on the calling thread it would be
+  the read's own work done one window early. Counters:
+  `produced_read_ahead_requests`, `produced_groups_read_ahead`,
+  `produced_read_ahead_deferrals`, `produced_read_ahead_missed`, and
+  `produced_group_ahead_no_room` for an opportunistic step that found no
+  room. Staging only: the kernel order and the bytes written are unchanged.
+  One limit remains. The chain's `then=` request fires in the roll's last
+  window, before `serialize_checkpoint(layer)` reads and retires the plane
+  the next layer reads, and the serializer's own requests replace it. The
+  first window after each checkpoint layer, including chain layer N-1 after
+  the tail checkpoint, therefore still opens cold: one cold window per
+  checkpoint, where before every window past the share was cold.
   **The stager thread (PQ #895).** At a window wider than two groups the
   owner runs those rules on one background thread, because on the compute
   thread they cost more than the compute: in the first production run the GPU
@@ -1844,6 +1906,26 @@ says exactly that.
   next group's prewrite claim, the durable-charge reclaim); it runs only when
   lane 1 is empty, and it is bounded at four times the window, so a full lane
   blocks the writer instead of queueing work faster than PrismaBuild takes it.
+  **An optional step never waits on the lane (PQ #989).** A write-time
+  publication used to sleep-poll its group's local export receipt on the one
+  lane for up to its whole budget, and a read the compute thread was waiting
+  for queued behind it. Now an optional step that finds its group's export
+  not landed yet (or, for a lookahead, its group's retirement still in
+  flight) looks once and returns `produced_stager.Requeue(delay_s)`. The
+  stager puts the step back at the end of lane 2 with a not-before time and
+  runs lane 1 meanwhile. A requeued step still counts for `pending`, `drain`
+  and `wait_keys_idle`. It keeps the deadline it fixed on its first run, so
+  it ends the way it did before: a publication whose export never lands
+  inside its budget is the same counted refusal, with the same reason.
+  `close` drops a requeued step through its `on_drop`, like any queued step,
+  and drops a step that asks to requeue after close began; a `keep_on_close`
+  step keeps running, and a dead worker strands it with the rest. Only
+  optional work may requeue. It never requeues where every task is waited for
+  on the thread that submitted it (the tests' synchronous mode), because
+  there it would wait for itself. `produced_stager_requeues` and
+  `produced_group_ahead_export_deferrals` count the requeues, and
+  `produced_stager_busy_s` counts only the time a step ran, not the time it
+  sat requeued.
   **One task runs at a time, on purpose.** PrismaBuild serializes one owner's
   mutating calls anyway: every mutating `produced_output` entry point takes
   `stage_ownership_lock(output_prefix)`, one path for all of an owner's

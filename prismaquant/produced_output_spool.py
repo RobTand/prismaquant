@@ -152,15 +152,24 @@ class ProducedOutputSpool:
         for batch_id in tuple(self._pending):
             self._poll_locked(batch_id, self._groups[batch_id])
 
+    def landed(self, batch_id):
+        """Look once: True when the group's export is durable and released.
+
+        Never waits. A caller that must not hold its thread on an export
+        (the owner's stager, PQ #989) asks this and comes back later; a
+        failed export raises here exactly as it does in ``await_group``.
+        """
+        with self._lock:
+            group = self._groups[batch_id]
+            if not group["submitted"]:
+                raise ProducedOutputSpoolRefused("incomplete local group has no export submission")
+            return self._poll_locked(batch_id, group)
+
     def await_group(self, batch_id, *, deadline=None):
         deadline = time.monotonic() + self.timeout_s if deadline is None else deadline
         while True:
-            with self._lock:
-                group = self._groups[batch_id]
-                if not group["submitted"]:
-                    raise ProducedOutputSpoolRefused("incomplete local group has no export submission")
-                if self._poll_locked(batch_id, group):
-                    return
+            if self.landed(batch_id):
+                return
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"local output group {batch_id!r} export has not landed")
             time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
