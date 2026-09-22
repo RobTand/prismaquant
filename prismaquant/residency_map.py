@@ -1002,6 +1002,38 @@ class ResidencyResolver:
                 return None, RANGE_UNDECLARED
             return None, RANGE_UNCOVERED
 
+    def staged_range_alternatives(
+            self, declared: str | Path, start: int, end: int, *,
+            rejected_offset: int, declared_size: int
+            ) -> tuple[list[dict], str | None]:
+        """One finite snapshot of other checked covers after lease retirement.
+
+        This is selection, never admission. Each returned entry still needs
+        its own PB lease. Called only after the first cover's typed retiring
+        refusal, so ordinary successful reads do no extra metadata work.
+        The first hard pre-open refusal is retained in case no alternative
+        can serve; missing files alone do not become integrity failures.
+        """
+        if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start <= end:
+            raise ValueError("a staged range is a non-negative [start, end) span")
+        path = _normal(declared)
+        with self._lock:
+            self._read_map()
+            index, real = self._interval_index()
+            rows = index.get(path) or real.get(path) or ()
+            answers, refusal = [], None
+            for entry in rows:
+                if (entry['offset'] == rejected_offset
+                        or not entry['offset'] <= start
+                        or end > entry['offset'] + entry['bytes']):
+                    continue
+                answer, reason, missing = self._range_answer(entry, path, declared_size)
+                if answer is not None:
+                    answers.append(answer)
+                elif not missing:
+                    refusal = refusal or reason
+            return answers, refusal
+
     def _range_answer(self, entry: dict, path: str,
                       declared_size: int
                       ) -> tuple[dict | None, str | None, bool]:

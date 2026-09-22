@@ -735,8 +735,10 @@ class StagedShardReader:
         exact ref released after the bound descriptors close. A RAM leg
         needs RAM-mover covers the composed map does not carry, so it
         refuses fast and the SSD copy acquires honestly with its own
-        material and lifetime. Any refusal — never a pool read. Inactive
-        policy keeps the legacy stage-only open order.
+        material and lifetime. A typed retiring refusal may select another
+        checked overlap through its own lease; other refusals propagate,
+        never becoming pool reads. Inactive policy keeps the legacy
+        stage-only open order.
         """
         for row in self._bound:
             if row[0] <= start and end <= row[1]:
@@ -784,13 +786,33 @@ class StagedShardReader:
             self._bound.append(row)
             return row
         from .staged_lease import LeaseRefused, acquire_entry_window
-        window, key = acquire_entry_window(
-            self._resolver, self._declared, entry)
-        try:
-            window.__enter__()
-        except LeaseRefused as refusal:
-            self._resolver.record_fallback(self._declared, str(refusal))
-            raise
+        alternatives = None
+        hard_refusal = None
+        while True:
+            try:
+                window, key = acquire_entry_window(
+                    self._resolver, self._declared, entry)
+                window.__enter__()
+                break
+            except LeaseRefused as refusal:
+                # A retired phase may still have a physically valid file
+                # while an older reader drains. Its closed generation cannot
+                # hide another overlapping entry that admits its OWN pin.
+                # Unknown/identity/integrity refusals never take this path.
+                if refusal.kind != 'availability' or refusal.reason != 'retiring':
+                    self._resolver.record_fallback(self._declared, str(refusal))
+                    raise
+                if alternatives is None:
+                    candidates, hard_refusal = self._resolver.staged_range_alternatives(
+                        self._declared, start, end,
+                        rejected_offset=entry['offset'], declared_size=self._declared_size)
+                    alternatives = iter(candidates)
+                entry = next(alternatives, None)
+                if entry is None:
+                    if hard_refusal is not None:
+                        refusal = LeaseRefused(hard_refusal, kind='integrity')
+                    self._resolver.record_fallback(self._declared, str(refusal))
+                    raise refusal
         try:
             fd, serving = window.open(key)
             info = os.fstat(fd)
