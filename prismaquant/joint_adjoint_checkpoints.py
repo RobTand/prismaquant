@@ -537,6 +537,16 @@ def _checkpoint_plan_windows(plans, width):
         yield list(group)
 
 
+def _checkpoint_window_references(cotangents, plans):
+    """The owner's entries one serializer window reads, in order."""
+    from .perturbed_x_cache import ExactActivationReference
+
+    references = [cotangents[(plan["probe_index"], plan["batch_index"])]
+                  for plan in plans]
+    return [value for value in references
+            if isinstance(value, ExactActivationReference)]
+
+
 def _checkpoint_tensor_window(cotangents, plans, owner):
     """Reuse the owner's bounded read grouping, including PB group retirement.
 
@@ -544,12 +554,7 @@ def _checkpoint_tensor_window(cotangents, plans, owner):
     for each of its entries. Match the existing prefetch batch width, keeping
     only that window plus one serializer's reservation resident.
     """
-    from .perturbed_x_cache import ExactActivationReference
-
-    references = [cotangents[(plan["probe_index"], plan["batch_index"])]
-                  for plan in plans]
-    references = [value for value in references
-                  if isinstance(value, ExactActivationReference)]
+    references = _checkpoint_window_references(cotangents, plans)
     return owner.prefetch(references) if references else nullcontext()
 
 
@@ -702,9 +707,18 @@ def write_adjoint_checkpoint(
         from .perturbed_x_cache import ExactActivationReference
 
         activation_entries = []
-        for window_plans in _checkpoint_plan_windows(
-                activation_plan, int(owner.config["prefetch_batches"])):
+        windows = list(_checkpoint_plan_windows(
+            activation_plan, int(owner.config["prefetch_batches"])))
+        # Staging only: each open window asks for the next one's groups, so
+        # their movers run while this one serializes (RobTand/prismaquant#989).
+        lookahead = getattr(owner, "stage_produced_reads_ahead", None)
+        for position, window_plans in enumerate(windows):
             with _checkpoint_tensor_window(cotangents, window_plans, owner) as window:
+                if lookahead is not None and position + 1 < len(windows):
+                    following = _checkpoint_window_references(
+                        cotangents, windows[position + 1])
+                    if following:
+                        lookahead(following)
                 for plan in window_plans:
                     value = cotangents[(plan["probe_index"], plan["batch_index"])]
                     tensor = (owner.get(window, value)
@@ -998,6 +1012,7 @@ def load_adjoint_receipt(path: str | os.PathLike, sha256: str) -> dict:
 def render_free_layer_roll(
     runner, *, storage, batches, layer, cotangents, n_probes,
     incoming_entries, incoming_tensor, roll, min_free_gib: float = 0.0,
+    then=None,
 ) -> int:
     """Roll the cotangent through one layer with no renders and no projection.
 
@@ -1019,6 +1034,9 @@ def render_free_layer_roll(
     ``None`` the incoming cotangent comes from ``incoming_tensor(probe, batch)``.
     ``roll(cpu_tensor, batch_index, probe_index)`` consumes the produced
     cotangent at boundary ``layer`` (publish it, keep it, or checkpoint it).
+    ``then`` is the pass the caller reads after this roll, as
+    ``(boundary_index, incoming_entries)``; its first window is staged
+    during the roll's last window. Staging only.
     Returns the number of backwards performed.
     """
     from contextlib import nullcontext
@@ -1038,13 +1056,13 @@ def render_free_layer_roll(
             cotangents=cotangents, n_probes=n_probes,
             incoming_entries=incoming_entries,
             incoming_tensor=incoming_tensor, roll=roll,
-            min_free_gib=min_free_gib)
+            min_free_gib=min_free_gib, then=then)
     return backwards
 
 
 def _render_free_probe_passes(
     runner, *, storage, batches, layer, cotangents, n_probes,
-    incoming_entries, incoming_tensor, roll, min_free_gib,
+    incoming_entries, incoming_tensor, roll, min_free_gib, then=None,
 ) -> int:
     """The probe passes of :func:`render_free_layer_roll`, order unchanged."""
     from .aura_cost import _free_gib
@@ -1056,8 +1074,15 @@ def _render_free_probe_passes(
     for probe_index in range(int(n_probes)):
         entries = (None if incoming_entries is None
                    else incoming_entries[probe_index])
+        # Staging only: the next probe pass's first window is asked for
+        # during this pass's last one (RobTand/prismaquant#989).
+        following = then
+        if probe_index + 1 < int(n_probes):
+            following = (int(layer), None if incoming_entries is None
+                         else incoming_entries[probe_index + 1])
         with prefetched_boundary_batches(
-                storage, batches, int(layer), incoming=entries) as windows:
+                storage, batches, int(layer), incoming=entries,
+                then=following) as windows:
             for batch_index, batch, boundary_cpu, incoming_cpu in windows:
                 owner = cotangents[probe_index][batch_index]
                 try:
