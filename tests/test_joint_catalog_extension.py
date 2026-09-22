@@ -131,6 +131,14 @@ def test_additive_catalog_binds_original_capture_without_relabelling(tmp_path, c
     result = bind_adjoint_receipt(receipt, **args, catalog_extension=bound)
     assert result == canonical_json_sha256(receipt, where="synthetic capture")
     assert Path(capture['path']).read_bytes() == original
+    from tools.dispatch_joint_quanta import check_adjoint_receipt, DispatchRefused
+    dispatch_record = {'campaign': {'plan_sha256': inputs['extended_plan']['sha256'],
+        'prepared_sha256': inputs['extended_prepared']['sha256']},
+        'adjoint': {'receipt_sha256': result}, 'catalog_extension': bound}
+    assert check_adjoint_receipt(Path(capture['path']), [(tmp_path/'q.json', dispatch_record)]) == receipt
+    unbound = {**dispatch_record, 'catalog_extension': None}
+    with pytest.raises(DispatchRefused, match='extension bindings differ'):
+        check_adjoint_receipt(Path(capture['path']), [(tmp_path/'q.json', dispatch_record), (tmp_path/'r.json', unbound)])
     plan = json.loads(Path(inputs['extended_plan']['path']).read_bytes())
     prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
     produced = layer_quanta(plan, prepared, campaign['parent_manifest'],
