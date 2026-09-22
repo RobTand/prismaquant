@@ -74,7 +74,7 @@ def test_the_core_reports_boundary_zero_under_head_before_forward_work(
     published entries.
     """
     _model, context, runner, _cache = fixture()
-    context.settle_prefetched_layers = lambda layers: None
+    context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     recorder, clock = Recorder(), Clock()
     progress = JointRunProgress(
         layers=runner.num_layers, partitions=1, base_units=7,

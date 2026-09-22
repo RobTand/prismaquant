@@ -187,3 +187,24 @@ def refuse_pool_bulk_read(path: str, reason: str) -> TierPolicyRefused:
     missing-digest-binding/get-slice-is-a-data-reader.
     """
     return TierPolicyRefused(f"staged-tier-forbidden: {reason}: {path}")
+
+
+class StagedRangeNotLanded(TierPolicyRefused):
+    """A declared staged range that is not currently landed (availability).
+
+    Raised at the read seam when the resolver reports ``RANGE_UNCOVERED``
+    for the span: the sealed readset declares these bytes but has no serving
+    cover, including stale covering rows whose staged files are missing.
+    The message keeps the established
+    ``readset-not-staged`` wording so existing log greps still match; the
+    type is what distinguishes a proven transient cause from the generic
+    refusal. An undeclared span (``RANGE_UNDECLARED``) and a failed
+    covering entry (``RANGE_REFUSED``) keep the generic refusal: nothing
+    about them says the bytes are on their way. Never read the pool.
+    """
+
+    def __init__(self, declared: str, start: int, end: int):
+        super().__init__(f"staged-tier-forbidden: readset-not-staged: {declared}")
+        self.declared = str(declared)
+        self.start = int(start)
+        self.end = int(end)

@@ -3693,7 +3693,8 @@ class StreamedCausalLM:
                             # workspace. The existing source owner still owns
                             # lookahead and its storage.
                             self.context.settle_prefetched_layers(range(
-                                layer + 1, min(self.num_layers, layer + self.prefetch_lookahead + 1)))
+                                layer + 1, min(self.num_layers, layer + self.prefetch_lookahead + 1)),
+                                retry_availability=True)
                             report_source_phase('capture_forward', layer)
                         next_batch = 0
                         with prefetched_boundary_batches(boundary_storage, batches, layer) if exact else nullcontext() as resident:
