@@ -20,6 +20,15 @@ def stamp(path):
 def read_cell(cell):
  started=time.monotonic();wire=Path(cell['wire']);render=Path(cell['render'])
  assert stamp(wire)==cell['wire_stat'];assert stamp(render)==cell['render_stat'];origin=_resolve_render_origin(render,wire=wire,record=cell['record'],name=cell['qname'],fmt=cell['format'],shape=cell['source_weight']['shape'],reader=None);assert origin==cell['render_origin'];assert RENDER_COMPARISON_BY_ORIGIN[origin]==cell['render_comparison']
+ if policy_is_active():
+  from prismaquant.residency_shard_reader import await_staged_spans, staged_range_wait_s
+  from prismaquant.staged_lease import stage_cover_is_published
+  from prismaquant.residency_map import RANGE_HIT
+  resolver=residency_resolver()
+  if resolver is None:raise refuse_pool_bulk_read(str(wire),'readset-not-staged')
+  wanted=[(cell[k],0,cell[k+'_stat']['bytes'],cell[k+'_stat']['bytes']) for k in ('wire','render')]
+  verdict=await_staged_spans(resolver,wanted,deadline=time.monotonic()+staged_range_wait_s(),published=stage_cover_is_published)
+  if verdict!=RANGE_HIT:raise refuse_pool_bulk_read(str(wire),'qualification-readiness-'+verdict)
  wire_start=time.monotonic();blob,_wire_digest=_read_verified_wire_blob(cell);verify_cached_unit(blob,cell['record'],cell['record']['identity']);assert stamp(wire)==cell['wire_stat']
  wire_seconds=time.monotonic()-wire_start;render_start=time.monotonic();resolver=residency_resolver();staged=None if resolver is None else resolver.staged_read(render)
  if policy_is_active() and staged is None:raise refuse_pool_bulk_read(str(render),'new-candidate-render-not-staged')

@@ -26,3 +26,27 @@ def test_partial_checkpoint_corruption_is_not_adopted(cell,tmp_path,monkeypatch)
  batch={'schema':'prismaquant.t4_qualification_pilot.v1','tasks':[{'id':'unit','output_id':'unit','payload':{'cell':cell,'output':str(out)}}],'result_manifest_path':str(tmp_path/'manifest.json')};path=tmp_path/'batch.json';path.write_text(json.dumps(batch));monkeypatch.setattr(sys,'argv',['qualify','--pilot-batch',str(path)])
  with pytest.raises(AssertionError):m.main()
  assert not (tmp_path/'manifest.json').exists()
+
+def test_strict_new_cell_awaits_declared_wire_and_render_before_payload(cell,monkeypatch):
+ from prismaquant import residency_shard_reader as staged
+ from prismaquant.staged_lease import stage_cover_is_published
+ class ReadyBoundary(Exception):pass
+ resolver=object();monkeypatch.setattr(m,'policy_is_active',lambda:True);monkeypatch.setattr(m,'residency_resolver',lambda:resolver)
+ def waiting(actual,wanted,*,deadline,published):
+  assert actual is resolver
+  assert wanted==[(cell[k],0,cell[k+'_stat']['bytes'],cell[k+'_stat']['bytes']) for k in ('wire','render')]
+  assert published is stage_cover_is_published
+  assert deadline>m.time.monotonic()
+  raise ReadyBoundary()
+ monkeypatch.setattr(staged,'await_staged_spans',waiting)
+ monkeypatch.setattr(m,'_read_verified_wire_blob',lambda c:pytest.fail('payload opened before bounded readiness wait'))
+ with pytest.raises(ReadyBoundary):m.read_cell(cell)
+
+def test_terminal_readiness_refusal_never_opens_payload(cell,monkeypatch):
+ from prismaquant import residency_shard_reader as staged
+ from prismaquant.residency_map import RANGE_UNDECLARED
+ from prismaquant.staged_tier_policy import TierPolicyRefused
+ monkeypatch.setattr(m,'policy_is_active',lambda:True);monkeypatch.setattr(m,'residency_resolver',lambda:object())
+ monkeypatch.setattr(staged,'await_staged_spans',lambda *a,**k:RANGE_UNDECLARED)
+ monkeypatch.setattr(m,'_read_verified_wire_blob',lambda c:pytest.fail('foreign bytes reached payload read'))
+ with pytest.raises(TierPolicyRefused):m.read_cell(cell)
