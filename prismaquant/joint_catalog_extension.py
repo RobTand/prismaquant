@@ -50,6 +50,56 @@ def _json(bound, label):
     return json.loads(_read_bound(bound, label))
 
 
+class EncoderAdoptionValidation:
+    """One operation's retained proof bytes, fenced on entry and completion.
+
+    Results are borrowed read-only metadata. Repeating a cell does no file
+    metadata work; every distinct dependency is rechecked before successful
+    completion, so a changed proof invalidates the whole operation.
+    """
+    def __init__(self):
+        self._proofs, self._catalogs, self._fences = {}, {}, {}
+        self._active = False
+
+    def __enter__(self):
+        _require(not self._active, "adoption validation cannot nest")
+        self._active = True
+        return self
+
+    def verify(self, adoption):
+        _require(self._active, "adoption validation is outside its operation")
+        from tools.reseal_campaign_identity import unit_kind
+        _same(adoption.get("schema"), ADOPTION_SCHEMA, "encoder adoption schema")
+        reference, candidate = adoption["reference_encoding_identity"], adoption["candidate_encoding_identity"]
+        bound = adoption["encoder_source_proof"]
+        key = (bound["path"], bound["sha256"], reference.get("encoder_source_sha256"),
+               candidate.get("encoder_source_sha256"), reference.get("encoder_fixture_id"),
+               candidate.get("encoder_fixture_id"), unit_kind(candidate.get("unit", '')))
+        if key not in self._proofs:
+            result = validated_encoder_adoption(adoption)
+            self._proofs[key] = result
+            for path, digest, fence in result["fences"]:
+                self._fences[path, digest] = fence
+        return self._proofs[key]
+
+    def catalog(self, bound):
+        _require(self._active, "adoption validation is outside its operation")
+        key = (bound["path"], bound["sha256"])
+        if key not in self._catalogs:
+            document = _json(bound, "selected candidate catalog")
+            self._catalogs[key] = document
+            self._fences[key] = _bound_stat_fence(Path(bound["path"]))
+        return self._catalogs[key]
+
+    def __exit__(self, kind, error, traceback):
+        _require(self._active, "adoption validation has already ended")
+        self._active = False
+        if kind is None:
+            for (path, digest), fence in self._fences.items():
+                _same(_bound_stat_fence(Path(path)), fence, "encoder proof dependency changed during operation")
+        return False
+
+
 def validated_encoder_adoption(adoption):
     """Authenticate the existing migration's semantics and all proof dependencies.
 
@@ -114,14 +164,19 @@ def validated_encoder_adoption(adoption):
     return copy.deepcopy(result)
 
 
-def require_selected_catalog_cell(data, name, fmt):
+def require_selected_catalog_cell(data, name, fmt, *, validation=None):
     """Rebind an added selected cell to its exact catalog row and current files."""
     bound = data.inputs.get("candidate_overlay")
     _same(data.payload.get("provenance", {}).get("candidate_overlay"), bound, "selected overlay provenance")
     _require(isinstance(bound, dict), "selected candidate has no explicit catalog overlay")
-    key = (bound["path"], bound["sha256"], _bound_stat_fence(Path(bound["path"])))
+    if validation is not None:
+        catalog = validation.catalog(bound)
+        key = (bound["path"], bound["sha256"], id(catalog))
+    else:
+        key = (bound["path"], bound["sha256"], _bound_stat_fence(Path(bound["path"])))
+        catalog = None
     if key not in _SELECTED_CATALOG:
-        catalog = _json(bound, "selected candidate catalog")
+        catalog = catalog if catalog is not None else _json(bound, "selected candidate catalog")
         _same(catalog.get("schema"), "prismaquant.t4_adopted_catalog.v1", "selected candidate catalog schema")
         rows = {(row["qname"], row["format"]): row for row in catalog["cells"]}
         _same(len(rows), len(catalog["cells"]), "selected catalog unique cells")
@@ -133,7 +188,8 @@ def require_selected_catalog_cell(data, name, fmt):
     for field in ("record", "wire", "render", "catalog_source_adoption"):
         _same(cell.get(field), row.get(field), "selected catalog " + field)
     adoption = row["catalog_source_adoption"]
-    proof = validated_encoder_adoption(adoption)
+    proof = (validation.verify(adoption) if validation is not None
+             else validated_encoder_adoption(adoption))
     _same(adoption["candidate_encoding_identity"], cell["record"]["identity"], "selected candidate identity")
     reference_pair = tuple(adoption["reference_pair"])
     _require(reference_pair in data.cells and reference_pair[0] == name, "selected adoption reference absent")
@@ -232,49 +288,50 @@ def verify_catalog_pair(inputs):
         source_by_name[name] = source
     additions = sorted(new_pairs - old_pairs)
     proof_fences = set()
-    for pair in additions:
-        _same(pair[1], ADDED_FORMAT, "this extension's added candidate format")
-        cell = new_verified[pair]
-        _require(isinstance(cell, dict) and all(k in cell for k in QUALIFIED_CELL_FIELDS),
-                 "added candidate lacks actual render qualification " + repr(pair))
-        _same(cell["render_origin"], "encoded", "historical candidate render origin")
-        _same(cell["render_comparison"], RENDER_COMPARISON_BY_ORIGIN["encoded"],
-              "actual render/wire comparison")
-        _same(cell["source_weight"], source_by_name.get(pair[0]), "added candidate source " + repr(pair))
-        for key in ("encoding_identity_sha256", "wire_sha256", "render_file_sha256"):
-            value = cell[key]
-            _require(isinstance(value, str) and len(value) == 64
-                     and all(c in "0123456789abcdef" for c in value), "added candidate lacks " + key)
-        _require(isinstance(extended.weights[pair], str), "added render must name its existing file")
-        rendered = cell["rendered_weight"]
-        digest = rendered.get("content_sha256") if isinstance(rendered, dict) else None
-        _require(isinstance(digest, str) and len(digest) == 64
-                 and all(c in "0123456789abcdef" for c in digest),
-                 "added candidate lacks measured rendered tensor identity")
-        _same(rendered.get("shape"), cell["source_weight"].get("shape"), "added render shape")
-        adoption = cell.get("catalog_source_adoption")
-        _require(isinstance(adoption, dict) and adoption.get("schema") == ADOPTION_SCHEMA,
-                 "added candidate lacks explicit source/H adoption evidence")
-        reference_pair = tuple(adoption.get("reference_pair", []))
-        _require(reference_pair in old_pairs and reference_pair[0] == pair[0],
-                 "adoption reference is not an original candidate of the same unit")
-        reference = adoption.get("reference_encoding_identity")
-        candidate = adoption.get("candidate_encoding_identity")
-        _require(isinstance(reference, dict) and isinstance(candidate, dict), "adoption identities are missing")
-        _same(canonical_json_sha256(reference, where="adopted reference encoding"),
-              old_verified[reference_pair]["encoding_identity_sha256"], "authenticated original encoding identity")
-        _same(canonical_json_sha256(candidate, where="adopted candidate encoding"),
-              cell["encoding_identity_sha256"], "authenticated added encoding identity")
-        for field in ("unit", "source", "projection", "calibration", "encoder_fixture_id"):
-            _require(field in reference and field in candidate, "adoption identity lacks " + field)
-            _same(reference[field], candidate[field], "adopted source/H " + field)
-        _same(candidate["unit"], pair[0], "adopted unit")
-        _same(candidate.get("recipe"), ADDED_RECIPE, "added E2M1 recipe")
-        # Hash the existing source-migration proof once; do not manufacture a
-        # new proof or silently normalize another encoding field here.
-        proof = adoption.get("encoder_source_proof")
-        verified_proof = validated_encoder_adoption(adoption)
-        proof_fences.update(verified_proof["fences"])
+    with EncoderAdoptionValidation() as proof_checks:
+        for pair in additions:
+            _same(pair[1], ADDED_FORMAT, "this extension's added candidate format")
+            cell = new_verified[pair]
+            _require(isinstance(cell, dict) and all(k in cell for k in QUALIFIED_CELL_FIELDS),
+                     "added candidate lacks actual render qualification " + repr(pair))
+            _same(cell["render_origin"], "encoded", "historical candidate render origin")
+            _same(cell["render_comparison"], RENDER_COMPARISON_BY_ORIGIN["encoded"],
+                  "actual render/wire comparison")
+            _same(cell["source_weight"], source_by_name.get(pair[0]), "added candidate source " + repr(pair))
+            for key in ("encoding_identity_sha256", "wire_sha256", "render_file_sha256"):
+                value = cell[key]
+                _require(isinstance(value, str) and len(value) == 64
+                         and all(c in "0123456789abcdef" for c in value), "added candidate lacks " + key)
+            _require(isinstance(extended.weights[pair], str), "added render must name its existing file")
+            rendered = cell["rendered_weight"]
+            digest = rendered.get("content_sha256") if isinstance(rendered, dict) else None
+            _require(isinstance(digest, str) and len(digest) == 64
+                     and all(c in "0123456789abcdef" for c in digest),
+                     "added candidate lacks measured rendered tensor identity")
+            _same(rendered.get("shape"), cell["source_weight"].get("shape"), "added render shape")
+            adoption = cell.get("catalog_source_adoption")
+            _require(isinstance(adoption, dict) and adoption.get("schema") == ADOPTION_SCHEMA,
+                     "added candidate lacks explicit source/H adoption evidence")
+            reference_pair = tuple(adoption.get("reference_pair", []))
+            _require(reference_pair in old_pairs and reference_pair[0] == pair[0],
+                     "adoption reference is not an original candidate of the same unit")
+            reference = adoption.get("reference_encoding_identity")
+            candidate = adoption.get("candidate_encoding_identity")
+            _require(isinstance(reference, dict) and isinstance(candidate, dict), "adoption identities are missing")
+            _same(canonical_json_sha256(reference, where="adopted reference encoding"),
+                  old_verified[reference_pair]["encoding_identity_sha256"], "authenticated original encoding identity")
+            _same(canonical_json_sha256(candidate, where="adopted candidate encoding"),
+                  cell["encoding_identity_sha256"], "authenticated added encoding identity")
+            for field in ("unit", "source", "projection", "calibration", "encoder_fixture_id"):
+                _require(field in reference and field in candidate, "adoption identity lacks " + field)
+                _same(reference[field], candidate[field], "adopted source/H " + field)
+            _same(candidate["unit"], pair[0], "adopted unit")
+            _same(candidate.get("recipe"), ADDED_RECIPE, "added E2M1 recipe")
+            # Hash the existing source-migration proof once; do not manufacture a
+            # new proof or silently normalize another encoding field here.
+            proof = adoption.get("encoder_source_proof")
+            verified_proof = proof_checks.verify(adoption)
+            proof_fences.update(verified_proof["fences"])
     science = {"plan": {k: v for k, v in old_plan.items() if k not in CANDIDATE_PLAN_FIELDS},
                "prepared": {key: old[key] for key in PREPARED_SCIENCE},
                "qnames": sorted(old["formats_by_qname"])}
@@ -371,73 +428,74 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
     _same(set(pairs), expected, "complete added candidate roster")
     _same(len(pairs), len(expected), "unique added candidate roster")
     selected_names = set(data.formats_by_qname)
-    for row in rows:
-        name, fmt = row["qname"], row["format"]
-        if name not in selected_names:
-            continue
-        _require((name, fmt) not in data.cells, "overlay attempts to replace an original cell")
-        adoption = row["catalog_source_adoption"]
-        _same(adoption.get("schema"), ADOPTION_SCHEMA, "overlay adoption schema")
-        _same(adoption.get("encoder_source_proof"), catalog["reseal_proof"], "overlay encoder source proof")
-        validated_encoder_adoption(adoption)
-        reference_pair = tuple(adoption["reference_pair"])
-        _require(reference_pair in data.cells and reference_pair[0] == name,
-                 "overlay reference candidate is absent from the base catalog")
-        reference = data.cells[reference_pair]["record"]["identity"]
-        candidate = row["record"]["identity"]
-        _same(candidate, adoption["candidate_encoding_identity"], "overlay recorded candidate identity")
-        _same(canonical_json_sha256(adoption["reference_encoding_identity"], where="overlay original encoding"),
-              old_cache.metadata["verified_cells"][reference_pair]["encoding_identity_sha256"],
-              "overlay authenticated original encoding")
-        _same(row["source_weight"], old_cache.metadata["verified_cells"][reference_pair]["source_weight"],
-              "overlay authenticated original source")
-        for key in ("unit", "source", "projection", "calibration", "encoder_fixture_id"):
-            _require(key in candidate and key in reference, "overlay source/H identity lacks " + key)
-            _same(candidate.get(key), reference.get(key), "overlay source/H " + key)
-            _same(candidate.get(key), adoption["reference_encoding_identity"].get(key),
-                  "overlay adopted source/H " + key)
-        _same(candidate.get("unit"), name, "overlay candidate unit")
-        _same(candidate.get("recipe"), ADDED_RECIPE, "overlay candidate recipe")
-        _same(canonical_json_sha256(candidate, where="overlay candidate encoding"),
-              row["encoding_identity_sha256"], "overlay candidate encoding digest")
-        anchor = row["anchor"]
-        scalar = costs["costs"][name][fmt]
-        _require(scalar.get("output_mse_measured") is True
-                 and scalar.get("cost_source") == "tessera_campaign_measured"
-                 and scalar.get("tessera_provenance") == "measured"
-                 and scalar.get("currency") == "output_mse_under_route_activation_contract",
-                 "overlay candidate is not a measured historical row")
-        for target, source in (("output_mse", "dloss"), ("tessera_family", "family"),
-                               ("tessera_body_rate_q256", "body_rate_q256"),
-                               ("activation_contract", "activation_contract"),
-                               ("activation_quantized", "activation_quantized"),
-                               ("input_global_scale", "input_global_scale"), ("wire_bytes", "wire_bytes")):
-            _same(scalar.get(target), anchor.get(source), "overlay measured " + target)
-        for key in ("supplied", "capture_sha256", "text_sha256", "fit_ids_sha256", "fit_tokens"):
-            _same(scalar.get("hessian_identity", {}).get(key),
+    with EncoderAdoptionValidation() as proof_checks:
+        for row in rows:
+            name, fmt = row["qname"], row["format"]
+            if name not in selected_names:
+                continue
+            _require((name, fmt) not in data.cells, "overlay attempts to replace an original cell")
+            adoption = row["catalog_source_adoption"]
+            _same(adoption.get("schema"), ADOPTION_SCHEMA, "overlay adoption schema")
+            _same(adoption.get("encoder_source_proof"), catalog["reseal_proof"], "overlay encoder source proof")
+            proof_checks.verify(adoption)
+            reference_pair = tuple(adoption["reference_pair"])
+            _require(reference_pair in data.cells and reference_pair[0] == name,
+                     "overlay reference candidate is absent from the base catalog")
+            reference = data.cells[reference_pair]["record"]["identity"]
+            candidate = row["record"]["identity"]
+            _same(candidate, adoption["candidate_encoding_identity"], "overlay recorded candidate identity")
+            _same(canonical_json_sha256(adoption["reference_encoding_identity"], where="overlay original encoding"),
+                  old_cache.metadata["verified_cells"][reference_pair]["encoding_identity_sha256"],
+                  "overlay authenticated original encoding")
+            _same(row["source_weight"], old_cache.metadata["verified_cells"][reference_pair]["source_weight"],
+                  "overlay authenticated original source")
+            for key in ("unit", "source", "projection", "calibration", "encoder_fixture_id"):
+                _require(key in candidate and key in reference, "overlay source/H identity lacks " + key)
+                _same(candidate.get(key), reference.get(key), "overlay source/H " + key)
+                _same(candidate.get(key), adoption["reference_encoding_identity"].get(key),
+                      "overlay adopted source/H " + key)
+            _same(candidate.get("unit"), name, "overlay candidate unit")
+            _same(candidate.get("recipe"), ADDED_RECIPE, "overlay candidate recipe")
+            _same(canonical_json_sha256(candidate, where="overlay candidate encoding"),
+                  row["encoding_identity_sha256"], "overlay candidate encoding digest")
+            anchor = row["anchor"]
+            scalar = costs["costs"][name][fmt]
+            _require(scalar.get("output_mse_measured") is True
+                     and scalar.get("cost_source") == "tessera_campaign_measured"
+                     and scalar.get("tessera_provenance") == "measured"
+                     and scalar.get("currency") == "output_mse_under_route_activation_contract",
+                     "overlay candidate is not a measured historical row")
+            for target, source in (("output_mse", "dloss"), ("tessera_family", "family"),
+                                   ("tessera_body_rate_q256", "body_rate_q256"),
+                                   ("activation_contract", "activation_contract"),
+                                   ("activation_quantized", "activation_quantized"),
+                                   ("input_global_scale", "input_global_scale"), ("wire_bytes", "wire_bytes")):
+                _same(scalar.get(target), anchor.get(source), "overlay measured " + target)
+            for key in ("supplied", "capture_sha256", "text_sha256", "fit_ids_sha256", "fit_tokens"):
+                _same(scalar.get("hessian_identity", {}).get(key),
                   data.payload["provenance"]["hessian"].get(key), "overlay measured H " + key)
-        _same(row["activation"].get("input_global_scale"), anchor.get("input_global_scale"),
-              "overlay activation scale")
-        for field in ("wire", "render"):
-            path = Path(row[field])
-            _require(path.is_absolute() and not path.is_symlink(), "overlay path must be an existing regular artifact")
-            stat = path.stat()
-            _require(stat_module.S_ISREG(stat.st_mode), "overlay artifact is not a regular file")
-            _same({"inode": stat.st_ino, "bytes": stat.st_size,
-                   "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns},
-                  row[field + "_stat"], "overlay current " + field + " fence")
-        cell = {key: copy.deepcopy(row[key]) for key in
-                ("anchor", "record", "wire", "render", "render_origin", "render_comparison",
-                 "catalog_source_adoption", "adopted_source_hessian")}
-        if verify_payloads:
-            _same(hashlib.sha256(Path(cell["wire"]).read_bytes()).hexdigest(),
-                  cell["record"]["blob_sha256"], "overlay wire bytes")
-            cell["render_file_sha256"] = hashlib.sha256(Path(cell["render"]).read_bytes()).hexdigest()
-        data.cells[name, fmt] = cell
-        data.formats_by_qname[name] = (*data.formats_by_qname[name], fmt)
-        data.payload["costs"][name][fmt] = copy.deepcopy(scalar)
-        if name in data.payload.get(EXPERT_WIRES_KEY, {}):
-            data.payload[EXPERT_WIRES_KEY][name][fmt] = copy.deepcopy(cell["record"])
+            _same(row["activation"].get("input_global_scale"), anchor.get("input_global_scale"),
+                  "overlay activation scale")
+            for field in ("wire", "render"):
+                path = Path(row[field])
+                _require(path.is_absolute() and not path.is_symlink(), "overlay path must be an existing regular artifact")
+                stat = path.stat()
+                _require(stat_module.S_ISREG(stat.st_mode), "overlay artifact is not a regular file")
+                _same({"inode": stat.st_ino, "bytes": stat.st_size,
+                       "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns},
+                      row[field + "_stat"], "overlay current " + field + " fence")
+            cell = {key: copy.deepcopy(row[key]) for key in
+                    ("anchor", "record", "wire", "render", "render_origin", "render_comparison",
+                     "catalog_source_adoption", "adopted_source_hessian")}
+            if verify_payloads:
+                _same(hashlib.sha256(Path(cell["wire"]).read_bytes()).hexdigest(),
+                      cell["record"]["blob_sha256"], "overlay wire bytes")
+                cell["render_file_sha256"] = hashlib.sha256(Path(cell["render"]).read_bytes()).hexdigest()
+            data.cells[name, fmt] = cell
+            data.formats_by_qname[name] = (*data.formats_by_qname[name], fmt)
+            data.payload["costs"][name][fmt] = copy.deepcopy(scalar)
+            if name in data.payload.get(EXPERT_WIRES_KEY, {}):
+                data.payload[EXPERT_WIRES_KEY][name][fmt] = copy.deepcopy(cell["record"])
     data.payload["provenance"]["candidate_overlay"] = dict(bound)
     return data
 
