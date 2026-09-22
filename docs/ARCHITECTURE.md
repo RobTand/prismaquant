@@ -9,6 +9,22 @@ generation record and receipt carry a `retained` block naming the origins and
 bytes still owned. No format, lane, pin, kernel order, ship-gate verdict or
 default changes.
 
+Stage B may explicitly seal `PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
+`PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` to keep its cotangent working plane
+on local disk. The existing boundary owner preallocates the exact tensor-byte
+extent in a private disposable file, loads authenticated checkpoint entries
+one at a time through the existing strict pinned reader, and owns cleanup.
+Every coordinate has a fixed dtype/shape slot; replay reads owned CPU tensors
+and overwrites the same slot, syncing and dropping file pages after I/O.
+There are no mmap tensor views and no second retained checkpoint plane.
+Checkpoint/source/bound/replay phases and layer/probe/batch arithmetic order
+remain unchanged. The container requires the explicitly sealed same-path
+writable mount; NFS, tmpfs and overlay scratch roots refuse. The per-job disk
+ceiling is checked before physical allocation and is not a global disk ledger.
+Interrupted scratch is discarded; original authenticated checkpoints and
+committed cost journals remain the recovery authority. No GPU throughput or
+large-model peak claim follows from the tiny CPU equality qualification.
+
 Stage A forward recovery (2026-09-22, PQ #949): `joint_cost_stage_a`
 accepts an optional `--forward-recovery` capsule plus its SHA-256. The capsule
 is a separate explicit authority (`prismaquant.joint_forward_recovery.v1`,
@@ -100,8 +116,65 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `fix/stagea-forward-recovery-20260922`.
+As of: 2026-09-22 · `flash/926-activation-quantizer-v2-reader`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `flash/926-activation-quantizer-v2-reader`) for **the
+activation-quantizer table's second grammar** (PQ #926, Tessera contract v33 /
+tessera#555). `platforms[<platform>]` became a LIST of attestations, one per
+serving image, because the fp4 rounding decision belongs to the runtime's
+compiled operator and two builds of one operator are two objects. The reader
+now accepts `tessera.activation-quantizer.v1` and `.v2` and refuses every other
+name, parsing both into one three-level table
+`[platform][image][activation_contract]` keyed by the image's content digest
+(a v1 block is a v2 list of one). Which table covers a measurement is decided
+by the image it EXECUTES in: `require_activation_quantizer_attested` takes
+`executing_image`, `prepare_native_inputs` passes the panel's `runtime_image`,
+and a platform that publishes several tables with no image named is REFUSED --
+there is no first entry. Refusals: a non-list under v2, an object under v1, an
+empty list, two tables for one image, a second table naming no `generated`
+block, a tag where a digest is needed, and an executing image no table covers
+(naming both sides). The consume-side gate
+`require_panel_execution_scope` is unchanged and still bites: selecting
+correctly at freeze time does not retire it. `generated.image` joins
+`contract_answer`'s activation row as its third column and its drift key,
+because it now selects rather than labels -- two byte-identical tables would
+otherwise project one row. The dev pin is NOT moved here; only the answer
+literal's new column is transcribed. Gates:
+`test_activation_quantizer_attestation.py`,
+`test_native_panel_execution_scope.py`, against
+`tests/fixtures/tessera_activation_quantizers_v34.json` -- Tessera master
+`e42c0593d2`'s block verbatim, with its digest recorded.
+
+Same branch, same commit, for **a qualified launch that rides no extension**
+(PQ #958). `lane_eligibility._parse_table` read every `prefix::symbol` a cell
+executes as a launch through `native_extensions[prefix]` and refused the whole
+contract when no row declared the prefix. Contract v34 mints four dense cells
+on `tessera::window_gemm_dense` under decoder `native_window_gemm` and states
+that the launch carries no lane because it is a launch, not an extension lane;
+its `native_extensions` publishes only `tessera_window_gemv`. Such a launch now
+reads as the route's own path, exactly as `torch._scaled_mm` does, with no wire
+predicate to apply (`lane_claim_for_cell` already returned `None` for it). The
+guard moves to the field the lane gate keys on: a launch that takes a decoder
+some lane SERVES while naming an extension no row declares is REFUSED, naming
+the cell, the launch, the decoder and that extension. A launch whose prefix is
+a declared extension still must carry that extension's decoder. With no
+`native_extensions` table at all, any qualified launch is still refused --
+there is nothing to read the decoder against. Gates:
+`test_tessera_lane_requires.py`.
+
+Re-stamped (2026-09-22, `fix/stageb-bounded-cotangent-950-20260922`) for
+**a bounded Stage B cotangent working plane** (PQ #950). Checkpoint
+restoration reads one authenticated entry at a time through the existing
+strict pinned reader instead of materializing all 4x512 cotangents at once,
+and `load_adjoint_checkpoint` takes an optional caller-owned cotangent
+factory plus an auxiliary byte ceiling for the shared-state payloads. When
+`PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
+`PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` are sealed, the boundary owner
+preallocates one fixed-slot local file and the quantum reuses that slot per
+coordinate; unset, the historical in-memory plane is unchanged. Phase order,
+layer/probe/batch arithmetic, calibration draw and checkpoint identity are
+untouched. Gate: `tests/test_stageb_cotangent_scratch.py`.
 
 Re-stamped (2026-09-22, `feat/pq-local-output-shuttle-20260922`) for
 **PB-owned precommit local output spooling** (PQ #928, PB #857). The default
@@ -1172,9 +1245,10 @@ commit's contract. The union digest predicted while the gate was written
 (`712a15e4…e8c61c`) went stale — #563's rework resolved two master conflicts
 on its branch, so the landed union bytes differ from the prediction;
 `prismaquant/tessera_runtime/README.md` carries the verification command.
-Tessera master has since advanced to contract v33 (#568, activation-quantizer
-schema v2); this pin does not chase it, and the v33 reader migration belongs
-to the next bump.
+Tessera master has since advanced past contract v33 (#568, activation-quantizer
+schema v2); this pin does not chase it. The READER no longer blocks that: it
+reads schema v1 and v2 since PQ #926 (below), so which commit to pin is a
+review of the answer diff rather than a migration.
 
 Re-stamped (2026-09-18, `flash/747-retained-budget-transition-20260918`) for
 **a run transition that admits a retained-budget-only plan correction**
@@ -6860,8 +6934,10 @@ executes (`native_operator_panel.py` -> `perturbed_x_cache._activation_qdq` ->
 contract published only the rule's NAME. Two mechanisms close that:
 
 * `tessera_runtime_contract.require_activation_quantizer_attested` reads the
-  runtime's own `activation_quantizers` block (`tessera.activation-quantizer.v1`,
-  keyed by platform then activation contract): probe **groups** of
+  runtime's own `activation_quantizers` block
+  (`tessera.activation-quantizer.v1` and `.v2`, keyed by platform, then by the
+  image the table was generated in, then by activation contract): probe
+  **groups** of
   `unit_length` bf16 inputs at a published global scale, with the UE4M3 byte
   the kernel stored and the code it emitted for each element, generated by
   running `torch.ops._C.scaled_fp4_quant` and by nothing else. PrismaQuant
@@ -6893,7 +6969,11 @@ and the contract says in which image:
 `activation_quantizers.platforms.sm_121.generated` -- `image`, `vllm`, `torch`,
 `device`, `compute_capability`, `driver`, `generator_sha256`, published beside
 `contracts` at the **platform** level, one generation for every contract that
-platform attests. That scope is read by `_parse_activation_generated`
+platform attests. Since Tessera contract v33 (activation-quantizer schema v2,
+tessera#555) a platform publishes a **list** of those attestations, one per
+serving image; PQ #926 reads both grammars into one three-level table
+(`[platform][image][activation_contract]`) and makes the image the SELECTOR
+rather than a label -- see the #926 stamp. That scope is read by `_parse_activation_generated`
 (`tessera_runtime_contract.py`) straight from the contract bytes, never
 asserted by a driver or an environment variable, and travels into the panel
 stamp as `generated` (plus `generated_absent_because` when the table publishes

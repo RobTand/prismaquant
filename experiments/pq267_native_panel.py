@@ -107,7 +107,8 @@ def prepare(args):
     inputs, tensors = prepare_native_inputs(cache, weight, rows, unit=unit, format_name=fmt,
         calibration_receipt=calibration, wire_blob=blob, wire_record=record, encoding_identity=encoding,
         prefill_rows=plan["prefill_rows"], decode_rows=plan["decode_rows"],
-        max_resident_bytes=plan["max_resident_bytes"])
+        max_resident_bytes=plan["max_resident_bytes"],
+        runtime_image=plan["runtime_image"])
     (args.out / "weight.tessera").write_bytes(blob)
     dump(args.out / "wire-record.json", record)
     save_file({key: tensor.detach().cpu().contiguous().clone() for key, tensor in tensors.items()},
