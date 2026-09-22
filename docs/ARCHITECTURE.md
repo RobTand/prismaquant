@@ -3,6 +3,12 @@
 As of: 2026-09-21 · `muse/stager904-reconciled-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-21, `muse/stager904-reconciled-20260921`) for
+**retirement ownership** (PQ #918): an unresolved queued or running stager
+publication refuses origin retirement with a timeout. The origin, live-byte
+charge, reference and slot stay owned, and the release report names the debt.
+No format, kernel order, or staging-budget default changes.
+
 Re-stamped (2026-09-21, `feat/stagea-background-stager-895`) for **the Stage A
 owner's background stager** (PQ #895). No format, lane, pin, ship-gate verdict
 or kernel order changes, and the **default is unchanged**: at the sealed

@@ -619,9 +619,16 @@ class StreamedBoundaryArtifacts:
                 # ask the question below as before.
                 with self._produced_blocked("copy_before_unlink"), (
                         self._produced_lock.yielded()):
-                    self._stager.wait_keys_idle(
+                    idle = self._stager.wait_keys_idle(
                         (key,), labels=("publish-ahead", "stage-ahead"),
                         timeout=self._produced_plan["staging_timeout_s"])
+                if not idle:
+                    reason = "publication did not become idle before origin retirement"
+                    self._produced_release_errors.append(
+                        {"batch_id": group["batch_id"],
+                         "step": "retain-origin-copy-unresolved",
+                         "reason": {"error": reason, "origin": reference.path}})
+                    raise TimeoutError(reason)
             if (key not in self._produced_ahead or group["retired"]
                     or group["context"] is not None
                     or group.get("copy_awaited")):
@@ -716,8 +723,8 @@ class StreamedBoundaryArtifacts:
             raise RuntimeError(
                 "an attached read-only generation cannot retire entries")
         identity = self._entry_identity(reference)
-        del self._slots[identity["slot"]]
         self._retire(reference)
+        del self._slots[identity["slot"]]
 
     # ------------------------------------------------------------------
     # Checkpoint artifact budget: strided-checkpoint files counted in the
