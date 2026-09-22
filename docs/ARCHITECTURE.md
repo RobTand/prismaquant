@@ -12,6 +12,14 @@ render, calibration, and wire checks. Its PB read manifest names the same
 prepared/cache files for either monolithic or distributed costs. No timing
 price, serving qualification, or missing candidate is inferred by this bridge.
 
+The full-engine report reader accepts the producer's optional `allocator_config`
+and v2 startup reservation witness fields. It recomputes reserved extent and
+same-sample slack from routed startup records or the versioned dense startup
+check, and refuses missing allocator binding, partial claims, or disagreement.
+This is a startup observation, not a run-long peak; it neither closes an open
+resource domain nor substitutes for the transient boundary's reservation-slack
+evidence.
+
 As of: 2026-09-22 · `diagnose/r4-retiring-cover-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
