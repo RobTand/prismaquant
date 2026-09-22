@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+The full-engine report reader accepts the producer's optional `allocator_config`
+and v2 startup reservation witness fields. It recomputes reserved extent and
+same-sample slack from routed startup records or the versioned dense startup
+check, and refuses missing allocator binding, partial claims, or disagreement.
+This is a startup observation, not a run-long peak; it neither closes an open
+resource domain nor substitutes for the transient boundary's reservation-slack
+evidence.
+
 As of: 2026-09-22 · `diagnose/r4-retiring-cover-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
