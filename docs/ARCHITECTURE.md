@@ -1,5 +1,25 @@
 # PrismaQuant Architecture
 
+GLM router epsilon (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`, PQ
+#938): `native_moe_panel.validate_glm_routing` no longer requires the router
+normalization epsilon to be `1e-6`, LFM's value. It accepts the value the
+capture read off the source router (`glm_routing_replay.router_normalization_epsilon`,
+`1e-20` for the GLM-5 router, bound by `router_source_sha256`) and refuses
+only a value that is not a positive finite float. Before this, every real GLM
+capture was refused. The LFM route keeps its own `1e-6` check. Gate:
+`tests/test_native_moe_glm_geometry.py`.
+
+Tessera pin (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`): the
+serving-runtime pin and the reader dev pin move from `acf9eafa6a…` to
+`07bfcc0e9b…`, Tessera master after #580, #582, #583 and #585 (the declared
+resident-tensor census, the wire-derived footprint and the native-unpriced
+acquisition producer) and #596 (`SourceDigestCache.adopt`). The packaged
+contract is byte-identical (v34, digest `d37c9448…03472`, lane schema v10), so
+no admission answer moves; `export.py` and `grammar.py` did not move either, so
+the legal domain is a re-transcription. The PrismaBuild test interpreter is
+`/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e` on sparky, sparklina and
+dl380g10. No format, default, stage or ship gate changes.
+
 Stage A startup and timeout hygiene (2026-09-22, PQ #978): Stage A now
 refuses at startup, before any GPU work, when a checkpoint path it would write
 already exists (`run_adjoint_capture` checks
@@ -45,7 +65,12 @@ streamed-model identity cache into Tessera's source digest cache after the
 complete-checkpoint validator and every per-shard fence check pass, so a whole
 cached export reuses those hashes without rereading payloads. It writes through
 Tessera's pinned `SourceDigestCache` (`acf9eafa6a…`, #966). No format, default,
-stage or ship gate changes.
+stage or ship gate changes. Since the `07bfcc0e9b…` pin it writes through
+`SourceDigestCache.adopt` (Tessera #596) rather than the private `_record`:
+Tessera re-takes each shard's fingerprint, refuses a shard changed inside its
+quiescence window (300 s by default, as for a fresh read) and stamps its own
+`adopted` record beside PrismaQuant's writer. Gate:
+`tests/test_tessera_source_digest_adoption.py`.
 
 Rooted selected cache (2026-09-22, PQ #939): `tools/build_tessera_selected_cache.py`
 builds a `tessera.cached_units.v2` manifest only from an accepted
@@ -254,6 +279,10 @@ digest of every unit the overlay prices. Without a reference binding on both
 sides a differing seal still refuses. The draw triple and every other check in
 the loop are unchanged. No format, default, stage or ship gate changes. Gate:
 `tests/test_joint_catalog_extension.py`.
+
+Re-stamped (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`) for the
+Tessera pin move to `07bfcc0e9b…` (contract unchanged at v34). Previous stamp:
+2026-09-22 · `fix/joint-catalog-extension-20260922`.
 
 Re-stamped (2026-09-22, `flash/926-activation-quantizer-v2-reader`) for **the
 activation-quantizer table's second grammar** (PQ #926, Tessera contract v33 /
@@ -19608,9 +19637,10 @@ top-1024 intersection bound, because no instrument in either repository
 produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9` (master after #588, #590 and #592, re-pinned
-2026-09-22; version `0.1.0`, contract v34, lane schema v10 — unchanged:
-v25-v34 are additive for a v10 reader. v32 was pinned at `cc739a55…`
+Tessera `07bfcc0e9b7da13276938cb722bc7dcd893e6c63` (master after #580, #582, #583, #585 and
+#596, re-pinned 2026-09-22; version `0.1.0`, contract v34, lane schema v10 — unchanged:
+v25-v34 are additive for a v10 reader. v34 was first pinned at `acf9eafa6a…`
+(master after #588, #590 and #592, same contract bytes), v32 at `cc739a55…`
 (the #562/#563 union head, 2026-09-19), v29 at `4c384e6049…`, v24 at `7dbbacbd…`, v23 at
 `1c827abc…`, v22 at `387eda36…` and `ba582d4…`, v21 landed at `b8b1cb38`
 in Tessera #313 and the release `e78959ed…` carried v20; first pinned
