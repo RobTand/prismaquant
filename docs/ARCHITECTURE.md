@@ -74,7 +74,7 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `codex/glm-r8-integration-20260922`.
+As of: 2026-09-22 · `fix/stagea-forward-recovery-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-22, `feat/pq-local-output-shuttle-20260922`) for
