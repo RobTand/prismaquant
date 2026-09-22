@@ -932,7 +932,8 @@ class BoundaryProducedPublication:
     # -- per group ---------------------------------------------------------
 
     def require_prewrite(self, *, batch_id: str, payload_ceiling_bytes: int,
-                         paths: list[str], temp_ceiling_bytes: int = 0) -> dict:
+                         paths: list[str], temp_ceiling_bytes: int = 0,
+                         checkpoint_ceiling_bytes: int = 0) -> dict:
         """Claim the group's durable budget BEFORE its first byte.
 
         ``paths`` is the group's PLANNED durable-origin superset: the exact
@@ -941,13 +942,19 @@ class BoundaryProducedPublication:
         is allowed by contract and the rename makes the temporaries absent
         again, which is what the commit's planned-omitted-absent proof
         requires.  Nothing here writes, copies or hashes a file.
+
+        ``checkpoint_ceiling_bytes`` charges PrismaBuild's ``checkpoint``
+        class instead of ``payload``. Only a declared adjoint checkpoint
+        group sets it; every boundary and cotangent group leaves it at
+        zero, so their claims are unchanged.
         """
 
         out = dict(self._po.require_prewrite(
             self.queue, self.instance, self.template, batch_id=batch_id,
             tier=self.tier,
             class_bytes={"payload": int(payload_ceiling_bytes),
-                         "checkpoint": 0, "temp": int(temp_ceiling_bytes)},
+                         "checkpoint": int(checkpoint_ceiling_bytes),
+                         "temp": int(temp_ceiling_bytes)},
             paths=list(paths)))
         if not out.get("ok"):
             raise BoundaryProducedPrewriteRefused(

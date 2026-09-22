@@ -222,6 +222,11 @@ class StreamedBoundaryArtifacts:
         self._checkpoint_committed = {}
         self._checkpoint_active = None
         self._next_checkpoint_reservation = 1
+        # Cotangent entries a committed declared checkpoint references
+        # (reference -> reservation id). The rolling chain may drop them
+        # from its live set, but their files are the checkpoint's bytes
+        # now, so this owner never unlinks them.
+        self._checkpoint_pinned = {}
         self._transient_hold_bytes = 0
         # Produced-output binding (Stage A's own entries staged through PB).
         # None on every ordinary path: an unbound owner writes, reads and
@@ -675,6 +680,15 @@ class StreamedBoundaryArtifacts:
     def _retire(self, reference, *, missing_ok=False):
         if self._references.get(reference.name) != reference:
             raise RuntimeError("exact boundary retirement has a stale reference")
+        if reference in self._checkpoint_pinned:
+            # A committed declared checkpoint owns this file: leave the
+            # rolling set without unlinking. Its bytes moved from the
+            # ordinary ledger to the checkpoint ledger at commit, and its
+            # produced group keeps counting it live, so PrismaBuild's
+            # origin charge stays with the file (``reclaim_origin`` would
+            # refuse ``origin-present-retain`` anyway).
+            del self._references[reference.name]
+            return
         if reference in self._forward_inputs:
             # Borrowed files and original ACKs remain owned by the old attempt.
             del self._references[reference.name]
@@ -954,14 +968,14 @@ class StreamedBoundaryArtifacts:
         return self.config["max_artifact_bytes"] - self._checkpoint_accounted_bytes()
 
     @staticmethod
-    def _validate_checkpoint_file_plan(file_plan):
+    def _validate_checkpoint_file_plan(file_plan, *, allow_no_files=False):
         if not isinstance(file_plan, dict):
             raise RuntimeError("exact boundary checkpoint file plan is not a mapping")
         files = file_plan.get("files")
         manifest_bytes = file_plan.get("manifest_bytes")
         temp_overlap_bytes = file_plan.get("temp_overlap_bytes")
         envelope_bytes = file_plan.get("envelope_bytes")
-        if (not isinstance(files, list) or not files
+        if (not isinstance(files, list) or (not files and not allow_no_files)
                 or type(manifest_bytes) is not int or manifest_bytes <= 0
                 or type(temp_overlap_bytes) is not int or temp_overlap_bytes < 0
                 or type(envelope_bytes) is not int or envelope_bytes <= 0):
@@ -982,13 +996,25 @@ class StreamedBoundaryArtifacts:
         return files
 
     def reserve_checkpoint_artifact(self, *, label, envelope_bytes, file_plan,
-                                    checkpoint_dir):
+                                    checkpoint_dir, referenced=None,
+                                    spool_boundary=None):
         """Admit one checkpoint attempt's whole envelope before it writes.
 
         Returns an integer reservation id. Refuses (counting a refusal) when
         the envelope does not fit the remaining ceiling, when another
         reservation is already active, or when the owner is not a running
         writer. Nothing is created by this call.
+
+        ``referenced`` (declared checkpoints only) maps entry names to this
+        generation's live cotangent references that the checkpoint record
+        names instead of copying. They are already counted in the ordinary
+        ledger, so they are not in the envelope; commit moves their bytes
+        to the checkpoint ledger and pins them. ``spool_boundary`` (declared
+        checkpoints with a bound produced-output spool) routes the
+        checkpoint's own files through one ``checkpoint``-class spool group
+        claimed here, after admission: the writer writes each planned file
+        to :meth:`checkpoint_local_paths`, and commit verifies those local
+        files and hands the group to PrismaBuild's export.
         """
         if self._readonly:
             raise RuntimeError(
@@ -998,7 +1024,16 @@ class StreamedBoundaryArtifacts:
         if self._checkpoint_active is not None:
             raise RuntimeError(
                 "exact boundary checkpoint reservation already active: single-owner writer")
-        files = self._validate_checkpoint_file_plan(file_plan)
+        referenced = dict(referenced or {})
+        files = self._validate_checkpoint_file_plan(
+            file_plan, allow_no_files=bool(referenced))
+        for name, reference in referenced.items():
+            identity = self._entry_identity(reference)
+            if (reference.name != name or identity["kind"] != "cotangent"
+                    or reference in self._checkpoint_pinned):
+                raise RuntimeError(
+                    "exact boundary checkpoint can reference only an unpinned "
+                    f"live cotangent entry: {name}")
         if file_plan["envelope_bytes"] != envelope_bytes:
             raise RuntimeError(
                 "exact boundary checkpoint envelope does not match its file plan")
@@ -1037,8 +1072,21 @@ class StreamedBoundaryArtifacts:
             "dir": str(directory), "label": str(label), "state": "active",
             "receipt_digest": None,
         }
+        if referenced:
+            self._checkpoint_reservations[reservation]["referenced"] = referenced
         self._checkpoint_active = reservation
         self.telemetry["checkpoint_reservations"] += 1
+        if spool_boundary is not None:
+            try:
+                self._claim_checkpoint_spool_group(
+                    self._checkpoint_reservations[reservation],
+                    boundary=spool_boundary, directory=directory)
+            except BaseException:
+                # Nothing was written: the claim either failed or gave its
+                # prewrite back, so the admission is released like a cancel.
+                del self._checkpoint_reservations[reservation]
+                self._checkpoint_active = None
+                raise
         return reservation
 
     def commit_checkpoint_artifact(self, reservation_id, record):
@@ -1081,6 +1129,12 @@ class StreamedBoundaryArtifacts:
             raise RuntimeError(message)
 
         planned = {row["name"]: row for row in entry["files"]}
+        referenced = entry.get("referenced", {})
+        local_paths = entry.get("local_paths")
+        if local_paths is not None and entry.get("spool_submitted"):
+            raise RuntimeError(
+                "exact boundary checkpoint spool group was already handed "
+                "to PrismaBuild")
         rows = []
         for field in ("activation_entries", "shared_state_entries"):
             entries = record.get(field)
@@ -1090,12 +1144,24 @@ class StreamedBoundaryArtifacts:
             rows.extend(entries)
         names = [row["name"] for row in rows
                  if isinstance(row, dict) and type(row.get("name")) is str]
-        if (len(names) != len(rows) or sorted(names) != sorted(planned)
+        if (len(names) != len(rows)
+                or sorted(names) != sorted([*planned, *referenced])
                 or len(set(names)) != len(names)):
-            missing = sorted(set(planned) - set(names))
-            extra = sorted(set(names) - set(planned))
+            missing = sorted((set(planned) | set(referenced)) - set(names))
+            extra = sorted(set(names) - set(planned) - set(referenced))
             _fail("exact boundary checkpoint receipt does not match its "
                   f"reserved plan: missing={missing[:8]}, extra={extra[:8]}")
+        if referenced:
+            from .joint_adjoint_checkpoints import exact_entry_record
+            for row in rows:
+                reference = referenced.get(row["name"])
+                if reference is None:
+                    continue
+                if (self._references.get(reference.name) != reference
+                        or row != exact_entry_record(reference)):
+                    _fail("exact boundary checkpoint reference is not the "
+                          f"live entry it reserved: {row['name']}")
+            rows = [row for row in rows if row["name"] not in referenced]
         for row in rows:
             expected = planned[row["name"]]
             if (type(row.get("path")) is not str
@@ -1120,7 +1186,8 @@ class StreamedBoundaryArtifacts:
         actual = 0
         for row in rows:
             try:
-                observed = Path(row["path"]).stat().st_size
+                observed = Path(row["path"] if local_paths is None
+                                else local_paths[row["path"]]).stat().st_size
             except OSError:
                 _fail("exact boundary checkpoint receipt file is missing: "
                       f"{row.get('name')}")
@@ -1129,6 +1196,8 @@ class StreamedBoundaryArtifacts:
                       f"{row.get('name')}")
             actual += row["file_bytes"]
         manifest_path = Path(entry["dir"]) / "checkpoint.json"
+        if local_paths is not None:
+            manifest_path = Path(local_paths[str(manifest_path)])
         try:
             manifest_bytes = manifest_path.stat().st_size
         except OSError:
@@ -1137,12 +1206,21 @@ class StreamedBoundaryArtifacts:
         if actual > entry["envelope_bytes"]:
             _fail("exact boundary checkpoint actual bytes exceed the reserved "
                   f"envelope ({actual} > {entry['envelope_bytes']})")
+        if local_paths is not None:
+            self._submit_checkpoint_spool_group(entry, rows, _fail)
         unused = entry["envelope_bytes"] - actual
         entry["state"] = "committed"
         entry["receipt_digest"] = digest
         if self._checkpoint_active == reservation_id:
             self._checkpoint_active = None
-        self.telemetry["live_checkpoint_bytes"] += actual
+        referenced_bytes = 0
+        for reference in referenced.values():
+            # The file stays where the chain wrote it; its bytes change
+            # ledgers, so the aggregate ceiling sees the same total.
+            self._checkpoint_pinned[reference] = reservation_id
+            self.telemetry["live_artifact_bytes"] -= reference.file_bytes
+            referenced_bytes += reference.file_bytes
+        self.telemetry["live_checkpoint_bytes"] += actual + referenced_bytes
         self.telemetry["peak_checkpoint_bytes"] = max(
             self.telemetry["live_checkpoint_bytes"],
             self.telemetry["peak_checkpoint_bytes"])
@@ -1152,6 +1230,9 @@ class StreamedBoundaryArtifacts:
                       "actual_bytes": actual, "unused_bytes": unused,
                       "receipt_digest": digest,
                       "checkpoint_dir": entry["dir"]}
+        if referenced:
+            commitment["referenced_entries"] = len(referenced)
+            commitment["referenced_bytes"] = referenced_bytes
         self._checkpoint_committed[reservation_id] = commitment
         if self._check_memory is not None:
             self._check_memory("checkpoint artifact publication")
@@ -1207,6 +1288,14 @@ class StreamedBoundaryArtifacts:
         import shutil
 
         directory = Path(entry["dir"])
+        if entry.get("spool_submitted"):
+            # PrismaBuild may be exporting this group into the directory:
+            # deleting there would race its copy. The group, its prewrite
+            # and its bytes stay with PrismaBuild's lifecycle.
+            raise RuntimeError(
+                "exact boundary checkpoint reclaim refuses a spool group "
+                f"already handed to PrismaBuild at {entry['dir']}; retaining "
+                "its bytes")
         if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
             raise RuntimeError(
                 "exact boundary checkpoint reclaim refuses an unexpected "
@@ -1258,6 +1347,144 @@ class StreamedBoundaryArtifacts:
                 return dict(commitment)
         return None
 
+    def checkpoint_pinned(self, reference):
+        """Whether a committed declared checkpoint references this entry."""
+        return reference in self._checkpoint_pinned
+
+    def declared_checkpoint_report(self):
+        """Counts for the receipt of a run that wrote declared checkpoints."""
+        committed = [row for row in self._checkpoint_committed.values()
+                     if "referenced_entries" in row]
+        return {"schema": "prismaquant.declared_adjoint_checkpoints.v1",
+                "checkpoints": len(committed),
+                "referenced_entries": sum(
+                    row["referenced_entries"] for row in committed),
+                "referenced_bytes": sum(
+                    row["referenced_bytes"] for row in committed),
+                "written_bytes": sum(row["actual_bytes"] for row in committed),
+                "through_spool": self._local_output_spool is not None}
+
+    def declared_checkpoint_spool(self):
+        """The spool a declared checkpoint writes through, or ``None``.
+
+        ``None`` only for an owner with no produced-output binding (a local
+        or test invocation), whose checkpoint files have no PrismaBuild
+        lifecycle to be declared into. A bound owner without a spool
+        refuses: its declared checkpoint would otherwise write the shared
+        output root synchronously, which is what the flag exists to stop.
+        """
+        if self._produced is not None and self._local_output_spool is None:
+            raise RuntimeError(
+                "declared adjoint checkpoints of a produced-output owner "
+                "need the local output spool (PRISMABUILD_PRODUCED_SPOOL_ROOT "
+                "in the sealed producer environment)")
+        return self._local_output_spool
+
+    def checkpoint_local_paths(self, reservation_id):
+        """Canonical path -> local spool file for a spool-routed reservation."""
+        entry = self._checkpoint_reservations.get(reservation_id)
+        if entry is None or "local_paths" not in entry:
+            raise RuntimeError(
+                "exact boundary checkpoint reservation has no spool group")
+        return dict(entry["local_paths"])
+
+    def _claim_checkpoint_spool_group(self, entry, *, boundary, directory):
+        """Claim one declared checkpoint's spool group before its first byte.
+
+        The checkpoint's own files (shared-state pickles, any copied tensor
+        and ``checkpoint.json``) form one PrismaBuild group of class
+        ``checkpoint``. The prewrite charges the checkpoint class and owns
+        exactly each final plus the ``.tmp`` its export writes, and the
+        spool reserves a directory on this host's local disk. PrismaBuild
+        exports the group into the pool as its own action; this thread
+        never writes the shared root.
+        """
+        spool = self.declared_checkpoint_spool()
+        if spool is None:
+            raise RuntimeError(
+                "a spool-routed checkpoint needs a bound produced-output spool")
+        if not self._produced.contains(directory):
+            raise RuntimeError(
+                f"the declared checkpoint directory {directory} is outside "
+                f"the bound output prefix {self._produced.output_prefix}: "
+                "declare a produced-output template whose prefix covers "
+                "the adjoint checkpoints")
+        if directory.exists() or directory.is_symlink():
+            raise RuntimeError(
+                f"declared checkpoint directory already exists: {directory}")
+        finals = ([row["path"] for row in entry["files"]]
+                  + [str(directory / "checkpoint.json")])
+        if len({Path(path).name for path in finals}) != len(finals):
+            raise RuntimeError(
+                "declared checkpoint files repeat a name within one group")
+        ceiling = (sum(row["envelope_bytes"] for row in entry["files"])
+                   + int(entry["manifest_bytes"]))
+        paths = [candidate for path in finals
+                 for candidate in (path, path + ".tmp")]
+        batch_id = self._produced.batch_id_for(
+            kind="checkpoint", boundary_index=int(boundary), group_index=0)
+        key = ("checkpoint", int(boundary), -1, 0)
+
+        def claim():
+            with self._produced_lock.yielded():
+                self._produced.require_prewrite(
+                    batch_id=batch_id, payload_ceiling_bytes=0,
+                    checkpoint_ceiling_bytes=ceiling, paths=paths)
+            try:
+                with self._produced_lock.yielded():
+                    return spool.reserve(batch_id, ceiling)
+            except BaseException:
+                # No byte exists yet, which PrismaBuild proves before it
+                # gives the prewrite back.
+                with self._produced_lock.yielded():
+                    self._produced.abort_prewrite(batch_id=batch_id)
+                raise
+
+        self._produced_raise_stager_failure()
+        with self._produced_lock.held():
+            local = Path(self._produced_submit(
+                "urgent", "checkpoint-prewrite", claim, keys=(key,),
+                reason="prewrite", wait=True))
+        entry["spool_batch_id"] = batch_id
+        entry["local_paths"] = {path: str(local / Path(path).name)
+                                for path in finals}
+
+    def _submit_checkpoint_spool_group(self, entry, rows, fail):
+        """Hand a verified checkpoint group to PrismaBuild's export.
+
+        Every row and the manifest is recorded under class ``checkpoint``
+        with its canonical destination, then the group is submitted. From
+        the submit on, the group is PrismaBuild's until its export lands:
+        the owner's receipt waits for that in ``settle_local_output``.
+        """
+        import hashlib
+
+        from .produced_output_spool import DeclaredFile
+
+        spool = self._local_output_spool
+        batch_id = entry["spool_batch_id"]
+        local_paths = entry["local_paths"]
+        manifest = str(Path(entry["dir"]) / "checkpoint.json")
+        files = [DeclaredFile(name=row["name"], path=local_paths[row["path"]],
+                              file_bytes=int(row["file_bytes"]),
+                              sha256=str(row["sha256"]))
+                 for row in rows]
+        payload = Path(local_paths[manifest]).read_bytes()
+        files.append(DeclaredFile(
+            name="checkpoint.json", path=local_paths[manifest],
+            file_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest()))
+        for declared in files:
+            canonical = next(path for path, local in local_paths.items()
+                             if local == declared.path)
+            spool.record(batch_id, declared, Path(canonical).parent,
+                         artifact_class="checkpoint")
+        entry["spool_submitted"] = True
+        try:
+            spool.submit(batch_id)
+        except BaseException as exc:
+            fail(f"exact boundary checkpoint spool export refused: {exc}")
+
     def checkpoint_output_descriptor(self):
         """Application-budget output descriptor for a future PB output lane.
 
@@ -1296,6 +1523,13 @@ class StreamedBoundaryArtifacts:
         """
         for reservation_id, entry in list(self._checkpoint_reservations.items()):
             if entry["state"] != "retained":
+                continue
+            if entry.get("spool_submitted"):
+                # Retained, not disposed: see _dispose_retained_entry.
+                self._produced_release_errors.append(
+                    {"batch_id": entry["spool_batch_id"],
+                     "step": "checkpoint-spool-retained",
+                     "reason": {"checkpoint_dir": entry["dir"]}})
                 continue
             self._dispose_retained_entry(reservation_id, entry)
 

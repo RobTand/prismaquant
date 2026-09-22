@@ -7,9 +7,10 @@ declares its outputs through a produced-output template. It was never specific
 to Stage A; `prismaquant/stage_a_local_spool.py` now only re-exports the former
 names. Each recorded entry may declare PB's `checkpoint` artifact class, which
 PB charges to the checkpoint prewrite budget instead of the payload one. Stage
-A boundary entries are its only caller today; routing adjoint checkpoints and
-renders through it is owed work. No format, default, stage or ship gate
-changes.
+A boundary entries and, behind the default-off
+`PRISMAQUANT_STAGE_A_DECLARED_CHECKPOINTS=1`, Stage A adjoint checkpoints are
+its callers (see "Declared adjoint checkpoints" below); routing renders through
+it is owed work. No format, default, stage or ship gate changes.
 
 Fully loaded modules skip checkpoint initialization (2026-09-22, PQ #968):
 the Transformers compatibility hook now marks a module `_is_hf_initialized`
@@ -212,7 +213,7 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `fix/joint-catalog-extension-20260922`.
+As of: 2026-09-22 · `ws-w/adjoint-checkpoint-declared-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-22, `flash/926-activation-quantizer-v2-reader`) for **the
@@ -258,6 +259,38 @@ a declared extension still must carry that extension's decoder. With no
 `native_extensions` table at all, any qualified launch is still refused --
 there is nothing to read the decoder against. Gates:
 `test_tessera_lane_requires.py`.
+
+Re-stamped (2026-09-22, `ws-w/adjoint-checkpoint-declared-20260922`) for
+**declared adjoint checkpoints** (refs PQ #870). `PRISMAQUANT_STAGE_A_DECLARED_CHECKPOINTS`
+is off by default. Unset or `0`, `write_adjoint_checkpoint` writes the same
+record, files and bytes as before: schema `prismaquant.joint_adjoint_checkpoint.v1`,
+each cotangent copied into `checkpoints/boundary-NNN/entries/`, everything
+written synchronously into the output space. Exactly `1`, Stage A
+(`run_adjoint_capture`, via `resolve_declared_checkpoints`; any other value
+refuses) writes each checkpoint with `declared=True`. The record, schema
+`prismaquant.joint_adjoint_checkpoint.v2`, names each cotangent that is already
+the owner's exact entry at that boundary by the entry's own record and writes
+no second copy, so each cotangent is written once. Commit pins those entries: the rolling
+chain's `_retire` drops a pinned entry from its live set without unlinking it,
+its bytes move from the ordinary ledger to the checkpoint ledger, and its
+produced group keeps counting it live. PrismaBuild never unlinks an
+acknowledged origin (`reclaim_origin` refuses `origin-present-retain`), so the
+file outlives the run. An abandoned attempt pins nothing. With a bound local
+output spool, the checkpoint's own files (shared-state pickles and
+`checkpoint.json`) are one `checkpoint`-class PrismaBuild group: the prewrite
+charges the checkpoint class and owns exactly each final plus its `.tmp`,
+the files are written to the local spool, and PrismaBuild's export copies
+them into `checkpoint_directory(space, boundary)`. The receipt's
+`declared_checkpoints` block counts referenced and written bytes. A bound
+owner without a spool refuses, and so does a checkpoint directory outside the
+template's `output_prefix`: the template must cover `<space>/checkpoints`.
+`load_adjoint_checkpoint` reads a referenced entry through the same digest-checked
+reader after binding it to the checkpoint session's generation and run
+identity, its boundary and its slot. `ExactCotangentScratch` accepts the
+`-at-<boundary>` entry names. Gates:
+`tests/test_declared_adjoint_checkpoints.py`,
+`tests/test_adjoint_checkpoint_default_path_identity.py` (the flag-off
+fingerprints, taken on origin/main `e60d86fe56`).
 
 Re-stamped (2026-09-22, `fix/stageb-bounded-cotangent-950-20260922`) for
 **a bounded Stage B cotangent working plane** (PQ #950). Checkpoint

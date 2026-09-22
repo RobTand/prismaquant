@@ -180,7 +180,7 @@ def shared_adjoint_copy_plan(cotangents) -> tuple[bool, int]:
 
 
 def write_checkpoint_with_snapshot(storage, space, *, boundary, session, plane,
-                                   cotangents, shared_pass) -> dict:
+                                   cotangents, shared_pass, declared=False) -> dict:
     """Snapshot + hold + writer lifetime the actual Stage-A caller uses.
 
     Zero-copy borrowed snapshot when every accumulator is already CPU
@@ -191,7 +191,9 @@ def write_checkpoint_with_snapshot(storage, space, *, boundary, session, plane,
     before releasing the hold (snapshot cleared inside the hold). Returns
     the checkpoint record. Meta/non-strided/quiescence fail closed before
     any hold or copy. ``serialize_checkpoint`` and the budget regressions
-    call this one operation -- no test-only execution path.
+    call this one operation -- no test-only execution path. ``declared``
+    selects the declared checkpoint writer (see
+    :func:`resolve_declared_checkpoints`).
     """
     from .joint_adjoint_checkpoints import write_adjoint_checkpoint
 
@@ -202,7 +204,7 @@ def write_checkpoint_with_snapshot(storage, space, *, boundary, session, plane,
             return write_adjoint_checkpoint(
                 space, boundary=boundary, session=session,
                 cotangents=plane, shared_adjoint=snapshot,
-                shared_pass=shared_pass, owner=storage)
+                shared_pass=shared_pass, owner=storage, declared=declared)
         finally:
             snapshot.clear()
     with storage.hold_transient_metadata(copy_bytes, "shared-adjoint CPU snapshot"):
@@ -217,9 +219,33 @@ def write_checkpoint_with_snapshot(storage, space, *, boundary, session, plane,
             return write_adjoint_checkpoint(
                 space, boundary=boundary, session=session,
                 cotangents=plane, shared_adjoint=snapshot,
-                shared_pass=shared_pass, owner=storage)
+                shared_pass=shared_pass, owner=storage, declared=declared)
         finally:
             snapshot.clear()
+
+
+def resolve_declared_checkpoints(environ=None) -> bool:
+    """Whether this capture writes declared adjoint checkpoints.
+
+    ``PRISMAQUANT_STAGE_A_DECLARED_CHECKPOINTS=1`` opts in; unset or ``0`` is
+    the default path, unchanged. The variable rides in the producer's sealed
+    environment, the same channel as the produced-output spool root. With it
+    on, each checkpoint references the chain's own cotangent entries instead
+    of copying them, and its remaining files go through the produced-output
+    spool as a ``checkpoint``-class group
+    (``joint_adjoint_checkpoints._write_declared_adjoint_checkpoint``).
+    Any other value refuses rather than guessing.
+    """
+    from .joint_adjoint_checkpoints import DECLARED_CHECKPOINTS_ENV
+
+    environ = os.environ if environ is None else environ
+    raw = str(environ.get(DECLARED_CHECKPOINTS_ENV, "") or "").strip()
+    if raw in ("", "0"):
+        return False
+    if raw == "1":
+        return True
+    raise AdjointIdentityRefused(
+        f"{DECLARED_CHECKPOINTS_ENV} must be 0 or 1, got {raw!r}")
 
 
 def resolve_stride(config, cli_stride) -> tuple[int, str]:
@@ -744,6 +770,7 @@ def run_adjoint_capture_core(
     read_manifest_sha256, implementation_sha256, campaign_scope=None,
     boundary_artifact_bytes=None, artifact_budget_stamp=None,
     min_free_gib=0.0, progress=None, produced_output=None, forward_recovery=None,
+    declared_checkpoints=False,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -777,6 +804,12 @@ def run_adjoint_capture_core(
     tensor this panel produces, and the durable origin class maximum is
     the EFFECTIVE ``max_artifact_bytes`` -- the plan's sealed value or
     this run's override, whichever is in force.
+
+    ``declared_checkpoints`` (default ``False``) writes each strided
+    checkpoint through the declared writer: the checkpoint references the
+    cotangent entries the chain already wrote instead of copying them, and
+    its own files are exported by PrismaBuild from the produced-output
+    spool. The receipt then carries a ``declared_checkpoints`` block.
     """
     from .cost_streaming import (
         StreamedBoundaryArtifacts,
@@ -967,7 +1000,8 @@ def run_adjoint_capture_core(
                 session={"generation": storage.session["generation"],
                          "kind": "adjoint_checkpoint",
                          "run_identity_sha256": storage.session["run_identity_sha256"]},
-                plane=plane, cotangents=cotangents, shared_pass=shared_pass)
+                plane=plane, cotangents=cotangents, shared_pass=shared_pass,
+                declared=declared_checkpoints)
             checkpoints.append(record)
             log(f"checkpoint published at boundary {boundary} "
                 f"({len(plane)} cotangent entries)")
@@ -1114,6 +1148,8 @@ def run_adjoint_capture_core(
     # PrismaBuild would not retire must be on the artifact, not only on
     # stdout.
     receipt["telemetry"].update(_produced_output_block(storage))
+    if declared_checkpoints:
+        receipt["declared_checkpoints"] = storage.declared_checkpoint_report()
     return receipt
 
 
@@ -1448,7 +1484,8 @@ def run_adjoint_capture(
             boundary_artifact_bytes=int(artifact["run_used"]),
             artifact_budget_stamp=artifact["override"],
             min_free_gib=config.get("min_free_gib", 0.0), progress=progress,
-            produced_output=publication, forward_recovery=forward_recovery)
+            produced_output=publication, forward_recovery=forward_recovery,
+            declared_checkpoints=resolve_declared_checkpoints())
         receipt["stride"]["source"] = stride_source
         receipt["device_envelope"] = result["device_envelope"]
         torch.cuda.synchronize()

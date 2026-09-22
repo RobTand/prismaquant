@@ -225,7 +225,7 @@ def _broker_control(q, owner: str) -> dict:
 
 
 def _template(prefix: str, *, payload_max_bytes: int = 1 << 20,
-              window_gib: int = 2) -> dict:
+              window_gib: int = 2, checkpoint_max_bytes: int = 1 << 10) -> dict:
     from prismabuild import produced_output as po
     return po.validate_template({
         "schema": po.TEMPLATE_SCHEMA_V1,
@@ -238,7 +238,7 @@ def _template(prefix: str, *, payload_max_bytes: int = 1 << 20,
         # of its own size before the rename, so the relationship is
         # explicit instead of a coincidence.
         "durable_maxima": {"payload_max_bytes": payload_max_bytes,
-                           "checkpoint_max_bytes": 1 << 10,
+                           "checkpoint_max_bytes": int(checkpoint_max_bytes),
                            "temp_max_bytes": payload_max_bytes},
         "working_demands": {TIER: {"minimum_gib": 1,
                                    "window_gib": int(window_gib)}},
@@ -375,7 +375,8 @@ def _execute_mover(q, mover: str) -> dict:
 def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
                  payload_max_bytes: int = 1 << 20, window_gib: int = 2,
                  gib: int = 4, staging_timeout_s: float = 900.0,
-                 published=False, producer_environment=None, claim_capacity=None):
+                 published=False, producer_environment=None, claim_capacity=None,
+                 checkpoint_max_bytes: int = 1 << 10):
     """A real queue, admitted owner, declared template, bound publication,
     and a real ``StreamedBoundaryArtifacts`` writing inside its prefix."""
 
@@ -397,7 +398,8 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
     prefix = tmp_path / "outputs"
     prefix.mkdir(parents=True, exist_ok=True)
     template = _template(str(prefix), payload_max_bytes=payload_max_bytes,
-                         window_gib=window_gib)
+                         window_gib=window_gib,
+                         checkpoint_max_bytes=checkpoint_max_bytes)
     # The template first: the owner's sealed request carries its declaration.
     owner = _sealed_producer_request(
         tmp_path, cas_root, pb_repo, template,

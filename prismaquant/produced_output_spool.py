@@ -30,6 +30,21 @@ class ProducedOutputSpoolRefused(RuntimeError):
     pass
 
 
+@dataclasses.dataclass(frozen=True)
+class DeclaredFile:
+    """A declared output file that is not an exact activation entry.
+
+    The fields :meth:`ProducedOutputSpool.record` and ``submit`` read: the
+    local file, its byte count and its SHA-256, which PrismaBuild's export
+    checks while it copies.
+    """
+
+    name: str
+    path: str
+    file_bytes: int
+    sha256: str
+
+
 class ProducedOutputSpool:
     def __init__(self, backend, *, capacity_deferred, timeout_s):
         self.backend = backend
@@ -136,7 +151,12 @@ class ProducedOutputSpool:
                 return False
             # Only the backend's verified durable receipt establishes this.
             group["durable"] = True
-            self._durable_progress.extend(ref for _, ref, _ in group["references"])
+            # Progress counts payload entries only. A checkpoint group's
+            # files are not boundary or cotangent units, and a declared
+            # checkpoint reference carries no entry identity to count.
+            self._durable_progress.extend(
+                ref for _, ref, artifact_class in group["references"]
+                if artifact_class == "payload")
         if not group["released"]:
             answer = self.backend.release_group(batch_id)
             if not answer.get("ok"):

@@ -978,9 +978,13 @@ class ExactCotangentScratch:
         self.max_slot_bytes = 0
         for entry in records:
             name = entry['name']
-            if not re.fullmatch(r'cotangent-[0-9]+-[0-9]+', name):
+            # A declared checkpoint references the rolling cotangent entry
+            # itself, whose name also carries its boundary
+            # (``cotangent-P-B-at-N``); the slot key is (probe, batch) either way.
+            match = re.fullmatch(r'cotangent-([0-9]+)-([0-9]+)(?:-at-[0-9]+)?', name)
+            if not match:
                 raise ValueError("cotangent scratch entry has invalid coordinates")
-            key = tuple(int(part) for part in name.split('-')[1:])
+            key = (int(match[1]), int(match[2]))
             if key in self._slots:
                 raise ValueError("cotangent scratch repeats coordinates")
             shape = tuple(entry['shape'])
