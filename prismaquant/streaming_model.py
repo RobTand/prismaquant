@@ -536,21 +536,19 @@ def _prefetch_delivery_enabled() -> bool:
 
 # ---------------------------------------------------------------------------
 def _is_prefetch_availability(exc: BaseException) -> bool:
-    """Whether a failed prefetch may be retried once on actual demand (PQ #911).
+    """Whether an admitted load may retry its failed speculation (PQ #911).
 
-    Only the proven transient cause retries: a declared staged range whose
-    bounded wait expired (``StagedRangeNotLanded``). The type is the proof;
+    Only the proven transient cause retries: a declared staged range that
+    remains unlanded (``StagedRangeNotLanded``). The type is the proof;
     message wording is never consulted, so an unknown failure whose text
     happens to contain availability words is refused, not retried, and
     ``CancelledError`` never retries. Undeclared spans, failed covering
     entries, wrong-size/non-regular/permission/corrupt payloads and
     integrity refusals keep their generic errors: nothing about them says
-    the bytes are on their way. ``LeaseRefused`` availability is not
-    matched: the strict shard reader is the only producer of a retried
-    future, and its transient cause is exactly ``StagedRangeNotLanded``
-    (lease-``availability`` refusals come from the SDK helpers, never from
-    the layer read seam). No pool/HDD read, no swallow, exactly one retry
-    by the caller.
+    the bytes are on their way. ``LeaseRefused`` can propagate from the
+    strict reader's LeaseWindow, including availability refusals such as
+    retiring. Those are not this declared-but-unlanded cause and do not
+    match. No pool/HDD read, no swallow, exactly one retry by the caller.
     """
     if isinstance(exc, CancelledError):
         return False
@@ -902,28 +900,7 @@ class StreamingContext:
         with self._inflight_lock:
             fut = self._inflight.get(L)
         if fut is not None:
-            try:
-                delivered = fut.result()
-            except Exception as exc:
-                # PQ #911: a speculative availability timeout must not
-                # poison the demand read. Retry availability once via the
-                # existing prefetch machinery with the bounded declared
-                # wait; preserve integrity at once. No pool read, no
-                # swallow, no unbounded retry: a second failure propagates.
-                if not _is_prefetch_availability(exc):
-                    raise
-                self._claim_inflight(L)
-                # PQ #907: a cancelled owner retries nothing: the retry
-                # would read payload nobody will install.
-                _cancel = getattr(self, "_staged_wait_cancel", None)
-                if _cancel is not None and _cancel.is_set():
-                    raise CancelledError(
-                        f"streamed layer {L} demand cancelled; "
-                        "not retrying its prefetch")
-                retried = self.schedule_prefetch(L)
-                if retried is None:
-                    raise
-                delivered = retried.result()
+            delivered = self._await_prefetch(L, fut, retry_availability=True)
             self._claim_inflight(L)
             cached = self.layer_cache.get(L)
             if cached is not None:
@@ -1028,13 +1005,57 @@ class StreamingContext:
         if self.device.type == 'cuda':
             torch.cuda.empty_cache()
 
-    def settle_prefetched_layers(self, layer_indices):
+    def _await_prefetch(self, layer, future, *, retry_availability):
+        """Await delivery, retaining its owner even when speculation is replaced.
+
+        The compute thread owns this transition. One retry belongs to the
+        delivery future, shared by loader settlement and later demand; a
+        failed replacement cannot earn another attempt at either boundary.
+        Scheduling still enforces the ordinary source-load memory gates.
+        This reports no progress and grants no new phase/watchdog allowance.
+        """
+        try:
+            return future.result()
+        except Exception as exc:
+            if (not retry_availability or not _is_prefetch_availability(exc)
+                    or getattr(future, '_pq_availability_retried', False)):
+                raise
+            cancel = getattr(self, '_staged_wait_cancel', None)
+            if cancel is not None and cancel.is_set():
+                raise CancelledError(
+                    f'streamed layer {layer} demand cancelled; not retrying its prefetch')
+            with self._inflight_lock:
+                if self._inflight.get(layer) is not future:
+                    raise RuntimeError('prefetch retry lost its delivery owner') from exc
+                future._pq_availability_retried = True
+                del self._inflight[layer]
+            # The visitor can still hold the original Future. Its failure
+            # traceback can retain a partially read layer, so release
+            # completed loader-frame locals before allocating the retry.
+            # Traceback locations and the exception itself remain intact;
+            # executing frames (including this one) are left alone.
+            import traceback
+            traceback.clear_frames(exc.__traceback__)
+            replacement = self.schedule_prefetch(layer)
+            if replacement is None:
+                # Keep the failed owner and its spent retry budget. A
+                # refused admission must not enable repeated retry calls.
+                with self._inflight_lock:
+                    self._inflight.setdefault(layer, future)
+                raise
+            replacement._pq_availability_retried = True
+            return replacement.result()
+
+    def settle_prefetched_layers(self, layer_indices, *, retry_availability=False):
         """Await an already scheduled window without claiming its owners.
 
         Capture may exclude loader temporaries only after every remaining
-        prefetch is complete. Missing, refused, failed or unexpected loads
-        fail closed; this boundary never schedules a cold read, installs a
-        layer, changes an LRU pin or removes a delivery future.
+        prefetch is complete. The default only observes. An already admitted
+        source-loading phase may explicitly retry a typed availability
+        failure once through the existing prefetch machinery. Missing,
+        refused, unknown/integrity or unexpected loads still fail closed.
+        Neither mode cold-reads, installs, claims a delivery future or spends
+        an LRU pin. A successful replacement remains owned for later install.
         """
         indices = tuple(layer_indices)
         if (len(set(indices)) != len(indices) or any(
@@ -1048,7 +1069,8 @@ class StreamingContext:
         for index in indices:
             future = futures.get(index)
             if future is not None:
-                if not future.result():
+                if not self._await_prefetch(
+                        index, future, retry_availability=retry_availability):
                     raise RuntimeError(f'capture successor {index} prefetch was refused')
                 settled.append(dict(layer=index, owner='prefetch_future'))
             elif self.layer_cache.peek(index):
@@ -1124,11 +1146,12 @@ class StreamingContext:
     def shutdown(self):
         # PQ #907: a failed capture must not sit in teardown until each
         # prefetch worker's own staged-range bound runs out. This context
-        # sets its own event first: running workers raise CancelledError
-        # out of the wait and read no further payload, pending workers
-        # never start, and the join below is bounded by cancellation, not
-        # by the staged-range bound. Draining never calls result(), so an
-        # owned future's failure can never mask the primary capture error
+        # sets its own event first: readiness waits raise CancelledError
+        # before their next payload read, and pending workers are cancelled.
+        # An I/O operation already in progress still joins normally; this
+        # is not an instant cancellation of kernel I/O. Draining never
+        # calls result(), so an owned future's failure cannot mask the
+        # primary capture error
         # this teardown runs under.
         cancel = getattr(self, "_staged_wait_cancel", None)
         if cancel is not None:

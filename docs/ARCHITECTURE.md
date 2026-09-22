@@ -1,7 +1,34 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/stagea-prefetch-907-20260921`.
+As of: 2026-09-22 · `fix/stagea-prefetch-907-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `fix/stagea-prefetch-907-20260921`) for **Stage A
+loader-barrier availability recovery** (PQ #911). The real forward visitor
+settles its successor window before entering `capture_forward`; waiting until
+`ensure_loaded` to retry a failed speculative future was too late. That
+forward barrier and Stage A's reverse-chain barrier now explicitly opt into
+one typed `StagedRangeNotLanded` retry while still inside their existing
+source-loading window, before graph/backward workspace begins. Default
+`settle_prefetched_layers` remains observational. Retry uses the existing
+prefetch scheduler, pressure floor and slot limits; it never cold-reads,
+installs, claims the replacement future or spends its cache pin. The retry
+budget follows the delivery future through settlement and later demand,
+including an admission refusal: a second failure propagates without another
+attempt. Before replacement, completed failure-frame locals are cleared so
+an old Future held by the visitor cannot retain a partial source layer beside
+the retry. The original exception and traceback locations remain available. Missing owners, unexpected windows, cancellation, unknown errors,
+integrity and every `LeaseRefused` remain immediate refusals. No source-phase
+progress is fabricated and no sealed wait/watchdog allowance is extended.
+`source_residency_snapshot` remains nonblocking. CPU/meta regression
+`tests/test_stagea_prefetch_barrier_retry.py` drives the real layer-major
+visitor, Stage A phase observer, StreamingContext, strict shard reader and
+installed PB lease SDK with an absent declared shard that actually lands
+before settlement. It stops at the capture boundary and checks exact installed/delivered
+weights, retained delivery/pin, later claim, phase order, zero pool payload
+and released leases. A separate full CPU core fixture checks both forward
+and reverse opt-in wiring. This is contract
+qualification, not a GPU performance measurement.
 
 Re-stamped (2026-09-21, `fix/stagea-prefetch-907-20260921`) for **a typed-only
 speculative-availability retry** (PQ #911, review tranche 2). The demand-side
@@ -11,18 +38,19 @@ only. No message-substring matching, no `kind`-attribute matching, no
 `CancelledError` retry: an unknown failure whose text happens to contain
 availability words is refused, not retried, and a second availability failure
 after the single bounded retry propagates. Lease-`availability` refusals are
-not matched either: the strict shard reader is the only producer of a retried
-future, and its transient cause is exactly the declared-but-unlanded range
-(lease-`availability` comes from the SDK helpers, never from the layer read
-seam). A cancelled owner performs no demand work: `ensure_loaded` raises
+not matched either: they can reach the layer read seam through its
+`LeaseWindow` (including `retiring`), but are distinct from the proven
+declared-but-unlanded cause. A cancelled owner starts no new demand read:
+`ensure_loaded` raises
 `CancelledError` before scheduling the retry and before the synchronous cold
-read, so a shut-down context reads no payload, installs nothing, and retries
-nothing. The retry still travels through the existing prefetch machinery with
+read. Cancellation interrupts readiness waits and prevents a subsequent
+read; I/O already in progress still joins normally during shutdown. The retry still travels through the existing prefetch machinery with
 the bounded declared wait, so source-phase memory accounting (admission bound,
 pressure floor) is unchanged, and teardown still drains without calling
 `result()`, keeping the primary capture error. `settle_prefetched_layers`
-awaits via `result()` with no retry, cold read, or claim -- a failed future
-propagates its own error -- and `source_residency_snapshot` describes a
+defaults to `result()` with no retry, cold read, or claim -- a failed future
+propagates its own error. The explicit admitted-loader opt-in described above
+adds the same bounded recovery before capture, and `source_residency_snapshot` describes a
 pending future as pending without waiting, touching, or loading it. No
 format, lane, pin, kernel order or ship gate changes. Gates:
 `tests/test_stagea_speculative_availability_retry.py` (8 tests: speculation
@@ -37,8 +65,8 @@ cancellation event, and the event travels explicitly -- prefetch worker to
 layer read to staged-range wait -- so shutting down one context never aborts
 a coexisting context's wait; there is no process-global cancellation state.
 A set event raises `CancelledError` out of the wait: a cancelled wait never
-resolves as a verdict and a cancelled owner reads no further payload and
-installs nothing. Teardown drains owned futures without calling `result()`,
+resolves as a verdict and the read following that wait does not start.
+In-progress I/O is joined normally; cancellation does not interrupt it. Teardown drains owned futures without calling `result()`,
 so a prefetch failure can never mask the primary capture error. The read
 seam raises `StagedRangeNotLanded` (a `TierPolicyRefused` with the declared
 span attached) when the resolver reports `RANGE_UNCOVERED`: declared bytes
@@ -46,11 +74,10 @@ with no mover row yet, the one transient cause. An undeclared span
 (`RANGE_UNDECLARED`) and a failed covering entry (`RANGE_REFUSED`) keep the
 generic refusal, and unknown, integrity, and cancellation outcomes never
 become the typed cause. Demand versus certification: `ensure_loaded` and
-`install` claim tensors for compute -- that is actual demand, the only place
-a bounded availability retry may happen (matching narrows in tranche 2);
-`settle_prefetched_layers` and `source_residency_snapshot` are residency
-certification barriers that never schedule, never cold-read, and fail closed
-on a missing, refused, failed, or cancelled future. No format, lane, pin,
+`install` claim tensors for compute. Default `settle_prefetched_layers` and
+`source_residency_snapshot` remain observational. The explicit Stage A loader
+opt-in documented above permits bounded availability recovery at settlement
+before capture; it still never claims a delivery future or cold-reads. No format, lane, pin,
 kernel order or ship gate changes. Gates:
 `tests/test_stagea_prefetch_review_tranche1.py`.
 
