@@ -1,40 +1,152 @@
 """Prepare immutable candidate metadata after every new render is qualified.
 
 Does not issue any Stage A capture reuse authority or activate Stage B.
+
+The catalog is named by path and SHA-256 (``--catalog``). A result file binds
+the digest of the cell it qualified. With ``--rebinding``
+(``rebind_t4_qualified_results.py``), a result that qualified the previous
+catalog's cell is admitted for the new cell when the two differ only in
+``anchor``. The rebinding proves this, and it is checked again here per cell.
 """
-import argparse,copy,hashlib,json,os,pickle
+import argparse
+import copy
+import hashlib
+import json
+import os
+import pickle
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from prismaquant.tessera_joint_aura import render_origin_census
-ROOT=Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/t4-reuse-20260922')
-PANEL=ROOT.parent/'allocation/joint-panel'
-OLDPLAN=PANEL/'complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.plan.json'
-OLDPREP=PANEL/'complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02/prepare/prepared.json'
-CATALOG_SHA='71238bdab85bdccabed921ce94b03459d5aba3607021b85007bf41f3e376fbc8'
-def sha(raw):return hashlib.sha256(raw).hexdigest()
-def doc(value):return (json.dumps(value,sort_keys=True,indent=2)+'\n').encode()
-def bound(path):return dict(path=str(path),sha256=sha(path.read_bytes()))
-def publish(path,raw):
- assert not path.exists(),path;path.parent.mkdir(parents=True,exist_ok=True);tmp=path.with_suffix(path.suffix+'.tmp')
- with tmp.open('xb') as f:f.write(raw);f.flush();os.fsync(f.fileno())
- os.link(tmp,path);tmp.unlink();return {'path':str(path),'sha256':sha(raw)}
+from rebind_t4_qualified_results import SCHEMA as REBINDING_SCHEMA, cell_sha256, require_rebound
+
+PANEL = Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/allocation/joint-panel')
+OLDPLAN = PANEL / 'complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.plan.json'
+OLDPREP = PANEL / 'complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02/prepare/prepared.json'
+#: The original panel's PWC plus every catalog cell.
+EXTENDED_CELLS = 234278
+
+
+def sha(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def doc(value):
+    return (json.dumps(value, sort_keys=True, indent=2) + '\n').encode()
+
+
+def bound(path):
+    return dict(path=str(path), sha256=sha(path.read_bytes()))
+
+
+def publish(path, raw):
+    assert not path.exists(), path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + '.tmp')
+    with tmp.open('xb') as f:
+        f.write(raw)
+        f.flush()
+        os.fsync(f.fileno())
+    os.link(tmp, path)
+    tmp.unlink()
+    return {'path': str(path), 'sha256': sha(raw)}
+
+
+def qualified_result(cell, raw, rebinding_rows):
+    """The result that qualified ``cell``, directly or through a rebinding row."""
+    if rebinding_rows is None:
+        value = json.loads(raw)
+        assert value['cell_sha256'] == cell_sha256(cell), cell['qname']
+        return value
+    return require_rebound(cell, raw, rebinding_rows[cell['qname'], cell['format']])
+
+
 def main():
- parser=argparse.ArgumentParser();parser.add_argument('--served-activation-policy',required=True);parser.add_argument('--served-activation-policy-sha256',required=True);args=parser.parse_args();policy={'path':args.served_activation_policy,'sha256':args.served_activation_policy_sha256};assert sha(Path(policy['path']).read_bytes())==policy['sha256']
- catalogpath=ROOT/'adopted-catalog.json';raw=catalogpath.read_bytes();assert sha(raw)==CATALOG_SHA;catalog=json.loads(raw);oldprep=json.loads(OLDPREP.read_bytes());plan=json.loads(OLDPLAN.read_bytes());raw=Path(oldprep['production_cache']['path']).read_bytes();assert sha(raw)==oldprep['production_cache']['sha256'];cache=pickle.loads(raw);del raw
- overlay=ROOT/'proposed-overlay';assert not overlay.exists(),'immutable proposed overlay already exists'
- plan['inputs']['candidate_overlay']={'path':str(catalogpath),'sha256':CATALOG_SHA};plan['output_root']=str(overlay)
- plan['served_activation_policy']=policy
- prepared=copy.deepcopy(oldprep);prepared['served_activation_policy']=policy
- for cell in catalog['cells']:
-  q,fmt=cell['qname'],cell['format'];pair=(q,fmt);assert pair not in cache.weights
-  value=json.loads((ROOT/'qualified'/(sha(q.encode())+'.json')).read_bytes());assert value['cell_sha256']==sha(json.dumps(cell,sort_keys=True,separators=(',',':')).encode());receipt=value['verified_cell']
-  if 'verified_cell_sha256' in value:assert value['verified_cell_sha256']==sha(json.dumps(receipt,sort_keys=True,separators=(',',':')).encode())
-  for key in ('source_weight','activation','encoding_identity_sha256','render_origin','render_comparison','catalog_source_adoption'):
-   assert receipt[key]==cell[key],(pair,key)
-  for key in ('wire','render'):
-   s=Path(cell[key]).stat();assert cell[key+'_stat']==dict(inode=s.st_ino,bytes=s.st_size,mtime_ns=s.st_mtime_ns,ctime_ns=s.st_ctime_ns)
-  assert receipt['render_file_sha256'] and receipt['rendered_weight']['content_sha256'];cache.weights[pair]=cell['render'];cache._lru_paths[pair]=cell['render'];cache.metadata['verified_cells'][pair]=receipt;prepared['formats_by_qname'][q].append(fmt)
- assert len(cache.weights)==234278
- planbinding=publish(overlay/'plan.json',doc(plan));cache.metadata['inputs']=plan['inputs'];cache.metadata['plan_sha256']=planbinding['sha256'];census=render_origin_census(r['render_origin'] for r in cache.metadata['verified_cells'].values());cache.metadata.update(census)
- prepared.update(census);prepared['measured_cells']=len(cache.weights);prepared['plan_sha256']=planbinding['sha256'];prepared['production_cache']=publish(overlay/'prepare/production.pkl',pickle.dumps(cache,protocol=pickle.HIGHEST_PROTOCOL));prepbinding=publish(overlay/'prepare/prepared.json',doc(prepared))
- inputs={'original_plan':bound(OLDPLAN),'original_prepared':bound(OLDPREP),'extended_plan':planbinding,'extended_prepared':prepbinding};publish(overlay/'catalog-pair-inputs.json',doc(inputs));print(json.dumps({'status':'proposed_candidate_metadata_only','inputs':inputs,'cells':len(cache.weights)}),flush=True)
-if __name__=='__main__':main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--served-activation-policy', required=True)
+    parser.add_argument('--served-activation-policy-sha256', required=True)
+    parser.add_argument('--catalog', required=True)
+    parser.add_argument('--catalog-sha256', required=True)
+    parser.add_argument('--qualified-dir', required=True)
+    parser.add_argument('--rebinding')
+    parser.add_argument('--rebinding-sha256')
+    parser.add_argument('--out', required=True, help='overlay root; must not exist')
+    args = parser.parse_args()
+    policy = {'path': args.served_activation_policy, 'sha256': args.served_activation_policy_sha256}
+    assert sha(Path(policy['path']).read_bytes()) == policy['sha256']
+    catalogpath = Path(args.catalog)
+    raw = catalogpath.read_bytes()
+    assert sha(raw) == args.catalog_sha256
+    catalog = json.loads(raw)
+    rebinding_rows = None
+    if args.rebinding is not None:
+        assert args.rebinding_sha256, '--rebinding needs --rebinding-sha256'
+        raw = Path(args.rebinding).read_bytes()
+        assert sha(raw) == args.rebinding_sha256
+        rebinding = json.loads(raw)
+        assert rebinding['schema'] == REBINDING_SCHEMA
+        assert rebinding['catalog'] == {'path': str(catalogpath), 'sha256': args.catalog_sha256}
+        assert Path(rebinding['qualified_dir']) == Path(args.qualified_dir)
+        rebinding_rows = {(row['qname'], row['format']): row for row in rebinding['rows']}
+        assert len(rebinding_rows) == len(rebinding['rows']) == len(catalog['cells'])
+    oldprep = json.loads(OLDPREP.read_bytes())
+    plan = json.loads(OLDPLAN.read_bytes())
+    raw = Path(oldprep['production_cache']['path']).read_bytes()
+    assert sha(raw) == oldprep['production_cache']['sha256']
+    cache = pickle.loads(raw)
+    del raw
+    overlay = Path(args.out)
+    assert not overlay.exists(), 'immutable proposed overlay already exists'
+    plan['inputs']['candidate_overlay'] = {'path': str(catalogpath), 'sha256': args.catalog_sha256}
+    plan['output_root'] = str(overlay)
+    plan['served_activation_policy'] = policy
+    prepared = copy.deepcopy(oldprep)
+    prepared['served_activation_policy'] = policy
+    for cell in catalog['cells']:
+        q, fmt = cell['qname'], cell['format']
+        pair = (q, fmt)
+        assert pair not in cache.weights
+        value = qualified_result(cell, (Path(args.qualified_dir) / (sha(q.encode()) + '.json')).read_bytes(),
+                                 rebinding_rows)
+        receipt = value['verified_cell']
+        if 'verified_cell_sha256' in value:
+            assert value['verified_cell_sha256'] == cell_sha256(receipt)
+        for key in ('source_weight', 'activation', 'encoding_identity_sha256', 'render_origin',
+                    'render_comparison', 'catalog_source_adoption'):
+            assert receipt[key] == cell[key], (pair, key)
+        for key in ('wire', 'render'):
+            s = Path(cell[key]).stat()
+            assert cell[key + '_stat'] == dict(inode=s.st_ino, bytes=s.st_size, mtime_ns=s.st_mtime_ns,
+                                               ctime_ns=s.st_ctime_ns)
+        assert receipt['render_file_sha256'] and receipt['rendered_weight']['content_sha256']
+        cache.weights[pair] = cell['render']
+        cache._lru_paths[pair] = cell['render']
+        cache.metadata['verified_cells'][pair] = receipt
+        # The loader appends the overlay format after the panel's own formats
+        # (attach_candidate_overlay), and the prepared roster must equal the
+        # loaded one in order.
+        prepared['formats_by_qname'][q].append(fmt)
+    assert len(cache.weights) == EXTENDED_CELLS
+    planbinding = publish(overlay / 'plan.json', doc(plan))
+    cache.metadata['inputs'] = plan['inputs']
+    cache.metadata['plan_sha256'] = planbinding['sha256']
+    census = render_origin_census(r['render_origin'] for r in cache.metadata['verified_cells'].values())
+    cache.metadata.update(census)
+    prepared.update(census)
+    prepared['measured_cells'] = len(cache.weights)
+    prepared['plan_sha256'] = planbinding['sha256']
+    prepared['production_cache'] = publish(overlay / 'prepare/production.pkl',
+                                           pickle.dumps(cache, protocol=pickle.HIGHEST_PROTOCOL))
+    prepbinding = publish(overlay / 'prepare/prepared.json', doc(prepared))
+    inputs = {'original_plan': bound(OLDPLAN), 'original_prepared': bound(OLDPREP),
+              'extended_plan': planbinding, 'extended_prepared': prepbinding}
+    publish(overlay / 'catalog-pair-inputs.json', doc(inputs))
+    print(json.dumps({'status': 'proposed_candidate_metadata_only', 'inputs': inputs,
+                      'cells': len(cache.weights)}), flush=True)
+
+
+if __name__ == '__main__':
+    main()
