@@ -1,5 +1,16 @@
 # prismaquant runtime flags
 
+Stage A local-output opt-in (PQ #928 / PB #857, 2026-09-22):
+`PRISMABUILD_PRODUCED_SPOOL_ROOT` and `PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES`
+must both be sealed in the parent PB request. The root names local disk and the
+positive byte ceiling bounds one owner's pending export groups (32 GiB is the
+proposed campaign setting, not additional RAM demand). The container must expose
+the same root at the same writable host/container path. PB verifies the sealed
+values and owns export admission, movement, retries and durable acknowledgements.
+Unset means the original direct canonical writer. This option changes output
+placement before commit, not scientific partitioning or read-tier authorization.
+
+
 *Reconciled against code 2026-07-30 (branch `claude/docs-consolidation`);
 citations and live/dead status re-verified 2026-08-02 against `main` @ v0.6.0.*
 The 2026-08-02 pass retired the L2/L3 knobs the 2026-07-30 wall had left in the

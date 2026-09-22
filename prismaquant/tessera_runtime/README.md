@@ -40,17 +40,46 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab` (the #562/#563 union head), the
-head of Tessera #562 (D2/D2b, stacked on #560's
-`flash/506-routed-full-domain-rates-20260918`), re-pinned 2026-09-19 for the
-coordinated post-#560-lineage bump (PrismaQuant #760). Install that revision
+The current pin is Tessera `acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9`, Tessera master on
+2026-09-22 after #588 (rooted cached units, `tessera.cached_units.v2`), #590
+(fenced source digests in whole cached exports) and #592. It is contract
+**v34**, lane schema still **v10**, contract sha256
+`d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472`. Install that revision
 and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
 `experiments/` and are not wheel entry points.
 Provision the pin venv from a git URL so the install records the commit
-(`git+file://<checkout>@<pin>`); the GPU sibling `pq-cu130-tessera-cc739a55`
-is provisioned on sparky (its `direct_url.json` `vcs_info` names the pin;
-measured 2026-09-19), the sparklina sibling is owed, and the dl380g10 x86
-sibling is owed (RobTand/prismaquant#753, RobTand/prismabuild#658).
+(`git+https://github.com/RobTand/tessera.git@<pin>`). The PrismaBuild test
+interpreter `/home/rob/venvs/pq-pb461728e4-tessera-acf9eafa` is provisioned on
+sparky and sparklina: a copy of `pq846-pb461728e4` with only the Tessera
+distribution reinstalled at the pin. Its `direct_url.json` `vcs_info` names the
+commit, and its installed `runtime_contract.json` hashes to the pin's digest.
+On each box:
+
+```bash
+V=/home/rob/venvs/pq-pb461728e4-tessera-acf9eafa
+cp -a /home/rob/venvs/pq846-pb461728e4 "$V"
+echo "$V/base-shadow" > "$V/lib/python3.12/site-packages/pq846-base-shadow.pth"
+"$V/bin/python" -m pip install --no-deps --no-build-isolation --force-reinstall \
+  'git+https://github.com/RobTand/tessera.git@acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9'
+```
+
+The dl380g10 x86 sibling is owed (RobTand/prismaquant#753,
+RobTand/prismabuild#658).
+
+**v32 -> v34 (2026-09-22).** The answer diff is five additions and no
+removals. v33 (#568) publishes the `sm_121` fp4 activation-quantiser table as a
+list of per-image attestations: the stock-image row is byte-identical to v32's,
+and a second row for the `glm53-nope-sm121` serving image carries the same
+rounding vectors. v34 (#579) attests the fused window GEMM
+(`tessera::window_gemm_dense`) and mints four dense `sm_121` cells:
+`TESSERA_BF16_K1` q1792 and `TESSERA_E4M3_K1` q1024, batch and decode, graded
+`route_only` with `smoke.status: not_recorded`. The status-only evidence gate
+does not refuse that grade, so this pin admits those two dense rungs on
+`sm_121` as `backed_with_serve_flag` where the v32 pin answered
+`unattested`/`no_cell`. `export.py` and `grammar.py` are byte-identical to the
+v32 pin, so the legal domain is a re-transcription.
+
+The history below describes the v32 pin (`cc739a55`, 2026-09-19).
 
 It moves the contract from **v29** to **v32**, and the lane-eligibility schema
 stays at **v10**: every bump in between is additive for a v10 reader. Four
@@ -102,7 +131,7 @@ cat-file` command below. Tessera master has since advanced to contract v33
 Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -197,14 +226,13 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` (branch head of #562, stacked on #560's
-lineage) on 2026-09-19:
+Verified against `RobTand/tessera` master on 2026-09-22:
 
 ```
-commit           cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab
-contract_sha256  3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34
+commit           acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9
+contract_sha256  d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472
 versions.tessera 0.1.0
-contract_version 32
+contract_version 34
 lane schema      tessera.lane-eligibility.v10
 ```
 

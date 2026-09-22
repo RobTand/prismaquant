@@ -12,6 +12,7 @@ from .joint_retained_window_plan import (
     RetainedWindowBudget, plan_retained_targets, targets_from_statistics_plan,
 )
 from .joint_statistics_plan import plan_joint_statistics_target_windows
+from .joint_served_activation import joint_activation_maxima
 
 SCHEMA = 'prismaquant.joint_operator_windows.v1'
 _FIELDS = {'schema', 'max_statistics_bytes', 'max_candidate_bytes',
@@ -121,7 +122,7 @@ def observe_and_project_windows(modules, specs, cache, policy, *, backward,
     """
     plan = plan_joint_statistics_target_windows(modules, specs,
         max_statistics_bytes=policy['max_statistics_bytes'],
-        activation_max_abs=cache.activation_max_abs, projection_backend=backend)
+        activation_max_abs=joint_activation_maxima(cache), projection_backend=backend)
     largest = max(4 * target.shape[0] * target.shape[1] for target in plan.targets)
     if largest > min(policy['max_candidate_bytes'], policy['workspace_reserve_bytes']):
         raise RuntimeError('joint single target exceeds candidate or matrix workspace budget')
@@ -145,7 +146,7 @@ def observe_and_project_windows(modules, specs, cache, policy, *, backward,
         with JointOperatorStatisticsLease(selected, {name: specs[name] for name in names},
                 max_statistics_bytes=policy['max_statistics_bytes'],
                 max_candidate_bytes=policy['max_candidate_bytes'],
-                activation_max_abs=cache.activation_max_abs, projection_backend=backend) as lease:
+                activation_max_abs=joint_activation_maxima(cache), projection_backend=backend) as lease:
             lease.begin_probe()
             backward(final=index == len(plan.windows)-1, lease=lease)
             require_sources()
@@ -278,7 +279,7 @@ def preflight_joint_operator_admission(names_by_layer, modules, formats_by_name,
             continue
         statistics_plan = plan_joint_statistics_target_windows(
             twins, specs, max_statistics_bytes=retained_budget.statistics_cap_bytes,
-            activation_max_abs=cache.activation_max_abs, projection_backend=None)
+            activation_max_abs=joint_activation_maxima(cache), projection_backend=None)
         _, _, targets = retained_admission_targets(statistics_plan, specs, cache)
         plan = plan_retained_targets(targets, budget=retained_budget,
                                      source_bytes=source_bytes,
@@ -332,7 +333,7 @@ def observe_and_project_retained_windows(
 
     statistics_plan = plan_joint_statistics_target_windows(
         modules, specs, max_statistics_bytes=retained_budget.statistics_cap_bytes,
-        activation_max_abs=cache.activation_max_abs, projection_backend=backend)
+        activation_max_abs=joint_activation_maxima(cache), projection_backend=backend)
     if source_fingerprints is None:
         source_fingerprints = {
             name: JointOperatorStatisticsLease._source_fingerprint(module.weight)
@@ -423,7 +424,7 @@ def observe_and_project_retained_windows(
                         selected, selected_specs,
                         max_statistics_bytes=retained_budget.statistics_cap_bytes,
                         max_candidate_bytes=retained_budget.candidate_delta_bytes,
-                        activation_max_abs=cache.activation_max_abs,
+                        activation_max_abs=joint_activation_maxima(cache),
                         projection_backend=backend) as lease:
                     lease.begin_probe()
                     backward(probe_index=probe_index,

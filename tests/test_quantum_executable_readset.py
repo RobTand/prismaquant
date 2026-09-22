@@ -363,11 +363,14 @@ def test_binder_refuses_forged_triples_consistent_rehash(tmp_path):
 
 
 def _dispatcher_record(tmp_path, manifest, wire_sha):
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text("{}")
     adjoint_path = tmp_path / "adjoint.json"
     adjoint_path.write_text("{}")
     record_path = tmp_path / "record.json"
     record = {"quantum_id": "layer-002", "layer": 2,
-              "campaign": {"plan_path": "plan.json", "plan_sha256": "0" * 64,
+              "campaign": {"plan_path": str(plan_path), "plan_sha256": hashlib.sha256(
+                               plan_path.read_bytes()).hexdigest(),
                            "prepared_path": "prep.json",
                            "prepared_sha256": "1" * 64},
               "read_set": {"manifest_path": str(tmp_path / "slice.gz"),
@@ -748,9 +751,9 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
 
     monkeypatch.setattr(runner.context, "install", install_logged)
 
-    def load_logged(space, checkpoint_record):
+    def load_logged(space, checkpoint_record, **kwargs):
         events.append(("checkpoint-open",))
-        return orig_load(space, checkpoint_record)
+        return orig_load(space, checkpoint_record, **kwargs)
 
     import prismaquant.joint_adjoint_checkpoints as _chk_mod
     monkeypatch.setattr(_chk_mod, "load_adjoint_checkpoint", load_logged)

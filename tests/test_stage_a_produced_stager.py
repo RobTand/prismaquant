@@ -468,3 +468,137 @@ def test_close_releases_every_waiter_and_joins_when_a_drop_callback_raises(monke
     finally:
         gate.set()
         stager.close(timeout=10.0)
+
+
+def test_a_dead_worker_drops_every_queued_task_and_records_the_death():
+    """A worker that dies gives its queue the treatment close gives (#959).
+
+    The death used to be recorded in a private field nothing read, and
+    the queued tasks were released without their drop callbacks: the
+    bookkeeping a refusal count or a durable charge depends on never
+    happened, and the owner was never told.
+    """
+    from prismaquant.produced_stager import OPTIONAL, ORDERED, StagerClosed
+
+    gate, entered = threading.Event(), threading.Event()
+    boom = RuntimeError("bookkeeping died on the stager")
+    dropped = []
+
+    def on_done(task):
+        if task.label == "hold":
+            raise boom
+
+    def hold():
+        entered.set()
+        assert gate.wait(10.0)
+
+    stager = _stager(on_done=on_done)
+    try:
+        stager.submit(hold, kind=OPTIONAL, label="hold")
+        # The worker is inside the hold before anything else is queued, so
+        # every task below is still queued when it dies.
+        assert entered.wait(10.0)
+        queued = [
+            stager.submit(lambda: None, kind=ORDERED, label="release",
+                          on_drop=lambda: dropped.append("release")),
+            stager.submit(lambda: None, kind=OPTIONAL, label="publish-ahead",
+                          on_drop=lambda: dropped.append("publish-ahead")),
+            # The kind `close` keeps, because close can still run it. A
+            # dead worker cannot, so this one is dropped like the rest.
+            stager.submit(lambda: None, kind=OPTIONAL, label="reclaim-origin",
+                          on_drop=lambda: dropped.append("reclaim-origin"),
+                          keep_on_close=True),
+        ]
+        gate.set()
+        for task in queued:
+            with pytest.raises(StagerClosed):
+                task.wait(10.0)
+    finally:
+        gate.set()
+    assert sorted(dropped) == ["publish-ahead", "reclaim-origin", "release"], (
+        "every stranded task gets its own drop callback", dropped)
+    assert stager.death() is boom, "the owner can read what killed the worker"
+    assert sorted(stager.stranded()) == [
+        "publish-ahead", "reclaim-origin", "release"]
+    assert any("died holding 3 queued task" in note
+               for note in getattr(boom, "__notes__", ())), boom
+    with pytest.raises(StagerClosed):
+        stager.submit(lambda: None, kind=OPTIONAL, label="after")
+    stager._thread.join(10.0)
+    assert not stager.alive()
+
+
+def test_a_drop_callback_that_fails_on_the_death_path_is_preserved():
+    """The first failure survives; the rest are attached to it (#959)."""
+    from prismaquant.produced_stager import OPTIONAL, StagerClosed
+
+    gate, entered = threading.Event(), threading.Event()
+    boom = RuntimeError("bookkeeping died on the stager")
+    first = RuntimeError("first drop failure")
+
+    def on_done(task):
+        if task.label == "hold":
+            raise boom
+
+    def hold():
+        entered.set()
+        assert gate.wait(10.0)
+
+    def bad_drop():
+        raise first
+
+    def worse_drop():
+        raise ValueError("second drop failure")
+
+    stager = _stager(on_done=on_done)
+    try:
+        stager.submit(hold, kind=OPTIONAL, label="hold")
+        assert entered.wait(10.0)
+        one = stager.submit(lambda: None, kind=OPTIONAL, label="first",
+                            on_drop=bad_drop)
+        two = stager.submit(lambda: None, kind=OPTIONAL, label="second",
+                            on_drop=worse_drop)
+        gate.set()
+        for task in (one, two):
+            with pytest.raises(StagerClosed):
+                task.wait(10.0)
+    finally:
+        gate.set()
+    assert stager.stranded_error() is first
+    assert any("another stager drop callback failed" in note
+               for note in getattr(first, "__notes__", ())), first
+    assert any("a stager drop callback failed" in note
+               for note in getattr(boom, "__notes__", ())), boom
+
+
+def test_the_owner_hears_a_dead_stager_and_runs_its_own_calls(
+        tmp_path, monkeypatch, closing):
+    """The death is release-error debt and the owner's next call raises."""
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+
+    boom = RuntimeError("stager bookkeeping died")
+    real_done = StreamedBoundaryArtifacts._produced_stager_done
+
+    def dying_done(self, task):
+        real_done(self, task)
+        if task.label == "prewrite":
+            raise boom
+
+    # Patched on the class, before the owner binds its stager: the
+    # callback the stager holds is the one taken at construction.
+    monkeypatch.setattr(StreamedBoundaryArtifacts, "_produced_stager_done",
+                        dying_done)
+    storage, _publication, _q, _env, _pb = _owner(
+        tmp_path, groups=1, window_gib=8)
+    closing(storage)
+    assert storage._stager is not None
+    with pytest.raises(RuntimeError) as caught:
+        chain._write_group(storage, count=2)
+    assert caught.value is boom, "the owner's next call raises the death"
+    assert storage._stager.death() is boom
+    died = [entry for entry in storage._produced_release_errors
+            if entry["step"] == "stager-died"]
+    assert died and "stager bookkeeping died" in died[0]["reason"]["error"], (
+        "a dead worker is reported debt, not a silently empty lane", died)
+    # The owner is the synchronous code again: its calls still happen.
+    assert chain._write_group(storage, count=1, first=2)

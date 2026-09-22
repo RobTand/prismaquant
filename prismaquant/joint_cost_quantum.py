@@ -171,6 +171,10 @@ def verify_quantum_identity(
         if receipt.get("status") != "complete":
             raise QuantumIdentityRefused(
                 f"adjoint receipt status is {receipt.get('status')!r}, not complete")
+        if record.get("catalog_extension") is not None:
+            from .joint_catalog_extension import require_extension
+            require_extension(record["catalog_extension"], receipt=receipt,
+                              plan_sha256=plan_sha256, prepared_sha256=prepared_sha256)
         chunks = record["chunks"]
         total = int(record["read_set"]["total_bytes"])
         cursor = 0
@@ -973,6 +977,43 @@ def prepare_retained_window_read(window_index: int, *, record: Mapping,
 # --------------------------------------------------------------------------
 
 
+def bind_joint_served_quantizer(formats_by_qname):
+    """Require the actual served static-A4 operator before Stage B pricing.
+
+    A registered binding includes the inspected image and extension build.
+    A missing operator refuses; the Torch arithmetic model is never a price.
+    A16/dynamic-only rosters do not load the serving extension.
+    """
+    from . import format_registry as fr
+    from .nvfp4_activation_contract import bind_served_quantizer_identity
+    from .perturbed_x_cache import _served_nvfp4_act_qdq_enabled
+
+    served_override = _served_nvfp4_act_qdq_enabled()
+    for fmt in sorted({fmt for formats in formats_by_qname.values() for fmt in formats}):
+        contract = fr.get_format(fmt).static_activation_contract
+        if contract is not None and (contract.measured_as_served or served_override):
+            identity = bind_served_quantizer_identity(
+                require=True, context="joint Stage B activation pricing")
+            if contract.served_quantizer is not None and contract.served_quantizer != identity:
+                raise RuntimeError("joint Stage B format overrides the served quantizer binding")
+            return identity.as_record()
+    return None
+
+
+def build_quantum_source_runner(config, *, offload_folder):
+    """Rebuild the same sealed BF16 source used by Stage A."""
+    from .cost_streaming import build_streamed_causal_lm
+    from .model_profiles import detect_profile
+    from .tessera_joint_aura import _source_prefetch
+
+    return build_streamed_causal_lm(
+        config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
+        offload_folder=str(offload_folder), profile=detect_profile(config["model"]),
+        attn_implementation="eager", source_authentication=None,
+        source_derivative=config["execution"].get("source_derivative"),
+        **_source_prefetch(config))
+
+
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
     record, receipt, execution, output_root,
@@ -1048,6 +1089,10 @@ def run_layer_quantum_core(
     unit_formats, fmts, render_formats = (
         roster.unit_formats, roster.fmts, roster.render_formats)
     packed_members = roster.packed_members
+    served_quantizer = bind_joint_served_quantizer(unit_formats)
+    from .joint_served_activation import joint_activation_maxima, operator_policy_record
+    pricing_maxima = joint_activation_maxima(production_cache)
+    activation_policy = getattr(production_cache, "_joint_served_activation", None)
     # The record seals window indices only (D2); membership comes from the
     # resolved handshake the caller ran, which refuses stale records. What is
     # checked here is coverage: the sealed budget must admit exactly this
@@ -1103,6 +1148,10 @@ def run_layer_quantum_core(
     joint_probe_identity["arithmetic"]["operator_windows"] = operator_windows
     joint_probe_identity["arithmetic"]["gradient_diagnostics"] = (
         "sum_output_operators_fp32_before_norm")
+    if served_quantizer is not None:
+        joint_probe_identity["arithmetic"]["served_quantizer"] = served_quantizer
+    if activation_policy is not None:
+        joint_probe_identity["arithmetic"]["served_activation_policy"] = activation_policy[0]
     if probe_layout is not None:
         joint_probe_identity["noise_layout"] = probe_layout
         joint_probe_identity["arithmetic"]["execution_partition"] = execution_partition
@@ -1124,11 +1173,13 @@ def run_layer_quantum_core(
         "cached_rendered_weights": joint_cache_renders,
         "activation_contracts": {
             name: {fmt: activation_identity(fr.get_format(fmt),
-                                            production_cache.activation_max_abs or {}, name)
+                                            pricing_maxima or {}, name)
                    for fmt in unit_formats[name]}
             for name in names
         },
     }
+    if served_quantizer is not None:
+        joint_run_identity["served_quantizer"] = served_quantizer
 
     # ---- journal ---------------------------------------------------------
     checkpoint_git_commit = _checkpoint_git_commit()
@@ -1166,7 +1217,8 @@ def run_layer_quantum_core(
     storage_policy = normalize_boundary_storage(execution["boundary_storage"])
     storage_policy["directory"] = str(boundary_entry_directory(adjusted_space(output_root)))
     storage = StreamedBoundaryArtifacts(storage_policy)
-    storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes)
+    storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes,
+                   forward_recovery=receipt["boundary_storage"].get("forward_recovery"))
     extra["streamed_boundary_storage"] = storage.identity
 
     identity = _build_aura_checkpoint_identity(
@@ -1244,19 +1296,22 @@ def run_layer_quantum_core(
             f"{record['adjoint']['checkpoint_boundary']}")
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
-    cotangent_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-        adjusted_space(output_root), checkpoint_record)
-    grad_plane: dict[tuple[int, int], torch.Tensor] = dict(cotangent_plane)
-    cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
-                         for _ in row_offsets] for _ in range(n_probes)]
-    for (probe, batch), state in shared_adjoint.items():
-        cotangent_owners[probe][batch].load_state_dict(state)
-
     with storage:
+        grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+            adjusted_space(output_root), checkpoint_record,
+            cotangent_factory=storage.checkpoint_cotangent_sink,
+            shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+        cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
+                             for _ in row_offsets] for _ in range(n_probes)]
+        for (probe, batch), state in shared_adjoint.items():
+            cotangent_owners[probe][batch].load_state_dict(state)
+        state = None
+        del shared_adjoint
         partitions = [calib_ids[offset:offset + batch_rows]
                       for offset in row_offsets]
         batches = _rebuild_batches(runner, partitions=partitions,
                                    shared_pass=shared_pass)
+        del shared_pass
         needed = sorted({int(c) for c in record["adjoint"]["chain_layers"]} | {layer})
         for batch_index, batch in enumerate(batches):
             batch.activations_cpu = [
@@ -1385,7 +1440,7 @@ def run_layer_quantum_core(
                 x2_probe.setdefault(key, [])
 
         def _record_joint_operator(name, fmt, source, rendered):
-            scales = production_cache.activation_max_abs or {}
+            scales = pricing_maxima or {}
             activation = activation_identity(fr.get_format(fmt), scales, name)
             rendered_identity = _cb_cache_tensor_identity(rendered)
             if fmt in render_formats[name]:
@@ -1406,6 +1461,11 @@ def run_layer_quantum_core(
                 "arithmetic": joint_probe_identity["arithmetic"],
                 "probe_identity_sha256": identity_sha256(joint_probe_identity),
             }
+            if activation_policy is not None and fmt != "BF16":
+                policy_record = operator_policy_record(
+                    *activation_policy, name, fmt, prepared_render_identities[name, fmt]["activation"])
+                if policy_record is not None:
+                    joint_operators[(name, fmt)]["served_activation_policy"] = policy_record
             joint_components.setdefault((name, fmt), [])
 
         # Zero-cost passthrough rows carry the source as their own render,
@@ -1668,6 +1728,9 @@ def run_layer_quantum_core(
         },
         "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
         "checkpoint_identity_sha256": checkpoint_identity_sha256,
+        **({"catalog_extension": record["catalog_extension"]}
+           if record.get("catalog_extension") is not None else {}),
+        **({"served_activation_policy": activation_policy[0]} if activation_policy is not None else {}),
     })
     if set(joint_rows) != set(names):
         raise RuntimeError("layer quantum incomplete unit coverage")
@@ -1812,6 +1875,11 @@ def run_layer_quantum(
     counters = None
     resolved_windows: list[dict] | None = None
     try:
+        # Bind before cache/intake work. The core repeats this idempotently
+        # for direct callers and stamps the actual arithmetic in row identity.
+        prepared_header = json.loads(_bound(prepared, "prepared anchors").read_text())
+        result["served_quantizer"] = bind_joint_served_quantizer(
+            prepared_header["formats_by_qname"])
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         implementation = _aura_source_sha256()
@@ -1859,6 +1927,13 @@ def run_layer_quantum(
         if not isinstance(cache, ProductionWeightCache):
             raise RuntimeError("prepared cache is not ProductionWeightCache")
         _same(cache.metadata["inputs"], data.inputs, "prepared source bindings")
+        _same(completion.get("served_activation_policy"), config.get("served_activation_policy"),
+              "prepared served activation policy")
+        if config.get("served_activation_policy") is not None:
+            if record.get("catalog_extension") is None:
+                raise RuntimeError("served activation policy requires an explicit catalog extension")
+            from .joint_served_activation import activate_policy
+            activate_policy(cache, config["served_activation_policy"])
         expected_renders = {pair: cache.metadata["verified_cells"][pair]["render_file_sha256"]
                             for pair in data.cells}
         cache.require_file_load_sha256(
@@ -1868,11 +1943,7 @@ def run_layer_quantum(
         result["wire_validation"] = "historical-qualified-wire"
 
         identity_cache_path = _seed_source_identity_cache(config, space / "run")
-        runner = build_streamed_causal_lm(
-            config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
-            offload_folder=str(space / "run" / "offload"),
-            profile=detect_profile(config["model"]), attn_implementation="eager",
-            source_authentication=None)
+        runner = build_quantum_source_runner(config, offload_folder=space / "run" / "offload")
         from .cost_streaming import build_streamed_model_identity
 
         source = build_streamed_model_identity(runner, config["model"],

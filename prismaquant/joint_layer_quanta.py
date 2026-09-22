@@ -483,6 +483,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                  max_resident_consumers: int | None = None,
                  window_partition: Mapping | None = None,
                  adjoint_receipt: Mapping | None = None,
+                 catalog_extension: Mapping | None = None,
                  layer_source_spans: Mapping[int, Sequence] | None = None) -> dict:
     """Cut the sealed campaign into per-layer quantum records (§4.1).
 
@@ -580,10 +581,13 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
     derived_stride = derive_stride(len(layers), stride)
     checkpoints = derived_stride["checkpoints"]
     receipt_sha = None
+    if catalog_extension is not None and adjoint_receipt is None:
+        raise ValueError("catalog extension requires the actual completed Stage A capture")
     if adjoint_receipt is not None:
         receipt_sha = bind_adjoint_receipt(adjoint_receipt, plan_sha256=plan_sha256,
                                            prepared_sha256=prepared_sha256,
-                                           scope=scope, checkpoints=checkpoints)
+                                           scope=scope, checkpoints=checkpoints,
+                                           catalog_extension=catalog_extension)
     quanta_root = output_root.rstrip("/") + "/layer-quanta"
     adjoint_dir = quanta_root + "/adjoint"
     # PQ #884: control metadata (slice manifests, record paths) may live in
@@ -697,6 +701,8 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                 "checkpoint_dir": space + "/checkpoints",
             },
         }
+        if catalog_extension is not None:
+            record["catalog_extension"] = dict(catalog_extension)
         record["identity_sha256"] = canonical_sha256(
             record, where=f"quantum record {qid}")
         records.append(record)
@@ -1259,17 +1265,23 @@ def check_quantum_for_campaign(record: Mapping, campaign: Mapping) -> None:
 
 
 def bind_adjoint_receipt(receipt: Mapping, *, plan_sha256: str, prepared_sha256: str,
-                         scope: Mapping, checkpoints: Sequence[int]) -> str:
+                         scope: Mapping, checkpoints: Sequence[int],
+                         catalog_extension: Mapping | None = None) -> str:
     """Digest a stage-A receipt after checking it answers for this campaign."""
     if not isinstance(receipt, dict):
         raise ValueError("a stage-A receipt must be an object")
     if receipt.get("schema") != ADJOINT_CAPTURE_SCHEMA:
         raise ValueError("a stage-A receipt has a foreign schema: refusing")
     identity = receipt.get("run_identity", receipt)
-    for field, expected in (("plan_sha256", plan_sha256),
-                            ("prepared_sha256", prepared_sha256)):
-        if identity.get(field) != expected:
-            raise ValueError(f"the stage-A receipt answers for another {field}: refusing")
+    if catalog_extension is not None:
+        from .joint_catalog_extension import require_extension
+        require_extension(catalog_extension, receipt=receipt,
+                          plan_sha256=plan_sha256, prepared_sha256=prepared_sha256)
+    else:
+        for field, expected in (("plan_sha256", plan_sha256),
+                                ("prepared_sha256", prepared_sha256)):
+            if identity.get(field) != expected:
+                raise ValueError(f"the stage-A receipt answers for another {field}: refusing")
     if canonical_bytes(identity.get("campaign_scope")) != canonical_bytes(scope):
         raise ValueError("the stage-A receipt answers for another scope: refusing")
     sealed = receipt.get("checkpoints", [])
@@ -1511,7 +1523,8 @@ def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     receipt_sha256 = bind_adjoint_receipt(
         receipt, plan_sha256=campaign["plan_sha256"],
         prepared_sha256=campaign["prepared_sha256"],
-        scope=campaign["campaign_scope"], checkpoints=strided_boundaries)
+        scope=campaign["campaign_scope"], checkpoints=strided_boundaries,
+        catalog_extension=record.get("catalog_extension"))
     if type(n_probes) is not int or isinstance(n_probes, bool) \
             or n_probes < 1:
         raise ValueError("a boundary readset needs a sealed probe count, "
@@ -2211,7 +2224,8 @@ def build_quantum_executable_manifest(
     receipt_sha256 = bind_adjoint_receipt(
         receipt, plan_sha256=campaign["plan_sha256"],
         prepared_sha256=campaign["prepared_sha256"],
-        scope=campaign["campaign_scope"], checkpoints=strided_boundaries)
+        scope=campaign["campaign_scope"], checkpoints=strided_boundaries,
+        catalog_extension=record.get("catalog_extension"))
     replay_windows = record.get("windows")
     if not isinstance(replay_windows, list) or not replay_windows:
         raise ValueError("a quantum record seals no replay windows: refusing")
