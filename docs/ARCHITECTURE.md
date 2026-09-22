@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Stager lifecycle (2026-09-22, PQ #959, #960): a Stage A stager worker that
+dies drops the tasks it stranded with their own `on_drop` callbacks, keeps the
+first callback failure, and reports the death to the owner, which raises it at
+its next call and records it as `stager-died` release debt. A run whose stager
+never joined publishes `status: retained` instead of `complete`, and its
+generation record and receipt carry a `retained` block naming the origins and
+bytes still owned. No format, lane, pin, kernel order, ship-gate verdict or
+default changes.
+
 Stage A forward recovery (2026-09-22, PQ #949): `joint_cost_stage_a`
 accepts an optional `--forward-recovery` capsule plus its SHA-256. The capsule
 is a separate explicit authority (`prismaquant.joint_forward_recovery.v1`,
@@ -1632,7 +1641,19 @@ says exactly that.
   origins and bytes; a primary exception receives a note and keeps its identity.
   A later explicit close may clean up only after it establishes the thread
   has ended. No thread is forcibly terminated and retained credit is not freed
-  optimistically. Explicit settlement also requires a successful stager drain
+  optimistically. Such a run is not a complete one: the generation's status is
+  `retained`, not `complete`, and the generation record and the owner's receipt
+  carry a `retained` block with the reason, the origin count and the origin
+  bytes (PQ #960). A run that was already failing keeps `failed`.
+  **A dead worker.** A worker thread that dies takes its queue with it. Every
+  task it strands is dropped with the `on_drop` callback `close` would have
+  given it, `keep_on_close` included, because a dead worker cannot run the
+  task that flag protects; the first drop-callback failure is preserved with
+  the rest attached to it as notes, and the death carries a note naming what
+  it stranded. The owner reads the death through `ProducedStager.death()`,
+  records it as a `stager-died` release error with the stranded labels, and
+  raises it at its next call, once, after any failure already kept (PQ #959).
+  The owner then runs its PrismaBuild calls itself, as it does with no stager. Explicit settlement also requires a successful stager drain
   before submitting its urgent task; a timed-out or failed drain refuses
   settlement while retaining ownership, so it cannot overtake queued
   publication (PQ #922). The existing closing-error path records that refusal
