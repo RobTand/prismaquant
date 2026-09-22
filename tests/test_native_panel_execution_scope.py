@@ -260,3 +260,82 @@ def test_a_table_with_no_generated_block_stamps_its_absence_with_a_reason():
     assert "no image or build it was taken under" in stamp["generated_absent_because"]
     with pytest.raises(ValueError, match="NOT VERIFIED"):
         _scope({"activation_quantizer_attestation": stamp}, ATTESTED)
+
+
+# --- two attested images, one executing one (Tessera contract v33) ----------
+
+V34 = Path(__file__).parent / "fixtures" / "tessera_activation_quantizers_v34.json"
+GLM = ("192.168.1.107/prismaquant/glm53-nope-sm121@sha256:"
+       "6941847351647ca714bbe7115ce6f627131bf78fc7eff86ddb98b11e6d25b46e")
+
+
+def _v34_stamp(executing_image):
+    """The stamp a producer freezes when the platform publishes two tables.
+
+    Read from the v2 block Tessera actually published, and selected by the
+    image the panel will execute in -- never by which entry the list happens
+    to start with (RobTand/prismaquant#926).
+    """
+    table = trc._parse_activation_quantizers(
+        json.loads(V34.read_text()), "<fixture>")
+    return trc.require_activation_quantizer_attested(
+        CONTRACT, platform=PLATFORM, table=table, contract_sha256=PIN_SHA256,
+        executing_image=executing_image)
+
+
+def test_the_campaign_image_selects_its_own_table_and_is_admitted(tmp_path):
+    """The GLM-5.3 serving image is the second entry, and it is admitted."""
+    stamp = _v34_stamp(GLM)
+    assert stamp["generated"]["image"] == GLM
+    assert stamp["generated"]["driver"] == "595.91.07"
+    panel_path, digest, panel = _cell(tmp_path, stamp=stamp,
+                                      executing_image=GLM)
+    scope = consume_native_receipt(panel_path, expected_sha256=digest,
+                                   expected_panel=panel)["activation_scope"]
+    assert scope["attested_image"] == GLM
+    assert scope["executing_image"] == GLM
+
+
+def test_the_stock_image_selects_the_other_table(tmp_path):
+    stamp = _v34_stamp(ATTESTED)
+    assert stamp["generated"]["image"] == ATTESTED
+    assert stamp["generated"]["driver"] == "595.84"
+    panel_path, digest, panel = _cell(tmp_path, stamp=stamp,
+                                      executing_image=ATTESTED)
+    scope = consume_native_receipt(panel_path, expected_sha256=digest,
+                                   expected_panel=panel)["activation_scope"]
+    assert scope["attested_image"] == ATTESTED
+
+
+def test_a_table_selected_for_one_image_does_not_cover_another(tmp_path):
+    """Selecting correctly at freeze time does not retire the consume gate.
+
+    The two legs are the same rule at the two points it could be got wrong,
+    and this is the second: a panel frozen under the campaign image's table
+    and then measured in the stock image is refused, naming both digests.
+    """
+    panel_path, digest, panel = _cell(tmp_path, stamp=_v34_stamp(GLM),
+                                      executing_image=ATTESTED)
+    with pytest.raises(ValueError) as refusal:
+        consume_native_receipt(panel_path, expected_sha256=digest,
+                               expected_panel=panel)
+    message = str(refusal.value)
+    assert f"sha256:{GLM.split('@sha256:')[1]}" in message
+    assert f"sha256:{ATTESTED.split('@sha256:')[1]}" in message
+
+
+def test_the_producer_seam_selects_with_the_image_it_is_given():
+    """``prepare_native_inputs`` passes its ``runtime_image`` down, and the
+    oracle helper refuses to pick when it is given none."""
+    from prismaquant.native_operator_panel import require_attested_activation_oracle
+
+    table = trc._parse_activation_quantizers(
+        json.loads(V34.read_text()), "<fixture>")
+    activation = {"quantizes_input": True,
+                  "static_contract": {"execution": CONTRACT}}
+    stamp = require_attested_activation_oracle(
+        activation, platform=PLATFORM, table=table, executing_image=GLM)
+    assert stamp["generated"]["image"] == GLM
+    with pytest.raises(trc.TesseraContractError, match="named none"):
+        require_attested_activation_oracle(
+            activation, platform=PLATFORM, table=table)

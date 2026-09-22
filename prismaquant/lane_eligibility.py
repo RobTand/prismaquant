@@ -2863,11 +2863,14 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
             symbol for cell in cells for symbol, _decoder in cell.executes
             if "::" in symbol})
         if native_extensions is None and extension_launches:
-            # Refused only when a cell actually launches THROUGH an extension:
-            # that launch is subject to the extension's published predicate,
-            # and with no table the predicate cannot be read. A table whose
-            # cells launch only through torch/vLLM paths has no lane to
-            # decide and reads () lanes, exactly as a v3 table does.
+            # Refused whenever a cell names a qualified launch and no
+            # extension table is published. With a table, the decoders it
+            # serves say whether such a launch rides an extension (below);
+            # with no table there is nothing to read that against, so a
+            # launch that does ride one would pass ungated. A table whose
+            # cells launch only through torch/vLLM paths has no qualified
+            # launch, no lane to decide, and reads () lanes, exactly as a v3
+            # table does.
             raise LaneEligibilityError(
                 f"runtime_contract publishes a {schema} lane table whose cells "
                 f"launch through an extension ({extension_launches}), but no "
@@ -2885,17 +2888,42 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
         # would slip past the gate; that is a contract inconsistency and it
         # is refused here, once, where the two tables meet.
         lane_decoders = {claim.extension: claim.decoder for claim in lanes}
+        served_by_a_lane = {
+            decoder: extension for extension, decoder in lane_decoders.items()}
         for cell in cells:
             for symbol, decoder in cell.executes:
                 prefix, sep, _rest = symbol.partition("::")
                 if not sep:
                     continue        # a torch/vLLM launch: the route's own path
                 if prefix not in lane_decoders:
-                    raise LaneEligibilityError(
-                        f"{where}.cells[{cell.id!r}].executes launches {symbol!r} "
-                        f"through an extension no native_extensions row "
-                        f"declares ({sorted(lane_decoders)}); what that kernel "
-                        "reads is unstated, so the launch cannot be decided")
+                    # A qualified symbol whose prefix is not an extension's
+                    # module_name_prefix. It is NOT automatically an
+                    # extension launch: Tessera's contract v34 mints four
+                    # dense cells on `tessera::window_gemm_dense` and states
+                    # in the same entry that the launch "carries lane null
+                    # because it is a launch, not an extension lane", and the
+                    # two tables agree -- no native_extensions row declares
+                    # it, and its decoder is no lane's decoder. Such a launch
+                    # stands exactly where `torch._scaled_mm` stands: the
+                    # route's own path, gated by the cell's route status and
+                    # evidence, with no wire predicate to read
+                    # (`lane_claim_for_cell` already returns None for it).
+                    #
+                    # What the prefix rule really guarded is still guarded,
+                    # one field over and on the field the gate actually keys
+                    # on: a launch that takes a decoder some lane SERVES,
+                    # while naming an extension no row declares, would escape
+                    # that lane's predicate, so it is refused here.
+                    if decoder in served_by_a_lane:
+                        raise LaneEligibilityError(
+                            f"{where}.cells[{cell.id!r}].executes launches "
+                            f"{symbol!r} under decoder {decoder!r}, which "
+                            f"native_extensions[{served_by_a_lane[decoder]!r}]"
+                            ".lane serves, but no native_extensions row "
+                            f"declares {prefix!r}; a launch read by that "
+                            "lane must name the extension that publishes "
+                            "the predicate, or it escapes it")
+                    continue
                 if decoder != lane_decoders[prefix]:
                     raise LaneEligibilityError(
                         f"{where}.cells[{cell.id!r}].executes launches {symbol!r} "
