@@ -23,7 +23,7 @@ import stat
 import threading
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, wait as wait_futures
+from concurrent.futures import CancelledError, ThreadPoolExecutor, wait as wait_futures
 from pathlib import Path
 
 import torch
@@ -1392,33 +1392,6 @@ _LAYER_READ_POOL: ThreadPoolExecutor | None = None
 _LAYER_READ_POOL_THREADS = 0
 
 
-# Shared cancellation for staged-range waits (PQ #907).
-#
-# A failed Stage A capture must cancel its prefetch workers' waits: they
-# poll, so a shared event checked in the poll loop is enough. The event is
-# set by ``StreamingContext.shutdown`` before it drains its owned futures;
-# ``_await_layer_readset`` forwards it to ``await_staged_spans``, which
-# wakes promptly with the existing waitable verdict so the read below
-# refuses fast on its existing path. Process-global because tensor payloads
-# are read on prefetch worker threads that inherit no context; tests reset
-# it explicitly via ``clear_staged_wait_cancel``.
-_STAGED_WAIT_CANCEL = threading.Event()
-
-
-def request_staged_wait_cancel() -> None:
-    """Signal staged-range waits to abort promptly."""
-    _STAGED_WAIT_CANCEL.set()
-
-
-def clear_staged_wait_cancel() -> None:
-    """Clear a previously requested staged-wait cancellation (tests)."""
-    _STAGED_WAIT_CANCEL.clear()
-
-
-def staged_wait_cancelled() -> bool:
-    """Whether a staged-wait cancellation has been requested."""
-    return _STAGED_WAIT_CANCEL.is_set()
-
 _LAYER_READ_POOL_LOCK = threading.Lock()
 
 # Below this many tensors a layer is a handful of big reads and the pool
@@ -1520,7 +1493,8 @@ def _advise_consumed_safetensors_pages(shard: str, keys: list[str],
         os.close(fd)
 
 
-def _await_layer_readset(by_shard, *, source_authentication=None):
+def _await_layer_readset(by_shard, *, source_authentication=None,
+                         cancel=None):
     """Let PrismaBuild's movers land this layer's ranges before the fan-out.
 
     Readiness is decided HERE, in the thread that is about to submit the
@@ -1559,6 +1533,11 @@ def _await_layer_readset(by_shard, *, source_authentication=None):
     this thread (tens of KB against a multi-GB layer payload; the gather's
     own readers parse their own headers as they always did) and one
     resolver lookup per tensor, no sleeps.
+
+    ``cancel`` is the owning context's ``threading.Event``, forwarded to
+    ``await_staged_spans``. A set event raises ``CancelledError`` out of
+    the wait; cancellation never resolves as a verdict and the read below
+    never runs for a cancelled owner.
     """
     from .residency_map import RANGE_HIT
     from .residency_shard_reader import (
@@ -1625,7 +1604,7 @@ def _await_layer_readset(by_shard, *, source_authentication=None):
     from .staged_lease import stage_cover_is_published
     verdict = await_staged_spans(resolver, wanted, deadline=began + budget,
                                  published=stage_cover_is_published,
-                                 cancel=_STAGED_WAIT_CANCEL)
+                                 cancel=cancel)
     if verdict != RANGE_HIT:
         # The time that actually elapsed, never the budget: an undeclared
         # span and a covering entry that failed a check both return from
@@ -1648,6 +1627,7 @@ def _read_layer_to_device(prefix: str,
                           merge_concat=None,
                           buffer_dtypes: dict[str, torch.dtype] | None = None,
                           source_authentication=None,
+                          cancel=None,
                           ) -> dict[str, torch.Tensor]:
     """Read all tensors under `prefix` from safetensors and place them
     on `device`. Returns {model_name: device_tensor}.
@@ -1670,7 +1650,14 @@ def _read_layer_to_device(prefix: str,
     consumed source payload pages after each existing reader chunk completes
     its copies and releases its mappings.
     CPU-backed outputs retain their mappings and never request page release.
+
+    ``cancel`` is the owning context's ``threading.Event``. A cancelled
+    owner reads no payload: a set event raises ``CancelledError`` before
+    the readiness wait and again before the gather, so teardown never pays
+    for bytes nobody will install.
     """
+    if cancel is not None and cancel.is_set():
+        raise CancelledError("layer read cancelled before its staged wait")
     by_shard: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for model_name, shard in model_to_shard.items():
         if model_name.startswith(prefix):
@@ -1736,7 +1723,10 @@ def _read_layer_to_device(prefix: str,
                 [key for _, key in pairs], source_stats[shard])
         return local
 
-    _await_layer_readset(by_shard, source_authentication=source_authentication)
+    _await_layer_readset(by_shard, source_authentication=source_authentication,
+                         cancel=cancel)
+    if cancel is not None and cancel.is_set():
+        raise CancelledError("layer read cancelled after its staged wait")
     total_tensors = sum(len(pairs) for pairs in by_shard.values())
     threads = layer_read_threads()
     if threads > 1 and total_tensors >= _LAYER_READ_MIN_TENSORS:

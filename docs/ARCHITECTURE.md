@@ -1,7 +1,31 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `fix/stagea-unpublished-905`.
+As of: 2026-09-21 · `fix/stagea-prefetch-907-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-21, `fix/stagea-prefetch-907-20260921`) for **per-context
+prefetch cancellation and a typed declared-range wait expiry** (PQ #907,
+PQ #911, review tranche 1). Each `StreamingContext` owns its staged-wait
+cancellation event, and the event travels explicitly -- prefetch worker to
+layer read to staged-range wait -- so shutting down one context never aborts
+a coexisting context's wait; there is no process-global cancellation state.
+A set event raises `CancelledError` out of the wait: a cancelled wait never
+resolves as a verdict and a cancelled owner reads no further payload and
+installs nothing. Teardown drains owned futures without calling `result()`,
+so a prefetch failure can never mask the primary capture error. The read
+seam raises `StagedRangeNotLanded` (a `TierPolicyRefused` with the declared
+span attached) when the resolver reports `RANGE_UNCOVERED`: declared bytes
+with no mover row yet, the one transient cause. An undeclared span
+(`RANGE_UNDECLARED`) and a failed covering entry (`RANGE_REFUSED`) keep the
+generic refusal, and unknown, integrity, and cancellation outcomes never
+become the typed cause. Demand versus certification: `ensure_loaded` and
+`install` claim tensors for compute -- that is actual demand, the only place
+a bounded availability retry may happen (matching narrows in tranche 2);
+`settle_prefetched_layers` and `source_residency_snapshot` are residency
+certification barriers that never schedule, never cold-read, and fail closed
+on a missing, refused, failed, or cancelled future. No format, lane, pin,
+kernel order or ship gate changes. Gates:
+`tests/test_stagea_prefetch_review_tranche1.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-unpublished-905`) for **a lease that sees
 what a stage mover has published now** (PQ #905, PrismaBuild #823). A

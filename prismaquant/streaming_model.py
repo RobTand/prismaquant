@@ -65,8 +65,6 @@ from .autoscale import (
 from .layer_streaming import (
     _build_fp8_scale_inv_map,
     LayerCache,
-    clear_staged_wait_cancel,
-    request_staged_wait_cancel,
     _build_concat_merger,
     _model_tensor_dtypes,
     _source_tensor_dtypes,
@@ -648,6 +646,10 @@ class StreamingContext:
         self.source_fp4_experts = source_fp4_experts
         self._inflight: dict[int, Any] = {}
         self._inflight_lock = threading.Lock()
+        # PQ #907: this context owns its staged-wait cancellation. The
+        # event travels explicitly -- worker to read to wait -- so shutting
+        # down one context never aborts a coexisting context's wait.
+        self._staged_wait_cancel = threading.Event()
         # Sequential-walk tracking for the automatic prefetch top-up.
         # Every streamed consumer (probe phase-1/phase-3, cost_streaming's
         # forward and reverse sweeps, incremental_measure_quant_cost) walks
@@ -734,6 +736,7 @@ class StreamingContext:
             pack_experts=self.expert_packer,
             merge_concat=self.concat_merger,
             buffer_dtypes=self.buffer_dtypes,
+            cancel=getattr(self, "_staged_wait_cancel", None),
             **({'source_authentication': self.source_authentication}
                if self.source_authentication is not None else {}))
         # The cache may still decline to RETAIN the layer under its dynamic
@@ -963,6 +966,7 @@ class StreamingContext:
             pack_experts=self.expert_packer,
             merge_concat=self.concat_merger,
             buffer_dtypes=self.buffer_dtypes,
+            cancel=getattr(self, "_staged_wait_cancel", None),
             **({'source_authentication': self.source_authentication}
                if self.source_authentication is not None else {}))
         self.layer_cache.put(L, tensors)
@@ -1124,27 +1128,20 @@ class StreamingContext:
 
     def shutdown(self):
         # PQ #907: a failed capture must not sit in teardown until each
-        # prefetch worker's own staged-range bound runs out. Prefetch
-        # workers poll, so a shared event checked in the poll loop is
-        # enough: request cancellation before draining, cancel pending
-        # owned futures promptly, then join. Running workers abort their
-        # wait with the existing waitable verdict and refuse fast on the
-        # existing read path, so this join is bounded by cancellation,
-        # not by the staged-range bound.
-        try:
-            request_staged_wait_cancel()
-        except Exception:
-            pass
-        try:
-            with self._inflight_lock:
-                owned = list(self._inflight.values())
-            for fut in owned:
-                try:
-                    fut.cancel()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        # prefetch worker's own staged-range bound runs out. This context
+        # sets its own event first: running workers raise CancelledError
+        # out of the wait and read no further payload, pending workers
+        # never start, and the join below is bounded by cancellation, not
+        # by the staged-range bound. Draining never calls result(), so an
+        # owned future's failure can never mask the primary capture error
+        # this teardown runs under.
+        cancel = getattr(self, "_staged_wait_cancel", None)
+        if cancel is not None:
+            cancel.set()
+        with self._inflight_lock:
+            owned = list(self._inflight.values())
+        for fut in owned:
+            fut.cancel()
         try:
             self.prefetch_pool.shutdown(wait=True)
         finally:
@@ -1155,10 +1152,6 @@ class StreamingContext:
             # pool is joined above and every owned future is released here.
             with self._inflight_lock:
                 self._inflight.clear()
-            try:
-                clear_staged_wait_cancel()
-            except Exception:
-                pass
 
     def reset_between_chunks(self, retain_cache: bool = False) -> dict:
         """Drop accumulated state at chunk boundaries in the multi-chunk

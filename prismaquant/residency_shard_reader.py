@@ -61,7 +61,7 @@ run; the bytes handed over are the stage's, admitted on the map.
 """
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 import errno
 import json
 import math
@@ -75,6 +75,7 @@ import torch
 
 from .residency_map import RANGE_HIT, RANGE_UNCOVERED, residency_resolver
 from .staged_tier_policy import (
+    StagedRangeNotLanded,
     active_policy,
     policy_is_active,
     refuse_pool_bulk_read,
@@ -138,61 +139,21 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
     uncovered one (PQ #905). Asked once per staged entry per poll, never per
     tensor, and an entry that answered yes is not asked again.
 
-    ``cancel`` aborts a wait that is no longer needed (PQ #907: a failed
-    capture must not sit in teardown until the staged-range bound runs
-    out). A ``threading.Event`` (or a zero-argument callable returning
-    bool) checked before every poll and waited on instead of sleeping, so
-    cancellation wakes promptly with the existing waitable verdict
-    (``RANGE_UNCOVERED``) and the read below refuses fast on its existing
-    path. ``None`` preserves the historical bounded wait.
+    ``cancel`` is the owning context's ``threading.Event`` (PQ #907), or
+    ``None`` for the historical bounded wait. A set event aborts the wait
+    by raising ``CancelledError``: a cancelled wait never resolves as a
+    verdict and never falls through to payload reading -- the caller owns
+    no bytes it did not ask to keep reading. ``Event.wait`` wakes the
+    sleep promptly.
     """
-    def _cancelled() -> bool:
-        if cancel is None:
-            return False
-        is_set = getattr(cancel, "is_set", None)
-        if callable(is_set):
-            try:
-                return bool(is_set())
-            except Exception:
-                return False
-        if callable(cancel):
-            try:
-                return bool(cancel())
-            except Exception:
-                return False
-        return False
-
-    def _interruptible_sleep(timeout: float) -> None:
-        wait = getattr(cancel, "wait", None)
-        if callable(wait):
-            try:
-                wait(timeout)
-                return
-            except Exception:
-                pass
-        # A callable cancel has no wait primitive: slice the sleep so the
-        # next poll notices promptly without changing the bound.
-        if cancel is not None and callable(cancel):
-            end = time.monotonic() + timeout
-            while True:
-                remaining = end - time.monotonic()
-                if remaining <= 0:
-                    return
-                time.sleep(min(0.05, remaining))
-                if _cancelled():
-                    return
-            return
-        time.sleep(timeout)
-
     started = time.monotonic()
     polls = 0
     pending = list(wanted)
     verdict = RANGE_HIT
     proven = set()
     while pending:
-        if _cancelled():
-            verdict = RANGE_UNCOVERED
-            break
+        if cancel is not None and cancel.is_set():
+            raise CancelledError("staged-range wait cancelled")
         still = []
         unproven = set()
         for row in pending:
@@ -224,13 +185,12 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
             if remaining <= 0:
                 verdict = RANGE_UNCOVERED
                 break
-            if _cancelled():
-                verdict = RANGE_UNCOVERED
-                break
-            _interruptible_sleep(min(STAGED_RANGE_POLL_S, remaining))
-            if _cancelled():
-                verdict = RANGE_UNCOVERED
-                break
+            if cancel is None:
+                time.sleep(min(STAGED_RANGE_POLL_S, remaining))
+            else:
+                cancel.wait(min(STAGED_RANGE_POLL_S, remaining))
+                if cancel.is_set():
+                    raise CancelledError("staged-range wait cancelled")
             polls += 1
             continue
         break
@@ -797,7 +757,7 @@ class StagedShardReader:
             if strict:
                 raise refuse_pool_bulk_read(self._declared, "readset-not-staged")
             return None
-        entry = self._resolver.staged_range(
+        entry, outcome = self._resolver.staged_range_outcome(
             self._declared, start, end, declared_size=self._declared_size)
         # Nothing waits here. This runs on a worker of the shared, bounded
         # ``layer_streaming._LAYER_READ_POOL``, and a worker sleeping on a
@@ -807,6 +767,12 @@ class StagedShardReader:
         # (PQ #874). By the time a chunk asks, the answer is final.
         if entry is None:
             if strict:
+                if outcome == RANGE_UNCOVERED:
+                    # Declared and simply not landed yet: the one transient
+                    # cause a demand-side retry may match on. Undeclared
+                    # spans and failed covering entries keep the generic
+                    # refusal below: nothing about them is on its way.
+                    raise StagedRangeNotLanded(self._declared, start, end)
                 raise refuse_pool_bulk_read(self._declared, "readset-not-staged")
             return None
         if not strict:
