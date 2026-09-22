@@ -1,6 +1,23 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-22 · `fix/pq-917-static-prepared-inputs-20260922`.
+As of: 2026-09-22 · `fix/stageb-bounded-cotangent-950-20260922`.
+
+Stage B may explicitly seal `PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
+`PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` to keep its cotangent working plane
+on local disk. The existing boundary owner preallocates the exact tensor-byte
+extent in a private disposable file, loads authenticated checkpoint entries
+one at a time through the existing strict pinned reader, and owns cleanup.
+Every coordinate has a fixed dtype/shape slot; replay reads owned CPU tensors
+and overwrites the same slot, syncing and dropping file pages after I/O.
+There are no mmap tensor views and no second retained checkpoint plane.
+Checkpoint/source/bound/replay phases and layer/probe/batch arithmetic order
+remain unchanged. The container requires the explicitly sealed same-path
+writable mount; NFS, tmpfs and overlay scratch roots refuse. The per-job disk
+ceiling is checked before physical allocation and is not a global disk ledger.
+Interrupted scratch is discarded; original authenticated checkpoints and
+committed cost journals remain the recovery authority. No GPU throughput or
+large-model peak claim follows from the tiny CPU equality qualification.
+
 Distributed joint-cost joins retain the runtime's measured per-unit statistics,
 unaltered cost rows, and each quantum's original provenance. Production-shaped
 payloads must agree on schema and probe identity and cover exactly their own
@@ -22,6 +39,19 @@ resource domain nor substitutes for the transient boundary's reservation-slack
 evidence.
 
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `fix/stageb-bounded-cotangent-950-20260922`) for
+**a bounded Stage B cotangent working plane** (PQ #950). Checkpoint
+restoration reads one authenticated entry at a time through the existing
+strict pinned reader instead of materializing all 4x512 cotangents at once,
+and `load_adjoint_checkpoint` takes an optional caller-owned cotangent
+factory plus an auxiliary byte ceiling for the shared-state payloads. When
+`PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
+`PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` are sealed, the boundary owner
+preallocates one fixed-slot local file and the quantum reuses that slot per
+coordinate; unset, the historical in-memory plane is unchanged. Phase order,
+layer/probe/batch arithmetic, calibration draw and checkpoint identity are
+untouched. Gate: `tests/test_stageb_cotangent_scratch.py`.
 
 Re-stamped (2026-09-22, `fix/pq-917-static-prepared-inputs-20260922`) for
 **static prepared renders at retained-window read boundaries** (PQ #917).

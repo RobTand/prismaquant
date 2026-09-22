@@ -904,6 +904,135 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
         compact = None
 
 
+class ExactCotangentScratch:
+    """Job-local fixed tensor slots; reads own their bytes, never mmap views.
+
+    This disposable arithmetic workspace is not a checkpoint or an input
+    cache. Its owner replays immutable checkpoint entries after interruption.
+    Allocation is real disk space; every completed I/O requests page release.
+    """
+
+    @staticmethod
+    def _require_local_disk(root):
+        root = Path(root)
+        if not root.is_absolute() or not root.is_dir() or root.is_symlink():
+            raise ValueError("cotangent scratch requires an existing absolute local directory")
+        resolved = root.resolve(strict=True)
+        matches = []
+        for line in Path('/proc/self/mountinfo').read_text().splitlines():
+            left, right = line.split(' - ', 1)
+            fields = left.split()
+            mount = Path(re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), fields[4]))
+            if resolved == mount or mount in resolved.parents:
+                matches.append((len(mount.parts), right.split()[0]))
+        if not matches or max(matches)[1] not in {'ext4', 'xfs', 'btrfs', 'zfs'}:
+            raise ValueError("cotangent scratch requires local disk (NFS/tmpfs/overlay refused)")
+        return resolved
+
+    def __init__(self, records, *, directory, max_bytes, max_tensor_bytes=None):
+        import tempfile
+        if type(max_bytes) is not int or max_bytes <= 0:
+            raise ValueError("cotangent scratch requires a positive byte ceiling")
+        if max_tensor_bytes is None:
+            max_tensor_bytes = max_bytes
+        if type(max_tensor_bytes) is not int or max_tensor_bytes <= 0:
+            raise ValueError("cotangent scratch requires a positive resident tensor ceiling")
+        self._file = None
+        self._slots = {}
+        self._written = set()
+        self.tensor_bytes = 0
+        self.max_slot_bytes = 0
+        for entry in records:
+            name = entry['name']
+            if not re.fullmatch(r'cotangent-[0-9]+-[0-9]+', name):
+                raise ValueError("cotangent scratch entry has invalid coordinates")
+            key = tuple(int(part) for part in name.split('-')[1:])
+            if key in self._slots:
+                raise ValueError("cotangent scratch repeats coordinates")
+            shape = tuple(entry['shape'])
+            if not shape or any(type(dim) is not int or dim <= 0 for dim in shape):
+                raise ValueError("cotangent scratch entry has invalid shape")
+            dtype = getattr(torch, str(entry['dtype']).removeprefix('torch.'), None)
+            if not isinstance(dtype, torch.dtype):
+                raise ValueError("cotangent scratch entry has invalid dtype")
+            size = math.prod(shape) * torch.empty((), dtype=dtype).element_size()
+            if type(entry['tensor_bytes']) is not int or size != entry['tensor_bytes']:
+                raise ValueError("cotangent scratch entry byte size differs")
+            if size > max_tensor_bytes:
+                raise RuntimeError("cotangent scratch slot exceeds resident tensor ceiling")
+            self._slots[key] = (self.tensor_bytes, size, shape, dtype)
+            self.tensor_bytes += size
+            self.max_slot_bytes = max(self.max_slot_bytes, size)
+        if not self._slots or self.tensor_bytes > max_bytes:
+            raise RuntimeError("cotangent scratch exceeds its sealed disk byte ceiling")
+        root = self._require_local_disk(directory)
+        self._file = tempfile.TemporaryFile(prefix='pq-cotangent-', dir=root)
+        try:
+            os.posix_fallocate(self._file.fileno(), 0, self.tensor_bytes)
+            os.fdatasync(self._file.fileno())
+            self._drop_pages()
+        except BaseException:
+            self.close()
+            raise
+
+    def _drop_pages(self):
+        os.posix_fadvise(self._file.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+
+    def __len__(self):
+        return len(self._slots)
+
+    def __iter__(self):
+        return iter(self._slots)
+
+    def __getitem__(self, key):
+        if self._file is None or key not in self._written:
+            raise RuntimeError("cotangent scratch slot is not ready")
+        offset, size, shape, dtype = self._slots[key]
+        tensor = torch.empty(shape, dtype=dtype, device='cpu')
+        view = memoryview(tensor.view(torch.uint8).reshape(-1).numpy())
+        try:
+            done = 0
+            while done < size:
+                got = os.preadv(self._file.fileno(), [view[done:]], offset + done)
+                if got <= 0:
+                    raise RuntimeError("cotangent scratch slot is truncated")
+                done += got
+            self._drop_pages()
+        finally:
+            view.release()
+        return tensor
+
+    def __setitem__(self, key, tensor):
+        if self._file is None:
+            raise RuntimeError("cotangent scratch is closed")
+        offset, size, shape, dtype = self._slots[key]
+        if (tensor.device.type != 'cpu' or tensor.dtype != dtype
+                or tuple(tensor.shape) != shape):
+            raise ValueError("cotangent scratch rollover changed shape/dtype")
+        self._written.discard(key)
+        # At most one slot-sized compaction, as in the exact-entry writer.
+        compact = tensor.detach().contiguous()
+        view = memoryview(compact.view(torch.uint8).reshape(-1).numpy())
+        try:
+            done = 0
+            while done < size:
+                put = os.pwritev(self._file.fileno(), [view[done:]], offset + done)
+                if put <= 0:
+                    raise RuntimeError("cotangent scratch short write")
+                done += put
+            os.fdatasync(self._file.fileno())
+            self._drop_pages()
+            self._written.add(key)
+        finally:
+            view.release()
+
+    def close(self):
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+        self._written.clear()
+
+
 class EntryReadScratch:
     """One reusable read buffer for exact activation entries.
 
