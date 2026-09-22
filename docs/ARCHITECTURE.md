@@ -19917,3 +19917,19 @@ scale; wire calibration identity remains historical. `--read-paths-out` emits
 the selected wires, package sources, authority documents and proof/policy
 inputs required when constructing PB's normal export read manifest. It is not
 an export qualification receipt and does not claim a full model was exported.
+
+### Selected executed-group activation export
+
+The routed-scale export gate accepts `executed_group.v1` only with the exact
+bound served-activation policy, independently rederived groups, selected A4
+member/format coverage, and the policy's priced fp32 values and formula. The
+build anchor preserves this binding and records pricing/input equality as
+verified; serving qualification remains false. Legacy per-unit declarations
+and refusal of unbound executed labels remain unchanged.
+
+`tools/write_tessera_selected_scales.py --assignment FILE --assignment-sha256
+SHA --out-dir NEW_DIRECTORY` reads that immutable allocation once and writes
+only its selected priced static scales through `write_export_inputs` with
+`hessians=None`. It does not recompute per-expert maxima or alter retained H.
+The output receipt binds the assignment, serialized scale file and served
+policy. An existing output directory is refused before any write.
