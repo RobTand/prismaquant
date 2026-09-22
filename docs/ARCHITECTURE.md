@@ -308,7 +308,8 @@ reader after binding it to the checkpoint session's generation and run
 identity, its boundary and its slot. `ExactCotangentScratch` accepts the
 `-at-<boundary>` entry names. Gates:
 `tests/test_declared_adjoint_checkpoints.py`,
-`tests/test_adjoint_checkpoint_default_path_identity.py` (the flag-off
+`tests/test_declared_adjoint_checkpoints_real_pb.py` (PrismaBuild's own export
+action), `tests/test_adjoint_checkpoint_default_path_identity.py` (the flag-off
 fingerprints, taken on origin/main `613ffb68a0`).
 
 Re-stamped (2026-09-22, `fix/stageb-bounded-cotangent-950-20260922`) for
