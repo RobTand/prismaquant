@@ -500,7 +500,9 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
                       cell["record"]["blob_sha256"], "overlay wire bytes")
                 cell["render_file_sha256"] = hashlib.sha256(Path(cell["render"]).read_bytes()).hexdigest()
             data.cells[name, fmt] = cell
-            data.formats_by_qname[name] = (*data.formats_by_qname[name], fmt)
+            old_formats = data.formats_by_qname[name]
+            _require(old_formats[-1] == "BF16", "base candidate roster must retain terminal BF16")
+            data.formats_by_qname[name] = (*old_formats[:-1], fmt, "BF16")
             data.payload["costs"][name][fmt] = copy.deepcopy(scalar)
             if name in data.payload.get(EXPERT_WIRES_KEY, {}):
                 data.payload[EXPERT_WIRES_KEY][name][fmt] = copy.deepcopy(cell["record"])

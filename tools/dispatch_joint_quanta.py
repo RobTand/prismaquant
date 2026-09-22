@@ -1014,13 +1014,26 @@ def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) 
         raise DispatchRefused(
             f"{receipt_path}: receipt schema is not {ADJOINT_SCHEMA!r}")
     campaign = records[0][1]["campaign"]
-    for key in ("plan_sha256", "prepared_sha256"):
-        if receipt.get(key) != campaign[key]:
-            raise DispatchRefused(
-                f"{receipt_path}: receipt {key} is not this campaign's "
-                "(stale receipt)")
+    extensions = [record.get("catalog_extension") for _, record in records]
+    if any(extension is not None for extension in extensions):
+        if any(extension != extensions[0] for extension in extensions):
+            raise DispatchRefused("quantum catalog extension bindings differ")
+        from prismaquant.joint_catalog_extension import require_extension
+        try:
+            require_extension(extensions[0], receipt=receipt,
+                plan_sha256=campaign["plan_sha256"], prepared_sha256=campaign["prepared_sha256"])
+        except (ValueError, OSError, KeyError) as exc:
+            raise DispatchRefused(f"catalog extension refused: {exc}") from exc
+    else:
+        for key in ("plan_sha256", "prepared_sha256"):
+            if receipt.get(key) != campaign[key]:
+                raise DispatchRefused(
+                    f"{receipt_path}: receipt {key} is not this campaign's "
+                    "(stale receipt)")
     digest = _canonical_receipt_sha256(receipt, where="stage-A receipt")
     expected = records[0][1]["adjoint"]["receipt_sha256"]
+    if extensions[0] is not None and any(record["adjoint"]["receipt_sha256"] != digest for _, record in records):
+        raise DispatchRefused("catalog extension records must all seal the original completed capture")
     if expected is not None and digest != expected:
         raise DispatchRefused(
             f"{receipt_path}: canonical digest {digest} does not match the "
