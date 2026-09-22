@@ -1546,8 +1546,9 @@ class StreamedBoundaryArtifacts:
         Queued optional steps are dropped, each publication as a counted
         refusal: a mover for a group nobody will read is not worth starting
         as the owner closes. Retirement asks and charge reclaims still run.
-        After the join there is no thread, so the settle that follows is the
-        synchronous code, unchanged.
+        A successful join restores synchronous cleanup. If the worker is
+        still alive, its handle and all owned resources remain retained;
+        the caller must skip teardown until a later close can join it.
         """
 
         stager = self._stager
@@ -1558,7 +1559,7 @@ class StreamedBoundaryArtifacts:
                 joined = stager.close(timeout=float(
                     self._produced_plan["staging_timeout_s"]) + 60.0)
             except BaseException as exc:                # noqa: BLE001
-                joined = False
+                joined = not stager.alive()
                 self._produced_release_errors.append(
                     {"batch_id": None, "step": "stager-close",
                      "reason": {"error": repr(exc)}})
@@ -1574,11 +1575,15 @@ class StreamedBoundaryArtifacts:
             self._produced_release_errors.append(
                 {"batch_id": None, "step": "stager-close",
                  "reason": {"error": "the stager thread did not end inside "
-                            "the staging budget; the settle was skipped"}})
+                            "the staging budget; teardown was skipped"}})
             self._produced_log(
                 "stager thread did not end inside the staging budget; the "
-                "settle at exit is skipped and the stage credit it would "
-                "have returned is reported as debt")
+                "teardown at exit is skipped; origins and credit remain owned "
+                "and are reported as debt")
+            # Keep the ownership handle while its callbacks can still run.
+            # Do not drain its failures or dispose of any shared state here.
+            return
+        self._stager_stuck = False
         self._stager = None
         for label, exc in self._stager_failures:
             self._produced_release_errors.append(
@@ -3091,6 +3096,17 @@ class StreamedBoundaryArtifacts:
             # disposal, the settle and the prewrite release are then the
             # synchronous code, unchanged.
             self._produced_stop_stager()
+            if self._stager_stuck:
+                note = ("stager still owns this generation; retaining origins, "
+                        "checkpoint reservations and produced-output credit")
+                self._produced_release_errors.append(
+                    {"batch_id": None, "step": "stuck-stager-exit-retain",
+                     "reason": {"error": note,
+                                "origins": len(self._references),
+                                "origin_bytes": self.telemetry["live_artifact_bytes"]}})
+                if exc is not None:
+                    exc.add_note(note)
+                return False
             if not self._readonly and (
                     self._active_window is not None or self.telemetry["resident_tensor_bytes"]):
                 raise RuntimeError("exact boundary generation closed with a live window")
@@ -3118,22 +3134,23 @@ class StreamedBoundaryArtifacts:
             self._status = "failed"
             raise
         finally:
-            if self._scratch is not None:
-                self._scratch.release()
-            for batch in self._batches or ():
-                batch.activations_cpu.clear()
-                batch.input_ids = batch.position_ids = None
-                batch.position_embeddings = batch.attention_mask = batch.shared_pass_state = None
-            for row in self._cotangents or ():
-                for cotangent in row:
-                    cotangent.release_resident_state()
-                row.clear()
-            if self._batches is not None:
-                self._batches.clear()
-            if self._cotangents is not None:
-                self._cotangents.clear()
-            self._batches = self._cotangents = None
-            self._check_memory = None
+            if not self._stager_stuck:
+                if self._scratch is not None:
+                    self._scratch.release()
+                for batch in self._batches or ():
+                    batch.activations_cpu.clear()
+                    batch.input_ids = batch.position_ids = None
+                    batch.position_embeddings = batch.attention_mask = batch.shared_pass_state = None
+                for row in self._cotangents or ():
+                    for cotangent in row:
+                        cotangent.release_resident_state()
+                    row.clear()
+                if self._batches is not None:
+                    self._batches.clear()
+                if self._cotangents is not None:
+                    self._cotangents.clear()
+                self._batches = self._cotangents = None
+                self._check_memory = None
             self._publish_status()
 
     def receipt(self):

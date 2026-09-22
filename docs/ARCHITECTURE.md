@@ -4,7 +4,7 @@ As of: 2026-09-21 · `muse/stager904-reconciled-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-21, `muse/stager904-reconciled-20260921`) for
-**retirement and close ownership** (PQ #918, #920): an unresolved queued or running stager
+**retirement and close ownership** (PQ #918, #919, #920): an unresolved queued or running stager
 publication refuses origin retirement with a timeout. The origin, live-byte
 charge, reference and slot stay owned, and the release report names the debt.
 No format, kernel order, or staging-budget default changes.
@@ -1357,8 +1357,13 @@ says exactly that.
   and still never changes the run's outcome. A failure kept at that point is
   recorded as a release error. A failing run waits for that join too, where
   the synchronous loop only asked and left. If the join times out, a PrismaBuild call is
-  still running on that thread: the settle is skipped and said so, in the log
-  and in the release errors.
+  still running on that thread: the handle remains owned, and all teardown
+  is skipped, including origin unlink, checkpoint reclamation, prewrite
+  release and scratch disposal (PQ #919). The release report names the retained
+  origins and bytes; a primary exception receives a note and keeps its identity.
+  A later explicit close may clean up only after it establishes the thread
+  has ended. No thread is forcibly terminated and retained credit is not freed
+  optimistically.
   **Telemetry.** `produced_compute_blocked_s` is the compute thread's time
   blocked on this owner's PrismaBuild work, which is the GPU's cost of
   staging. It is the sum of one exclusive counter per reason
