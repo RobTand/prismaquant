@@ -11,7 +11,7 @@ def launch_argv(cwd,environ,affinity,args):
  progress=environ.get('PRISMABUILD_ACTION_PROGRESS_PATH')
  if progress and not Path(progress).is_relative_to('/mnt/shared'):
   parent=str(Path(progress).parent);mounts.append({'source':parent,'target':parent,'readonly':False})
- env={'PRISMAQUANT_CONTAINER_CONTENT_SHA256':CONTENT,'PYTHONPATH':f'/pq:{PIN}/src','TESSERA_REPO':PIN,'OMP_NUM_THREADS':'1','MKL_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1','PRISMAQUANT_PROD_ACT_SCALES':'0','TRITON_CACHE_DIR':'/tmp/triton','TORCHINDUCTOR_COMPILE_THREADS':'1','MAX_JOBS':'1'}
+ env={'PRISMAQUANT_CONTAINER_CONTENT_SHA256':CONTENT,'PYTHONPATH':f'/pq:{PIN}/src','TESSERA_REPO':PIN,'OMP_NUM_THREADS':'1','MKL_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1','PRISMAQUANT_PROD_ACT_SCALES':'0','PRISMAQUANT_TMPDIR':'/tmp/prismaquant','TMPDIR':'/tmp','HF_HOME':'/tmp/huggingface','XDG_CACHE_HOME':'/tmp/cache','TRITON_CACHE_DIR':'/tmp/triton','TORCHINDUCTOR_COMPILE_THREADS':'1','MAX_JOBS':'1'}
  from tools.tessera_campaign_container import residency_environment, reader_context_environment, progress_environment
  spec={'container':{'mounts':mounts},'env':env}
  residency_env,residency_mounts=residency_environment(spec,environ)
