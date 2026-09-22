@@ -1,7 +1,37 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-22 - `fix/pq-917-static-prepared-inputs-20260922` (replays accepted #900).
+As of: 2026-09-22 · `fix/pq-917-static-prepared-inputs-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `diagnose/r4-retiring-cover-20260922`) for **a retiring
+cover yielding to an independently leased overlap** (PQ #916). A broad head
+entry may still pass every file check while PB has closed its material
+generation to new leases. After that exact typed `retiring` refusal, the
+source reader takes one finite snapshot of other covering entries through
+the existing resolver checks, then tries each entry's own real lease. It
+keeps the successful pin and descriptor for the complete reader lifetime.
+Ordinary successful reads do no extra metadata work. Unknown authority,
+changed identity, and other SDK integrity refusals stop immediately; when
+no alternative can serve, hard file failures remain integrity refusals and
+missing/all-retiring alternatives serve no bytes. No HDD fallback, lease
+bypass, phase-policy change, or PB runtime change is introduced. Gates:
+`tests/test_staged_range_retiring_cover.py` uses real PB fragments, sidecars,
+pins, retiring marks, SSD/RAM admission, and exact releases.
+
+Re-stamped (2026-09-21, `fix/pq-903-stale-missing-waitable`) for **a stale covering row waiting instead of refusing** (PQ #903). After #902 every covering entry is asked, but every covering staged file missing still refused at once, even when the sealed readset declares the span and the layer's own range has not landed yet: the map is behind the file system (partial eviction or recompose lag), not the bytes unavailable. `ResidencyResolver._range_answer` now carries a typed missing cause (`errno.ENOENT` on the staged `lstat` with no RAM offer, never a `strerror` substring match); `staged_range_outcome` reports all-missing + declared as `RANGE_UNCOVERED` (same silent `range_misses` waitable miss as no covering entry) and all-missing + undeclared as `RANGE_UNDECLARED`. Any hard failure -- entry runs past the declared file, staged copy not regular, wrong size, or unreadable for any other errno including permission -- still refuses at once and reports the first hard reason (integrity first). The layer pre-flight waits on the waitable miss under its single deadline and the read below still refuses after the bound with no pool read. No format, lane, pin, kernel order or ship gate changes. Gates: `tests/test_staged_range_every_covering_entry.py`, `tests/test_strict_reader_tier_enforcement.py` (mid-wait map rewrite with real PB writers and lease paths).
+
+Re-stamped (2026-09-21, `fix/pq-890-tests-20260921`) for **what counts as a
+produced-group release failure** (PQ #890). No format, lane, pin, ship-gate
+verdict or kernel order changes, and no default moves. One counter changes
+meaning: an own-copy deferral that the owner waits out and that then clears
+is no longer recorded in `produced_group_release_failures` or in the report's
+`release_errors`. The waited path now follows the rule the poll path already
+followed -- a deferral is news that PrismaBuild still holds the copy, not a
+stage copy left standing -- so the counter answers "did this owner leave a
+copy behind?" rather than "did this owner happen to ask inside a wait?". A
+deferral that runs its budget out is recorded where it is decided, in the
+wait, alongside the `BoundaryProducedReleaseDeferred` it raises; foreign
+pins, promotion handoffs and egress errors are recorded exactly as before.
 
 
 Re-stamped (2026-09-21, `fix/stagea-unpublished-905`) for **a lease that sees
@@ -113,8 +143,9 @@ phase and **gates** the result:
   toward this gate either, because PrismaBuild stages and evicts by phase. The
   gate is about what is **declared**, not about which entry the reader picks:
   the resolver asks every map entry that covers a span, lowest offset first, so
-  a neighbour's header entry still serves a layer's first tensors while it is
-  staged, and the layer's own entry serves them once it is not (PQ #902).
+  a neighbour's header entry can serve while its file and lease both admit
+  the read. A missing file or typed retiring generation cannot hide the
+  layer's independently admitted entry (PQ #902, #916).
 - Each run of uncovered tensors becomes one entry from the first tensor's own
   file offset to the last one's end. The offset is derived, not aligned, so it
   cannot land on a header entry's `(path, 0)`.
@@ -1244,7 +1275,9 @@ says exactly that.
   **asks** for the retirement and returns, and later window opens poll it, a
   poll of PrismaBuild's own in-flight egress being neither a failed attempt
   nor a recorded error (`produced_group_release_polls` counts them apart from
-  re-drives); (5) the owner **waits** in four places, all timed: for credit
+  re-drives), and a deferral seen inside a wait being neither one either
+  until the wait gives up on it (`produced_group_release_deferrals` counts
+  the waits, `produced_group_release_failures` the copies left standing); (5) the owner **waits** in four places, all timed: for credit
   when the window is full, for a pending retirement of a group a read wants
   (a copy is never read while an egress may be deleting it), for the mover's
   receipt before it unlinks an origin of a group staged ahead and never read
