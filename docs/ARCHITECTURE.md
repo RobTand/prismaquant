@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Rooted selected cache (2026-09-22, PQ #939): `tools/build_tessera_selected_cache.py`
+builds a `tessera.cached_units.v2` manifest only from an accepted
+`joint_catalog_extension.v1` plus exact historical producer packages, binds
+each adopted A4 cell to the served-activation policy's priced group scale, and
+can emit the export's PB read paths. The v1 single-root path is unchanged. The
+reader is the pinned Tessera (`acf9eafa6a…`, #966); see "Selected cached wires
+from an additive historical catalog". No format, default, stage or ship gate
+changes.
+
 Tessera pin (2026-09-22, `ws-j2/tessera-pin-v34`, Refs #944 #939): the
 serving-runtime pin and the reader dev pin move from `cc739a5516…` (contract
 v32) to `acf9eafa6a…` (Tessera master after #588, #590 and #592; contract v34,
