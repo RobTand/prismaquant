@@ -60,6 +60,7 @@ from .joint_adjoint_checkpoints import (
     derive_checkpoint_boundaries,
     dev_mode_stamp,
     exact_entry_record,
+    occupied_checkpoint_directories,
     render_free_layer_roll,
     require_dev_mode,
     write_adjoint_checkpoint,
@@ -1305,6 +1306,17 @@ def run_adjoint_capture(
         raise AdjointIdentityRefused(
             f"plan output_root {config['output_root']} is not --output-root "
             f"{output_root}")
+    occupied = occupied_checkpoint_directories(adjoint_space(output_root))
+    if occupied:
+        # write_adjoint_checkpoint creates each boundary with exist_ok=False,
+        # so an occupied path fails the run only when the adjoint sweep
+        # reaches it -- after the head intake and the forward pass. Refuse
+        # here instead, before any GPU work.
+        raise AdjointIdentityRefused(
+            "stage A writes checkpoint paths that already exist: "
+            + ", ".join(str(path) for path in occupied)
+            + "; a checkpoint directory is never reused, so move a stale "
+            "one aside (rename it) before submitting")
     _bound(prepared, "prepared anchors")
     stride_value, stride_source = resolve_stride(config, stride)
     prefetch = resolve_prefetch_override(config, prefetch_override)

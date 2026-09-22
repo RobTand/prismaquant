@@ -213,7 +213,17 @@ def staged_range_wait_s() -> float:
     is neither negative nor NaN, and a deadline of ``started + inf`` never
     expires. An unbounded wait is not a longer bound, it is no bound.
     """
-    raw = os.environ.get(STAGED_RANGE_WAIT_ENV)
+    return staged_range_wait_from_env(os.environ)
+
+
+def staged_range_wait_from_env(env) -> float:
+    """:func:`staged_range_wait_s` read from ``env`` rather than the process.
+
+    The joint dispatcher reads a campaign spec's ``env`` block with the same
+    rules before it submits, so the wait it compares with the row's progress
+    grace is the wait the reader inside the container will use.
+    """
+    raw = env.get(STAGED_RANGE_WAIT_ENV)
     if raw is None or not str(raw).strip():
         return STAGED_RANGE_WAIT_S
     try:

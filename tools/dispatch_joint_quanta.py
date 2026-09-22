@@ -738,8 +738,40 @@ def _plan_output_root(campaign: Mapping) -> Path:
     return Path(plan["output_root"])
 
 
-def _container_wrap(spec_path: Path,
-                    payload: list[str]) -> tuple[list[str], str | None]:
+def require_staged_wait_below_grace(spec: Mapping,
+                                    progress: Sequence[tuple[str, int]]) -> None:
+    """Refuse a row whose staged-range wait could outlast a phase grace.
+
+    The reader inside the container waits up to
+    ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` for a published range to land and
+    then refuses with the staging error. PrismaBuild kills a phase that
+    commits no progress for its grace. A wait at or above the smallest grace
+    turns a staging stall into a no-progress kill, which names no range
+    (R10: 900 s wait against a 900 s chain grace). The wait is read from the
+    spec's ``env`` block with the reader's own rules, so the value compared
+    here is the value the reader will use; the admissible bound is derived
+    from the grace this row declares.
+    """
+    from prismaquant.residency_shard_reader import (
+        STAGED_RANGE_WAIT_ENV, staged_range_wait_from_env)
+
+    env = spec.get("env") or {}
+    try:
+        wait = staged_range_wait_from_env(env)
+    except ValueError as exc:
+        raise DispatchRefused(f"campaign spec: {exc}") from exc
+    name, grace = min(progress, key=lambda phase: phase[1])
+    if not wait < grace:
+        raise DispatchRefused(
+            f"campaign spec {STAGED_RANGE_WAIT_ENV}={wait:g} s is not below "
+            f"the {grace} s progress grace of phase {name!r}: a staging stall "
+            "would end as a no-progress kill instead of the reader's staging "
+            f"refusal. Set it below {grace} s")
+
+
+def _container_wrap(spec_path: Path, payload: list[str], *,
+                    progress: Sequence[tuple[str, int]]
+                    ) -> tuple[list[str], str | None]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -754,8 +786,12 @@ def _container_wrap(spec_path: Path,
     race a spec rewrite and seal one image while declaring another; the
     caller adds the reference to the pbrun envelope (``--container-image``
     before the payload separator), never inside the payload.
+
+    ``progress`` is the row's ``--progress-phase`` list; the same parse is
+    checked against it (:func:`require_staged_wait_below_grace`).
     """
     spec = json.loads(Path(spec_path).read_text())
+    require_staged_wait_below_grace(spec, progress)
     argv = ["python3", "-m", "tools.tessera_campaign_container",
             "--spec", json.dumps(spec, sort_keys=True),
             "--", *payload]
@@ -847,7 +883,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--data-manifest-sha256", staged_sha256,
         "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
-        "--output-root", str(output_root)])
+        "--output-root", str(output_root)], progress=progress)
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
         argv += ["--tag", str(tag)]
@@ -973,14 +1009,15 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         payload += ["--prefetch-override", str(prefetch_override)]
     if artifact_budget_bytes is not None:
         payload += ["--artifact-budget-bytes", str(artifact_budget_bytes)]
-    wrapped, container_image = _container_wrap(SPEC_PATH, payload)
+    progress = [(phase, HEAD_PROGRESS_GRACE_S if phase == "head"
+                 else CHUNK_PROGRESS_GRACE_S) for phase in binding["phases"]]
+    wrapped, container_image = _container_wrap(SPEC_PATH, payload,
+                                               progress=progress)
     argv = [sys.executable, str(PBRUN),
             "--tag", tag,
             "--data-manifest", str(adjoint_manifest),
             "--residency", "stage"]
-    for phase in binding["phases"]:
-        grace = (HEAD_PROGRESS_GRACE_S if phase == "head"
-                 else CHUNK_PROGRESS_GRACE_S)
+    for phase, grace in progress:
         argv += ["--progress-phase", f"{phase}={grace}"]
     argv += ["--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
              "--cpus", "10"]
