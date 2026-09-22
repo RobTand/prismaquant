@@ -19983,3 +19983,18 @@ It emits a coordinator launch recipe without submitting nested PB work.
 A spec may explicitly bind `container_admission_reference` to PB's portable
 content identity while keeping the distinct scientifically inspected Docker
 content identity; both checks must succeed before execution.
+
+`tools/adopt_tessera_source_digests.py` can transfer an existing, explicitly
+SHA-bound streamed-model identity cache into Tessera's source digest cache.
+The owning complete-checkpoint validator must authenticate config, shard map,
+identity seal and every original mutation fence; the caller also binds the
+expected source content identity. Before and after publication, each source
+file is reopened and checked through the existing cache fingerprint contract.
+Entries use Tessera's existing atomic cache writer and retain the authority,
+original upstream fingerprint and `fresh_payload_read: false`. This is adoption
+of previously established hashes, never a claim that payloads were reread.
+The existing explicit development-mode device-number portability exception is
+neither enabled nor widened by this helper. If used by the caller, it remains
+visible in every adopted writer and the aggregate receipt; certified source
+validation retains its strict device fence. Whole cached export still checks
+all source headers and its complete expected source identity.
