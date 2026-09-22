@@ -19,6 +19,17 @@ kill, which names no range, and not as the reader's staging refusal. The
 default wait of 300 s is unchanged. Gate:
 `tests/test_stagea_startup_hygiene.py`.
 
+Declared-output client (2026-09-22, PQ #870): the precommit local output
+spool is one generic client, `prismaquant/produced_output_spool.py`
+(`ProducedOutputSpool`), for every writer that runs under PrismaBuild and
+declares its outputs through a produced-output template. It was never specific
+to Stage A; `prismaquant/stage_a_local_spool.py` now only re-exports the former
+names. Each recorded entry may declare PB's `checkpoint` artifact class, which
+PB charges to the checkpoint prewrite budget instead of the payload one. Stage
+A boundary entries are its only caller today; routing adjoint checkpoints and
+renders through it is owed work. No format, default, stage or ship gate
+changes.
+
 Fully loaded modules skip checkpoint initialization (2026-09-22, PQ #968):
 the Transformers compatibility hook now marks a module `_is_hf_initialized`
 when every parameter and buffer it owns came from the checkpoint, before
@@ -295,7 +306,9 @@ the existing RAM/SSD lease policy. Failed/incomplete exports retain local files
 and prewrite credit, and successful capture receipts drain outstanding exports.
 The container requires an explicitly declared writable bind preserving host
 path identity. This is per-owner bounded precommit storage, not a global host
-disk ledger; checkpoint serialization is unchanged. Tests distinguish adapter
+disk ledger; checkpoint serialization is unchanged. (The client is now
+`produced_output_spool.ProducedOutputSpool`; see the 2026-09-22 declared-output
+note at the top.) Tests distinguish adapter
 transport doubles from qualification of PB's actual exporter. Deployment is
 separate from source qualification.
 
