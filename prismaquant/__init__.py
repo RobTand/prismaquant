@@ -85,6 +85,33 @@ def _ensure_triton_cache_writable() -> None:
 # Re-expose the 4.x import path so remote code that matches the checkpoint
 # tensor naming still loads. Idempotent — no-op if the symbol is already
 # there (4.x or future 5.x that re-exports it).
+def _mark_fully_loaded_modules(model) -> None:
+    """Flag every module whose own tensors all came from the checkpoint.
+
+    Transformers 5.6.0's ``_initialize_missing_keys`` still documents that it
+    "propagates this flag to modules", but its body does so only under FSDP.
+    Everywhere else it runs ``_init_weights`` on every module and relies on
+    the initializer calling the guarded ``transformers.initialization``
+    functions, which skip a tensor already marked ``_is_hf_initialized``.  An
+    initializer that writes a tensor directly (``weight.fill_``,
+    ``bias.zero_()`` -- the vendored DeepSeek-V4 router does this to a loaded
+    buffer) then overwrites checkpoint values after the load.  Transformers
+    applies exactly this module rule to remote code; it is applied here to
+    every checkpoint load, before missing-state initialization runs.
+
+    A module with no tensors of its own, or with any tensor the checkpoint did
+    not supply (a nonpersistent buffer, a missing key), is left unmarked, so
+    its initializer still runs.
+    """
+    for module in model.modules():
+        if getattr(module, "_is_hf_initialized", False):
+            continue
+        tensors = [*module.parameters(recurse=False),
+                   *(b for b in module.buffers(recurse=False) if b is not None)]
+        if tensors and all(getattr(t, "_is_hf_initialized", False) for t in tensors):
+            module._is_hf_initialized = True
+
+
 def _polyfill_transformers() -> None:
     try:
         # OutputRecorder: transformers.utils.generic → transformers.modeling_utils
@@ -118,6 +145,7 @@ def _polyfill_transformers() -> None:
                 # An unsuccessful repeated finalization must not retain an
                 # earlier completion descriptor.
                 self.__dict__.pop(_INITIALIZATION_CONTRACT_ATTRIBUTE, None)
+                _mark_fully_loaded_modules(self)
                 token = _checkpoint_initializing.set(True)
                 try:
                     result = real_missing(self, *args, **kwargs)
