@@ -151,7 +151,7 @@ def _single_run(tmp_path, monkeypatch, *, checkpoint):
     """The campaign of record: one consumer, retained windows, exact boundaries."""
     monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
     model, context, runner, cache = fixture()
-    context.settle_prefetched_layers = lambda layers: None
+    context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         "owners": [], "unique_storage_bytes": sum(
             p.numel() * p.element_size() for p in model.parameters())}
@@ -860,7 +860,7 @@ def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
     del payload_single
     torch.manual_seed(85)
     model, context, runner, _ = fixture()
-    context.settle_prefetched_layers = lambda layers: None
+    context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         "owners": [], "unique_storage_bytes": sum(
             p.numel() * p.element_size() for p in model.parameters())}
@@ -1327,7 +1327,7 @@ def test_resolve_handshake_refuses_stale_records(tmp_path, monkeypatch):
     """The D2 handshake: wrong count or advisory-names mismatch refuses."""
     torch.manual_seed(85)
     model, context, runner, cache = fixture()
-    context.settle_prefetched_layers = lambda layers: None
+    context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         "owners": [], "unique_storage_bytes": sum(
             p.numel() * p.element_size() for p in model.parameters())}

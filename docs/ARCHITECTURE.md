@@ -12,8 +12,53 @@ render, calibration, and wire checks. Its PB read manifest names the same
 prepared/cache files for either monolithic or distributed costs. No timing
 price, serving qualification, or missing candidate is inferred by this bridge.
 
-As of: 2026-09-22 · `diagnose/r4-retiring-cover-20260922`.
+As of: 2026-09-22 · `integrate/stageb-r6-astra-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `fix/stagea-prefetch-907-20260921`) for **Stage A
+loader-barrier availability recovery** (PQ #911). The real forward visitor
+settles its successor window before entering `capture_forward`; waiting until
+`ensure_loaded` to retry a failed speculative future was too late. That
+forward barrier and Stage A's reverse-chain barrier now explicitly opt into
+one typed `StagedRangeNotLanded` retry while still inside their existing
+source-loading window, before graph/backward workspace begins. Default
+`settle_prefetched_layers` remains observational. Retry uses the existing
+prefetch scheduler, pressure floor and slot limits; it never cold-reads,
+installs, claims the replacement future or spends its cache pin. The retry
+budget follows the delivery future through settlement and later demand,
+including an admission refusal: a second failure propagates without another
+attempt. Before replacement, completed failure-frame locals are cleared so
+an old Future held by the visitor cannot retain a partial source layer beside
+the retry. The original exception and traceback locations remain available. Missing
+owners, unexpected windows, cancellation, unknown errors,
+integrity and every `LeaseRefused` remain immediate refusals. No source-phase
+progress is fabricated and no sealed wait/watchdog allowance is extended.
+`source_residency_snapshot` remains nonblocking. CPU/meta regression
+`tests/test_stagea_prefetch_barrier_retry.py` drives the real layer-major
+visitor, Stage A phase observer, StreamingContext, strict shard reader and
+installed PB lease SDK with an absent declared shard that actually lands
+before settlement. It stops at the capture boundary and checks exact
+installed/delivered
+weights, retained delivery/pin, later claim, phase order, zero pool payload
+and released leases. A separate full CPU core fixture checks both forward
+and reverse opt-in wiring. This is contract qualification, not a GPU
+performance measurement.
+
+Re-stamped (2026-09-22, `fix/pq-917-static-prepared-inputs-20260922`) for
+**static prepared renders at retained-window read boundaries** (PQ #917).
+The executable-readset generator loads the digest-bound production cache once,
+derives complete candidate rosters through the existing retained admission
+planners, and seals each window's verified render digests, current sizes and
+whole-file paths. Planner disagreement refuses instead of regrouping windows.
+Each `render-NN` phase precedes that window's replay phases. Dispatch verifies
+the complete prepared contract and exact bound entries against the manifest;
+legacy sequencing-only rows still refuse. At runtime the production window
+callback enters the render phase and awaits those entries using the existing
+bounded staged-read readiness API before the PWC loading pool starts. Strict
+leases remain authoritative for actual reads. This introduces no dynamic
+rendering, second mover, source fallback, or production metadata regeneration.
+Gates: `test_stageb_prepared_inputs_bridge.py` and
+`test_stageb_prepared_render_inputs.py` (CPU synthetic tensor fixtures).
 
 Re-stamped (2026-09-22, `diagnose/r4-retiring-cover-20260922`) for **a retiring
 cover yielding to an independently leased overlap** (PQ #916). A broad head
@@ -32,6 +77,12 @@ pins, retiring marks, SSD/RAM admission, and exact releases.
 
 Re-stamped (2026-09-21, `fix/pq-903-stale-missing-waitable`) for **a stale covering row waiting instead of refusing** (PQ #903). After #902 every covering entry is asked, but every covering staged file missing still refused at once, even when the sealed readset declares the span and the layer's own range has not landed yet: the map is behind the file system (partial eviction or recompose lag), not the bytes unavailable. `ResidencyResolver._range_answer` now carries a typed missing cause (`errno.ENOENT` on the staged `lstat` with no RAM offer, never a `strerror` substring match); `staged_range_outcome` reports all-missing + declared as `RANGE_UNCOVERED` (same silent `range_misses` waitable miss as no covering entry) and all-missing + undeclared as `RANGE_UNDECLARED`. Any hard failure -- entry runs past the declared file, staged copy not regular, wrong size, or unreadable for any other errno including permission -- still refuses at once and reports the first hard reason (integrity first). The layer pre-flight waits on the waitable miss under its single deadline and the read below still refuses after the bound with no pool read. No format, lane, pin, kernel order or ship gate changes. Gates: `tests/test_staged_range_every_covering_entry.py`, `tests/test_strict_reader_tier_enforcement.py` (mid-wait map rewrite with real PB writers and lease paths).
 
+Re-stamped (2026-09-21, `muse/stager904-reconciled-20260921`) for
+**retirement and close ownership** (PQ #918, #919, #920, #922): an unresolved queued or running stager
+publication refuses origin retirement with a timeout. The origin, live-byte
+charge, reference and slot stay owned, and the release report names the debt.
+No format, kernel order, or staging-budget default changes.
+
 Re-stamped (2026-09-21, `fix/pq-890-tests-20260921`) for **what counts as a
 produced-group release failure** (PQ #890). No format, lane, pin, ship-gate
 verdict or kernel order changes, and no default moves. One counter changes
@@ -44,6 +95,81 @@ copy behind?" rather than "did this owner happen to ask inside a wait?". A
 deferral that runs its budget out is recorded where it is decided, in the
 wait, alongside the `BoundaryProducedReleaseDeferred` it raises; foreign
 pins, promotion handoffs and egress errors are recorded exactly as before.
+
+Re-stamped (2026-09-21, `fix/stagea-prefetch-907-20260921`) for **a typed-only
+speculative-availability retry** (PQ #911, review tranche 2). The demand-side
+retry predicate (`streaming_model._is_prefetch_availability`) matches the
+proven transient cause by type -- `isinstance` against `StagedRangeNotLanded`
+only. No message-substring matching, no `kind`-attribute matching, no
+`CancelledError` retry: an unknown failure whose text happens to contain
+availability words is refused, not retried, and a second availability failure
+after the single bounded retry propagates. Lease-`availability` refusals are
+not matched either: they can reach the layer read seam through its
+`LeaseWindow` (including `retiring`), but are distinct from the proven
+declared-but-unlanded cause. A cancelled owner starts no new demand read:
+`ensure_loaded` raises
+`CancelledError` before scheduling the retry and before the synchronous cold
+read. Cancellation interrupts readiness waits and prevents a subsequent
+read; I/O already in progress still joins normally during shutdown. The
+retry still travels through the existing prefetch machinery with
+the bounded declared wait, so source-phase memory accounting (admission bound,
+pressure floor) is unchanged, and teardown still drains without calling
+`result()`, keeping the primary capture error. `settle_prefetched_layers`
+defaults to `result()` with no retry, cold read, or claim -- a failed future
+propagates its own error. The explicit admitted-loader opt-in described above
+adds the same bounded recovery before capture, and
+`source_residency_snapshot` describes a
+pending future as pending without waiting, touching, or loading it. No
+format, lane, pin, kernel order or ship gate changes. Gates:
+`tests/test_stagea_speculative_availability_retry.py` (8 tests: speculation
+lands-then-serves, integrity preserved, incidental wording refused,
+single-retry-then-propagates, success costs one read, cancelled demand reads
+nothing, settle fails closed, snapshot never waits).
+
+Re-stamped (2026-09-21, `fix/stagea-prefetch-907-20260921`) for **per-context
+prefetch cancellation and a typed declared-range wait expiry** (PQ #907,
+PQ #911, review tranche 1). Each `StreamingContext` owns its staged-wait
+cancellation event, and the event travels explicitly -- prefetch worker to
+layer read to staged-range wait -- so shutting down one context never aborts
+a coexisting context's wait; there is no process-global cancellation state.
+A set event raises `CancelledError` out of the wait: a cancelled wait never
+resolves as a verdict and the read following that wait does not start.
+In-progress I/O is joined normally; cancellation does not interrupt it.
+Teardown drains owned futures without calling `result()`,
+so a prefetch failure can never mask the primary capture error. The read
+seam raises `StagedRangeNotLanded` (a `TierPolicyRefused` with the declared
+span attached) when the resolver reports `RANGE_UNCOVERED`: declared bytes
+with no mover row yet, the one transient cause. An undeclared span
+(`RANGE_UNDECLARED`) and a failed covering entry (`RANGE_REFUSED`) keep the
+generic refusal, and unknown, integrity, and cancellation outcomes never
+become the typed cause. Demand versus certification: `ensure_loaded` and
+`install` claim tensors for compute. Default `settle_prefetched_layers` and
+`source_residency_snapshot` remain observational. The explicit Stage A loader
+opt-in documented above permits bounded availability recovery at settlement
+before capture; it still never claims a delivery future or cold-reads. No
+format, lane, pin,
+kernel order or ship gate changes. Gates:
+`tests/test_stagea_prefetch_review_tranche1.py`.
+
+Re-stamped (2026-09-21, `feat/stagea-background-stager-895`) for **the Stage A
+owner's background stager** (PQ #895). No format, lane, pin, ship-gate verdict
+or kernel order changes, and the **default is unchanged**: at the sealed
+two-group window the owner starts no thread and every step runs where it is
+called. With a window wider than two groups, the bound owner starts one stager
+thread (`prismaquant/produced_stager.py`) and runs on it every PrismaBuild
+call that can wait on a lock: the prewrite claim, publication, re-staging,
+retirement asks and their polls, and the durable-charge reclaim. The compute
+thread submits that work and keeps two lock-free reads, the poll of a mover's
+receipt and the composition of a group's reader context. It blocks only for a
+group it must read that is not funded yet, for a prewrite the stager has not
+claimed yet, or for a full optional queue. The read-ahead rules of #887 are
+the same code; what changed is the thread they run on. The reason is measured:
+in the first production run with read-ahead the GPU was busy 18 percent of the
+forward pass, because at 1 GiB a group the owner's PrismaBuild calls, made on
+the compute thread, took longer than the compute between them.
+`PRISMAQUANT_STAGEA_STAGER=inline` is the run-scoped override that keeps
+every step on the calling thread at any window width.
+
 
 Re-stamped (2026-09-21, `fix/stagea-unpublished-905`) for **a lease that sees
 what a stage mover has published now** (PQ #905, PrismaBuild #823). A
@@ -68,6 +194,46 @@ every other refusal is the read's to make, at once, as before. After the bound
 the refusal stands and nothing is read from the pool. No format, lane, pin,
 kernel order or ship gate changes. Gates:
 `tests/test_stage_cover_mid_copy_mover.py`.
+
+Re-stamped (2026-09-22, `fix/pq-917-static-prepared-inputs-20260922`, adapted #909 filter) for **source-only
+executable phases** (PQ #909). `_source_extent_entries(source_model_root=...)`
+keeps only the parent entries under the sealed plan's source model directory
+(path-component boundary, the stage-A selection): rendered-cache files the
+parent also tiles never stage in a chain/own source phase and stay under the
+produced-output lifecycle. The tiling-agreement check still runs on the whole
+tiled group first, a phase left with no source entry refuses, and without a
+root the historical bytes reproduce unchanged. The regen CLI reads the root
+from the sealed plan's `model` and refuses without it. Gate:
+`tests/test_stageb_source_render_exclusion.py`.
+
+Re-stamped (2026-09-21, `fix/stageb-source-readset-900`) for **Stage B's
+actual source readset, independent of the parent byte tiling** (PQ #900).
+`build_quantum_executable_manifest(layer_source_spans=...)` completes every
+chain and own source phase using Stage A's `complete_source_extent` and
+`uncovered_source_spans`: each tensor must fit inside one entry of that
+phase, including a small tensor already declared in a neighbouring layer's
+phase. Missing or empty per-layer span sets refuse. Added entries follow all
+existing entries and use the first missing tensor's own offset; a duplicate
+`(path, offset)` refuses. The manifest records `annotations.source_completion`
+and the existing executable binder rederives the completed manifest against
+the same spans before binding its digest into a new record generation.
+
+`tools/regenerate_joint_quanta.py --executable-readsets
+--source-layers-prefix PREFIX` reads the sealed plan's source checkpoint
+index and shard headers once and passes all body-layer tensor spans through
+the builder, emitter and binder. This is opt-in so historical generations
+still reproduce exactly; `--metadata-root` gives the new control generation
+its own namespace and `--compare-existing` checks the retained scientific
+bindings before any publication. The frozen parent, slice entries and chunk
+tiling, plan/prepared identity, calibration draw, and Stage A artifact paths
+stay intact. A new executable record identity is expected, just as for every
+post-capture binding. Completing only four slices would both violate their
+parent tiling and miss source holes in the other layers a quantum walks.
+**The produced-output launch gate stays in place:** executable manifests
+remain sequencing-only until the accepted validator integration tracked by
+PQ #870 / PR #871 is available. This repair supplies no storage lease and
+does not make a Stage B GPU run qualified. Gate:
+`tests/test_stageb_readset_source_coverage.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 staged-range resolver asking every covering entry** (PQ #902). PrismaBuild
@@ -134,8 +300,9 @@ in the first 80 KB of a shard whose first MiB a neighbouring layer's phase
 declares). PrismaBuild's `validate_data_manifest` and `manifest_phase_ranges`
 accept it. **Not changed:** the per-layer slice manifests and the quantum records
 that seal them. They tile the parent byte for byte (§3.1 of the distributed
-campaign contract), so they carry the same four holes into Stage B; that is
-filed separately. Gates: `tests/test_stagea_readset_source_coverage.py`.
+campaign contract). Stage B source coverage is completed separately in its
+bound executable readsets (PQ #900, above); slice coverage alone proves no
+reader coverage. Gates: `tests/test_stagea_readset_source_coverage.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 scope of Stage A's kernel-time profiler** (PQ #899). `run_adjoint_capture`
@@ -159,7 +326,6 @@ A failing capture prints `capture failed: <type>: <message>` before any
 teardown. Stage B's per-chain and per-window sessions are bounded scopes and are
 unchanged. No format, lane, pin, kernel order or ship gate changes. Gates:
 `tests/test_stage_a_kernel_profile_scope.py`.
-
 Re-stamped (2026-09-21, `feat/stagea-owner-loop-readahead-20260921`) for
 **read-ahead in the Stage A produced-boundary owner loop** (PQ #887). No
 format, lane, pin, ship-gate verdict or kernel order changes, and the
@@ -1234,7 +1400,9 @@ says exactly that.
   trips each way on the 512-sample panel. The owner reads the group count
   back from the sealed window (`window_gib // ceil(group_bytes / GiB)`,
   `cost_streaming._sealed_window_groups`) and treats every group past two as
-  credit for work no read has asked for yet. Five rules, no threads:
+  credit for work no read has asked for yet. Five rules, which run on the
+  calling thread at the default window and on the stager thread described
+  after them at a wider one:
   (1) a group is **published when its last entry is durable**, so its mover
   runs while the writer computes — unless the writer says no read follows
   (`write(read_back=False)`, the walk's last roll); (2)
@@ -1301,9 +1469,116 @@ says exactly that.
   groups plus retirements in flight, so `concurrent_groups` of about 56
   (`window_gib` 112). A narrower window degrades toward the synchronous loop;
   it does not fail.
-  **Telemetry.** `produced_group_stage_wait_s`, `produced_group_release_wait_s`
-  and `produced_group_ahead_wait_s` are the owner's time blocked on, or
-  spent asking, the PrismaBuild queue.
+  **The stager thread (PQ #895).** At a window wider than two groups the
+  owner runs those rules on one background thread, because on the compute
+  thread they cost more than the compute: in the first production run the GPU
+  was busy 18 percent of the forward pass, and a publish-ahead step that
+  overran its 10 s budget was counted as a refusal, so its group was published
+  at its first read while the GPU waited for the mover. The stager
+  (`produced_stager.ProducedStager`) is a serial executor with two lanes.
+  Lane 1 holds a read the compute thread is waiting for (urgent) and a closed
+  window's retirement asks (ordered), first in, first out, so a read never
+  runs ahead of a retirement ask queued before it. Lane 2 holds optional work
+  nobody waits for (publication at write-complete, staging a plane ahead, the
+  next group's prewrite claim, the durable-charge reclaim); it runs only when
+  lane 1 is empty, and it is bounded at four times the window, so a full lane
+  blocks the writer instead of queueing work faster than PrismaBuild takes it.
+  **One task runs at a time, on purpose.** PrismaBuild serializes one owner's
+  mutating calls anyway: every mutating `produced_output` entry point takes
+  `stage_ownership_lock(output_prefix)`, one path for all of an owner's
+  groups, and `posix_lock.held` takes a per-path `threading.RLock` before the
+  POSIX lock, because a POSIX lock is process-scoped. A second thread inside
+  the SDK would wait on that lock and gain nothing. The cost is stated, not
+  hidden: an urgent task waits for the task in flight
+  (`produced_stager_urgent_delay_s`), and an optional step's budget on the
+  stager is 120 s (`PRODUCED_STAGER_STEP_BUDGET_S`), not the staging budget.
+  **What the compute thread still does.** It writes and reads tensors, polls
+  a mover's receipt (`await_materialized`) and composes a group's reader
+  context, both lock-free reads of PrismaBuild's records. A window whose
+  groups are all published, funded and not being retired submits nothing
+  (`produced_group_fast_reads`); that is the steady state. Which groups a
+  closing window keeps for the next probe pass is decided on the compute
+  thread at window exit, never later on the stager, and the groups whose
+  retirement is queued are marked, so the read that wants one waits for the
+  ask instead of reading a copy an egress may be deleting. The stager retires
+  the previous window's groups while the next window is open; the rule that a
+  group is not retired under a live window is therefore checked against the
+  live window's own groups there, and against any live window on the calling
+  thread, as before. One lock guards the bookkeeping both threads touch
+  (`produced_stager.OwnerLock`), and a thread gives it up around every
+  PrismaBuild call: decide under the lock, call without it, commit under it.
+  Credit a read-ahead step takes is counted before its call, so the other
+  thread's arithmetic sees it while the call runs.
+  **A failure never disappears.** An optional step stays a counted refusal
+  with its reason. An urgent step raises on the compute thread under its own
+  type, as it did inline. Any other step's failure is kept and raised by the
+  owner's next call, with a note naming the step. Refusals, funding
+  deferrals, retirements PrismaBuild did not take, and stager steps that ran
+  longer than 10 s are printed when they happen, one line each with the
+  reason, and are not left to the closing receipt.
+  **Close.** The owner stops the stager before it disposes of anything:
+  queued optional steps are dropped (a queued publication as a refusal with
+  reason `owner-closing`, because a mover for a group nobody will read is not
+  worth starting), retirement asks and charge reclaims still run, and the
+  thread is joined inside the staging budget plus 60 s. Every dropped waiter
+  is released even if a drop callback raises; close attempts its join with the
+  remaining budget and then raises the first callback error (PQ #920), with
+  subsequent callback errors attached as notes. After the join there
+  is no thread, so the settle at close is the synchronous code, unchanged,
+  and still never changes the run's outcome. A failure kept at that point is
+  recorded as a release error. A failing run waits for that join too, where
+  the synchronous loop only asked and left. If the join times out, a PrismaBuild call is
+  still running on that thread: the handle remains owned, and all teardown
+  is skipped, including origin unlink, checkpoint reclamation, prewrite
+  release and scratch disposal (PQ #919). The release report names the retained
+  origins and bytes; a primary exception receives a note and keeps its identity.
+  A later explicit close may clean up only after it establishes the thread
+  has ended. No thread is forcibly terminated and retained credit is not freed
+  optimistically. Explicit settlement also requires a successful stager drain
+  before submitting its urgent task; a timed-out or failed drain refuses
+  settlement while retaining ownership, so it cannot overtake queued
+  publication (PQ #922). The existing closing-error path records that refusal
+  without replacing a primary failure.
+  **Telemetry.** `produced_compute_blocked_s` is the compute thread's time
+  blocked on this owner's PrismaBuild work, which is the GPU's cost of
+  staging. It is the sum of one exclusive counter per reason
+  (`produced_compute_blocked_<reason>_s`: `prewrite`, `publish_ahead`,
+  `stage_ahead`, `read_fund`, `stage_wait`, `compose`, `release`,
+  `copy_before_unlink`, `reclaim_origin`, `queue_full`, `settle`, `close`),
+  and it is counted inline too, so an `inline` run reports the same figure.
+  It includes the settle, which the cycle driver's external clock does not:
+  in the cycles below the owner reports 37.4 s and 38.2 s where the driver
+  reports 29.8 s and 31.1 s, and the difference is `settle` (8.5 s and 8.0 s)
+  less the driver's own per-call overhead.
+  `produced_group_stage_wait_s`, `produced_group_release_wait_s` and
+  `produced_group_ahead_wait_s` keep their meaning, time spent on or waiting
+  for the PrismaBuild queue, but with a stager most of it is the stager's
+  time, not the GPU's: read them beside `produced_stager_busy_s`.
+  `produced_stager_busy_s` over `produced_stager_alive_s` is the stager's
+  load, with `produced_stager_queue_peak`, `produced_stager_step_overruns` and
+  `produced_stager_dropped`. A stager near full load is PrismaBuild's fixed
+  action cost (PB #811) surfacing on the other thread, and the bound on
+  read-ahead then.
+  **Evidence, and its limit.** Three chain cycles at production group size
+  (`tools/stagea_produced_live_cycle.py --mode chain --entry-mib 16
+  --group-size 64 --window-compute-s 7`: 64 entries of 16 MiB a group, 2
+  layers, 2 groups a plane, 4 probes, 24-group window, owner on a Spark, 2026-09-21), one
+  before the change and two after, all on an **idle fleet**. The driver times
+  its own calls into the owner and subtracts the raw tensor writes and reads,
+  so the figure does not depend on the owner's counters. Compute-thread time
+  blocked on the owner, before and after: 35.8 s, then 29.8 s and 31.1 s, of a
+  367 s, 341 s and 342 s cycle. Per group: first forward layer 0.60 s, then
+  0.03 s and 0.02 s; tail 2.26 s, then 0.88 s and 0.93 s; steady-state chain
+  layer 0.29 s, then 0.13 s and 0.14 s. The cold-start chain layer did not
+  move (3.33 s, then 3.29 s and 3.36 s a group): that wait is the mover's copy
+  of a plane whose retirement from the tail read was still in flight, which no
+  thread removes. No arm had a refusal, and the stager was busy 26 s of 342 s.
+  So on an idle fleet the change is worth about 5 s in 36 s. **That is not the
+  production case.** The 512-sample run's symptom, publish-ahead steps
+  overrunning 10 s under load and their groups published at first read, did
+  not occur in the before arm either, so these cycles do not measure what the
+  stager does to it. That needs a cycle beside running input movers, or the
+  next 512-sample run, whose receipt carries `produced_compute_blocked_s`.
   **Evidence** is five live chain cycles on the fleet
   (`tools/stagea_produced_live_cycle.py --mode chain`, owner on a Spark,
   24-group window, 3 s of stand-in compute per window; the last four in the
