@@ -135,6 +135,13 @@ def owner_execution(shape, *, format_name):
             "tensor_parallel_cut_axis": shape["tensor_parallel_cut_axis"]}
 
 
+def _expert_count(shape):
+    """Route bounds depend on expert count, independently of member widths."""
+    key = ("n_routed_experts" if geometry_family(shape) == "glm53_next_routed_stack_v1"
+           else "experts")
+    return shape[key]
+
+
 def _shape_for_roster(shape):
     """The member roster's own view: expert count, this rank's width, one format.
 
@@ -147,9 +154,8 @@ def _shape_for_roster(shape):
     cut of a member carries; the member record's own geometry is the container,
     which is ``intermediate_size`` and stays untouched here.
     """
-    glm = geometry_family(shape) == "glm53_next_routed_stack_v1"
     width = member_intermediate_width(shape)
-    return {**shape, "experts": shape["n_routed_experts"] if glm else shape["experts"],
+    return {**shape, "experts": _expert_count(shape),
             "rank_local_intermediate": width,
             "format": shape.get("format", FORMAT)}
 
@@ -770,7 +776,7 @@ def _validate_phase_tensors(x, ids, weights, shape, *, cuda):
     if len({value.device for value in (x, ids, weights)}) != 1 or (cuda and x.device.type != "cuda"):
         raise ValueError("native MoE routed invocation must be resident on one CUDA device")
     if (not bool(torch.isfinite(x).all()) or not bool(torch.isfinite(weights).all())
-            or bool((weights < 0).any()) or bool((ids < 0).any()) or bool((ids >= _shape_for_roster(shape)["experts"]).any())):
+            or bool((weights < 0).any()) or bool((ids < 0).any()) or bool((ids >= _expert_count(shape)).any())):
         raise ValueError("native MoE routed invocation has nonfinite values or invalid assignments")
     if shape["top_k"] > 1 and bool((ids.sort(dim=-1).values.diff(dim=-1) == 0).any()):
         raise ValueError("native MoE capture repeats an expert within a token's top-k")
