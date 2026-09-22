@@ -1410,6 +1410,8 @@ def admit_native_rows(table, relation):
             raise RuntimePriceError("native row requires its original native runtime")
         _, panel = reader.json(binding["panel"], "independent native panel")
         receipt_path, receipt = reader.json(binding["receipt"], "native receipt")
+        from .native_execution_binding import resolve_native_receipt_view
+        receipt = resolve_native_receipt_view(receipt, panel)
         trace_path, _ = reader.bytes(binding["memory_trace"], "native memory trace")
         run = relation["runs"][run_id]
         _equal(panel["runtime"], run["raw"], "original native panel runtime")
@@ -1437,6 +1439,7 @@ def admit_native_rows(table, relation):
             for peer in binding.get("peer_receipts", ()):
                 _object(peer, ("rank", "receipt", "memory_trace"), "native peer receipt binding")
                 peer_path, peer_receipt = reader.json(peer["receipt"], "native peer receipt")
+                peer_receipt = resolve_native_receipt_view(peer_receipt, panel)
                 peer_trace, _ = reader.bytes(peer["memory_trace"], "native peer memory trace")
                 _equal(peer_receipt["panel"], panel, "native peer receipt panel")
                 _equal(peer_receipt["resources"]["rank"], peer["rank"], "native peer receipt rank")
