@@ -120,6 +120,23 @@ literal's new column is transcribed. Gates:
 `test_native_panel_execution_scope.py`, against
 `tests/fixtures/tessera_activation_quantizers_v34.json` -- Tessera master
 `e42c0593d2`'s block verbatim, with its digest recorded.
+
+Same branch, same commit, for **a qualified launch that rides no extension**
+(PQ #958). `lane_eligibility._parse_table` read every `prefix::symbol` a cell
+executes as a launch through `native_extensions[prefix]` and refused the whole
+contract when no row declared the prefix. Contract v34 mints four dense cells
+on `tessera::window_gemm_dense` under decoder `native_window_gemm` and states
+that the launch carries no lane because it is a launch, not an extension lane;
+its `native_extensions` publishes only `tessera_window_gemv`. Such a launch now
+reads as the route's own path, exactly as `torch._scaled_mm` does, with no wire
+predicate to apply (`lane_claim_for_cell` already returned `None` for it). The
+guard moves to the field the lane gate keys on: a launch that takes a decoder
+some lane SERVES while naming an extension no row declares is REFUSED, naming
+the cell, the launch, the decoder and that extension. A launch whose prefix is
+a declared extension still must carry that extension's decoder. With no
+`native_extensions` table at all, any qualified launch is still refused --
+there is nothing to read the decoder against. Gates:
+`test_tessera_lane_requires.py`.
 Re-stamped (2026-09-22, `feat/pq-local-output-shuttle-20260922`) for
 **PB-owned precommit local output spooling** (PQ #928, PB #857). The default
 remains canonical shared writes. An explicitly sealed local spool root and
