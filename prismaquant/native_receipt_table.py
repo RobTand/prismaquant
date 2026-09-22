@@ -449,6 +449,9 @@ def _require_one_runtime(panels: list[Mapping]) -> None:
        in each. One run may load *more* than another; it may never load a
        different ``libtorch.so`` and call the timings comparable.
     """
+    if any("native_cohort_bundle" in panel["runtime"].get("source",{}) for panel in panels):
+        from .native_runtime_cohort import bind_cohort
+        return bind_cohort(panels)
     first = panels[0]["runtime"]
     if not isinstance(first.get(PER_ROUTE_RUNTIME_FIELD), Mapping):
         raise RuntimePriceError("native runtime record declares no loaded libraries")
@@ -521,13 +524,16 @@ def derive_context(panels: list[Mapping], *, relation: Mapping,
                 f"{NATIVE_BOUND_COMPOSITION!r} only")
         boundary = BOUNDARY_V1
     first = panels[0]
-    _require_one_runtime(panels)
+    cohort = _require_one_runtime(panels)
     structures = {PANEL_STRUCTURE[panel["schema"]] for panel in panels}
     if len(structures) != 1:
-        raise RuntimePriceError(
-            "native receipts were produced on more than one structure: "
-            f"{sorted(structures)}; a table prices one")
-    structure = structures.pop()
+        if cohort is None:
+            raise RuntimePriceError("native receipts were produced on more than one structure: "
+                                    f"{sorted(structures)}; a table prices one unless a versioned cohort is supplied")
+        from .measured_runtime_prices import MIXED_NATIVE_STRUCTURE
+        structure = MIXED_NATIVE_STRUCTURE
+    else:
+        structure = structures.pop()
     for panel in panels[1:]:
         for what, key in (("source model", lambda p: p["source_sha256"]),
                           ("calibration", lambda p: p["calibration_sha256"]),
@@ -545,7 +551,9 @@ def derive_context(panels: list[Mapping], *, relation: Mapping,
         if any(panel["phases"][phase]["m"] != expected for panel in panels):
             raise RuntimePriceError(f"native {phase} panels do not all run {expected} token(s)")
     return {
-        "schema": PROVENANCE_CONTEXT_SCHEMA, "runtime_identity_kind": PROVENANCE_IDENTITY_KIND,
+        "schema": ("prismaquant.measured_runtime_context.v3" if cohort is not None else PROVENANCE_CONTEXT_SCHEMA),
+        "runtime_identity_kind": PROVENANCE_IDENTITY_KIND,
+        **({"native_cohort":cohort} if cohort is not None else {}),
         "serving_context": {"platform": f"sm_{major}{minor}", "structure": structure,
                             "residency": execution["mode"], "runtime_image": runtime["image"],
                             "execution_mode": execution["execution_mode"]},
