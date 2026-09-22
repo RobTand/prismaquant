@@ -49,13 +49,14 @@ def main():
   cell=task['payload']['cell'];out=Path(task['payload']['output'])
   if out.exists():
    raw=out.read_bytes();expected=task['payload'].get('existing_result_sha256');assert expected is None or digest(raw)==expected;value=json.loads(raw);assert value['cell_sha256']==digest(json.dumps(cell,sort_keys=True,separators=(',',':')).encode());assert stamp(Path(cell['render']))==cell['render_stat'];assert stamp(Path(cell['wire']))==cell['wire_stat']
+   if expected is None:assert value.get('verified_cell_sha256')==digest(json.dumps(value['verified_cell'],sort_keys=True,separators=(',',':')).encode())
    return ('existing',raw,value)
   return ('new',read_cell(cell))
  def commit_task(task,loaded):
   cell=task['payload']['cell'];out=Path(task['payload']['output']);out.parent.mkdir(parents=True,exist_ok=True)
   if loaded[0]=='existing':raw,value=loaded[1:]
   else:
-   value={'qname':cell['qname'],'format':cell['format'],'cell_sha256':digest(json.dumps(cell,sort_keys=True,separators=(',',':')).encode()),'verified_cell':finish_cell(loaded[1])};raw=(json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode();tmp=out.with_suffix('.tmp')
+   value={'qname':cell['qname'],'format':cell['format'],'cell_sha256':digest(json.dumps(cell,sort_keys=True,separators=(',',':')).encode()),'verified_cell':finish_cell(loaded[1])};value['verified_cell_sha256']=digest(json.dumps(value['verified_cell'],sort_keys=True,separators=(',',':')).encode());raw=(json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode();tmp=out.with_suffix('.tmp')
    with tmp.open('wb') as f:f.write(raw);f.flush();os.fsync(f.fileno())
    os.replace(tmp,out)
   results.append({'task_id':task['id'],'output_id':task['output_id'],'value_sha256':digest(raw)})

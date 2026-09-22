@@ -25,6 +25,7 @@ def main():
  for cell in catalog['cells']:
   q,fmt=cell['qname'],cell['format'];pair=(q,fmt);assert pair not in cache.weights
   value=json.loads((ROOT/'qualified'/(sha(q.encode())+'.json')).read_bytes());assert value['cell_sha256']==sha(json.dumps(cell,sort_keys=True,separators=(',',':')).encode());receipt=value['verified_cell']
+  if 'verified_cell_sha256' in value:assert value['verified_cell_sha256']==sha(json.dumps(receipt,sort_keys=True,separators=(',',':')).encode())
   for key in ('source_weight','activation','encoding_identity_sha256','render_origin','render_comparison','catalog_source_adoption'):
    assert receipt[key]==cell[key],(pair,key)
   for key in ('wire','render'):
