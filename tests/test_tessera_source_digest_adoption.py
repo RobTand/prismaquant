@@ -24,12 +24,25 @@ def test_adopts_original_hashes_without_payload_reads(authority,tmp_path,monkeyp
     out=tmp_path/'digests';out.mkdir()
     with pytest.raises(AssertionError,match='rehashed'):
         SourceDigestCache(out,source=root).sha256(next(iter(shards.values())))
-    result=adopt_source_digests(root,binding,out,expected_content_sha256=identity['content_sha256'])
+    result=adopt_source_digests(root,binding,out,expected_content_sha256=identity['content_sha256'],
+                                quiescent_seconds=0)
     assert result['shards']==2 and result['fresh_source_payload_reads']==0
     cache=SourceDigestCache(out,source=root)
     for row in identity['shards']:assert cache.sha256(Path(row['path']))==row['sha256']
     receipt=cache.receipt();assert receipt['cached_shards']==2
     assert all(row['writer']['authority']==binding and row['writer']['fresh_payload_read'] is False for row in receipt['shards'])
+    # Written through Tessera's SourceDigestCache.adopt, which stamps its own
+    # adoption record (host, pid, device, quiescence) beside this owner's writer.
+    assert all(row['writer']['adopted']['quiescent_seconds']==0 and row['writer']['adopted']['pid']
+               for row in receipt['shards'])
+
+
+def test_a_shard_changed_inside_the_quiescence_window_is_not_adopted(authority,tmp_path):
+    root,shards,path,identity,binding=authority
+    with pytest.raises(ValueError,match='not quiescent'):
+        adopt_source_digests(root,binding,tmp_path/'fresh',expected_content_sha256=identity['content_sha256'],
+                             quiescent_seconds=3600)
+    assert not any((tmp_path/'fresh').glob('*.json'))
 
 
 @pytest.mark.parametrize('change',['proof','source','expected'])
@@ -40,7 +53,7 @@ def test_changed_authority_or_source_cannot_publish_a_cache(authority,tmp_path,c
     else:expected='0'*64
     out=tmp_path/'refused'
     with pytest.raises((ValueError,RuntimeError)):
-        adopt_source_digests(root,binding,out,expected_content_sha256=expected)
+        adopt_source_digests(root,binding,out,expected_content_sha256=expected,quiescent_seconds=0)
     assert not out.exists()
 
 
@@ -51,9 +64,11 @@ def test_device_only_portability_is_explicit_and_preserved(authority,tmp_path,mo
     for row in document['fingerprints']:row['device']+=123
     path.write_text(json.dumps(document));binding['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
     with pytest.raises(RuntimeError,match='stat drifted'):
-        adopt_source_digests(root,binding,tmp_path/'strict',expected_content_sha256=identity['content_sha256'])
+        adopt_source_digests(root,binding,tmp_path/'strict',expected_content_sha256=identity['content_sha256'],
+                             quiescent_seconds=0)
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE','1')
-    out=tmp_path/'portable';result=adopt_source_digests(root,binding,out,expected_content_sha256=identity['content_sha256'])
+    out=tmp_path/'portable';result=adopt_source_digests(root,binding,out,expected_content_sha256=identity['content_sha256'],
+                                                        quiescent_seconds=0)
     assert result['device_portable_shards']==2
     cache=SourceDigestCache(out,source=root)
     for shard in shards.values():cache.sha256(shard)
