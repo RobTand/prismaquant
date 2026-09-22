@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Source-digest adoption (2026-09-22, PQ #944):
+`tools/adopt_tessera_source_digests.py` carries an existing, SHA-bound
+streamed-model identity cache into Tessera's source digest cache after the
+complete-checkpoint validator and every per-shard fence check pass, so a whole
+cached export reuses those hashes without rereading payloads. It writes through
+Tessera's pinned `SourceDigestCache` (`acf9eafa6a…`, #966). No format, default,
+stage or ship gate changes.
+
 Rooted selected cache (2026-09-22, PQ #939): `tools/build_tessera_selected_cache.py`
 builds a `tessera.cached_units.v2` manifest only from an accepted
 `joint_catalog_extension.v1` plus exact historical producer packages, binds
