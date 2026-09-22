@@ -1014,6 +1014,23 @@ def build_quantum_source_runner(config, *, offload_folder):
         **_source_prefetch(config))
 
 
+def quantum_adjoint_space(record, receipt, output_root):
+    """Read the original capture namespace when only the candidate catalog moved."""
+    if record.get("catalog_extension") is None:
+        return adjusted_space(output_root)
+    directory = Path(receipt["boundary_storage"]["directory"])
+    if (not directory.is_absolute() or directory.name != "exact-boundaries"
+            or ".." in directory.parts):
+        raise RuntimeError("catalog extension capture has no canonical original adjoint namespace")
+    space = directory.parent
+    for checkpoint in receipt["checkpoints"]:
+        expected = space / "checkpoints" / f"boundary-{int(checkpoint['boundary']):03d}" / "entries"
+        for entry in checkpoint.get("activation_entries", []) + checkpoint.get("shared_state_entries", []):
+            if Path(entry["path"]).parent != expected:
+                raise RuntimeError("catalog extension checkpoint escaped the original capture namespace")
+    return space
+
+
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
     record, receipt, execution, output_root,
@@ -1093,6 +1110,7 @@ def run_layer_quantum_core(
     from .joint_served_activation import joint_activation_maxima, operator_policy_record
     pricing_maxima = joint_activation_maxima(production_cache)
     activation_policy = getattr(production_cache, "_joint_served_activation", None)
+    resource_policy = getattr(production_cache, "_joint_stage_b_resource_policy", None)
     # The record seals window indices only (D2); membership comes from the
     # resolved handshake the caller ran, which refuses stale records. What is
     # checked here is coverage: the sealed budget must admit exactly this
@@ -1152,6 +1170,8 @@ def run_layer_quantum_core(
         joint_probe_identity["arithmetic"]["served_quantizer"] = served_quantizer
     if activation_policy is not None:
         joint_probe_identity["arithmetic"]["served_activation_policy"] = activation_policy[0]
+    if resource_policy is not None:
+        joint_probe_identity["arithmetic"]["stage_b_resource_policy"] = resource_policy
     if probe_layout is not None:
         joint_probe_identity["noise_layout"] = probe_layout
         joint_probe_identity["arithmetic"]["execution_partition"] = execution_partition
@@ -1214,8 +1234,9 @@ def run_layer_quantum_core(
     }
 
     # ---- boundary storage: read-attached to the adjoint capture ----------
+    source_adjoint_space = quantum_adjoint_space(record, receipt, output_root)
     storage_policy = normalize_boundary_storage(execution["boundary_storage"])
-    storage_policy["directory"] = str(boundary_entry_directory(adjusted_space(output_root)))
+    storage_policy["directory"] = str(boundary_entry_directory(source_adjoint_space))
     storage = StreamedBoundaryArtifacts(storage_policy)
     storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes,
                    forward_recovery=receipt["boundary_storage"].get("forward_recovery"))
@@ -1298,7 +1319,7 @@ def run_layer_quantum_core(
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
     with storage:
         grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-            adjusted_space(output_root), checkpoint_record,
+            source_adjoint_space, checkpoint_record,
             cotangent_factory=storage.checkpoint_cotangent_sink,
             shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
         cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
@@ -1731,6 +1752,7 @@ def run_layer_quantum_core(
         **({"catalog_extension": record["catalog_extension"]}
            if record.get("catalog_extension") is not None else {}),
         **({"served_activation_policy": activation_policy[0]} if activation_policy is not None else {}),
+        **({"stage_b_resource_policy": resource_policy} if resource_policy is not None else {}),
     })
     if set(joint_rows) != set(names):
         raise RuntimeError("layer quantum incomplete unit coverage")
@@ -1839,6 +1861,8 @@ def run_layer_quantum(
     from .autoscale import require_bounded_capture_environment
 
     execution = config["execution"]
+    from .joint_stageb_resources import enforce_device_policy
+    device_envelope = enforce_device_policy(config)
     if (config.get("qualification_window") is not None
             or execution.get("retained_operator_windows") is not None):
         require_bounded_capture_environment(os.environ)
@@ -1868,6 +1892,7 @@ def run_layer_quantum(
         "phases": [], "passed": False,
     }
     result["env"]["container_content_sha256"] = executing_image()
+    result["device_envelope"] = device_envelope
 
     started, before_io = time.time(), _io_counters()
     runner = None
@@ -1927,6 +1952,10 @@ def run_layer_quantum(
         if not isinstance(cache, ProductionWeightCache):
             raise RuntimeError("prepared cache is not ProductionWeightCache")
         _same(cache.metadata["inputs"], data.inputs, "prepared source bindings")
+        _same(completion.get("stage_b_resource_policy"), config.get("stage_b_resource_policy"),
+              "prepared Stage B resource policy")
+        if config.get("stage_b_resource_policy") is not None:
+            cache._joint_stage_b_resource_policy = dict(config["stage_b_resource_policy"])
         _same(completion.get("served_activation_policy"), config.get("served_activation_policy"),
               "prepared served activation policy")
         if config.get("served_activation_policy") is not None:

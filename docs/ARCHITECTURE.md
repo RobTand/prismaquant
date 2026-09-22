@@ -20280,3 +20280,30 @@ only its selected priced static scales through `write_export_inputs` with
 `hessians=None`. It does not recompute per-expert maxima or alter retained H.
 The output receipt binds the assignment, serialized scale file and served
 policy. An existing output directory is refused before any write.
+
+### Candidate extension Stage B resource and source namespaces
+
+An immutable `prismaquant.joint_stageb_resource_policy.v1` may replace only
+`execution.retained_operator_windows.budget` and `max_gpu_bytes` for an
+extended candidate catalog. The original source derivative, probe count/layout,
+seed, calibration and execution controls remain exact. The policy independently
+rederives the existing statistics/window planner from the old qualified tensor
+geometry and the actual retained candidate file sizes; it binds every candidate
+path and size observation. Workers reuse sealed size observations, while their
+executable readsets and PWC checks enforce the bytes actually consumed. An
+explicit `verify_files=True` audit repeats the filesystem observations when needed.
+The current approved ceiling is 100 GiB physical, 28 GiB host and 72 GiB device.
+The dispatcher enforces the same Docker/PB limits and runtime applies the Torch
+allocator ceiling before GPU preparation. These controls preserve existing
+runtime reserve limitations; they do not claim to cap driver allocations.
+
+The original adjoint receipt remains immutable. An extended cost output root
+reads boundary storage and checkpoint manifests from the receipt's original
+capture namespace. `prepare_extended_joint_quanta` requires completed Stage A,
+fully qualified old/new PWC records and the catalog authority before generating
+fresh metadata. Historical parent layer extents remain identifiable; actual
+new candidate reads must be completed by the executable prepared-input producer.
+It emits a coordinator launch recipe without submitting nested PB work.
+A spec may explicitly bind `container_admission_reference` to PB's portable
+content identity while keeping the distinct scientifically inspected Docker
+content identity; both checks must succeed before execution.
