@@ -299,7 +299,7 @@ _DERIVED_FIELDS_V2 = _DERIVED_FIELDS + ("admission", "fixed_resources", "timing_
 #: observation therefore reads instead of refusing; registering a new key
 #: means defining its shape check in :func:`_observations` at the same time,
 #: because a carried record nobody validates is evidence of nothing.
-OPTIONAL_OBSERVATION_FIELDS = (RESERVATION_SLACK_FIELD,)
+OPTIONAL_OBSERVATION_FIELDS = (RESERVATION_SLACK_FIELD, "allocator_config")
 OBSERVATION_KEY_REGISTRY = frozenset(_OBSERVATION_FIELDS + OPTIONAL_OBSERVATION_FIELDS)
 
 #: Partition schemas admitted by NAME (PQ #731).  One member today; a second
@@ -312,7 +312,9 @@ PARTITION_SCHEMAS = (PARTITION_SCHEMA,)
 #: ``fixed_resources`` and ``timing_terms`` are carried and read by nothing
 #: here.  ``timing_terms`` is null while the timing partition is unobserved,
 #: which is a producer state rather than a malformed block.
-DERIVED_BLOCK_NAMES_V2 = ("admission", "fixed_resources", "timing_terms")
+RESERVATION_DERIVED_FIELDS = ("reserved_peak_bytes", "reservation_slack_peak_bytes",
+                              "reservation_witness")
+DERIVED_BLOCK_NAMES_V2 = ("admission", "fixed_resources", "timing_terms") + RESERVATION_DERIVED_FIELDS
 
 #: The producer's ``derived.admission`` coordinates this consumer compares.
 #: ``reason`` and ``scope`` are prose no check reads; ``verdict``,
@@ -820,6 +822,8 @@ def _observations(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Map
             raise RuntimePriceError(
                 f"{where}: missing required observation {key!r}")
     observations = value
+    if "allocator_config" in observations:
+        _optional_string(observations["allocator_config"], where + " allocator config")
     if RESERVATION_SLACK_FIELD in observations and observations[RESERVATION_SLACK_FIELD] is not None:
         _reservation_slack(observations[RESERVATION_SLACK_FIELD], where + " reservation slack")
     _sha(observations["capture_sha256"], where + " capture digest")
@@ -875,9 +879,13 @@ def _observations(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Map
     startup = observations["worker_startup_records"]
     if startup is not None:
         for item in _list(startup, where + " worker startup records"):
-            record = _object(item, WORKER_STARTUP_RECORD_FIELDS, where + " worker startup record")
+            fields = WORKER_STARTUP_RECORD_FIELDS + (
+                ("memory_reserved_bytes",) if "memory_reserved_bytes" in item else ())
+            record = _object(item, fields, where + " worker startup record")
             _index(record["rank"], where + " worker startup rank")
             _index(record["memory_allocated_bytes"], where + " worker startup allocated bytes")
+            if "memory_reserved_bytes" in record:
+                _index(record["memory_reserved_bytes"], where + " worker startup reserved bytes")
             _index(record["receipt_resident_bytes"], where + " worker startup receipt resident bytes")
             _index(record["workspace_resident_bytes"],
                    where + " worker startup workspace resident bytes")
@@ -1059,6 +1067,7 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
     partition = _partition(report["partition"], "report partition", schema=schema)
     _resolved_evidence(partition["domains"], observations, "report partition domain")
     derived = _derived(report["derived"], "report derived", schema=schema)
+    _validate_reservation_witness(observations, derived)
     if schema == REPORT_SCHEMA_V2:
         # The producer's own admission verdict, fixed-resource composition and
         # timing terms (PQ #731).  Each is admitted by NAME with its own shape
@@ -1088,6 +1097,55 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
 # --------------------------------------------------------------------------
 # Independent recomputation. Nothing below reads `derived`.
 # --------------------------------------------------------------------------
+
+def _validate_reservation_witness(observations: Mapping, derived: Mapping) -> None:
+    """Check the producer's startup witness without turning it into a run peak.
+
+    This observation does not replace the boundary's reservation_slack record
+    or close any resource domain. Older reports omit all three derived keys.
+    """
+    carried = set(RESERVATION_DERIVED_FIELDS) & set(derived)
+    if not carried:
+        return
+    if carried != set(RESERVATION_DERIVED_FIELDS):
+        raise RuntimePriceError("report reservation witness: all three derived fields are required")
+    records = list(observations["worker_startup_records"] or [])
+    owner = observations["owner_views"]
+    if isinstance(owner, Mapping) and owner.get("schema") == "tessera.full_engine_ownership_observation.v1":
+        dense = owner.get("dense_startup_check")
+        if (isinstance(dense, Mapping)
+                and dense.get("schema") == "tessera.full_engine_dense_startup_check.v1"
+                and dense.get("memory_reserved_bytes") is not None):
+            records.append(dense)
+    samples = [r for r in records if "memory_reserved_bytes" in r]
+    for record in samples:
+        allocated = _index(record.get("memory_allocated_bytes"), "reservation witness allocated bytes")
+        reserved = _index(record.get("memory_reserved_bytes"), "reservation witness reserved bytes")
+        _index(record.get("rank"), "reservation witness rank")
+        if reserved < allocated:
+            raise RuntimePriceError("reservation witness reserved bytes are below allocated bytes")
+    expected = (None, None)
+    source = None
+    if samples:
+        _string(observations.get("allocator_config"), "reservation witness allocator config")
+        source = max(samples, key=lambda r: r["memory_reserved_bytes"])
+        expected = (source["memory_reserved_bytes"],
+                    source["memory_reserved_bytes"] - source["memory_allocated_bytes"])
+    for key, actual in zip(RESERVATION_DERIVED_FIELDS[:2], expected):
+        claimed = _optional_index(derived[key], "report derived " + key)
+        if derived[key] != actual:
+            raise RuntimePriceError(f"report derived {key} disagrees with startup observations")
+    witness = derived["reservation_witness"]
+    if source is None:
+        if witness is not None:
+            raise RuntimePriceError("report reservation witness has no startup observation")
+    else:
+        record = _object(witness, ("rank", "memory_allocated_bytes", "scope"), "report reservation witness")
+        _string(record["scope"], "report reservation witness scope")
+        for key in ("rank", "memory_allocated_bytes"):
+            _index(record[key], "report reservation witness " + key)
+            if record[key] != source[key]:
+                raise RuntimePriceError(f"report reservation witness {key} disagrees with startup observations")
 
 def _declared_steps(observations: Mapping):
     """The engine steps this classification may rely on, or ``None``.
