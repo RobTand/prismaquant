@@ -1000,6 +1000,20 @@ def bind_joint_served_quantizer(formats_by_qname):
     return None
 
 
+def build_quantum_source_runner(config, *, offload_folder):
+    """Rebuild the same sealed BF16 source used by Stage A."""
+    from .cost_streaming import build_streamed_causal_lm
+    from .model_profiles import detect_profile
+    from .tessera_joint_aura import _source_prefetch
+
+    return build_streamed_causal_lm(
+        config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
+        offload_folder=str(offload_folder), profile=detect_profile(config["model"]),
+        attn_implementation="eager", source_authentication=None,
+        source_derivative=config["execution"].get("source_derivative"),
+        **_source_prefetch(config))
+
+
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
     record, receipt, execution, output_root,
@@ -1907,11 +1921,7 @@ def run_layer_quantum(
         result["wire_validation"] = "historical-qualified-wire"
 
         identity_cache_path = _seed_source_identity_cache(config, space / "run")
-        runner = build_streamed_causal_lm(
-            config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
-            offload_folder=str(space / "run" / "offload"),
-            profile=detect_profile(config["model"]), attn_implementation="eager",
-            source_authentication=None)
+        runner = build_quantum_source_runner(config, offload_folder=space / "run" / "offload")
         from .cost_streaming import build_streamed_model_identity
 
         source = build_streamed_model_identity(runner, config["model"],

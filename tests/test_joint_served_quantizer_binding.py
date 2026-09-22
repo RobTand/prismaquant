@@ -32,3 +32,26 @@ def test_a16_does_not_require_vllm_extension(monkeypatch):
         pytest.fail("A16 has no served static activation quantizer")
     monkeypatch.setattr(contract, "bind_served_quantizer_identity", unwanted)
     assert bind_joint_served_quantizer({"q": ["BF16", "TESSERA_BF16_K1_R1024"]}) is None
+
+
+def test_source_build_retains_stage_a_derivative_and_admitted_prefetch(monkeypatch):
+    from prismaquant import cost_streaming, model_profiles
+    from prismaquant.joint_cost_quantum import build_quantum_source_runner
+    prefetch = dict(max_cache_slots=2, prefetch_workers=1, prefetch_lookahead=1,
+                    cache_headroom_gb=2, prefetch_min_available_gb=2,
+                    require_prefetched_residency=True)
+    derivative = {"schema": "prismaquant.glm_source_derivative.v1", "version": "fixture"}
+    def build(path, **kwargs):
+        assert path == "/source"
+        assert kwargs["source_derivative"] == derivative
+        assert {k: kwargs[k] for k in prefetch} == prefetch
+        assert kwargs["attn_implementation"] == "eager"
+        return "built"
+    monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", build)
+    monkeypatch.setattr(model_profiles, "detect_profile", lambda _: None)
+    config = {"model": "/source", "execution": {"source_derivative": derivative},
+              "source_prefetch": prefetch}
+    assert build_quantum_source_runner(config, offload_folder="/offload") == "built"
+    config.pop("source_prefetch")
+    with pytest.raises(ValueError, match="complete source_prefetch"):
+        build_quantum_source_runner(config, offload_folder="/offload")
