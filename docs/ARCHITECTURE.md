@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Fully loaded modules skip checkpoint initialization (2026-09-22, PQ #968):
+the Transformers compatibility hook now marks a module `_is_hf_initialized`
+when every parameter and buffer it owns came from the checkpoint, before
+missing-state initialization runs. Transformers 5.6.0 documents this
+propagation but performs it only under FSDP, so an initializer that writes a
+tensor directly (the vendored DeepSeek-V4 router's `bias.zero_()`) replaced
+loaded values. Modules with a missing key or a nonpersistent buffer are still
+initialized. Gate: `tests/test_pretrained_buffer_initialization.py`.
+
 Source-digest adoption (2026-09-22, PQ #944):
 `tools/adopt_tessera_source_digests.py` carries an existing, SHA-bound
 streamed-model identity cache into Tessera's source digest cache after the
@@ -6961,7 +6970,9 @@ buffers) rematerialized by Transformers with uninitialized storage. Successfully
 finalized models expose `prismaquant.pretrained_initialization.v1` through
 `pretrained_initialization_contract`; from-config models and malformed descriptors
 refuse. This descriptor records the checkpoint load phase, not later model
-mutations. Gate: `tests/test_pretrained_buffer_initialization.py`.
+mutations. Modules whose own tensors all came from the checkpoint are marked
+initialized first, so the initializer never replaces loaded values (PQ #968).
+Gate: `tests/test_pretrained_buffer_initialization.py`.
 
 Re-stamped (2026-09-07, `feat/packed-joint-aura`) for **joint costs for
 profile-declared packed source Linears** (#313). Opt-in streamed joint AURA
@@ -7171,7 +7182,9 @@ buffers) rematerialized by Transformers with uninitialized storage. Successfully
 finalized models expose `prismaquant.pretrained_initialization.v1` through
 `pretrained_initialization_contract`; from-config models and malformed descriptors
 refuse. This descriptor records the checkpoint load phase, not later model
-mutations. Gate: `tests/test_pretrained_buffer_initialization.py`.
+mutations. Modules whose own tensors all came from the checkpoint are marked
+initialized first, so the initializer never replaces loaded values (PQ #968).
+Gate: `tests/test_pretrained_buffer_initialization.py`.
 
 Re-stamped (2026-09-07, `codex/selected-wire-materialization-20260907`) for
 **selected expert-wire materialization** (§4.10; #301). The allocator's opt-in
