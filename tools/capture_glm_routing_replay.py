@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--spec", required=True, help="bound plan/prepared/capture and owned boundary-copy bindings")
     parser.add_argument("--spec-sha256", required=True)
     parser.add_argument("--output-root", required=True)
+    parser.add_argument("--device-bytes", required=True, type=int)
     args = parser.parse_args()
     spec_binding = {"path": args.spec, "sha256": args.spec_sha256}
     spec = json.loads(_read_bound(spec_binding, "routing replay spec"))
@@ -71,6 +72,8 @@ def main():
     if (producer_source["files"] != expected_files
             or producer_source["tensors"] != prepared["source_model_identity"]["checkpoint_weight_map"]):
         raise ValueError("native producer file/tensor identity differs from original qualified source")
+    from prismaquant.memory_management import enforce_device_envelope
+    envelope = enforce_device_envelope("cuda", args.device_bytes, where="native GLM routing prefix")
     torch.set_num_threads(1)
     torch.set_float32_matmul_precision("highest")
     torch.backends.cuda.matmul.allow_tf32 = False
@@ -132,6 +135,7 @@ def main():
                     calibration=calibration, producer_source=producer_source,
                     parent_boundary={"capture":spec["capture"],"original_entry":matches[0],
                                      "owned_copy":copied,"spec":spec_binding})
+        result["metadata"]["capture_device_envelope"] = envelope
         buffer = io.BytesIO()
         torch.save(result, buffer)
         raw = buffer.getvalue()
