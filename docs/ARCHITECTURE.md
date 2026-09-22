@@ -1,5 +1,22 @@
 # PrismaQuant Architecture
 
+Stage A forward recovery (2026-09-22, PQ #949): `joint_cost_stage_a`
+accepts an optional `--forward-recovery` capsule plus its SHA-256. The capsule
+is a separate explicit authority (`prismaquant.joint_forward_recovery.v1`,
+`joint_forward_resume.py`); it does not make an unfinished generation reusable.
+It admits a complete forward prefix only when PrismaBuild proves the original
+owner action contained, every immutable group descriptor and export
+acknowledgement matches, every calibration partition is present at every
+boundary from zero through the frontier, and the source, calibration, probe and
+execution identity is unchanged under an explicitly declared implementation
+compatibility. Imported files keep their original session and owner; the new
+generation borrows them as immutable inputs and its receipt carries the capsule
+binding, which Stage B reads as the exact foreign-reference whitelist. Profiles
+whose forward pass-state hooks are not the inherited stateless ones refuse.
+Without the flag the capture path is unchanged.
+`docs/design/distributed_campaign_2026-09-19.md` §3.3.1 holds the full
+contract.
+
 Recovered Stage A campaign receipts (2026-09-22, PQ #947): an explicit recovery
 capsule may carry the existing campaign record by path and SHA-256. The new
 receipt binding is checked against that record's canonical seal, original
