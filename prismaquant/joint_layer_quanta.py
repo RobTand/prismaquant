@@ -1925,10 +1925,10 @@ def check_prepared_input_windows(prepared: Mapping, *,
                     f"{where} window {window_index!r} names no absolute "
                     "render path: refusing")
             if type(offset) is not int or isinstance(offset, bool) \
-                    or offset < 0:
+                    or offset != 0:
                 raise ValueError(
-                    f"{where} window {window_index!r} names no render "
-                    "offset: refusing")
+                    f"{where} window {window_index!r} is not a whole-file "
+                    "render entry (offset 0): refusing")
             if type(size) is not int or isinstance(size, bool) or size <= 0:
                 raise ValueError(
                     f"{where} window {window_index!r} carries no render "
@@ -2598,8 +2598,18 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     }
     prepared_sealed = manifest.get("annotations", {}).get("prepared_input")
     if prepared_sealed is not None:
-        fresh["executable_readset"]["prepared_input"] = copy.deepcopy(
-            prepared_sealed)
+        # The bound block carries the window file entries themselves
+        # (resolved from the sealed manifest entries), so the dispatcher
+        # and the runtime can stage and await the exact declared bytes
+        # without re-reading the manifest file.
+        block_prepared = copy.deepcopy(prepared_sealed)
+        manifest_entries = manifest.get("entries", [])
+        for window in block_prepared.get("windows", []):
+            window["entries"] = [
+                {key: manifest_entries[index][key]
+                 for key in ("path", "offset", "bytes", "sha256")}
+                for index in window.get("entry_indices", [])]
+        fresh["executable_readset"]["prepared_input"] = block_prepared
     body = {key: value for key, value in fresh.items()
             if key != "identity_sha256"}
     fresh["identity_sha256"] = canonical_sha256(

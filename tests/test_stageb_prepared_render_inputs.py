@@ -230,8 +230,22 @@ def test_binder_carries_prepared_membership_into_record(tmp_path):
     bound, _receipt, _parent, manifest, _files, _prepared = _bind_prepared(
         tmp_path, root)
     block = bound["executable_readset"]
-    assert block["prepared_input"] == manifest["annotations"][
-        "prepared_input"]
+    announced = manifest["annotations"]["prepared_input"]
+    carried = block["prepared_input"]
+    for key in ("schema", "production_pkl_sha256", "unit_roster_sha256",
+                "prepared_sha256"):
+        assert carried[key] == announced[key]
+    assert len(carried["windows"]) == len(announced["windows"])
+    for carried_window, announced_window in zip(
+            carried["windows"], announced["windows"]):
+        for key in ("window_index", "members", "entry_indices"):
+            assert carried_window[key] == announced_window[key]
+        assert carried_window["entries"] == [
+            {key: manifest["entries"][index][key]
+             for key in ("path", "offset", "bytes", "sha256")}
+            for index in announced_window["entry_indices"]]
+        assert all(item["offset"] == 0 for item in
+                   carried_window["entries"])
     assert block["phases"] == [phase["name"]
                                for phase in manifest["read_plan"]["phases"]]
 

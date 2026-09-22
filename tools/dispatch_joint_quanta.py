@@ -639,10 +639,42 @@ def _executable_prepared_input(record: dict, *,
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} bound phase list is not the sealed "
             "manifest order: refusing")
-    if block.get("prepared_input") != prepared:
+    block_prepared = block.get("prepared_input")
+    if not isinstance(block_prepared, dict):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} names no bound prepared contract: "
+            "refusing")
+    for key in ("schema", "production_pkl_sha256", "unit_roster_sha256",
+                "prepared_sha256"):
+        if block_prepared.get(key) != prepared.get(key):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} bound prepared contract is not "
+                "the sealed manifest annotation: refusing")
+    block_windows = block_prepared.get("windows")
+    if not isinstance(block_windows, list) or len(block_windows) != len(
+            sealed_windows):
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} bound prepared contract is not the "
             "sealed manifest annotation: refusing")
+    for bound_window, sealed_window in zip(block_windows, sealed_windows):
+        if not isinstance(bound_window, dict):
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} bound prepared contract is not "
+                "the sealed manifest annotation: refusing")
+        for key in ("window_index", "members", "entry_indices"):
+            if bound_window.get(key) != sealed_window.get(key):
+                raise ExecutableBindingUnsupported(
+                    f"quantum {quantum_id!r} bound prepared contract is "
+                    "not the sealed manifest annotation: refusing")
+        staged = []
+        for index in sealed_window.get("entry_indices", []):
+            staged.append(
+                {key: entries[index][key]
+                 for key in ("path", "offset", "bytes", "sha256")})
+        if bound_window.get("entries") != staged:
+            raise ExecutableBindingUnsupported(
+                f"quantum {quantum_id!r} bound prepared entries are not "
+                "the sealed manifest entries: refusing")
     return manifest_doc, prepared
 
 

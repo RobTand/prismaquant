@@ -645,6 +645,43 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
             "receipts_newly_bound": receipt_moves}
 
 
+def _load_production_cache(prepared: dict):
+    """Load the prepared completion's production weight cache, once (PQ #917).
+
+    The ``production_cache`` binding names independently bound path/SHA256;
+    the bytes are digest-verified before unpickling and the result must be
+    a ``ProductionWeightCache``. The single load serves every layer's
+    prepared-input derivation; render payloads are never rehashed (digests
+    come from the cache's sealed verified cells, sizes from current stat).
+    """
+    import pickle
+
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    reference = prepared.get("production_cache")
+    if not isinstance(reference, dict) or set(reference) != {
+            "path", "sha256"}:
+        raise ValueError("the prepared completion names no bound production "
+                         "cache (path/SHA256): refusing")
+    path = Path(reference["path"])
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"production cache unreadable at {path}: "
+                         f"{exc}") from exc
+    if hashlib.sha256(raw).hexdigest() != reference["sha256"]:
+        raise ValueError(f"production cache digest mismatch at {path}")
+    try:
+        cache = pickle.loads(raw)
+    except Exception as exc:
+        raise ValueError(f"production cache does not unpickle at {path}: "
+                         f"{exc}") from exc
+    if not isinstance(cache, ProductionWeightCache):
+        raise ValueError("the prepared production cache is not a "
+                         "ProductionWeightCache: refusing")
+    return cache
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--plan", type=Path, required=True)
@@ -945,18 +982,60 @@ def main(argv=None) -> int:
                     source_spans = read_layer_source_spans(
                         source_model_root, len(layers),
                         checkpoint_layers_prefix=args.source_layers_prefix)
-                emitted = emit_quantum_executable_readsets(
-                    receipt, produced["records"], parent,
-                    strided_boundaries=checkpoints, n_probes=n_probes,
-                    calib={"path": calib_path, "bytes": calib_bytes,
-                           "sha256": calib_sha256},
-                    render_prerequisite={
-                        "scope": "pb732",
-                        "production_pkl_sha256": production_sha,
-                        "unit_roster_sha256": roster},
-                    output_root=output_root, metadata_root=metadata_root,
-                    layer_source_spans=source_spans,
-                    source_model_root=source_model_root)
+                # PQ #917 static prepared-input bridge: the production
+                # pickle loads ONCE here; each layer's prepared contract is
+                # derived from its verified cells through the existing
+                # retained planners (no re-prepare, re-render or payload
+                # rehash). Records group by layer so every emitted row
+                # carries its own layer's contract.
+                production_cache = _load_production_cache(prepared)
+                formats_by_qname = prepared.get("formats_by_qname")
+                if not isinstance(formats_by_qname, dict) or \
+                        not formats_by_qname:
+                    raise ValueError(
+                        "the prepared completion names no unit roster: "
+                        "refusing")
+                from prismaquant.joint_cost_quantum import (
+                    derive_layer_prepared_inputs,
+                )
+                by_layer: dict[int, list] = {}
+                for record in produced["records"]:
+                    by_layer.setdefault(record.get("layer"), []).append(
+                        record)
+                emitted = []
+                for layer in sorted(by_layer):
+                    layer_records = by_layer[layer]
+                    layer_prepared = derive_layer_prepared_inputs(
+                        layer_records[0],
+                        execution=plan.get("execution", {}),
+                        formats_by_qname=formats_by_qname,
+                        production_cache=production_cache,
+                        prepared_sha256=args.prepared_sha256,
+                        production_pkl_sha256=production_sha,
+                        unit_roster_sha256=layer_records[0][
+                            "campaign"].get("unit_roster_sha256"))
+                    print(f"prepared-input bridge: layer {layer} seals "
+                          f"{len(layer_prepared['windows'])} retained "
+                          f"windows over "
+                          f"{sum(len(window['members']) for window in layer_prepared['windows'])} "
+                          f"render members")
+                    for row in emit_quantum_executable_readsets(
+                            receipt, layer_records, parent,
+                            strided_boundaries=checkpoints,
+                            n_probes=n_probes,
+                            calib={"path": calib_path,
+                                   "bytes": calib_bytes,
+                                   "sha256": calib_sha256},
+                            render_prerequisite={
+                                "scope": "pb732",
+                                "production_pkl_sha256": production_sha,
+                                "unit_roster_sha256": roster},
+                            output_root=output_root,
+                            metadata_root=metadata_root,
+                            layer_source_spans=source_spans,
+                            source_model_root=source_model_root,
+                            prepared_inputs=layer_prepared):
+                        emitted.append(row)
                 produced["records"] = [row["record"] for row in emitted]
                 bound_manifests.extend(
                     (row["manifest_path"], row["manifest"],
