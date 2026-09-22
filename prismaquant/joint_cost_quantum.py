@@ -977,6 +977,29 @@ def prepare_retained_window_read(window_index: int, *, record: Mapping,
 # --------------------------------------------------------------------------
 
 
+def bind_joint_served_quantizer(formats_by_qname):
+    """Require the actual served static-A4 operator before Stage B pricing.
+
+    A registered binding includes the inspected image and extension build.
+    A missing operator refuses; the Torch arithmetic model is never a price.
+    A16/dynamic-only rosters do not load the serving extension.
+    """
+    from . import format_registry as fr
+    from .nvfp4_activation_contract import bind_served_quantizer_identity
+    from .perturbed_x_cache import _served_nvfp4_act_qdq_enabled
+
+    served_override = _served_nvfp4_act_qdq_enabled()
+    for fmt in sorted({fmt for formats in formats_by_qname.values() for fmt in formats}):
+        contract = fr.get_format(fmt).static_activation_contract
+        if contract is not None and (contract.measured_as_served or served_override):
+            identity = bind_served_quantizer_identity(
+                require=True, context="joint Stage B activation pricing")
+            if contract.served_quantizer is not None and contract.served_quantizer != identity:
+                raise RuntimeError("joint Stage B format overrides the served quantizer binding")
+            return identity.as_record()
+    return None
+
+
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
     record, receipt, execution, output_root,
@@ -1052,6 +1075,7 @@ def run_layer_quantum_core(
     unit_formats, fmts, render_formats = (
         roster.unit_formats, roster.fmts, roster.render_formats)
     packed_members = roster.packed_members
+    served_quantizer = bind_joint_served_quantizer(unit_formats)
     # The record seals window indices only (D2); membership comes from the
     # resolved handshake the caller ran, which refuses stale records. What is
     # checked here is coverage: the sealed budget must admit exactly this
@@ -1107,6 +1131,8 @@ def run_layer_quantum_core(
     joint_probe_identity["arithmetic"]["operator_windows"] = operator_windows
     joint_probe_identity["arithmetic"]["gradient_diagnostics"] = (
         "sum_output_operators_fp32_before_norm")
+    if served_quantizer is not None:
+        joint_probe_identity["arithmetic"]["served_quantizer"] = served_quantizer
     if probe_layout is not None:
         joint_probe_identity["noise_layout"] = probe_layout
         joint_probe_identity["arithmetic"]["execution_partition"] = execution_partition
@@ -1133,6 +1159,8 @@ def run_layer_quantum_core(
             for name in names
         },
     }
+    if served_quantizer is not None:
+        joint_run_identity["served_quantizer"] = served_quantizer
 
     # ---- journal ---------------------------------------------------------
     checkpoint_git_commit = _checkpoint_git_commit()
@@ -1818,6 +1846,11 @@ def run_layer_quantum(
     counters = None
     resolved_windows: list[dict] | None = None
     try:
+        # Bind before cache/intake work. The core repeats this idempotently
+        # for direct callers and stamps the actual arithmetic in row identity.
+        prepared_header = json.loads(_bound(prepared, "prepared anchors").read_text())
+        result["served_quantizer"] = bind_joint_served_quantizer(
+            prepared_header["formats_by_qname"])
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         implementation = _aura_source_sha256()

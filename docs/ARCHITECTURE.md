@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Stage B binds the registered served static-A4 quantizer before cache or pricing
+work. An absent extension or image identity refuses; there is no Torch-model
+fallback. The observed operator, platform, Torch/vLLM build and inspected image
+digest are retained in the joint probe arithmetic and run identity, so rows and
+resumed checkpoints cannot silently change quantizer implementations. Dynamic
+or A16-only rosters do not require the serving extension.
+
 An explicit `joint_catalog_extension.v1` may add qualified E2M1-K2 q896
 candidates across the original qname roster while retaining the original
 completed BF16 Stage A capture. It binds the old/new plans and prepared PWCs,
