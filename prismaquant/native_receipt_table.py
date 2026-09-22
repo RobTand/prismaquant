@@ -227,6 +227,8 @@ def bind_cost_row(panel: Mapping, cost_payload: Mapping, cost_sha256: str) -> Ma
         raise RuntimePriceError(f"panel joint operator identity differs from the cost payload row: {where}")
     if panel["probe_identity_sha256"] != row["probe_identity_sha256"]:
         raise RuntimePriceError(f"panel probe identity differs from the cost payload row: {where}")
+    from .native_execution_binding import require_reference_quantizer
+    require_reference_quantizer(panel, row["joint_operator_identity"]["activation"], row["probe_identity"])
     return row
 
 
@@ -265,6 +267,8 @@ def _bind_routed_cost_rows(panel: Mapping, cost_payload: Mapping, cost_sha256: s
         if row["joint_operator_identity_sha256"] != binding.member_operator_identity_sha256[name]:
             raise RuntimePriceError(
                 f"member joint operator identity differs from the cost payload row: {member_where}")
+        from .native_execution_binding import require_reference_quantizer
+        require_reference_quantizer(panel,row["joint_operator_identity"]["activation"],row["probe_identity"])
         if row["probe_identity_sha256"] != panel["probe_identity_sha256"]:
             raise RuntimePriceError(
                 f"member probe identity differs from the frozen panel: {member_where}")

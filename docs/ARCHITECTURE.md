@@ -19780,3 +19780,26 @@ weight-only or dynamically scored cost does not depend on which A-side
 arithmetic the run bound, so its cache stays reusable for a mathematical reason
 rather than a convenient one. The key (`qname|FMT`) is unchanged, and no second
 cache, rehash or per-row resolution is introduced.
+
+### Native execution evidence before final joint costs (#936)
+
+`native_execution_binding` and `native_moe_execution_binding` preserve immutable
+raw dense and whole routed-owner receipts without a cost-table or probe digest.
+A subsequent explicit late-binding envelope retains that raw receipt verbatim
+and compares every measured source, calibration, wire/render, activation,
+routing, phase, runtime, and operator coordinate with the final joint panel.
+Only this verified view enters the existing native consumer; a filename or a
+geometry match cannot substitute for a final cost-row identity.
+
+Static A4 references additionally name the actually registered quality-image
+quantizer. Final cost rows must carry that exact arithmetic identity. Native
+execution still compares its observed QDQ output exactly with the independent
+reference; successful samples establish agreement for those inputs, not a
+universal equivalence between different image builds. Whole routed A4 owners
+require one executed group scale for gate/up and one for down. GLM source
+routing uses its actual normalization epsilon of 1e-20; LFM remains unchanged.
+
+The acquisition adapters retain original PWC wires and renders. Whole-owner
+reference preparation uses the source module's `_apply_gate` when exposed,
+including GLM's clamp, and the serving producer alone owns native launch-table
+validation. No PrismaQuant production module imports Tessera serving runtime.
