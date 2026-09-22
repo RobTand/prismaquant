@@ -36,7 +36,7 @@ import re
 import threading
 import time
 from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from typing import Any
 
 import torch
@@ -538,42 +538,24 @@ def _prefetch_delivery_enabled() -> bool:
 def _is_prefetch_availability(exc: BaseException) -> bool:
     """Whether a failed prefetch may be retried once on actual demand (PQ #911).
 
-    Only availability is retryable: the mover had not landed yet and the
-    bounded declared wait ran out. Integrity fails clear with no alternate
-    copy and must raise at once. Fail closed: unknown refusals are not
-    availability. Mirrors ``staged_lease`` availability/integrity taxonomy
-    without importing it; no pool/HDD read, no swallow, exactly one retry
+    Only the proven transient cause retries: a declared staged range whose
+    bounded wait expired (``StagedRangeNotLanded``). The type is the proof;
+    message wording is never consulted, so an unknown failure whose text
+    happens to contain availability words is refused, not retried, and
+    ``CancelledError`` never retries. Undeclared spans, failed covering
+    entries, wrong-size/non-regular/permission/corrupt payloads and
+    integrity refusals keep their generic errors: nothing about them says
+    the bytes are on their way. ``LeaseRefused`` availability is not
+    matched: the strict shard reader is the only producer of a retried
+    future, and its transient cause is exactly ``StagedRangeNotLanded``
+    (lease-``availability`` refusals come from the SDK helpers, never from
+    the layer read seam). No pool/HDD read, no swallow, exactly one retry
     by the caller.
     """
-    kind = getattr(exc, "kind", None)
-    if kind == "availability":
-        return True
-    if kind == "integrity":
+    if isinstance(exc, CancelledError):
         return False
-    msg = str(exc)
-    integrity_tokens = (
-        "file-identity-changed",
-        "generation-changed",
-        "source-coverage-gap",
-        "ownership-uncertain",
-        "lease-open-size-changed",
-        "cover-proof-divergent",
-    )
-    if any(token in msg for token in integrity_tokens):
-        return False
-    availability_tokens = (
-        "readset-not-staged",
-        "pool-fallback",
-        "unpublished",
-        "stale-epoch",
-        "retiring",
-        "file-missing",
-        "no-file-identity",
-        "ram-covers-unresolved",
-        "lease-helper-unavailable",
-        "lease-context-unavailable",
-    )
-    return any(token in msg for token in availability_tokens)
+    from .staged_tier_policy import StagedRangeNotLanded
+    return isinstance(exc, StagedRangeNotLanded)
 
 
 class StreamingContext:
@@ -931,6 +913,13 @@ class StreamingContext:
                 if not _is_prefetch_availability(exc):
                     raise
                 self._claim_inflight(L)
+                # PQ #907: a cancelled owner retries nothing: the retry
+                # would read payload nobody will install.
+                _cancel = getattr(self, "_staged_wait_cancel", None)
+                if _cancel is not None and _cancel.is_set():
+                    raise CancelledError(
+                        f"streamed layer {L} demand cancelled; "
+                        "not retrying its prefetch")
                 retried = self.schedule_prefetch(L)
                 if retried is None:
                     raise
@@ -954,6 +943,12 @@ class StreamingContext:
                 f"streamed layer {L} is not resident after its required "
                 "prefetch; refusing synchronous cold source read"
             )
+        # PQ #907: a cancelled owner starts no synchronous read either.
+        _cancel = getattr(self, "_staged_wait_cancel", None)
+        if _cancel is not None and _cancel.is_set():
+            raise CancelledError(
+                f"streamed layer {L} demand cancelled; "
+                "not reading its source")
         # v20 fix #1: pre-evict to make room for the synchronous read.
         # Cold path can't skip (the consumer needs this layer now), so
         # prepare_for_load best-efforts; if effective_max < layer size,

@@ -3,6 +3,33 @@
 As of: 2026-09-21 · `fix/stagea-prefetch-907-20260921`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-21, `fix/stagea-prefetch-907-20260921`) for **a typed-only
+speculative-availability retry** (PQ #911, review tranche 2). The demand-side
+retry predicate (`streaming_model._is_prefetch_availability`) matches the
+proven transient cause by type -- `isinstance` against `StagedRangeNotLanded`
+only. No message-substring matching, no `kind`-attribute matching, no
+`CancelledError` retry: an unknown failure whose text happens to contain
+availability words is refused, not retried, and a second availability failure
+after the single bounded retry propagates. Lease-`availability` refusals are
+not matched either: the strict shard reader is the only producer of a retried
+future, and its transient cause is exactly the declared-but-unlanded range
+(lease-`availability` comes from the SDK helpers, never from the layer read
+seam). A cancelled owner performs no demand work: `ensure_loaded` raises
+`CancelledError` before scheduling the retry and before the synchronous cold
+read, so a shut-down context reads no payload, installs nothing, and retries
+nothing. The retry still travels through the existing prefetch machinery with
+the bounded declared wait, so source-phase memory accounting (admission bound,
+pressure floor) is unchanged, and teardown still drains without calling
+`result()`, keeping the primary capture error. `settle_prefetched_layers`
+awaits via `result()` with no retry, cold read, or claim -- a failed future
+propagates its own error -- and `source_residency_snapshot` describes a
+pending future as pending without waiting, touching, or loading it. No
+format, lane, pin, kernel order or ship gate changes. Gates:
+`tests/test_stagea_speculative_availability_retry.py` (8 tests: speculation
+lands-then-serves, integrity preserved, incidental wording refused,
+single-retry-then-propagates, success costs one read, cancelled demand reads
+nothing, settle fails closed, snapshot never waits).
+
 Re-stamped (2026-09-21, `fix/stagea-prefetch-907-20260921`) for **per-context
 prefetch cancellation and a typed declared-range wait expiry** (PQ #907,
 PQ #911, review tranche 1). Each `StreamingContext` owns its staged-wait
