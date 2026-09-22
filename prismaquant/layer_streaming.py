@@ -1654,10 +1654,10 @@ def _read_layer_to_device(prefix: str,
     its copies and releases its mappings.
     CPU-backed outputs retain their mappings and never request page release.
 
-    ``cancel`` is the owning context's ``threading.Event``. A cancelled
-    owner reads no payload: a set event raises ``CancelledError`` before
-    the readiness wait and again before the gather, so teardown never pays
-    for bytes nobody will install.
+    ``cancel`` is the owning context's ``threading.Event``. A set event
+    raises ``CancelledError`` before readiness and again before the gather.
+    Cancellation interrupts a readiness wait; I/O already in progress still
+    completes and is joined normally during teardown.
     """
     if cancel is not None and cancel.is_set():
         raise CancelledError("layer read cancelled before its staged wait")

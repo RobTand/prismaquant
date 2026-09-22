@@ -190,11 +190,12 @@ def refuse_pool_bulk_read(path: str, reason: str) -> TierPolicyRefused:
 
 
 class StagedRangeNotLanded(TierPolicyRefused):
-    """A declared staged range with no mover row yet (transient availability).
+    """A declared staged range that is not currently landed (availability).
 
     Raised at the read seam when the resolver reports ``RANGE_UNCOVERED``
-    for the span: the sealed readset declares these bytes and no mover has
-    written them yet. The message keeps the established
+    for the span: the sealed readset declares these bytes but has no serving
+    cover, including stale covering rows whose staged files are missing.
+    The message keeps the established
     ``readset-not-staged`` wording so existing log greps still match; the
     type is what distinguishes a proven transient cause from the generic
     refusal. An undeclared span (``RANGE_UNDECLARED``) and a failed
