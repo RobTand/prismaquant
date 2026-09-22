@@ -884,8 +884,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     file digest, and each render/marker/wire stat fence -- before trusting
     it, truncating the cursor at the first drift and re-walking from there:
     unverified state is discarded, never trusted. Banked units are re-walked
-    never, re-reported always, so the resumed run's counter and final state
-    are identical to a fresh walk's. Units are banked on a time cadence, so
+    never; their reverified prefix is reported once at its final cumulative
+    count, so the resumed run's counter and final state are identical to a
+    fresh walk's without rewriting progress for every already-durable unit.
+    Units are banked on a time cadence, so
     an interruption loses at most one interval of verified work.
 
     ``head_walk_workers`` is the walk's worker count. The default is the CPU
@@ -1159,17 +1161,19 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         for name in roster[len(banked):]:
             if name in completed:
                 unit_path(head_root, name).unlink(missing_ok=True)
-        # A resumed unit is re-verified, so it is resolved work this run did:
-        # reported in roster order like every other unit, never a count the
-        # walk cannot answer for (#678). Nothing it synthesized counts as
-        # written now -- a resume writes nothing.
+        # Every banked unit has passed its original fences before this loop.
+        # Assemble that durable prefix in roster order, then publish its one
+        # final cumulative count. Rewriting the same atomic progress file for
+        # every replayed unit paid 36,423 serial NFS writes in the GLM head
+        # without establishing any additional durable work (#822). Nothing
+        # it synthesized counts as written now -- a resume writes nothing.
         for name, state in banked:
             for fmt, row in state["cells"].items():
                 cells[name, fmt] = row
             formats[name] = tuple(state["formats"])
             resolved += 1
-            if progress_phase is not None:
-                _pb_commit(resolved, progress_phase, unit=name)
+        if banked and progress_phase is not None:
+            _pb_commit(resolved, progress_phase, unit=banked[-1][0])
 
     def walk_one(name):
         """Verify one unit end to end; the rows, the fences, the events."""
