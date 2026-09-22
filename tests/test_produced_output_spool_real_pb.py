@@ -27,7 +27,7 @@ def test_actual_export_ack_precedes_pq_publication_progress_and_strict_read(tmp_
     for name, digest in pin["files"].items():
         assert hashlib.sha256((root / name).read_bytes()).hexdigest() == digest, name
     monkeypatch.setattr(chain, "PIN_PATH", pin_path)
-    from prismaquant.stage_a_local_spool import ROOT_ENV, MAX_ENV
+    from prismaquant.produced_output_spool import ROOT_ENV, MAX_ENV
     storage, publication, queue, env, pb_repo = chain._bound_owner(
         tmp_path, staging_timeout_s=90, published=True,
         claim_capacity={"cpu": 4, "mem_gb": 4},
