@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+The selected-cache builder retains the v1 single-root contract. Explicit
+`--catalog-extension` and `--producer-packages` path/SHA256 bindings enable
+`tessera.cached_units.v2` only for a completed joint handoff carrying that exact
+accepted extension. Every selected departure from the checkpoint encoder seal
+authenticates its overlay row, historical migration proof and current wire/render
+fences. Proof dependencies are shared within one bounded operation and rechecked
+before completion. Records remain unchanged. The manifest names each immutable
+root and exact historical producer package; Tessera recomputes identities with
+the original producer and keeps strict verification. Selected added A4 cells
+also require the full512 served-activation policy and exact Stage B priced group
+scale. `--read-paths-out` emits the selected wires, packages and authority inputs
+needed by PB's export manifest; it confers no export qualification.
+
 An explicit `joint_served_activation_policy.v1` permits newly added routed
 E2M1-K2 q896 candidates to be priced at the fused MoE runtime's executed-stage
 scale. Its bound original full-512 preparation and census independently derive
