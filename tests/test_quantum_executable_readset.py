@@ -363,11 +363,14 @@ def test_binder_refuses_forged_triples_consistent_rehash(tmp_path):
 
 
 def _dispatcher_record(tmp_path, manifest, wire_sha):
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text("{}")
     adjoint_path = tmp_path / "adjoint.json"
     adjoint_path.write_text("{}")
     record_path = tmp_path / "record.json"
     record = {"quantum_id": "layer-002", "layer": 2,
-              "campaign": {"plan_path": "plan.json", "plan_sha256": "0" * 64,
+              "campaign": {"plan_path": str(plan_path), "plan_sha256": hashlib.sha256(
+                               plan_path.read_bytes()).hexdigest(),
                            "prepared_path": "prep.json",
                            "prepared_sha256": "1" * 64},
               "read_set": {"manifest_path": str(tmp_path / "slice.gz"),
