@@ -14,6 +14,36 @@ write-time publication leaves it room inside the existing read-ahead share.
 Credit bounds, refusal reasons, the settle at close and the bytes written are
 unchanged. Gate: `tests/test_stage_a_produced_lookahead.py`.
 
+GLM Stage B runs from main (2026-09-22, `ws-sb2/stageb-runnable-990-20260922`,
+PQ #990). The Stage B commits that lived only on the frozen campaign union
+(`integrate/glm-campaign-final-20260922`) are ported onto main: the bounded
+resource policy (`prismaquant/joint_stageb_resources.py`), the capture-bound
+metadata producer (`tools/prepare_extended_joint_quanta.py`), catalog-extension
+authentication at dispatch, the outer PB scratch declaration, and the dev-mode
+post-intake prepared digest check (`tessera_joint_aura.require_prepared_digests`).
+Main keeps its own bounded cotangent scratch (#956) and its overlay Hessian
+identity by content (#986); the union's copies of both are dropped.
+Candidate order is now one rule, `joint_catalog_extension.extended_roster`: an
+added format goes before the terminal BF16 that every sealed prepared roster
+ends in. The loader (`attach_candidate_overlay`), the overlay assembler
+(`tools/assemble_t4_overlay.py`) and the pair check (`verify_catalog_pair`) all
+use it, and the pair check now compares order, not only sets, because Stage B
+compares the prepared roster with the loaded one in order. The assembler also
+binds a Stage B resource policy (`--stage-b-resource-policy`) onto the extended
+plan and prepared file. The dispatcher validates a declared cotangent workspace
+against its writable identity mount and seals both scratch variables into the
+outer PB request from the same inlined spec bytes. `prepare_extended_joint_quanta`
+runs the dispatcher's own spec check with the quantum row's grace set, so a
+spec whose `PRISMAQUANT_STAGED_RANGE_WAIT_S` is not below 900 s refuses before
+any metadata is published. `tools/prepare_stageb_after_capture.sh` is the
+repository launcher for that step; it resolves the interpreter from the Tessera
+dev pin. Gates: `tests/test_joint_catalog_extension.py`,
+`tests/test_prepare_extended_joint_quanta.py`,
+`tests/test_joint_stageb_resources.py`, `tests/test_dispatch_joint_quanta.py`,
+`tests/test_stage_b_prepared_digest_dev_mode.py`,
+`tests/test_campaign_recovery_scratch_seam.py`. No format, pipeline default or
+ship gate changes.
+
 GLM router epsilon (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`, PQ
 #938): `native_moe_panel.validate_glm_routing` no longer requires the router
 normalization epsilon to be `1e-6`, LFM's value. It accepts the value the
@@ -215,7 +245,10 @@ plans. The capture's identity and digest remain original in every quantum;
 the separate extension binding is sealed into each new record and retained
 through the joined handoff. Generator `--catalog-extension` and its SHA256
 require an actual completed capture. Validation of a proposed catalog pair
-alone grants no capture-reuse authority.
+alone grants no capture-reuse authority. Each extended roster is the original
+roster with the added format inserted before its terminal BF16
+(`joint_catalog_extension.extended_roster`); the pair check refuses any other
+order, and a unit that already offers the added format keeps its roster.
 
 The optional digest-bound `inputs.candidate_overlay` augments the complete
 historical anchor intake without rewriting the original merged journal or
@@ -288,7 +321,14 @@ window asks for the next window's groups (`stage_produced_reads_ahead`);
 see "The read path's lookahead" and "An optional step never waits on the
 lane" under the produced-boundary owner. No format, default, lane, pin,
 kernel order or ship gate changes; the bytes written are unchanged. Gate:
-`tests/test_stage_a_produced_lookahead.py`.
+`tests/test_stage_a_produced_lookahead.py`. Merged over GLM Stage B from main
+(PQ #990), whose entries touch other sections.
+
+Re-stamped (2026-09-22, `ws-sb2/stageb-runnable-990-20260922`) for **GLM Stage B
+from main** (PQ #990): the union-only Stage B commits are ported, extension
+candidates insert before the terminal BF16 in the loader, assembler and pair
+check, and the Stage B prepare step has a repository launcher; see the entry of
+that name at the top. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-22, `feat/glm-native-unpriced-20260922`) for **native
 execution evidence before final joint costs** (PQ #936): raw dense and routed
@@ -20362,3 +20402,30 @@ only its selected priced static scales through `write_export_inputs` with
 `hessians=None`. It does not recompute per-expert maxima or alter retained H.
 The output receipt binds the assignment, serialized scale file and served
 policy. An existing output directory is refused before any write.
+
+### Candidate extension Stage B resource and source namespaces
+
+An immutable `prismaquant.joint_stageb_resource_policy.v1` may replace only
+`execution.retained_operator_windows.budget` and `max_gpu_bytes` for an
+extended candidate catalog. The original source derivative, probe count/layout,
+seed, calibration and execution controls remain exact. The policy independently
+rederives the existing statistics/window planner from the old qualified tensor
+geometry and the actual retained candidate file sizes; it binds every candidate
+path and size observation. Workers reuse sealed size observations, while their
+executable readsets and PWC checks enforce the bytes actually consumed. An
+explicit `verify_files=True` audit repeats the filesystem observations when needed.
+The current approved ceiling is 100 GiB physical, 28 GiB host and 72 GiB device.
+The dispatcher enforces the same Docker/PB limits and runtime applies the Torch
+allocator ceiling before GPU preparation. These controls preserve existing
+runtime reserve limitations; they do not claim to cap driver allocations.
+
+The original adjoint receipt remains immutable. An extended cost output root
+reads boundary storage and checkpoint manifests from the receipt's original
+capture namespace. `prepare_extended_joint_quanta` requires completed Stage A,
+fully qualified old/new PWC records and the catalog authority before generating
+fresh metadata. Historical parent layer extents remain identifiable; actual
+new candidate reads must be completed by the executable prepared-input producer.
+It emits a coordinator launch recipe without submitting nested PB work.
+A spec may explicitly bind `container_admission_reference` to PB's portable
+content identity while keeping the distinct scientifically inspected Docker
+content identity; both checks must succeed before execution.

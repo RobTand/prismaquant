@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.joint_catalog_extension import extended_roster
 from prismaquant.tessera_joint_aura import render_origin_census
 from rebind_t4_qualified_results import SCHEMA as REBINDING_SCHEMA, cell_sha256, require_rebound
 
@@ -55,6 +56,30 @@ def publish(path, raw):
     return {'path': str(path), 'sha256': sha(raw)}
 
 
+def add_overlay_format(formats_by_qname, qname, fmt):
+    """Insert ``fmt`` before ``qname``'s terminal BF16, as the loader reads it.
+
+    ``attach_candidate_overlay`` and ``verify_catalog_pair`` use the same
+    order, and Stage B compares the prepared roster with the loaded one in
+    order (RobTand/prismaquant#990).
+    """
+    formats_by_qname[qname] = list(extended_roster(formats_by_qname[qname], fmt))
+
+
+def bind_stage_b_resources(plan, prepared, policy_binding, resources):
+    """Carry a Stage B resource policy onto the extended plan and prepared file.
+
+    The policy may replace only the retained-window budget and the GPU byte
+    ceiling (``joint_catalog_extension.CANDIDATE_PLAN_FIELDS``);
+    ``verify_catalog_pair`` re-derives it and ``prepare_extended_joint_quanta``
+    requires it.
+    """
+    plan['stage_b_resource_policy'] = policy_binding
+    plan['execution']['retained_operator_windows']['budget'] = resources['budget']
+    plan['max_gpu_bytes'] = resources['limits']['gpu_bytes']
+    prepared['stage_b_resource_policy'] = policy_binding
+
+
 def qualified_result(cell, raw, rebinding_rows):
     """The result that qualified ``cell``, directly or through a rebinding row."""
     if rebinding_rows is None:
@@ -68,6 +93,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--served-activation-policy', required=True)
     parser.add_argument('--served-activation-policy-sha256', required=True)
+    parser.add_argument('--stage-b-resource-policy', required=True)
+    parser.add_argument('--stage-b-resource-policy-sha256', required=True)
     parser.add_argument('--catalog', required=True)
     parser.add_argument('--catalog-sha256', required=True)
     parser.add_argument('--qualified-dir', required=True)
@@ -77,6 +104,10 @@ def main():
     args = parser.parse_args()
     policy = {'path': args.served_activation_policy, 'sha256': args.served_activation_policy_sha256}
     assert sha(Path(policy['path']).read_bytes()) == policy['sha256']
+    resource_policy = {'path': args.stage_b_resource_policy, 'sha256': args.stage_b_resource_policy_sha256}
+    raw = Path(resource_policy['path']).read_bytes()
+    assert sha(raw) == resource_policy['sha256']
+    resources = json.loads(raw)
     catalogpath = Path(args.catalog)
     raw = catalogpath.read_bytes()
     assert sha(raw) == args.catalog_sha256
@@ -105,6 +136,7 @@ def main():
     plan['served_activation_policy'] = policy
     prepared = copy.deepcopy(oldprep)
     prepared['served_activation_policy'] = policy
+    bind_stage_b_resources(plan, prepared, resource_policy, resources)
     for cell in catalog['cells']:
         q, fmt = cell['qname'], cell['format']
         pair = (q, fmt)
@@ -125,10 +157,7 @@ def main():
         cache.weights[pair] = cell['render']
         cache._lru_paths[pair] = cell['render']
         cache.metadata['verified_cells'][pair] = receipt
-        # The loader appends the overlay format after the panel's own formats
-        # (attach_candidate_overlay), and the prepared roster must equal the
-        # loaded one in order.
-        prepared['formats_by_qname'][q].append(fmt)
+        add_overlay_format(prepared['formats_by_qname'], q, fmt)
     assert len(cache.weights) == EXTENDED_CELLS
     planbinding = publish(overlay / 'plan.json', doc(plan))
     cache.metadata['inputs'] = plan['inputs']

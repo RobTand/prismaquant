@@ -123,6 +123,8 @@ def _quantum_record(tmp_path: Path) -> Path:
     record_path = tmp_path / "layer-001.json"
     slice_path = tmp_path / "layer-001.data-manifest.json"
     slice_path.write_bytes(json.dumps({"slice": "layer-001"}).encode())
+    if not (tmp_path / "plan.json").exists():
+        (tmp_path / "plan.json").write_text("{}")  # the row reads its plan
     record_path.write_text(json.dumps({
         "schema": joint.RECORD_SCHEMA, "quantum_id": "layer-001", "layer": 1,
         "identity_sha256": "3" * 64,

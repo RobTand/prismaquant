@@ -154,7 +154,8 @@ def test_both_row_builders_check_the_wait_on_the_parse_they_seal():
         calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)
                  and getattr(node.func, "id", None) == "_container_wrap"]
         assert len(calls) == 1, name
-        assert [kw.arg for kw in calls[0].keywords] == ["progress"], name
+        keywords = [kw.arg for kw in calls[0].keywords]
+        assert "progress" in keywords and None not in keywords, name
 
 
 def test_the_default_wait_is_below_the_chunk_grace():

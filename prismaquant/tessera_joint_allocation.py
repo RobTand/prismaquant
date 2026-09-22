@@ -106,6 +106,8 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
     source_by_unit = {}
     result = copy.deepcopy(joint)
     policy_binding = prepared.get('served_activation_policy')
+    _same(joint['provenance'].get('stage_b_resource_policy'), prepared.get('stage_b_resource_policy'),
+          'joint Stage B resource policy')
     _same(joint['provenance'].get('served_activation_policy'), policy_binding, 'joint served activation policy')
     policy = None
     if policy_binding is not None:
@@ -131,6 +133,8 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
             operator, probe = row['joint_operator_identity'], row['probe_identity']
             _same(operator['arithmetic'].get('served_activation_policy'), policy_binding,
                   f'{name}@{fmt}: priced served policy arithmetic')
+            _same(operator['arithmetic'].get('stage_b_resource_policy'), prepared.get('stage_b_resource_policy'),
+                  f'{name}@{fmt}: priced resource policy arithmetic')
             _same(probe['source_model'], prepared['source_model_identity'], f'{name}: source model')
             _same(probe['source_model']['source'], original['model'], f'{name}: source model path')
             _same(probe['calibration_sha256'],
@@ -275,6 +279,7 @@ def handoff(*, joint_binding, plan_binding, output_path):
     prepared_binding = evidence['prepared']
     prepared = json.loads(_read_bound(prepared_binding, 'prepared completion'))
     _same(prepared.get('served_activation_policy'), plan.get('served_activation_policy'), 'planned served activation policy')
+    _same(prepared.get('stage_b_resource_policy'), plan.get('stage_b_resource_policy'), 'planned Stage B resource policy')
     _same(prepared['calibration_input']['artifact_sha256'], plan['calibration_input']['sha256'], 'planned calibration artifact')
     cache = pickle.loads(_read_bound(prepared['production_cache'], 'prepared cache'))
     _require(isinstance(cache, ProductionWeightCache), 'prepared cache owner is not ProductionWeightCache')
