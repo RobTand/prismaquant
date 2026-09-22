@@ -25,14 +25,18 @@ REPO = CONFTEST.parent.parent
 
 def _run(directory: Path, *args: str) -> subprocess.CompletedProcess:
     shutil.copyfile(CONFTEST, directory / "conftest.py")
-    env = dict(os.environ)
+    # Every PYTEST_* variable is scrubbed, not just addopts. Under
+    # pytest-xdist the parent exports PYTEST_XDIST_WORKER and
+    # PYTEST_XDIST_WORKER_COUNT, and a child that inherits them starts as a
+    # worker and blocks on a controller channel that is not there.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("PYTEST_", "PRISMABUILD_"))}
     env["PYTHONPATH"] = str(REPO)
-    env["PYTEST_ADDOPTS"] = ""
-    env.pop("PRISMABUILD_TEST_TIMEOUT_S", None)
     return subprocess.run(
-        [sys.executable, "-m", "pytest", "-o", "addopts=", str(directory),
-         *args],
+        [sys.executable, "-m", "pytest", "-p", "no:xdist", "-o", "addopts=",
+         str(directory), *args],
         cwd=str(directory), capture_output=True, text=True, env=env,
+        timeout=600,
     )
 
 
