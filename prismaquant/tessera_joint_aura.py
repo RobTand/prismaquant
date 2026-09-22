@@ -28,6 +28,7 @@ from .cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, atomic_write_bytes, canonical_json_sha256,
     canonical_json_sha256_normalized,
     prepare_journal, unit_path, write_unit,
+    _drive_ordered_units as _drive_ordered_walk,
 )
 from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning
 from .interned_json import load_json_file
@@ -596,43 +597,7 @@ def _head_walk_worker_count(requested=None, environ=None):
     return value
 
 
-def _drive_ordered_walk(roster, walk, commit, *, workers):
-    """Walk units, committing strictly in the roster's one deterministic order.
-
-    ``workers <= 1`` is the serial path: today's loop, no pool. Above it the
-    per-unit walks overlap while the committer still banks and reports each
-    unit only after every unit before it has committed, so the durable state
-    is always a roster prefix -- the prefix a resume can re-verify -- and the
-    progress sequence means exactly what it meant serially. A failing unit
-    stops the walk with its prefix committed, precisely where the serial
-    loop would have stopped.
-    """
-    if workers <= 1:
-        for name in roster:
-            commit(name, walk(name))
-        return
-    from collections import deque
-    from concurrent.futures import ThreadPoolExecutor
-    # A bounded window: the pool is never starved, and results for units the
-    # committer has not reached cannot pile up ahead of it.
-    window = 2 * workers
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="joint-head-walk") as pool:
-        inflight = deque()
-        try:
-            for name in roster:
-                while len(inflight) >= window:
-                    done_name, done = inflight.popleft()
-                    commit(done_name, done.result())
-                inflight.append((name, pool.submit(walk, name)))
-            while inflight:
-                done_name, done = inflight.popleft()
-                commit(done_name, done.result())
-        except BaseException:
-            pool.shutdown(wait=True, cancel_futures=True)
-            raise
-
-
-def _open_head_journal(root, *, resume, identity, qnames):
+def _open_head_journal(root, *, resume, identity, qnames, workers=1):
     """Open the head walk's journal, setting aside state that cannot be trusted.
 
     The machinery is the campaign's own (``prepare_journal``: identity-bound
@@ -647,7 +612,7 @@ def _open_head_journal(root, *, resume, identity, qnames):
     root = Path(root)
     try:
         return prepare_journal(root, stage=HEAD_WALK_STAGE, resume=resume,
-                               identity=identity, qnames=qnames)
+                               identity=identity, qnames=qnames, unit_workers=workers)
     except RuntimeError as exc:
         if not resume:
             raise
@@ -661,7 +626,7 @@ def _open_head_journal(root, *, resume, identity, qnames):
         print(f"tessera_joint_aura: discarding head-walk checkpoint ({exc}); "
               "restarting the walk from the roster's start", flush=True)
         return prepare_journal(root, stage=HEAD_WALK_STAGE, resume=True,
-                               identity=identity, qnames=qnames)
+                               identity=identity, qnames=qnames, unit_workers=workers)
 
 
 def parse_unit_scope(spec, count=None):
@@ -884,8 +849,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     file digest, and each render/marker/wire stat fence -- before trusting
     it, truncating the cursor at the first drift and re-walking from there:
     unverified state is discarded, never trusted. Banked units are re-walked
-    never, re-reported always, so the resumed run's counter and final state
-    are identical to a fresh walk's. Units are banked on a time cadence, so
+    never; their reverified prefix is reported once at its final cumulative
+    count, so the resumed run's counter and final state are identical to a
+    fresh walk's without rewriting progress for every already-durable unit.
+    Units are banked on a time cadence, so
     an interruption loses at most one interval of verified work.
 
     ``head_walk_workers`` is the walk's worker count. The default is the CPU
@@ -899,6 +866,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     digesting (the GIL is released through the syscalls and by hashlib for
     the buffers that dominate), and the one thread-unsafe step left -- a
     missing render's synthesis through the bound reader -- holds a lock.
+    The same bounded driver also restores resume envelopes and rechecks
+    independent banked-unit fences; only a verified roster prefix is retained.
 
     ``head_walk_quantum`` is the opt-in distributed-quantum half of #765: a
     descriptor from ``joint_head_walk_quanta.head_walk_quanta`` naming this
@@ -1073,6 +1042,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         _require(head_checkpoint is not None,
                  "a head-walk quantum banks its slice journal or refuses")
     resolved, synthesized, started = 0, 0, time.time()
+    walk_workers = _head_walk_worker_count(head_walk_workers)
 
     # -- the walk banks its prefix and fans out (#754) ----------------------
     # Every action restart used to re-pay this whole loop. Now each verified
@@ -1107,7 +1077,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             head_identity["roster_sha256"] = head_walk_quantum["roster_sha256"]
             head_identity["quantum"] = dict(head_walk_quantum)
         head_root, head_seal, completed = _open_head_journal(
-            Path(head_checkpoint), resume=head_resume, identity=head_identity, qnames=roster)
+            Path(head_checkpoint), resume=head_resume, identity=head_identity, qnames=roster,
+            workers=walk_workers)
 
         def _banked_unit_still_binds(name, state):
             """Re-verify one banked unit against the very bytes it names.
@@ -1151,25 +1122,41 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         # The cursor is a roster prefix: re-verify in the walk's own order and
         # truncate at the first unit that no longer answers for itself. The
         # stale suffix is discarded -- its units are re-walked, never reused.
-        for name in roster:
+        class _PrefixEnded(Exception):
+            pass
+
+        def verify_banked(name):
             state = completed.get(name)
-            if state is None or not _banked_unit_still_binds(name, state):
-                break
+            return state if state is not None and _banked_unit_still_binds(name, state) else None
+
+        def retain_banked(name, state):
+            if state is None:
+                raise _PrefixEnded
             banked.append((name, state))
+
+        # Independent read-only authentication may finish out of order, but
+        # only the roster prefix is reusable. The existing bounded driver
+        # cancels queued suffix work and joins active reads before recovery.
+        try:
+            _drive_ordered_walk(roster, verify_banked, retain_banked, workers=walk_workers)
+        except _PrefixEnded:
+            pass
         for name in roster[len(banked):]:
             if name in completed:
                 unit_path(head_root, name).unlink(missing_ok=True)
-        # A resumed unit is re-verified, so it is resolved work this run did:
-        # reported in roster order like every other unit, never a count the
-        # walk cannot answer for (#678). Nothing it synthesized counts as
-        # written now -- a resume writes nothing.
+        # Every banked unit has passed its original fences before this loop.
+        # Assemble that durable prefix in roster order, then publish its one
+        # final cumulative count. Rewriting the same atomic progress file for
+        # every replayed unit paid 36,423 serial NFS writes in the GLM head
+        # without establishing any additional durable work (#822). Nothing
+        # it synthesized counts as written now -- a resume writes nothing.
         for name, state in banked:
             for fmt, row in state["cells"].items():
                 cells[name, fmt] = row
             formats[name] = tuple(state["formats"])
             resolved += 1
-            if progress_phase is not None:
-                _pb_commit(resolved, progress_phase, unit=name)
+        if banked and progress_phase is not None:
+            _pb_commit(resolved, progress_phase, unit=banked[-1][0])
 
     def walk_one(name):
         """Verify one unit end to end; the rows, the fences, the events."""
@@ -1305,7 +1292,6 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         # still holding for them is retention, not working set (#823).
         _reclaim_head_walk_allocator(synthesis_device)
 
-    walk_workers = _head_walk_worker_count(head_walk_workers)
     try:
         # However many workers fan the verification out, commitment -- cell
         # insertion, reporting, banking -- stays in the roster's one order,

@@ -195,7 +195,9 @@ class SerializedEntryDigest:
     descriptor, which this sink does not own.
     """
 
-    def __init__(self):
+    def __init__(self, *, max_bytes=None):
+        self.max_bytes = max_bytes
+        self.file_identity = None
         self._hash = hashlib.sha256()
         self._handle = None
         self.bytes = 0
@@ -207,6 +209,8 @@ class SerializedEntryDigest:
     def write(self, data):
         view = memoryview(data).cast("B")
         try:
+            if self.max_bytes is not None and self.bytes + view.nbytes > self.max_bytes:
+                raise RuntimeError("serialized entry exceeds its preallocated ceiling")
             self._hash.update(view)
             self.bytes += view.nbytes
             return self._handle.write(view)
@@ -221,20 +225,38 @@ class SerializedEntryDigest:
 
 
 def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x",
-                                 durable=False, serialized_digest=None, **metadata):
+                                 durable=False, serialized_digest=None,
+                                 preallocate_bytes=None, **metadata):
     """Atomically store already-selected rows without changing their precision."""
     import os
     path = Path(cache_dir) / activation_cache_filename(name)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".pt.tmp")
-    with temporary.open("wb") as handle:
+    with temporary.open("xb" if preallocate_bytes is not None else "wb") as handle:
+        if preallocate_bytes is not None:
+            if type(preallocate_bytes) is not int or preallocate_bytes <= 0:
+                raise ValueError("preallocated entry ceiling must be positive")
+            if serialized_digest is None or serialized_digest.max_bytes != preallocate_bytes:
+                raise ValueError("preallocation requires the matching bounded digest sink")
+            created = os.fstat(handle.fileno())
+            serialized_digest.file_identity = (created.st_dev, created.st_ino)
+            os.posix_fallocate(handle.fileno(), 0, preallocate_bytes)
         torch.save({**metadata, "inputs": inputs.contiguous(), "name": name,
                     "source": source},
                    handle if serialized_digest is None else serialized_digest.sink(handle))
+        if preallocate_bytes is not None:
+            handle.flush()
+            handle.truncate(serialized_digest.bytes)
         if durable:
             handle.flush()
             os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    if preallocate_bytes is None:
+        os.replace(temporary, path)
+    else:
+        # Publish this precommit inode without overwriting an unexpected
+        # destination created after the initial existence check.
+        os.link(temporary, path, follow_symlinks=False)
+        temporary.unlink()
     if durable:
         directory = os.open(path.parent, os.O_RDONLY)
         try:
@@ -858,7 +880,7 @@ def _activation_file_signature(path):
 
 def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
                                        max_tensor_bytes, max_file_bytes,
-                                       release_file_pages=True):
+                                       release_file_pages=True, preallocate=False):
     """Extend the ordinary atomic writer with an exact tensor/identity receipt.
 
     The caller reserves the one compact CPU copy before entering. No dtype,
@@ -877,13 +899,15 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
     if path.exists() or path.with_suffix(".pt.tmp").exists():
         raise RuntimeError("exact activation entry already exists")
     compact = None
+    digest = None
     try:
         compact = inputs.detach().to(device="cpu", copy=True,
             memory_format=torch.contiguous_format)
-        digest = SerializedEntryDigest()
+        digest = SerializedEntryDigest(max_bytes=max_file_bytes if preallocate else None)
         path = write_activation_cache_entry(cache_dir, name, compact,
             source="exact_activation", durable=True, exact=metadata,
-            serialized_digest=digest)
+            serialized_digest=digest,
+            preallocate_bytes=max_file_bytes if preallocate else None)
         del compact
         compact = None
         published_stat = path.lstat()
@@ -899,8 +923,16 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
         return ExactActivationReference(str(path), name, encoded, tuple(inputs.shape),
             str(inputs.dtype), nbytes, signature[2], digest.hexdigest())
     except BaseException:
-        path.unlink(missing_ok=True)
-        path.with_suffix(".pt.tmp").unlink(missing_ok=True)
+        for candidate in (path, path.with_suffix(".pt.tmp")):
+            if preallocate:
+                owned = getattr(digest, "file_identity", None)
+                try:
+                    current = candidate.lstat()
+                except FileNotFoundError:
+                    continue
+                if owned != (current.st_dev, current.st_ino):
+                    continue
+            candidate.unlink(missing_ok=True)
         raise
     finally:
         compact = None
