@@ -389,6 +389,42 @@ def _load_unit(
     return dict(state)
 
 
+def _drive_ordered_units(roster, walk, commit, *, workers):
+    """Walk units, committing strictly in the roster's one deterministic order.
+
+    ``workers <= 1`` is the serial path: today's loop, no pool. Above it the
+    per-unit walks overlap while the committer still banks and reports each
+    unit only after every unit before it has committed, so the durable state
+    is always a roster prefix -- the prefix a resume can re-verify -- and the
+    progress sequence means exactly what it meant serially. A failing unit
+    stops the walk with its prefix committed, precisely where the serial
+    loop would have stopped.
+    """
+    if workers <= 1:
+        for name in roster:
+            commit(name, walk(name))
+        return
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+    # A bounded window: the pool is never starved, and results for units the
+    # committer has not reached cannot pile up ahead of it.
+    window = 2 * workers
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="joint-head-walk") as pool:
+        inflight = deque()
+        try:
+            for name in roster:
+                while len(inflight) >= window:
+                    done_name, done = inflight.popleft()
+                    commit(done_name, done.result())
+                inflight.append((name, pool.submit(walk, name)))
+            while inflight:
+                done_name, done = inflight.popleft()
+                commit(done_name, done.result())
+        except BaseException:
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
+
+
 def prepare_journal(
     checkpoint_dir: str | Path,
     *,
@@ -397,13 +433,26 @@ def prepare_journal(
     identity: Mapping[str, object],
     qnames: Sequence[str],
     manifest_path: str | Path | None = None,
+    unit_workers: int = 1,
 ) -> tuple[Path, str, dict[str, dict[str, object]]]:
     """Create/validate a journal and return all exact completed unit states.
 
     File-oriented callers can retain their explicit manifest pathname while
     placing unit shards in ``checkpoint_dir``. The same manifest/unit schemas
     and refusal rules apply; directory-oriented callers keep ``manifest.json``.
+    ``unit_workers`` optionally overlaps independent envelope reads within
+    the assigned CPU affinity. The existing bounded ordered driver preserves
+    roster order and joins reads before a corrupt journal can be set aside.
+    Other callers remain serial by default.
     """
+    if type(unit_workers) is not int or unit_workers < 1:
+        raise ValueError("journal unit_workers must be a positive integer")
+    try:
+        assigned = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        assigned = 1
+    if unit_workers > max(1, assigned):
+        raise ValueError("journal unit_workers exceed the PB-assigned CPU affinity")
     root = Path(checkpoint_dir)
     if root.exists() and not root.is_dir():
         raise RuntimeError(f"{stage} checkpoint path is not a directory: {root}")
@@ -509,12 +558,16 @@ def prepare_journal(
             expected=[],
         )
     completed: dict[str, dict[str, object]] = {}
-    for path, qname in expected_paths.items():
+
+    def read_unit(path):
         if path.is_file():
-            completed[qname] = _load_unit(
-                path,
-                stage=stage,
-                qname=qname,
-                identity_sha256=identity_sha256,
-            )
+            return _load_unit(path, stage=stage, qname=expected_paths[path],
+                              identity_sha256=identity_sha256)
+        return None
+
+    def retain_unit(path, state):
+        if state is not None:
+            completed[expected_paths[path]] = state
+
+    _drive_ordered_units(expected_paths, read_unit, retain_unit, workers=unit_workers)
     return root, identity_sha256, completed

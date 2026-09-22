@@ -1,6 +1,56 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-22 · `flash/926-activation-quantizer-v2-reader`.
+Stage A forward recovery (2026-09-22, PQ #949): `joint_cost_stage_a`
+accepts an optional `--forward-recovery` capsule plus its SHA-256. The capsule
+is a separate explicit authority (`prismaquant.joint_forward_recovery.v1`,
+`joint_forward_resume.py`); it does not make an unfinished generation reusable.
+It admits a complete forward prefix only when PrismaBuild proves the original
+owner action contained, every immutable group descriptor and export
+acknowledgement matches, every calibration partition is present at every
+boundary from zero through the frontier, and the source, calibration, probe and
+execution identity is unchanged under an explicitly declared implementation
+compatibility. Imported files keep their original session and owner; the new
+generation borrows them as immutable inputs and its receipt carries the capsule
+binding, which Stage B reads as the exact foreign-reference whitelist. Profiles
+whose forward pass-state hooks are not the inherited stateless ones refuse.
+Without the flag the capture path is unchanged.
+`docs/design/distributed_campaign_2026-09-19.md` §3.3.1 holds the full
+contract.
+
+Recovered Stage A campaign receipts (2026-09-22, PQ #947): an explicit recovery
+capsule may carry the existing campaign record by path and SHA-256. The new
+receipt binding is checked against that record's canonical seal, original
+plan/prepared/read-manifest hashes, complete measured unit roster and full
+calibration geometry. The original caller's absent scope and trailing-newline
+roster digest remain evidence; only those precise legacy spellings, or an
+already canonical caller, are accepted. The new receipt uses the campaign's
+existing scope and shared roster-digest helper. The original forward session,
+source/calibration/probe identity and every tensor remain unchanged. This is
+an explicit recovery binding, not permission to relabel arbitrary captures.
+
+Stage A checkpoint residency (2026-09-22, `fix/stagea-checkpoint-memory-20260922`):
+the tail and reverse chain retain their existing exact-entry descriptors,
+not a second full CPU cotangent plane. Checkpoint admission derives tensor
+envelopes from owned descriptors before opening payloads. Serialization uses
+the existing owner's digest-verified, lease-held `prefetch_batches` windows,
+grouped by probe and batch window, plus one charged serialization buffer.
+This preserves produced-group retirement boundaries and avoids repeatedly
+restaging a group for each tensor. Write failure closes the resident window
+and retains the admitted durable reservation under the existing failure
+contract. Tensor payloads, checkpoint schema, calibration and probe arithmetic
+are unchanged; checkpoint files still use their existing durable writer.
+
+Stage A allocator envelope (2026-09-22, PQ #934): an explicit positive finite
+`PRISMAQUANT_MAX_GPU_MEM_GB` now calls the existing
+`enforce_device_envelope` before backend preparation or model construction.
+It can only tighten the plan's `max_gpu_bytes`. The applied byte limit,
+allocator device and fraction are recorded in results, counters and the
+sealed adjoint receipt. Invalid explicit values refuse before device work;
+absence preserves the legacy path. This caps Torch allocations, not native
+CUDA/context allocations, which remain covered by PB's GPU and aggregate
+action backstops. A lower envelope may refuse a later allocation; it never
+silently grows to complete the capture. No scientific plan is rewritten.
+
 Distributed joint-cost joins retain the runtime's measured per-unit statistics,
 unaltered cost rows, and each quantum's original provenance. Production-shaped
 payloads must agree on schema and probe identity and cover exactly their own
@@ -21,6 +71,27 @@ This is a startup observation, not a run-long peak; it neither closes an open
 resource domain nor substitutes for the transient boundary's reservation-slack
 evidence.
 
+Head-resume concurrency update (2026-09-22, PQ #822): the head worker count
+also applies to checksummed journal-envelope restoration and independent
+banked-unit input-fence checks. The existing ordered driver is shared from
+`cost_stage_checkpoint`; it bounds outstanding results to twice the assigned
+worker count and commits in roster order. At the first stale or absent unit,
+queued suffix reads are canceled and active reads join before stale journal
+files are removed. Every source hash, render signature, marker hash and wire
+size check remains unchanged. Generic journal callers remain serial unless
+they explicitly request `unit_workers`, bounded by PB's CPU affinity.
+
+Head-resume progress update (2026-09-22, PQ #822): the existing head-walk
+journal and every input fence are still reverified before reuse. A resumed
+durable prefix now publishes one cumulative progress record after its rows
+are restored, retaining its last qname and exact completed-unit count.
+Replaying the prefix no longer rewrites the NFS progress file once per unit.
+The unbanked suffix continues from that count and reports normally; no
+unverified or corrupt suffix contributes to replay progress. Journal loading
+and fence validation remain unchanged, including their existing watchdog
+allowance. This is progress-write coalescing, not relaxed authentication.
+
+As of: 2026-09-22 · `flash/926-activation-quantizer-v2-reader`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-22, `flash/926-activation-quantizer-v2-reader`) for **the
@@ -49,22 +120,24 @@ literal's new column is transcribed. Gates:
 `test_native_panel_execution_scope.py`, against
 `tests/fixtures/tessera_activation_quantizers_v34.json` -- Tessera master
 `e42c0593d2`'s block verbatim, with its digest recorded.
-
-Re-stamped (2026-09-22, `fix/pq-917-static-prepared-inputs-20260922`) for
-**static prepared renders at retained-window read boundaries** (PQ #917).
-The executable-readset generator loads the digest-bound production cache once,
-derives complete candidate rosters through the existing retained admission
-planners, and seals each window's verified render digests, current sizes and
-whole-file paths. Planner disagreement refuses instead of regrouping windows.
-Each `render-NN` phase precedes that window's replay phases. Dispatch verifies
-the complete prepared contract and exact bound entries against the manifest;
-legacy sequencing-only rows still refuse. At runtime the production window
-callback enters the render phase and awaits those entries using the existing
-bounded staged-read readiness API before the PWC loading pool starts. Strict
-leases remain authoritative for actual reads. This introduces no dynamic
-rendering, second mover, source fallback, or production metadata regeneration.
-Gates: `test_stageb_prepared_inputs_bridge.py` and
-`test_stageb_prepared_render_inputs.py` (CPU synthetic tensor fixtures).
+Re-stamped (2026-09-22, `feat/pq-local-output-shuttle-20260922`) for
+**PB-owned precommit local output spooling** (PQ #928, PB #857). The default
+remains canonical shared writes. An explicitly sealed local spool root and
+byte ceiling opt Stage A into exact boundary/cotangent serialization on local
+disk. The existing canonical group prewrite precedes PB's per-owner local
+reservation; each serializer preallocates and fills the same temporary inode
+under a bounded digest sink, then truncates to actual size and renames locally.
+Complete existing groups enter PB's source-host export actions. PQ neither
+copies payloads nor dispatches transfers. Canonical references remain pending
+until PB verifies durable export; only then may the old descriptor/publication
+path run, entry progress advance, or local reservations release. Reads retain
+the existing RAM/SSD lease policy. Failed/incomplete exports retain local files
+and prewrite credit, and successful capture receipts drain outstanding exports.
+The container requires an explicitly declared writable bind preserving host
+path identity. This is per-owner bounded precommit storage, not a global host
+disk ledger; checkpoint serialization is unchanged. Tests distinguish adapter
+transport doubles from qualification of PB's actual exporter. Deployment is
+separate from source qualification.
 
 Re-stamped (2026-09-22, `fix/stagea-prefetch-907-20260921`) for **Stage A
 loader-barrier availability recovery** (PQ #911). The real forward visitor
@@ -95,11 +168,21 @@ and released leases. A separate full CPU core fixture checks both forward
 and reverse opt-in wiring. This is contract qualification, not a GPU
 performance measurement.
 
-Re-stamped (2026-09-22, `feat/stagea-background-stager-895`) for
-**retirement and close ownership** (PQ #918, #919, #920, #922): an unresolved queued or running stager
-publication refuses origin retirement with a timeout. The origin, live-byte
-charge, reference and slot stay owned, and the release report names the debt.
-No format, kernel order, or staging-budget default changes.
+Re-stamped (2026-09-22, `fix/pq-917-static-prepared-inputs-20260922`) for
+**static prepared renders at retained-window read boundaries** (PQ #917).
+The executable-readset generator loads the digest-bound production cache once,
+derives complete candidate rosters through the existing retained admission
+planners, and seals each window's verified render digests, current sizes and
+whole-file paths. Planner disagreement refuses instead of regrouping windows.
+Each `render-NN` phase precedes that window's replay phases. Dispatch verifies
+the complete prepared contract and exact bound entries against the manifest;
+legacy sequencing-only rows still refuse. At runtime the production window
+callback enters the render phase and awaits those entries using the existing
+bounded staged-read readiness API before the PWC loading pool starts. Strict
+leases remain authoritative for actual reads. This introduces no dynamic
+rendering, second mover, source fallback, or production metadata regeneration.
+Gates: `test_stageb_prepared_inputs_bridge.py` and
+`test_stageb_prepared_render_inputs.py` (CPU synthetic tensor fixtures).
 
 Re-stamped (2026-09-22, `diagnose/r4-retiring-cover-20260922`) for **a retiring
 cover yielding to an independently leased overlap** (PQ #916). A broad head
@@ -117,6 +200,12 @@ bypass, phase-policy change, or PB runtime change is introduced. Gates:
 pins, retiring marks, SSD/RAM admission, and exact releases.
 
 Re-stamped (2026-09-21, `fix/pq-903-stale-missing-waitable`) for **a stale covering row waiting instead of refusing** (PQ #903). After #902 every covering entry is asked, but every covering staged file missing still refused at once, even when the sealed readset declares the span and the layer's own range has not landed yet: the map is behind the file system (partial eviction or recompose lag), not the bytes unavailable. `ResidencyResolver._range_answer` now carries a typed missing cause (`errno.ENOENT` on the staged `lstat` with no RAM offer, never a `strerror` substring match); `staged_range_outcome` reports all-missing + declared as `RANGE_UNCOVERED` (same silent `range_misses` waitable miss as no covering entry) and all-missing + undeclared as `RANGE_UNDECLARED`. Any hard failure -- entry runs past the declared file, staged copy not regular, wrong size, or unreadable for any other errno including permission -- still refuses at once and reports the first hard reason (integrity first). The layer pre-flight waits on the waitable miss under its single deadline and the read below still refuses after the bound with no pool read. No format, lane, pin, kernel order or ship gate changes. Gates: `tests/test_staged_range_every_covering_entry.py`, `tests/test_strict_reader_tier_enforcement.py` (mid-wait map rewrite with real PB writers and lease paths).
+
+Re-stamped (2026-09-21, `muse/stager904-reconciled-20260921`) for
+**retirement and close ownership** (PQ #918, #919, #920, #922): an unresolved queued or running stager
+publication refuses origin retirement with a timeout. The origin, live-byte
+charge, reference and slot stay owned, and the release report names the debt.
+No format, kernel order, or staging-budget default changes.
 
 Re-stamped (2026-09-21, `fix/pq-890-tests-20260921`) for **what counts as a
 produced-group release failure** (PQ #890). No format, lane, pin, ship-gate
@@ -204,6 +293,7 @@ forward pass, because at 1 GiB a group the owner's PrismaBuild calls, made on
 the compute thread, took longer than the compute between them.
 `PRISMAQUANT_STAGEA_STAGER=inline` is the run-scoped override that keeps
 every step on the calling thread at any window width.
+
 
 Re-stamped (2026-09-21, `fix/stagea-unpublished-905`) for **a lease that sees
 what a stage mover has published now** (PQ #905, PrismaBuild #823). A
