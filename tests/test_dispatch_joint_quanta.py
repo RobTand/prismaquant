@@ -753,7 +753,7 @@ def test_portable_admission_does_not_skip_container_spec_validation(tmp_path):
     path.write_text(json.dumps({'container_admission_reference': 'content:sha256:' + 'c'*64,
         'container': {'image': 'image', 'content_sha256': 'b'*64, 'unknown_field': True}}))
     with pytest.raises(RuntimeError, match='container must declare'):
-        _container_wrap(path, ['python3'])
+        _container_wrap(path, ['python3'], progress=[('head', 1800)])
 
 
 def test_extended_catalog_cannot_launch_historical_bare_parent_readset(tmp_path, campaign):

@@ -907,7 +907,6 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         raise DispatchRefused(
             f"quantum {quantum_id!r} adjoint receipt unreadable at "
             f"{adjoint_path}: {exc}") from exc
-    wrap_options = {} if resource_policy is None else {"resource_policy": resource_policy}
     wrapped, container_image = _container_wrap(SPEC_PATH, [
         "python3", "-m", "prismaquant.joint_cost_quantum",
         "--quantum", str(record_path),
@@ -921,7 +920,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--data-manifest-sha256", staged_sha256,
         "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
-        "--output-root", str(output_root)], progress=progress, **wrap_options)
+        "--output-root", str(output_root)], progress=progress,
+        resource_policy=resource_policy)
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
         argv += ["--tag", str(tag)]
