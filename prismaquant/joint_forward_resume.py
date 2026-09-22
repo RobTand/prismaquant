@@ -3,6 +3,10 @@
 This authority does not alter ``working_artifacts_reusable``. Old files retain
 their original session and producer; a fresh action reads them as sealed inputs.
 Only stateless profiles can reconstruct the per-batch forward state.
+
+A recovery can itself be contained mid-forward. Its capsule then chains: the
+top segment holds the boundaries that owner wrote, and ``imported`` pins the
+capsule it resumed from. Every segment is re-verified against PB on load.
 """
 from __future__ import annotations
 
@@ -125,7 +129,10 @@ def _records(document, entries):
         raise ForwardRecoveryRefused('unsupported exact boundary geometry')
     width = torch.empty((), dtype=getattr(torch, dtype.split('.')[1])).element_size()
     tensor_bytes = math.prod(shape) * width
-    result = {str(b): {} for b in range(document['frontier'] + 1)}
+    first = document.get('first_boundary', 0)
+    if type(first) is not int or not 0 <= first <= document['frontier']:
+        raise ForwardRecoveryRefused('forward recovery segment range is invalid')
+    result = {str(b): {} for b in range(first, document['frontier'] + 1)}
     for entry in entries:
         path = Path(entry['destination_path'])
         match = re.fullmatch(r'boundary-(\d+)-(\d+)-at-(\d+)\.pt', path.name)
@@ -148,6 +155,100 @@ def _records(document, entries):
         raise ForwardRecoveryRefused('incomplete whole-draw forward boundary coverage')
     return {boundary: [rows[i] for i in range(document['n_batches'])]
             for boundary, rows in result.items()}
+
+
+MAX_CHAIN_SEGMENTS = 16
+
+
+def _campaign(document):
+    return document.get('published_campaign_identity', document['campaign_identity'])
+
+
+def _prior(document):
+    """The sha-pinned capsule this segment's owner resumed from, or None."""
+    bound = document.get('imported')
+    if bound is None:
+        if document.get('first_boundary', 0) != 0:
+            raise ForwardRecoveryRefused('a partial forward segment names no imported prefix')
+        return None
+    prior, _ = _read(bound['path'], bound['sha256'])
+    first = document.get('first_boundary')
+    if (prior.get('schema') != SCHEMA or type(first) is not int or
+            first != prior['frontier'] + 1 or document['frontier'] < first):
+        raise ForwardRecoveryRefused('forward recovery segment does not continue its import')
+    for field in ('n_batches', 'entry_shape', 'entry_dtype', 'queue_root',
+                  'source_campaign_record'):
+        if prior.get(field) != document.get(field):
+            raise ForwardRecoveryRefused('forward recovery segments differ in ' + field)
+    # The imported capsule's recovery implementation is this owner's producer,
+    # over the same science and campaign.
+    validate_forward_state(prior, bind_identity=document['original_bind_identity'],
+                           campaign_identity=_campaign(document))
+    return prior
+
+
+def chain_documents(document):
+    """Top segment first; each imported capsule is read and linked once."""
+    chain = [document]
+    while (prior := _prior(chain[-1])) is not None:
+        if len(chain) >= MAX_CHAIN_SEGMENTS:
+            raise ForwardRecoveryRefused('forward recovery chain is too long')
+        chain.append(prior)
+    return chain
+
+
+def _merge(document, parts):
+    """Disjoint segment records that cover boundaries 0..frontier exactly."""
+    records = {}
+    for rows in parts:
+        if set(rows) & set(records):
+            raise ForwardRecoveryRefused('forward recovery segments overlap')
+        records.update(rows)
+    if set(records) != {str(b) for b in range(document['frontier'] + 1)}:
+        raise ForwardRecoveryRefused('incomplete whole-draw forward boundary coverage')
+    return records
+
+
+def chain_records(document):
+    """Every recovered coordinate of a sha-pinned chain; no PB reads."""
+    return _merge(document, [
+        _records(segment, [entry for group in segment['groups']
+                           for entry in group['manifest']['entries']])
+        for segment in chain_documents(document)])
+
+
+def _require_imported_by_owner(document, sdk):
+    """The segment's owner sealed exactly this import into its own command."""
+    action = sdk['core'].validate_action(document['owner_action'])
+    bound = document['imported']
+    argv = action['params']['command']
+    flags = [i for i, arg in enumerate(argv) if arg == '--forward-recovery']
+    if (action['action_key'] != document['instance']['owner_action_key'] or
+            len(flags) != 1 or argv[flags[0] + 1:flags[0] + 4] != [
+                bound['path'], '--forward-recovery-sha256', bound['sha256']]):
+        raise ForwardRecoveryRefused('segment owner did not import this capsule')
+
+
+def _verified_chain_records(document, sdk):
+    """Containment, sealed exports and PB descriptors for every segment."""
+    parts = []
+    for segment in chain_documents(document):
+        queue = sdk['pool'].PoolQueue(segment['queue_root'])
+        instance = sdk['produced_output'].validate_instance(segment['instance'])
+        template = sdk['produced_output'].validate_template(segment['template'])
+        require_contained(queue, instance, sdk)
+        directory = sdk['produced_output'].instance_dir(queue.root, instance)
+        if _read(directory / 'instance.json')[0] != instance:
+            raise ForwardRecoveryRefused('original PB instance changed')
+        commitments = _read(directory / 'commitments.json')[0]
+        if 'imported' in segment:
+            _require_imported_by_owner(segment, sdk)
+        entries = []
+        for group in segment['groups']:
+            entries.extend(_checked_group(group, queue=queue, instance=instance,
+                template=template, commitments=commitments, sdk=sdk))
+        parts.append(_records(segment, entries))
+    return _merge(document, parts)
 
 
 @dataclass(frozen=True)
@@ -219,19 +320,8 @@ def load_forward_recovery(bound, *, bind_identity, campaign_identity, runner, st
     if frontier > runner.num_layers:
         raise ForwardRecoveryRefused('forward frontier exceeds model layers')
     sdk = _sdk()
-    queue = sdk['pool'].PoolQueue(document['queue_root'])
     instance = sdk['produced_output'].validate_instance(document['instance'])
-    template = sdk['produced_output'].validate_template(document['template'])
-    require_contained(queue, instance, sdk)
-    directory = sdk['produced_output'].instance_dir(queue.root, instance)
-    if _read(directory / 'instance.json')[0] != instance:
-        raise ForwardRecoveryRefused('original PB instance changed')
-    commitments = _read(directory / 'commitments.json')[0]
-    entries = []
-    for group in document['groups']:
-        entries.extend(_checked_group(group, queue=queue, instance=instance,
-            template=template, commitments=commitments, sdk=sdk))
-    records = _records(document, entries)
+    records = _verified_chain_records(document, sdk)
     binding = {'schema': SCHEMA, 'capsule': {'path': str(bound['path']), 'sha256': digest},
                'frontier': frontier, 'original_session': document['session'],
                'original_owner': instance['owner_action_key'],
@@ -241,14 +331,63 @@ def load_forward_recovery(bound, *, bind_identity, campaign_identity, runner, st
     return result
 
 
-def build_forward_recovery(*, specification, spool_directory, output,
-                           bind_current_implementation=False, frontier=None):
+def chained_specification(imported, *, spool_directory, owner_request):
+    """Derive the next segment from its imported capsule and its owner's spool.
+
+Nothing derived here is trusted: the freezer and the loader re-verify every
+field against the owner's sealed request, PB and the imported chain.
+"""
+    from .cost_stage_checkpoint import canonical_json_sha256
+    prior, _ = _read(imported['path'], imported['sha256'])
+    action = _read(owner_request)[0]
+    manifests = [manifest for manifest in (_read(path)[0] for path in
+                 sorted(Path(spool_directory).glob('*/manifest.json')))
+                 if manifest['owner'] == action['action_key'] and
+                 manifest['batch_id'].startswith('stagea-boundary-')]
+    if not manifests:
+        raise ForwardRecoveryRefused('owner spool holds no exact boundary groups')
+    instance, template = manifests[0]['instance'], manifests[0]['template']
+    directories = {Path(entry['destination_path']).parent.parent for manifest in manifests
+                   for entry in manifest['entries']}
+    if (len(directories) != 1 or any(manifest['instance'] != instance or
+                                     manifest['template'] != template for manifest in manifests)):
+        raise ForwardRecoveryRefused('owner spool spans more than one generation')
+    directory = directories.pop()
+    bind = {**prior['original_bind_identity'],
+            'producer_source_sha256': prior['implementation_compatibility']['recovery']}
+    session = {'generation': directory.name, 'run_identity_sha256':
+               canonical_json_sha256(bind, where='chained forward recovery session')}
+    if _read(directory / 'generation.json')[0].get('session') != session:
+        raise ForwardRecoveryRefused('owner generation is not the imported continuation')
+    document = {field: prior[field] for field in (
+        'schema', 'queue_root', 'n_batches', 'entry_shape', 'entry_dtype',
+        'source_campaign_record', 'published_campaign_identity') if field in prior}
+    document.update(instance=instance, template=template, session=session,
+                    original_bind_identity=bind, campaign_identity=_campaign(prior),
+                    first_boundary=prior['frontier'] + 1, frontier=prior['frontier'] + 1,
+                    imported=dict(imported), owner_action=action)
+    return document
+
+
+def build_forward_recovery(*, spool_directory, output, specification=None,
+                           bind_current_implementation=False, frontier=None,
+                           imported=None, owner_request=None):
     """Freeze complete ACK-backed groups after containment; metadata reads only.
 
 The supplied specification is the operator-reviewed science/implementation
 compatibility declaration. It never licenses changing the original files.
+With ``imported``, the specification is derived instead, and this segment
+continues the imported chain.
 """
-    document = dict(specification)
+    if (specification is None) == (imported is None):
+        raise ForwardRecoveryRefused('pass a specification or an imported capsule')
+    if imported is None:
+        document = dict(specification)
+    elif not bind_current_implementation:
+        raise ForwardRecoveryRefused('a chained segment binds the current implementation')
+    else:
+        document = chained_specification(imported, spool_directory=spool_directory,
+                                         owner_request=owner_request)
     if frontier is not None:
         if type(frontier) is not int or frontier < 1:
             raise ForwardRecoveryRefused('frontier must be an explicit positive integer')
@@ -261,15 +400,16 @@ compatibility declaration. It never licenses changing the original files.
     prospective = {**document['original_bind_identity'], 'producer_source_sha256':
                    document['implementation_compatibility']['recovery']}
     validate_forward_state(document, bind_identity=prospective,
-                           campaign_identity=document.get('published_campaign_identity', document['campaign_identity']))
+                           campaign_identity=_campaign(document))
     sdk = _sdk()
+    first = document.get('first_boundary', 0)
     groups = []
     for path in sorted(Path(spool_directory).glob('*/manifest.json')):
         manifest, digest = _read(path)
         if manifest['owner'] != document['instance']['owner_action_key']:
             continue
         match = re.match(r'stagea-boundary-b(\d+)-g', manifest['batch_id'])
-        if match is None or int(match[1]) > document['frontier']:
+        if match is None or not first <= int(match[1]) <= document['frontier']:
             continue
         record = _read(path.parent / 'export.json')[0]
         if record['manifest_sha256'] != digest:
@@ -277,16 +417,7 @@ compatibility declaration. It never licenses changing the original files.
         groups.append({'manifest': manifest, 'manifest_raw': path.read_text(),
                        'record': record, 'receipt': _read(path.parent / 'receipt.json')[0]})
     document['groups'] = groups
-    queue = sdk['pool'].PoolQueue(document['queue_root'])
-    instance = sdk['produced_output'].validate_instance(document['instance'])
-    require_contained(queue, instance, sdk)
-    commitments = _read(sdk['produced_output'].instance_dir(queue.root, instance) /
-                        'commitments.json')[0]
-    entries = []
-    for group in groups:
-        entries.extend(_checked_group(group, queue=queue, instance=instance,
-            template=document['template'], commitments=commitments, sdk=sdk))
-    _records(document, entries)
+    records = _verified_chain_records(document, sdk)
     raw = (json.dumps(document, sort_keys=True, separators=(',', ':')) + '\n').encode()
     with Path(output).open('xb') as handle:
         handle.write(raw)
@@ -299,4 +430,5 @@ compatibility declaration. It never licenses changing the original files.
     finally:
         os.close(directory_fd)
     return {'path': str(output), 'sha256': hashlib.sha256(raw).hexdigest(),
-            'groups': len(groups), 'entries': len(entries)}
+            'groups': len(groups), 'segments': len(chain_documents(document)),
+            'entries': sum(len(rows) for rows in records.values())}

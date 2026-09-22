@@ -366,6 +366,25 @@ Forward recovery currently requires inherited stateless model-profile hooks;
 profiles with cross-layer shared state refuse rather than reconstructing it as
 empty. The head journal's existing independent resume authority is unchanged.
 
+A recovered action can itself be contained mid-forward. Its capsule is then a
+**chained segment**: `first_boundary` through `frontier` name only the
+boundaries that owner wrote, and `imported` pins, by path and SHA256, the
+capsule that owner resumed from. `tools/stagea_forward_recovery.py
+--import-capsule` derives the segment from the imported capsule, the owner's
+sealed PB request and its local spool. The loader walks the chain and, for every
+segment, repeats the whole single-capsule proof: containment, sealed exports,
+immutable descriptors and full batch coverage. Adjacent segments must agree on
+geometry, queue and campaign record. Each segment's original implementation
+must equal the recovery implementation the imported capsule bound. The owner's
+sealed command must import exactly that capsule once. Segments may not overlap,
+and together they must cover boundary zero through the top frontier. Stage B's
+attach reads references from every generation in the chain.
+
+Adjoint checkpoints have fixed paths (`checkpoints/boundary-NNN`) and are never
+overwritten. A contained attempt that reached its tail leaves a checkpoint that
+fails the next attempt after its own tail. The package launcher refuses to
+launch while any checkpoint path is occupied.
+
 ### 3.4 Stride derivation (S)
 
 `S = 8` at this plan, derived, not chosen: the artifact budget for retained

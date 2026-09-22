@@ -380,7 +380,7 @@ class StreamedBoundaryArtifacts:
         self._readonly = True
         self._status = "attached"
         if forward_recovery is not None:
-            from .joint_forward_resume import SCHEMA, _read, _records
+            from .joint_forward_resume import SCHEMA, _read, chain_records
             from .joint_adjoint_checkpoints import reference_from_record
             if forward_recovery.get("schema") != SCHEMA:
                 raise RuntimeError("unsupported attached forward recovery authority")
@@ -392,8 +392,8 @@ class StreamedBoundaryArtifacts:
                     document["instance"]["owner_action_key"] != forward_recovery["original_owner"] or
                     document["instance"]["owner_attempt"] != forward_recovery["original_attempt"]):
                 raise RuntimeError("attached forward recovery session changed")
-            records = _records(document, [entry for group in document["groups"]
-                for entry in group["manifest"]["entries"]])
+            # A chained capsule spans generations; each reference keeps its own session.
+            records = chain_records(document)
             self._attached_forward_inputs = frozenset(reference_from_record(row)
                 for rows in records.values() for row in rows)
 
