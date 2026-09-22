@@ -177,7 +177,8 @@ def test_handoff_carries_complete_original_projection_and_measured_wire_roster()
 
 @pytest.mark.parametrize('mutation', [None, 'joint_bytes', 'cache_bytes', 'render_path',
     'output_exists', 'receipt_exists', 'output_race', 'receipt_race'])
-def test_file_handoff_authenticates_owned_bytes_and_preserves_original(tmp_path, monkeypatch, mutation):
+@pytest.mark.parametrize('distributed', [False, True])
+def test_file_handoff_authenticates_owned_bytes_and_preserves_original(tmp_path, monkeypatch, mutation, distributed):
     import hashlib
     import json
     import pickle
@@ -205,6 +206,12 @@ def test_file_handoff_authenticates_owned_bytes_and_preserves_original(tmp_path,
     evidence = joint['provenance']['tessera_joint_anchors']
     evidence.update(plan_sha256=plan_binding['sha256'], prepared=prepared_binding,
                     calibration_input=prepared['calibration_input'])
+    if distributed:
+        from prismaquant.joint_quanta_join import JOINED_RESULTS_SCHEMA
+        del joint['provenance']['tessera_joint_anchors']
+        joint['provenance'].update(join_schema=JOINED_RESULTS_SCHEMA,
+            plan_sha256=plan_binding['sha256'], prepared_sha256=prepared_binding['sha256'],
+            prepared=prepared_binding, coverage={'status': 'complete', 'gaps': []})
     joint_raw = pickle.dumps(joint)
     joint_binding = write_bound('joint.pkl', joint_raw)
     def load_inputs(inputs, *, verify_payloads):

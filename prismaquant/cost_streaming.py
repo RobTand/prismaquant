@@ -249,6 +249,26 @@ class StreamedBoundaryArtifacts:
         self._produced_ahead = set()
         self._produced_ahead_refusals = []
         self._produced_retained_boundary = None
+        # The background stager (RobTand/prismaquant#895). ``None`` on every
+        # unbound owner and at the default two-group window: there is then no
+        # thread, and every step below runs where it is called, as before.
+        # With a stager, this owner's PrismaBuild calls that can wait on a
+        # lock run on its thread; the compute thread submits them and blocks
+        # only for a group it must read now or a full queue. One lock guards
+        # the bookkeeping both threads touch, and a thread gives it up around
+        # each PrismaBuild call.
+        from .produced_stager import OwnerLock
+        self._produced_lock = OwnerLock()
+        self._stager = None
+        self._stager_stuck = False
+        self._stager_failures = []
+        self._stager_preclaimed = set()
+        self._produced_release_queued = set()
+        self._produced_live_keys = frozenset()
+        import threading
+        # Per thread: spans nest on the thread that opened them, and a frame
+        # from another thread in the same stack would misattribute both.
+        self._produced_blocked_local = threading.local()
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -277,7 +297,32 @@ class StreamedBoundaryArtifacts:
             "produced_group_ahead_wait_s": 0.0,
             "produced_group_release_polls": 0,
             "produced_group_read_refunds": 0,
-            "produced_groups_ahead_surrendered": 0}
+            "produced_groups_ahead_surrendered": 0,
+            "produced_groups_prewritten_ahead": 0,
+            "produced_group_fast_reads": 0,
+            "produced_stager_tasks": 0,
+            "produced_stager_busy_s": 0.0,
+            "produced_stager_alive_s": 0.0,
+            "produced_stager_queue_peak": 0,
+            "produced_stager_urgent_tasks": 0,
+            "produced_stager_urgent_delay_s": 0.0,
+            "produced_stager_step_overruns": 0,
+            "produced_stager_dropped": 0,
+            "produced_stager_failures": 0,
+            "produced_compute_blocked_s": 0.0,
+            **{f"produced_compute_blocked_{reason}_s": 0.0
+               for reason in self.PRODUCED_BLOCKED_REASONS}}
+
+    #: Why the compute thread was blocked on this owner's PrismaBuild work.
+    #: One telemetry counter each (``produced_compute_blocked_<reason>_s``),
+    #: exclusive of each other, and ``produced_compute_blocked_s`` is their
+    #: sum: the GPU's cost of staging, stated directly. Every key exists from
+    #: the start, because the status file serializes the telemetry while the
+    #: stager updates it and a dict may not change size under that.
+    PRODUCED_BLOCKED_REASONS = (
+        "prewrite", "publish_ahead", "stage_ahead", "read_fund", "stage_wait",
+        "compose", "release", "copy_before_unlink", "reclaim_origin",
+        "queue_full", "settle", "close")
 
     def __enter__(self):
         return self
@@ -475,10 +520,12 @@ class StreamedBoundaryArtifacts:
         # at the commit inside the deferred publish.
         produced_group = None
         if self._produced is not None:
-            produced_group = self._produced_prewrite(self._produced_group_key(
-                kind=kind, batch_index=batch_index, boundary_index=boundary_index,
-                probe_index=probe_index,
-                group_size=self._produced_plan["group_size"]))
+            self._produced_raise_stager_failure()
+            produced_group = self._produced_group_for_write(
+                self._produced_group_key(
+                    kind=kind, batch_index=batch_index,
+                    boundary_index=boundary_index, probe_index=probe_index,
+                    group_size=self._produced_plan["group_size"]))
         self._reserve(nbytes)
         try:
             with torch.profiler.record_function("aura.exact_activation.write"):
@@ -489,15 +536,17 @@ class StreamedBoundaryArtifacts:
         self._references[name] = reference
         self._slots[slot] = reference
         if produced_group is not None:
-            produced_group["references"].append(reference)
-            produced_group["live_references"] += 1
             produced_key = self._produced_group_key(
                 kind=kind, batch_index=batch_index,
                 boundary_index=boundary_index, probe_index=probe_index,
                 group_size=self._produced_plan["group_size"])
-            self._produced_index[reference] = produced_key
-            if (read_back and len(produced_group["references"])
-                    == len(produced_group["planned"]) // 2):
+            with self._produced_lock.held():
+                produced_group["references"].append(reference)
+                produced_group["live_references"] += 1
+                self._produced_index[reference] = produced_key
+                complete = (read_back and len(produced_group["references"])
+                            == len(produced_group["planned"]) // 2)
+            if complete:
                 # The group's last entry is durable, and everything its
                 # publication needs is on the references already. Publishing
                 # here lets PrismaBuild's mover run while the GPU works.
@@ -528,17 +577,18 @@ class StreamedBoundaryArtifacts:
         self.telemetry["live_artifact_bytes"] -= reference.file_bytes
         self.telemetry["retired_entries"] += 1
         if self._produced is not None:
-            key = self._produced_index.get(reference)
-            group = None if key is None else self._produced_groups.get(key)
-            if group is not None and group["live_references"] > 0:
-                group["live_references"] -= 1
-            self._reclaim_produced_origin_if_final(reference)
-            # The origin is gone, so the reference is dead: drop it from
-            # the lookup index AFTER the reclaim gate has read it. The
-            # group's own list is untouched -- the committed batch's
-            # descriptors are PrismaBuild's and are not rewritten by this
-            # owner disposing of its files.
-            self._produced_index.pop(reference, None)
+            with self._produced_lock.held():
+                key = self._produced_index.get(reference)
+                group = None if key is None else self._produced_groups.get(key)
+                if group is not None and group["live_references"] > 0:
+                    group["live_references"] -= 1
+                self._reclaim_produced_origin_if_final(reference)
+                # The origin is gone, so the reference is dead: drop it from
+                # the lookup index AFTER the reclaim gate has read it. The
+                # group's own list is untouched -- the committed batch's
+                # descriptors are PrismaBuild's and are not rewritten by this
+                # owner disposing of its files.
+                self._produced_index.pop(reference, None)
 
     def _produced_await_copy_before_unlink(self, reference):
         """Do not unlink an origin PrismaBuild's mover may still be reading.
@@ -555,21 +605,45 @@ class StreamedBoundaryArtifacts:
 
         import time
 
-        key = self._produced_index.get(reference)
-        group = None if key is None else self._produced_groups.get(key)
-        if (group is None or key not in self._produced_ahead
-                or group["retired"] or group["context"] is not None
-                or group.get("copy_awaited")):
-            return
-        started = time.monotonic()
-        try:
-            self._produced.await_materialized(
-                batch_id=group["batch_id"],
-                timeout_s=self._produced_plan["staging_timeout_s"])
-            group["copy_awaited"] = True
-        finally:
-            self.telemetry["produced_group_stage_wait_s"] += (
-                time.monotonic() - started)
+        with self._produced_lock.held():
+            key = self._produced_index.get(reference)
+            group = None if key is None else self._produced_groups.get(key)
+            if (group is None or group["retired"]
+                    or group["context"] is not None
+                    or group.get("copy_awaited")):
+                return
+            if self._stager is not None:
+                # A publication of this group may be queued or running on
+                # the stager, and until it has run the owner cannot say
+                # whether a mover will open these origins. Wait for it, then
+                # ask the question below as before.
+                with self._produced_blocked("copy_before_unlink"), (
+                        self._produced_lock.yielded()):
+                    idle = self._stager.wait_keys_idle(
+                        (key,), labels=("publish-ahead", "stage-ahead"),
+                        timeout=self._produced_plan["staging_timeout_s"])
+                if not idle:
+                    reason = "publication did not become idle before origin retirement"
+                    self._produced_release_errors.append(
+                        {"batch_id": group["batch_id"],
+                         "step": "retain-origin-copy-unresolved",
+                         "reason": {"error": reason, "origin": reference.path}})
+                    raise TimeoutError(reason)
+            if (key not in self._produced_ahead or group["retired"]
+                    or group["context"] is not None
+                    or group.get("copy_awaited")):
+                return
+            started = time.monotonic()
+            try:
+                with self._produced_blocked("copy_before_unlink"), (
+                        self._produced_lock.yielded()):
+                    self._produced.await_materialized(
+                        batch_id=group["batch_id"],
+                        timeout_s=self._produced_plan["staging_timeout_s"])
+                group["copy_awaited"] = True
+            finally:
+                self.telemetry["produced_group_stage_wait_s"] += (
+                    time.monotonic() - started)
 
     def _reclaim_produced_origin_for_group(self, key, group):
         """Release a group's durable charge when both conditions hold.
@@ -587,7 +661,20 @@ class StreamedBoundaryArtifacts:
             return
         if group["live_references"]:
             return
-        out = self._produced.reclaim_origin(group["batch_id"])
+        if self._produced_on_compute_with_stager():
+            # The proof of absence is PrismaBuild's and takes its ownership
+            # lock, so it runs on the stager. Kept at close: a durable
+            # charge still has to be given back by a run that is ending.
+            self._produced_submit(
+                "optional", "reclaim-origin",
+                lambda: self._reclaim_produced_origin_for_group(key, group),
+                keys=(key,), reason="reclaim_origin", keep_on_close=True)
+            return
+        with self._produced_blocked("reclaim_origin"), (
+                self._produced_lock.yielded()):
+            out = self._produced.reclaim_origin(group["batch_id"])
+        if group.get("origin_reclaimed"):
+            return
         if out.get("ok"):
             group["origin_reclaimed"] = True
             self.telemetry["produced_groups_origin_reclaimed"] += 1
@@ -595,6 +682,9 @@ class StreamedBoundaryArtifacts:
             self._produced_release_errors.append(
                 {"batch_id": group["batch_id"], "step": "reclaim_origin",
                  "reason": {"refusal": out.get("refusal")}})
+            self._produced_log(
+                f"reclaim_origin refused for {group['batch_id']}: "
+                f"{out.get('refusal')!r}")
 
     def _reclaim_produced_origin_if_final(self, reference):
         """Free a group's DURABLE charge once its last origin file is gone.
@@ -633,8 +723,8 @@ class StreamedBoundaryArtifacts:
             raise RuntimeError(
                 "an attached read-only generation cannot retire entries")
         identity = self._entry_identity(reference)
-        del self._slots[identity["slot"]]
         self._retire(reference)
+        del self._slots[identity["slot"]]
 
     # ------------------------------------------------------------------
     # Checkpoint artifact budget: strided-checkpoint files counted in the
@@ -1231,6 +1321,323 @@ class StreamedBoundaryArtifacts:
                                "ahead_groups": int(window_groups) - 2}
 
         self._produced_groups = {}
+        self._produced_start_stager()
+
+    # ------------------------------------------------------------------
+    # The background stager (RobTand/prismaquant#895).
+    #
+    # Measured on the first production run with read-ahead: the GPU was busy
+    # 18 percent of the forward pass, because every PrismaBuild call ran on
+    # the thread that drives it. With a sealed window wider than two groups
+    # the owner now starts one stager thread, and these rules hold:
+    #
+    # * The compute thread makes no PrismaBuild call that can wait on a lock.
+    #   It polls a group's mover receipt and composes its reader context
+    #   (both lock-free reads), and it submits everything else.
+    # * A group the window must read now is an URGENT task the compute
+    #   thread waits for. A window's retirement asks are ORDERED. Both run
+    #   first in, first out, ahead of OPTIONAL work: publishing at
+    #   write-complete, staging a plane ahead, claiming the next group's
+    #   prewrite, reclaiming a durable charge.
+    # * In steady state a read submits nothing: a group that is published,
+    #   holds credit and has no retirement asked for goes straight to the
+    #   receipt poll (``produced_group_fast_reads``).
+    # * One task runs at a time, so the state machine below runs on one
+    #   thread and is the code the synchronous loop runs. An urgent task
+    #   waits for the task in flight: ``produced_stager_urgent_delay_s``.
+    # * A failure never disappears. An optional step stays a counted refusal
+    #   with its reason. An urgent step raises on the compute thread, under
+    #   its own type. Any other step's failure is kept and raised by the
+    #   owner's next call.
+    # ------------------------------------------------------------------
+
+    #: ``inline`` keeps every step on the calling thread at any window
+    #: width: the synchronous read-ahead loop of #887, for a run that must
+    #: rule the thread out. Anything else, or unset, is the default.
+    PRODUCED_STAGER_ENV = "PRISMAQUANT_STAGEA_STAGER"
+
+    #: How long one opportunistic step may run on the stager. It bounds the
+    #: wait of an urgent task behind it, so it is not the staging budget.
+    PRODUCED_STAGER_STEP_BUDGET_S = 120.0
+
+    #: How often the stager asks again about retirements still in flight.
+    #: Each ask is a PrismaBuild call under the ownership lock, and the
+    #: synchronous loop asked once a window, so this is about a window at
+    #: production size and not the two seconds a record is paced at.
+    PRODUCED_STAGER_POLL_S = 5.0
+
+    #: Tests only: wait for every submitted task where it is submitted, so
+    #: the read-ahead rules can be asserted step by step on the real thread.
+    _PRODUCED_STAGER_WAIT_ALL = False
+
+    def _produced_start_stager(self):
+        import os
+        from .produced_stager import ProducedStager
+
+        if (self._produced_plan["ahead_groups"] <= 0
+                or os.environ.get(self.PRODUCED_STAGER_ENV, "") == "inline"):
+            return
+        self._stager = ProducedStager(
+            name="stagea-produced-stager",
+            capacity=4 * self._produced_plan["window_groups"],
+            poll=self._produced_stager_poll,
+            poll_s=self.PRODUCED_STAGER_POLL_S,
+            on_done=self._produced_stager_done,
+            on_error=self._produced_stager_error)
+        self._produced_log(
+            f"stager thread started: window {self._produced_plan['window_groups']} "
+            f"groups, read-ahead {self._produced_plan['ahead_groups']}")
+
+    def _produced_on_stager(self):
+        import threading
+        stager = self._stager
+        return stager is not None and threading.get_ident() == stager.ident
+
+    def _produced_on_compute_with_stager(self):
+        return (self._stager is not None and not self._produced_on_stager()
+                and not getattr(self._produced_blocked_local, "inline", 0))
+
+    def _produced_log(self, message):
+        """One line when it happens; the receipt carries the totals."""
+
+        print(f"exact boundary owner: {message}", flush=True)
+
+    @contextmanager
+    def _produced_blocked(self, reason):
+        """Count the compute thread's time inside this span under ``reason``.
+
+        Exclusive: a span nested in another is taken out of the outer one,
+        so the reasons add up to ``produced_compute_blocked_s``. The stager
+        thread's time is never counted here; it is ``produced_stager_busy_s``.
+        """
+
+        import time
+
+        if self._produced_on_stager():
+            yield
+            return
+        stack = getattr(self._produced_blocked_local, "stack", None)
+        if stack is None:
+            stack = self._produced_blocked_local.stack = []
+        frame = [time.monotonic(), 0.0]
+        stack.append(frame)
+        try:
+            yield
+        finally:
+            stack.pop()
+            elapsed = time.monotonic() - frame[0]
+            own = max(elapsed - frame[1], 0.0)
+            if stack:
+                stack[-1][1] += elapsed
+            self.telemetry[f"produced_compute_blocked_{reason}_s"] += own
+            self.telemetry["produced_compute_blocked_s"] += own
+
+    def _produced_submit(self, kind, label, call, *, keys=(), reason,
+                         wait=False, on_drop=None, keep_on_close=False):
+        """Run ``call`` on the stager, or here when there is none.
+
+        ``wait`` is for the step the compute thread cannot go on without;
+        its exception is raised here, as it was. Without ``wait`` the result
+        is ``None`` and a failure is surfaced by the next call.
+        """
+
+        from .produced_stager import StagerClosed
+
+        if self._produced_on_compute_with_stager():
+            wait = wait or self._PRODUCED_STAGER_WAIT_ALL
+            try:
+                with self._produced_lock.yielded():
+                    with self._produced_blocked("queue_full"):
+                        task = self._stager.submit(
+                            lambda: self._produced_run_task(call),
+                            kind=kind, label=label, keys=keys,
+                            on_drop=on_drop, keep_on_close=keep_on_close,
+                            waited=wait)
+                    if not wait:
+                        return None
+                    with self._produced_blocked(reason):
+                        return task.wait()
+            except StagerClosed:
+                # The stager is gone (closing, or it died): the step still
+                # has to happen, so it happens here, as it did before.
+                pass
+        # Per thread: a step running here must not submit its own nested
+        # steps, and that says nothing about what another thread may do.
+        local = self._produced_blocked_local
+        local.inline = getattr(local, "inline", 0) + 1
+        try:
+            with self._produced_blocked(reason), self._produced_lock.held():
+                return call()
+        finally:
+            local.inline -= 1
+
+    def _produced_run_task(self, call):
+        with self._produced_lock.held():
+            return call()
+
+    def _produced_stager_done(self, task):
+        """Stager thread: fold one finished task into the telemetry."""
+
+        stager = self._stager
+        with self._produced_lock.held():
+            ran = (task.finished or 0.0) - (task.started or 0.0)
+            if task.label != "poll":
+                self.telemetry["produced_stager_tasks"] += 1
+            self.telemetry["produced_stager_busy_s"] += max(ran, 0.0)
+            self.telemetry["produced_stager_queue_peak"] = max(
+                self.telemetry["produced_stager_queue_peak"],
+                stager.queue_peak if stager is not None else 0)
+            if task.kind == "urgent":
+                self.telemetry["produced_stager_urgent_tasks"] += 1
+                self.telemetry["produced_stager_urgent_delay_s"] += max(
+                    (task.started or 0.0) - task.submitted, 0.0)
+            if (task.kind == "optional"
+                    and ran > self.PRODUCED_AHEAD_PUBLISH_BUDGET_S):
+                self.telemetry["produced_stager_step_overruns"] += 1
+                overrun = (f"stager step {task.label} took {ran:.1f}s, over the "
+                           f"{self.PRODUCED_AHEAD_PUBLISH_BUDGET_S:.0f}s a "
+                           "synchronous step was given")
+            else:
+                overrun = None
+        if overrun is not None:
+            self._produced_log(overrun)
+
+    def _produced_stager_error(self, task, exc):
+        """Stager thread: a task nobody waits for failed. Keep it."""
+
+        with self._produced_lock.held():
+            self.telemetry["produced_stager_failures"] += 1
+            self._stager_failures.append((task.label, exc))
+        self._produced_log(
+            f"stager step {task.label} failed and will be raised by the "
+            f"owner's next call: {exc!r}")
+
+    def _produced_raise_stager_failure(self):
+        """Raise the oldest kept stager failure, under its own type."""
+
+        if not self._stager_failures or self._produced_on_stager():
+            return
+        with self._produced_lock.held():
+            label, exc = self._stager_failures.pop(0)
+        exc.add_note(f"raised on the produced-output stager thread by its "
+                     f"{label} step, and surfaced here")
+        raise exc
+
+    def _produced_stager_poll(self):
+        with self._produced_lock.held():
+            if self._produced_release_pending:
+                self._drain_produced_releases()
+
+    def drain_produced_stager(self, timeout=None):
+        """Wait until the stager has nothing queued or running.
+
+        Returns True when that held inside ``timeout``. A kept failure is
+        raised here like at any other call. With no stager this is a no-op.
+        """
+
+        stager = self._stager
+        idle = True if stager is None else stager.drain(timeout)
+        self._produced_raise_stager_failure()
+        return idle
+
+    def _produced_stop_stager(self):
+        """Stop taking work, finish what must finish, join. Never raises.
+
+        Queued optional steps are dropped, each publication as a counted
+        refusal: a mover for a group nobody will read is not worth starting
+        as the owner closes. Retirement asks and charge reclaims still run.
+        A successful join restores synchronous cleanup. If the worker is
+        still alive, its handle and all owned resources remain retained;
+        the caller must skip teardown until a later close can join it.
+        """
+
+        stager = self._stager
+        if stager is None:
+            return
+        with self._produced_blocked("close"):
+            try:
+                joined = stager.close(timeout=float(
+                    self._produced_plan["staging_timeout_s"]) + 60.0)
+            except BaseException as exc:                # noqa: BLE001
+                joined = not stager.alive()
+                self._produced_release_errors.append(
+                    {"batch_id": None, "step": "stager-close",
+                     "reason": {"error": repr(exc)}})
+        import time
+        self.telemetry["produced_stager_alive_s"] = round(
+            time.monotonic() - stager.started, 3)
+        self.telemetry["produced_stager_queue_peak"] = max(
+            self.telemetry["produced_stager_queue_peak"], stager.queue_peak)
+        if not joined:
+            # A PrismaBuild call is still running on that thread and this
+            # one must not run the same state machine beside it.
+            self._stager_stuck = True
+            self._produced_release_errors.append(
+                {"batch_id": None, "step": "stager-close",
+                 "reason": {"error": "the stager thread did not end inside "
+                            "the staging budget; teardown was skipped"}})
+            self._produced_log(
+                "stager thread did not end inside the staging budget; the "
+                "teardown at exit is skipped; origins and credit remain owned "
+                "and are reported as debt")
+            # Keep the ownership handle while its callbacks can still run.
+            # Do not drain its failures or dispose of any shared state here.
+            return
+        self._stager_stuck = False
+        self._stager = None
+        for label, exc in self._stager_failures:
+            self._produced_release_errors.append(
+                {"batch_id": None, "step": f"stager:{label}",
+                 "reason": {"error": repr(exc)}})
+        self._stager_failures = []
+
+    def _produced_group_for_write(self, key):
+        """The group an entry is written into, its prewrite already claimed.
+
+        With a stager the claim runs there and this waits for it. The next
+        group of the same plane is claimed in the background as soon as this
+        one takes its first entry: the writer reaches it a group of compute
+        later, and a claim is a PrismaBuild call under the ownership lock.
+        """
+
+        with self._produced_lock.held():
+            group = self._produced_groups.get(key)
+            if group is None:
+                group = self._produced_submit(
+                    "urgent", "prewrite", lambda: self._produced_prewrite(key),
+                    keys=(key,), reason="prewrite", wait=True)
+            if (self._stager is None or group["references"]
+                    or self._PRODUCED_STAGER_WAIT_ALL):
+                # Step by step there is no "ahead of the writer": the claim
+                # would land before the write that the tests count it at.
+                return group
+            following = (key[0], key[1], key[2], key[3] + 1)
+            plan = self._produced_plan
+            if (following[3] * plan["group_size"] < plan["n_batches"]
+                    and following not in self._produced_groups
+                    and following not in self._stager_preclaimed):
+                self._stager_preclaimed.add(following)
+                self._produced_submit(
+                    "optional", "prewrite-ahead",
+                    lambda: self._produced_prewrite_ahead(following),
+                    keys=(following,), reason="prewrite")
+            return group
+
+    def _produced_prewrite_ahead(self, key):
+        """Stager: claim a group the writer has not reached. Never raises.
+
+        A refusal here costs nothing: the writer asks again at the group's
+        first entry and is refused there, under the prewrite's own type.
+        """
+
+        try:
+            if key not in self._produced_groups:
+                self._produced_prewrite(key)
+                self.telemetry["produced_groups_prewritten_ahead"] += 1
+        except Exception as exc:                        # noqa: BLE001
+            self._produced_log(
+                f"prewrite ahead of the writer was refused for {key!r}; the "
+                f"writer will ask again: {exc!r}")
 
     @staticmethod
     def _sealed_window_groups(publication, *, group_size, max_entry_tensor_bytes):
@@ -1308,8 +1715,10 @@ class StreamedBoundaryArtifacts:
         ceiling = self._produced.group_ceiling_bytes(
             entries=len(planned) // 2,
             max_entry_tensor_bytes=self._produced_plan["max_entry_tensor_bytes"])
-        self._produced.require_prewrite(
-            batch_id=batch_id, payload_ceiling_bytes=ceiling, paths=planned)
+        with self._produced_lock.yielded():
+            self._produced.require_prewrite(
+                batch_id=batch_id, payload_ceiling_bytes=ceiling,
+                paths=planned)
         group = {"batch_id": batch_id, "planned": planned,
                  "references": [], "published": None, "context": None,
                  "manifest_digest": None, "retired": False,
@@ -1372,9 +1781,11 @@ class StreamedBoundaryArtifacts:
         group["manifest_digest"] = self._produced.manifest_digest_for(descriptors)
         before = int(getattr(self._produced, "funding_deferrals", 0))
         try:
-            group["published"] = self._produced.publish(
-                batch_id=group["batch_id"], descriptors=descriptors,
-                deadline=deadline)
+            with self._produced_lock.yielded():
+                published = self._produced.publish(
+                    batch_id=group["batch_id"], descriptors=descriptors,
+                    deadline=deadline)
+            group["published"] = published
         except BoundaryProducedFundingDeferred as exc:
             # The budget is spent and the batch is NOT published: nothing
             # was reserved and nothing transferred, so this owner still
@@ -1385,6 +1796,10 @@ class StreamedBoundaryArtifacts:
                 "batch_id": group["batch_id"], "step": exc.step,
                 "attempts": exc.attempts, "waited_s": exc.waited_s,
                 "timeout_s": exc.timeout_s, "outcome": exc.outcome}
+            self._produced_log(
+                f"publication of {group['batch_id']} deferred on funding for "
+                f"{exc.waited_s:.1f}s of {exc.timeout_s:.1f}s "
+                f"({exc.attempts} attempts)")
             raise
         finally:
             self.telemetry["produced_group_funding_deferrals"] += max(
@@ -1429,13 +1844,23 @@ class StreamedBoundaryArtifacts:
         if key in self._produced_held or not self._produced_ahead_has_room():
             return False
         started = time.monotonic()
+        # On the stager nobody is waiting for this step, so it gets a budget
+        # that rides out a loaded fleet; on the calling thread it keeps the
+        # short one, because there the GPU waits for it.
+        budget = (self.PRODUCED_STAGER_STEP_BUDGET_S
+                  if self._produced_on_stager()
+                  else self.PRODUCED_AHEAD_PUBLISH_BUDGET_S)
         deadline = started + min(
-            self.PRODUCED_AHEAD_PUBLISH_BUDGET_S,
-            float(self._produced_plan["staging_timeout_s"]))
+            budget, float(self._produced_plan["staging_timeout_s"]))
+        # Counted before the call, not after it: while the call runs without
+        # the lock, the other thread's credit arithmetic must see this group.
+        self._produced_held.add(key)
+        self._produced_ahead.add(key)
         try:
             if restage:
-                self._produced.ensure_batch_materialized(
-                    batch_id=group["batch_id"], deadline=deadline)
+                with self._produced_lock.yielded():
+                    self._produced.ensure_batch_materialized(
+                        batch_id=group["batch_id"], deadline=deadline)
                 group["retired"] = False
                 group["context"] = None
                 group["copy_awaited"] = False
@@ -1451,17 +1876,22 @@ class StreamedBoundaryArtifacts:
             # the read decides, and raises under its own name if it must.
             self._produced_publish_deferred.pop(key, None)
             self.telemetry["produced_group_ahead_refusals"] += 1
+            self._produced_held.discard(key)
+            self._produced_ahead.discard(key)
             adopted = self._produced_adopt_after_refusal(key, group)
             self._produced_ahead_refusals.append(
                 {"batch_id": group["batch_id"], "restage": bool(restage),
                  "adopted": adopted, "reason": repr(exc)})
             del self._produced_ahead_refusals[:-self.PRODUCED_AHEAD_REFUSAL_LOG]
+            self._produced_log(
+                f"read-ahead {'re-staging' if restage else 'publication'} of "
+                f"{group['batch_id']} refused after "
+                f"{time.monotonic() - started:.1f}s of a {budget:.0f}s budget "
+                f"(adopted={adopted}); its read will stage it: {exc!r}")
             return False
         finally:
             self.telemetry["produced_group_ahead_wait_s"] += (
                 time.monotonic() - started)
-        self._produced_held.add(key)
-        self._produced_ahead.add(key)
         return True
 
     def _produced_adopt_after_refusal(self, key, group):
@@ -1476,8 +1906,9 @@ class StreamedBoundaryArtifacts:
         """
 
         try:
-            state = self._produced.materialization_state(
-                batch_id=group["batch_id"])
+            with self._produced_lock.yielded():
+                state = self._produced.materialization_state(
+                    batch_id=group["batch_id"])
         except Exception:                               # noqa: BLE001
             return False
         if not (isinstance(state, dict) and state.get("ok")
@@ -1500,7 +1931,8 @@ class StreamedBoundaryArtifacts:
     def produced_ahead_refusals(self):
         """The most recent read-ahead steps PrismaBuild did not take."""
 
-        return [dict(entry) for entry in self._produced_ahead_refusals]
+        with self._produced_lock.held():
+            return [dict(entry) for entry in self._produced_ahead_refusals]
 
     def produced_output_report(self):
         """What a receipt should carry about this owner's staging, or None.
@@ -1513,25 +1945,45 @@ class StreamedBoundaryArtifacts:
 
         if self._produced is None or self._produced_plan is None:
             return None
-        return {
-            "window_groups": self._produced_plan["window_groups"],
-            "ahead_groups": self._produced_plan["ahead_groups"],
-            "telemetry": {name: value for name, value in self.telemetry.items()
-                          if name.startswith("produced_")},
-            "release_debt": self.produced_release_debt(),
-            "ahead_refusals": self.produced_ahead_refusals(),
-            "release_errors": [
-                {**entry, "reason": repr(entry.get("reason"))[:400]}
-                for entry in self._produced_release_errors[
-                    -self.PRODUCED_AHEAD_REFUSAL_LOG:]],
-            "release_error_count": len(self._produced_release_errors)}
+        with self._produced_lock.held():
+            return {
+                "window_groups": self._produced_plan["window_groups"],
+                "ahead_groups": self._produced_plan["ahead_groups"],
+                "telemetry": {name: value
+                              for name, value in self.telemetry.items()
+                              if name.startswith("produced_")},
+                "release_debt": self.produced_release_debt(),
+                "ahead_refusals": self.produced_ahead_refusals(),
+                "release_errors": [
+                    {**entry, "reason": repr(entry.get("reason"))[:400]}
+                    for entry in self._produced_release_errors[
+                        -self.PRODUCED_AHEAD_REFUSAL_LOG:]],
+                "release_error_count": len(self._produced_release_errors)}
 
     def _produced_publish_ahead(self, key, group):
         if (self._produced_plan["ahead_groups"] <= 0
                 or group["published"] is not None):
             return
-        if self._produced_take_ahead(key, group, restage=False):
-            self.telemetry["produced_groups_published_ahead"] += 1
+
+        def publish():
+            if group["published"] is not None:
+                return
+            if self._produced_take_ahead(key, group, restage=False):
+                self.telemetry["produced_groups_published_ahead"] += 1
+
+        def dropped():
+            with self._produced_lock.held():
+                self.telemetry["produced_stager_dropped"] += 1
+                self.telemetry["produced_group_ahead_refusals"] += 1
+                self._produced_ahead_refusals.append(
+                    {"batch_id": group["batch_id"], "restage": False,
+                     "adopted": False, "reason": "owner-closing"})
+                del self._produced_ahead_refusals[
+                    :-self.PRODUCED_AHEAD_REFUSAL_LOG]
+
+        self._produced_submit("optional", "publish-ahead", publish,
+                              keys=(key,), reason="publish_ahead",
+                              on_drop=dropped)
 
     def stage_produced_boundary_ahead(self, boundary_index):
         """Ask PrismaBuild to stage one boundary plane before it is read.
@@ -1545,6 +1997,19 @@ class StreamedBoundaryArtifacts:
 
         if self._produced is None or self._produced_plan["ahead_groups"] <= 0:
             return 0
+        self._produced_raise_stager_failure()
+        # With a stager this only asks: the count of groups it staged is in
+        # ``produced_groups_staged_ahead``, and the return is 0.
+        with self._produced_lock.held():
+            keys = tuple(key for key in self._produced_groups
+                         if key[0] == "boundary"
+                         and key[1] == int(boundary_index) and key[2] < 0)
+        return self._produced_submit(
+            "optional", "stage-ahead",
+            lambda: self._produced_stage_boundary_ahead(boundary_index),
+            keys=keys, reason="stage_ahead") or 0
+
+    def _produced_stage_boundary_ahead(self, boundary_index):
         # A plane whose retirement was asked for and has since finished can
         # be staged again; one still in flight is left to its read.
         self._drain_produced_releases()
@@ -1581,16 +2046,18 @@ class StreamedBoundaryArtifacts:
             return
         if self._produced_retained_boundary is not None:
             raise RuntimeError("produced boundary retention does not nest")
+        self._produced_raise_stager_failure()
         self._produced_retained_boundary = int(boundary_index)
         try:
             yield
         finally:
             self._produced_retained_boundary = None
             if self._active_window is None:
-                self._release_produced_window(
-                    [key for key in sorted(self._produced_held)
-                     if key[0] == "boundary" and key[1] == int(boundary_index)
-                     and key[2] < 0])
+                with self._produced_lock.held():
+                    keys = [key for key in sorted(self._produced_held)
+                            if key[0] == "boundary"
+                            and key[1] == int(boundary_index) and key[2] < 0]
+                self._release_produced_window(keys)
 
     def _produced_wait_for_credit(self, need, keep=()):
         """Get credit back until ``need`` more groups fit the window.
@@ -1764,11 +2231,18 @@ class StreamedBoundaryArtifacts:
                      "step": "read", "kind": kind, "reason": repr(refused)})
                 del self._produced_ahead_refusals[
                     :-self.PRODUCED_AHEAD_REFUSAL_LOG]
+                self._produced_log(
+                    f"a read's funding step was refused ({kind}) for "
+                    f"{getattr(refused, 'batch_id', None)}; "
+                    + ("asking again" if kind == "census"
+                       else "taking read-ahead credit back")
+                    + f": {refused!r}")
                 started = time.monotonic()
                 if kind == "census":
                     if started + self.PRODUCED_CENSUS_POLL_S >= deadline:
                         raise
-                    time.sleep(self.PRODUCED_CENSUS_POLL_S)
+                    with self._produced_lock.yielded():
+                        time.sleep(self.PRODUCED_CENSUS_POLL_S)
                     self.telemetry["produced_group_stage_wait_s"] += (
                         time.monotonic() - started)
                     continue
@@ -1809,6 +2283,25 @@ class StreamedBoundaryArtifacts:
             # was asked, and a refused one is reported as debt: asking
             # again here would change that accounting.
             return
+        if self._produced_on_compute_with_stager():
+            # Everything queued runs first -- a publication still queued
+            # would otherwise take credit after the settle gave it back --
+            # and then the settle itself runs on the stager, the one thread
+            # that drives retirements while it is alive.
+            with self._produced_blocked("settle"):
+                idle = self._stager.drain(
+                    float(self._produced_plan["staging_timeout_s"]))
+            self._produced_raise_stager_failure()
+            if not idle:
+                raise TimeoutError("stager did not become idle before settlement")
+        return self._produced_submit(
+            "urgent", "settle",
+            lambda: self._produced_settle_releases(wait_for_each),
+            reason="settle", wait=True)
+
+    def _produced_settle_releases(self, wait_for_each):
+        import time
+
         started = time.monotonic()
         try:
             # Ask for all of them before waiting for any: each retirement
@@ -1837,21 +2330,110 @@ class StreamedBoundaryArtifacts:
         plane and the incoming cotangent plane reads two batches, each
         vouched in its own material namespace. Nothing polls and nothing
         falls back -- an unstaged group raises PB's own incomplete signal.
+
+        Without a stager this is the synchronous loop, group by group:
+        prepare, then fund and wait for each group in turn. With one
+        (RobTand/prismaquant#895) the funding runs there as one urgent task
+        for the whole window and this thread then waits on each mover's
+        receipt, which is a lock-free read. A window whose groups are all
+        staged already submits nothing at all.
         """
+
+        import time
+
+        self._produced_raise_stager_failure()
+        with self._produced_lock.held():
+            wanted = {}
+            for reference in references:
+                key, group = self._produced_group_for(reference)
+                if group is None:
+                    raise RuntimeError(
+                        "exact boundary reference is not in any produced group: "
+                        "a bound owner reads only entries it declared")
+                wanted[key] = group
+            budget = float(self._produced_plan["staging_timeout_s"])
+            if not self._produced_on_compute_with_stager():
+                with self._produced_blocked("read_fund"):
+                    self._produced_prepare_read(wanted)
+                for key, group in wanted.items():
+                    # ONE absolute instant for this group's whole staging:
+                    # the publish, any re-materialization and the wait for
+                    # PB's receipt all spend it and none of them resets it.
+                    # A budget that starts again at each step is not a bound.
+                    deadline = time.monotonic() + budget
+                    with self._produced_blocked("read_fund"):
+                        self._produced_fund_group_for_read(
+                            key, group, wanted, deadline)
+                    self._produced_await_group_for_read(key, group, deadline)
+            else:
+                if self._produced_read_is_staged(wanted):
+                    self.telemetry["produced_group_fast_reads"] += 1
+                    now = time.monotonic()
+                    deadlines = {key: now + budget for key in wanted}
+                else:
+                    deadlines = self._produced_submit(
+                        "urgent", "read",
+                        lambda: self._produced_stage_for_read(wanted),
+                        keys=tuple(wanted), reason="read_fund", wait=True)
+                for key, group in wanted.items():
+                    self._produced_await_group_for_read(
+                        key, group, deadlines[key])
+            contexts = {key: group["context"][0]
+                        for key, group in wanted.items()}
+            by_reference = {reference: contexts[key]
+                            for key, group in wanted.items()
+                            for reference in group["references"]}
+            # The window OWNS these groups for its whole lifetime. Resolving
+            # them again at exit through the reference index would lose any
+            # group whose entries were disposed while the window was live --
+            # and that is the ordinary production pattern, not an edge case:
+            # the tail retires an activation inside the read window, and the
+            # reverse roll retires the previous cotangent as it writes the
+            # next. Such a group would resolve to nothing, never be offered
+            # to the retirement, raise no release debt, and silently keep its
+            # stage credits.
+            self._produced_window_keys = tuple(wanted)
+            self._produced_live_keys = frozenset(wanted)
+        return lambda reference: by_reference.get(reference)
+
+    def _produced_read_is_staged(self, wanted):
+        """Does this window need nothing from PrismaBuild but its receipts?
+
+        True when every group is published, holds credit, is not retired and
+        has no retirement asked for or queued. That is the steady state of
+        read-ahead, and it is why the compute thread then waits on nothing
+        but the mover's receipt.
+        """
+
+        return all(
+            key in self._produced_held and group["published"] is not None
+            and not group["retired"]
+            and key not in self._produced_release_pending
+            and key not in self._produced_release_queued
+            for key, group in wanted.items())
+
+    def _produced_stage_for_read(self, wanted):
+        """Stager: fund every group of one window. Returns their deadlines."""
+
+        import time
+
+        self._produced_prepare_read(wanted)
+        deadlines = {}
+        for key, group in wanted.items():
+            deadlines[key] = time.monotonic() + float(
+                self._produced_plan["staging_timeout_s"])
+            self._produced_fund_group_for_read(
+                key, group, wanted, deadlines[key])
+        return deadlines
+
+    def _produced_prepare_read(self, wanted):
+        """Take back what a read needs before it funds anything."""
 
         import time
 
         # Before anything new is published: give PrismaBuild another
         # chance to take back the windows an earlier exit could not.
         self._drain_produced_releases()
-        wanted = {}
-        for reference in references:
-            key, group = self._produced_group_for(reference)
-            if group is None:
-                raise RuntimeError(
-                    "exact boundary reference is not in any produced group: "
-                    "a bound owner reads only entries it declared")
-            wanted[key] = group
         for key, group in wanted.items():
             if (self._produced_plan["ahead_groups"] > 0
                     and key in self._produced_release_pending
@@ -1870,68 +2452,68 @@ class StreamedBoundaryArtifacts:
         self._produced_wait_for_credit(
             sum(1 for key in wanted if key not in self._produced_held),
             keep=wanted)
-        contexts = {}
-        for key, group in wanted.items():
-            # ONE absolute instant for this group's whole staging: the
-            # publish, any re-materialization and the wait for PB's receipt
-            # all spend it and none of them resets it. A budget that starts
-            # again at each step is not a bound.
-            deadline = time.monotonic() + float(
-                self._produced_plan["staging_timeout_s"])
-            self._produced_fund_for_read(
-                lambda: self._produced_publish(key, group, deadline=deadline),
-                wanted, deadline=deadline)
-            self._produced_held.add(key)
-            if group["retired"]:
-                # The same unchanged logical batch, taken back onto the
-                # tier. PB is asked first (``materialization_state``) and
-                # drives the transition only if its own records say the
-                # copy is gone; the batch id, manifest, descriptors,
-                # namespace and durable charge are all unchanged.
-                self._produced_fund_for_read(
-                    lambda: self._produced.ensure_batch_materialized(
-                        batch_id=group["batch_id"], deadline=deadline),
-                    wanted, deadline=deadline)
-                group["retired"] = False
-                group["context"] = None
-                self.telemetry["produced_groups_rematerialized"] += 1
-            if group["context"] is None:
-                # Staging is asynchronous: the publish (or the ensure
-                # above) seals a mover row and the FLEET runs it. Wait on
-                # PB's own receipt -- bounded, named, no fallback -- before
-                # composing, because fragments alone compose the same
-                # whether the batch is whole or half there.
-                waited = time.monotonic()
+
+    def _produced_fund_group_for_read(self, key, group, wanted, deadline):
+        """Publish one group, or take it back onto the tier, for its read."""
+
+        self._produced_fund_for_read(
+            lambda: self._produced_publish(key, group, deadline=deadline),
+            wanted, deadline=deadline)
+        self._produced_held.add(key)
+        if group["retired"]:
+            # The same unchanged logical batch, taken back onto the
+            # tier. PB is asked first (``materialization_state``) and
+            # drives the transition only if its own records say the
+            # copy is gone; the batch id, manifest, descriptors,
+            # namespace and durable charge are all unchanged.
+            def ensure():
+                with self._produced_lock.yielded():
+                    return self._produced.ensure_batch_materialized(
+                        batch_id=group["batch_id"], deadline=deadline)
+
+            self._produced_fund_for_read(ensure, wanted, deadline=deadline)
+            group["retired"] = False
+            group["context"] = None
+            self.telemetry["produced_groups_rematerialized"] += 1
+
+    def _produced_await_group_for_read(self, key, group, deadline):
+        """Wait for the mover's receipt and compose the group's context."""
+
+        import time
+
+        if group["context"] is not None:
+            return
+        # Staging is asynchronous: the publish (or the ensure) seals a
+        # mover row and the FLEET runs it. Wait on PB's own receipt --
+        # bounded, named, no fallback -- before composing, because
+        # fragments alone compose the same whether the batch is whole or
+        # half there. Both calls are lock-free reads, so they stay on the
+        # thread that needs the answer.
+        waited = time.monotonic()
+        try:
+            with self._produced_blocked("stage_wait"), (
+                    self._produced_lock.yielded()):
                 self._produced.await_materialized(
                     batch_id=group["batch_id"],
                     timeout_s=self._produced_plan["staging_timeout_s"],
                     deadline=deadline)
-                self.telemetry["produced_group_stage_wait_s"] += (
-                    time.monotonic() - waited)
-                resolver, block = self._produced.reader_context(
-                    batch_id=group["batch_id"],
-                    manifest_digest=group["manifest_digest"])
-                group["context"] = (resolver, block)
-                self.telemetry["produced_groups_materialized"] += 1
-            contexts[key] = group["context"][0]
-        by_reference = {reference: contexts[key]
-                        for key, group in wanted.items()
-                        for reference in group["references"]}
-        # The window OWNS these groups for its whole lifetime. Resolving
-        # them again at exit through the reference index would lose any
-        # group whose entries were disposed while the window was live --
-        # and that is the ordinary production pattern, not an edge case:
-        # the tail retires an activation inside the read window, and the
-        # reverse roll retires the previous cotangent as it writes the
-        # next. Such a group would resolve to nothing, never be offered to
-        # the retirement, raise no release debt, and silently keep its
-        # stage credits.
-        self._produced_window_keys = tuple(wanted)
-        return lambda reference: by_reference.get(reference)
+        finally:
+            self.telemetry["produced_group_stage_wait_s"] += (
+                time.monotonic() - waited)
+        with self._produced_blocked("compose"), self._produced_lock.yielded():
+            resolver, block = self._produced.reader_context(
+                batch_id=group["batch_id"],
+                manifest_digest=group["manifest_digest"])
+        group["context"] = (resolver, block)
+        self.telemetry["produced_groups_materialized"] += 1
 
     def produced_group_records(self):
         """What this owner published, for a receipt. Never a second ledger."""
 
+        with self._produced_lock.held():
+            return self._produced_group_records_locked()
+
+    def _produced_group_records_locked(self):
         return [{"batch_id": group["batch_id"],
                  "entries": len(group["references"]),
                  "manifest_digest": group["manifest_digest"],
@@ -1976,22 +2558,38 @@ class StreamedBoundaryArtifacts:
         bounded window (the first being never releasing at all).
         """
 
-        key, group = self._produced_group_for(reference)
+        self._produced_raise_stager_failure()
+        with self._produced_lock.held():
+            key, group = self._produced_group_for(reference)
         if group is None:
             raise RuntimeError(
                 "exact boundary reference is not in any produced group")
-        return self._retire_produced_group(key, group)
+        if self._active_window is not None:
+            raise RuntimeError(
+                "a produced boundary group cannot be retired while its "
+                "window is live: the pin must be released first")
+        return self._produced_submit(
+            "urgent", "release-group",
+            lambda: self._retire_produced_group(key, group),
+            keys=(key,), reason="release", wait=True)
 
     def _retire_produced_group(self, key, group):
         """Give one group's stage copy back. The caller names the group."""
 
         if group["retired"]:
             return dict(group["published"] or {})
-        if self._active_window is not None:
+        # On the calling thread any live window refuses, as it always did.
+        # The stager retires the PREVIOUS window's groups while the next one
+        # is open, so there the rule is what it always meant: not a group the
+        # live window reads.
+        if self._active_window is not None and (
+                not self._produced_on_stager()
+                or key in self._produced_live_keys):
             raise RuntimeError(
                 "a produced boundary group cannot be retired while its "
                 "window is live: the pin must be released first")
-        out = self._produced.retire(group["batch_id"])
+        with self._produced_lock.yielded():
+            out = self._produced.retire(group["batch_id"])
         if out.get("ok"):
             group["retired"] = True
             group["context"] = None
@@ -2102,6 +2700,9 @@ class StreamedBoundaryArtifacts:
         record["last_reason"] = reason
         if record["first_reason"] is None:
             record["first_reason"] = reason
+        self._produced_log(
+            f"retirement of {group['batch_id']} not taken (attempt "
+            f"{record['attempts']}): {repr(reason)[:300]}")
         if "error" not in reason:
             from .stage_a_produced_output import (
                 UNCLASSIFIED_OUTCOMES, BoundaryEgressUnclassified,
@@ -2194,8 +2795,10 @@ class StreamedBoundaryArtifacts:
         record["deferred_own"] = receipt.get(DEFERRED_OWN_FIELD)
         self.telemetry["produced_group_release_deferrals"] += 1
         try:
-            record["deferred_state"] = self._produced.materialization_state(
-                batch_id=group["batch_id"])
+            with self._produced_lock.yielded():
+                state = self._produced.materialization_state(
+                    batch_id=group["batch_id"])
+            record["deferred_state"] = state
         except Exception as exc:                        # noqa: BLE001
             # Evidence only. A state read that fails does not change what
             # the retirement said, and must not become the failure.
@@ -2221,7 +2824,8 @@ class StreamedBoundaryArtifacts:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 _spent()
-            time.sleep(min(self.PRODUCED_DEFERRAL_POLL_S, remaining))
+            with self._produced_lock.yielded():
+                time.sleep(min(self.PRODUCED_DEFERRAL_POLL_S, remaining))
             # THE DEADLINE IS READ AGAIN HERE, immediately before the
             # retirement, because a retire is a mutation and the sleep
             # above can have landed exactly on the deadline. Checking only
@@ -2301,32 +2905,62 @@ class StreamedBoundaryArtifacts:
         credits are never asked for.
         """
 
+        wait = self._produced_plan["ahead_groups"] <= 0
+        with self._produced_lock.held():
+            # Which groups stay is decided HERE, on the thread that opens the
+            # next window, and never later on the stager: a group kept for
+            # the next probe pass must not be found queued for retirement by
+            # the read that wants it.
+            retained = self._produced_retained_boundary
+            ask = []
+            for key in keys:
+                group = self._produced_groups.get(key)
+                if group is None or group["retired"]:
+                    continue
+                if (retained is not None and key[0] == "boundary"
+                        and key[1] == retained and key[2] < 0):
+                    # Another probe pass reads this group. Keep it staged if
+                    # the read-ahead share has room for it (or holds it).
+                    if key in self._produced_ahead:
+                        continue
+                    if self._produced_ahead_has_room(holding=True):
+                        self._produced_ahead.add(key)
+                        self.telemetry["produced_groups_retained"] += 1
+                        continue
+                ask.append(key)
+            threaded = self._produced_on_compute_with_stager()
+            if threaded:
+                if not ask:
+                    return
+                # A read that wants one of these waits for the ask below
+                # instead of taking the fast path past it.
+                self._produced_release_queued.update(ask)
+        self._produced_submit(
+            "ordered", "release",
+            lambda: self._produced_ask_releases(ask, wait),
+            keys=tuple(ask), reason="release")
+
+    def _produced_ask_releases(self, ask, wait):
+        """Ask for each retirement the window exit decided on."""
+
         import time
 
-        wait = self._produced_plan["ahead_groups"] <= 0
-        retained = self._produced_retained_boundary
         started = time.monotonic()
-        for key in keys:
-            group = self._produced_groups.get(key)
-            if group is None or group["retired"]:
-                continue
-            if (retained is not None and key[0] == "boundary"
-                    and key[1] == retained and key[2] < 0):
-                # Another probe pass reads this group. Keep it staged if the
-                # read-ahead share has room for it (or already holds it).
-                if key in self._produced_ahead:
+        try:
+            for key in ask:
+                self._produced_release_queued.discard(key)
+                group = self._produced_groups.get(key)
+                if group is None or group["retired"]:
                     continue
-                if self._produced_ahead_has_room(holding=True):
-                    self._produced_ahead.add(key)
-                    self.telemetry["produced_groups_retained"] += 1
-                    continue
-            self._release_one_produced_group(key, group, wait=wait)
-            record = self._produced_release_pending.get(key)
-            if record is not None:
-                record["next_poll"] = (
-                    time.monotonic() + self.PRODUCED_RELEASE_POLL_S)
-        self.telemetry["produced_group_release_wait_s"] += (
-            time.monotonic() - started)
+                self._release_one_produced_group(key, group, wait=wait)
+                record = self._produced_release_pending.get(key)
+                if record is not None:
+                    record["next_poll"] = (
+                        time.monotonic() + self.PRODUCED_RELEASE_POLL_S)
+        finally:
+            self._produced_release_queued.difference_update(ask)
+            self.telemetry["produced_group_release_wait_s"] += (
+                time.monotonic() - started)
 
     def produced_release_debt(self):
         """Stage copies this owner asked PB to retire and PB did not.
@@ -2335,6 +2969,10 @@ class StreamedBoundaryArtifacts:
         can see exactly which groups still hold it and why.
         """
 
+        with self._produced_lock.held():
+            return self._produced_release_debt_locked()
+
+    def _produced_release_debt_locked(self):
         return {"pending": {str(record["batch_id"]): record["last_reason"]
                             for record in self._produced_release_pending.values()},
                 "abandoned": {str(record["batch_id"]): record["first_reason"]
@@ -2383,6 +3021,7 @@ class StreamedBoundaryArtifacts:
             raise
         finally:
             self._active_window = None
+            self._produced_live_keys = frozenset()
             # Cleanup never MASKS the failure that caused it. A cleanup
             # error raised out of a `finally` replaces the compute error as
             # the exception the caller sees, which is worse than either
@@ -2431,6 +3070,11 @@ class StreamedBoundaryArtifacts:
 
         if self._produced is None or self._produced_plan is None:
             return
+        if self._stager_stuck:
+            # Recorded where the join timed out. A PrismaBuild call is still
+            # running on that thread; this one does not drive the same
+            # retirements beside it.
+            return
         try:
             self.settle_produced_releases(wait_for_each=primary is None)
         except Exception as cleanup:                    # noqa: BLE001
@@ -2450,6 +3094,21 @@ class StreamedBoundaryArtifacts:
         self._status = "failed" if exc_type is not None else (
             "attached" if self._readonly else ("complete" if self.session else "unused"))
         try:
+            # First, so that everything below runs with no second thread: the
+            # disposal, the settle and the prewrite release are then the
+            # synchronous code, unchanged.
+            self._produced_stop_stager()
+            if self._stager_stuck:
+                note = ("stager still owns this generation; retaining origins, "
+                        "checkpoint reservations and produced-output credit")
+                self._produced_release_errors.append(
+                    {"batch_id": None, "step": "stuck-stager-exit-retain",
+                     "reason": {"error": note,
+                                "origins": len(self._references),
+                                "origin_bytes": self.telemetry["live_artifact_bytes"]}})
+                if exc is not None:
+                    exc.add_note(note)
+                return False
             if not self._readonly and (
                     self._active_window is not None or self.telemetry["resident_tensor_bytes"]):
                 raise RuntimeError("exact boundary generation closed with a live window")
@@ -2477,22 +3136,23 @@ class StreamedBoundaryArtifacts:
             self._status = "failed"
             raise
         finally:
-            if self._scratch is not None:
-                self._scratch.release()
-            for batch in self._batches or ():
-                batch.activations_cpu.clear()
-                batch.input_ids = batch.position_ids = None
-                batch.position_embeddings = batch.attention_mask = batch.shared_pass_state = None
-            for row in self._cotangents or ():
-                for cotangent in row:
-                    cotangent.release_resident_state()
-                row.clear()
-            if self._batches is not None:
-                self._batches.clear()
-            if self._cotangents is not None:
-                self._cotangents.clear()
-            self._batches = self._cotangents = None
-            self._check_memory = None
+            if not self._stager_stuck:
+                if self._scratch is not None:
+                    self._scratch.release()
+                for batch in self._batches or ():
+                    batch.activations_cpu.clear()
+                    batch.input_ids = batch.position_ids = None
+                    batch.position_embeddings = batch.attention_mask = batch.shared_pass_state = None
+                for row in self._cotangents or ():
+                    for cotangent in row:
+                        cotangent.release_resident_state()
+                    row.clear()
+                if self._batches is not None:
+                    self._batches.clear()
+                if self._cotangents is not None:
+                    self._cotangents.clear()
+                self._batches = self._cotangents = None
+                self._check_memory = None
             self._publish_status()
 
     def receipt(self):
@@ -3033,7 +3693,8 @@ class StreamedCausalLM:
                             # workspace. The existing source owner still owns
                             # lookahead and its storage.
                             self.context.settle_prefetched_layers(range(
-                                layer + 1, min(self.num_layers, layer + self.prefetch_lookahead + 1)))
+                                layer + 1, min(self.num_layers, layer + self.prefetch_lookahead + 1)),
+                                retry_availability=True)
                             report_source_phase('capture_forward', layer)
                         next_batch = 0
                         with prefetched_boundary_batches(boundary_storage, batches, layer) if exact else nullcontext() as resident:

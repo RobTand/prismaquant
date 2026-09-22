@@ -33,6 +33,7 @@ import gzip
 import hashlib
 import json
 import pickle
+import copy
 import sys
 import time
 from pathlib import Path
@@ -148,7 +149,7 @@ def _check_digest(path: Path, expected: str, *, where: str) -> None:
             f"{where}: digest mismatch at {path}: expected {expected}, got {actual}")
 
 
-def _scan_receipts(input_root: Path) -> list[dict]:
+def _scan_receipts(input_root: Path | None, *, records_dir: Path | None = None) -> list[dict]:
     """Build the receipt set from the campaign output root.
 
     The records are the sealed source of every path (§3.1 ``output_space``):
@@ -160,10 +161,13 @@ def _scan_receipts(input_root: Path) -> list[dict]:
     consumed); custody re-checks each record's identity before its paths are
     trusted for content.
     """
-    quanta_root = input_root / "layer-quanta"
+    if records_dir is not None and input_root is not None:
+        raise JoinRefused("coverage: choose records directory or historical input root, not both")
+    quanta_root = records_dir if records_dir is not None else input_root / "layer-quanta"
     record_paths: list[Path] = []
-    for records_dir in (quanta_root / "records", quanta_root):
-        record_paths = sorted(records_dir.glob("layer-*.json"))
+    directories = (quanta_root,) if records_dir is not None else (quanta_root / "records", quanta_root)
+    for directory in directories:
+        record_paths = sorted(directory.glob("layer-*.json"))
         if record_paths:
             break
     if not record_paths:
@@ -465,6 +469,7 @@ def _expected_quantum_ids(campaign: dict) -> set[str]:
 def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
                       output_dir: str | Path,
                       input_root: str | Path | None = None,
+                      records_dir: str | Path | None = None,
                       now: float | None = None) -> dict:
     """Merge per-layer cost payloads into the campaign's results shape.
 
@@ -482,9 +487,10 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
     Raises :class:`JoinRefused` on custody, coverage-defect, or row defects.
     """
     if receipts is None:
-        if input_root is None:
+        if input_root is None and records_dir is None:
             raise JoinRefused("coverage: no receipts and no input root")
-        receipts = _scan_receipts(Path(input_root))
+        receipts = _scan_receipts(Path(input_root) if input_root is not None else None,
+                                 records_dir=Path(records_dir) if records_dir is not None else None)
     if not receipts:
         raise JoinRefused("coverage: empty receipt set")
     quantum_ids = [r["quantum_id"] for r in receipts]
@@ -506,6 +512,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
     roster_by_layer = _roster_by_layer(campaign["roster"])
 
     merged: dict[str, dict] = {}
+    measured_payloads: dict[str, dict] = {}
     gaps: list[dict] = []
     per_layer: list[dict] = []
     for quantum_id in sorted(records):
@@ -522,6 +529,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
                               "status": status, "units": units})
             continue
         payload = _load_cost_payload(receipt, record, campaign)
+        measured_payloads[quantum_id] = payload
         costs = payload["costs"]
         for qname in costs:
             if qname in merged:
@@ -605,6 +613,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
             "join_schema": JOINED_RESULTS_SCHEMA,
         },
     }
+    _preserve_allocation_payload(joined, measured_payloads, records)
     joined_unix = time.time() if now is None else now
     results = {
         "schema": JOINED_RESULTS_SCHEMA,
@@ -629,6 +638,70 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
             "joint_cost_path": str(cost_path),
             "results_path": str(results_path),
             "coverage_sha256": coverage_sha256}
+
+
+def _preserve_allocation_payload(joined, payloads, records):
+    """Retain measured stats and currency instead of dropping them at union.
+
+    Old parser-only quantum fixtures have neither schema nor stats. They stay
+    readable, but cannot acquire allocation metadata from this path. A mix of
+    old and production payloads refuses rather than losing part of the probe.
+    Per-quantum provenance is kept verbatim; unit-local run identities are not
+    relabelled as a new whole-model measurement.
+    """
+    present = ["stats" in p or "schema" in p for p in payloads.values()]
+    if not any(present):
+        return
+    if not all(present):
+        raise JoinRefused("allocation: mixed measured and parser-only quantum payloads")
+    from prismaquant.schemas import validate_probe_payload, validate_cost_payload
+    from prismaquant.cost_currency import require_run_currency
+
+    stats, provenance = {}, {}
+    shared = None
+    for quantum, payload in sorted(payloads.items()):
+        try:
+            validate_probe_payload(payload)
+            validate_cost_payload(payload)
+            currency = require_run_currency(payload)
+        except ValueError as exc:
+            raise JoinRefused(f"allocation {quantum}: {exc}") from exc
+        if payload.get("schema") != "prismaquant.aura_cost.v1":
+            raise JoinRefused(f"allocation {quantum}: unsupported measured payload schema")
+        if set(payload["stats"]) != set(payload["costs"]):
+            raise JoinRefused(f"allocation {quantum}: statistics do not cover its cost rows")
+        identity = {key: payload.get(key) for key in ("schema", "n_probes", "token_scope")}
+        identity["probe_identity_sha256"] = currency.get("probe_identity_sha256")
+        if not identity["probe_identity_sha256"]:
+            raise JoinRefused(f"allocation {quantum}: complete joint currency required")
+        if shared is not None and identity != shared:
+            raise JoinRefused(f"allocation {quantum}: probe or measurement identity differs")
+        shared = identity
+        for unit, stat in payload["stats"].items():
+            if unit in stats:
+                raise JoinRefused(f"allocation {unit}: duplicate statistic")
+            stats[unit] = copy.deepcopy(stat)
+        provenance[quantum] = copy.deepcopy(payload["provenance"])
+    bindings = {(record["campaign"]["prepared_path"],
+                 record["campaign"]["prepared_sha256"]) for record in records.values()}
+    if len(bindings) != 1:
+        raise JoinRefused("allocation: quantum prepared bindings differ")
+    path, digest = next(iter(bindings))
+    joined.update({key: shared[key] for key in ("schema", "n_probes", "token_scope")})
+    joined["stats"] = dict(sorted(stats.items()))
+    joined["formats"] = sorted({fmt for rows in joined["costs"].values() for fmt in rows})
+    joined["provenance"].update({
+        "cost_mode": "aura", "joint_activation": True,
+        "cost_currency": "joint_aura_predicted_dloss",
+        "measurement_status": "research",
+        "prepared": {"path": path, "sha256": digest},
+        "quantum_provenance": provenance,
+    })
+    # This also verifies the rows share one full probe/calibration identity.
+    try:
+        require_run_currency(joined)
+    except ValueError as exc:
+        raise JoinRefused(f"allocation joined currency: {exc}") from exc
 
 
 def load_joint_cost_for_allocation(path: str | Path) -> dict:
@@ -656,7 +729,9 @@ def _read_text_list(path: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Join per-layer joint-AURA cost quanta (§7).")
-    parser.add_argument("--input-root", required=True)
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument("--input-root", help="historical root containing layer-quanta/records")
+    inputs.add_argument("--records", help="exact records directory from regenerate_joint_quanta --metadata-root")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--plan", required=True)
     parser.add_argument("--plan-sha256", required=True)
@@ -696,7 +771,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         result = join_joint_quanta(receipts=None, campaign=campaign,
                                    output_dir=args.output_dir,
-                                   input_root=args.input_root)
+                                   input_root=args.input_root, records_dir=args.records)
     except JoinRefused as exc:
         print(f"joint_quanta_join: refused: {exc}", file=sys.stderr)
         return EXIT_REFUSED

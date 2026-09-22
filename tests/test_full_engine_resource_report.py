@@ -110,6 +110,7 @@ def test_the_consumer_reads_the_artifact_and_never_the_serving_runtime():
         # Every mention is part of a schema identifier, never a module path.
         assert re.match(r"tessera\.(full_engine_resource_report\.v[12]"
                         r"|full_engine_resource_(identity|partition)\.v1"
+                        r"|full_engine_(ownership_observation|dense_startup_check)\.v1"
                         r"|native_moe_workspace\.v1)",
                         mention), mention
 
@@ -1818,6 +1819,66 @@ def test_a_registered_optional_observation_reads(tmp_path):
     def mutate(report):
         report["observations"]["reservation_slack"] = None
     assert consume(tmp_path, mutated(mutate)).disagreements == ()
+
+
+def test_current_producer_reservation_observations_read_without_admitting(tmp_path):
+    report = _v2_with_admission(supplied())
+    report["observations"]["allocator_config"] = "unset"
+    report["derived"].update(reserved_peak_bytes=None,
+                              reservation_slack_peak_bytes=None,
+                              reservation_witness=None)
+    verdict = consume(tmp_path, report)
+    assert verdict.disagreements == ()
+    assert verdict.blocking
+
+
+def _dense_reservation_report():
+    report = _v2_with_admission(supplied())
+    report["observations"].update(allocator_config="unset", owner_views={
+        "schema": "tessera.full_engine_ownership_observation.v1",
+        "dense_startup_check": {"schema": "tessera.full_engine_dense_startup_check.v1",
+                                "rank": 0, "memory_allocated_bytes": 100,
+                                "memory_reserved_bytes": 160}})
+    report["derived"].update(reserved_peak_bytes=160, reservation_slack_peak_bytes=60,
+        reservation_witness={"rank": 0, "memory_allocated_bytes": 100,
+                             "scope": "startup sample only"})
+    return report
+
+
+def test_dense_startup_reservation_is_recomputed_without_closing_domains(tmp_path):
+    report = _dense_reservation_report()
+    verdict = consume(tmp_path, report)
+    assert verdict.disagreements == ()
+    assert "worker_startup" in verdict.open_domains
+
+
+@pytest.mark.parametrize("key,value", [("reserved_peak_bytes", 161),
+                                      ("reservation_slack_peak_bytes", 61),
+                                      ("reserved_peak_bytes", True)])
+def test_startup_reservation_derived_tampering_refuses(tmp_path, key, value):
+    report = _dense_reservation_report()
+    report["derived"][key] = value
+    with pytest.raises(RuntimePriceError):
+        consume(tmp_path, report)
+
+
+@pytest.mark.parametrize("value", [None, "", False, 1, {}])
+def test_startup_reservation_requires_bound_allocator_config(tmp_path, value):
+    report = _dense_reservation_report()
+    report["observations"]["allocator_config"] = value
+    with pytest.raises(RuntimePriceError):
+        consume(tmp_path, report)
+
+
+def test_startup_reservation_rejects_partial_fields_and_foreign_rank(tmp_path):
+    report = _dense_reservation_report()
+    del report["derived"]["reservation_witness"]
+    with pytest.raises(RuntimePriceError, match="all three"):
+        consume(tmp_path, report)
+    report = _dense_reservation_report()
+    report["derived"]["reservation_witness"]["rank"] = 1
+    with pytest.raises(RuntimePriceError, match="rank disagrees"):
+        consume(tmp_path, report)
 
 
 def test_an_unknown_partition_schema_refuses_by_name(tmp_path):

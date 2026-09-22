@@ -25,7 +25,7 @@ def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, pro
         observed['context'] = context
     if skeleton is not None:
         skeleton(model, context)
-    context.settle_prefetched_layers = lambda layers: None
+    context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         'owners': [], 'unique_storage_bytes': sum(p.numel() * p.element_size() for p in model.parameters())}
     files, proofs, file_shas = {}, {}, {}

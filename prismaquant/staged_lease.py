@@ -813,10 +813,11 @@ def acquire_entry_window(resolver, declared, entry: dict):
     retired, unrelated mover would poison into ``unpublished``.
     ``ssd`` outside the allowed tiers refuses.
 
-    Enter-time races (republish/retire between this selection and the
-    caller's single enter) fail clear by design — no hidden
-    reacquisition, no alternate adoption. PB-level retry mints a new
-    attempt; bytes are never wrong and the pool is never read.
+    Enter-time races fail this window clearly; it never re-enters or
+    silently changes covers. A source reader may handle a typed retiring
+    refusal by selecting another covering entry and entering a NEW window
+    for it. The selected entry's pin and descriptor own the full read
+    lifetime; unknown and integrity refusals still fail closed.
     """
     from .staged_tier_policy import tier_is_allowed
     if entry.get("ram_path") is not None and tier_is_allowed("ram"):
