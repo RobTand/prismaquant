@@ -28,6 +28,8 @@ QUALIFIED_CELL_FIELDS = ("source_weight", "rendered_weight", "activation",
                          "encoding_identity_sha256", "wire_sha256", "render_file_sha256",
                          "render_origin", "render_comparison")
 _VERIFIED_PAIR = {}
+_VERIFIED_ENCODER_PROOFS = {}
+_SELECTED_CATALOG = {}
 ADOPTION_SCHEMA = "prismaquant.joint_catalog_source_adoption.v1"
 ADDED_FORMAT = "TESSERA_E2M1_K2_R896"
 ADDED_RECIPE = {"body": "tcq", "channel_sigma": None, "grid": "E2M1x2",
@@ -46,6 +48,108 @@ def _same(a, b, message):
 
 def _json(bound, label):
     return json.loads(_read_bound(bound, label))
+
+
+def validated_encoder_adoption(adoption):
+    """Authenticate the existing migration's semantics and all proof dependencies.
+
+    This never substitutes an encoder seal. It binds the exact old/new source
+    pair and fixture, reuses the owning reseal proof validator, and retains
+    inode/size/mtime/ctime fences for every dependency before memoized reuse.
+    The producer package is a declaration; Tessera independently hashes that
+    complete package before using its historical identity factory.
+    """
+    from tools.reseal_campaign_identity import load_bundle, unit_kind, format_family, Refused
+
+    _same(adoption.get("schema"), ADOPTION_SCHEMA, "encoder adoption schema")
+    reference, candidate = adoption["reference_encoding_identity"], adoption["candidate_encoding_identity"]
+    old, new = reference.get("encoder_source_sha256"), candidate.get("encoder_source_sha256")
+    for value in (old, new):
+        _require(isinstance(value, str) and len(value) == 64
+                 and all(c in '0123456789abcdef' for c in value), "encoder adoption needs exact source seals")
+    fixture = reference.get("encoder_fixture_id")
+    _require(isinstance(fixture, str) and len(fixture) == 64
+             and all(c in '0123456789abcdef' for c in fixture), "encoder adoption needs an exact fixture identity")
+    _same(fixture, candidate.get("encoder_fixture_id"), "adopted encoder fixture")
+    proof = adoption["encoder_source_proof"]
+    stratum = (unit_kind(candidate["unit"]), format_family(ADDED_FORMAT))
+    key = (proof["path"], proof["sha256"], _bound_stat_fence(Path(proof["path"])), old, new, fixture, stratum)
+    cached = _VERIFIED_ENCODER_PROOFS.get(key)
+    if cached is not None and cached["fences"] == tuple(
+            (b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in cached["dependencies"]):
+        return copy.deepcopy(cached)
+    document = _json(proof, "encoder source proof")
+    _same(document.get("pins", {}).get("old", {}).get("encoder_source_sha256"), old,
+          "encoder proof old source")
+    _same(document.get("pins", {}).get("new", {}).get("encoder_source_sha256"), new,
+          "encoder proof new source")
+    _require(document.get("arms"), "encoder proof has no measured comparison arms")
+    try:
+        checked = load_bundle(proof["path"], document["pins"])
+    except Refused as error:
+        raise ValueError("joint catalog extension: encoder proof refused: " + str(error)) from error
+    _require(stratum in checked["covered"],
+             "encoder proof does not cover the added candidate stratum")
+    fixture_record = document.get("fixture_id", {})
+    fixture_bound = {"path": fixture_record.get("result"), "sha256": fixture_record.get("result_sha256")}
+    observed = _json(fixture_bound, "encoder fixture proof")
+    _require(observed.get("kind") == "fixture_id" and observed.get("ok") is True
+             and observed.get("fixture_id_equal") is True, "encoder fixture proof did not pass")
+    _same(set((observed.get("encoder_source_sha256") or {}).values()), {old, new}, "fixture proof source pair")
+    _same(set((observed.get("encoder_fixture_ids") or {}).values()), {fixture}, "fixture proof identity")
+    _same(set((fixture_record.get("ids") or {}).values()), {fixture}, "bundled fixture identity")
+    dependencies = [dict(proof), fixture_bound] + [
+        {"path": arm["result"], "sha256": arm["result_sha256"]} for arm in document["arms"]]
+    for bound in dependencies:
+        _read_bound(bound, "encoder proof dependency")
+    source = document.get("source_checks", {}).get("encoder", {})
+    _same(source.get("sha256"), new, "declared candidate producer source")
+    _require(isinstance(source.get("tree"), str) and Path(source["tree"]).is_absolute(),
+             "encoder proof has no bound candidate producer package")
+    result = {"proof": dict(proof), "producer_package": {"path": source["tree"], "sha256": new},
+              "dependencies": dependencies,
+              "fences": tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies)}
+    _VERIFIED_ENCODER_PROOFS.clear()
+    _VERIFIED_ENCODER_PROOFS[key] = result
+    return copy.deepcopy(result)
+
+
+def require_selected_catalog_cell(data, name, fmt):
+    """Rebind an added selected cell to its exact catalog row and current files."""
+    bound = data.inputs.get("candidate_overlay")
+    _same(data.payload.get("provenance", {}).get("candidate_overlay"), bound, "selected overlay provenance")
+    _require(isinstance(bound, dict), "selected candidate has no explicit catalog overlay")
+    key = (bound["path"], bound["sha256"], _bound_stat_fence(Path(bound["path"])))
+    if key not in _SELECTED_CATALOG:
+        catalog = _json(bound, "selected candidate catalog")
+        _same(catalog.get("schema"), "prismaquant.t4_adopted_catalog.v1", "selected candidate catalog schema")
+        rows = {(row["qname"], row["format"]): row for row in catalog["cells"]}
+        _same(len(rows), len(catalog["cells"]), "selected catalog unique cells")
+        _SELECTED_CATALOG.clear()
+        _SELECTED_CATALOG[key] = rows
+    row = _SELECTED_CATALOG[key].get((name, fmt))
+    _require(row is not None, "selected cell absent from bound overlay")
+    cell = data.cells[name, fmt]
+    for field in ("record", "wire", "render", "catalog_source_adoption"):
+        _same(cell.get(field), row.get(field), "selected catalog " + field)
+    adoption = row["catalog_source_adoption"]
+    proof = validated_encoder_adoption(adoption)
+    _same(adoption["candidate_encoding_identity"], cell["record"]["identity"], "selected candidate identity")
+    reference_pair = tuple(adoption["reference_pair"])
+    _require(reference_pair in data.cells and reference_pair[0] == name, "selected adoption reference absent")
+    reference = data.cells[reference_pair]["record"]["identity"]
+    for field in ("unit", "source", "projection", "calibration", "encoder_fixture_id"):
+        _same(reference.get(field), adoption["reference_encoding_identity"].get(field), "selected reference " + field)
+        _same(reference.get(field), cell["record"]["identity"].get(field), "selected candidate " + field)
+    for field in ("wire", "render"):
+        path = Path(row[field])
+        _require(path.is_absolute() and not path.is_symlink() and path.is_file(), "selected artifact is not regular")
+        observed = path.stat()
+        _same({"inode": observed.st_ino, "bytes": observed.st_size,
+               "mtime_ns": observed.st_mtime_ns, "ctime_ns": observed.st_ctime_ns},
+              row[field + "_stat"], "selected current " + field + " fence")
+    return {"adoption": copy.deepcopy(adoption), "wire_root": str(Path(row["wire"]).resolve().parent),
+            "catalog": dict(bound), **proof}
 
 
 def _pairs(prepared):
@@ -169,8 +273,8 @@ def verify_catalog_pair(inputs):
         # Hash the existing source-migration proof once; do not manufacture a
         # new proof or silently normalize another encoding field here.
         proof = adoption.get("encoder_source_proof")
-        _read_bound(proof, "existing encoder source proof")
-        proof_fences.add((proof["path"], proof["sha256"], _bound_stat_fence(Path(proof["path"]))))
+        verified_proof = validated_encoder_adoption(adoption)
+        proof_fences.update(verified_proof["fences"])
     science = {"plan": {k: v for k, v in old_plan.items() if k not in CANDIDATE_PLAN_FIELDS},
                "prepared": {key: old[key] for key in PREPARED_SCIENCE},
                "qnames": sorted(old["formats_by_qname"])}
@@ -275,6 +379,7 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
         adoption = row["catalog_source_adoption"]
         _same(adoption.get("schema"), ADOPTION_SCHEMA, "overlay adoption schema")
         _same(adoption.get("encoder_source_proof"), catalog["reseal_proof"], "overlay encoder source proof")
+        validated_encoder_adoption(adoption)
         reference_pair = tuple(adoption["reference_pair"])
         _require(reference_pair in data.cells and reference_pair[0] == name,
                  "overlay reference candidate is absent from the base catalog")
