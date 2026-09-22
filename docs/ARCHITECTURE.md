@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+Stage A startup and timeout hygiene (2026-09-22, PQ #978): Stage A now
+refuses at startup, before any GPU work, when a checkpoint path it would write
+already exists (`run_adjoint_capture` checks
+`occupied_checkpoint_directories`). Each `checkpoints/boundary-NNN`
+directory is created with `exist_ok=False`, so a stale checkpoint used to
+fail the run only when the adjoint sweep reached it, after the head intake
+and the forward pass. The check matches the writer's own `boundary-NNN`
+spelling, because the tail boundary depends on the layer count and that
+count is known only after the model is built. A directory renamed aside
+does not block. The joint dispatcher now refuses a Stage A or quantum row
+unless the campaign spec's `PRISMAQUANT_STAGED_RANGE_WAIT_S` is strictly
+below the smallest `--progress-phase` grace the row declares, which is
+900 s per chunk. It reads the wait with the reader's own rules
+(`staged_range_wait_from_env`) from the same spec parse it seals into the
+row. Without that bound, a staging stall ends as PrismaBuild's no-progress
+kill, which names no range, and not as the reader's staging refusal. The
+default wait of 300 s is unchanged. Gate:
+`tests/test_stagea_startup_hygiene.py`.
+
 Fully loaded modules skip checkpoint initialization (2026-09-22, PQ #968):
 the Transformers compatibility hook now marks a module `_is_hf_initialized`
 when every parameter and buffer it owns came from the checkpoint, before
@@ -812,7 +831,9 @@ future range is a worker the current layer's already-staged reads queue
 behind; a ready current-layer read now proceeds while every lookahead layer is
 cold. It waits under one deadline for the whole layer, however many shards it
 spans (`PRISMAQUANT_STAGED_RANGE_WAIT_S`, default 300 s, `0` restores the
-pre-#874 behaviour, and the value must be finite). A covered entry whose
+pre-#874 behaviour, and the value must be finite; the joint dispatcher
+refuses a campaign spec whose wait is not strictly below the row's smallest
+progress grace, PQ #978). A covered entry whose
 material sidecar PrismaBuild has not written yet counts as not landed, asked
 once per staged entry per poll (PQ #905). It only ever waits: it
 never reads payload and never refuses, so an unreachable range still fails
