@@ -55,8 +55,10 @@ from .joint_adjoint_checkpoints import (
 )
 from .joint_layer_quanta import (
     CHECKPOINT_LOAD_PHASE,
+    check_prepared_windows_against_resolved,
     executable_bound_phase_name,
     executable_own_source_phase_name,
+    executable_render_phase_name,
     executable_replay_phase_name,
     executable_source_phase_name,
 )
@@ -1306,6 +1308,15 @@ def run_layer_quantum_core(
         def before_window(window_index, window_names):
             nonlocal window_kernel, window_started, replay_window
             del window_names
+            if executable:
+                # PQ #917: the window's prepared renders stage under
+                # their own consumption phase, entered here -- before
+                # observe_and_project_retained_windows opens the PWC
+                # retained window and its loading pool reads the
+                # declared render files. Skipped/resumed windows still
+                # enter it: the sealed phase list never changes.
+                progress.enter_read_phase(
+                    executable_render_phase_name(int(window_index)))
             replay_window = int(window_index)
             window_kernel = KernelTimeProfiler()
             window_kernel.__enter__()
@@ -1635,6 +1646,18 @@ def run_layer_quantum(
             operator_windows=retained.operator_windows,
             retained_budget=retained.retained_budget,
             source_bytes=retained.source_bytes)
+        executable_block = record.get("executable_readset")
+        if isinstance(executable_block, dict) and isinstance(
+                executable_block.get("prepared_input"), dict):
+            # PQ #917: the sealed prepared membership must equal the live
+            # geometry recomputed above, before any GPU work or progress.
+            try:
+                check_prepared_windows_against_resolved(
+                    executable_block["prepared_input"].get("windows", []),
+                    resolved_windows,
+                    quantum_id=record.get("quantum_id"))
+            except ValueError as exc:
+                raise QuantumIdentityRefused(str(exc)) from exc
         result["resolved_windows"] = len(resolved_windows)
         counters = QuantumCounters(
             quantum_id=record["quantum_id"], identity_sha256=record["identity_sha256"],
