@@ -18,6 +18,8 @@ from test_stage_a_produced_boundary_chain import _isolated_launch_context  # noq
 
 
 def test_actual_export_ack_precedes_pq_publication_progress_and_strict_read(tmp_path, monkeypatch):
+    from fleet_sdk import require_prismabuild_sdk
+    require_prismabuild_sdk()
     pin_path = Path(__file__).with_name("stagea_local_spool_pb_pin.json")
     pin = json.loads(pin_path.read_text())
     root = Path(pin["bundle_root"])
