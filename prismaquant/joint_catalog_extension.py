@@ -21,7 +21,8 @@ SCHEMA = "prismaquant.joint_catalog_extension.v1"
 INPUTS = ("original_plan", "original_prepared", "extended_plan", "extended_prepared")
 # These select candidate artifacts or their output namespace; every other
 # plan field, including the entire execution/derivative policy, stays exact.
-CANDIDATE_PLAN_FIELDS = frozenset(("inputs", "output_root", "historical_encoder_reuse", "served_activation_policy"))
+CANDIDATE_PLAN_FIELDS = frozenset(("inputs", "output_root", "historical_encoder_reuse", "served_activation_policy",
+                                  "stage_b_resource_policy", "execution", "max_gpu_bytes"))
 PREPARED_SCIENCE = ("source_model_identity", "source_execution", "calibration_input",
                     "projection_backend", "reader_identity")
 QUALIFIED_CELL_FIELDS = ("source_weight", "rendered_weight", "activation",
@@ -233,6 +234,11 @@ def verify_catalog_pair(inputs):
     old_plan, new_plan = documents["original_plan"], documents["extended_plan"]
     old, new = documents["original_prepared"], documents["extended_prepared"]
     bindings = list(inputs.values()) + [old["production_cache"], new["production_cache"]]
+    from .joint_stageb_resources import require_plan_resources
+    resources = require_plan_resources(old_plan, new_plan, inputs["original_plan"], inputs["original_prepared"])
+    _same(new.get("stage_b_resource_policy"), new_plan.get("stage_b_resource_policy"), "extended resource policy")
+    if resources is not None:
+        bindings += [new_plan["stage_b_resource_policy"], *resources["inputs"].values()]
     _same(old_plan.get("served_activation_policy"), old.get("served_activation_policy"), "original served policy")
     _same(new_plan.get("served_activation_policy"), new.get("served_activation_policy"), "extended served policy")
     if new_plan.get("served_activation_policy") is not None:
@@ -282,6 +288,10 @@ def verify_catalog_pair(inputs):
             _same(metadata.get(field), prepared[field], name + " cache " + field)
         caches[name] = cache
     previous, extended = caches["original"], caches["extended"]
+    if resources is not None:
+        _same({pair: str(Path(extended._path_for_value(path)).absolute()) for pair, path in extended.weights.items()},
+              {tuple(row["member"]): row["path"] for row in resources["candidate_files"]},
+              "resource-policy actual candidate file roster")
     _same(previous.levers, extended.levers, "original render levers")
     _same(previous.activation_max_abs, extended.activation_max_abs, "original activation maxima mapping")
     old_verified, new_verified = previous.metadata["verified_cells"], extended.metadata["verified_cells"]
@@ -341,6 +351,7 @@ def verify_catalog_pair(inputs):
             verified_proof = proof_checks.verify(adoption)
             proof_fences.update(verified_proof["fences"])
     science = {"plan": {k: v for k, v in old_plan.items() if k not in CANDIDATE_PLAN_FIELDS},
+               "original_execution": old_plan["execution"], "original_max_gpu_bytes": old_plan.get("max_gpu_bytes"),
                "prepared": {key: old[key] for key in PREPARED_SCIENCE},
                "qnames": sorted(old["formats_by_qname"])}
     evidence = {"original_cells": len(old_pairs), "extended_cells": len(new_pairs),

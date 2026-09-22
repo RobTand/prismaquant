@@ -104,7 +104,7 @@ def _pair(tmp_path, campaign, probe):
         prepared = {**common, 'schema': PREPARED_SCHEMA, 'status': 'complete',
             'plan_sha256': inputs[label+'_plan']['sha256'],
             'production_cache': _write(tmp_path, label+'.pkl', cache, binary=True),
-            'formats_by_qname': {name: [oldfmt, 'BF16'] + ([ADDED_FORMAT] if label == 'extended' else [])
+            'formats_by_qname': {name: [oldfmt] + ([ADDED_FORMAT] if label == 'extended' else []) + ['BF16']
                                  for name in qnames}, 'measured_cells': len(cells)}
         inputs[label+'_prepared'] = _write(tmp_path, label+'-prepared.json', prepared)
     receipt = {'schema': 'prismaquant.joint_adjoint_capture.v1', 'status': 'complete',

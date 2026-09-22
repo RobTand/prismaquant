@@ -739,7 +739,7 @@ def _plan_output_root(campaign: Mapping) -> Path:
 
 
 def _container_wrap(spec_path: Path,
-                    payload: list[str]) -> tuple[list[str], str | None]:
+                    payload: list[str], *, resource_policy=None) -> tuple[list[str], str | None]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -756,10 +756,21 @@ def _container_wrap(spec_path: Path,
     before the payload separator), never inside the payload.
     """
     spec = json.loads(Path(spec_path).read_text())
+    if resource_policy is not None:
+        limits = resource_policy["limits"]
+        if (float(spec.get("cpu_memory_gb", -1)) * 1024 ** 3 != limits["host_bytes"]
+                or float(spec.get("env", {}).get("PRISMAQUANT_MAX_GPU_MEM_GB", -1)) * 1024 ** 3 != limits["gpu_bytes"]):
+            raise DispatchRefused("container host/device envelope differs from the bound Stage B resource policy")
     argv = ["python3", "-m", "tools.tessera_campaign_container",
             "--spec", json.dumps(spec, sort_keys=True),
             "--", *payload]
-    return argv, admission_image_reference(spec)
+    admission = spec.get("container_admission_reference")
+    if admission is not None:
+        if (not isinstance(admission, str) or not admission.startswith("content:sha256:")
+                or not _is_hex64(admission.removeprefix("content:sha256:"))
+                or not _is_hex64(spec.get("container", {}).get("content_sha256"))):
+            raise DispatchRefused("explicit portable image admission requires content SHA and inspected scientific image identity")
+    return argv, admission or admission_image_reference(spec)
 
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
@@ -793,6 +804,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     all lanes.
     """
     quantum_id = record["quantum_id"]
+    resource_policy = None
     executable = record.get("executable_readset")
     if executable is not None:
         # PQ #917: the complete static prepared-input contract is an
@@ -823,6 +835,19 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             raise DispatchRefused(
                 f"quantum {quantum_id!r} seals no campaign {key}")
     try:
+        plan_raw = Path(campaign["plan_path"]).read_bytes()
+        plan = json.loads(plan_raw)
+    except (OSError, ValueError) as exc:
+        raise DispatchRefused(f"quantum {quantum_id!r} source plan is unreadable: {exc}") from exc
+    if plan.get("stage_b_resource_policy") is not None:
+        if hashlib.sha256(plan_raw).hexdigest() != campaign["plan_sha256"]:
+            raise DispatchRefused("resource-bound plan differs from its quantum seal")
+        from prismaquant.joint_stageb_resources import verify_policy
+        try:
+            resource_policy = verify_policy(plan["stage_b_resource_policy"])
+        except (ValueError, OSError) as exc:
+            raise DispatchRefused(f"invalid Stage B resource policy: {exc}") from exc
+    try:
         record_sha256 = _sha_bytes(Path(record_path).read_bytes())
     except OSError as exc:
         raise DispatchRefused(
@@ -834,6 +859,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         raise DispatchRefused(
             f"quantum {quantum_id!r} adjoint receipt unreadable at "
             f"{adjoint_path}: {exc}") from exc
+    wrap_options = {} if resource_policy is None else {"resource_policy": resource_policy}
     wrapped, container_image = _container_wrap(SPEC_PATH, [
         "python3", "-m", "prismaquant.joint_cost_quantum",
         "--quantum", str(record_path),
@@ -847,7 +873,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--data-manifest-sha256", staged_sha256,
         "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
-        "--output-root", str(output_root)])
+        "--output-root", str(output_root)], **wrap_options)
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
         argv += ["--tag", str(tag)]
@@ -855,9 +881,17 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
              "--residency", "stage", "--residency-ram", "auto"]
     for name, grace in progress:
         argv += ["--progress-phase", f"{name}={grace}"]
+    mem_gib, gpu_gib, cpus = "104", "80", 10
+    if resource_policy is not None:
+        limits = resource_policy["limits"]
+        mem_gib, gpu_gib = (f"{limits[key] / 1024 ** 3:g}" for key in ("physical_bytes", "gpu_bytes"))
+        sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
+        cpus = max(int(sealed_spec.get("env", {}).get("PRISMAQUANT_LAYER_READ_THREADS", 1)),
+                   int(plan["source_prefetch"]["prefetch_workers"]) + 1,
+                   int(plan["execution"]["operator_windows"]["prefetch_workers"]) + 1)
     argv += ["--priority", str(priority),
-             "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
-             "--cpus", "10"]
+             "--demand", f"gpu=1,mem_gb={mem_gib}", "--gpu-memory-gb", gpu_gib,
+             "--cpus", str(cpus)]
     if container_image is not None:
         # A pbrun option, so it precedes the separator like the manifest: PB
         # must admit the row only where this image is already present, or

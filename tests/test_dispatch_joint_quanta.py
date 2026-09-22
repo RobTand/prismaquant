@@ -718,3 +718,30 @@ def test_stage_a_argv_refuses_foreign_read_parent(tmp_path, campaign):
     manifest = _adjoint_manifest(tmp_path, campaign, parent="e" * 64)
     with pytest.raises(DispatchRefused, match="mixed campaign"):
         stage_a_argv(manifest, campaign)
+
+
+def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, campaign, monkeypatch):
+    import dispatch_joint_quanta as dispatch
+    from prismaquant import joint_stageb_resources as resources
+    policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30, "gpu_bytes": 72 << 30}}
+    monkeypatch.setattr(resources, 'verify_policy', lambda _: policy)
+    plan = {"stage_b_resource_policy": {"path": "/resource", "sha256": "0"*64},
+        "source_prefetch": {"prefetch_workers": 1}, "execution": {"operator_windows": {"prefetch_workers": 4}}}
+    raw = json.dumps(plan).encode(); Path(campaign['plan_path']).write_bytes(raw)
+    campaign['plan_sha256'] = hashlib.sha256(raw).hexdigest()
+    spec = {"container": {"image": "sha256:" + "0"*64, "content_sha256": "b"*64},
+        "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": 28,
+        "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10"}}
+    dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    record = _record(campaign, 1, slice_dir=tmp_path)
+    path = tmp_path/'record.json'; path.write_text(json.dumps(record))
+    receipt = tmp_path/'receipt.json'; receipt.write_text('{}')
+    args = dict(record_path=path, output_root=tmp_path/'out', adjoint_path=receipt)
+    argv = quantum_argv(record, **args)
+    assert argv[argv.index('--demand')+1] == 'gpu=1,mem_gb=100'
+    assert argv[argv.index('--gpu-memory-gb')+1] == '72'
+    assert argv[argv.index('--cpus')+1] == '10'
+    assert argv[argv.index('--container-image')+1] == 'content:sha256:' + 'c'*64
+    spec['cpu_memory_gb'] = 32; dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    with pytest.raises(DispatchRefused, match='envelope differs'):
+        quantum_argv(record, **args)
