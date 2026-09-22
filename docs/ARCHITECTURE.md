@@ -19814,3 +19814,24 @@ arithmetic, package, execution mode, and collector identity must match; any
 library path shared by any two rows must have identical bytes. The intake
 gate recomputes this record from the independently consumed actual panels.
 Legacy contexts keep their existing single-structure grammar and equality.
+
+Fresh GLM native routing can carry a completed `streaming_prefix_initialization.v1`
+witness for source layers 0 through 3. This is a proper-prefix observation from
+`StreamingContext`'s existing initialization auditor, not a full pretrained-load
+contract. Intake checks the complete source identity and live checkpoint map,
+actual head coverage, all four predecessor layers, original calibration sample
+zero, eager capture runtime, and the exact stop before the layer-3 expert call.
+DEV source-cache reuse remains explicitly uncertified in the raw receipt and the
+retained per-operator context of a mixed runtime cohort.
+
+The acquisition adapter transports leased source spans, wire bytes and PWC renders
+into a private local directory owned by the same admitted action. Same-inode
+preallocation and bounded writes enforce a 40 GiB local disk ceiling; this is
+short-lived transport, not a resumable scientific checkpoint or PB distribution
+mechanism. The independent Tessera reader checks the action key, closed file
+roster, anchored no-follow descriptors and exact byte digests. Each source tensor
+is borrowed separately instead of retaining a second full source layer in RAM.
+The pilot declares 96 GiB aggregate memory: 40 GiB container CPU memory, a 48 GiB
+Torch allocator limit enforced in both processes, and 8 GiB for other allocations.
+Native/driver allocations outside Torch remain visible in the actual resource
+trace and are not claimed to be bounded by Torch's allocator limit.
