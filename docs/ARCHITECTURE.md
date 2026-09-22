@@ -1,6 +1,16 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-22 · `integrate/stageb-r6-astra-20260922`.
+Head-resume progress update (2026-09-22, PQ #822): the existing head-walk
+journal and every input fence are still reverified before reuse. A resumed
+durable prefix now publishes one cumulative progress record after its rows
+are restored, retaining its last qname and exact completed-unit count.
+Replaying the prefix no longer rewrites the NFS progress file once per unit.
+The unbanked suffix continues from that count and reports normally; no
+unverified or corrupt suffix contributes to replay progress. Journal loading
+and fence validation remain unchanged, including their existing watchdog
+allowance. This is progress-write coalescing, not relaxed authentication.
+
+As of: 2026-09-22 · `codex/glm-r8-integration-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-22, `feat/pq-local-output-shuttle-20260922`) for
