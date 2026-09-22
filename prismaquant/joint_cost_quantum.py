@@ -171,6 +171,10 @@ def verify_quantum_identity(
         if receipt.get("status") != "complete":
             raise QuantumIdentityRefused(
                 f"adjoint receipt status is {receipt.get('status')!r}, not complete")
+        if record.get("catalog_extension") is not None:
+            from .joint_catalog_extension import require_extension
+            require_extension(record["catalog_extension"], receipt=receipt,
+                              plan_sha256=plan_sha256, prepared_sha256=prepared_sha256)
         chunks = record["chunks"]
         total = int(record["read_set"]["total_bytes"])
         cursor = 0
@@ -1668,6 +1672,8 @@ def run_layer_quantum_core(
         },
         "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
         "checkpoint_identity_sha256": checkpoint_identity_sha256,
+        **({"catalog_extension": record["catalog_extension"]}
+           if record.get("catalog_extension") is not None else {}),
     })
     if set(joint_rows) != set(names):
         raise RuntimeError("layer quantum incomplete unit coverage")
