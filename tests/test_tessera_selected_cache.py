@@ -208,7 +208,8 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     policy = {'schema': served.SCHEMA, 'format': bridge.ADDED_FORMAT,
               'effective_max_abs': {name: 24.0 for name in groups},
               'qualification_max_abs': {name: 12.0 for name in groups},
-              'executed_grouping': {'groups': groups}}
+              'executed_grouping': {'groups': groups},
+              **{key: _write(tmp_path, key+'.json', {}) for key in ('original_prepared', 'original_cache', 'census')}}
     policy_bound = _write(tmp_path, 'policy.json', policy)
     for row in rows:
         name = row['qname']; qualification = row['activation']
@@ -239,6 +240,15 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
         return
     manifest = build()
     assert len(seen) == 1
+    for package in packages.values():
+        directory = Path(package['path']); directory.mkdir()
+        (directory/'__init__.py').write_text('# source fixture')
+    reads = set(bridge.selected_cache_read_paths(manifest))
+    assert {row['wire'] for row in rows} <= reads
+    assert str(tmp_path/records[DENSE]['file']) in reads
+    assert {proof['path'], str(tmp_path/'source-proof-arm.json'), str(tmp_path/'source-fixture.json')} <= reads
+    assert {str(Path(package['path'])/'__init__.py') for package in packages.values()} <= reads
+    assert {policy_bound['path'], *(policy[key]['path'] for key in ('original_prepared', 'original_cache', 'census'))} <= reads
     bundle = CachedUnitBundle(manifest, tmp_path, set(names), source)
     assert len(bundle.roots) == 2 and bundle.producer_packages == packages
     for name in names:
