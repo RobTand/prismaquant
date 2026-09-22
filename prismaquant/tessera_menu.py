@@ -2025,7 +2025,7 @@ def assert_uniform_hessian_identity(costs: "dict") -> dict:
 
 
 def priced_static_scales(assignment: "Mapping[str, str]",
-                         costs: "Mapping", *, policy) -> dict:
+                         costs: "Mapping", *, policy, served_activation_policy=None) -> dict:
     """The static A-side scale VALUE each selected Tessera unit was priced under.
 
     ``{"schema": PRICED_STATIC_SCALES_SCHEMA, "units": {unit: scale},
@@ -2095,6 +2095,27 @@ def priced_static_scales(assignment: "Mapping[str, str]",
     # so the export gate reads an answer rather than an absence (#624).  Derived
     # from the units the rows priced, not from a caller argument.
     grouping = routed_static_scale_grouping(units)
+    if served_activation_policy is not None:
+        import copy
+        from .joint_served_activation import verify_policy, policy_group, require_priced_activation
+        served = verify_policy(served_activation_policy)
+        affected = []
+        for name, fmt in assignment.items():
+            group = policy_group(served, name, fmt)
+            if group is None:
+                continue
+            row = costs[name][fmt]
+            operator = row['joint_operator_identity']
+            qualified = operator.get('served_activation_policy', {}).get('qualification_activation')
+            if not isinstance(qualified, Mapping):
+                raise ValueError(f'{name}: executed-group price lacks its original qualification activation')
+            scale = require_priced_activation(served_activation_policy, served, name, fmt, qualified, operator)
+            if units.get(name) != scale:
+                raise ValueError(f'{name}: priced static scale differs from executed-group operator')
+            affected.append(name)
+        if affected:
+            grouping = copy.deepcopy(served['executed_grouping'])
+            block['served_activation_policy'] = dict(served_activation_policy)
     if grouping is not None:
         block["activation_scale_grouping"] = grouping
     return block

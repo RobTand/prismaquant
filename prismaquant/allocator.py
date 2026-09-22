@@ -6127,7 +6127,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 # served (RobTand/prismaquant#624).
                 policy=(cost_data.get("provenance", {})
                         .get("activation_static_scales", {})
-                        .get("policy")))}
+                        .get("policy")),
+                served_activation_policy=cost_data.get("provenance", {}).get("served_activation_policy"))}
            if any(str(fmt).startswith("TESSERA_")
                   for fmt in assignment_expanded.values()) else {}),
         **({"tessera_dev_pin": dict(tessera_dev_pin)} if tessera_dev_pin else {}),

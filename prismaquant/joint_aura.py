@@ -105,6 +105,8 @@ def identity_sha256(value) -> str:
 
 def activation_identity(spec, activation_max_abs: Mapping, qname: str) -> dict:
     """Bind the resolved QDQ policy, including its calibrated static scale."""
+    from .joint_served_activation import format_activation_maxima
+    activation_max_abs = format_activation_maxima(activation_max_abs, spec)
     changes = spec.act_quant_changes_input
     maximum = _activation_max_abs_lookup(activation_max_abs, qname) if changes else None
     if maximum is not None and not math.isfinite(float(maximum)):
