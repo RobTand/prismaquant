@@ -210,6 +210,21 @@ def require_selected_catalog_cell(data, name, fmt, *, validation=None):
             "catalog": dict(bound), **proof}
 
 
+def extended_roster(formats, fmt):
+    """One unit's candidate roster with ``fmt`` added before the terminal BF16.
+
+    Every sealed prepared roster is its sorted formats with BF16 appended, and
+    the T4 overlay was assembled by inserting the added format before that
+    BF16. The loader, the overlay assembler and the pair check all use this
+    one order, because Stage B compares the prepared roster with the loaded
+    roster in order (RobTand/prismaquant#990).
+    """
+    formats = tuple(formats)
+    _require(bool(formats) and formats[-1] == "BF16", "base candidate roster must retain terminal BF16")
+    _require(fmt not in formats, "added candidate is already in the base roster")
+    return (*formats[:-1], fmt, "BF16")
+
+
 def _pairs(prepared):
     formats = prepared.get("formats_by_qname")
     _require(isinstance(formats, dict) and formats, "prepared candidate roster is missing")
@@ -272,6 +287,9 @@ def verify_catalog_pair(inputs):
              "extended E2M1 candidate must cover the complete original qname roster")
     for name, formats in old["formats_by_qname"].items():
         _require(set(formats) <= set(new["formats_by_qname"][name]), "original candidate removed for " + name)
+        expected = tuple(formats) if ADDED_FORMAT in formats else extended_roster(formats, ADDED_FORMAT)
+        _same(tuple(new["formats_by_qname"][name]), expected,
+              "extended candidate order (added format before terminal BF16) for " + name)
 
     caches = {}
     for name, prepared, plan, pairs in (("original", old, old_plan, old_pairs),
@@ -562,9 +580,7 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
                       cell["record"]["blob_sha256"], "overlay wire bytes")
                 cell["render_file_sha256"] = hashlib.sha256(Path(cell["render"]).read_bytes()).hexdigest()
             data.cells[name, fmt] = cell
-            old_formats = data.formats_by_qname[name]
-            _require(old_formats[-1] == "BF16", "base candidate roster must retain terminal BF16")
-            data.formats_by_qname[name] = (*old_formats[:-1], fmt, "BF16")
+            data.formats_by_qname[name] = extended_roster(data.formats_by_qname[name], fmt)
             data.payload["costs"][name][fmt] = copy.deepcopy(scalar)
             if name in data.payload.get(EXPERT_WIRES_KEY, {}):
                 data.payload[EXPERT_WIRES_KEY][name][fmt] = copy.deepcopy(cell["record"])

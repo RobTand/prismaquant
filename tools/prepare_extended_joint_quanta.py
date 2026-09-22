@@ -91,6 +91,27 @@ def metadata_entries(inputs, plan, prepared, extension, receipt):
     return entries
 
 
+def check_stage_b_spec(spec_path, spec, policy):
+    """Refuse a container spec every Stage B quantum row would refuse.
+
+    The dispatcher's own wrapper runs here, with the grace set a Stage B
+    quantum row declares: the head grace and the 900 s chunk grace. The spec's
+    ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` must sit below the smaller one, its
+    host/device envelope must equal the resource policy's limits, and a
+    declared cotangent workspace needs its identity mount. A spec that fails
+    would publish metadata whose every quantum the dispatcher then refuses.
+    """
+    from tools.dispatch_joint_quanta import (
+        CHUNK_PROGRESS_GRACE_S, HEAD_PROGRESS_GRACE_S, DispatchRefused, _container_wrap)
+    try:
+        _container_wrap(spec_path, ['python3'], resource_policy=policy,
+                        progress=[('head', HEAD_PROGRESS_GRACE_S), ('chunk', CHUNK_PROGRESS_GRACE_S)])
+    except DispatchRefused as exc:
+        raise ValueError(f'Stage B spec refused by the quantum dispatcher: {exc}') from exc
+    if str(spec.get('env', {}).get('PRISMAQUANT_PROD_ACT_SCALES')) != '0':
+        raise ValueError('Stage B spec must explicitly seal native static activation semantics')
+
+
 def prepare(args):
     inputs = _load_json(args.pair_inputs, digest=args.pair_inputs_sha256, where='catalog pair')
     plan = _load_json(Path(inputs['extended_plan']['path']), digest=inputs['extended_plan']['sha256'], where='extended plan')
@@ -101,14 +122,7 @@ def prepare(args):
     derivation = _load_json(args.derivation, digest=args.derivation_sha256, where='original quantum derivation')
     spec = _load_json(args.spec, digest=args.spec_sha256, where='reviewed Stage B container spec')
     policy = verify_policy(plan['stage_b_resource_policy'])
-    from tools.dispatch_joint_quanta import (
-        CHUNK_PROGRESS_GRACE_S, HEAD_PROGRESS_GRACE_S, _container_wrap)
-    # The grace set a Stage B quantum row declares; the spec's staged-range
-    # wait must sit below its smallest member (require_staged_wait_below_grace).
-    _container_wrap(args.spec, ['python3'], resource_policy=policy,
-                    progress=[('head', HEAD_PROGRESS_GRACE_S), ('chunk', CHUNK_PROGRESS_GRACE_S)])
-    if str(spec.get('env', {}).get('PRISMAQUANT_PROD_ACT_SCALES')) != '0':
-        raise ValueError('Stage B spec must explicitly seal native static activation semantics')
+    check_stage_b_spec(args.spec, spec, policy)
     root = args.metadata_root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     proof_path = root/'catalog-extension.json'

@@ -1,5 +1,35 @@
 # PrismaQuant Architecture
 
+GLM Stage B runs from main (2026-09-22, `ws-sb2/stageb-runnable-990-20260922`,
+PQ #990). The Stage B commits that lived only on the frozen campaign union
+(`integrate/glm-campaign-final-20260922`) are ported onto main: the bounded
+resource policy (`prismaquant/joint_stageb_resources.py`), the capture-bound
+metadata producer (`tools/prepare_extended_joint_quanta.py`), catalog-extension
+authentication at dispatch, the outer PB scratch declaration, and the dev-mode
+post-intake prepared digest check (`tessera_joint_aura.require_prepared_digests`).
+Main keeps its own bounded cotangent scratch (#956) and its overlay Hessian
+identity by content (#986); the union's copies of both are dropped.
+Candidate order is now one rule, `joint_catalog_extension.extended_roster`: an
+added format goes before the terminal BF16 that every sealed prepared roster
+ends in. The loader (`attach_candidate_overlay`), the overlay assembler
+(`tools/assemble_t4_overlay.py`) and the pair check (`verify_catalog_pair`) all
+use it, and the pair check now compares order, not only sets, because Stage B
+compares the prepared roster with the loaded one in order. The assembler also
+binds a Stage B resource policy (`--stage-b-resource-policy`) onto the extended
+plan and prepared file. The dispatcher validates a declared cotangent workspace
+against its writable identity mount and seals both scratch variables into the
+outer PB request from the same inlined spec bytes. `prepare_extended_joint_quanta`
+runs the dispatcher's own spec check with the quantum row's grace set, so a
+spec whose `PRISMAQUANT_STAGED_RANGE_WAIT_S` is not below 900 s refuses before
+any metadata is published. `tools/prepare_stageb_after_capture.sh` is the
+repository launcher for that step; it resolves the interpreter from the Tessera
+dev pin. Gates: `tests/test_joint_catalog_extension.py`,
+`tests/test_prepare_extended_joint_quanta.py`,
+`tests/test_joint_stageb_resources.py`, `tests/test_dispatch_joint_quanta.py`,
+`tests/test_stage_b_prepared_digest_dev_mode.py`,
+`tests/test_campaign_recovery_scratch_seam.py`. No format, pipeline default or
+ship gate changes.
+
 GLM router epsilon (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`, PQ
 #938): `native_moe_panel.validate_glm_routing` no longer requires the router
 normalization epsilon to be `1e-6`, LFM's value. It accepts the value the
@@ -201,7 +231,10 @@ plans. The capture's identity and digest remain original in every quantum;
 the separate extension binding is sealed into each new record and retained
 through the joined handoff. Generator `--catalog-extension` and its SHA256
 require an actual completed capture. Validation of a proposed catalog pair
-alone grants no capture-reuse authority.
+alone grants no capture-reuse authority. Each extended roster is the original
+roster with the added format inserted before its terminal BF16
+(`joint_catalog_extension.extended_roster`); the pair check refuses any other
+order, and a unit that already offers the added format keeps its roster.
 
 The optional digest-bound `inputs.candidate_overlay` augments the complete
 historical anchor intake without rewriting the original merged journal or
@@ -263,8 +296,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `feat/glm-native-unpriced-20260922`.
+As of: 2026-09-22 · `ws-sb2/stageb-runnable-990-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `ws-sb2/stageb-runnable-990-20260922`) for **GLM Stage B
+from main** (PQ #990): the union-only Stage B commits are ported, extension
+candidates insert before the terminal BF16 in the loader, assembler and pair
+check, and the Stage B prepare step has a repository launcher; see the entry of
+that name at the top. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-22, `feat/glm-native-unpriced-20260922`) for **native
 execution evidence before final joint costs** (PQ #936): raw dense and routed

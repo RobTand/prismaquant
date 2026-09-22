@@ -30,3 +30,41 @@ def test_extension_parent_only_augments_head_and_keeps_exact_layer_body():
     parent['annotations']['plan_sha256'] = 'foreign'
     with pytest.raises(ValueError, match='scientific plan'):
         extend_parent(parent, added, **kwargs)
+
+
+def _stage_b_spec(tmp_path, wait):
+    """The reviewed local-scratch spec's shape, with a chosen staged-range wait."""
+    import json
+    scratch = tmp_path / 'scratch'
+    spec = {'container': {'content_sha256': 'd'*64, 'image': 'prismaquant-glm-derivative:test',
+                          'mounts': [{'readonly': False, 'source': str(scratch), 'target': str(scratch)}]},
+            'container_admission_reference': 'content:sha256:' + 'b'*64,
+            'cpu_memory_gb': 28,
+            'env': {'PRISMAQUANT_MAX_GPU_MEM_GB': '72', 'PRISMAQUANT_PROD_ACT_SCALES': '0',
+                    'PRISMAQUANT_STAGED_RANGE_WAIT_S': str(wait),
+                    'PRISMAQUANT_STAGE_B_COTANGENT_ROOT': str(scratch),
+                    'PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES': str(36 * 1024 ** 3)}}
+    path = tmp_path / 'spec.json'
+    path.write_text(json.dumps(spec))
+    return path, spec
+
+
+_POLICY = {'limits': {'host_bytes': 28 * 1024 ** 3, 'gpu_bytes': 72 * 1024 ** 3,
+                      'physical_bytes': 100 * 1024 ** 3}}
+
+
+def test_stage_b_spec_wait_must_sit_below_the_chunk_grace(tmp_path):
+    """The reviewed spec a52b5359... seals a 900 s wait; every quantum row refuses it (#990)."""
+    from tools.prepare_extended_joint_quanta import check_stage_b_spec
+    path, spec = _stage_b_spec(tmp_path, 899)
+    check_stage_b_spec(path, spec, _POLICY)
+    path, spec = _stage_b_spec(tmp_path, 900)
+    with pytest.raises(ValueError, match='progress grace'):
+        check_stage_b_spec(path, spec, _POLICY)
+
+
+def test_stage_b_spec_envelope_must_equal_the_resource_policy(tmp_path):
+    from tools.prepare_extended_joint_quanta import check_stage_b_spec
+    path, spec = _stage_b_spec(tmp_path, 600)
+    with pytest.raises(ValueError, match='resource policy'):
+        check_stage_b_spec(path, spec, {'limits': {**_POLICY['limits'], 'gpu_bytes': 64 * 1024 ** 3}})
