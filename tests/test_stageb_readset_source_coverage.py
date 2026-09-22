@@ -180,6 +180,8 @@ def _cli_fixture(tmp_path):
 
 
 def test_cli_completes_in_new_generation_preserving_prior_tiling(tmp_path):
+    from fleet_sdk import require_prismabuild_sdk
+    require_prismabuild_sdk()
     import regenerate_joint_quanta as regen
     campaign, receipt_path, spans = _cli_fixture(tmp_path)
     original = tmp_path / "original-records"
