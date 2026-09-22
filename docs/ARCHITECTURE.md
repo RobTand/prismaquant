@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Distributed joint-cost joins retain the runtime's measured per-unit statistics,
+unaltered cost rows, and each quantum's original provenance. Production-shaped
+payloads must agree on schema and probe identity and cover exactly their own
+statistics roster; incomplete joins remain diagnostic and cannot enter the
+allocation handoff. The join CLI accepts `--records` for an immutable metadata
+generation as well as its historical `--input-root` layout. The ordinary Tessera
+handoff reconstructs its shared anchor record from the digest-bound original
+plan and prepared completion, then applies its existing per-cell source,
+render, calibration, and wire checks. Its PB read manifest names the same
+prepared/cache files for either monolithic or distributed costs. No timing
+price, serving qualification, or missing candidate is inferred by this bridge.
+
 The full-engine report reader accepts the producer's optional `allocator_config`
 and v2 startup reservation witness fields. It recomputes reserved extent and
 same-sample slack from routed startup records or the versioned dense startup
