@@ -1515,9 +1515,12 @@ def _await_layer_readset(by_shard, *, source_authentication=None):
       The read that follows refuses exactly where and as it did before, so
       an unreachable range fails with the same error from the same line.
     * It waits only on ``RANGE_UNCOVERED`` -- a span PrismaBuild's sealed
-      readset declares and no mover has written yet. A span the readset
-      does not declare, or an entry that covers it and fails a check, ends
-      the wait at once.
+      readset declares and no mover has written yet, including a span every
+      covering entry reports missing for (PQ #903: a stale row whose staged
+      file an eviction unlinked, while the layer's own declared range has
+      not landed). A span the readset does not declare, or an entry that
+      covers it and fails a hard check (wrong size, non-regular, permission
+      or integrity), ends the wait at once.
     * If the sealed readset is not bound (see
       ``ResidencyResolver.declared_readset``) this process cannot tell
       those apart, so it does not wait at all. Not knowing is not a

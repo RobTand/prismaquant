@@ -1,13 +1,50 @@
 # PrismaQuant Architecture
 
-As of: 2026-09-21 · `muse/stager904-reconciled-20260921`.
+Distributed joint-cost joins retain the runtime's measured per-unit statistics,
+unaltered cost rows, and each quantum's original provenance. Production-shaped
+payloads must agree on schema and probe identity and cover exactly their own
+statistics roster; incomplete joins remain diagnostic and cannot enter the
+allocation handoff. The join CLI accepts `--records` for an immutable metadata
+generation as well as its historical `--input-root` layout. The ordinary Tessera
+handoff reconstructs its shared anchor record from the digest-bound original
+plan and prepared completion, then applies its existing per-cell source,
+render, calibration, and wire checks. Its PB read manifest names the same
+prepared/cache files for either monolithic or distributed costs. No timing
+price, serving qualification, or missing candidate is inferred by this bridge.
+
+The full-engine report reader accepts the producer's optional `allocator_config`
+and v2 startup reservation witness fields. It recomputes reserved extent and
+same-sample slack from routed startup records or the versioned dense startup
+check, and refuses missing allocator binding, partial claims, or disagreement.
+This is a startup observation, not a run-long peak; it neither closes an open
+resource domain nor substitutes for the transient boundary's reservation-slack
+evidence.
+
+As of: 2026-09-22 · `feat/stagea-background-stager-895`.
 Stamps follow, newest first, each recording its own branch and date.
 
-Re-stamped (2026-09-21, `muse/stager904-reconciled-20260921`) for
+Re-stamped (2026-09-22, `feat/stagea-background-stager-895`) for
 **retirement and close ownership** (PQ #918, #919, #920, #922): an unresolved queued or running stager
 publication refuses origin retirement with a timeout. The origin, live-byte
 charge, reference and slot stay owned, and the release report names the debt.
 No format, kernel order, or staging-budget default changes.
+
+Re-stamped (2026-09-22, `diagnose/r4-retiring-cover-20260922`) for **a retiring
+cover yielding to an independently leased overlap** (PQ #916). A broad head
+entry may still pass every file check while PB has closed its material
+generation to new leases. After that exact typed `retiring` refusal, the
+source reader takes one finite snapshot of other covering entries through
+the existing resolver checks, then tries each entry's own real lease. It
+keeps the successful pin and descriptor for the complete reader lifetime.
+Ordinary successful reads do no extra metadata work. Unknown authority,
+changed identity, and other SDK integrity refusals stop immediately; when
+no alternative can serve, hard file failures remain integrity refusals and
+missing/all-retiring alternatives serve no bytes. No HDD fallback, lease
+bypass, phase-policy change, or PB runtime change is introduced. Gates:
+`tests/test_staged_range_retiring_cover.py` uses real PB fragments, sidecars,
+pins, retiring marks, SSD/RAM admission, and exact releases.
+
+Re-stamped (2026-09-21, `fix/pq-903-stale-missing-waitable`) for **a stale covering row waiting instead of refusing** (PQ #903). After #902 every covering entry is asked, but every covering staged file missing still refused at once, even when the sealed readset declares the span and the layer's own range has not landed yet: the map is behind the file system (partial eviction or recompose lag), not the bytes unavailable. `ResidencyResolver._range_answer` now carries a typed missing cause (`errno.ENOENT` on the staged `lstat` with no RAM offer, never a `strerror` substring match); `staged_range_outcome` reports all-missing + declared as `RANGE_UNCOVERED` (same silent `range_misses` waitable miss as no covering entry) and all-missing + undeclared as `RANGE_UNDECLARED`. Any hard failure -- entry runs past the declared file, staged copy not regular, wrong size, or unreadable for any other errno including permission -- still refuses at once and reports the first hard reason (integrity first). The layer pre-flight waits on the waitable miss under its single deadline and the read below still refuses after the bound with no pool read. No format, lane, pin, kernel order or ship gate changes. Gates: `tests/test_staged_range_every_covering_entry.py`, `tests/test_strict_reader_tier_enforcement.py` (mid-wait map rewrite with real PB writers and lease paths).
 
 Re-stamped (2026-09-21, `fix/pq-890-tests-20260921`) for **what counts as a
 produced-group release failure** (PQ #890). No format, lane, pin, ship-gate
@@ -110,8 +147,9 @@ phase and **gates** the result:
   toward this gate either, because PrismaBuild stages and evicts by phase. The
   gate is about what is **declared**, not about which entry the reader picks:
   the resolver asks every map entry that covers a span, lowest offset first, so
-  a neighbour's header entry still serves a layer's first tensors while it is
-  staged, and the layer's own entry serves them once it is not (PQ #902).
+  a neighbour's header entry can serve while its file and lease both admit
+  the read. A missing file or typed retiring generation cannot hide the
+  layer's independently admitted entry (PQ #902, #916).
 - Each run of uncovered tensors becomes one entry from the first tensor's own
   file offset to the last one's end. The offset is derived, not aligned, so it
   cannot land on a header entry's `(path, 0)`.

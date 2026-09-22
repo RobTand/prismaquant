@@ -2284,3 +2284,148 @@ def test_a_non_strict_layer_read_with_a_map_still_never_waits(
     assert report['bytes_from_pool'] == 0
     assert report['range_wait_polls'] == 0
     assert report['declared_readset']['state'] == 'unread'
+
+# -- a stale covering row whose file is missing waits when declared (PQ #903)
+#
+# Split out of #902. After #902 the resolver asks every covering entry, so a
+# stale entry no longer hides a staged one. One path still ended a run on bytes
+# PrismaBuild was about to deliver: a neighbour phase's entry covers the span,
+# its staged file has been unlinked by an eviction, its row is still in the
+# composed map, and the layer's own declared range has not landed yet, so there
+# is no second row. Every covering entry failed -> RANGE_REFUSED -> the reader
+# stopped waiting at once. If the stale row were absent the same span would be
+# RANGE_UNCOVERED and the mover would land it. The refusal was caused by the
+# map being behind the file system, not by the bytes being unavailable.
+#
+# PQ #903: every covering staged file missing + span declared stays waitable
+# for its own range (typed ENOENT, never a strerror substring match);
+# wrong-size, non-regular, permission and other integrity failures still
+# refuse at once. These tests rewrite the composed map mid-wait through the
+# REAL PB writers with real file and lease paths.
+
+
+def test_a_layer_read_waits_when_the_only_covering_entry_is_stale_missing(
+        tmp_path, monkeypatch):
+    """Stale missing row + declared own range not yet landed: wait, then serve."""
+    path, _tensors = _shard(tmp_path)
+    stage_root = _stage_root(tmp_path)
+    staged_stale = _stage_whole(stage_root, path)
+    resolver, consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    publish({'stale': (path, staged_stale)})
+    assert resolver.declared_readset()['state'] == 'bound'
+    # The eviction unlinked the file; the row is still in the composed map.
+    staged_stale.unlink()
+    # The layer's own range lands mid-wait as a distinct staged file.
+    staged_own = stage_root / 'model-00001-of-00002.own.safetensors'
+    staged_own.write_bytes(path.read_bytes())
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "90")
+
+    def mover_leg():
+        time.sleep(2.0)
+        publish({'own': (path, staged_own)})
+
+    thread = threading.Thread(target=mover_leg, name='own-range-mover')
+    thread.start()
+    try:
+        served = _read_layer(path)
+    finally:
+        thread.join(timeout=120)
+        assert not thread.is_alive()
+
+    from safetensors import safe_open
+    with safe_open(str(path), framework='pt') as reference:
+        want = reference.get_tensor('f32')
+    got = served['layer.0.f32']
+    assert got.dtype == want.dtype and got.shape == want.shape
+    assert torch.equal(got.view(torch.uint8), want.view(torch.uint8))
+
+    report = resolver.report()
+    assert report['bytes_from_pool'] == 0
+    assert report['bytes_from_stage'] > 0
+    assert report['range_waits_served'] == 1
+    assert report['range_waits_refused'] == 0
+    assert report['range_wait_polls'] >= 1
+    assert report['fallback_count'] == 0
+    assert report['declared_readset']['state'] == 'bound'
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_stale_missing_entry_with_nothing_landing_refuses_after_its_bound(
+        tmp_path, monkeypatch):
+    """Stale missing row + declared span nothing ever stages: wait, then refuse."""
+    path, _ = _shard(tmp_path)
+    staged_stale = _stage_whole(_stage_root(tmp_path), path)
+    resolver, _consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    publish({'stale': (path, staged_stale)})
+    staged_stale.unlink()
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "3")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    waited = time.monotonic() - started
+    assert 2.0 <= waited < 60.0, f"waited {waited:.1f}s against a 3s bound"
+
+    report = resolver.report()
+    assert report['range_waits_refused'] == 1
+    assert report['range_waits_served'] == 0
+    assert report['range_wait_polls'] >= 1
+    assert report['bytes_from_pool'] == 0
+    assert report['fallback_count'] == 0
+
+
+def test_a_nonregular_staged_entry_refuses_without_waiting(
+        tmp_path, monkeypatch):
+    """A covering entry that is a directory is integrity evidence, not a miss."""
+    path, _ = _shard(tmp_path)
+    staged = _stage_whole(_stage_root(tmp_path), path)
+    resolver, _consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    publish({'s': (path, staged)})
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+    staged.unlink()
+    staged.mkdir()
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    assert time.monotonic() - started < 30.0
+
+    report = resolver.report()
+    assert report['range_wait_polls'] == 0
+    assert report['range_waits_refused'] == 0
+    assert report['fallback_count'] >= 1
+    assert report['bytes_from_pool'] == 0
+
+
+def test_a_stale_missing_entry_with_unbound_readset_does_not_wait(
+        tmp_path, monkeypatch):
+    """Missing file + unbound readset: resolver says UNCOVERED, caller declines.
+
+    PQ #903 maps all-missing to RANGE_UNCOVERED whenever `_declares` is not
+    False, which includes the unbound (None) case. The wait itself stays
+    gated on a bound sealed readset (`_await_layer_readset` returns early
+    when `declared_readset.state != "bound"`), so an unbound run keeps the
+    pre-#874 behaviour: immediate refusal, no polls, reason recorded.
+    """
+    path, _ = _shard(tmp_path)
+    staged_stale = _stage_whole(_stage_root(tmp_path), path)
+    resolver, _consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path), seal=False)
+    publish({'stale': (path, staged_stale)})
+    staged_stale.unlink()
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+        _read_layer(path)
+    assert time.monotonic() - started < 30.0
+
+    report = resolver.report()
+    assert report['declared_readset']['state'] == 'unbound'
+    assert report['range_wait_polls'] == 0
+    assert report['range_waits_served'] == 0
+    assert report['range_waits_refused'] == 0
+    assert report['bytes_from_pool'] == 0

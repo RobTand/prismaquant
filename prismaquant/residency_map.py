@@ -67,6 +67,7 @@ entry; the resolver never waits for the map to be complete.
 from __future__ import annotations
 
 import bisect
+import errno
 import hashlib
 import json
 import os
@@ -94,9 +95,12 @@ MAX_RECORDED_FALLBACKS = 256
 #: ``ResidencyResolver.staged_range_outcome`` verdicts. An entry covering the
 #: span that passed every check; no entry covering it (the map's ordinary
 #: mid-flight state, which says nothing about whether the span is declared);
-#: an entry covering it that then failed a check, already recorded as a
-#: fallback. Named rather than spelled inline so a caller's branch reads as
-#: the distinction it is making.
+#: an entry covering it that then failed a hard check (wrong size, non-regular,
+#: permission or integrity -- already recorded as a fallback); a covering entry
+#: whose staged file is merely missing (``errno.ENOENT``) is not a refusal: when
+#: the sealed readset declares the span it reports ``RANGE_UNCOVERED`` so the
+#: caller waits for the own range to land. Named rather than spelled inline so
+#: a caller's branch reads as the distinction it is making.
 #: Larger than any byte offset a declared file can hold, so a bisect key of
 #: ``(start, _INFINITE_OFFSET)`` orders after every real span beginning at
 #: ``start``. Not a magic constant: 2**64 is past the addressable range of
@@ -879,10 +883,14 @@ class ResidencyResolver:
             an entry covers the span and passed every pre-open check.
         ``RANGE_UNCOVERED``
             no entry covers the span, and PrismaBuild's sealed readset
-            declares it. The map holds only what a mover has already
-            written, so a range PB published but has not moved yet lands
-            here: it is *not staged yet*, which is not *not staged*.
-            Counted in ``range_misses``, silent.
+            declares it -- or every covering entry's staged file is merely
+            missing (``errno.ENOENT``) and the readset declares the span.
+            The map holds only what a mover has already written, so a range
+            PB published but has not moved yet lands here: it is *not staged
+            yet*, which is not *not staged*. A stale covering row whose file
+            an eviction unlinked is the same state under another name: the
+            bytes are declared and may still land. Counted in
+            ``range_misses``, silent.
         ``RANGE_UNDECLARED``
             no entry covers the span and the sealed readset does not
             declare it -- nothing was ever asked to stage these bytes, so
@@ -895,16 +903,22 @@ class ResidencyResolver:
             reported as unknown; callers decide what to do with it, and
             the reader's pre-flight declines to wait on one.
         ``RANGE_REFUSED``
-            an entry covers the span and then failed a check: the declared
-            file is unstatable, the entry runs past it, or the staged copy
-            is unreadable, not a regular file, or a different size than the
-            map says, with no RAM offer. Counted and printed as a fallback.
+            an entry covers the span and then failed a hard check: the
+            declared file is unstatable, the entry runs past it, or the
+            staged copy is not a regular file, is a different size than the
+            map says, or is unreadable for any cause other than missing
+            (permission included), with no RAM offer. Counted and printed
+            as a fallback. A missing staged file alone never refuses: see
+            ``RANGE_UNCOVERED``.
 
         The kinds exist because the right response differs. Re-asking can
         turn ``RANGE_UNCOVERED`` into a hit, because the map changes under
         its readers; it cannot improve ``RANGE_REFUSED``, which is evidence
         already in hand -- an entry that runs past the declared file runs
-        past it on every look.
+        past it on every look, and a wrong-size or non-regular staged file
+        is corrupt on every look. A missing staged file is the opposite: the
+        entry names bytes the readset declares and a mover may still write,
+        so re-asking is exactly right.
 
         This method reports the kind and never waits. Re-asking belongs to
         the caller -- ``layer_streaming._await_layer_readset``, before a
@@ -916,8 +930,12 @@ class ResidencyResolver:
         entry is asked, lowest offset first, and the first to pass serves the
         span. The map is composed after the fact, so an entry can outlive its
         staged file (an eviction that has not been recomposed yet); that entry
-        must not hide a healthy one behind it. ``RANGE_REFUSED`` means every
-        covering entry failed, and reports the first one's reason.
+        must not hide a healthy one behind it. ``RANGE_REFUSED`` means at
+        least one covering entry failed hard and none passed, and reports the
+        first hard reason (integrity first: a wrong-size entry behind a
+        missing one still refuses). All-missing with the span declared is
+        ``RANGE_UNCOVERED``; all-missing with the span undeclared is
+        ``RANGE_UNDECLARED``.
 
         ``staged_read``'s pre-open checks, asked of a byte range. One entry has
         to cover the span outright; the staged copy has to be a regular file of
@@ -930,8 +948,10 @@ class ResidencyResolver:
 
         A span no entry covers is a miss, counted and silent: a half-staged
         shard is the ordinary mid-flight state, not a refusal worth a line per
-        tensor. An entry that covers it and then fails a check is a fallback,
-        counted and printed, exactly as a whole-file refusal is.
+        tensor. An entry that covers it and then fails a hard check is a
+        fallback, counted and printed, exactly as a whole-file refusal is. A
+        covering entry whose staged file is merely missing is a miss too when
+        the span is declared: same silence, same counter, same wait.
 
         The read position inside the staged file is ``start - entry["offset"]``:
         PrismaBuild's mover writes a range as a file of its own, from byte 0.
@@ -958,47 +978,114 @@ class ResidencyResolver:
                         path, "declared file is unstatable, cannot bind the entry to it")
                     return None, RANGE_REFUSED
             refusal = None
+            failed_before = False
             for entry in covering:
-                answer, reason = self._range_answer(entry, path, declared_size)
+                answer, reason, missing = self._range_answer(
+                    entry, path, declared_size)
                 if answer is not None:
-                    if refusal is not None:
+                    if failed_before:
                         self._range_rows_passed_over += 1
                     return answer, RANGE_HIT
-                refusal = refusal or reason
-            self._record_fallback(path, refusal)
-            return None, RANGE_REFUSED
+                failed_before = True
+                if not missing:
+                    refusal = refusal or reason
+            if refusal is not None:
+                self._record_fallback(path, refusal)
+                return None, RANGE_REFUSED
+            # Every covering staged file is missing. When the sealed readset
+            # declares the span the bytes may still land, so this is the same
+            # waitable miss as no covering entry at all -- silent, counted in
+            # range_misses, waited on by the caller. Otherwise nothing will
+            # ever produce them.
+            self._range_misses += 1
+            if self._declares(path, start, end) is False:
+                return None, RANGE_UNDECLARED
+            return None, RANGE_UNCOVERED
+
+    def staged_range_alternatives(
+            self, declared: str | Path, start: int, end: int, *,
+            rejected_offset: int, declared_size: int
+            ) -> tuple[list[dict], str | None]:
+        """One finite snapshot of other checked covers after lease retirement.
+
+        This is selection, never admission. Each returned entry still needs
+        its own PB lease. Called only after the first cover's typed retiring
+        refusal, so ordinary successful reads do no extra metadata work.
+        The first hard pre-open refusal is retained in case no alternative
+        can serve; missing files alone do not become integrity failures.
+        """
+        if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start <= end:
+            raise ValueError("a staged range is a non-negative [start, end) span")
+        path = _normal(declared)
+        with self._lock:
+            self._read_map()
+            index, real = self._interval_index()
+            rows = index.get(path) or real.get(path) or ()
+            answers, refusal = [], None
+            for entry in rows:
+                if (entry['offset'] == rejected_offset
+                        or not entry['offset'] <= start
+                        or end > entry['offset'] + entry['bytes']):
+                    continue
+                answer, reason, missing = self._range_answer(entry, path, declared_size)
+                if answer is not None:
+                    answers.append(answer)
+                elif not missing:
+                    refusal = refusal or reason
+            return answers, refusal
 
     def _range_answer(self, entry: dict, path: str,
-                      declared_size: int) -> tuple[dict | None, str | None]:
-        """``(answer, None)`` or ``(None, reason)`` for one covering entry.
+                      declared_size: int
+                      ) -> tuple[dict | None, str | None, bool]:
+        """``(answer, None, False)`` or ``(None, reason, missing)``.
+
+        ``missing`` is True only when the staged copy's ``lstat`` fails with
+        ``errno.ENOENT`` and no RAM offer covers the span: the file is not
+        there, which an eviction or a not-yet-landed mover explains. Every
+        other failure -- the entry runs past the declared file, the staged
+        copy is not a regular file, is the wrong size, or is unreadable for
+        any other errno (permission included) -- is a hard refusal. The
+        cause is classified from ``error.errno``, never by matching the
+        translated ``strerror`` text, and integrity refusals are never
+        converted to waitable misses.
 
         Caller holds the lock. Records nothing about the stage copy: the caller
         knows whether another entry served the span, and only a span nothing
-        served is a fallback.
+        served is a fallback (hard) or a miss (all-missing).
         """
         if entry["offset"] + entry["bytes"] > declared_size:
-            return None, "map entry runs past the declared file"
+            return None, "map entry runs past the declared file", False
         ram_path = self._ram_offer(entry, path)
         stage_path = entry["stage_path"]
         try:
             info = os.lstat(stage_path)
         except OSError as error:
-            stage_refusal = f"staged copy is unreadable: {error.strerror}"
+            if ram_path is not None:
+                answer = {"declared_path": path, "stage_path": stage_path,
+                          "bytes": entry["bytes"], "offset": entry["offset"],
+                          "sha256": entry["sha256"],
+                          "ram_path": ram_path}
+                return answer, None, False
+            if error.errno == errno.ENOENT:
+                return (None,
+                        f"staged copy is missing: {error.strerror}", True)
+            return (None,
+                    f"staged copy is unreadable: {error.strerror}", False)
         else:
             if not stat.S_ISREG(info.st_mode):
-                stage_refusal = "staged copy is not a regular file"
+                stage_refusal: str | None = "staged copy is not a regular file"
             elif info.st_size != entry["bytes"]:
                 stage_refusal = "staged copy size differs from the map"
             else:
                 stage_refusal = None
         if stage_refusal is not None and ram_path is None:
-            return None, stage_refusal
+            return None, stage_refusal, False
         answer = {"declared_path": path, "stage_path": stage_path,
                   "bytes": entry["bytes"], "offset": entry["offset"],
                   "sha256": entry["sha256"]}
         if ram_path is not None:
             answer["ram_path"] = ram_path
-        return answer, None
+        return answer, None, False
 
     # -- the accounting --------------------------------------------------
 
