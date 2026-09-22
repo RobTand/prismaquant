@@ -77,18 +77,110 @@ def _declared_entry(map_path: str) -> tuple[str, dict]:
     return key.split(":", 1)[1], dict(entries[key])
 
 
+class _ComputeClock:
+    """Where the compute thread's wall time goes, measured from outside.
+
+    The owner's own counters changed meaning when its PrismaBuild calls
+    moved to a stager thread (RobTand/prismaquant#895), so a before and
+    after comparison cannot rest on them. This clock does not: it times
+    every call the driver makes into the owner, and separately the raw
+    tensor writes and reads inside those calls. Owner time less raw tensor
+    I/O is what the compute thread spent on the owner's bookkeeping and on
+    PrismaBuild, which is the time a GPU would have been idle. It reads the
+    same on any owner implementation.
+    """
+
+    def __init__(self):
+        import threading
+        self.totals: dict[str, float] = {}
+        self._thread = threading.get_ident()
+
+    def add(self, name, seconds):
+        import threading
+        if threading.get_ident() == self._thread:
+            self.totals[name] = self.totals.get(name, 0.0) + seconds
+
+    def span(self, name):
+        import time
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _span():
+            started = time.monotonic()
+            try:
+                yield
+            finally:
+                self.add(name, time.monotonic() - started)
+        return _span()
+
+    def patch_raw_io(self):
+        """Time the entry writer and the window read the owner delegates to."""
+
+        import time
+        from contextlib import contextmanager
+        import prismaquant.perturbed_x_cache as cache
+
+        raw_write = cache.write_exact_activation_cache_entry
+        raw_prefetch = cache.prefetch_exact_activation_cache_entries
+
+        def timed_write(*args, **kwargs):
+            started = time.monotonic()
+            try:
+                return raw_write(*args, **kwargs)
+            finally:
+                self.add("raw_write", time.monotonic() - started)
+
+        @contextmanager
+        def timed_prefetch(*args, **kwargs):
+            context = raw_prefetch(*args, **kwargs)
+            started = time.monotonic()
+            window = context.__enter__()
+            self.add("raw_read", time.monotonic() - started)
+            try:
+                yield window
+            except BaseException as exc:
+                if not context.__exit__(type(exc), exc, exc.__traceback__):
+                    raise
+            else:
+                context.__exit__(None, None, None)
+
+        cache.write_exact_activation_cache_entry = timed_write
+        cache.prefetch_exact_activation_cache_entries = timed_prefetch
+
+    OWNER_SPANS = ("write", "prefetch_enter", "prefetch_exit", "stage_ahead",
+                   "retain_exit", "retire")
+
+    def blocked(self, totals=None):
+        """Owner time on the compute thread that was not raw tensor I/O."""
+
+        totals = self.totals if totals is None else totals
+        owner = sum(totals.get(name, 0.0) for name in self.OWNER_SPANS)
+        return owner - totals.get("raw_write", 0.0) - totals.get("raw_read", 0.0)
+
+    def delta(self, before):
+        return {name: self.totals.get(name, 0.0) - before.get(name, 0.0)
+                for name in set(self.totals) | set(before)}
+
+
 def _chain_cycle(publication, report, report_progress, *,
-                 window_compute_s: float = 0.0) -> int:
+                 window_compute_s: float = 0.0, group_size: int = 4,
+                 entry_mib: int = 0) -> int:
     """A miniature Stage A over real staging: forward, tail, two-layer roll.
 
     Two boundary planes and 4 probe planes of 2 groups each, in the order
-    the real capture uses: each boundary plane is written and read back once
-    (the forward pass), the incoming cotangent planes are written (the
-    tail), and each layer's roll reads its input boundary in all 4 probe
-    passes while it replaces every cotangent entry it reads. What is
-    asserted is the staging the read-ahead rules promise: one staging of a
-    boundary group per roll, no group staged twice in a roll, no release
-    debt, and the durable charge back to zero.
+    the real capture uses. The forward pass writes plane 0, then each later
+    layer reads the plane below it one window at a time and writes its own
+    plane's group in that window. The tail reads the top plane and writes
+    the incoming cotangent planes. Each layer's roll reads its input
+    boundary in all 4 probe passes while it replaces every cotangent entry
+    it reads. What is asserted is the staging the read-ahead rules promise:
+    one staging of a boundary group per roll, no group staged twice in a
+    roll, no release debt, and the durable charge back to zero.
+
+    ``entry_mib`` and ``group_size`` set the production geometry (16 MiB
+    entries, 64 a group, so 1 GiB a group). A cycle with 8 KB groups on an
+    idle fleet did not show what the 512 run showed (#895): a publication
+    took a second and a copy was instant.
     """
 
     import time
@@ -98,73 +190,173 @@ def _chain_cycle(publication, report, report_progress, *,
     from prismaquant.cost_streaming import (
         BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
 
-    group_size, groups, n_probes, layers = 4, 2, 4, 2
+    groups, n_probes, layers = 2, 4, 2
     n_batches = group_size * groups
+    numel = (entry_mib << 20) // 4 if entry_mib else 8
+    entry_bytes = numel * 4
+    # Live at once: every boundary plane, every probe's cotangent plane and
+    # the plane the roll is writing. Two groups are resident in a window.
+    file_bytes = entry_bytes + 65536
     storage = StreamedBoundaryArtifacts({
         "schema": BOUNDARY_STORAGE_SCHEMA,
         "directory": str(Path(publication.output_prefix) / "chain-cycle"),
-        "max_resident_bytes": 1 << 22, "max_auxiliary_bytes": 1 << 22,
-        "max_artifact_bytes": 1 << 24, "prefetch_batches": group_size})
+        # Two groups are resident in a chain window, and a write inside it
+        # reserves the entry it is writing on top of them.
+        "max_resident_bytes": max(
+            1 << 22, (2 * group_size + 2) * entry_bytes + (1 << 20)),
+        "max_auxiliary_bytes": 1 << 22,
+        "max_artifact_bytes": max(
+            1 << 24, (layers + n_probes + 2) * n_batches * file_bytes),
+        "prefetch_batches": group_size})
+    clock = _ComputeClock()
+    clock.patch_raw_io()
 
     def boundary_value(layer, batch):
-        return torch.arange(8, dtype=torch.float32) + 1000 * layer + batch
+        # Exact in float32: the largest value stays under 2**24.
+        return torch.arange(numel, dtype=torch.float32) + 1000 * layer + batch
 
     def windows(references):
         for start in range(0, n_batches, group_size):
             yield start, references[start:start + group_size]
 
+    def write(*args, **kwargs):
+        with clock.span("write"):
+            return storage.write(*args, **kwargs)
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def prefetch(references):
+        context = storage.prefetch(references)
+        with clock.span("prefetch_enter"):
+            window = context.__enter__()
+        try:
+            yield window
+        except BaseException as exc:
+            with clock.span("prefetch_exit"):
+                suppressed = context.__exit__(type(exc), exc, exc.__traceback__)
+            if not suppressed:
+                raise
+        else:
+            with clock.span("prefetch_exit"):
+                context.__exit__(None, None, None)
+
+    def phase_record(name, started, before, telemetry_before, n_groups):
+        spent = clock.delta(before)
+        blocked = clock.blocked(spent)
+        after = dict(storage.telemetry)
+        record = {
+            "phase": name, "seconds": round(time.monotonic() - started, 3),
+            "groups": n_groups,
+            "compute_blocked_s": round(blocked, 3),
+            "compute_blocked_per_group_s": round(blocked / max(n_groups, 1), 3),
+            "clock_s": {key: round(value, 3) for key, value in sorted(spent.items())},
+            "telemetry": {key: round(after[key] - telemetry_before.get(key, 0), 3)
+                          for key in sorted(after)
+                          if key.startswith("produced_")
+                          and isinstance(after[key], (int, float))
+                          and after[key] != telemetry_before.get(key, 0)}}
+        # Progress from committed work only: every group this phase read was
+        # staged and read back, and every group it wrote is durable. At
+        # production size one phase is minutes, so the whole cycle cannot
+        # sit inside one stall allowance.
+        record["progress_reported"] = report_progress(
+            PHASE, len(phases) + 1, unit="cycle-phases")
+        return record
+
     marks: dict[str, float] = {}
+    phases = []
     started = time.monotonic()
     with storage:
         storage.bind({"source_model": "live-chain-cycle"}, n_probes=n_probes)
         storage.bind_produced_output(
             publication, group_size=group_size, n_batches=n_batches,
-            max_entry_tensor_bytes=1 << 14, staging_timeout_s=600.0)
+            max_entry_tensor_bytes=max(1 << 14, entry_bytes),
+            staging_timeout_s=900.0 if entry_mib else 600.0)
         report["window_groups"] = storage._produced_plan["window_groups"]
         report["window_compute_s"] = window_compute_s
+        report["geometry"] = {"group_size": group_size, "groups_per_plane": groups,
+                              "entry_bytes": entry_bytes, "layers": layers,
+                              "n_probes": n_probes}
 
-        # Forward: write each plane, then read it back once, as the next
-        # layer's forward does. The read leaves the plane retired.
+        # Forward, in the capture's order: plane 0 is written, then every
+        # later layer reads the plane below it a window at a time and writes
+        # its own group in that window. Each read leaves its group retired.
         boundary = {}
         for layer in range(layers):
-            boundary[layer] = [
-                storage.write(boundary_value(layer, batch), batch_index=batch,
+            before, telemetry_before = dict(clock.totals), dict(storage.telemetry)
+            layer_started = time.monotonic()
+            boundary[layer] = []
+            if layer == 0:
+                for start in range(0, n_batches, group_size):
+                    time.sleep(window_compute_s)
+                    boundary[layer].extend(
+                        write(boundary_value(layer, batch), batch_index=batch,
                               boundary_index=layer)
-                for batch in range(n_batches)]
-            for start, refs in windows(boundary[layer]):
-                with storage.prefetch(refs) as window:
-                    for offset, reference in enumerate(refs):
-                        if not torch.equal(
-                                storage.get(window, reference),
-                                boundary_value(layer, start + offset)):
-                            report["error"] = "forward read returned other bytes"
-                            print(json.dumps(report))
-                            return 1
+                        for batch in range(start, start + group_size))
+            else:
+                for start, refs in windows(boundary[layer - 1]):
+                    with prefetch(refs) as window:
+                        time.sleep(window_compute_s)
+                        for offset, reference in enumerate(refs):
+                            if not torch.equal(
+                                    storage.get(window, reference),
+                                    boundary_value(layer - 1, start + offset)):
+                                report["error"] = "forward read returned other bytes"
+                                print(json.dumps(report))
+                                return 1
+                            boundary[layer].append(write(
+                                boundary_value(layer, start + offset),
+                                batch_index=start + offset, boundary_index=layer))
+            phases.append(phase_record(
+                f"forward-{layer}", layer_started, before, telemetry_before, groups))
         marks["forward_s"] = time.monotonic() - started
         after_forward = dict(storage.telemetry)
 
-        # Tail: the incoming cotangent planes at the top boundary.
-        cotangent = {probe: [
-            storage.write(torch.full((8,), float(10 * probe + 1)) + batch,
-                          batch_index=batch, boundary_index=layers,
-                          probe_index=probe)
-            for batch in range(n_batches)] for probe in range(n_probes)}
-        storage.stage_produced_boundary_ahead(layers - 1)
+        # Tail: read the top plane, write the incoming cotangent planes.
+        before, telemetry_before = dict(clock.totals), dict(storage.telemetry)
+        tail_started = time.monotonic()
+        cotangent = {probe: [] for probe in range(n_probes)}
+        for start, refs in windows(boundary[layers - 1]):
+            with prefetch(refs) as window:
+                time.sleep(window_compute_s)
+                for offset, reference in enumerate(refs):
+                    if not torch.equal(
+                            storage.get(window, reference),
+                            boundary_value(layers - 1, start + offset)):
+                        report["error"] = "tail read returned other bytes"
+                        print(json.dumps(report))
+                        return 1
+                for probe in range(n_probes):
+                    cotangent[probe].extend(
+                        write(torch.full((numel,), float(10 * probe + 1)) + batch,
+                              batch_index=batch, boundary_index=layers,
+                              probe_index=probe)
+                        for batch in range(start, start + group_size))
+        with clock.span("stage_ahead"):
+            storage.stage_produced_boundary_ahead(layers - 1)
+        phases.append(phase_record(
+            "tail", tail_started, before, telemetry_before, groups))
         marks["tail_s"] = time.monotonic() - started
+        after_tail = dict(storage.telemetry)
 
         # Chain: probe outer, window inner, the input boundary re-read in
         # every pass, each cotangent entry replaced as it is read.
         per_layer = []
         for layer in reversed(range(layers)):
             before = dict(storage.telemetry)
+            clock_before = dict(clock.totals)
             layer_started = time.monotonic()
             if layer > 0:
-                storage.stage_produced_boundary_ahead(layer - 1)
-            with storage.retain_produced_boundary(layer):
+                with clock.span("stage_ahead"):
+                    storage.stage_produced_boundary_ahead(layer - 1)
+            retained = storage.retain_produced_boundary(layer)
+            retained.__enter__()
+            try:
                 for probe in range(n_probes):
                     for start, refs in windows(boundary[layer]):
                         incoming = cotangent[probe][start:start + group_size]
-                        with storage.prefetch(list(refs) + list(incoming)) as window:
+                        with prefetch(list(refs) + list(incoming)) as window:
                             time.sleep(window_compute_s)
                             for offset, (b_ref, c_ref) in enumerate(
                                     zip(refs, incoming)):
@@ -177,11 +369,17 @@ def _chain_cycle(publication, report, report_progress, *,
                                     return 1
                                 # The walk's last roll is read by nothing,
                                 # exactly as the capture declares it.
-                                cotangent[probe][start + offset] = storage.write(
+                                cotangent[probe][start + offset] = write(
                                     g + 1.0, batch_index=start + offset,
                                     boundary_index=layer, probe_index=probe,
                                     previous=c_ref, read_back=layer > 0)
+            finally:
+                with clock.span("retain_exit"):
+                    retained.__exit__(None, None, None)
             after = dict(storage.telemetry)
+            phases.append(phase_record(
+                f"chain-{layer}", layer_started, clock_before, before,
+                n_probes * groups))
             per_layer.append({
                 "layer": layer,
                 "seconds": round(time.monotonic() - layer_started, 3),
@@ -196,8 +394,8 @@ def _chain_cycle(publication, report, report_progress, *,
                     "produced_group_ahead_wait_s",
                     "produced_group_credit_waits")}})
         marks["chain_s"] = time.monotonic() - started
-        report["progress_reported"] = report_progress(
-            PHASE, layers, unit="chain-layers")
+        report["progress_reported"] = all(
+            record["progress_reported"] for record in phases)
 
         # The capture's own order: the last roll's entries are disposed of
         # FIRST, and the stage credit is settled after that, as the owner
@@ -216,11 +414,23 @@ def _chain_cycle(publication, report, report_progress, *,
         report["charge_before_disposal"] = publication.durable_charge()
         for reference in list(storage._references.values()):
             storage.retire(reference)
+        # With a stager (RobTand/prismaquant#895) the charge reclaim that a
+        # group's last disposal triggers is queued, not done, when retire()
+        # returns. Cycle s2 read the charge before the queue was empty and
+        # found three groups still charged. The owner's close runs what is
+        # queued; this waits for the same thing before it reads.
+        drain = getattr(storage, "drain_produced_stager", None)
+        if drain is not None:
+            report["stager_drained_before_charge_read"] = drain(600.0)
         report["charge_after_disposal"] = publication.durable_charge()
         report["telemetry"] = dict(storage.telemetry)
         report["group_records"] = storage.produced_group_records()
     report["release_instance"] = publication.release()
     report["per_layer"] = per_layer
+    report["phases"] = phases
+    report["compute_clock_s"] = {
+        name: round(value, 3) for name, value in sorted(clock.totals.items())}
+    report["compute_blocked_s"] = round(clock.blocked(), 3)
     report["marks_s"] = {name: round(value, 3) for name, value in marks.items()}
 
     telemetry = report["telemetry"]
@@ -236,17 +446,18 @@ def _chain_cycle(publication, report, report_progress, *,
         "read_ahead_was_never_refused_or_surrendered":
             telemetry["produced_group_ahead_refusals"] == 0
             and telemetry["produced_groups_ahead_surrendered"] == 0,
-        "the_forward_read_each_boundary_group_once":
-            after_forward["produced_groups_materialized"] == layers * groups,
+        "the_forward_and_tail_read_each_boundary_group_once":
+            after_forward["produced_groups_materialized"]
+            == (layers - 1) * groups
+            and after_tail["produced_groups_materialized"] == layers * groups,
         "a_roll_stages_each_group_it_reads_exactly_once": all(
             row["produced_groups_materialized"] == groups_read_per_layer
             for row in per_layer),
-        # A re-staging is counted where it is asked for, so the lower
-        # plane's count lands in the roll above it: across the chain each
-        # plane is staged again once, never once per probe pass.
+        # Each plane is read once going forward and staged again once for
+        # its roll, never once per probe pass. Counted over the whole run:
+        # which phase a re-staging lands in depends on when it was asked.
         "a_boundary_plane_is_restaged_once_per_roll_not_once_per_pass":
-            sum(row["produced_groups_rematerialized"] for row in per_layer)
-            == layers * groups,
+            telemetry["produced_groups_rematerialized"] == layers * groups,
         "the_lower_plane_was_staged_ahead_of_its_roll":
             per_layer[-1]["produced_groups_rematerialized"] == 0
             and telemetry["produced_groups_staged_ahead"] >= groups,
@@ -307,7 +518,20 @@ def main() -> int:
         help=("chain mode: seconds each read window spends on stand-in "
               "compute. Read-ahead overlaps staging with compute, so with "
               "none there is nothing for it to overlap."))
+    ap.add_argument(
+        "--entry-mib", type=int, default=0,
+        help=("chain mode: MiB of float32 in each entry. 0 keeps the 32-byte "
+              "entries. The 512-sample capture writes 16 MiB entries, and "
+              "only a cycle at that size shows what a publication and a "
+              "mover copy cost under load (RobTand/prismaquant#895)."))
+    ap.add_argument(
+        "--group-size", type=int, default=4,
+        help=("chain mode: entries in a group. The capture uses 64, so 64 "
+              "with --entry-mib 16 is a 1 GiB group. The template's window "
+              "and durable maxima must be sized for it."))
     args = ap.parse_args()
+    if args.entry_mib < 0 or args.group_size <= 0:
+        ap.error("--entry-mib is nonnegative and --group-size is positive")
 
     from prismaquant.calibration_data import _read_calibration_payload
     from prismaquant.cost_streaming import (
@@ -445,7 +669,9 @@ def main() -> int:
 
     if args.mode == "chain":
         return _chain_cycle(publication, report, report_progress,
-                            window_compute_s=args.window_compute_s)
+                            window_compute_s=args.window_compute_s,
+                            group_size=args.group_size,
+                            entry_mib=args.entry_mib)
 
     group_size = 4
     entries = Path(publication.output_prefix) / "live-cycle"
