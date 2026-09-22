@@ -342,6 +342,30 @@ paths non-deterministic across stage-A attempts; that is why boundary
 artifacts are receipt-addressed rather than sealed into slice manifests**
 (§10 records the sealed-identity change that would lift this).
 
+### 3.3.1 Explicit forward recovery
+
+Forward recovery is a separate explicit authority:
+`prismaquant.joint_forward_recovery.v1`. An unfinished generation continues to
+declare `working_artifacts_reusable: false`; it never becomes a complete adjoint
+capture. A new action may import a complete forward prefix only after the exact
+original action/attempt has a PrismaBuild containment proof. Its digest-bound
+capsule verifies the original source, calibration, probe and execution identity,
+an explicit reviewed implementation compatibility binding, every immutable PB
+group descriptor and canonical export acknowledgement, current file identity
+fences, and every calibration partition at every boundary from zero through the
+frontier. Payload hashes and embedded identities are checked on the bounded read.
+
+Imported entries retain their original session and files. New entries belong to
+a fresh generation; retiring an imported reference does not unlink its original.
+The new sealed data manifest stages those old files as ordinary immutable inputs,
+with the resumed boundary in its forward phase and each needed boundary in its
+reverse phase. No previous producer identity, mover credit, namespace ownership,
+or completion status is transferred. The final complete receipt carries the
+capsule binding; Stage B permits only the exact foreign references it names.
+Forward recovery currently requires inherited stateless model-profile hooks;
+profiles with cross-layer shared state refuse rather than reconstructing it as
+empty. The head journal's existing independent resume authority is unchanged.
+
 ### 3.4 Stride derivation (S)
 
 `S = 8` at this plan, derived, not chosen: the artifact budget for retained

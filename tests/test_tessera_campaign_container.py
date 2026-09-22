@@ -628,3 +628,30 @@ def test_cotangent_scratch_preserves_sealed_local_path_identity(mode):
         with pytest.raises(RuntimeError, match="cotangent scratch"):
             runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
                 uid=1000, gid=1000, image_id="sha256:resolved", environ=env)
+
+
+@pytest.mark.parametrize("mode", ["good", "missing", "readonly", "remapped", "nested", "conflict"])
+def test_local_spool_preserves_source_host_path_identity(mode):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    declared = spec()
+    root = "/home/rob/local-spool"
+    env = {runner.PRODUCED_SPOOL_ENV[0]: root,
+           runner.PRODUCED_SPOOL_ENV[1]: str(32 << 30)}
+    if mode != "missing":
+        declared["container"]["mounts"].append({
+            "source": root if mode != "remapped" else "/different/host-path",
+            "target": root, "readonly": mode == "readonly"})
+    if mode == "nested":
+        declared["container"]["mounts"].append({
+            "source": "/other", "target": root + "/payload"})
+    if mode == "conflict":
+        declared["env"][runner.PRODUCED_SPOOL_ENV[0]] = "/different"
+    if mode == "good":
+        argv = runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
+            uid=1000, gid=1000, image_id="sha256:resolved", environ=env)
+        assert f"{runner.PRODUCED_SPOOL_ENV[0]}={root}" in argv
+        assert f"{runner.PRODUCED_SPOOL_ENV[1]}={32 << 30}" in argv
+    else:
+        with pytest.raises(RuntimeError, match="local output spool"):
+            runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
+                uid=1000, gid=1000, image_id="sha256:resolved", environ=env)

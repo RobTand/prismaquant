@@ -509,11 +509,25 @@ def _canonical_absolute(value: object) -> "str | None":
 COTANGENT_SCRATCH_ENV = ("PRISMAQUANT_STAGE_B_COTANGENT_ROOT",
                          "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
 
+PRODUCED_SPOOL_ENV = ("PRISMABUILD_PRODUCED_SPOOL_ROOT",
+                      "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES")
+
 
 def cotangent_scratch_environment(spec: dict, environ) -> dict:
     """Forward only an explicitly sealed, identity-mounted local workspace."""
     return _bounded_local_environment(spec, environ, COTANGENT_SCRATCH_ENV,
                                       "cotangent scratch")
+
+
+def produced_spool_environment(spec: dict, environ) -> dict:
+    """Forward the sealed local-spool declaration through an identity bind.
+
+    The source-host exporter runs outside the container. A remapped pathname
+    would name different bytes there, so the most specific covering mount must
+    expose the same host path read-write. No host directory is mounted here.
+    """
+    return _bounded_local_environment(spec, environ, PRODUCED_SPOOL_ENV,
+                                      "local output spool")
 
 
 def _bounded_local_environment(spec, environ, names, label):
@@ -848,7 +862,8 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
                  **bounded_defaults,
                  **progress_environment(spec, environ if environ is not None else {}),
                  **residency_env, **reader_env,
-                 **cotangent_scratch_environment(spec, environ if environ is not None else {})}
+                 **cotangent_scratch_environment(spec, environ if environ is not None else {}),
+                 **produced_spool_environment(spec, environ if environ is not None else {})}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
     if content_sha256 is not None:

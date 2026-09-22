@@ -339,7 +339,12 @@ def _check_package_coherence(expected_dir: Path) -> None:
     divergent preimport cannot strand a pin.
     """
     expected = Path(expected_dir).resolve()
-    for name, mod in list(sys.modules.items()):
+    # Keep the same point-in-time module mapping without allocating one
+    # tracked tuple per unrelated import. On a loaded model those temporary
+    # tuples repeatedly trigger cyclic GC on the lease hot path. A dict copy
+    # retains the identical names and module objects; all path checks below
+    # still run, including newly imported modules and changed symlink targets.
+    for name, mod in sys.modules.copy().items():
         if name != "prismabuild" and not name.startswith("prismabuild."):
             continue
         if mod is None:
