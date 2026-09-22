@@ -45,6 +45,7 @@ if __package__:
     from tools.tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
+        cotangent_scratch_environment,
     )
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
@@ -54,6 +55,7 @@ else:
     from tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
+        cotangent_scratch_environment,
     )
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
@@ -770,8 +772,8 @@ def require_staged_wait_below_grace(spec: Mapping,
 
 
 def _container_wrap(spec_path: Path, payload: list[str], *,
-                    progress: Sequence[tuple[str, int]]
-                    ) -> tuple[list[str], str | None]:
+                    progress: Sequence[tuple[str, int]],
+                    resource_policy=None) -> tuple[list[str], str | None]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -792,10 +794,29 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     """
     spec = json.loads(Path(spec_path).read_text())
     require_staged_wait_below_grace(spec, progress)
+    # Validate a declared workspace before publishing the row. These same
+    # inlined spec bytes supply its outer PB environment below; no ambient
+    # coordinator environment or second spec read participates.
+    try:
+        cotangent_scratch_environment(spec, spec.get("env", {}))
+    except (ValueError, RuntimeError) as exc:
+        raise DispatchRefused(str(exc)) from exc
+    if resource_policy is not None:
+        limits = resource_policy["limits"]
+        if (float(spec.get("cpu_memory_gb", -1)) * 1024 ** 3 != limits["host_bytes"]
+                or float(spec.get("env", {}).get("PRISMAQUANT_MAX_GPU_MEM_GB", -1)) * 1024 ** 3 != limits["gpu_bytes"]):
+            raise DispatchRefused("container host/device envelope differs from the bound Stage B resource policy")
     argv = ["python3", "-m", "tools.tessera_campaign_container",
             "--spec", json.dumps(spec, sort_keys=True),
             "--", *payload]
-    return argv, admission_image_reference(spec)
+    default_admission = admission_image_reference(spec)
+    admission = spec.get("container_admission_reference")
+    if admission is not None:
+        if (not isinstance(admission, str) or not admission.startswith("content:sha256:")
+                or not _is_hex64(admission.removeprefix("content:sha256:"))
+                or not _is_hex64(spec.get("container", {}).get("content_sha256"))):
+            raise DispatchRefused("explicit portable image admission requires content SHA and inspected scientific image identity")
+    return argv, admission or default_admission
 
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
@@ -829,7 +850,10 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     all lanes.
     """
     quantum_id = record["quantum_id"]
+    resource_policy = None
     executable = record.get("executable_readset")
+    if record.get("catalog_extension") is not None and executable is None:
+        raise DispatchRefused("catalog extension requires executable prepared-input readsets before publication")
     if executable is not None:
         # PQ #917: the complete static prepared-input contract is an
         # ordinary immutable input staging -- the manifest names existing
@@ -859,6 +883,19 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             raise DispatchRefused(
                 f"quantum {quantum_id!r} seals no campaign {key}")
     try:
+        plan_raw = Path(campaign["plan_path"]).read_bytes()
+        plan = json.loads(plan_raw)
+    except (OSError, ValueError) as exc:
+        raise DispatchRefused(f"quantum {quantum_id!r} source plan is unreadable: {exc}") from exc
+    if plan.get("stage_b_resource_policy") is not None:
+        if hashlib.sha256(plan_raw).hexdigest() != campaign["plan_sha256"]:
+            raise DispatchRefused("resource-bound plan differs from its quantum seal")
+        from prismaquant.joint_stageb_resources import verify_policy
+        try:
+            resource_policy = verify_policy(plan["stage_b_resource_policy"])
+        except (ValueError, OSError) as exc:
+            raise DispatchRefused(f"invalid Stage B resource policy: {exc}") from exc
+    try:
         record_sha256 = _sha_bytes(Path(record_path).read_bytes())
     except OSError as exc:
         raise DispatchRefused(
@@ -883,7 +920,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--data-manifest-sha256", staged_sha256,
         "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
-        "--output-root", str(output_root)], progress=progress)
+        "--output-root", str(output_root)], progress=progress,
+        resource_policy=resource_policy)
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
         argv += ["--tag", str(tag)]
@@ -891,14 +929,25 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
              "--residency", "stage", "--residency-ram", "auto"]
     for name, grace in progress:
         argv += ["--progress-phase", f"{name}={grace}"]
+    sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
+    mem_gib, gpu_gib, cpus = "104", "80", 10
+    if resource_policy is not None:
+        limits = resource_policy["limits"]
+        mem_gib, gpu_gib = (f"{limits[key] / 1024 ** 3:g}" for key in ("physical_bytes", "gpu_bytes"))
+        cpus = max(int(sealed_spec.get("env", {}).get("PRISMAQUANT_LAYER_READ_THREADS", 1)),
+                   int(plan["source_prefetch"]["prefetch_workers"]) + 1,
+                   int(plan["execution"]["operator_windows"]["prefetch_workers"]) + 1)
     argv += ["--priority", str(priority),
-             "--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
-             "--cpus", "10"]
+             "--demand", f"gpu=1,mem_gb={mem_gib}", "--gpu-memory-gb", gpu_gib,
+             "--cpus", str(cpus)]
     if container_image is not None:
         # A pbrun option, so it precedes the separator like the manifest: PB
         # must admit the row only where this image is already present, or
         # leave it ready for a box that has it (RobTand/prismabuild#714).
         argv += [CONTAINER_IMAGE_FLAG, container_image]
+    for name, value in cotangent_scratch_environment(
+            sealed_spec, sealed_spec.get("env", {})).items():
+        argv += ["--env", f"{name}={value}"]
     argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
     return argv
 
@@ -1051,13 +1100,26 @@ def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) 
         raise DispatchRefused(
             f"{receipt_path}: receipt schema is not {ADJOINT_SCHEMA!r}")
     campaign = records[0][1]["campaign"]
-    for key in ("plan_sha256", "prepared_sha256"):
-        if receipt.get(key) != campaign[key]:
-            raise DispatchRefused(
-                f"{receipt_path}: receipt {key} is not this campaign's "
-                "(stale receipt)")
+    extensions = [record.get("catalog_extension") for _, record in records]
+    if any(extension is not None for extension in extensions):
+        if any(extension != extensions[0] for extension in extensions):
+            raise DispatchRefused("quantum catalog extension bindings differ")
+        from prismaquant.joint_catalog_extension import require_extension
+        try:
+            require_extension(extensions[0], receipt=receipt,
+                plan_sha256=campaign["plan_sha256"], prepared_sha256=campaign["prepared_sha256"])
+        except (ValueError, OSError, KeyError) as exc:
+            raise DispatchRefused(f"catalog extension refused: {exc}") from exc
+    else:
+        for key in ("plan_sha256", "prepared_sha256"):
+            if receipt.get(key) != campaign[key]:
+                raise DispatchRefused(
+                    f"{receipt_path}: receipt {key} is not this campaign's "
+                    "(stale receipt)")
     digest = _canonical_receipt_sha256(receipt, where="stage-A receipt")
     expected = records[0][1]["adjoint"]["receipt_sha256"]
+    if extensions[0] is not None and any(record["adjoint"]["receipt_sha256"] != digest for _, record in records):
+        raise DispatchRefused("catalog extension records must all seal the original completed capture")
     if expected is not None and digest != expected:
         raise DispatchRefused(
             f"{receipt_path}: canonical digest {digest} does not match the "

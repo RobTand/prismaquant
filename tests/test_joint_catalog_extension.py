@@ -104,7 +104,7 @@ def _pair(tmp_path, campaign, probe):
         prepared = {**common, 'schema': PREPARED_SCHEMA, 'status': 'complete',
             'plan_sha256': inputs[label+'_plan']['sha256'],
             'production_cache': _write(tmp_path, label+'.pkl', cache, binary=True),
-            'formats_by_qname': {name: [oldfmt, 'BF16'] + ([ADDED_FORMAT] if label == 'extended' else [])
+            'formats_by_qname': {name: [oldfmt] + ([ADDED_FORMAT] if label == 'extended' else []) + ['BF16']
                                  for name in qnames}, 'measured_cells': len(cells)}
         inputs[label+'_prepared'] = _write(tmp_path, label+'-prepared.json', prepared)
     receipt = {'schema': 'prismaquant.joint_adjoint_capture.v1', 'status': 'complete',
@@ -131,6 +131,14 @@ def test_additive_catalog_binds_original_capture_without_relabelling(tmp_path, c
     result = bind_adjoint_receipt(receipt, **args, catalog_extension=bound)
     assert result == canonical_json_sha256(receipt, where="synthetic capture")
     assert Path(capture['path']).read_bytes() == original
+    from tools.dispatch_joint_quanta import check_adjoint_receipt, DispatchRefused
+    dispatch_record = {'campaign': {'plan_sha256': inputs['extended_plan']['sha256'],
+        'prepared_sha256': inputs['extended_prepared']['sha256']},
+        'adjoint': {'receipt_sha256': result}, 'catalog_extension': bound}
+    assert check_adjoint_receipt(Path(capture['path']), [(tmp_path/'q.json', dispatch_record)]) == receipt
+    unbound = {**dispatch_record, 'catalog_extension': None}
+    with pytest.raises(DispatchRefused, match='extension bindings differ'):
+        check_adjoint_receipt(Path(capture['path']), [(tmp_path/'q.json', dispatch_record), (tmp_path/'r.json', unbound)])
     plan = json.loads(Path(inputs['extended_plan']['path']).read_bytes())
     prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
     produced = layer_quanta(plan, prepared, campaign['parent_manifest'],
@@ -439,3 +447,75 @@ def test_overlay_intake_compares_hessian_content_not_reference_files(tmp_path, c
                 'stale_row_seal': 'capture seal', 'unbound_panel': 'capture_sha256 differs'}[change]
     with pytest.raises(ValueError, match=expected):
         attach_candidate_overlay(data, bound, verify_payloads=True)
+
+
+# The sealed GLM Stage A prepared completion ends every roster in BF16, and
+# the T4 overlay was assembled by inserting the added format before it.
+# Stage B re-checks the prepared roster against the loaded one in order
+# (joint_cost_quantum.run_layer_quantum), so the loader, the assembler and
+# the pair check must all produce exactly this order (RobTand/prismaquant#990).
+_SEALED_ROSTERS = json.loads((Path(__file__).parent / 'fixtures'
+                              / 'glm_sealed_prepared_rosters.json').read_text())
+
+
+def test_sealed_roster_fixture_is_bf16_terminal_and_extends_before_it():
+    assert _SEALED_ROSTERS['added_format'] == ADDED_FORMAT
+    for name, unit in _SEALED_ROSTERS['units'].items():
+        base = unit['base']
+        assert base[-1] == 'BF16' and base[:-1] == sorted(base[:-1]), name
+        if unit['extended'] is not None:
+            assert unit['extended'] == [*base[:-1], ADDED_FORMAT, 'BF16'], name
+
+
+def _extended_units():
+    return {name: unit for name, unit in sorted(_SEALED_ROSTERS['units'].items())
+            if unit['extended'] is not None}
+
+
+def test_overlay_intake_inserts_added_format_before_terminal_bf16(tmp_path, campaign, probe):
+    """Loader order on sealed rosters equals the order the overlay was assembled in."""
+    from prismaquant.joint_catalog_extension import attach_candidate_overlay
+    case = _overlay_case(tmp_path, campaign, probe)
+    data, bound = case.bind()
+    sealed = list(_extended_units().values())
+    expected = {}
+    for index, name in enumerate(case.qnames):
+        unit = sealed[index % len(sealed)]
+        data.formats_by_qname[name] = tuple(unit['base'])
+        expected[name] = tuple(unit['extended'])
+    result = attach_candidate_overlay(data, bound, verify_payloads=True)
+    assert dict(result.formats_by_qname) == expected
+
+
+def test_overlay_intake_refuses_a_base_roster_without_terminal_bf16(tmp_path, campaign, probe):
+    from prismaquant.joint_catalog_extension import attach_candidate_overlay
+    case = _overlay_case(tmp_path, campaign, probe)
+    data, bound = case.bind()
+    name = case.qnames[0]
+    data.formats_by_qname[name] = tuple(data.formats_by_qname[name])[:-1]
+    with pytest.raises(ValueError, match='terminal BF16'):
+        attach_candidate_overlay(data, bound, verify_payloads=True)
+
+
+def test_catalog_pair_refuses_an_extension_appended_after_bf16(tmp_path, campaign, probe):
+    """The on-disk proposed-overlay-01 pair appended the format after BF16; refuse it."""
+    inputs, _, _ = _pair(tmp_path, campaign, probe)
+    verify_catalog_pair(inputs)
+    path = Path(inputs['extended_prepared']['path'])
+    prepared = json.loads(path.read_bytes())
+    prepared['formats_by_qname'] = {name: [*[f for f in formats if f != ADDED_FORMAT], ADDED_FORMAT]
+                                    for name, formats in prepared['formats_by_qname'].items()}
+    inputs['extended_prepared'] = _write(tmp_path, 'appended-prepared.json', prepared)
+    with pytest.raises(ValueError, match='terminal BF16'):
+        verify_catalog_pair(inputs)
+
+
+def test_overlay_assembly_inserts_before_terminal_bf16():
+    """tools/assemble_t4_overlay.py writes the order the loader reads."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+    import assemble_t4_overlay as assemble
+    rosters = {name: list(unit['base']) for name, unit in _extended_units().items()}
+    for name in rosters:
+        assemble.add_overlay_format(rosters, name, ADDED_FORMAT)
+    assert rosters == {name: unit['extended'] for name, unit in _extended_units().items()}

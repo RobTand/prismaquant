@@ -146,6 +146,9 @@ def _dispatch_prepared(tmp_path, monkeypatch):
     records = tmp_path / "records"
     records.mkdir(parents=True)
     (records / "layer-002.json").write_text(json.dumps(bound))
+    plan = Path(bound["campaign"]["plan_path"])
+    if not plan.exists():
+        plan.write_text("{}")  # the row reads its plan before publishing
     receipt_path = tmp_path / "adjoint-capture.json"
     receipt_path.write_text(json.dumps(receipt))
     out = tmp_path / "out"

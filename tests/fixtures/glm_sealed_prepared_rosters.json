@@ -1,0 +1,114 @@
+{
+  "added_format": "TESSERA_E2M1_K2_R896",
+  "description": "Candidate rosters copied verbatim from the sealed GLM Stage A prepared completion. Each base roster is sorted with BF16 appended. extended is the roster the T4 overlay assembly (assemble-t4-overlay-bf16-last.py) produces: the added format inserted before the terminal BF16. Units that already offer the added format are not extended.",
+  "source": {
+    "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/allocation/joint-panel/complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02/prepare/prepared.json",
+    "sha256": "962207a3385e9531adaf951b823871a2fb7ff4684320e7a8e19a1d0aa85d8f16",
+    "units": 36423
+  },
+  "units": {
+    "model.language_model.layers.0.mlp.down_proj": {
+      "base": [
+        "TESSERA_BF16_K1_R1024",
+        "TESSERA_BF16_K1_R1088",
+        "TESSERA_BF16_K1_R832",
+        "TESSERA_BF16_K1_R960",
+        "TESSERA_E2M1_K2_R896",
+        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R1088",
+        "TESSERA_E4M3_K1_R832",
+        "TESSERA_E4M3_K1_R960",
+        "BF16"
+      ],
+      "extended": null
+    },
+    "model.language_model.layers.10.mlp.experts.0.down_proj": {
+      "base": [
+        "TESSERA_BF16_K1_R1024",
+        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R1088",
+        "TESSERA_E4M3_K1_R832",
+        "TESSERA_E4M3_K1_R960",
+        "BF16"
+      ],
+      "extended": [
+        "TESSERA_BF16_K1_R1024",
+        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R1088",
+        "TESSERA_E4M3_K1_R832",
+        "TESSERA_E4M3_K1_R960",
+        "TESSERA_E2M1_K2_R896",
+        "BF16"
+      ]
+    },
+    "model.language_model.layers.15.mlp.experts.56.gate_proj": {
+      "base": [
+        "TESSERA_BF16_K1_R1024",
+        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R1088",
+        "TESSERA_E4M3_K1_R832",
+        "TESSERA_E4M3_K1_R864",
+        "TESSERA_E4M3_K1_R896",
+        "TESSERA_E4M3_K1_R928",
+        "TESSERA_E4M3_K1_R960",
+        "BF16"
+      ],
+      "extended": [
+        "TESSERA_BF16_K1_R1024",
+        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R1088",
+        "TESSERA_E4M3_K1_R832",
+        "TESSERA_E4M3_K1_R864",
+        "TESSERA_E4M3_K1_R896",
+        "TESSERA_E4M3_K1_R928",
+        "TESSERA_E4M3_K1_R960",
+        "TESSERA_E2M1_K2_R896",
+        "BF16"
+      ]
+    },
+    "model.language_model.layers.20.mlp.experts.0.down_proj": {
+      "base": [
+        "TESSERA_BF16_K1_R1024",
+        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R1088",
+        "TESSERA_E4M3_K1_R832",
+        "TESSERA_E4M3_K1_R896",
+        "TESSERA_E4M3_K1_R960",
+        "BF16"
+      ],
+      "extended": [
+        "TESSERA_BF16_K1_R1024",
+        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R1088",
+        "TESSERA_E4M3_K1_R832",
+        "TESSERA_E4M3_K1_R896",
+        "TESSERA_E4M3_K1_R960",
+        "TESSERA_E2M1_K2_R896",
+        "BF16"
+      ]
+    },
+    "model.language_model.layers.25.mlp.experts.0.down_proj": {
+      "base": [
+        "TESSERA_BF16_K1_R1024",
+        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R1088",
+        "TESSERA_E4M3_K1_R832",
+        "TESSERA_E4M3_K1_R896",
+        "TESSERA_E4M3_K1_R928",
+        "TESSERA_E4M3_K1_R960",
+        "BF16"
+      ],
+      "extended": [
+        "TESSERA_BF16_K1_R1024",
+        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R1088",
+        "TESSERA_E4M3_K1_R832",
+        "TESSERA_E4M3_K1_R896",
+        "TESSERA_E4M3_K1_R928",
+        "TESSERA_E4M3_K1_R960",
+        "TESSERA_E2M1_K2_R896",
+        "BF16"
+      ]
+    }
+  }
+}
