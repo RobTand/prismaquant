@@ -1238,7 +1238,8 @@ def run_layer_quantum_core(
     storage_policy = normalize_boundary_storage(execution["boundary_storage"])
     storage_policy["directory"] = str(boundary_entry_directory(source_adjoint_space))
     storage = StreamedBoundaryArtifacts(storage_policy)
-    storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes)
+    storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes,
+                   forward_recovery=receipt["boundary_storage"].get("forward_recovery"))
     extra["streamed_boundary_storage"] = storage.identity
 
     identity = _build_aura_checkpoint_identity(
