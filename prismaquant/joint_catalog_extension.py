@@ -204,7 +204,8 @@ def require_selected_catalog_cell(data, name, fmt, *, validation=None):
         _same({"inode": observed.st_ino, "bytes": observed.st_size,
                "mtime_ns": observed.st_mtime_ns, "ctime_ns": observed.st_ctime_ns},
               row[field + "_stat"], "selected current " + field + " fence")
-    return {"adoption": copy.deepcopy(adoption), "wire_root": str(Path(row["wire"]).resolve().parent),
+    return {"qualification_activation": copy.deepcopy(row["activation"]),
+            "adoption": copy.deepcopy(adoption), "wire_root": str(Path(row["wire"]).resolve().parent),
             "catalog": dict(bound), **proof}
 
 
@@ -529,6 +530,79 @@ def main(argv=None):
         adjoint_capture={"path": args.adjoint_capture, "sha256": args.adjoint_capture_sha256}, output=args.out)
     print(json.dumps(result, sort_keys=True))
     return 0
+
+
+def selected_cache_read_paths(manifest):
+    """Enumerate immutable mixed-cache export inputs for a PB read manifest.
+
+    This returns paths, not placement or authorization. The caller binds their
+    current bytes using PB's normal input-manifest machinery. Original wires
+    remain at their original roots; every historical package and proof arm is
+    explicit, including the served-policy source documents.
+    """
+    _same(manifest.get('schema'), 'tessera.cached_units.v2', 'rooted selected cache schema')
+    paths = {str(Path(manifest['wire_roots'][manifest['unit_roots'][name]]) / row['file'])
+             for name, row in manifest['units'].items()}
+    for package in manifest['producer_packages'].values():
+        root = Path(package['path'])
+        _require(root.is_dir() and root.resolve() == root, "selected producer root must be canonical and present")
+        paths.update(str(path) for path in root.rglob('*') if path.is_file()
+                     and path.suffix in {'.py', '.cu', '.cuh', '.cpp', '.h'})
+    authority = manifest['reuse_authority']
+    documents = set()
+    proof_bindings = {}
+    def add(bound):
+        _require(isinstance(bound, dict) and set(bound) == {'path', 'sha256'},
+                 'selected control dependency needs an exact binding')
+        paths.add(bound['path'])
+    def control(bound, kind):
+        add(bound)
+        key = (bound['path'], bound['sha256'])
+        if key in documents:
+            return
+        documents.add(key)
+        document = _json(bound, 'selected ' + kind + ' dependencies')
+        if kind == 'extension':
+            add(document['adjoint_capture'])
+            for name, value in document['inputs'].items():
+                control(value, 'plan' if name.endswith('_plan') else 'prepared')
+        elif kind == 'plan':
+            for name, value in document.get('inputs', {}).items():
+                if isinstance(value, dict) and set(value) == {'path', 'sha256'}:
+                    if name == 'candidate_overlay': control(value, 'catalog')
+                    else: add(value)
+        elif kind == 'prepared':
+            add(document['production_cache'])
+        elif kind == 'catalog':
+            for name in ('cost', 'old_pwc'):
+                if name in document: add(document[name])
+            if 'old_prepared' in document: control(document['old_prepared'], 'prepared')
+            if 'reseal_proof' in document:
+                proof_bindings[document['reseal_proof']['sha256']] = document['reseal_proof']
+        elif kind == 'activation':
+            for name in ('original_prepared', 'original_cache', 'census'): add(document[name])
+        elif kind == 'resources':
+            for name, value in document['inputs'].items():
+                control(value, {'original_plan': 'plan', 'original_prepared': 'prepared',
+                    'candidate_overlay': 'catalog', 'served_activation_policy': 'activation'}[name])
+        for name, policy_kind in (('served_activation_policy', 'activation'),
+                                  ('stage_b_resource_policy', 'resources')):
+            if document.get(name) is not None: control(document[name], policy_kind)
+    control(authority['catalog_extension'], 'extension')
+    control(authority['candidate_overlay'], 'catalog')
+    for bound in authority['encoder_source_proofs']:
+        proof_bindings[bound['sha256']] = bound
+    for bound in proof_bindings.values():
+        document = _json(bound, 'selected encoder proof dependencies')
+        paths.add(bound['path'])
+        paths.add(document['fixture_id']['result'])
+        paths.update(arm['result'] for arm in document['arms'])
+    bound = manifest.get('served_activation_policy')
+    if bound:
+        policy = _json(bound, 'selected served policy dependencies')
+        paths.add(bound['path'])
+        paths.update(policy[key]['path'] for key in ('original_prepared', 'original_cache', 'census'))
+    return sorted(paths)
 
 
 if __name__ == "__main__":

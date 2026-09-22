@@ -248,12 +248,25 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: the prediction.  Master has since advanced to contract v33 (tessera
 #: #568, activation-quantizer schema v2); this pin does NOT chase it -- the
 #: v33 reader migration is owed to the NEXT bump, not folded into this one.
+#: Re-pinned 2026-09-22 to acf9eafa6 -- Tessera master after #588 (rooted
+#: cached units, ``tessera.cached_units.v2``), #590 (fenced source digests in
+#: whole cached exports) and #592 -- so PrismaQuant #940 and #945 run against
+#: the pinned reader instead of a vendored one: contract v32 -> v34, lane
+#: schema still v10.  v33 publishes the activation-quantiser table as a list
+#: per platform (the v2 grammar this reader has parsed since #957); v34
+#: (#579) attests the fused window GEMM and mints four dense ``sm_121`` cells,
+#: ``TESSERA_BF16_K1`` q1792 and ``TESSERA_E4M3_K1`` q1024, batch and decode,
+#: on ``tessera::window_gemm_dense``.  They carry ``route_only`` grade and
+#: ``smoke.status: not_recorded``, which ``cell_evidence_admits`` does not
+#: refuse, so this pin ADMITS those two dense rungs on ``sm_121`` where the
+#: v32 pin answered ``unattested``.  The digest is from ``git show`` of the
+#: canonical remote's object, never from an installed copy.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab"
+    "acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "3cb67d98b325abdfc1c11c16b6e2edb3dff915ba673dd941f6b0ed41a9c4df34"
+    "d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472"
 )
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the

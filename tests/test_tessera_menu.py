@@ -999,10 +999,11 @@ def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(
     than typed, so a family the pin stops attesting at 2 fails here by name.
 
     Parametrised over both scopes since the v31 withdrawals: the dense scope
-    carries the E2M1 dense pair, the routed scope the E4M3 and E2M1 routed
-    pairs.  ``TESSERA_BF16_K1`` is gone from this census -- its every cell
-    is withdrawn, and a family the pin no longer attests at ANY world size
-    fails the union assert below by name, which is the fail-closed reading.
+    carries the E2M1 dense pair and, since the v34 pin (Tessera #579), the
+    re-minted E4M3 R1024 and BF16 R1792 dense pairs on the fused window GEMM;
+    the routed scope carries the E4M3 and E2M1 routed pairs.  A family the pin
+    no longer attests at ANY world size fails the union assert below by name,
+    which is the fail-closed reading.
     """
     contract = trc.load_tessera_contract()
     scope = (_dense_context() if context == "dense"
@@ -1016,7 +1017,8 @@ def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(
     assert [r.format_name for r in at_two] == at_one
     families = {r.admission.payload_family for r in at_two}
     if context == "dense":
-        assert families == {"TESSERA_E2M1_K2"}, sorted(families)
+        assert families == {"TESSERA_E2M1_K2", "TESSERA_E4M3_K1",
+                            "TESSERA_BF16_K1"}, sorted(families)
     else:
         # Each routed family serves on its OWN image, so the E4M3 scope
         # carries exactly the E4M3 pair; the E2M1 routed pair is carried by
@@ -1359,15 +1361,16 @@ PRICED = [
 
 def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_pin):
     """The default path allocates over the backed axis, not over nothing."""
-    # The dense scope: the E2M1 dense pair backs R896; the routed-only E4M3
-    # and the sub-cap E2M1 rates are reported, not silently narrowed.
+    # The dense scope: the E2M1 dense pair backs R896 and, since the v34 pin,
+    # the E4M3 dense pair backs R1024; the unattested rates and the
+    # unpublished family are reported, not silently narrowed.
     menu, dropped = tm.expand_menu_tokens_report(
         ["NVFP4", tm.MENU_TOKEN, "BF16"], PRICED, context_by_unit=_scope())
     assert menu == [
-        "NVFP4", "TESSERA_E2M1_K2_R896", "BF16",
+        "NVFP4", "TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R1024", "BF16",
     ], menu
     assert sorted(dropped) == sorted([
-        "TESSERA_E2M1_K2_R640", "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E2M1_K2_R640",
         "TESSERA_E4M3_K1_R512", "TESSERA_E2M1_K1_R256",
     ]), dropped
     fr.require_producer_formats(menu, where="test", context_by_unit=_scope())

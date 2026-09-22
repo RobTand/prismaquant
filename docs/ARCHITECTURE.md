@@ -1,5 +1,25 @@
 # PrismaQuant Architecture
 
+Rooted selected cache (2026-09-22, PQ #939): `tools/build_tessera_selected_cache.py`
+builds a `tessera.cached_units.v2` manifest only from an accepted
+`joint_catalog_extension.v1` plus exact historical producer packages, binds
+each adopted A4 cell to the served-activation policy's priced group scale, and
+can emit the export's PB read paths. The v1 single-root path is unchanged. The
+reader is the pinned Tessera (`acf9eafa6a…`, #966); see "Selected cached wires
+from an additive historical catalog". No format, default, stage or ship gate
+changes.
+
+Tessera pin (2026-09-22, `ws-j2/tessera-pin-v34`, Refs #944 #939): the
+serving-runtime pin and the reader dev pin move from `cc739a5516…` (contract
+v32) to `acf9eafa6a…` (Tessera master after #588, #590 and #592; contract v34,
+digest `d37c9448…03472`, lane schema still v10). The answer adds the per-image
+`glm53-nope-sm121` activation-quantiser row and four dense `sm_121` cells on
+`tessera::window_gemm_dense`: `TESSERA_BF16_K1` q1792 and `TESSERA_E4M3_K1`
+q1024, batch and decode, `route_only` / `not_recorded`, which the status-only
+evidence gate admits as `backed_with_serve_flag` (§9.4, §10). No format,
+default, stage or ship gate changes; the legal domain is a re-transcription
+because `export.py` and `grammar.py` did not move.
+
 Stager lifecycle (2026-09-22, PQ #959, #960): a Stage A stager worker that
 dies drops the tasks it stranded with their own `on_drop` callbacks, keeps the
 first callback failure, and reports the death to the owner, which raises it at
@@ -19512,16 +19532,15 @@ top-1024 intersection bound, because no instrument in either repository
 produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab` (master's merge of #563, the #562/#563 union head,
-D2/D2b, stacked on #560's routed-full-domain branch — the gated prerequisite
-half of the coordinated #760 landing, re-pinned 2026-09-19; version `0.1.0`,
-contract v32, lane schema v10 — unchanged: v25-v32 are additive for a v10
-reader. v29 was pinned at `4c384e6049…`, v24 at `7dbbacbd…`, v23 at
+Tessera `acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9` (master after #588, #590 and #592, re-pinned
+2026-09-22; version `0.1.0`, contract v34, lane schema v10 — unchanged:
+v25-v34 are additive for a v10 reader. v32 was pinned at `cc739a55…`
+(the #562/#563 union head, 2026-09-19), v29 at `4c384e6049…`, v24 at `7dbbacbd…`, v23 at
 `1c827abc…`, v22 at `387eda36…` and `ba582d4…`, v21 landed at `b8b1cb38`
 in Tessera #313 and the release `e78959ed…` carried v20; first pinned
 2026-09-04 at `5acc2a6f…`, contract v17)
 and the SHA-256 of the `runtime_contract.json` it packages
-(`3cb67d98…4df34`);
+(`d37c9448…03472`);
 `require_pinned_tessera_runtime` refuses unless the pin equals the reader's
 three constants AND the installed contract hashes to that digest, and
 `tessera_lane_attested` ANDs that in (§5.7), as does the container arm's
@@ -20039,6 +20058,25 @@ weight-only or dynamically scored cost does not depend on which A-side
 arithmetic the run bound, so its cache stays reusable for a mathematical reason
 rather than a convenient one. The key (`qname|FMT`) is unchanged, and no second
 cache, rehash or per-row resolution is introduced.
+
+### Selected cached wires from an additive historical catalog
+
+The selected-cache builder retains the v1 single-root contract. Explicit
+`--catalog-extension` and `--producer-packages` path/SHA-256 bindings enable
+`tessera.cached_units.v2` only for a completed joint handoff carrying that exact
+accepted extension. Every selected departure from the checkpoint encoder seal
+must authenticate its exact overlay row, historical migration proof and current
+wire/render fences. Proof bytes and dependency fences are shared within one
+bounded operation and rechecked before completion. Records are never resealed.
+
+The manifest names all selected immutable roots and exact historical producer
+packages. Tessera recomputes each expected identity with its original producer
+and keeps strict verification unchanged. Selected added A4 cells also require
+the explicit full512 served-activation policy and the exact Stage B priced group
+scale; wire calibration identity remains historical. `--read-paths-out` emits
+the selected wires, package sources, authority documents and proof/policy
+inputs required when constructing PB's normal export read manifest. It is not
+an export qualification receipt and does not claim a full model was exported.
 
 ### Selected executed-group activation export
 
