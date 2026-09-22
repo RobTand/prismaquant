@@ -5,16 +5,42 @@ import pytest
 import test_stage_a_produced_boundary_chain as chain
 from test_stage_a_produced_boundary_chain import (  # noqa: F401
     _isolated_launch_context)
-def _stub_publication(states: list, calls: list):
+#: How many times a stub publication may be asked before the test gives
+#: up. These tests demonstrate that a terminal mover fails fast, so on a
+#: tree that still waits out the budget they have to FAIL, in bounded
+#: time, rather than poll a stopped clock forever (PQ #961): an unbounded
+#: poll loop here OOM-killed two PrismaBuild shards on the growing call
+#: list before the failure was narrowed by hand.
+POLL_BOUND = 16
+def _stub_publication(states: list, calls: list, *, max_polls: int = POLL_BOUND):
     from prismaquant.stage_a_produced_output import (
         BoundaryProducedPublication)
     publication = BoundaryProducedPublication.__new__(
         BoundaryProducedPublication)
     def _state(*, batch_id: str):
         calls.append(batch_id)
+        if len(calls) > max_polls:
+            raise AssertionError(
+                f"await_materialized asked for {batch_id!r} {len(calls)} "
+                f"times without failing fast on a terminal mover; the stub "
+                f"bound is {max_polls} polls (PQ #961)")
         return dict(states[min(len(calls) - 1, len(states) - 1)])
     publication.materialization_state = _state  # type: ignore[method-assign]
     return publication
+def _stub_clock(monkeypatch, sleeps: list, *, start: float = 0.0):
+    """A monotonic clock that only the poll loop's own sleep advances.
+
+    Sleeping moves it, so a wait that keeps polling reaches its deadline
+    instead of running forever against a frozen reading, and the list of
+    sleeps still records exactly what the code under test asked for.
+    """
+    clock = {"now": float(start)}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
+    def _sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += max(float(seconds), 0.001)
+    monkeypatch.setattr(time, "sleep", _sleep)
+    return clock
 def _terminal_state(*, queue_state: str, complete=None, refusal=None):
     return {"ok": True, "batch_id": "b-0", "mover_key": "a" * 64,
             "generation": 0, "mover_receipt_complete": complete,
@@ -25,8 +51,7 @@ def test_failed_terminal_fails_fast_without_waiting(monkeypatch):
     sleeps: list = []
     publication = _stub_publication(
         [_terminal_state(queue_state="failed")], calls)
-    monkeypatch.setattr(time, "monotonic", lambda: 100.0)
-    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+    _stub_clock(monkeypatch, sleeps, start=100.0)
     with pytest.raises(BoundaryStagingTimeout) as caught:
         publication.await_materialized(batch_id="b-0", timeout_s=900.0)
     assert calls == ["b-0"], calls
@@ -38,16 +63,15 @@ def test_failed_terminal_fails_fast_without_waiting(monkeypatch):
 def test_withdrawn_terminal_carries_refusal_and_generation(monkeypatch):
     from prismaquant.stage_a_produced_output import BoundaryStagingTimeout
     calls: list = []
+    sleeps: list = []
     publication = _stub_publication(
         [_terminal_state(queue_state="withdrawn", complete=False,
                          refusal="residency_moved_nothing")], calls)
-    monkeypatch.setattr(time, "monotonic", lambda: 50.0)
-    def _no_sleep(s):
-        raise AssertionError("must not sleep on terminal")
-    monkeypatch.setattr(time, "sleep", _no_sleep)
+    _stub_clock(monkeypatch, sleeps, start=50.0)
     with pytest.raises(BoundaryStagingTimeout) as caught:
         publication.await_materialized(batch_id="b-1", timeout_s=900.0)
     assert calls == ["b-1"], calls
+    assert sleeps == [], "a terminal mover is not waited on"
     text = str(caught.value)
     assert "will not stage" in text and "withdrawn" in text, text
     assert "residency_moved_nothing" in text, text
@@ -55,7 +79,7 @@ def test_complete_true_wins_over_terminal_queue_state(monkeypatch):
     calls: list = []
     publication = _stub_publication(
         [_terminal_state(queue_state="failed", complete=True)], calls)
-    monkeypatch.setattr(time, "monotonic", lambda: 0.0)
+    _stub_clock(monkeypatch, [])
     out = publication.await_materialized(batch_id="b-0", timeout_s=900.0)
     assert out["mover_receipt_complete"] is True
     assert calls == ["b-0"], calls
@@ -66,7 +90,7 @@ def test_ok_false_still_raises_binding_not_timeout(monkeypatch):
              "mover_queue_state": "failed",
              "mover_receipt_complete": None}
     publication = _stub_publication([state], [])
-    monkeypatch.setattr(time, "monotonic", lambda: 0.0)
+    _stub_clock(monkeypatch, [])
     with pytest.raises(BoundaryProducedBindingError) as caught:
         publication.await_materialized(batch_id="b-missing", timeout_s=10.0)
     assert "unknown-batch" in str(caught.value)
@@ -75,12 +99,7 @@ def test_ready_claimed_absent_unknown_done_keep_bounded_wait(monkeypatch):
     for queue_state in ("ready", "claimed", "absent", "unknown", "done"):
         calls: list = []
         sleeps: list = []
-        clock = {"now": 0.0}
-        monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
-        def _sleep(s, _c=clock, _s=sleeps):
-            _s.append(s)
-            _c["now"] += float(s)
-        monkeypatch.setattr(time, "sleep", _sleep)
+        _stub_clock(monkeypatch, sleeps)
         publication = _stub_publication(
             [_terminal_state(queue_state=queue_state)], calls)
         with pytest.raises(BoundaryStagingTimeout) as caught:
