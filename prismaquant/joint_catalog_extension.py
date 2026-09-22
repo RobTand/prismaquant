@@ -545,6 +545,7 @@ def selected_cache_read_paths(manifest):
              for name, row in manifest['units'].items()}
     for package in manifest['producer_packages'].values():
         root = Path(package['path'])
+        _require(root.is_dir() and root.resolve() == root, "selected producer root must be canonical and present")
         paths.update(str(path) for path in root.rglob('*') if path.is_file()
                      and path.suffix in {'.py', '.cu', '.cuh', '.cpp', '.h'})
     authority = manifest['reuse_authority']
