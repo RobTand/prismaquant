@@ -64,11 +64,15 @@ def verify_policy(bound, *, original_prepared=None):
     else:
         policy = json.loads(_read_bound(bound, "served activation policy"))
         _require(policy.get("schema") == SCHEMA and policy.get("format") == FORMAT, "unknown policy scope")
-        _require(policy == derive_policy(policy["original_prepared"]), "group maxima or calibrated source evidence changed")
         dependencies = [dict(bound)] + [policy[k] for k in ("original_prepared", "original_cache", "census")]
+        before = tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies)
+        _require(before[0] == key, "policy changed while it was read")
+        _require(policy == derive_policy(policy["original_prepared"]), "group maxima or calibrated source evidence changed")
+        _require(before == tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"])))
+                                 for b in dependencies), "calibrated policy inputs changed during verification")
         _VERIFIED.clear()
         _VERIFIED[key] = {"policy": policy, "dependencies": dependencies,
-            "fences": tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies)}
+            "fences": before}
     if original_prepared is not None:
         _require(policy["original_prepared"] == original_prepared, "original prepared binding differs")
     return policy
@@ -77,6 +81,8 @@ def verify_policy(bound, *, original_prepared=None):
 def format_activation_maxima(maxima, spec):
     """Resolve an explicitly format-scoped transient view; never mutate maxima."""
     overrides = (maxima or {}).get(FORMAT_MAXIMA_KEY, {})
+    if not overrides:
+        return maxima
     selected = overrides.get(spec.name)
     if selected is None:
         return maxima

@@ -21,7 +21,7 @@ SCHEMA = "prismaquant.joint_catalog_extension.v1"
 INPUTS = ("original_plan", "original_prepared", "extended_plan", "extended_prepared")
 # These select candidate artifacts or their output namespace; every other
 # plan field, including the entire execution/derivative policy, stays exact.
-CANDIDATE_PLAN_FIELDS = frozenset(("inputs", "output_root", "historical_encoder_reuse"))
+CANDIDATE_PLAN_FIELDS = frozenset(("inputs", "output_root", "historical_encoder_reuse", "served_activation_policy"))
 PREPARED_SCIENCE = ("source_model_identity", "source_execution", "calibration_input",
                     "projection_backend", "reader_identity")
 QUALIFIED_CELL_FIELDS = ("source_weight", "rendered_weight", "activation",
@@ -233,6 +233,14 @@ def verify_catalog_pair(inputs):
     old_plan, new_plan = documents["original_plan"], documents["extended_plan"]
     old, new = documents["original_prepared"], documents["extended_prepared"]
     bindings = list(inputs.values()) + [old["production_cache"], new["production_cache"]]
+    _same(old_plan.get("served_activation_policy"), old.get("served_activation_policy"), "original served policy")
+    _same(new_plan.get("served_activation_policy"), new.get("served_activation_policy"), "extended served policy")
+    if new_plan.get("served_activation_policy") is not None:
+        from .joint_served_activation import verify_policy
+        _require(old_plan.get("served_activation_policy") is None, "cannot replace an original served policy")
+        policy = verify_policy(new_plan["served_activation_policy"], original_prepared=inputs["original_prepared"])
+        _same(policy["calibration_input"], old["calibration_input"], "served-group calibration")
+        bindings += [new_plan["served_activation_policy"], policy["census"]]
     fences = tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in bindings)
     if fences in _VERIFIED_PAIR:
         cached = _VERIFIED_PAIR[fences]
@@ -275,8 +283,7 @@ def verify_catalog_pair(inputs):
         caches[name] = cache
     previous, extended = caches["original"], caches["extended"]
     _same(previous.levers, extended.levers, "original render levers")
-    for name, value in (previous.activation_max_abs or {}).items():
-        _same((extended.activation_max_abs or {}).get(name), value, "original activation scale " + name)
+    _same(previous.activation_max_abs, extended.activation_max_abs, "original activation maxima mapping")
     old_verified, new_verified = previous.metadata["verified_cells"], extended.metadata["verified_cells"]
     for pair in sorted(old_pairs):
         _same(previous.weights[pair], extended.weights[pair], "original render path " + repr(pair))

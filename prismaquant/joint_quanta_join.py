@@ -677,6 +677,7 @@ def _preserve_allocation_payload(joined, payloads, records):
             raise JoinRefused(f"allocation {quantum}: statistics do not cover its cost rows")
         identity = {key: payload.get(key) for key in ("schema", "n_probes", "token_scope")}
         identity["probe_identity_sha256"] = currency.get("probe_identity_sha256")
+        identity["served_activation_policy"] = payload["provenance"].get("served_activation_policy")
         if not identity["probe_identity_sha256"]:
             raise JoinRefused(f"allocation {quantum}: complete joint currency required")
         if shared is not None and identity != shared:
@@ -702,6 +703,8 @@ def _preserve_allocation_payload(joined, payloads, records):
         "prepared": {"path": path, "sha256": digest},
         "quantum_provenance": provenance,
     })
+    if shared["served_activation_policy"] is not None:
+        joined["provenance"]["served_activation_policy"] = copy.deepcopy(shared["served_activation_policy"])
     # This also verifies the rows share one full probe/calibration identity.
     try:
         require_run_currency(joined)
