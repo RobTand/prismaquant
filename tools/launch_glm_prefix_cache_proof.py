@@ -9,5 +9,6 @@ environ=dict(os.environ);environ.update(sdk_submodule('core')._reader_identity_e
 argv=launch_argv(Path.cwd(),environ,os.sched_getaffinity(0),[])
 i=argv.index('--gpus');del argv[i:i+2]
 for option in ('--memory','--memory-swap'):argv[argv.index(option)+1]='4g'
-i=argv.index(IMAGE);argv=argv[:i]+['--env','CUDA_VISIBLE_DEVICES=','--env','NVIDIA_VISIBLE_DEVICES=void',IMAGE]+['python3','tools/verify_glm_prefix_source_cache.py',*sys.argv[1:]]
+command=(['python3','-m','pytest',*sys.argv[2:]] if sys.argv[1:2]==['--pytest'] else ['python3','tools/verify_glm_prefix_source_cache.py',*sys.argv[1:]])
+i=argv.index(IMAGE);argv=argv[:i]+['--env','CUDA_VISIBLE_DEVICES=','--env','NVIDIA_VISIBLE_DEVICES=void',IMAGE]+command
 raise SystemExit(subprocess.call(argv))

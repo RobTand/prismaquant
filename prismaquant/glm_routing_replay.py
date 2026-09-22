@@ -64,7 +64,6 @@ def router_normalization_epsilon(router):
 def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calibration,
                                producer_source, parent_boundary):
     """Run a source layer only until the real packed-expert call is reached."""
-    from . import pretrained_initialization_contract
     from .cost_streaming import StreamedForwardBoundaries
     from .joint_aura import source_execution_identity
     from .production_weight_cache import _cb_cache_tensor_identity
@@ -159,7 +158,7 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
         "calibration_shape": calibration["shape"], "calibration_dtype": calibration["dtype"],
         "producer_source": source, "runtime_config": runner.model.config.to_dict(),
         "source_execution": source_execution_identity(runner.model),
-        "model_load_contract": pretrained_initialization_contract(runner.model),
+        "model_load_contract": runner.context.source_prefix_initialization_contract(layer),
         "attention_implementation": attention,
         "capture_runtime": {"torch": str(torch.__version__), "cuda": torch.version.cuda,
                             "transformers": __import__("transformers").__version__},

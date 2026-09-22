@@ -103,6 +103,7 @@ def main():
             raise ValueError("replayed source execution/derivative differs")
         if mode == "fresh_source_prefix":
             from prismaquant.cost_streaming import StreamedForwardBoundaries
+            runner.context.begin_source_initialization_audit()
             batch_ids, positions, hidden, embeddings, mask = runner._prepare(ids[:1])
             batch = StreamedForwardBoundaries(batch_ids, positions, embeddings, mask, [], None)
             pass_state = runner.profile.new_forward_pass_state()
