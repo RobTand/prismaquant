@@ -1140,6 +1140,13 @@ def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
                 "merged_checkpoint"):
         path = _bound(inputs[key], f"plan inputs.{key}")
         track.add(path, 0, _required_size(path, f"plan inputs.{key}"), "head")
+    if inputs.get("candidate_overlay") is not None:
+        overlay_path = _bound(inputs["candidate_overlay"], "candidate overlay")
+        track.add(overlay_path, 0, _required_size(overlay_path, "candidate overlay"), "head")
+        overlay = _read_json(overlay_path, "candidate overlay")
+        for key in ("old_prepared", "old_pwc", "cost", "reseal_proof"):
+            path = _bound(overlay[key], "candidate overlay " + key)
+            track.add(path, 0, _required_size(path, "candidate overlay " + key), "head")
 
     checkpoint = _bound(inputs["merged_checkpoint"], "plan inputs.merged_checkpoint")
     parts = checkpoint + ".parts"

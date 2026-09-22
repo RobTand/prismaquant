@@ -76,6 +76,41 @@ CUDA/context allocations, which remain covered by PB's GPU and aggregate
 action backstops. A lower envelope may refuse a later allocation; it never
 silently grows to complete the capture. No scientific plan is rewritten.
 
+Stage B binds the registered served static-A4 quantizer before cache or pricing
+work. An absent extension or image identity refuses; there is no Torch-model
+fallback. The observed operator, platform, Torch/vLLM build and inspected image
+digest are retained in the joint probe arithmetic and run identity, so rows and
+resumed checkpoints cannot silently change quantizer implementations. Dynamic
+or A16-only rosters do not require the serving extension.
+
+An explicit `joint_catalog_extension.v1` may add qualified E2M1-K2 q896
+candidates across the original qname roster while retaining the original
+completed BF16 Stage A capture. It binds the old/new plans and prepared PWCs,
+checks identical source, calibration, derivative and execution policy, and
+requires every old candidate, render path, qualification record, lever and
+activation scale to remain unchanged. New cells carry actual render/file
+digests and an explicit source/H adoption chain to a qualified original cell;
+the bridge creates no costs or qualification. Only candidate input catalogs,
+their explicit encoder-reuse policy and output namespace may differ in the
+plans. The capture's identity and digest remain original in every quantum;
+the separate extension binding is sealed into each new record and retained
+through the joined handoff. Generator `--catalog-extension` and its SHA256
+require an actual completed capture. Validation of a proposed catalog pair
+alone grants no capture-reuse authority.
+
+The optional digest-bound `inputs.candidate_overlay` augments the complete
+historical anchor intake without rewriting the original merged journal or
+inventing historical fanout receipts. Its rows must cover exactly the missing
+E2M1 candidates and match an authenticated original cell's source, projection,
+calibration/H and fixture commitments. Historical scalar rows remain scalar;
+Stage B measures their joint costs. File fences detect changed retained
+artifacts, PWC validates the qualified render digests on consumption, and
+export independently authenticates selected wires. The PB head manifest
+declares the additional catalog, original qualification metadata and scalar
+cost inputs. Metadata validation is memoized only under the existing bound
+reader's complete inode/size/mtime/ctime fences; no tensor payload is rehashed
+by the bridge.
+
 Distributed joint-cost joins retain the runtime's measured per-unit statistics,
 unaltered cost rows, and each quantum's original provenance. Production-shaped
 payloads must agree on schema and probe identity and cover exactly their own
@@ -116,7 +151,7 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `flash/926-activation-quantizer-v2-reader`.
+As of: 2026-09-22 · `fix/served-group-export-root-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-22, `flash/926-activation-quantizer-v2-reader`) for **the
@@ -19991,3 +20026,19 @@ weight-only or dynamically scored cost does not depend on which A-side
 arithmetic the run bound, so its cache stays reusable for a mathematical reason
 rather than a convenient one. The key (`qname|FMT`) is unchanged, and no second
 cache, rehash or per-row resolution is introduced.
+
+### Selected executed-group activation export
+
+The routed-scale export gate accepts `executed_group.v1` only with the exact
+bound served-activation policy, independently rederived groups, selected A4
+member/format coverage, and the policy's priced fp32 values and formula. The
+build anchor preserves this binding and records pricing/input equality as
+verified; serving qualification remains false. Legacy per-unit declarations
+and refusal of unbound executed labels remain unchanged.
+
+`tools/write_tessera_selected_scales.py --assignment FILE --assignment-sha256
+SHA --out-dir NEW_DIRECTORY` reads that immutable allocation once and writes
+only its selected priced static scales through `write_export_inputs` with
+`hessians=None`. It does not recompute per-expert maxima or alter retained H.
+The output receipt binds the assignment, serialized scale file and served
+policy. An existing output directory is refused before any write.

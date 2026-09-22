@@ -613,6 +613,11 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
             "join_schema": JOINED_RESULTS_SCHEMA,
         },
     }
+    extensions = [record.get("catalog_extension") for record in records.values()]
+    if any(extension is not None for extension in extensions):
+        if any(extension != extensions[0] for extension in extensions):
+            raise JoinRefused("allocation: quantum catalog-extension bindings differ")
+        joined["provenance"]["catalog_extension"] = copy.deepcopy(extensions[0])
     _preserve_allocation_payload(joined, measured_payloads, records)
     joined_unix = time.time() if now is None else now
     results = {
