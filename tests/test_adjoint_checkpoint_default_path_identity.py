@@ -8,7 +8,7 @@ ones the writer produced before that change, on the unwatched path
 and ledgers.
 
 The expected fingerprints were produced by running this file unchanged
-against origin/main e60d86fe56 through PrismaBuild. The file imports nothing
+against origin/main 613ffb68a0 through PrismaBuild. The file imports nothing
 origin/main lacks, so the same test runs on both trees; the PR records both
 action keys.
 """
@@ -20,6 +20,7 @@ from pathlib import Path
 
 import torch
 
+from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 from prismaquant.joint_adjoint_checkpoints import adjoint_space, write_adjoint_checkpoint
 
@@ -53,20 +54,34 @@ def _shared_pass():
 
 
 def _fingerprint(space: Path, record: dict) -> dict:
+    """Hashes of the record and every file, independent of the pytest path.
+
+    Paths inside ``space`` are spelled ``<space>``. ``cotangent_sha256`` is a
+    digest over the record's own fields, absolute paths included, so it
+    changes with the temporary directory: it is checked here to be exactly
+    ``canonical_json_sha256`` of those fields and then spelled ``<digest>``.
+    """
+    digest = record["cotangent_sha256"]
+    assert digest == canonical_json_sha256(
+        {key: record[key] for key in
+         ("schema", "boundary", "session", "activation_entries", "shared_state_entries")},
+        where="adjoint checkpoint")
     root = str(space)
-    text = json.dumps(record, sort_keys=True).replace(root, "<space>")
+    text = (json.dumps(record, sort_keys=True)
+            .replace(root, "<space>").replace(digest, "<digest>"))
     files = {}
     for path in sorted(space.rglob("*")):
         if path.is_file():
-            data = path.read_bytes().replace(root.encode(), b"<space>")
+            data = (path.read_bytes().replace(root.encode(), b"<space>")
+                    .replace(digest.encode(), b"<digest>"))
             files[str(path.relative_to(space))] = hashlib.sha256(data).hexdigest()
     return {"record_sha256": hashlib.sha256(text.encode()).hexdigest(),
             "files": files}
 
 
-#: Produced on origin/main e60d86fe56 by PrismaBuild action f6b0e5aeca8e
+#: Produced on origin/main 613ffb68a0 by PrismaBuild action 4d2404bdd702
 #: (see the module docstring).
-EXPECTED = {'owner': {'files': {'checkpoints/boundary-005/checkpoint.json': 'fef306215eb8456a6f8e89e15db1dc3fe28f994ff79321d5a1d83e4423bf11cd',
+EXPECTED = {'owner': {'files': {'checkpoints/boundary-005/checkpoint.json': 'dffecdeee48e1dc8c5e98cb6460ef0739b99419ae4d95705294f2395714c9bb6',
                      'checkpoints/boundary-005/entries/cotangent-0-0.pt': '7967f18b256dd93f70a7f3ca097eab2ff92824a484d1b602e309ebbcc7a8f969',
                      'checkpoints/boundary-005/entries/cotangent-0-1.pt': 'f62c23f3c2439f8d5ffac304c7c250f49f71d66e2ce55cdbc82663a36b7a7c5f',
                      'checkpoints/boundary-005/entries/cotangent-0-2.pt': '3e2f8032bc4fab20e889da2b24fb9fd0880e419c5dfecc349ce6342b0297ad56',
@@ -82,11 +97,11 @@ EXPECTED = {'owner': {'files': {'checkpoints/boundary-005/checkpoint.json': 'fef
                      'checkpoints/boundary-005/entries/shared-pass-0.pkl': '23b6ccecfeec0aeb768bef566c3b191fe330361c9c2217b9d5cb1305bc8ac36c',
                      'checkpoints/boundary-005/entries/shared-pass-1.pkl': 'd66e518a13bd05835d2a426103bb6c074ffb69c5d3c53f2720196e6c99e942b9',
                      'checkpoints/boundary-005/entries/shared-pass-2.pkl': '9c48bd2d25381c41540df6c8fb0f896ed75ac358a84c5da6e704d767d6f70a41'},
-           'record_sha256': 'f794f6ca10c9ee4c04534e2f1895a4aa585117eab3628fda882cb3eb37077dde'},
+           'record_sha256': '2f01160c573fd1b1cb5797c2cb78dd5a70ae1a55fc494c60402283a00475acca'},
  'owner_commitment': {'actual_bytes': 24675,
                       'checkpoint_dir': '<space>/checkpoints/boundary-005',
                       'envelope_bytes': 476868,
-                      'receipt_digest': '3a94e1c6eb4e516c5d13fdad56c7048bd379ff7e3e9002f6b54dc935b6c946ab',
+                      'receipt_digest': '<digest>',
                       'reservation': 1,
                       'unused_bytes': 452193},
  'owner_ledgers': {'checkpoint_envelope_unused_bytes': 452193,
@@ -94,7 +109,7 @@ EXPECTED = {'owner': {'files': {'checkpoints/boundary-005/checkpoint.json': 'fef
                    'live_checkpoint_bytes': 24675,
                    'retired_entries': 0,
                    'written_entries': 6},
- 'unwatched': {'files': {'checkpoints/boundary-005/checkpoint.json': 'fe9645539554cc11c9e09e1653886854192950af209bf4f83c5322f0659eefaf',
+ 'unwatched': {'files': {'checkpoints/boundary-005/checkpoint.json': 'dffecdeee48e1dc8c5e98cb6460ef0739b99419ae4d95705294f2395714c9bb6',
                          'checkpoints/boundary-005/entries/cotangent-0-0.pt': '7967f18b256dd93f70a7f3ca097eab2ff92824a484d1b602e309ebbcc7a8f969',
                          'checkpoints/boundary-005/entries/cotangent-0-1.pt': 'f62c23f3c2439f8d5ffac304c7c250f49f71d66e2ce55cdbc82663a36b7a7c5f',
                          'checkpoints/boundary-005/entries/cotangent-0-2.pt': '3e2f8032bc4fab20e889da2b24fb9fd0880e419c5dfecc349ce6342b0297ad56',
@@ -110,7 +125,7 @@ EXPECTED = {'owner': {'files': {'checkpoints/boundary-005/checkpoint.json': 'fef
                          'checkpoints/boundary-005/entries/shared-pass-0.pkl': '23b6ccecfeec0aeb768bef566c3b191fe330361c9c2217b9d5cb1305bc8ac36c',
                          'checkpoints/boundary-005/entries/shared-pass-1.pkl': 'd66e518a13bd05835d2a426103bb6c074ffb69c5d3c53f2720196e6c99e942b9',
                          'checkpoints/boundary-005/entries/shared-pass-2.pkl': '9c48bd2d25381c41540df6c8fb0f896ed75ac358a84c5da6e704d767d6f70a41'},
-               'record_sha256': '722cfe923abd9ff251552e9a9d9ef22c21935e858620cca3157c7b9858db30da'}}
+               'record_sha256': '2f01160c573fd1b1cb5797c2cb78dd5a70ae1a55fc494c60402283a00475acca'}}
 
 
 def _unwatched(tmp_path):
@@ -136,6 +151,8 @@ def _owner_path(tmp_path):
         shared_adjoint=_shared_adjoint(), shared_pass=_shared_pass(), owner=owner)
     commitment = owner.checkpoint_commitment(record["cotangent_sha256"])
     commitment["checkpoint_dir"] = commitment["checkpoint_dir"].replace(str(space), "<space>")
+    assert commitment["receipt_digest"] == record["cotangent_sha256"]
+    commitment["receipt_digest"] = "<digest>"
     ledgers = {key: owner.telemetry[key] for key in (
         "live_artifact_bytes", "live_checkpoint_bytes", "written_entries",
         "retired_entries", "checkpoint_envelope_unused_bytes")}

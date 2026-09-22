@@ -309,7 +309,7 @@ identity, its boundary and its slot. `ExactCotangentScratch` accepts the
 `-at-<boundary>` entry names. Gates:
 `tests/test_declared_adjoint_checkpoints.py`,
 `tests/test_adjoint_checkpoint_default_path_identity.py` (the flag-off
-fingerprints, taken on origin/main `e60d86fe56`).
+fingerprints, taken on origin/main `613ffb68a0`).
 
 Re-stamped (2026-09-22, `fix/stageb-bounded-cotangent-950-20260922`) for
 **a bounded Stage B cotangent working plane** (PQ #950). Checkpoint

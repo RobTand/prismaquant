@@ -151,12 +151,7 @@ class ProducedOutputSpool:
                 return False
             # Only the backend's verified durable receipt establishes this.
             group["durable"] = True
-            # Progress counts payload entries only. A checkpoint group's
-            # files are not boundary or cotangent units, and a declared
-            # checkpoint reference carries no entry identity to count.
-            self._durable_progress.extend(
-                ref for _, ref, artifact_class in group["references"]
-                if artifact_class == "payload")
+            self._durable_progress.extend(ref for _, ref, _ in group["references"])
         if not group["released"]:
             answer = self.backend.release_group(batch_id)
             if not answer.get("ok"):

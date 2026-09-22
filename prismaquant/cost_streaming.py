@@ -664,7 +664,12 @@ class StreamedBoundaryArtifacts:
     def _commit_local_output_progress(self):
         if self._local_output_spool is None:
             return
+        from .produced_output_spool import DeclaredFile
         for reference in self._local_output_spool.durable_entries():
+            if isinstance(reference, DeclaredFile):
+                # A declared checkpoint's own file: no boundary or cotangent
+                # unit, and no entry identity to count.
+                continue
             if self._progress is not None:
                 identity = json.loads(reference.metadata_json)["identity"]
                 coordinates = identity["coordinates"]

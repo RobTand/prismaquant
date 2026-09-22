@@ -328,7 +328,11 @@ def _spool_owner(tmp_path):
 
 
 def test_spooled_declared_checkpoint_is_a_checkpoint_class_group(tmp_path):
+    from prismaquant.joint_run_progress import JointRunProgress
     owner, publication, queue, backend = _spool_owner(tmp_path)
+    progress = JointRunProgress(layers=8, partitions=chain.GROUP_SIZE,
+                               phases=["head", "layer-0"], log=lambda line: None)
+    owner.watch_progress(progress)
     plane = {(0, batch): owner.write(_tensor(0, batch), probe_index=0,
                                      batch_index=batch, boundary_index=BOUNDARY)
              for batch in range(chain.GROUP_SIZE)}
@@ -373,6 +377,9 @@ def test_spooled_declared_checkpoint_is_a_checkpoint_class_group(tmp_path):
     _same(loaded_shared, shared_adjoint)
     _same(loaded_pass, shared_pass)
     assert owner.produced_output_report()["local_spool"]["pending_groups"] == 0
+    # Progress counts the payload group's cotangent entries, not the
+    # checkpoint group's files.
+    assert progress.units == chain.GROUP_SIZE
 
 
 def test_bound_owner_without_a_spool_refuses_declared_checkpoints(tmp_path):
