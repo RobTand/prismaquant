@@ -20,8 +20,8 @@ REAL producer, the REAL regen CLI and the REAL receipt writers:
   control drift (the one zero-byte head phase row, the exact record-path
   relocation) and refuses everything else;
 * receipt/readset binding through the real validators under the metadata
-  namespace, with the dispatcher's ExecutableBindingUnsupported refusal
-  still standing for executable rows.
+  namespace, with the complete static prepared-input contract accepted by
+  the dispatcher. Sequencing-only rows remain unsupported.
 """
 
 from __future__ import annotations
@@ -65,20 +65,24 @@ def _sha(path: Path) -> str:
 
 def _tiny_campaign(tmp_path: Path) -> dict:
     """Two-layer plan + prepared + parent files the real producer binds."""
+    from test_stageb_prepared_inputs_bridge import (
+        _execution, _render_files, _production_pkl, _qnames, FMT)
+    files = _render_files(tmp_path)
+    pkl_path = _production_pkl(tmp_path, files)
     root = tmp_path / "campaign"
     calib = tmp_path / "calib.bin"
     calib.write_bytes(b"calibration-bytes")
     plan = {"output_root": str(root), "model": "/fixture/model",
             "distributed_campaign": {},
-            "execution": {"n_probes": 2},
+            "execution": _execution(),
             "calibration_input": {"path": str(calib),
                                   "sha256": "a" * 64}}
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(plan, sort_keys=True))
     prepared = {"formats_by_qname": {
-        "model.layers.0.mlp.gate_proj": {},
-        "model.layers.1.mlp.gate_proj": {}},
-        "production_cache": {"sha256": "b" * 64}}
+        name: [FMT] for name in _qnames(0) + _qnames(1)[:1]},
+        "production_cache": {"path": str(pkl_path),
+                             "sha256": hashlib.sha256(pkl_path.read_bytes()).hexdigest()}}
     prepared_path = tmp_path / "prepared.json"
     prepared_path.write_text(json.dumps(prepared, sort_keys=True))
     prepared_sha = hashlib.sha256(prepared_path.read_bytes()).hexdigest()
@@ -773,7 +777,8 @@ def test_receipt_and_readsets_bind_under_metadata_namespace(tmp_path):
                             / f"{record['quantum_id']}{suffix}.json.gz")
             assert path.is_file()
             assert _sha(path) == bound["manifest_sha256"]
-        # The executable lane stays sequencing-only: binding None.
+        # Static prepared inputs use ordinary immutable input staging;
+        # they do not claim a dynamic produced-output binding.
         manifest = json.loads(gzip.decompress(
             Path(record["executable_readset"]["manifest_path"])
             .read_bytes()).decode("utf-8"))
@@ -814,12 +819,14 @@ def test_receipt_and_readsets_bind_under_metadata_namespace(tmp_path):
     assert _snapshot(meta) == first
 
 
-def test_dispatcher_still_refuses_executable_rows(tmp_path):
-    """The metadata namespace changes placement of control files, never the
-    strict binding gates: an executable-bound record is refused by the
-    dispatcher exactly as before."""
+def test_dispatcher_accepts_prepared_executable_rows(tmp_path, monkeypatch):
+    """Metadata placement retains the complete prepared-input binding."""
     pytest.importorskip("torch")
     import dispatch_joint_quanta as dispatch
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({"container": {"image": "sha256:" + "0" * 64},
+                                "env": {}}))
+    monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
     campaign = _tiny_campaign(tmp_path)
     adjoint_space = campaign["root"] / "layer-quanta" / "adjoint"
     receipt_path = _tiny_receipt(campaign, adjoint_space)
@@ -831,11 +838,12 @@ def test_dispatcher_still_refuses_executable_rows(tmp_path):
            "--executable-readsets"]) == 0
     record_path = meta / "records" / "layer-000.json"
     record = json.loads(record_path.read_text())
-    with pytest.raises(dispatch.ExecutableBindingUnsupported):
-        dispatch.quantum_argv(
-            record, record_path=record_path,
-            output_root=Path(str(campaign["root"])),
-            adjoint_path=receipt_path)
+    argv = dispatch.quantum_argv(
+        record, record_path=record_path,
+        output_root=Path(str(campaign["root"])),
+        adjoint_path=receipt_path)
+    assert "--data-manifest" in argv
+    assert "prepared_input" in record["executable_readset"]
 
 
 def test_binder_requires_exact_metadata_path(tmp_path):

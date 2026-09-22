@@ -289,6 +289,44 @@ Two pure functions, both refusing rather than repairing (the #768 pattern):
   live plan/prepared/manifest digests and scope; refuses a record built for
   any other campaign revision.
 
+**Source coverage extension (2026-09-21, PQ #900).** The §3.2 tiling proof
+is about the frozen parent, not a proof that the parent declared everything
+the reader consumes. Keep §3.1 slices and chunks exact even when the parent
+has a source hole. The existing post-capture executable manifest is the
+separate staging corpus: pass `layer_source_spans` to
+`build_quantum_executable_manifest`, `bind_quantum_executable` and
+`emit_quantum_executable_readsets` to complete every chain and own source
+phase through Stage A's completion helpers. Each needed layer requires a
+nonempty span set, and each tensor must fit in one entry within its phase;
+coverage in a neighbour's phase or across two staged files does not count.
+Added entries are appended, preserving existing entry indices, and
+`annotations.source_completion` records the additions. The binder rebuilds
+with the same spans, so a rehashed omission refuses. Inputs are immutable;
+the returned executable binding produces the usual new record identity.
+
+The regeneration CLI opts in with `--executable-readsets
+--source-layers-prefix model.language_model.layers.` for the GLM checkpoint
+namespace. It derives spans once from the sealed plan's `model` index and
+shard headers for all parent body layers, before first-writer publication.
+Use a fresh `--metadata-root` and `--compare-existing` for a retained prior
+generation; dry-run with `--check-only` first. The old default reproduces
+unchanged. This does not supply an output storage lease or bypass
+`ExecutableBindingUnsupported`; PQ #870 / PR #871 owns the independent
+accepted produced-output validator integration.
+
+**Source-only executable phases (2026-09-21, PQ #909).** The parent tiles
+rendered-cache files alongside source weights, and the executable builder
+used to copy the whole tiled group into each chain/own source phase. Pass
+`source_model_root` (the sealed plan's `model` directory; the regen CLI
+reads it from the sealed plan and refuses without it) to
+`build_quantum_executable_manifest`, `bind_quantum_executable` and
+`emit_quantum_executable_readsets` to keep only the entries under that
+root, matched on a path-component boundary. The tiling proof still runs on
+the whole group first, a phase left with no source entry refuses, and the
+binder rederives with the same root so a root mismatch refuses. Without a
+root the historical bytes reproduce unchanged. Rendered weights remain
+exclusively under the produced-output lifecycle.
+
 ### 3.3 Stage-A receipt
 
 `<output_root>/layer-quanta/adjoint/adjoint-capture.json`,
