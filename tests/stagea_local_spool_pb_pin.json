@@ -1,7 +1,7 @@
 {
   "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
-  "bundle_root": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/pb-local-export-a7a17c3c5224",
-  "candidate_commit": "a7a17c3c5224",
+  "bundle_root": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/pb-local-export-3eda6a0f0688",
+  "candidate_commit": "3eda6a0f0688",
   "files": {
     "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
     "src/prismabuild/movement_actions.py": "fd3a76883033c4e955a9e6e5a939536390671064ed44132fd90835003683d2af",
@@ -14,13 +14,13 @@
     "tools/fleet/prewarm_loop.py": "638f2aeda817037df4c2ea99c557ab9104172823351553849ad0cc3244b9634f",
     "tools/fleet/stage_move.py": "4dab41a6bda7e59799308720e2d1d2413021c67e830dd30f4af0a443566d161f",
     "tools/fleet/stage_release.py": "642409966f3e551c62d197701e2fe29890cb28e14bb092a77052a6bb8c977be7",
-    "src/prismabuild/produced_spool.py": "8fdb23353200cfa88af365776e0acb5f500abbf6717813f812267f69a5e146c3",
+    "src/prismabuild/produced_spool.py": "9ba61e972cbfee07c7a8d890ed7e649ab1ee5cbc6853e95d4b3c3a54f235c40f",
     "tools/fleet/produced_export.py": "0bc4159cf5d4d4955bc83c10d6676df42108a281a4b0b6e9024d5c4c73a30efc"
   },
   "search_paths": [
     {
-      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/pb-local-export-a7a17c3c5224"
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/pb-local-export-3eda6a0f0688"
     }
   ],
-  "note": "Immutable PB857 candidate archive, source qualification only; no live deployment claim."
+  "note": "Immutable PB857 security-hardened candidate archive; source qualification only, no live deployment claim."
 }
