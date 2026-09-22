@@ -745,3 +745,20 @@ def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, camp
     spec['cpu_memory_gb'] = 32; dispatch.SPEC_PATH.write_text(json.dumps(spec))
     with pytest.raises(DispatchRefused, match='envelope differs'):
         quantum_argv(record, **args)
+
+
+def test_portable_admission_does_not_skip_container_spec_validation(tmp_path):
+    from dispatch_joint_quanta import _container_wrap
+    path = tmp_path/'spec.json'
+    path.write_text(json.dumps({'container_admission_reference': 'content:sha256:' + 'c'*64,
+        'container': {'image': 'image', 'content_sha256': 'b'*64, 'unknown_field': True}}))
+    with pytest.raises(RuntimeError, match='container must declare'):
+        _container_wrap(path, ['python3'])
+
+
+def test_extended_catalog_cannot_launch_historical_bare_parent_readset(tmp_path, campaign):
+    record = _record(campaign, 1, slice_dir=tmp_path)
+    record['catalog_extension'] = {'path': '/proof', 'sha256': 'e'*64}
+    with pytest.raises(DispatchRefused, match='requires executable prepared-input'):
+        quantum_argv(record, record_path=tmp_path/'record', output_root=tmp_path/'out',
+                     adjoint_path=tmp_path/'receipt')

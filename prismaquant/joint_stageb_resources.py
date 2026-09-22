@@ -101,7 +101,8 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
     else:
         for pair in sorted(paths):
             record_file(pair, observe_file(pair))
-    print(f"resource geometry: {len(file_rows)} file observations complete; deriving {len(by_layer)} layers", flush=True)
+    mode = "observed" if recorded is None else "reused sealed observations for"
+    print(f"resource geometry: {mode} {len(file_rows)} files; deriving {len(by_layer)} layers", flush=True)
     maxima = {**cache.activation_max_abs, FORMAT_MAXIMA_KEY: {FORMAT: activation["effective_max_abs"]}}
     targets = {}
     for layer, names in sorted(by_layer.items()):

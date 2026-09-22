@@ -800,13 +800,14 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     argv = ["python3", "-m", "tools.tessera_campaign_container",
             "--spec", json.dumps(spec, sort_keys=True),
             "--", *payload]
+    default_admission = admission_image_reference(spec)
     admission = spec.get("container_admission_reference")
     if admission is not None:
         if (not isinstance(admission, str) or not admission.startswith("content:sha256:")
                 or not _is_hex64(admission.removeprefix("content:sha256:"))
                 or not _is_hex64(spec.get("container", {}).get("content_sha256"))):
             raise DispatchRefused("explicit portable image admission requires content SHA and inspected scientific image identity")
-    return argv, admission or admission_image_reference(spec)
+    return argv, admission or default_admission
 
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
@@ -842,6 +843,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     quantum_id = record["quantum_id"]
     resource_policy = None
     executable = record.get("executable_readset")
+    if record.get("catalog_extension") is not None and executable is None:
+        raise DispatchRefused("catalog extension requires executable prepared-input readsets before publication")
     if executable is not None:
         # PQ #917: the complete static prepared-input contract is an
         # ordinary immutable input staging -- the manifest names existing
