@@ -24,20 +24,64 @@ class ForwardRecoveryRefused(RuntimeError):
     pass
 
 
+#: One PB record or proof document: an instance, commitments, export
+#: manifest, receipt, export record, owner request or specification.
+PROOF_READ_MAX_BYTES = 128 << 20
+#: A capsule is assembled from bounded reads. Each group holds its export
+#: manifest twice (parsed and raw), its receipt and its export record; the
+#: rest is the specification and, for a chained segment, the owner's request.
+_GROUP_READS = 4
+_HEADER_READS = 2
+
+
+def capsule_byte_limit(document):
+    """The most a capsule declaring these groups can occupy."""
+    groups = document.get('groups')
+    if not isinstance(groups, list):
+        raise ForwardRecoveryRefused('recovery capsule declares no groups')
+    return (_HEADER_READS + _GROUP_READS * len(groups)) * PROOF_READ_MAX_BYTES
+
+
+def _stat_fence(value):
+    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+
+
 def _read(path, expected=None):
+    """Read one proof document; a pinned read verifies its digest first.
+
+    An unpinned read is one PB record, bounded by ``PROOF_READ_MAX_BYTES``.
+    A pinned read hashes the file in fixed chunks before loading it, so a
+    wrong file is refused without being held in memory; a pinned capsule is
+    then bounded by the groups it declares, not by one record's bound.
+    """
     path = Path(path)
     before = path.lstat()
-    if not stat.S_ISREG(before.st_mode) or before.st_size > 128 << 20:
+    if not stat.S_ISREG(before.st_mode) or (
+            expected is None and before.st_size > PROOF_READ_MAX_BYTES):
         raise ForwardRecoveryRefused('recovery proof is not a bounded regular file')
+    if expected is not None:
+        digest = hashlib.sha256()
+        with path.open('rb') as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b''):
+                digest.update(chunk)
+        if _stat_fence(path.lstat()) != _stat_fence(before):
+            raise ForwardRecoveryRefused('recovery proof changed during read')
+        if digest.hexdigest() != expected:
+            raise ForwardRecoveryRefused('recovery proof SHA256 mismatch')
     raw = path.read_bytes()
-    after = path.lstat()
-    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+    if _stat_fence(path.lstat()) != _stat_fence(before):
         raise ForwardRecoveryRefused('recovery proof changed during read')
     digest = hashlib.sha256(raw).hexdigest()
     if expected is not None and digest != expected:
         raise ForwardRecoveryRefused('recovery proof SHA256 mismatch')
-    return json.loads(raw), digest
+    document = json.loads(raw)
+    if expected is not None and len(raw) > (
+            capsule_byte_limit(document)
+            if isinstance(document, dict) and document.get('schema') == SCHEMA
+            else PROOF_READ_MAX_BYTES):
+        raise ForwardRecoveryRefused(
+            'recovery proof is larger than its declared groups allow')
+    return document, digest
 
 
 def _sdk():
@@ -215,6 +259,33 @@ def chain_records(document):
         _records(segment, [entry for group in segment['groups']
                            for entry in group['manifest']['entries']])
         for segment in chain_documents(document)])
+
+
+#: Verified chains a Stage B owner attached in this process, keyed by the
+#: top capsule's (path, sha256). The digest pins every byte of the chain, so
+#: a later owner attaching the same capsule reuses the references instead of
+#: re-reading and re-parsing every imported capsule.
+_ATTACHED_CHAINS: dict = {}
+
+
+def attached_chain(capsule):
+    """The top segment's identity and every reference of a pinned chain."""
+    key = (str(capsule['path']), str(capsule['sha256']))
+    cached = _ATTACHED_CHAINS.get(key)
+    if cached is None:
+        from .joint_adjoint_checkpoints import reference_from_record
+        document, _ = _read(capsule['path'], capsule['sha256'])
+        if document.get('schema') != SCHEMA:
+            raise ForwardRecoveryRefused('unsupported attached forward recovery schema')
+        identity = {'session': document['session'], 'frontier': document['frontier'],
+                    'owner': document['instance']['owner_action_key'],
+                    'attempt': document['instance']['owner_attempt']}
+        references = frozenset(reference_from_record(row)
+                               for rows in chain_records(document).values() for row in rows)
+        while len(_ATTACHED_CHAINS) >= MAX_CHAIN_SEGMENTS:
+            _ATTACHED_CHAINS.pop(next(iter(_ATTACHED_CHAINS)))
+        cached = _ATTACHED_CHAINS[key] = (identity, references)
+    return cached
 
 
 def _require_imported_by_owner(document, sdk):

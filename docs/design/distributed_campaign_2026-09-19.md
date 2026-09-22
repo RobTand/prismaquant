@@ -378,7 +378,23 @@ geometry, queue and campaign record. Each segment's original implementation
 must equal the recovery implementation the imported capsule bound. The owner's
 sealed command must import exactly that capsule once. Segments may not overlap,
 and together they must cover boundary zero through the top frontier. Stage B's
-attach reads references from every generation in the chain.
+attach reads references from every generation in the chain, and caches the
+verified chain by the top capsule's path and SHA256, so a second owner in the
+same process reads no capsule again. `--inspect-live --import-capsule` checks a
+contained chained owner's own groups and every imported link without freezing.
+
+A pinned capsule read hashes the file before loading it. An unpinned proof (one
+PB record) keeps the fixed 128 MiB bound; a pinned capsule is bounded by the
+reads it is assembled from: two header documents plus four per declared group.
+
+`tools/build_stagea_forward_recovery_package.py` renders the attempt launcher
+from `tools/templates/stagea_forward_recovery_launch.py.template`. A reviewed
+campaign declaration (`--campaign-fields`, for GLM full512
+`tools/templates/glm_full512_stagea_campaign_fields.json`) supplies the
+campaign fields, including the original read manifest's digest; the build
+supplies the label, source head, recovery manifest digest and capsule. The
+fields and the template's placeholders must match exactly. Rendering R11's
+fields reproduces the launcher R11 was sealed with.
 
 Adjoint checkpoints have fixed paths (`checkpoints/boundary-NNN`) and are never
 overwritten. A contained attempt that reached its tail leaves a checkpoint that

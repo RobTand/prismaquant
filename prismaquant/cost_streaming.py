@@ -382,22 +382,18 @@ class StreamedBoundaryArtifacts:
         self._readonly = True
         self._status = "attached"
         if forward_recovery is not None:
-            from .joint_forward_resume import SCHEMA, _read, chain_records
-            from .joint_adjoint_checkpoints import reference_from_record
+            from .joint_forward_resume import SCHEMA, attached_chain
             if forward_recovery.get("schema") != SCHEMA:
                 raise RuntimeError("unsupported attached forward recovery authority")
-            capsule = forward_recovery["capsule"]
-            document, _ = _read(capsule["path"], capsule["sha256"])
-            if (document.get("schema") != SCHEMA or
-                    document["session"] != forward_recovery["original_session"] or
-                    document["frontier"] != forward_recovery["frontier"] or
-                    document["instance"]["owner_action_key"] != forward_recovery["original_owner"] or
-                    document["instance"]["owner_attempt"] != forward_recovery["original_attempt"]):
+            # A chained capsule spans generations; each reference keeps its
+            # own session. The chain is verified once per (path, sha256).
+            identity, references = attached_chain(forward_recovery["capsule"])
+            if (identity["session"] != forward_recovery["original_session"] or
+                    identity["frontier"] != forward_recovery["frontier"] or
+                    identity["owner"] != forward_recovery["original_owner"] or
+                    identity["attempt"] != forward_recovery["original_attempt"]):
                 raise RuntimeError("attached forward recovery session changed")
-            # A chained capsule spans generations; each reference keeps its own session.
-            records = chain_records(document)
-            self._attached_forward_inputs = frozenset(reference_from_record(row)
-                for rows in records.values() for row in rows)
+            self._attached_forward_inputs = references
 
     def authorize_forward_inputs(self, references):
         """Borrow already authenticated recovery inputs without taking ownership."""
