@@ -89,7 +89,7 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False, fail_unit=None,
     context = SimpleNamespace(schedule_prefetch=lambda depth: None,
         install=lambda layer, **kw: events.append(('install', layer)),
         unload=lambda layer: events.append(('unload', layer)),
-        settle_prefetched_layers=lambda indices: events.append(('settled', tuple(indices))))
+        settle_prefetched_layers=lambda indices, *, retry_availability=False: events.append(('settled', tuple(indices))))
     runner = SimpleNamespace(model=torch.nn.Module(), context=context,
         num_layers=max(layer_of) + 1, prefetch_lookahead=1,
         require_prefetched_residency=True, profile=object(), device='cpu',

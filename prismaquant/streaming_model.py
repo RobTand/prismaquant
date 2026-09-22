@@ -36,7 +36,7 @@ import re
 import threading
 import time
 from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from typing import Any
 
 import torch
@@ -535,6 +535,27 @@ def _prefetch_delivery_enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
+def _is_prefetch_availability(exc: BaseException) -> bool:
+    """Whether an admitted load may retry its failed speculation (PQ #911).
+
+    Only the proven transient cause retries: a declared staged range that
+    remains unlanded (``StagedRangeNotLanded``). The type is the proof;
+    message wording is never consulted, so an unknown failure whose text
+    happens to contain availability words is refused, not retried, and
+    ``CancelledError`` never retries. Undeclared spans, failed covering
+    entries, wrong-size/non-regular/permission/corrupt payloads and
+    integrity refusals keep their generic errors: nothing about them says
+    the bytes are on their way. ``LeaseRefused`` can propagate from the
+    strict reader's LeaseWindow, including availability refusals such as
+    retiring. Those are not this declared-but-unlanded cause and do not
+    match. No pool/HDD read, no swallow, exactly one retry by the caller.
+    """
+    if isinstance(exc, CancelledError):
+        return False
+    from .staged_tier_policy import StagedRangeNotLanded
+    return isinstance(exc, StagedRangeNotLanded)
+
+
 class StreamingContext:
     def __init__(self, *, model, base_model, layers, layers_prefix: str,
                  num_layers: int, install_resolvers: list[dict],
@@ -605,6 +626,10 @@ class StreamingContext:
         self.source_fp4_experts = source_fp4_experts
         self._inflight: dict[int, Any] = {}
         self._inflight_lock = threading.Lock()
+        # PQ #907: this context owns its staged-wait cancellation. The
+        # event travels explicitly -- worker to read to wait -- so shutting
+        # down one context never aborts a coexisting context's wait.
+        self._staged_wait_cancel = threading.Event()
         # Sequential-walk tracking for the automatic prefetch top-up.
         # Every streamed consumer (probe phase-1/phase-3, cost_streaming's
         # forward and reverse sweeps, incremental_measure_quant_cost) walks
@@ -691,6 +716,7 @@ class StreamingContext:
             pack_experts=self.expert_packer,
             merge_concat=self.concat_merger,
             buffer_dtypes=self.buffer_dtypes,
+            cancel=getattr(self, "_staged_wait_cancel", None),
             **({'source_authentication': self.source_authentication}
                if self.source_authentication is not None else {}))
         # The cache may still decline to RETAIN the layer under its dynamic
@@ -874,7 +900,7 @@ class StreamingContext:
         with self._inflight_lock:
             fut = self._inflight.get(L)
         if fut is not None:
-            delivered = fut.result()
+            delivered = self._await_prefetch(L, fut, retry_availability=True)
             self._claim_inflight(L)
             cached = self.layer_cache.get(L)
             if cached is not None:
@@ -894,6 +920,12 @@ class StreamingContext:
                 f"streamed layer {L} is not resident after its required "
                 "prefetch; refusing synchronous cold source read"
             )
+        # PQ #907: a cancelled owner starts no synchronous read either.
+        _cancel = getattr(self, "_staged_wait_cancel", None)
+        if _cancel is not None and _cancel.is_set():
+            raise CancelledError(
+                f"streamed layer {L} demand cancelled; "
+                "not reading its source")
         # v20 fix #1: pre-evict to make room for the synchronous read.
         # Cold path can't skip (the consumer needs this layer now), so
         # prepare_for_load best-efforts; if effective_max < layer size,
@@ -906,6 +938,7 @@ class StreamingContext:
             pack_experts=self.expert_packer,
             merge_concat=self.concat_merger,
             buffer_dtypes=self.buffer_dtypes,
+            cancel=getattr(self, "_staged_wait_cancel", None),
             **({'source_authentication': self.source_authentication}
                if self.source_authentication is not None else {}))
         self.layer_cache.put(L, tensors)
@@ -972,13 +1005,57 @@ class StreamingContext:
         if self.device.type == 'cuda':
             torch.cuda.empty_cache()
 
-    def settle_prefetched_layers(self, layer_indices):
+    def _await_prefetch(self, layer, future, *, retry_availability):
+        """Await delivery, retaining its owner even when speculation is replaced.
+
+        The compute thread owns this transition. One retry belongs to the
+        delivery future, shared by loader settlement and later demand; a
+        failed replacement cannot earn another attempt at either boundary.
+        Scheduling still enforces the ordinary source-load memory gates.
+        This reports no progress and grants no new phase/watchdog allowance.
+        """
+        try:
+            return future.result()
+        except Exception as exc:
+            if (not retry_availability or not _is_prefetch_availability(exc)
+                    or getattr(future, '_pq_availability_retried', False)):
+                raise
+            cancel = getattr(self, '_staged_wait_cancel', None)
+            if cancel is not None and cancel.is_set():
+                raise CancelledError(
+                    f'streamed layer {layer} demand cancelled; not retrying its prefetch')
+            with self._inflight_lock:
+                if self._inflight.get(layer) is not future:
+                    raise RuntimeError('prefetch retry lost its delivery owner') from exc
+                future._pq_availability_retried = True
+                del self._inflight[layer]
+            # The visitor can still hold the original Future. Its failure
+            # traceback can retain a partially read layer, so release
+            # completed loader-frame locals before allocating the retry.
+            # Traceback locations and the exception itself remain intact;
+            # executing frames (including this one) are left alone.
+            import traceback
+            traceback.clear_frames(exc.__traceback__)
+            replacement = self.schedule_prefetch(layer)
+            if replacement is None:
+                # Keep the failed owner and its spent retry budget. A
+                # refused admission must not enable repeated retry calls.
+                with self._inflight_lock:
+                    self._inflight.setdefault(layer, future)
+                raise
+            replacement._pq_availability_retried = True
+            return replacement.result()
+
+    def settle_prefetched_layers(self, layer_indices, *, retry_availability=False):
         """Await an already scheduled window without claiming its owners.
 
         Capture may exclude loader temporaries only after every remaining
-        prefetch is complete. Missing, refused, failed or unexpected loads
-        fail closed; this boundary never schedules a cold read, installs a
-        layer, changes an LRU pin or removes a delivery future.
+        prefetch is complete. The default only observes. An already admitted
+        source-loading phase may explicitly retry a typed availability
+        failure once through the existing prefetch machinery. Missing,
+        refused, unknown/integrity or unexpected loads still fail closed.
+        Neither mode cold-reads, installs, claims a delivery future or spends
+        an LRU pin. A successful replacement remains owned for later install.
         """
         indices = tuple(layer_indices)
         if (len(set(indices)) != len(indices) or any(
@@ -992,7 +1069,8 @@ class StreamingContext:
         for index in indices:
             future = futures.get(index)
             if future is not None:
-                if not future.result():
+                if not self._await_prefetch(
+                        index, future, retry_availability=retry_availability):
                     raise RuntimeError(f'capture successor {index} prefetch was refused')
                 settled.append(dict(layer=index, owner='prefetch_future'))
             elif self.layer_cache.peek(index):
@@ -1066,12 +1144,32 @@ class StreamingContext:
                     unique_storage_bytes=sum(all_storages.values()))
 
     def shutdown(self):
-        self.prefetch_pool.shutdown(wait=True)
-        # Completed-but-unclaimed futures hold a reference to their layer
-        # tensors (that is the delivery guarantee); drop them so a torn-down
-        # context does not pin layer bytes until it is garbage-collected.
+        # PQ #907: a failed capture must not sit in teardown until each
+        # prefetch worker's own staged-range bound runs out. This context
+        # sets its own event first: readiness waits raise CancelledError
+        # before their next payload read, and pending workers are cancelled.
+        # An I/O operation already in progress still joins normally; this
+        # is not an instant cancellation of kernel I/O. Draining never
+        # calls result(), so an owned future's failure cannot mask the
+        # primary capture error
+        # this teardown runs under.
+        cancel = getattr(self, "_staged_wait_cancel", None)
+        if cancel is not None:
+            cancel.set()
         with self._inflight_lock:
-            self._inflight.clear()
+            owned = list(self._inflight.values())
+        for fut in owned:
+            fut.cancel()
+        try:
+            self.prefetch_pool.shutdown(wait=True)
+        finally:
+            # Completed-but-unclaimed futures hold a reference to their
+            # layer tensors (that is the delivery guarantee); drop them so
+            # a torn-down context does not pin layer bytes until it is
+            # garbage-collected. No dangling thread, read, or lease: the
+            # pool is joined above and every owned future is released here.
+            with self._inflight_lock:
+                self._inflight.clear()
 
     def reset_between_chunks(self, retain_cache: bool = False) -> dict:
         """Drop accumulated state at chunk boundaries in the multi-chunk
