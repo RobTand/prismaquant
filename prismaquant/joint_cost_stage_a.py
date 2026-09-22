@@ -1220,6 +1220,38 @@ def bind_stage_a_produced_output(*, artifact_max_bytes, tier=None,
     return publication
 
 
+def _stage_a_device_envelope(config, *, environ=None):
+    """Apply an explicitly requested allocator ceiling before GPU preparation.
+
+    The general cache-budget variable did not enforce Stage A's allocator.
+    Keep legacy calls without it unchanged; an explicit value must be finite
+    and positive and can only tighten the scientific plan's post-hoc ceiling.
+    CUDA runtime/native allocations remain outside Torch's allocator and are
+    bounded by PrismaBuild's GPU and aggregate action backstops.
+    """
+    import math
+    from .memory_management import enforce_device_envelope
+
+    environ = os.environ if environ is None else environ
+    raw = environ.get("PRISMAQUANT_MAX_GPU_MEM_GB")
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        gib = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Stage A device envelope must be positive finite GiB") from exc
+    if not math.isfinite(gib) or gib <= 0:
+        raise ValueError("Stage A device envelope must be positive finite GiB")
+    requested = int(gib * 1024 ** 3)
+    limit = config.get("max_gpu_bytes", requested)
+    if type(limit) is not int or limit <= 0:
+        raise ValueError("Stage A plan device envelope must be positive integer bytes")
+    applied = min(requested, limit)
+    record = enforce_device_envelope("cuda", applied, where="Stage A device envelope")
+    return {**record, "source": "PRISMAQUANT_MAX_GPU_MEM_GB",
+            "requested_bytes": requested, "plan_max_gpu_bytes": limit}
+
+
 def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
@@ -1304,6 +1336,12 @@ def run_adjoint_capture(
     runner = None
     started, before_io = time.time(), _io_counters()
     try:
+        result["device_envelope"] = _stage_a_device_envelope(config)
+        if result["device_envelope"] is not None:
+            print("joint_cost_stage_a: enforced Torch allocator envelope "
+                  f"{result['device_envelope']['device_envelope_bytes']} bytes "
+                  "before backend/model allocation; native CUDA allocations "
+                  "remain covered by PB action limits", flush=True)
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         implementation = _aura_source_sha256()
@@ -1389,6 +1427,7 @@ def run_adjoint_capture(
             min_free_gib=config.get("min_free_gib", 0.0), progress=progress,
             produced_output=publication)
         receipt["stride"]["source"] = stride_source
+        receipt["device_envelope"] = result["device_envelope"]
         torch.cuda.synchronize()
         result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
         result["peak_gpu_reserved_bytes"] = torch.cuda.max_memory_reserved()
@@ -1452,6 +1491,7 @@ def run_adjoint_capture(
         "prefetch_override": prefetch["override"],
         "artifact_budget_override": artifact["override"],
         "artifact_preflight": result.get("artifact_preflight"),
+        "device_envelope": result.get("device_envelope"),
     }
     atomic_write_bytes(space / "counters.json",
                        (json.dumps(counters, sort_keys=True, indent=2,
