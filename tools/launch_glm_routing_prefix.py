@@ -7,11 +7,11 @@ IMAGE='prismaquant-glm-derivative:causal-exp-v1-20260908'
 PIN='/mnt/shared/tessera-pins/tessera-4c384e6049dca3eeaf503bb2c9cd1cd2778978d1'
 CONTENT='d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026'
 def launch_argv(cwd,environ,affinity,args):
- mounts=[{'source':str(cwd),'target':'/pq','readonly':True},{'source':PIN,'target':'/tessera-pin','readonly':True},{'source':'/mnt/shared','target':'/mnt/shared','readonly':False}]
+ mounts=[{'source':str(cwd),'target':'/pq','readonly':True},{'source':str(Path(PIN).parent),'target':str(Path(PIN).parent),'readonly':True},{'source':'/mnt/shared','target':'/mnt/shared','readonly':False}]
  progress=environ.get('PRISMABUILD_ACTION_PROGRESS_PATH')
  if progress and not Path(progress).is_relative_to('/mnt/shared'):
   parent=str(Path(progress).parent);mounts.append({'source':parent,'target':parent,'readonly':False})
- env={'PRISMAQUANT_CONTAINER_CONTENT_SHA256':CONTENT,'PYTHONPATH':'/pq:/tessera-pin/src','TESSERA_REPO':'/tessera-pin','OMP_NUM_THREADS':'1','MKL_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1','PRISMAQUANT_PROD_ACT_SCALES':'0','TRITON_CACHE_DIR':'/tmp/triton','TORCHINDUCTOR_COMPILE_THREADS':'1','MAX_JOBS':'1'}
+ env={'PRISMAQUANT_CONTAINER_CONTENT_SHA256':CONTENT,'PYTHONPATH':f'/pq:{PIN}/src','TESSERA_REPO':PIN,'OMP_NUM_THREADS':'1','MKL_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1','PRISMAQUANT_PROD_ACT_SCALES':'0','TRITON_CACHE_DIR':'/tmp/triton','TORCHINDUCTOR_COMPILE_THREADS':'1','MAX_JOBS':'1'}
  from tools.tessera_campaign_container import residency_environment, reader_context_environment, progress_environment
  spec={'container':{'mounts':mounts},'env':env}
  residency_env,residency_mounts=residency_environment(spec,environ)

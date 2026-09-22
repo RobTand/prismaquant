@@ -16,3 +16,12 @@ def test_unmounted_stage_refuses_before_docker(tmp_path,monkeypatch):
  monkeypatch.setattr(existing,'_stage_root_mounted',lambda p:False)
  with pytest.raises(RuntimeError,match='not a mounted directory'):
   launcher.launch_argv(tmp_path,{'PRISMABUILD_RESIDENCY_MAP':str(mapping)},[2],[])
+
+
+def test_private_pin_is_read_through_traversable_readonly_parent(tmp_path):
+ argv=launcher.launch_argv(tmp_path,{},[2],[])
+ parent=str(Path(launcher.PIN).parent)
+ assert f'type=bind,src={parent},dst={parent},readonly' in argv
+ assert not any(v.startswith(f'type=bind,src={launcher.PIN},') for v in argv)
+ assert f'PYTHONPATH=/pq:{launcher.PIN}/src' in argv
+ assert f'TESSERA_REPO={launcher.PIN}' in argv
