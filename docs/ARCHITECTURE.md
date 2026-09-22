@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+GLM router epsilon (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`, PQ
+#938): `native_moe_panel.validate_glm_routing` no longer requires the router
+normalization epsilon to be `1e-6`, LFM's value. It accepts the value the
+capture read off the source router (`glm_routing_replay.router_normalization_epsilon`,
+`1e-20` for the GLM-5 router, bound by `router_source_sha256`) and refuses
+only a value that is not a positive finite float. Before this, every real GLM
+capture was refused. The LFM route keeps its own `1e-6` check. Gate:
+`tests/test_native_moe_glm_geometry.py`.
+
 Tessera pin (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`): the
 serving-runtime pin and the reader dev pin move from `acf9eafa6a…` to
 `07bfcc0e9b…`, Tessera master after #580, #582, #583 and #585 (the declared
