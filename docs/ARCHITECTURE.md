@@ -17,18 +17,50 @@ budget follows the delivery future through settlement and later demand,
 including an admission refusal: a second failure propagates without another
 attempt. Before replacement, completed failure-frame locals are cleared so
 an old Future held by the visitor cannot retain a partial source layer beside
-the retry. The original exception and traceback locations remain available. Missing owners, unexpected windows, cancellation, unknown errors,
+the retry. The original exception and traceback locations remain available. Missing
+owners, unexpected windows, cancellation, unknown errors,
 integrity and every `LeaseRefused` remain immediate refusals. No source-phase
 progress is fabricated and no sealed wait/watchdog allowance is extended.
 `source_residency_snapshot` remains nonblocking. CPU/meta regression
 `tests/test_stagea_prefetch_barrier_retry.py` drives the real layer-major
 visitor, Stage A phase observer, StreamingContext, strict shard reader and
 installed PB lease SDK with an absent declared shard that actually lands
-before settlement. It stops at the capture boundary and checks exact installed/delivered
+before settlement. It stops at the capture boundary and checks exact
+installed/delivered
 weights, retained delivery/pin, later claim, phase order, zero pool payload
 and released leases. A separate full CPU core fixture checks both forward
-and reverse opt-in wiring. This is contract
-qualification, not a GPU performance measurement.
+and reverse opt-in wiring. This is contract qualification, not a GPU
+performance measurement.
+
+Re-stamped (2026-09-22, `diagnose/r4-retiring-cover-20260922`) for **a retiring
+cover yielding to an independently leased overlap** (PQ #916). A broad head
+entry may still pass every file check while PB has closed its material
+generation to new leases. After that exact typed `retiring` refusal, the
+source reader takes one finite snapshot of other covering entries through
+the existing resolver checks, then tries each entry's own real lease. It
+keeps the successful pin and descriptor for the complete reader lifetime.
+Ordinary successful reads do no extra metadata work. Unknown authority,
+changed identity, and other SDK integrity refusals stop immediately; when
+no alternative can serve, hard file failures remain integrity refusals and
+missing/all-retiring alternatives serve no bytes. No HDD fallback, lease
+bypass, phase-policy change, or PB runtime change is introduced. Gates:
+`tests/test_staged_range_retiring_cover.py` uses real PB fragments, sidecars,
+pins, retiring marks, SSD/RAM admission, and exact releases.
+
+Re-stamped (2026-09-21, `fix/pq-903-stale-missing-waitable`) for **a stale covering row waiting instead of refusing** (PQ #903). After #902 every covering entry is asked, but every covering staged file missing still refused at once, even when the sealed readset declares the span and the layer's own range has not landed yet: the map is behind the file system (partial eviction or recompose lag), not the bytes unavailable. `ResidencyResolver._range_answer` now carries a typed missing cause (`errno.ENOENT` on the staged `lstat` with no RAM offer, never a `strerror` substring match); `staged_range_outcome` reports all-missing + declared as `RANGE_UNCOVERED` (same silent `range_misses` waitable miss as no covering entry) and all-missing + undeclared as `RANGE_UNDECLARED`. Any hard failure -- entry runs past the declared file, staged copy not regular, wrong size, or unreadable for any other errno including permission -- still refuses at once and reports the first hard reason (integrity first). The layer pre-flight waits on the waitable miss under its single deadline and the read below still refuses after the bound with no pool read. No format, lane, pin, kernel order or ship gate changes. Gates: `tests/test_staged_range_every_covering_entry.py`, `tests/test_strict_reader_tier_enforcement.py` (mid-wait map rewrite with real PB writers and lease paths).
+
+Re-stamped (2026-09-21, `fix/pq-890-tests-20260921`) for **what counts as a
+produced-group release failure** (PQ #890). No format, lane, pin, ship-gate
+verdict or kernel order changes, and no default moves. One counter changes
+meaning: an own-copy deferral that the owner waits out and that then clears
+is no longer recorded in `produced_group_release_failures` or in the report's
+`release_errors`. The waited path now follows the rule the poll path already
+followed -- a deferral is news that PrismaBuild still holds the copy, not a
+stage copy left standing -- so the counter answers "did this owner leave a
+copy behind?" rather than "did this owner happen to ask inside a wait?". A
+deferral that runs its budget out is recorded where it is decided, in the
+wait, alongside the `BoundaryProducedReleaseDeferred` it raises; foreign
+pins, promotion handoffs and egress errors are recorded exactly as before.
 
 Re-stamped (2026-09-21, `fix/stagea-prefetch-907-20260921`) for **a typed-only
 speculative-availability retry** (PQ #911, review tranche 2). The demand-side
@@ -44,13 +76,15 @@ declared-but-unlanded cause. A cancelled owner starts no new demand read:
 `ensure_loaded` raises
 `CancelledError` before scheduling the retry and before the synchronous cold
 read. Cancellation interrupts readiness waits and prevents a subsequent
-read; I/O already in progress still joins normally during shutdown. The retry still travels through the existing prefetch machinery with
+read; I/O already in progress still joins normally during shutdown. The
+retry still travels through the existing prefetch machinery with
 the bounded declared wait, so source-phase memory accounting (admission bound,
 pressure floor) is unchanged, and teardown still drains without calling
 `result()`, keeping the primary capture error. `settle_prefetched_layers`
 defaults to `result()` with no retry, cold read, or claim -- a failed future
 propagates its own error. The explicit admitted-loader opt-in described above
-adds the same bounded recovery before capture, and `source_residency_snapshot` describes a
+adds the same bounded recovery before capture, and
+`source_residency_snapshot` describes a
 pending future as pending without waiting, touching, or loading it. No
 format, lane, pin, kernel order or ship gate changes. Gates:
 `tests/test_stagea_speculative_availability_retry.py` (8 tests: speculation
@@ -66,7 +100,8 @@ layer read to staged-range wait -- so shutting down one context never aborts
 a coexisting context's wait; there is no process-global cancellation state.
 A set event raises `CancelledError` out of the wait: a cancelled wait never
 resolves as a verdict and the read following that wait does not start.
-In-progress I/O is joined normally; cancellation does not interrupt it. Teardown drains owned futures without calling `result()`,
+In-progress I/O is joined normally; cancellation does not interrupt it.
+Teardown drains owned futures without calling `result()`,
 so a prefetch failure can never mask the primary capture error. The read
 seam raises `StagedRangeNotLanded` (a `TierPolicyRefused` with the declared
 span attached) when the resolver reports `RANGE_UNCOVERED`: declared bytes
@@ -77,7 +112,8 @@ become the typed cause. Demand versus certification: `ensure_loaded` and
 `install` claim tensors for compute. Default `settle_prefetched_layers` and
 `source_residency_snapshot` remain observational. The explicit Stage A loader
 opt-in documented above permits bounded availability recovery at settlement
-before capture; it still never claims a delivery future or cold-reads. No format, lane, pin,
+before capture; it still never claims a delivery future or cold-reads. No
+format, lane, pin,
 kernel order or ship gate changes. Gates:
 `tests/test_stagea_prefetch_review_tranche1.py`.
 
@@ -150,8 +186,9 @@ phase and **gates** the result:
   toward this gate either, because PrismaBuild stages and evicts by phase. The
   gate is about what is **declared**, not about which entry the reader picks:
   the resolver asks every map entry that covers a span, lowest offset first, so
-  a neighbour's header entry still serves a layer's first tensors while it is
-  staged, and the layer's own entry serves them once it is not (PQ #902).
+  a neighbour's header entry can serve while its file and lease both admit
+  the read. A missing file or typed retiring generation cannot hide the
+  layer's independently admitted entry (PQ #902, #916).
 - Each run of uncovered tensors becomes one entry from the first tensor's own
   file offset to the last one's end. The offset is derived, not aligned, so it
   cannot land on a header entry's `(path, 0)`.
@@ -1280,7 +1317,9 @@ says exactly that.
   **asks** for the retirement and returns, and later window opens poll it, a
   poll of PrismaBuild's own in-flight egress being neither a failed attempt
   nor a recorded error (`produced_group_release_polls` counts them apart from
-  re-drives); (5) the owner **waits** in four places, all timed: for credit
+  re-drives), and a deferral seen inside a wait being neither one either
+  until the wait gives up on it (`produced_group_release_deferrals` counts
+  the waits, `produced_group_release_failures` the copies left standing); (5) the owner **waits** in four places, all timed: for credit
   when the window is full, for a pending retirement of a group a read wants
   (a copy is never read while an egress may be deleting it), for the mover's
   receipt before it unlinks an origin of a group staged ahead and never read

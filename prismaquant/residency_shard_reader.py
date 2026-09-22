@@ -124,9 +124,13 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
     Stops early, without waiting, on anything that is neither a covered
     span nor a mid-flight miss: ``RANGE_UNDECLARED`` (PB's sealed readset
     never named these bytes, so no mover will ever produce them) and
-    ``RANGE_REFUSED`` (an entry covers the span and failed a check --
-    evidence in hand, which re-asking cannot improve). Waiting on either
-    would be the same conflation this exists to fix, pointed the other way.
+    ``RANGE_REFUSED`` (an entry covers the span and failed a hard check --
+    wrong size, non-regular, permission or integrity, evidence in hand which
+    re-asking cannot improve). A covering entry whose staged file is merely
+    missing reports ``RANGE_UNCOVERED`` when the span is declared (PQ #903)
+    and is waited on like any other mid-flight miss. Waiting on either
+    terminal verdict would be the same conflation this exists to fix,
+    pointed the other way.
 
     Cheap to poll: an uncovered span returns before ``staged_range``
     stats anything, and ``ResidencyResolver._read_map`` is identity-gated,
@@ -746,8 +750,10 @@ class StagedShardReader:
         exact ref released after the bound descriptors close. A RAM leg
         needs RAM-mover covers the composed map does not carry, so it
         refuses fast and the SSD copy acquires honestly with its own
-        material and lifetime. Any refusal — never a pool read. Inactive
-        policy keeps the legacy stage-only open order.
+        material and lifetime. A typed retiring refusal may select another
+        checked overlap through its own lease; other refusals propagate,
+        never becoming pool reads. Inactive policy keeps the legacy
+        stage-only open order.
         """
         for row in self._bound:
             if row[0] <= start and end <= row[1]:
@@ -801,13 +807,33 @@ class StagedShardReader:
             self._bound.append(row)
             return row
         from .staged_lease import LeaseRefused, acquire_entry_window
-        window, key = acquire_entry_window(
-            self._resolver, self._declared, entry)
-        try:
-            window.__enter__()
-        except LeaseRefused as refusal:
-            self._resolver.record_fallback(self._declared, str(refusal))
-            raise
+        alternatives = None
+        hard_refusal = None
+        while True:
+            try:
+                window, key = acquire_entry_window(
+                    self._resolver, self._declared, entry)
+                window.__enter__()
+                break
+            except LeaseRefused as refusal:
+                # A retired phase may still have a physically valid file
+                # while an older reader drains. Its closed generation cannot
+                # hide another overlapping entry that admits its OWN pin.
+                # Unknown/identity/integrity refusals never take this path.
+                if refusal.kind != 'availability' or refusal.reason != 'retiring':
+                    self._resolver.record_fallback(self._declared, str(refusal))
+                    raise
+                if alternatives is None:
+                    candidates, hard_refusal = self._resolver.staged_range_alternatives(
+                        self._declared, start, end,
+                        rejected_offset=entry['offset'], declared_size=self._declared_size)
+                    alternatives = iter(candidates)
+                entry = next(alternatives, None)
+                if entry is None:
+                    if hard_refusal is not None:
+                        refusal = LeaseRefused(hard_refusal, kind='integrity')
+                    self._resolver.record_fallback(self._declared, str(refusal))
+                    raise refusal
         try:
             fd, serving = window.open(key)
             info = os.fstat(fd)

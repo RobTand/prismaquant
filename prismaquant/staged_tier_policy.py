@@ -90,13 +90,6 @@ def activate_staged_tier_policy(value: str) -> frozenset[str]:
 
     ``value`` is the sealed ``--allowed-tiers`` declaration the campaign
     entrypoints always pass explicitly. No ambient fallback: callers that
-    have no sealed declaration have no policy.
-    """
-def activate_staged_tier_policy(value: str) -> frozenset[str]:
-    """Activate strict enforcement for this process. Returns the allowed set.
-
-    ``value`` is the sealed ``--allowed-tiers`` declaration the campaign
-    entrypoints always pass explicitly. No ambient fallback: callers that
     have no sealed declaration have no policy. The explicit production
     install wins over any test-only scope state.
     """
