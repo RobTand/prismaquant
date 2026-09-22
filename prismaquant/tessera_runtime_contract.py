@@ -342,7 +342,10 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: reader) and #945 (fenced source-digest adoption) are tested against the
 #: pin rather than a vendored tree.  Contract v32 -> v34, lane schema v10.
 #: The answer diff below is the review: see the v34 note inside the literal.
-TESSERA_DEV_PIN_COMMIT = "acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9"
+#: Re-pinned 2026-09-22 to 07bfcc0e9 -- Tessera master after #580, #582, #583,
+#: #585 and #596 (``SourceDigestCache.adopt``).  The packaged contract is
+#: byte-identical to ``acf9eafa6``'s, so the answer below does not move.
+TESSERA_DEV_PIN_COMMIT = "07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
