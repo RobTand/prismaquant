@@ -1048,6 +1048,7 @@ def run_adjoint_capture_core(
                     storage.retire(reference)
                     grad_outs[probe][batch] = None
 
+        storage.settle_local_output()
         boundary_entries: dict[str, list[dict]] = {}
         for boundary in range(num_layers):
             boundary_entries[str(boundary)] = [

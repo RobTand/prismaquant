@@ -193,7 +193,8 @@ class SerializedEntryDigest:
     descriptor, which this sink does not own.
     """
 
-    def __init__(self):
+    def __init__(self, *, max_bytes=None):
+        self.max_bytes = max_bytes
         self._hash = hashlib.sha256()
         self._handle = None
         self.bytes = 0
@@ -205,6 +206,8 @@ class SerializedEntryDigest:
     def write(self, data):
         view = memoryview(data).cast("B")
         try:
+            if self.max_bytes is not None and self.bytes + view.nbytes > self.max_bytes:
+                raise RuntimeError("serialized entry exceeds its preallocated ceiling")
             self._hash.update(view)
             self.bytes += view.nbytes
             return self._handle.write(view)
@@ -219,16 +222,26 @@ class SerializedEntryDigest:
 
 
 def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x",
-                                 durable=False, serialized_digest=None, **metadata):
+                                 durable=False, serialized_digest=None,
+                                 preallocate_bytes=None, **metadata):
     """Atomically store already-selected rows without changing their precision."""
     import os
     path = Path(cache_dir) / activation_cache_filename(name)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".pt.tmp")
-    with temporary.open("wb") as handle:
+    with temporary.open("xb" if preallocate_bytes is not None else "wb") as handle:
+        if preallocate_bytes is not None:
+            if type(preallocate_bytes) is not int or preallocate_bytes <= 0:
+                raise ValueError("preallocated entry ceiling must be positive")
+            if serialized_digest is None or serialized_digest.max_bytes != preallocate_bytes:
+                raise ValueError("preallocation requires the matching bounded digest sink")
+            os.posix_fallocate(handle.fileno(), 0, preallocate_bytes)
         torch.save({**metadata, "inputs": inputs.contiguous(), "name": name,
                     "source": source},
                    handle if serialized_digest is None else serialized_digest.sink(handle))
+        if preallocate_bytes is not None:
+            handle.flush()
+            handle.truncate(serialized_digest.bytes)
         if durable:
             handle.flush()
             os.fsync(handle.fileno())
@@ -856,7 +869,7 @@ def _activation_file_signature(path):
 
 def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
                                        max_tensor_bytes, max_file_bytes,
-                                       release_file_pages=True):
+                                       release_file_pages=True, preallocate=False):
     """Extend the ordinary atomic writer with an exact tensor/identity receipt.
 
     The caller reserves the one compact CPU copy before entering. No dtype,
@@ -878,10 +891,11 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
     try:
         compact = inputs.detach().to(device="cpu", copy=True,
             memory_format=torch.contiguous_format)
-        digest = SerializedEntryDigest()
+        digest = SerializedEntryDigest(max_bytes=max_file_bytes if preallocate else None)
         path = write_activation_cache_entry(cache_dir, name, compact,
             source="exact_activation", durable=True, exact=metadata,
-            serialized_digest=digest)
+            serialized_digest=digest,
+            preallocate_bytes=max_file_bytes if preallocate else None)
         del compact
         compact = None
         published_stat = path.lstat()

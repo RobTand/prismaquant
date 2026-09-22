@@ -225,6 +225,7 @@ class StreamedBoundaryArtifacts:
         # retires exactly as it did before produced output existed.
         self._produced = None
         self._produced_plan = None
+        self._local_output_spool = None
         self._produced_groups = {}
         self._produced_release_errors = []
         self._produced_index = {}
@@ -482,6 +483,7 @@ class StreamedBoundaryArtifacts:
         from .perturbed_x_cache import write_exact_activation_cache_entry
         if self._status != "running":
             raise RuntimeError("exact boundary generation is not running")
+        self._commit_local_output_progress()
         kind = "boundary" if probe_index is None else "cotangent"
         coordinates = {"batch": batch_index, "boundary": boundary_index, "probe": probe_index}
         if any(type(v) is not int or v < 0 for v in (batch_index, boundary_index)):
@@ -505,6 +507,9 @@ class StreamedBoundaryArtifacts:
         # retained) checkpoint narrows later ordinary writes exactly as live
         # ordinary entries narrow later checkpoints.
         file_limit = nbytes + 65536
+        if (self._local_output_spool is not None
+                and nbytes > self._produced_plan["max_entry_tensor_bytes"]):
+            raise RuntimeError("local output entry exceeds its sealed group tensor ceiling")
         remaining = self.checkpoint_remaining_bytes()
         if file_limit > remaining:
             raise RuntimeError(
@@ -526,11 +531,18 @@ class StreamedBoundaryArtifacts:
                     kind=kind, batch_index=batch_index,
                     boundary_index=boundary_index, probe_index=probe_index,
                     group_size=self._produced_plan["group_size"]))
+        write_directory = self.directory / "entries"
+        if self._local_output_spool is not None:
+            write_directory = self._local_output_spool.directory(produced_group["batch_id"])
         self._reserve(nbytes)
         try:
             with torch.profiler.record_function("aura.exact_activation.write"):
-                reference = write_exact_activation_cache_entry(self.directory / "entries", name, tensor,
-                    identity=identity, max_tensor_bytes=nbytes, max_file_bytes=file_limit)
+                reference = write_exact_activation_cache_entry(write_directory, name, tensor,
+                    identity=identity, max_tensor_bytes=nbytes, max_file_bytes=file_limit,
+                    preallocate=self._local_output_spool is not None)
+                if self._local_output_spool is not None:
+                    reference = self._local_output_spool.record(
+                        produced_group["batch_id"], reference, self.directory / "entries")
         finally:
             self._reserve(-nbytes)
         self._references[name] = reference
@@ -544,9 +556,11 @@ class StreamedBoundaryArtifacts:
                 produced_group["references"].append(reference)
                 produced_group["live_references"] += 1
                 self._produced_index[reference] = produced_key
-                complete = (read_back and len(produced_group["references"])
+                complete = (len(produced_group["references"])
                             == len(produced_group["planned"]) // 2)
-            if complete:
+            if complete and self._local_output_spool is not None:
+                self._local_output_spool.submit(produced_group["batch_id"])
+            if complete and read_back:
                 # The group's last entry is durable, and everything its
                 # publication needs is on the references already. Publishing
                 # here lets PrismaBuild's mover run while the GPU works.
@@ -561,15 +575,37 @@ class StreamedBoundaryArtifacts:
             self.telemetry["live_artifact_bytes"], self.telemetry["peak_artifact_bytes"])
         if previous is not None:
             self._retire(previous)
-        if self._progress is not None:
+        if self._local_output_spool is not None:
+            self._commit_local_output_progress()
+        elif self._progress is not None:
             self._progress.entry(layer=boundary_index, partition=batch_index, kind=kind)
         if self._check_memory is not None:
             self._check_memory("exact activation publication")
         return reference
 
+    def _commit_local_output_progress(self):
+        if self._local_output_spool is None:
+            return
+        for reference in self._local_output_spool.durable_entries():
+            if self._progress is not None:
+                identity = json.loads(reference.metadata_json)["identity"]
+                coordinates = identity["coordinates"]
+                self._progress.entry(layer=coordinates["boundary"],
+                                     partition=coordinates["batch"], kind=identity["kind"])
+
+    def settle_local_output(self):
+        """Finish PB durable exports before a successful capture receipt."""
+        if self._local_output_spool is not None:
+            self._local_output_spool.drain()
+            self._commit_local_output_progress()
+
     def _retire(self, reference, *, missing_ok=False):
         if self._references.get(reference.name) != reference:
             raise RuntimeError("exact boundary retirement has a stale reference")
+        if self._local_output_spool is not None and not missing_ok:
+            _key, group = self._produced_group_for(reference)
+            self._local_output_spool.await_group(group["batch_id"])
+            self._commit_local_output_progress()
         if self._produced is not None and not missing_ok:
             self._produced_await_copy_before_unlink(reference)
         Path(reference.path).unlink(missing_ok=missing_ok)
@@ -1320,6 +1356,11 @@ class StreamedBoundaryArtifacts:
                                "window_groups": int(window_groups),
                                "ahead_groups": int(window_groups) - 2}
 
+        from .stage_a_local_spool import BoundaryOutputSpool
+        self._local_output_spool = BoundaryOutputSpool.from_publication(
+            publication, timeout_s=staging_timeout_s)
+        if self._local_output_spool is not None and not self._published:
+            raise RuntimeError("local output spool requires a published Stage A owner")
         self._produced_groups = {}
         self._produced_start_stager()
 
@@ -1719,6 +1760,9 @@ class StreamedBoundaryArtifacts:
             self._produced.require_prewrite(
                 batch_id=batch_id, payload_ceiling_bytes=ceiling,
                 paths=planned)
+        if self._local_output_spool is not None:
+            with self._produced_lock.yielded():
+                self._local_output_spool.reserve(batch_id, ceiling)
         group = {"batch_id": batch_id, "planned": planned,
                  "references": [], "published": None, "context": None,
                  "manifest_digest": None, "retired": False,
@@ -1771,6 +1815,9 @@ class StreamedBoundaryArtifacts:
 
         if group["published"] is not None:
             return group
+        if self._local_output_spool is not None:
+            with self._produced_lock.yielded():
+                self._local_output_spool.await_group(group["batch_id"], deadline=deadline)
         descriptors = [self._produced.descriptor_for(
             reference, producer_generation=group["batch_id"])
             for reference in group["references"]]
@@ -1947,6 +1994,8 @@ class StreamedBoundaryArtifacts:
             return None
         with self._produced_lock.held():
             return {
+                "local_spool": (self._local_output_spool.report()
+                                if self._local_output_spool is not None else None),
                 "window_groups": self._produced_plan["window_groups"],
                 "ahead_groups": self._produced_plan["ahead_groups"],
                 "telemetry": {name: value
@@ -2540,6 +2589,9 @@ class StreamedBoundaryArtifacts:
         for group in self._produced_groups.values():
             if group["published"] is not None:
                 continue
+            if (self._local_output_spool is not None
+                    and self._local_output_spool.pending(group["batch_id"])):
+                continue
             self._produced.abort_prewrite(batch_id=group["batch_id"])
 
     def release_produced_group(self, reference):
@@ -3109,6 +3161,8 @@ class StreamedBoundaryArtifacts:
                 if exc is not None:
                     exc.add_note(note)
                 return False
+            if exc_type is None:
+                self.settle_local_output()
             if not self._readonly and (
                     self._active_window is not None or self.telemetry["resident_tensor_bytes"]):
                 raise RuntimeError("exact boundary generation closed with a live window")

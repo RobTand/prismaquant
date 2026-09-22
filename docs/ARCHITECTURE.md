@@ -3,6 +3,25 @@
 As of: 2026-09-22 · `integrate/stageb-r6-astra-20260922`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-22, `feat/pq-local-output-shuttle-20260922`) for
+**PB-owned precommit local output spooling** (PQ #928, PB #857). The default
+remains canonical shared writes. An explicitly sealed local spool root and
+byte ceiling opt Stage A into exact boundary/cotangent serialization on local
+disk. The existing canonical group prewrite precedes PB's per-owner local
+reservation; each serializer preallocates and fills the same temporary inode
+under a bounded digest sink, then truncates to actual size and renames locally.
+Complete existing groups enter PB's source-host export actions. PQ neither
+copies payloads nor dispatches transfers. Canonical references remain pending
+until PB verifies durable export; only then may the old descriptor/publication
+path run, entry progress advance, or local reservations release. Reads retain
+the existing RAM/SSD lease policy. Failed/incomplete exports retain local files
+and prewrite credit, and successful capture receipts drain outstanding exports.
+The container requires an explicitly declared writable bind preserving host
+path identity. This is per-owner bounded precommit storage, not a global host
+disk ledger; checkpoint serialization is unchanged. Tests distinguish adapter
+transport doubles from qualification of PB's actual exporter. Deployment is
+separate from source qualification.
+
 Re-stamped (2026-09-22, `fix/stagea-prefetch-907-20260921`) for **Stage A
 loader-barrier availability recovery** (PQ #911). The real forward visitor
 settles its successor window before entering `capture_forward`; waiting until
