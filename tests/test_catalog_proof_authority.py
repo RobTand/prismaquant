@@ -40,3 +40,33 @@ def test_cached_catalog_pair_rechecks_changed_proof_arm(tmp_path, campaign, prob
     (tmp_path/'source-proof-arm.json').write_text('{}')
     with pytest.raises((ValueError, RuntimeError), match='encoder|proof|changed'):
         verify_catalog_pair(inputs)
+
+
+def test_operation_reuses_proof_without_per_cell_filesystem_checks(tmp_path, campaign, probe, monkeypatch):
+    import prismaquant.joint_catalog_extension as bridge
+    inputs, _, _ = _pair(tmp_path, campaign, probe)
+    adoption = _adoption(inputs)
+    calls = []
+    original = bridge._bound_stat_fence
+    def fence(path):
+        calls.append(path)
+        return original(path)
+    monkeypatch.setattr(bridge, '_bound_stat_fence', fence)
+    with bridge.EncoderAdoptionValidation() as operation:
+        first = operation.verify(adoption)
+        initial = len(calls)
+        for _ in range(100):
+            assert operation.verify(adoption) is first
+        assert len(calls) == initial
+    assert len(calls) > initial, 'completion must recheck dependency fences'
+    with pytest.raises(ValueError, match='outside'):
+        operation.verify(adoption)
+
+
+def test_operation_refuses_dependency_change_before_return(tmp_path, campaign, probe):
+    from prismaquant.joint_catalog_extension import EncoderAdoptionValidation
+    inputs, _, _ = _pair(tmp_path, campaign, probe)
+    with pytest.raises(ValueError, match='changed during operation'):
+        with EncoderAdoptionValidation() as operation:
+            operation.verify(_adoption(inputs))
+            (tmp_path/'source-proof-arm.json').write_text('{}')
