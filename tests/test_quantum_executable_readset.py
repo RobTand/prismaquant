@@ -751,9 +751,9 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
 
     monkeypatch.setattr(runner.context, "install", install_logged)
 
-    def load_logged(space, checkpoint_record):
+    def load_logged(space, checkpoint_record, **kwargs):
         events.append(("checkpoint-open",))
-        return orig_load(space, checkpoint_record)
+        return orig_load(space, checkpoint_record, **kwargs)
 
     import prismaquant.joint_adjoint_checkpoints as _chk_mod
     monkeypatch.setattr(_chk_mod, "load_adjoint_checkpoint", load_logged)

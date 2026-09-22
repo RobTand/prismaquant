@@ -199,7 +199,8 @@ def read_exact_entry_tensors(records, *, expected_session) -> dict:
     """Read whole exact entries back, digest-verified, name -> CPU tensor.
 
     Uses the activation owner's verified window reader (hash-then-load in one
-    pass), sized so a whole checkpoint cotangent plane is one window.
+    pass), sized to the caller's entry list. Checkpoint restoration passes one
+    entry at a time so no read window owns the complete cotangent plane.
     """
     from .perturbed_x_cache import prefetch_exact_activation_cache_entries
 
@@ -783,13 +784,33 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
     return raw
 
 
+def _await_checkpoint_entry(entry, *, deadline):
+    """Wait within the entered checkpoint phase; the exact reader keeps its pin checks."""
+    from .staged_tier_policy import policy_is_active
+    if not policy_is_active():
+        return
+    from .residency_map import residency_resolver
+    from .residency_shard_reader import await_staged_spans
+    from .staged_lease import stage_cover_is_published
+    resolver = residency_resolver()
+    if resolver is None:
+        return  # The strict reader supplies its existing missing-context refusal.
+    size = entry["file_bytes"]
+    return await_staged_spans(
+        resolver, [(entry["path"], 0, size, size)], deadline=deadline,
+        published=stage_cover_is_published)
+
+
 def load_adjoint_checkpoint(
-    space: str | os.PathLike, record: dict,
+    space: str | os.PathLike, record: dict, *, cotangent_factory=None,
+    shared_state_max_bytes=None,
 ) -> tuple[dict, dict, dict]:
     """Read one checkpoint back, verifying every digest it claims.
 
     Returns ``(cotangents, shared_adjoint, shared_pass)`` with CPU tensors and
-    deserialized state. Refuses on any digest or shape mismatch: a checkpoint
+    deserialized state. A caller-owned cotangent factory may provide bounded
+    working storage; verified entry windows are released before the next load.
+    Refuses on any digest or shape mismatch: a checkpoint
     whose bytes moved is a new identity, never a silent partial read.
     """
     checkpoint_dir = checkpoint_directory(space, int(record["boundary"]))
@@ -811,16 +832,29 @@ def load_adjoint_checkpoint(
             raise RuntimeError(
                 f"adjoint checkpoint {field} differ from its receipt entry "
                 f"(boundary {record.get('boundary')})")
+    if shared_state_max_bytes is not None:
+        if type(shared_state_max_bytes) is not int or shared_state_max_bytes <= 0:
+            raise ValueError("adjoint shared-state ceiling must be positive")
+        sizes = [entry.get("file_bytes") for entry in stored["shared_state_entries"]]
+        if (any(type(size) is not int or size <= 0 for size in sizes)
+                or sum(sizes) > shared_state_max_bytes):
+            raise RuntimeError("adjoint shared-state payloads exceed auxiliary byte ceiling")
+    from .residency_shard_reader import staged_range_wait_s
+    deadline = time.monotonic() + staged_range_wait_s()
     session = stored["session"]
-    cotangents = {}
-    tensors = read_exact_entry_tensors(
-        stored["activation_entries"], expected_session=session)
-    for entry in stored["activation_entries"]:
+    entries = stored["activation_entries"]
+    cotangents = {} if cotangent_factory is None else cotangent_factory(entries)
+    for entry in entries:
+        _await_checkpoint_entry(entry, deadline=deadline)
+        tensors = read_exact_entry_tensors([entry], expected_session=session)
         probe, batch = (int(part) for part in
                         entry["name"].removeprefix("cotangent-").split("-"))
-        cotangents[(probe, batch)] = tensors[entry["name"]]
+        cotangents[(probe, batch)] = tensors.pop(entry["name"])
+        del tensors
     shared_adjoint, shared_pass = {}, {}
+    shared_tensor_bytes = 0
     for entry in stored["shared_state_entries"]:
+        _await_checkpoint_entry(entry, deadline=deadline)
         path = Path(entry["path"])
         payload = _read_shared_state_payload(path, entry)
         digest = hashlib.sha256(payload).hexdigest()
@@ -828,11 +862,17 @@ def load_adjoint_checkpoint(
             raise RuntimeError(
                 f"adjoint checkpoint shared-state entry changed: {entry['name']}")
         state = pickle.loads(payload)
+        del payload
         parts = entry["name"].split("-")
         if entry["name"].startswith("shared-adjoint-"):
             shared_adjoint[(int(parts[2]), int(parts[3]))] = state
         else:
             shared_pass[int(parts[2])] = state
+        if shared_state_max_bytes is not None:
+            from .cost_streaming import _state_storage_bytes
+            shared_tensor_bytes += _state_storage_bytes(state)
+            if shared_tensor_bytes > shared_state_max_bytes:
+                raise RuntimeError("adjoint shared-state tensors exceed auxiliary byte ceiling")
     return cotangents, shared_adjoint, shared_pass
 
 
