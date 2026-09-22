@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Head-resume concurrency update (2026-09-22, PQ #822): the head worker count
+also applies to checksummed journal-envelope restoration and independent
+banked-unit input-fence checks. The existing ordered driver is shared from
+`cost_stage_checkpoint`; it bounds outstanding results to twice the assigned
+worker count and commits in roster order. At the first stale or absent unit,
+queued suffix reads are canceled and active reads join before stale journal
+files are removed. Every source hash, render signature, marker hash and wire
+size check remains unchanged. Generic journal callers remain serial unless
+they explicitly request `unit_workers`, bounded by PB's CPU affinity.
+
 Head-resume progress update (2026-09-22, PQ #822): the existing head-walk
 journal and every input fence are still reverified before reuse. A resumed
 durable prefix now publishes one cumulative progress record after its rows
