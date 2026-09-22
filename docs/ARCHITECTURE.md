@@ -65,7 +65,12 @@ streamed-model identity cache into Tessera's source digest cache after the
 complete-checkpoint validator and every per-shard fence check pass, so a whole
 cached export reuses those hashes without rereading payloads. It writes through
 Tessera's pinned `SourceDigestCache` (`acf9eafa6a…`, #966). No format, default,
-stage or ship gate changes.
+stage or ship gate changes. Since the `07bfcc0e9b…` pin it writes through
+`SourceDigestCache.adopt` (Tessera #596) rather than the private `_record`:
+Tessera re-takes each shard's fingerprint, refuses a shard changed inside its
+quiescence window (300 s by default, as for a fresh read) and stamps its own
+`adopted` record beside PrismaQuant's writer. Gate:
+`tests/test_tessera_source_digest_adoption.py`.
 
 Rooted selected cache (2026-09-22, PQ #939): `tools/build_tessera_selected_cache.py`
 builds a `tessera.cached_units.v2` manifest only from an accepted
