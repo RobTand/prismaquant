@@ -1401,6 +1401,20 @@ class BoundaryProducedPublication:
         library call this path may shell out to), so this polls those
         records at a bounded budget and raises :class:`BoundaryStagingTimeout`
         -- a named failure and a withdrawal, never a fallback.
+
+        A complete receipt still wins: ``mover_receipt_complete is True``
+        returns even if the queue row has since moved terminal. An
+        attributable terminal mover fails fast: after a valid binding
+        (``ok is True``) with an incomplete receipt, a current mover
+        already in ``failed`` or ``withdrawn`` raises
+        :class:`BoundaryStagingTimeout` at once with the batch, mover and
+        generation attached, rather than waiting out the full budget.
+        Every other state -- absent, unknown/unreadable, ready, claimed,
+        done -- keeps the existing bounded wait. This never infers spent
+        funding from absent tokens and never scans ``recover_batches``;
+        the single ``materialization_state`` snapshot is the identity
+        proof, so a retired predecessor cannot fail a live successor:
+        once a restage files, the active mover is the successor.
         """
 
         import time
@@ -1419,6 +1433,25 @@ class BoundaryProducedPublication:
                 raise BoundaryProducedBindingError(
                     f"boundary group {batch_id!r} has no readable "
                     f"materialization: {last.get('refusal')!r}")
+            # Fail fast on an attributable terminal mover. The snapshot
+            # above is the ACTIVE materialization, so a retired
+            # predecessor cannot trigger this once a successor is filed:
+            # the active mover would then be the successor. Only
+            # failed/withdrawn are terminal here; absent, unknown,
+            # ready, claimed and done keep the bounded wait, and no
+            # funding record or census is read on this path.
+            if (last.get("ok") is True
+                    and last.get("mover_receipt_complete") is not True
+                    and last.get("mover_queue_state") in (
+                        "failed", "withdrawn")):
+                raise BoundaryStagingTimeout(
+                    f"boundary group {batch_id!r} will not stage: mover "
+                    f"{str(last.get('mover_key'))[:12]} (generation "
+                    f"{last.get('generation')!r}) is terminal "
+                    f"{last.get('mover_queue_state')!r} and its receipt "
+                    f"reads {last.get('mover_receipt_complete')!r} "
+                    f"(refusal {last.get('mover_refusal')!r}); failing fast "
+                    f"without waiting the full {timeout_s}s budget")
             if time.monotonic() >= deadline:
                 raise BoundaryStagingTimeout(
                     f"boundary group {batch_id!r} was not staged within "

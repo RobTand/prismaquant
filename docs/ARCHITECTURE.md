@@ -1,5 +1,6 @@
 # PrismaQuant Architecture
 
+As of: 2026-09-22 · `fix/pq-917-static-prepared-inputs-20260922`.
 Distributed joint-cost joins retain the runtime's measured per-unit statistics,
 unaltered cost rows, and each quantum's original provenance. Production-shaped
 payloads must agree on schema and probe identity and cover exactly their own
@@ -20,8 +21,52 @@ This is a startup observation, not a run-long peak; it neither closes an open
 resource domain nor substitutes for the transient boundary's reservation-slack
 evidence.
 
-As of: 2026-09-22 · `feat/stagea-background-stager-895`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `fix/pq-917-static-prepared-inputs-20260922`) for
+**static prepared renders at retained-window read boundaries** (PQ #917).
+The executable-readset generator loads the digest-bound production cache once,
+derives complete candidate rosters through the existing retained admission
+planners, and seals each window's verified render digests, current sizes and
+whole-file paths. Planner disagreement refuses instead of regrouping windows.
+Each `render-NN` phase precedes that window's replay phases. Dispatch verifies
+the complete prepared contract and exact bound entries against the manifest;
+legacy sequencing-only rows still refuse. At runtime the production window
+callback enters the render phase and awaits those entries using the existing
+bounded staged-read readiness API before the PWC loading pool starts. Strict
+leases remain authoritative for actual reads. This introduces no dynamic
+rendering, second mover, source fallback, or production metadata regeneration.
+Gates: `test_stageb_prepared_inputs_bridge.py` and
+`test_stageb_prepared_render_inputs.py` (CPU synthetic tensor fixtures).
+
+Re-stamped (2026-09-22, `fix/stagea-prefetch-907-20260921`) for **Stage A
+loader-barrier availability recovery** (PQ #911). The real forward visitor
+settles its successor window before entering `capture_forward`; waiting until
+`ensure_loaded` to retry a failed speculative future was too late. That
+forward barrier and Stage A's reverse-chain barrier now explicitly opt into
+one typed `StagedRangeNotLanded` retry while still inside their existing
+source-loading window, before graph/backward workspace begins. Default
+`settle_prefetched_layers` remains observational. Retry uses the existing
+prefetch scheduler, pressure floor and slot limits; it never cold-reads,
+installs, claims the replacement future or spends its cache pin. The retry
+budget follows the delivery future through settlement and later demand,
+including an admission refusal: a second failure propagates without another
+attempt. Before replacement, completed failure-frame locals are cleared so
+an old Future held by the visitor cannot retain a partial source layer beside
+the retry. The original exception and traceback locations remain available. Missing
+owners, unexpected windows, cancellation, unknown errors,
+integrity and every `LeaseRefused` remain immediate refusals. No source-phase
+progress is fabricated and no sealed wait/watchdog allowance is extended.
+`source_residency_snapshot` remains nonblocking. CPU/meta regression
+`tests/test_stagea_prefetch_barrier_retry.py` drives the real layer-major
+visitor, Stage A phase observer, StreamingContext, strict shard reader and
+installed PB lease SDK with an absent declared shard that actually lands
+before settlement. It stops at the capture boundary and checks exact
+installed/delivered
+weights, retained delivery/pin, later claim, phase order, zero pool payload
+and released leases. A separate full CPU core fixture checks both forward
+and reverse opt-in wiring. This is contract qualification, not a GPU
+performance measurement.
 
 Re-stamped (2026-09-22, `feat/stagea-background-stager-895`) for
 **retirement and close ownership** (PQ #918, #919, #920, #922): an unresolved queued or running stager
@@ -58,6 +103,61 @@ copy behind?" rather than "did this owner happen to ask inside a wait?". A
 deferral that runs its budget out is recorded where it is decided, in the
 wait, alongside the `BoundaryProducedReleaseDeferred` it raises; foreign
 pins, promotion handoffs and egress errors are recorded exactly as before.
+
+Re-stamped (2026-09-21, `fix/stagea-prefetch-907-20260921`) for **a typed-only
+speculative-availability retry** (PQ #911, review tranche 2). The demand-side
+retry predicate (`streaming_model._is_prefetch_availability`) matches the
+proven transient cause by type -- `isinstance` against `StagedRangeNotLanded`
+only. No message-substring matching, no `kind`-attribute matching, no
+`CancelledError` retry: an unknown failure whose text happens to contain
+availability words is refused, not retried, and a second availability failure
+after the single bounded retry propagates. Lease-`availability` refusals are
+not matched either: they can reach the layer read seam through its
+`LeaseWindow` (including `retiring`), but are distinct from the proven
+declared-but-unlanded cause. A cancelled owner starts no new demand read:
+`ensure_loaded` raises
+`CancelledError` before scheduling the retry and before the synchronous cold
+read. Cancellation interrupts readiness waits and prevents a subsequent
+read; I/O already in progress still joins normally during shutdown. The
+retry still travels through the existing prefetch machinery with
+the bounded declared wait, so source-phase memory accounting (admission bound,
+pressure floor) is unchanged, and teardown still drains without calling
+`result()`, keeping the primary capture error. `settle_prefetched_layers`
+defaults to `result()` with no retry, cold read, or claim -- a failed future
+propagates its own error. The explicit admitted-loader opt-in described above
+adds the same bounded recovery before capture, and
+`source_residency_snapshot` describes a
+pending future as pending without waiting, touching, or loading it. No
+format, lane, pin, kernel order or ship gate changes. Gates:
+`tests/test_stagea_speculative_availability_retry.py` (8 tests: speculation
+lands-then-serves, integrity preserved, incidental wording refused,
+single-retry-then-propagates, success costs one read, cancelled demand reads
+nothing, settle fails closed, snapshot never waits).
+
+Re-stamped (2026-09-21, `fix/stagea-prefetch-907-20260921`) for **per-context
+prefetch cancellation and a typed declared-range wait expiry** (PQ #907,
+PQ #911, review tranche 1). Each `StreamingContext` owns its staged-wait
+cancellation event, and the event travels explicitly -- prefetch worker to
+layer read to staged-range wait -- so shutting down one context never aborts
+a coexisting context's wait; there is no process-global cancellation state.
+A set event raises `CancelledError` out of the wait: a cancelled wait never
+resolves as a verdict and the read following that wait does not start.
+In-progress I/O is joined normally; cancellation does not interrupt it.
+Teardown drains owned futures without calling `result()`,
+so a prefetch failure can never mask the primary capture error. The read
+seam raises `StagedRangeNotLanded` (a `TierPolicyRefused` with the declared
+span attached) when the resolver reports `RANGE_UNCOVERED`: declared bytes
+with no mover row yet, the one transient cause. An undeclared span
+(`RANGE_UNDECLARED`) and a failed covering entry (`RANGE_REFUSED`) keep the
+generic refusal, and unknown, integrity, and cancellation outcomes never
+become the typed cause. Demand versus certification: `ensure_loaded` and
+`install` claim tensors for compute. Default `settle_prefetched_layers` and
+`source_residency_snapshot` remain observational. The explicit Stage A loader
+opt-in documented above permits bounded availability recovery at settlement
+before capture; it still never claims a delivery future or cold-reads. No
+format, lane, pin,
+kernel order or ship gate changes. Gates:
+`tests/test_stagea_prefetch_review_tranche1.py`.
 
 Re-stamped (2026-09-21, `feat/stagea-background-stager-895`) for **the Stage A
 owner's background stager** (PQ #895). No format, lane, pin, ship-gate verdict
@@ -101,6 +201,46 @@ every other refusal is the read's to make, at once, as before. After the bound
 the refusal stands and nothing is read from the pool. No format, lane, pin,
 kernel order or ship gate changes. Gates:
 `tests/test_stage_cover_mid_copy_mover.py`.
+
+Re-stamped (2026-09-22, `fix/pq-917-static-prepared-inputs-20260922`, adapted #909 filter) for **source-only
+executable phases** (PQ #909). `_source_extent_entries(source_model_root=...)`
+keeps only the parent entries under the sealed plan's source model directory
+(path-component boundary, the stage-A selection): rendered-cache files the
+parent also tiles never stage in a chain/own source phase and stay under the
+produced-output lifecycle. The tiling-agreement check still runs on the whole
+tiled group first, a phase left with no source entry refuses, and without a
+root the historical bytes reproduce unchanged. The regen CLI reads the root
+from the sealed plan's `model` and refuses without it. Gate:
+`tests/test_stageb_source_render_exclusion.py`.
+
+Re-stamped (2026-09-21, `fix/stageb-source-readset-900`) for **Stage B's
+actual source readset, independent of the parent byte tiling** (PQ #900).
+`build_quantum_executable_manifest(layer_source_spans=...)` completes every
+chain and own source phase using Stage A's `complete_source_extent` and
+`uncovered_source_spans`: each tensor must fit inside one entry of that
+phase, including a small tensor already declared in a neighbouring layer's
+phase. Missing or empty per-layer span sets refuse. Added entries follow all
+existing entries and use the first missing tensor's own offset; a duplicate
+`(path, offset)` refuses. The manifest records `annotations.source_completion`
+and the existing executable binder rederives the completed manifest against
+the same spans before binding its digest into a new record generation.
+
+`tools/regenerate_joint_quanta.py --executable-readsets
+--source-layers-prefix PREFIX` reads the sealed plan's source checkpoint
+index and shard headers once and passes all body-layer tensor spans through
+the builder, emitter and binder. This is opt-in so historical generations
+still reproduce exactly; `--metadata-root` gives the new control generation
+its own namespace and `--compare-existing` checks the retained scientific
+bindings before any publication. The frozen parent, slice entries and chunk
+tiling, plan/prepared identity, calibration draw, and Stage A artifact paths
+stay intact. A new executable record identity is expected, just as for every
+post-capture binding. Completing only four slices would both violate their
+parent tiling and miss source holes in the other layers a quantum walks.
+**The produced-output launch gate stays in place:** executable manifests
+remain sequencing-only until the accepted validator integration tracked by
+PQ #870 / PR #871 is available. This repair supplies no storage lease and
+does not make a Stage B GPU run qualified. Gate:
+`tests/test_stageb_readset_source_coverage.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 staged-range resolver asking every covering entry** (PQ #902). PrismaBuild
@@ -167,8 +307,9 @@ in the first 80 KB of a shard whose first MiB a neighbouring layer's phase
 declares). PrismaBuild's `validate_data_manifest` and `manifest_phase_ranges`
 accept it. **Not changed:** the per-layer slice manifests and the quantum records
 that seal them. They tile the parent byte for byte (§3.1 of the distributed
-campaign contract), so they carry the same four holes into Stage B; that is
-filed separately. Gates: `tests/test_stagea_readset_source_coverage.py`.
+campaign contract). Stage B source coverage is completed separately in its
+bound executable readsets (PQ #900, above); slice coverage alone proves no
+reader coverage. Gates: `tests/test_stagea_readset_source_coverage.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 scope of Stage A's kernel-time profiler** (PQ #899). `run_adjoint_capture`
