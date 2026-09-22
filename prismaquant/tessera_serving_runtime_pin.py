@@ -261,8 +261,15 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: refuse, so this pin ADMITS those two dense rungs on ``sm_121`` where the
 #: v32 pin answered ``unattested``.  The digest is from ``git show`` of the
 #: canonical remote's object, never from an installed copy.
+#: Re-pinned 2026-09-22 to 07bfcc0e9 -- Tessera master after #580, #582,
+#: #583 and #585 (the declared resident-tensor census, the wire-derived
+#: footprint and the native-unpriced acquisition producer) and #596
+#: (``SourceDigestCache.adopt``, which ``tessera_source_digest_adoption``
+#: now calls).  The packaged contract is byte-identical to ``acf9eafa6``'s
+#: (v34, digest ``d37c9448…``), so admission does not move: this is a
+#: commit-only move and the answer diff is empty.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9"
+    "07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (

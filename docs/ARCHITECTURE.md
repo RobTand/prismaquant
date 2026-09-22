@@ -1,12 +1,76 @@
 # PrismaQuant Architecture
 
+GLM router epsilon (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`, PQ
+#938): `native_moe_panel.validate_glm_routing` no longer requires the router
+normalization epsilon to be `1e-6`, LFM's value. It accepts the value the
+capture read off the source router (`glm_routing_replay.router_normalization_epsilon`,
+`1e-20` for the GLM-5 router, bound by `router_source_sha256`) and refuses
+only a value that is not a positive finite float. Before this, every real GLM
+capture was refused. The LFM route keeps its own `1e-6` check. Gate:
+`tests/test_native_moe_glm_geometry.py`.
+
+Tessera pin (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`): the
+serving-runtime pin and the reader dev pin move from `acf9eafa6a…` to
+`07bfcc0e9b…`, Tessera master after #580, #582, #583 and #585 (the declared
+resident-tensor census, the wire-derived footprint and the native-unpriced
+acquisition producer) and #596 (`SourceDigestCache.adopt`). The packaged
+contract is byte-identical (v34, digest `d37c9448…03472`, lane schema v10), so
+no admission answer moves; `export.py` and `grammar.py` did not move either, so
+the legal domain is a re-transcription. The PrismaBuild test interpreter is
+`/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e` on sparky, sparklina and
+dl380g10. No format, default, stage or ship gate changes.
+
+Stage A startup and timeout hygiene (2026-09-22, PQ #978): Stage A now
+refuses at startup, before any GPU work, when a checkpoint path it would write
+already exists (`run_adjoint_capture` checks
+`occupied_checkpoint_directories`). Each `checkpoints/boundary-NNN`
+directory is created with `exist_ok=False`, so a stale checkpoint used to
+fail the run only when the adjoint sweep reached it, after the head intake
+and the forward pass. The check matches the writer's own `boundary-NNN`
+spelling, because the tail boundary depends on the layer count and that
+count is known only after the model is built. A directory renamed aside
+does not block. The joint dispatcher now refuses a Stage A or quantum row
+unless the campaign spec's `PRISMAQUANT_STAGED_RANGE_WAIT_S` is strictly
+below the smallest `--progress-phase` grace the row declares, which is
+900 s per chunk. It reads the wait with the reader's own rules
+(`staged_range_wait_from_env`) from the same spec parse it seals into the
+row. Without that bound, a staging stall ends as PrismaBuild's no-progress
+kill, which names no range, and not as the reader's staging refusal. The
+default wait of 300 s is unchanged. Gate:
+`tests/test_stagea_startup_hygiene.py`.
+
+Declared-output client (2026-09-22, PQ #870): the precommit local output
+spool is one generic client, `prismaquant/produced_output_spool.py`
+(`ProducedOutputSpool`), for every writer that runs under PrismaBuild and
+declares its outputs through a produced-output template. It was never specific
+to Stage A; `prismaquant/stage_a_local_spool.py` now only re-exports the former
+names. Each recorded entry may declare PB's `checkpoint` artifact class, which
+PB charges to the checkpoint prewrite budget instead of the payload one. Stage
+A boundary entries are its only caller today; routing adjoint checkpoints and
+renders through it is owed work. No format, default, stage or ship gate
+changes.
+
+Fully loaded modules skip checkpoint initialization (2026-09-22, PQ #968):
+the Transformers compatibility hook now marks a module `_is_hf_initialized`
+when every parameter and buffer it owns came from the checkpoint, before
+missing-state initialization runs. Transformers 5.6.0 documents this
+propagation but performs it only under FSDP, so an initializer that writes a
+tensor directly (the vendored DeepSeek-V4 router's `bias.zero_()`) replaced
+loaded values. Modules with a missing key or a nonpersistent buffer are still
+initialized. Gate: `tests/test_pretrained_buffer_initialization.py`.
+
 Source-digest adoption (2026-09-22, PQ #944):
 `tools/adopt_tessera_source_digests.py` carries an existing, SHA-bound
 streamed-model identity cache into Tessera's source digest cache after the
 complete-checkpoint validator and every per-shard fence check pass, so a whole
 cached export reuses those hashes without rereading payloads. It writes through
 Tessera's pinned `SourceDigestCache` (`acf9eafa6a…`, #966). No format, default,
-stage or ship gate changes.
+stage or ship gate changes. Since the `07bfcc0e9b…` pin it writes through
+`SourceDigestCache.adopt` (Tessera #596) rather than the private `_record`:
+Tessera re-takes each shard's fingerprint, refuses a shard changed inside its
+quiescence window (300 s by default, as for a fresh read) and stamps its own
+`adopted` record beside PrismaQuant's writer. Gate:
+`tests/test_tessera_source_digest_adoption.py`.
 
 Rooted selected cache (2026-09-22, PQ #939): `tools/build_tessera_selected_cache.py`
 builds a `tessera.cached_units.v2` manifest only from an accepted
@@ -200,7 +264,12 @@ execution evidence before final joint costs** (PQ #936): raw dense and routed
 native receipts bind to the final joint panel through a late-binding envelope;
 see the section of that name. `joint_served_activation.verify_policy` gains an
 optional hash-bound `read_bound=` reader for the native acquisition driver. No
-format, default, stage or ship gate changes.
+format, default, stage or ship gate changes. Merged over the Tessera pin move
+to `07bfcc0e9b…` (PQ #987), whose GLM router epsilon check this branch now
+uses in place of its own `1e-20` constant.
+
+Re-stamped (2026-09-22, `ws-t2/tessera-pin-07bfcc0e-20260922`) for the
+Tessera pin move to `07bfcc0e9b…` (contract unchanged at v34).
 
 Re-stamped (2026-09-22, `fix/joint-catalog-extension-20260922`) for **executed-group
 A4 pricing of added catalog candidates** (PQ #937).
@@ -277,7 +346,9 @@ the existing RAM/SSD lease policy. Failed/incomplete exports retain local files
 and prewrite credit, and successful capture receipts drain outstanding exports.
 The container requires an explicitly declared writable bind preserving host
 path identity. This is per-owner bounded precommit storage, not a global host
-disk ledger; checkpoint serialization is unchanged. Tests distinguish adapter
+disk ledger; checkpoint serialization is unchanged. (The client is now
+`produced_output_spool.ProducedOutputSpool`; see the 2026-09-22 declared-output
+note at the top.) Tests distinguish adapter
 transport doubles from qualification of PB's actual exporter. Deployment is
 separate from source qualification.
 
@@ -813,7 +884,9 @@ future range is a worker the current layer's already-staged reads queue
 behind; a ready current-layer read now proceeds while every lookahead layer is
 cold. It waits under one deadline for the whole layer, however many shards it
 spans (`PRISMAQUANT_STAGED_RANGE_WAIT_S`, default 300 s, `0` restores the
-pre-#874 behaviour, and the value must be finite). A covered entry whose
+pre-#874 behaviour, and the value must be finite; the joint dispatcher
+refuses a campaign spec whose wait is not strictly below the row's smallest
+progress grace, PQ #978). A covered entry whose
 material sidecar PrismaBuild has not written yet counts as not landed, asked
 once per staged entry per poll (PQ #905). It only ever waits: it
 never reads payload and never refuses, so an unreachable range still fails
@@ -6971,7 +7044,9 @@ buffers) rematerialized by Transformers with uninitialized storage. Successfully
 finalized models expose `prismaquant.pretrained_initialization.v1` through
 `pretrained_initialization_contract`; from-config models and malformed descriptors
 refuse. This descriptor records the checkpoint load phase, not later model
-mutations. Gate: `tests/test_pretrained_buffer_initialization.py`.
+mutations. Modules whose own tensors all came from the checkpoint are marked
+initialized first, so the initializer never replaces loaded values (PQ #968).
+Gate: `tests/test_pretrained_buffer_initialization.py`.
 
 Re-stamped (2026-09-07, `feat/packed-joint-aura`) for **joint costs for
 profile-declared packed source Linears** (#313). Opt-in streamed joint AURA
@@ -7181,7 +7256,9 @@ buffers) rematerialized by Transformers with uninitialized storage. Successfully
 finalized models expose `prismaquant.pretrained_initialization.v1` through
 `pretrained_initialization_contract`; from-config models and malformed descriptors
 refuse. This descriptor records the checkpoint load phase, not later model
-mutations. Gate: `tests/test_pretrained_buffer_initialization.py`.
+mutations. Modules whose own tensors all came from the checkpoint are marked
+initialized first, so the initializer never replaces loaded values (PQ #968).
+Gate: `tests/test_pretrained_buffer_initialization.py`.
 
 Re-stamped (2026-09-07, `codex/selected-wire-materialization-20260907`) for
 **selected expert-wire materialization** (§4.10; #301). The allocator's opt-in
@@ -19550,9 +19627,10 @@ top-1024 intersection bound, because no instrument in either repository
 produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9` (master after #588, #590 and #592, re-pinned
-2026-09-22; version `0.1.0`, contract v34, lane schema v10 — unchanged:
-v25-v34 are additive for a v10 reader. v32 was pinned at `cc739a55…`
+Tessera `07bfcc0e9b7da13276938cb722bc7dcd893e6c63` (master after #580, #582, #583, #585 and
+#596, re-pinned 2026-09-22; version `0.1.0`, contract v34, lane schema v10 — unchanged:
+v25-v34 are additive for a v10 reader. v34 was first pinned at `acf9eafa6a…`
+(master after #588, #590 and #592, same contract bytes), v32 at `cc739a55…`
 (the #562/#563 union head, 2026-09-19), v29 at `4c384e6049…`, v24 at `7dbbacbd…`, v23 at
 `1c827abc…`, v22 at `387eda36…` and `ba582d4…`, v21 landed at `b8b1cb38`
 in Tessera #313 and the release `e78959ed…` carried v20; first pinned

@@ -568,9 +568,20 @@ def validate_glm_routing(routing):
     source = routing["source_protocol"]
     if (not isinstance(source, dict) or set(source) != GLM_SOURCE_PROTOCOL_FIELDS
             or not isinstance(source["router_class"], str) or not source["router_class"]
-            or source["normalization_epsilon"] != 1e-20
             or source["expert_bias_affects"] != "selection_only"):
         raise ValueError("GLM routed owner requires the actual GLM source router protocol")
+    # The normalization epsilon is the SOURCE's value, not a constant of this
+    # module. `glm_routing_replay.router_normalization_epsilon` reads it off
+    # the router's own forward (`denominator = ... + <epsilon>`, 1e-20 for the
+    # GLM-5 router) and `router_source_sha256` binds the code it was read
+    # from. This consumer cannot re-read that code, so it checks only that
+    # the value is one a denominator guard can be: a positive, finite float.
+    # It used to require LFM's 1e-6, which refused every real GLM capture.
+    epsilon = source["normalization_epsilon"]
+    if type(epsilon) is not float or not math.isfinite(epsilon) or epsilon <= 0:
+        raise ValueError(
+            f"GLM routed owner normalization epsilon is {epsilon!r}; the source's "
+            "router epsilon is a positive finite float read off its forward")
     if source["scoring_func"] != "sigmoid" or source["topk_method"] != GLM_SOURCE_GEOMETRY["topk_method"]:
         raise ValueError("GLM routed owner source protocol names a different selection rule")
     if source["norm_topk_prob"] is not True:

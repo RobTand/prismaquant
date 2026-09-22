@@ -299,6 +299,43 @@ def test_the_captured_glm_routing_validates():
     panel.validate_routing(glm_routing())
 
 
+def test_the_router_epsilon_is_the_value_the_capture_read_off_the_source():
+    """The panel accepts the source's own epsilon, whatever the capture read.
+
+    The GLM-5 router divides its selected weights by ``sum + 1e-20``, and
+    ``glm_routing_replay.router_normalization_epsilon`` records the constant
+    it parses out of that router's forward. The panel required ``1e-6``,
+    LFM's value, so every real GLM capture was refused (PQ #938). The value is
+    taken from the producer here rather than typed, so the test fails if the
+    two sides stop agreeing on how the epsilon is derived.
+    """
+    from prismaquant.glm_routing_replay import router_normalization_epsilon
+
+    class Router:
+        def forward(self, weights):
+            denominator = weights.sum(dim=-1, keepdim=True) + 1e-20
+            return weights / denominator
+
+    epsilon = router_normalization_epsilon(Router())
+    routing = glm_routing()
+    routing["source_protocol"]["normalization_epsilon"] = epsilon
+    validated = panel.validate_routing(copy.deepcopy(routing))
+    assert validated["source_protocol"]["normalization_epsilon"] == epsilon
+    # The panel keeps what the source says; it does not pin a constant of its own.
+    routing["source_protocol"]["normalization_epsilon"] = 1e-6
+    panel.validate_routing(routing)
+
+
+@pytest.mark.parametrize("value", ["1e-20", 1, True, None, 0.0, -1e-20,
+                                   float("nan"), float("inf")])
+def test_a_router_epsilon_that_is_not_a_positive_finite_float_is_refused(value):
+    routing = glm_routing()
+    routing["source_protocol"]["normalization_epsilon"] = value
+    with pytest.raises(ValueError) as caught:
+        panel.validate_routing(routing)
+    assert "normalization epsilon" in str(caught.value), str(caught.value)
+
+
 @pytest.mark.parametrize("override,expected", [
     ({"swiglu_limit": None}, "SwiGLU clamp"),
     ({"swiglu_limit": 5.0}, "SwiGLU clamp"),

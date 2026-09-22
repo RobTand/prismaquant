@@ -40,31 +40,45 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9`, Tessera master on
-2026-09-22 after #588 (rooted cached units, `tessera.cached_units.v2`), #590
-(fenced source digests in whole cached exports) and #592. It is contract
-**v34**, lane schema still **v10**, contract sha256
-`d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472`. Install that revision
+The current pin is Tessera `07bfcc0e9b7da13276938cb722bc7dcd893e6c63`, Tessera master on
+2026-09-22 after #580, #582, #583 and #585 (the declared resident-tensor
+census, the wire-derived footprint and the native-unpriced acquisition
+producer) and #596 (`SourceDigestCache.adopt`). It is contract **v34**, lane
+schema still **v10**, contract sha256
+`d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472` -- the same
+bytes as the previous pin `acf9eafa6a8c…`, so this move changes no admission
+answer. Install that revision
 and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
 `experiments/` and are not wheel entry points.
 Provision the pin venv from a git URL so the install records the commit
 (`git+https://github.com/RobTand/tessera.git@<pin>`). The PrismaBuild test
-interpreter `/home/rob/venvs/pq-pb461728e4-tessera-acf9eafa` is provisioned on
-sparky and sparklina: a copy of `pq846-pb461728e4` with only the Tessera
-distribution reinstalled at the pin. Its `direct_url.json` `vcs_info` names the
-commit, and its installed `runtime_contract.json` hashes to the pin's digest.
-On each box:
+interpreter `/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e` is provisioned on
+sparky, sparklina and dl380g10. On the two GB10 boxes it is a copy of
+`pq846-pb461728e4` with only the Tessera distribution reinstalled at the pin.
+Its `direct_url.json` `vcs_info` names the commit, and its installed
+`runtime_contract.json` hashes to the pin's digest. On each GB10 box:
 
 ```bash
-V=/home/rob/venvs/pq-pb461728e4-tessera-acf9eafa
+V=/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e
 cp -a /home/rob/venvs/pq846-pb461728e4 "$V"
 echo "$V/base-shadow" > "$V/lib/python3.12/site-packages/pq846-base-shadow.pth"
 "$V/bin/python" -m pip install --no-deps --no-build-isolation --force-reinstall \
-  'git+https://github.com/RobTand/tessera.git@acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9'
+  'git+https://github.com/RobTand/tessera.git@07bfcc0e9b7da13276938cb722bc7dcd893e6c63'
 ```
 
-The dl380g10 x86 sibling is owed (RobTand/prismaquant#753,
-RobTand/prismabuild#658).
+dl380g10 has no `pq846-pb461728e4`. Its x86 interpreter of the same name is a
+copy of `pq881-pb461728e4` (Python 3.14, CPU torch, no `base-shadow`), with
+only the Tessera distribution reinstalled the same way:
+
+```bash
+V=/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e
+cp -a /home/rob/venvs/pq881-pb461728e4 "$V"
+"$V/bin/python" -m pip install --no-deps --no-build-isolation --force-reinstall \
+  'git+https://github.com/RobTand/tessera.git@07bfcc0e9b7da13276938cb722bc7dcd893e6c63'
+```
+
+The previous interpreter, `pq-pb461728e4-tessera-acf9eafa`, stays on sparky
+and sparklina for work sealed against that pin.
 
 **v32 -> v34 (2026-09-22).** The answer diff is five additions and no
 removals. v33 (#568) publishes the `sm_121` fp4 activation-quantiser table as a
@@ -131,7 +145,7 @@ cat-file` command below. Tessera master has since advanced to contract v33
 Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p 07bfcc0e9b7da13276938cb722bc7dcd893e6c63:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -229,7 +243,7 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 Verified against `RobTand/tessera` master on 2026-09-22:
 
 ```
-commit           acf9eafa6a8cfcebaba1c6c975e5c04ef82a1ff9
+commit           07bfcc0e9b7da13276938cb722bc7dcd893e6c63
 contract_sha256  d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472
 versions.tessera 0.1.0
 contract_version 34

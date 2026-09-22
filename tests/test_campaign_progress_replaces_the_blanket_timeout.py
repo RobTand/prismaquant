@@ -172,10 +172,17 @@ def test_a_readonly_mount_is_not_somewhere_to_report(monkeypatch):
                               gid=1, image_id="sha256:x", environ=os.environ)
 
 
-def test_a_row_without_the_contract_adds_no_container_environment(monkeypatch):
+def test_a_row_without_the_contract_adds_no_container_environment():
+    """A launcher environment carrying none of PrismaBuild's contracts.
+
+    Passed explicitly rather than derived from ``os.environ``: this test runs
+    inside a PrismaBuild action, whose environment carries the reader
+    context (``PRISMABUILD_ACTION_KEY``/``NONCE``/``SCOPE``/
+    ``READER_HELPER_ROOT``) that ``docker_command`` forwards on purpose.
+    Scrubbing only the progress pair left that bundle in place, so the test
+    failed exactly where it was meant to run.
+    """
     runner = importlib.import_module("tools.tessera_campaign_container")
-    monkeypatch.delenv(prismabuild_progress.PATH_ENV, raising=False)
-    monkeypatch.delenv(prismabuild_progress.TOKEN_ENV, raising=False)
     argv = runner.docker_command(spec(), ["python3"], cwd="/snapshot", uid=1,
-                                 gid=1, image_id="sha256:x", environ=os.environ)
-    assert not [entry for entry in argv if entry.startswith("PRISMABUILD_")]
+                                 gid=1, image_id="sha256:x", environ={})
+    assert not [entry for entry in argv if "PRISMABUILD_" in entry]

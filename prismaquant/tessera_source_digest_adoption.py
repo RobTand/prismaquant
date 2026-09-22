@@ -1,15 +1,24 @@
 """Carry a validated original source hash proof into Tessera's existing cache.
 
 No weight hash is recomputed or relabelled as fresh. The owning PrismaQuant
-validator checks the complete source/config/fences first; the existing Tessera
-cache writer publishes the same digest under its mutation-sensitive key.
+validator checks the complete source/config/fences first; Tessera's own
+``SourceDigestCache.adopt`` then re-takes each shard's fingerprint, applies its
+quiescence rule and publishes the same digest under its mutation-sensitive key,
+recording this owner as the writer.
 """
 from __future__ import annotations
 import argparse, hashlib, json, os
 from pathlib import Path
 
 
-def adopt_source_digests(source, binding, output, *, expected_content_sha256):
+def adopt_source_digests(source, binding, output, *, expected_content_sha256,
+                         quiescent_seconds=None):
+    """Seed Tessera's source digest cache from a validated retained hash proof.
+
+    ``quiescent_seconds`` is passed to ``SourceDigestCache``; ``None`` keeps
+    Tessera's default. A shard changed more recently than that is refused by
+    ``adopt`` exactly as a fresh read would not be recorded.
+    """
     from . import cost_streaming as owner
     from .tessera_joint_allocation import _read_bound, _bound_stat_fence
     from .cost_stage_checkpoint import publish_new_bytes
@@ -33,11 +42,12 @@ def adopt_source_digests(source, binding, output, *, expected_content_sha256):
             raise ValueError('retained source fence changed before adoption: '+str(shard))
         observed.append((shard,row['sha256'],fp,prior,live!=prior))
     out=Path(output);out.mkdir(parents=True,exist_ok=True,mode=0o700)
-    cache=SourceDigestCache(out,source=source)
+    cache=(SourceDigestCache(out,source=source) if quiescent_seconds is None
+           else SourceDigestCache(out,source=source,quiescent_seconds=quiescent_seconds))
     for shard,digest,fp,prior,portable in observed:
-        if SourceDigestCache.fingerprint(shard)!=fp:
-            raise ValueError('source fence changed during adoption: '+str(shard))
-        cache._record(cache._entry_path(cache._key(fp)),cache._key(fp),digest,{
+        # adopt re-takes the fingerprint and refuses one that differs from the
+        # fence taken above, so a shard changed since then publishes nothing.
+        cache.adopt(shard,digest,fingerprint=fp,writer={
             'kind':'adopted_verified_prismaquant_streamed_identity',
             'authority':dict(binding),'source_content_sha256':identity['content_sha256'],
             'upstream_fingerprint':prior,'upstream_dev_portable_device':portable,

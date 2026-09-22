@@ -16,7 +16,7 @@ import time
 import pytest
 import torch
 
-from prismaquant.stage_a_local_spool import BoundaryOutputSpool, BoundarySpoolRefused
+from prismaquant.produced_output_spool import ProducedOutputSpool, ProducedOutputSpoolRefused
 from prismaquant.perturbed_x_cache import write_exact_activation_cache_entry
 from test_stage_a_produced_boundary_chain import _isolated_launch_context  # noqa: F401
 import test_stage_a_produced_boundary_chain as chain
@@ -78,7 +78,7 @@ def _owner(tmp_path, monkeypatch, *, n_batches=chain.GROUP_SIZE):
     # asynchronous exporter while keeping the actual writer and publisher.
     owner._published = True
     backend = ControlledExport(tmp_path / "local")
-    owner._local_output_spool = BoundaryOutputSpool(
+    owner._local_output_spool = ProducedOutputSpool(
         backend, capacity_deferred=CapacityDeferred, timeout_s=2)
     return owner, publication, backend
 
@@ -150,7 +150,7 @@ def test_failed_export_retains_local_sources_and_canonical_prewrite(tmp_path, mo
     group = next(iter(owner._produced_groups.values()))
     batch_id = group["batch_id"]
     backend.groups[batch_id]["failure"] = "destination identity changed"
-    with pytest.raises(BoundarySpoolRefused, match="destination identity changed"):
+    with pytest.raises(ProducedOutputSpoolRefused, match="destination identity changed"):
         owner.settle_local_output()
     aborted = []
     monkeypatch.setattr(publication, "abort_prewrite", lambda **kwargs: aborted.append(kwargs))
@@ -176,7 +176,7 @@ def test_incomplete_group_retains_reservation_on_failure(tmp_path, monkeypatch):
 
 def test_full_spool_waits_only_until_prior_export_is_released(tmp_path):
     backend = ControlledExport(tmp_path / "local", capacity=65536)
-    adapter = BoundaryOutputSpool(backend, capacity_deferred=CapacityDeferred, timeout_s=2)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred, timeout_s=2)
     adapter.reserve("one", 65536)
     # A real tiny writer reference is enough to exercise reservation ownership.
     ref = write_exact_activation_cache_entry(
@@ -221,3 +221,32 @@ def test_local_atomic_publication_never_overwrites_or_deletes_foreign_file(tmp_p
             max_tensor_bytes=64, max_file_bytes=65536, preallocate=True)
     assert (tmp_path / "raced.pt").read_bytes() == foreign
     assert not (tmp_path / "raced.pt.tmp").exists()
+
+
+def test_a_checkpoint_entry_declares_its_class_and_a_payload_entry_stays_unchanged(tmp_path):
+    backend = ControlledExport(tmp_path / "local")
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred, timeout_s=2)
+    adapter.reserve("g", 1 << 20)
+    references = []
+    for name in ("payload-entry", "checkpoint-entry"):
+        references.append(write_exact_activation_cache_entry(
+            adapter.directory("g"), name, torch.arange(8), identity={"session": "fixture"},
+            max_tensor_bytes=64, max_file_bytes=65536))
+    adapter.record("g", references[0], tmp_path / "canonical")
+    adapter.record("g", references[1], tmp_path / "canonical", artifact_class="checkpoint")
+    with pytest.raises(ProducedOutputSpoolRefused, match="artifact class"):
+        adapter.record("g", references[1], tmp_path / "canonical", artifact_class="temp")
+    adapter.submit("g")
+    payload, checkpoint = backend.groups["g"]["entries"]
+    assert "artifact_class" not in payload
+    assert checkpoint["artifact_class"] == "checkpoint"
+    backend.acknowledge("g")
+    adapter.await_group("g")
+    assert [ref.path for ref in adapter.durable_entries()] == [
+        str(tmp_path / "canonical" / Path(ref.path).name) for ref in references]
+
+
+def test_the_former_stage_a_import_names_the_same_client():
+    from prismaquant import stage_a_local_spool as former
+    assert former.BoundaryOutputSpool is ProducedOutputSpool
+    assert former.BoundarySpoolRefused is ProducedOutputSpoolRefused
