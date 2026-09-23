@@ -512,11 +512,32 @@ COTANGENT_SCRATCH_ENV = ("PRISMAQUANT_STAGE_B_COTANGENT_ROOT",
 PRODUCED_SPOOL_ENV = ("PRISMABUILD_PRODUCED_SPOOL_ROOT",
                       "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES")
 
+#: The Stage B one-pass replay spill (PQ #994); the names
+#: ``prismaquant.joint_replay_spill.SPILL_ENV`` reads.
+STAGE_B_SPILL_ENV = ("PRISMAQUANT_STAGE_B_SPILL_ROOT",
+                     "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
+
 
 def cotangent_scratch_environment(spec: dict, environ) -> dict:
     """Forward only an explicitly sealed, identity-mounted local workspace."""
     return _bounded_local_environment(spec, environ, COTANGENT_SCRATCH_ENV,
                                       "cotangent scratch")
+
+
+def stage_b_spill_environment(spec: dict, environ) -> dict:
+    """Forward the Stage B replay spill through a writable identity bind.
+
+    Declared exactly like the cotangent scratch. The root must also not be
+    under ``/mnt/shared``: the spill is local-NVMe scratch, never NFS and
+    never the ZFS pool behind it. The process refuses any other non-local
+    filesystem when it opens the scratch.
+    """
+    forwarded = _bounded_local_environment(spec, environ, STAGE_B_SPILL_ENV,
+                                           "Stage B spill")
+    root = forwarded.get(STAGE_B_SPILL_ENV[0])
+    if root is not None and PurePosixPath("/mnt/shared") in PurePosixPath(root).parents:
+        raise RuntimeError("Stage B spill root must not be under /mnt/shared")
+    return forwarded
 
 
 def produced_spool_environment(spec: dict, environ) -> dict:
@@ -863,6 +884,7 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
                  **progress_environment(spec, environ if environ is not None else {}),
                  **residency_env, **reader_env,
                  **cotangent_scratch_environment(spec, environ if environ is not None else {}),
+                 **stage_b_spill_environment(spec, environ if environ is not None else {}),
                  **produced_spool_environment(spec, environ if environ is not None else {})}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
