@@ -1,17 +1,25 @@
 """Declared outputs written locally, then exported by PrismaBuild.
 
-Any PrismaQuant writer that runs as a PrismaBuild action and declares its
-outputs through a produced-output template uses this one client: boundary
-entries, adjoint checkpoints and renders alike. The writer serializes into a
-PB-reserved group on the producing host's local disk; PB exports the group to
-its canonical destinations as an ordinary action, and the writer's own thread
-never waits on the pool's disks.
+``StreamedBoundaryArtifacts`` is this client's one user. A bound owner whose
+PrismaBuild publication seals a spool root writes through it: the boundary
+and cotangent entries of its produced groups, and the small-file groups of
+``write_produced_files`` (the band-serial handoff record, PQ #1015). The
+writer serializes into a PB-reserved group on the producing host's local
+disk; PB exports the group to its canonical destinations as an ordinary
+action, and the writer's own thread never waits on the pool's disks.
+
+Nothing else writes through it. Stage A's adjoint checkpoints are written
+directly into the output root (``joint_adjoint_checkpoints``), and renders
+never bind it. Without a sealed root (``PRISMABUILD_PRODUCED_SPOOL_ROOT``)
+a bound owner writes its entries straight into the pool; the Stage A
+dispatch therefore refuses a spec that declares none (PQ #1012).
 
 This adapter serializes nothing and moves nothing. It remembers exact writer
 references until PB acknowledges immutable canonical origins. Only that ack may
 advance durable entry progress or release the PB-owned local reservation. Each
-entry carries PB's artifact class (``payload`` or ``checkpoint``), so a
-checkpoint is charged to the prewrite budget the producer declared for it.
+entry carries PB's artifact class. Every writer today records ``payload``;
+``checkpoint`` is PB's class for a checkpoint charged to the prewrite budget
+its producer declared, and no writer uses it yet.
 """
 from __future__ import annotations
 
