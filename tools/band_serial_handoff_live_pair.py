@@ -86,7 +86,10 @@ def _manifest(entries: list[dict], phases: list[tuple[str, list[int]]],
         cumulative += size
         read_phases.append({"name": name, "entry_indices": indices,
                             "bytes": size, "cumulative_bytes": cumulative})
-    return {"schema": MANIFEST_SCHEMA_V2, "mount_prefix": "/mnt/shared",
+    return {"schema": MANIFEST_SCHEMA_V2,
+            "produced_by": {"tool": "tools/band_serial_handoff_live_pair.py",
+                            "entry_point": "prepare"},
+            "mount_prefix": "/mnt/shared",
             "entries": entries, "entry_count": len(entries),
             "total_bytes": sum(entry["bytes"] for entry in entries),
             "annotations": annotations,
