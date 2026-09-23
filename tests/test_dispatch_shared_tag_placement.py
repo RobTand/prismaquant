@@ -114,6 +114,10 @@ def test_dispatcher_tags_are_the_shared_class_tag():
     assert not {"sparky", "sparklina"} <= set(CONSUMER_TAGS)
 
 
+#: Reads the live PrismaBuild queue, which no PB action declares:
+#: skipped unless asked for (PQ #1014). The two tests above read only the
+#: published PB source tree and stay selected.
+@pytest.mark.fleet_data
 def test_dispatcher_tags_are_placeable_on_the_live_gb10_fleet():
     """The acceptance check on the live fleet: the dispatcher's tags reach
     both Sparks and exclude every host of another class, while the old pair

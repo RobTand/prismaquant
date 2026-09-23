@@ -391,7 +391,41 @@ OWN_PROCESS_REPORT_ENV = "PQ_OWN_PROCESS_REPORT"
 PRISMABUILD_TEST_BOUND_PLUGIN = "prismabuild.pytest_test_bound"
 
 
+#: Marks a test that reads fleet-local campaign data or live PrismaBuild
+#: state that no PB action declares (PQ #1014): a gigabyte real-data read, a
+#: walk over a campaign tree, a read of the live queue. Such reads bypass
+#: PB's admission and tiered caching, so these tests skip by default, with a
+#: reason that names the opt-in. They run when ``-m`` names the mark
+#: (``pbtest --pytest-args "-m fleet_data"``) or ``PQ_FLEET_DATA_TESTS=1`` is
+#: set; declaring their reads to PB is PB #915. A skip, not a deselection:
+#: under xdist only the workers see a deselection, so a shard of nothing but
+#: these tests would exit 5 ("no tests collected") and read as a failure.
+FLEET_DATA_MARK = "fleet_data"
+FLEET_DATA_ENV = "PQ_FLEET_DATA_TESTS"
+FLEET_DATA_SKIP_REASON = (
+    f"{FLEET_DATA_MARK}: reads fleet data PrismaBuild does not declare "
+    f"(PQ #1014); run with -m {FLEET_DATA_MARK} or {FLEET_DATA_ENV}=1")
+
+
+class _FleetDataSelection:
+    """Skip ``fleet_data`` tests unless the run asks for them."""
+
+    @staticmethod
+    def requested(config) -> bool:
+        return (os.environ.get(FLEET_DATA_ENV) == "1"
+                or FLEET_DATA_MARK in (config.getoption("markexpr", "") or ""))
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_collection_modifyitems(self, session, config, items):
+        if self.requested(config):
+            return
+        for item in items:
+            if item.get_closest_marker(FLEET_DATA_MARK) is not None:
+                item.add_marker(pytest.mark.skip(reason=FLEET_DATA_SKIP_REASON))
+
+
 def pytest_configure(config):
+    config.pluginmanager.register(_FleetDataSelection(), "pq-fleet-data-selection")
     config.addinivalue_line(
         "markers",
         f"{OWN_PROCESS_MARK}: the module needs a pytest process of its own. In "

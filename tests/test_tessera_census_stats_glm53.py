@@ -3,6 +3,10 @@
 Reads the real probe and census cost table by their recorded SHA-256.  It
 skips only where those files do not exist (hosted CI); on the fleet a skip is
 a failure to run, and its record must show the test passed.
+
+It reads about 1.45 GB that no PrismaBuild action declares, so it is marked
+``fleet_data`` and skipped unless asked for (PQ #1014; see
+``tests/conftest.py``).
 """
 from __future__ import annotations
 
@@ -36,6 +40,7 @@ def _load(path: Path, digest: str):
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.fleet_data
 @pytest.mark.skipif(not (PROBE.is_file() and COSTS.is_file()),
                     reason="GLM-5.3 probe and census are fleet-local inputs")
 def test_glm53_probe_expands_onto_the_census_roster():
