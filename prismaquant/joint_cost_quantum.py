@@ -678,6 +678,15 @@ class QuantumCounters:
 # --------------------------------------------------------------------------
 
 
+def _render_proof_sides(value, source, *, side: str) -> str:
+    """Both sides of a failed prepared render proof, for its refusal (PQ #1102)."""
+    live_bytes = ("n/a (meta)" if source.is_meta
+                  else source.numel() * source.element_size())
+    return (f"prepared shape {value.get('shape')} dtype {value.get('dtype')} "
+            f"bytes {value.get('logical_bytes')}; {side} shape {list(source.shape)} "
+            f"dtype {source.dtype} bytes {live_bytes}")
+
+
 def _install_with_settlement(runner, layer: int, *, operator_windows,
                              order) -> None:
     """Install one layer of the quantum's own walk, then prefetch its next.
@@ -1455,13 +1464,22 @@ def run_layer_quantum_core(
     prepared_render_identities = production_cache.metadata["verified_cells"]
     expected_pairs = {(name, fmt) for name in names for fmt in render_formats[name]}
     joint_cache_renders: dict[str, dict[str, dict]] = {}
+    # Before install, a streamed Linear is the meta skeleton's parameter: its
+    # shape is the checkpoint's, its dtype is torch's default
+    # (``build_streaming_skeleton`` passes none, so GLM's wrapper config gets
+    # float32 against a bf16 checkpoint).  Only the shape is compared here.
+    # The dtype and byte half of the prepared proof is checked on the
+    # installed tensor, per layer, before its first render is consumed (PQ
+    # #1102; the run's ``_require_installed_render_sources`` since 20dede4a).
     for name, fmt in sorted(expected_pairs):
         value = prepared_render_identities[(name, fmt)]["rendered_weight"]
         source = linears[name].weight
-        if (value["shape"] != list(source.shape)
-                or value["logical_bytes"] != source.numel() * source.element_size()):
+        if (value.get("shape") != list(source.shape)
+                or not isinstance(value.get("dtype"), str)
+                or type(value.get("logical_bytes")) is not int):
             raise RuntimeError(
-                f"prepared render tensor proof differs from the source for {name}@{fmt}")
+                f"prepared render tensor proof differs from the source for {name}@{fmt}: "
+                f"{_render_proof_sides(value, source, side='skeleton')}")
         joint_cache_renders.setdefault(name, {})[fmt] = dict(value)
     joint_run_identity = {
         "schema": "prismaquant.joint_aura.run.v2",
@@ -1817,7 +1835,8 @@ def run_layer_quantum_core(
                         or value["logical_bytes"] != source.numel() * source.element_size()):
                     raise RuntimeError(
                         f"prepared render tensor proof differs from the "
-                        f"installed source for {name}@{fmt}")
+                        f"installed source for {name}@{fmt}: "
+                        f"{_render_proof_sides(value, source, side='installed')}")
 
         pending = [name for name in names if name not in completed_units]
         for name in pending:
