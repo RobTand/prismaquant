@@ -382,21 +382,105 @@ def pytest_sessionfinish(session, exitstatus):
 # ``--timeout``, PrismaBuild's ``prismabuild.pytest_test_bound``, or both. A
 # test that hangs in the child fails alone, with the bound named in its
 # failure, and the tests after it still run.
+#
+# PrismaBuild's bound is on whenever ``PRISMABUILD_TEST_TIMEOUT_S`` is set
+# (PQ #1055). ``pbtest`` exports the variable to every shard, but no shard
+# names the plugin with ``-p`` and ``prismabuild`` registers no entry point,
+# so this conftest registers it. It loads the plugin from its file rather
+# than importing the ``prismabuild`` package: an ``own_process`` harness
+# refuses a process whose ``prismabuild`` is not its pinned candidate, and a
+# child session inherits the variable and loads the plugin the same way.
 
 OWN_PROCESS_MARK = "own_process"
 #: Set in a child session only: the file the child appends its reports to.
 OWN_PROCESS_REPORT_ENV = "PQ_OWN_PROCESS_REPORT"
-#: PrismaBuild's per-test bound plugin, by the name ``-p`` loads it under. It
-#: reads ``PRISMABUILD_TEST_TIMEOUT_S``, which the child inherits.
+#: PrismaBuild's per-test bound plugin, by the name ``-p`` loads it under.
 PRISMABUILD_TEST_BOUND_PLUGIN = "prismabuild.pytest_test_bound"
+#: The per-test bound in seconds, which ``pbtest`` exports to every shard and
+#: the plugin reads. Unset or empty: no bound.
+PRISMABUILD_TEST_BOUND_ENV = "PRISMABUILD_TEST_TIMEOUT_S"
+
+
+def _load_prismabuild_test_bound(config) -> None:
+    """Register PrismaBuild's per-test bound when the shard sets one.
+
+    Does nothing when ``PRISMABUILD_TEST_TIMEOUT_S`` is unset or empty, or
+    when the plugin is already registered (``-p``). Otherwise the plugin's
+    file is found without importing ``prismabuild`` (``find_spec`` of a
+    top-level package does not run it), loaded under a private module name,
+    and registered under the plugin's own name. It imports only the standard
+    library and pytest. A bound the session asks for but cannot load is
+    refused: running unbounded and green is what the bound exists to end.
+    """
+    import importlib.util
+
+    if not os.environ.get(PRISMABUILD_TEST_BOUND_ENV, "").strip():
+        return
+    if config.pluginmanager.has_plugin(PRISMABUILD_TEST_BOUND_PLUGIN):
+        return
+    try:
+        package = importlib.util.find_spec("prismabuild")
+    except (ImportError, ValueError):
+        package = None
+    candidates = [Path(location) / "pytest_test_bound.py" for location in
+                  (package.submodule_search_locations or ())] if package else []
+    path = next((candidate for candidate in candidates if candidate.is_file()),
+                None)
+    if path is None:
+        raise pytest.UsageError(
+            f"{PRISMABUILD_TEST_BOUND_ENV} is set, but no "
+            f"{PRISMABUILD_TEST_BOUND_PLUGIN} is installed to apply it: this "
+            "session would run with no per-test bound")
+    spec = importlib.util.spec_from_file_location(
+        "_pq_prismabuild_pytest_test_bound", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # Registered from pytest_configure, a historic hook: the plugin's own
+    # pytest_configure runs now and reads the bound.
+    config.pluginmanager.register(module, PRISMABUILD_TEST_BOUND_PLUGIN)
+
+
+#: Marks a test that reads fleet-local campaign data or live PrismaBuild
+#: state that no PB action declares (PQ #1014): a gigabyte real-data read, a
+#: walk over a campaign tree, a read of the live queue. Such reads bypass
+#: PB's admission and tiered caching, so these tests skip by default, with a
+#: reason that names the opt-in. They run when ``-m`` names the mark
+#: (``pbtest --pytest-args "-m fleet_data"``) or ``PQ_FLEET_DATA_TESTS=1`` is
+#: set; declaring their reads to PB is PB #915. A skip, not a deselection:
+#: under xdist only the workers see a deselection, so a shard of nothing but
+#: these tests would exit 5 ("no tests collected") and read as a failure.
+FLEET_DATA_MARK = "fleet_data"
+FLEET_DATA_ENV = "PQ_FLEET_DATA_TESTS"
+FLEET_DATA_SKIP_REASON = (
+    f"{FLEET_DATA_MARK}: reads fleet data PrismaBuild does not declare "
+    f"(PQ #1014); run with -m {FLEET_DATA_MARK} or {FLEET_DATA_ENV}=1")
+
+
+class _FleetDataSelection:
+    """Skip ``fleet_data`` tests unless the run asks for them."""
+
+    @staticmethod
+    def requested(config) -> bool:
+        return (os.environ.get(FLEET_DATA_ENV) == "1"
+                or FLEET_DATA_MARK in (config.getoption("markexpr", "") or ""))
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_collection_modifyitems(self, session, config, items):
+        if self.requested(config):
+            return
+        for item in items:
+            if item.get_closest_marker(FLEET_DATA_MARK) is not None:
+                item.add_marker(pytest.mark.skip(reason=FLEET_DATA_SKIP_REASON))
 
 
 def pytest_configure(config):
+    config.pluginmanager.register(_FleetDataSelection(), "pq-fleet-data-selection")
     config.addinivalue_line(
         "markers",
         f"{OWN_PROCESS_MARK}: the module needs a pytest process of its own. In "
         "a session that collects other modules too, its tests run in one "
         "child pytest and report back under their own node ids (PQ #1008).")
+    _load_prismabuild_test_bound(config)
 
 
 class OwnProcessFailure(Exception):
@@ -446,15 +530,18 @@ def _own_process_bound_args(config) -> list[str]:
     """The child's arguments for the per-test bound the parent runs under.
 
     pytest-timeout's ``--timeout``, and PrismaBuild's plugin when the parent
-    loaded it by name (``-p`` or ``pytest_plugins``). A plugin loaded from an
-    entry point loads in the child the same way, so it is not named again. A
-    bound the parent does not run under is not added.
+    named it with ``-p``. A plugin the parent loaded from
+    ``PRISMABUILD_TEST_TIMEOUT_S`` loads in the child the same way, since the
+    child inherits the variable (PQ #1055); naming it with ``-p`` there
+    would import the ``prismabuild`` package into the child. A bound the
+    parent does not run under is not added.
     """
     argv = []
     timeout = getattr(config.option, "timeout", None)
     if timeout:
         argv.append(f"--timeout={timeout}")
-    if config.pluginmanager.has_plugin(PRISMABUILD_TEST_BOUND_PLUGIN):
+    if PRISMABUILD_TEST_BOUND_PLUGIN in (getattr(config.option, "plugins", None)
+                                        or ()):
         argv += ["-p", PRISMABUILD_TEST_BOUND_PLUGIN]
     return argv
 

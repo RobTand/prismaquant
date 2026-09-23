@@ -33,8 +33,20 @@ ADJOINT_CHECKPOINT_SCHEMA = "prismaquant.joint_adjoint_checkpoint.v1"
 #: shared states and ``checkpoint.json`` stay in ``checkpoints/boundary-NNN``;
 #: see :func:`checkpoint_cotangent_plane` for the rows' identity rules.
 ADJOINT_CHECKPOINT_REFERENCED_SCHEMA = "prismaquant.joint_adjoint_checkpoint.v2"
+#: A referenced checkpoint (as v2) whose shared states are one sealed pack
+#: file instead of one pickle per state (RobTand/prismaquant#1037). Its
+#: ``shared_state_entries`` is exactly one whole-file row,
+#: :data:`SHARED_STATE_PACK_NAME` at ``entries/shared-states.pack``; the
+#: pack's layout is ``joint_adjoint_checkpoints.unpack_shared_states``'s.
+ADJOINT_CHECKPOINT_PACKED_SCHEMA = "prismaquant.joint_adjoint_checkpoint.v3"
+#: The schemas whose activation rows reference the owner's entries.
+ADJOINT_CHECKPOINT_REFERENCED_SCHEMAS = (ADJOINT_CHECKPOINT_REFERENCED_SCHEMA,
+                                         ADJOINT_CHECKPOINT_PACKED_SCHEMA)
 ADJOINT_CHECKPOINT_SCHEMAS = (ADJOINT_CHECKPOINT_SCHEMA,
-                              ADJOINT_CHECKPOINT_REFERENCED_SCHEMA)
+                              ADJOINT_CHECKPOINT_REFERENCED_SCHEMA,
+                              ADJOINT_CHECKPOINT_PACKED_SCHEMA)
+SHARED_STATE_PACK_NAME = "shared-states"
+SHARED_STATE_PACK_FILENAME = "shared-states.pack"
 
 
 def derive_checkpoint_boundaries(num_layers: int, stride: int) -> tuple[int, ...]:
@@ -221,14 +233,24 @@ def checkpoint_manifest_bytes(record) -> bytes:
 
 
 def checkpoint_is_referenced(record) -> bool:
-    """Whether a checkpoint record references the owner's entries (v2).
+    """Whether a checkpoint record references the owner's entries (v2, v3).
 
     ``False`` for a copied (v1) checkpoint; any other schema refuses.
     """
     schema = record.get("schema") if isinstance(record, dict) else None
     if schema not in ADJOINT_CHECKPOINT_SCHEMAS:
         raise ValueError(f"not an adjoint checkpoint schema: {schema!r}: refusing")
-    return schema == ADJOINT_CHECKPOINT_REFERENCED_SCHEMA
+    return schema in ADJOINT_CHECKPOINT_REFERENCED_SCHEMAS
+
+
+def checkpoint_is_packed(record) -> bool:
+    """Whether a checkpoint's shared states are one sealed pack (v3, #1037).
+
+    ``False`` for v1 and v2, whose shared states are one pickle per state;
+    any other schema refuses.
+    """
+    checkpoint_is_referenced(record)
+    return record["schema"] == ADJOINT_CHECKPOINT_PACKED_SCHEMA
 
 
 def checkpoint_owner_session(record) -> dict:
@@ -258,13 +280,23 @@ def checkpoint_entry_session(record) -> dict:
 def _checkpoint_own_directory(record) -> Path:
     """``checkpoints/boundary-NNN``: where the checkpoint's own files live.
 
-    A copied (v1) checkpoint keeps every entry there; a referenced (v2) one
-    keeps only its shared states there. Rows spread over more than one
+    A copied (v1) checkpoint keeps every entry there; a referenced (v2, v3)
+    one keeps only its shared states there. Rows spread over more than one
     directory, or a directory that does not name the record's boundary,
-    refuse.
+    refuse. A packed (v3) checkpoint's shared states are exactly one row,
+    the pack, under its fixed name and file name.
     """
     own_fields = (("shared_state_entries",) if checkpoint_is_referenced(record)
                   else ("activation_entries", "shared_state_entries"))
+    if checkpoint_is_packed(record):
+        rows = record["shared_state_entries"]
+        if (not isinstance(rows, list) or len(rows) != 1
+                or not isinstance(rows[0], dict)
+                or rows[0].get("name") != SHARED_STATE_PACK_NAME
+                or type(rows[0].get("path")) is not str
+                or Path(rows[0]["path"]).name != SHARED_STATE_PACK_FILENAME):
+            raise ValueError("a packed adjoint checkpoint names exactly one "
+                             "shared-state pack: refusing")
     directories = set()
     for field in own_fields:
         rows = record[field]
@@ -320,7 +352,7 @@ def checkpoint_cotangent_plane(record) -> dict:
     - A copied (v1) row is named ``cotangent-{p}-{b}`` and sits in the
       checkpoint's own ``checkpoints/boundary-NNN/entries``. Its identity is
       the exact reader's to check against the checkpoint session, as before.
-    - A referenced (v2) row is the Stage A owner's own committed entry at
+    - A referenced (v2, v3) row is the Stage A owner's own committed entry at
       this boundary, verbatim: named ``cotangent-{p}-{b}-at-{B}``, in
       ``exact-boundaries/<generation>/entries`` of the same adjoint space,
       and carrying exactly the owner identity ``{session: {generation,

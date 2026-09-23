@@ -1,7 +1,7 @@
 """Referenced adjoint checkpoints (PQ #1036).
 
-A v2 checkpoint's cotangent rows are the Stage A owner's own committed
-entries, not copies. The checkpoint directory holds only the shared states
+A referenced (v2, and since PQ #1037 packed v3) checkpoint's cotangent rows
+are the Stage A owner's own committed entries, not copies. The checkpoint directory holds only the shared states
 and the manifest. These tests use the real owner and writer on tiny CPU
 tensors. They check that the writer copies nothing, that a pinned entry
 outlives its rollover and the owner's close, that each identity refusal
@@ -18,7 +18,7 @@ import torch
 
 from prismaquant.cost_streaming import StreamedBoundaryArtifacts
 from prismaquant.joint_adjoint_checkpoints import (
-    ADJOINT_CHECKPOINT_REFERENCED_SCHEMA,
+    ADJOINT_CHECKPOINT_PACKED_SCHEMA,
     ADJOINT_CHECKPOINT_SCHEMA,
     adjoint_space,
     checkpoint_cotangent_plane,
@@ -69,7 +69,7 @@ def _referenced(tmp_path, *, published=False):
 
 def test_referenced_checkpoint_copies_no_activation(tmp_path):
     space, owner, references, record = _referenced(tmp_path)
-    assert record["schema"] == ADJOINT_CHECKPOINT_REFERENCED_SCHEMA
+    assert record["schema"] == ADJOINT_CHECKPOINT_PACKED_SCHEMA
     assert checkpoint_is_referenced(record)
     entries = Path(space) / "checkpoints" / f"boundary-{BOUNDARY:03d}" / "entries"
     assert sorted(path.name.split(".")[0] for path in entries.iterdir()) == sorted(
@@ -253,7 +253,7 @@ def test_a_referenced_tee_names_each_entry_as_the_roll_hands_it_over(tmp_path):
         attempt.reference_activation(0, 1, other)
     attempt.write_shared_states(shared_adjoint, shared_pass)
     record = attempt.seal()
-    assert record["schema"] == ADJOINT_CHECKPOINT_REFERENCED_SCHEMA
+    assert record["schema"] == ADJOINT_CHECKPOINT_PACKED_SCHEMA
     assert sorted(record["activation_entries"], key=lambda row: row["name"]) == sorted(
         (exact_entry_record(reference) for reference in references.values()),
         key=lambda row: row["name"])

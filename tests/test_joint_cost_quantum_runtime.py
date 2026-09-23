@@ -366,16 +366,12 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
                         lambda *a, **k: type("B", (), {"identity": None})())
     monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
     monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: _hex("b"))
-    monkeypatch.setattr(aura, "_preflight_run_prepared", lambda *a, **k: None)
+    # Stage A takes its head from the completion the preflight checked
+    # (PQ #1051); the stub returns it as the real preflight does.
+    monkeypatch.setattr(aura, "_preflight_run_prepared",
+                        lambda prepared, **k: json.loads(Path(prepared["path"]).read_text()))
     draw = {"fit_ids_sha256": _hex("1"), "text_sha256": _hex("2"),
             "nsamples": 4, "seqlen": 512, "seed": 7}
-    monkeypatch.setattr(aura, "load_measured_anchor_input",
-                        lambda inputs, **k: type("D", (), {
-                            "formats_by_qname": {}, "cells": [],
-                            "census": {"model": "/models/x",
-                                       "attention_implementation": "eager"},
-                            "payload": {"provenance": {
-                                "hessian": {"calibration_identity": draw}}}})())
     import prismaquant.calibration_data as calib
     monkeypatch.setattr(calib, "load_calibration_input",
                         lambda *a, **k: ([], {"provenance": dict(draw)}))
@@ -404,7 +400,10 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
                 "prefetch_min_available_gb": 16,
                 "require_prefetched_residency": True}
     prepared_path.write_text(json.dumps(
-        {"plan_sha256": _hex("d"), "source_model_identity": None}))
+        {"plan_sha256": _hex("d"), "source_model_identity": None,
+         "calibration_input": {"provenance": draw},
+         "formats_by_qname": {"model.layers.0.mlp.down_proj": ["NVFP4"]},
+         "measured_cells": 1}))
     prepared = {"path": str(prepared_path),
                 "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
     config = {"execution": {"production_act_scales": "scales",
@@ -513,19 +512,14 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     monkeypatch.setattr(backend, "executing_image", lambda: None)
     monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
     monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: _hex("b"))
-    monkeypatch.setattr(aura, "_preflight_run_prepared", lambda *a, **k: None)
+    # Stage A takes its head from the completion the preflight checked
+    # (PQ #1051); the stub returns it as the real preflight does.
+    monkeypatch.setattr(aura, "_preflight_run_prepared",
+                        lambda prepared, **k: json.loads(Path(prepared["path"]).read_text()))
     monkeypatch.setattr(compatibility, "require_capture_compatibility",
                         lambda *a, **k: None)
     draw = {"fit_ids_sha256": _hex("1"), "text_sha256": _hex("2"),
             "nsamples": 4, "seqlen": 512, "seed": 7}
-    monkeypatch.setattr(aura, "load_measured_anchor_input",
-                        lambda inputs, **k: type("D", (), {
-                            "formats_by_qname": {}, "cells": [],
-                            "progress_committed": 0,
-                            "census": {"model": "/models/x",
-                                       "attention_implementation": "eager"},
-                            "payload": {"provenance": {
-                                "hessian": {"calibration_identity": draw}}}})())
     import prismaquant.calibration_data as calib
     monkeypatch.setattr(calib, "load_calibration_input",
                         lambda *a, **k: (_Ids(), {"provenance": dict(draw)}))
@@ -571,7 +565,10 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
 
     prepared_path = tmp_path / "prepared.json"
     prepared_path.write_text(json.dumps(
-        {"plan_sha256": _hex("d"), "source_model_identity": {"identity": "stub"}}))
+        {"plan_sha256": _hex("d"), "source_model_identity": {"identity": "stub"},
+         "calibration_input": {"provenance": draw},
+         "formats_by_qname": {"model.layers.0.mlp.down_proj": ["NVFP4"]},
+         "measured_cells": 1}))
     prepared = {"path": str(prepared_path),
                 "sha256": hashlib.sha256(prepared_path.read_bytes()).hexdigest()}
     config = {"execution": {"production_act_scales": "0",
@@ -739,7 +736,9 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
     loader saw no policy and refused a reuse the plan explicitly names. The
     single-run path threads it (tessera_joint_aura.py:2777); stage A must
     too. This pins the seam: whatever the plan carries reaches the loader's
-    kwarg verbatim, and a plan without the block reaches it as None.
+    kwarg verbatim, and a plan without the block reaches it as None. Since
+    PQ #1051 Stage A walks only in its verification arm (``head_walk``), so
+    that arm is the caller pinned here.
     """
     import prismaquant.joint_cost_stage_a as stage_a
     import prismaquant.tessera_joint_aura as aura
@@ -763,7 +762,8 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
                         lambda *a, **k: type("B", (), {"identity": None})())
     monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
     monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: _hex("b"))
-    monkeypatch.setattr(aura, "_preflight_run_prepared", lambda *a, **k: None)
+    monkeypatch.setattr(aura, "_preflight_run_prepared",
+                        lambda *a, **k: {"plan_sha256": _hex("d")})
     monkeypatch.setattr(aura, "load_measured_anchor_input", fake_loader)
     monkeypatch.setattr(residency, "bind_residency_manifest", lambda *a, **k: None)
     monkeypatch.setattr(stage_a, "GpuPowerSampler",
@@ -801,7 +801,7 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
     with pytest.raises(_Done):
         stage_a.run_adjoint_capture(
             config, plan_sha256=_hex("d"), prepared=prepared,
-            output_root=str(tmp_path), stride=2)
+            output_root=str(tmp_path), stride=2, head_walk=True)
     assert captured["historical_encoder_reuse"] == reuse_block
 
     captured.clear()
@@ -809,7 +809,7 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
     with pytest.raises(_Done):
         stage_a.run_adjoint_capture(
             config, plan_sha256=_hex("d"), prepared=prepared,
-            output_root=str(tmp_path), stride=2)
+            output_root=str(tmp_path), stride=2, head_walk=True)
     assert captured["historical_encoder_reuse"] is None
 
 
@@ -1008,6 +1008,49 @@ def test_quantum_matches_single_run_bitwise(tmp_path, monkeypatch):
                                 layer=layer, qname_filter=None)
         assert verdict["verdict"] == "match", verdict
         assert verdict["matched"] == verdict["units_shared"] == 1
+
+
+def test_the_core_refuses_a_live_bf16_flag_the_slice_does_not_record(
+        tmp_path, monkeypatch):
+    """PQ #1065: the core compares the live flag with the verified slice.
+
+    Stage A ran at PyTorch's default, so its slice carries no bf16 stamp; a
+    quantum core running with the flag off would rebuild another chain. It
+    refuses before the checkpoint is read, naming both settings.
+    """
+    from prismaquant.joint_cost_quantum import QuantumIdentityRefused
+    from prismaquant.matmul_arithmetic import BF16_REDUCTION_ENV, BF16_REDUCTION_FIELD
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    single_root = tmp_path / "single"
+    single = _single_run(single_root, monkeypatch,
+                         checkpoint=single_root / "checkpoints")
+    output_root = tmp_path / "campaign"
+    runner_a, _ = _stage_a(tmp_path, monkeypatch)
+    runner_a.context.settle_prefetch_layers = lambda layers: None
+    matmul = torch.backends.cuda.matmul
+    saved = matmul.allow_bf16_reduced_precision_reduction
+    matmul.allow_bf16_reduced_precision_reduction = True
+    try:
+        receipt = run_adjoint_capture_core(
+            runner_a, draw(), execution=_execution(tmp_path),
+            output_root=output_root, stride=2,
+            source_model_identity=_model_identity("joint-source"),
+            unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
+            prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
+            implementation_sha256=aura._aura_source_sha256())
+        assert BF16_REDUCTION_FIELD not in receipt["run_identity"]
+        matmul.allow_bf16_reduced_precision_reduction = False
+        with pytest.raises(QuantumIdentityRefused) as refused:
+            _run_quantum(tmp_path, monkeypatch, single=single, layer=1,
+                         receipt=receipt, output_root=output_root,
+                         plan_sha=_hex("d"), prepared_sha=_hex("e"))
+    finally:
+        matmul.allow_bf16_reduced_precision_reduction = saved
+    message = str(refused.value)
+    assert f"{BF16_REDUCTION_FIELD}=True ({BF16_REDUCTION_ENV} unset)" in message
+    assert f"{BF16_REDUCTION_FIELD}=False ({BF16_REDUCTION_ENV}=off)" in message
+    assert not (output_root / "layer-quanta" / "layer-001" / "checkpoints").exists()
 
 
 def test_quantum_writes_only_inside_its_output_space(tmp_path, monkeypatch):

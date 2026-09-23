@@ -274,10 +274,13 @@ def test_a_handoff_binds_its_consumer_and_refuses_everything_else(tmp_path, monk
     handoff = load_quantum_handoff(path, sha, record=record, adjoint_slice=adjoint_slice)
     assert handoff["boundary"] == 2 and handoff["producer"]["layer"] == 2
     # The head's staged reads: the plane, the owner states and the slice
-    # checkpoint's shared-pass pickles -- never the checkpoint plane.
+    # checkpoint's shared-pass states -- never the checkpoint plane. A packed
+    # (v3) checkpoint holds those in its one pack (PQ #1037).
     rows = handoff_read_entries(handoff, adjoint_slice["checkpoint"])
     shared_pass = [entry for entry in adjoint_slice["checkpoint"]["shared_state_entries"]
-                   if entry["name"].startswith("shared-pass-")]
+                   if entry["name"].startswith("shared-pass-")
+                   or entry["name"] == "shared-states"]
+    assert shared_pass
     assert [row["path"] for row in rows] == [
         *(entry["path"] for entry in handoff["activation_entries"]),
         handoff["owner_states"]["path"], *(entry["path"] for entry in shared_pass)]
