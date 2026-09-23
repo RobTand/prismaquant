@@ -76,10 +76,17 @@ Gates, all fail closed with exit 3:
   ``--check-only`` runs the gates and writes nothing, mirroring the
   external binder's dry run.
 
-This is a producer, never a scheduler: it publishes no PB rows, claims
-nothing, and holds no state. Run it on a checkout inside the PB code
-closure (unlike the external binder script, which lives beside the data
-and cannot be captured), then submit from its outputs.
+This is a producer, never a scheduler: it submits no PB rows and holds no
+state. Run it on a checkout inside the PB code closure (unlike the external
+binder script, which lives beside the data and cannot be captured), then
+submit from its outputs.
+
+With ``--produced-output`` (PQ #1070), as an admitted PrismaBuild action
+submitted with the data manifest and write-only produced-output template
+that ``tools/stage_b_preparation_submission.py`` writes, it files a prewrite
+for each group of files it creates under ``--metadata-root`` and commits
+them at their origin (``prismaquant.stage_b_prep_io``). Without the flag it
+writes exactly as before.
 """
 from __future__ import annotations
 
@@ -152,28 +159,6 @@ def _load_json(path: Path, *, digest: str | None, where: str):
         return json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeError) as exc:
         raise ValueError(f"{where} is not JSON at {path}: {exc}") from exc
-
-
-def _publish(path: Path, payload: bytes, *, where: str) -> None:
-    """First-writer immutable publication; same bytes are idempotent.
-
-    Reuses the existing no-clobber owner: concurrent writers cannot
-    overwrite supposedly immutable outputs or collide on a fixed temp
-    name, and a rerun over identical bytes completes instead of refusing.
-    Differing bytes at an existing path refuse -- a re-seal is a new
-    reviewed directory, never an edit.
-    """
-    from prismaquant.cost_stage_checkpoint import publish_new_bytes
-    if publish_new_bytes(path, payload):
-        return
-    try:
-        existing = path.read_bytes()
-    except OSError as exc:
-        raise ValueError(f"{where} unreadable at {path}: {exc}") from exc
-    if existing != payload:
-        raise ValueError(
-            f"refusing to overwrite differing bytes at {path}: a re-seal "
-            f"is a new reviewed directory, never an edit")
 
 
 def _pretty(value) -> bytes:
@@ -806,6 +791,13 @@ def main(argv=None) -> int:
                     help="authoritative DATA run root sealed into "
                          "output_space and adjoint.boundary_artifacts "
                          "(default: the plan's output_root)")
+    ap.add_argument("--produced-output", action="store_true",
+                    help="PQ #1070: commit every file this run creates under "
+                         "--metadata-root as a PrismaBuild produced output of "
+                         "this admitted action. The action must declare the "
+                         "write-only template tools/stage_b_preparation_"
+                         "submission.py writes; refuses before the first "
+                         "write otherwise")
     ap.add_argument("--metadata-root", type=Path, default=None,
                     help="PQ #884: explicit immutable control-metadata "
                          "generation root. Slice manifests land at "
@@ -1260,44 +1252,51 @@ def main(argv=None) -> int:
                   f"({'; '.join(note)}); wrote nothing")
         return 0
     out = records_out
+    from prismaquant.stage_b_prep_io import (
+        PreparationPublicationRefused, bind_preparation_publication, publish_files)
     try:
+        # With --produced-output, inside the admitted PrismaBuild action, the
+        # files are produced outputs committed at their origin (PQ #1070);
+        # without it they are published directly, as before.
+        publication = bind_preparation_publication(
+            metadata_root, required=args.produced_output)
         # Publication order is the recoverability contract: every
         # referenced manifest is published and hash-verified BEFORE any
         # record or index names it, so no discoverable record ever points
         # at absent or different bytes. A crash between manifests and
         # records reruns to completion (same bytes are idempotent);
         # differing bytes refuse instead of overwriting.
-        for record in produced["records"]:
-            qid = record["quantum_id"]
-            _publish(Path(record["read_set"]["manifest_path"]),
-                     seal_manifest_bytes(produced["slice_manifests"][qid]),
-                     where="slice manifest")
+        control = [(Path(record["read_set"]["manifest_path"]),
+                    seal_manifest_bytes(produced["slice_manifests"][record["quantum_id"]]),
+                    "slice manifest")
+                   for record in produced["records"]]
         # Bound boundary readsets land at their own producer-named absolute
         # paths -- a new immutable generation beside the records, never an
         # edit of a sealed file.
-        for manifest_path, manifest, _ in bound_manifests:
-            _publish(Path(manifest_path), seal_manifest_bytes(manifest),
-                     where="bound readset")
+        control += [(Path(manifest_path), seal_manifest_bytes(manifest), "bound readset")
+                    for manifest_path, manifest, _ in bound_manifests]
         # Each layer's Stage B head slice (PQ #1010) lands at the path its
-        # record's executable readset names, digest re-verified, before the
-        # record exists.
-        for layer, sealed in sorted(head_slices.items()):
+        # record's executable readset names, before the record exists.
+        control += [(Path(sealed["binding"]["path"]), sealed["bytes"], "Stage B head slice")
+                    for _, sealed in sorted(head_slices.items())]
+        # Each bound record's stage-A slice (PQ #993) lands at the path the
+        # record names, as its canonical bytes, before the record exists.
+        control += [(Path(record["adjoint"]["slice_path"]),
+                     adjoint_slice_bytes(adjoint_slices[record["quantum_id"]]),
+                     "stage-A slice")
+                    for record in produced["records"]
+                    if record["adjoint"].get("slice_path") is not None]
+        publish_files(publication, "manifests", control)
+        for _, sealed in sorted(head_slices.items()):
             binding = sealed["binding"]
-            _publish(Path(binding["path"]), sealed["bytes"],
-                     where="Stage B head slice")
             if hashlib.sha256(Path(binding["path"]).read_bytes()).hexdigest() \
                     != binding["sha256"]:
                 return _fail(f"head slice at {binding['path']} does not hash "
                              "to the sealed digest")
-        # Each bound record's stage-A slice (PQ #993) lands at the path the
-        # record names, as its canonical bytes, before the record exists.
         for record in produced["records"]:
             slice_path = record["adjoint"].get("slice_path")
             if slice_path is None:
                 continue
-            _publish(Path(slice_path),
-                     adjoint_slice_bytes(adjoint_slices[record["quantum_id"]]),
-                     where="stage-A slice")
             if hashlib.sha256(Path(slice_path).read_bytes()).hexdigest() != \
                     record["adjoint"]["slice_sha256"]:
                 return _fail(f"stage-A slice at {slice_path} does not hash to "
@@ -1328,24 +1327,24 @@ def main(argv=None) -> int:
         # the producer-named absolute paths the records bind -- never
         # beside the record files. The adjoint manifest is the phase
         # worker's file and is never written here.
-        for record in produced["records"]:
-            _publish(out / f"{record['quantum_id']}.json",
-                     _pretty(record), where="quantum record")
+        records = [(out / f"{record['quantum_id']}.json", _pretty(record),
+                    "quantum record") for record in produced["records"]]
         if args.adjoint_band and args.adjoint_receipt is None:
             # Band granularity (PQ #993): one index per band, so a later run
             # with more bands adds indexes and never rewrites one.
             for boundary, band in sorted(band_index.items()):
                 layers = set(band["band"]["layers"])
-                _publish(out / f"records.band-{boundary:03d}.json",
-                         _pretty([record for record in produced["records"]
-                                  if record["layer"] in layers]),
-                         where="band records index")
+                records.append((out / f"records.band-{boundary:03d}.json",
+                                _pretty([record for record in produced["records"]
+                                         if record["layer"] in layers]),
+                                "band records index"))
         else:
-            _publish(out / "records.json", _pretty(produced["records"]),
-                     where="records index")
-        _publish(out / "derivation.json", _pretty(produced["derivation"]),
-                 where="derivation")
-    except (ValueError, OSError) as exc:
+            records.append((out / "records.json", _pretty(produced["records"]),
+                            "records index"))
+        records.append((out / "derivation.json", _pretty(produced["derivation"]),
+                        "derivation"))
+        publish_files(publication, "records", records)
+    except (ValueError, OSError, PreparationPublicationRefused) as exc:
         return _fail(str(exc))
     bound = ("unbound (pre-stage-A)" if receipt is None else
              f"bound to their stage-A slices ({len(proofs)} proof(s): "

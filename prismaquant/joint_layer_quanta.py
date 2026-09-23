@@ -863,6 +863,59 @@ def slice_layer_manifest(parent_manifest: Mapping, layer: int, *,
 _SAFETENSORS_HEADER_MAX_BYTES = 100_000_000
 
 
+def _layer_source_shards(model_dir: str, num_layers: int, *,
+                         checkpoint_layers_prefix: str):
+    """``(index path, {shard: [(layer, tensor name), ...]})`` for layers below ``num_layers``.
+
+    The streamed reader's selection: every checkpoint tensor named
+    ``{checkpoint_layers_prefix}{layer}.*``, grouped by the shard the index
+    places it in.
+    """
+    index_path = os.path.join(model_dir, "model.safetensors.index.json")
+    with open(index_path, encoding="utf-8") as handle:
+        weight_map = json.load(handle)["weight_map"]
+    pattern = re.compile(rf"^{re.escape(checkpoint_layers_prefix)}([0-9]+)\.")
+    wanted: dict[str, list[tuple[int, str]]] = {}
+    for name, shard in weight_map.items():
+        match = pattern.match(name)
+        if match is None or int(match.group(1)) >= num_layers:
+            continue
+        wanted.setdefault(shard, []).append((int(match.group(1)), name))
+    return index_path, wanted
+
+
+def _safetensors_header_length(handle, path: str, size: int) -> int:
+    """Read a safetensors file's 8-byte length prefix and check it."""
+    raw = handle.read(8)
+    if len(raw) != 8:
+        raise ValueError(f"{path} is too short to be a safetensors file")
+    (length,) = struct.unpack("<Q", raw)
+    if not 0 < length <= min(_SAFETENSORS_HEADER_MAX_BYTES, size - 8):
+        raise ValueError(f"{path} has an invalid safetensors header length")
+    return length
+
+
+def layer_source_header_reads(model_dir: str, num_layers: int, *,
+                              checkpoint_layers_prefix: str,
+                              ) -> list[tuple[str, int, int]]:
+    """The reads :func:`read_layer_source_spans` makes, as ``(path, offset, bytes)``.
+
+    The whole checkpoint index, then each selected shard's length prefix and
+    JSON header, in the order the spans reader opens them (PQ #1070). Finding
+    a header's length reads its first 8 bytes.
+    """
+    index_path, wanted = _layer_source_shards(
+        model_dir, num_layers, checkpoint_layers_prefix=checkpoint_layers_prefix)
+    reads = [(os.path.normpath(index_path), 0, os.path.getsize(index_path))]
+    for shard in sorted(wanted):
+        path = os.path.normpath(os.path.join(model_dir, shard))
+        size = os.path.getsize(path)
+        with open(path, "rb") as handle:
+            length = _safetensors_header_length(handle, path, size)
+        reads.append((path, 0, 8 + length))
+    return reads
+
+
 def read_layer_source_spans(model_dir: str, num_layers: int, *,
                             checkpoint_layers_prefix: str,
                             ) -> dict[int, list[tuple[str, int, int]]]:
@@ -878,28 +931,15 @@ def read_layer_source_spans(model_dir: str, num_layers: int, *,
     It exists because a read manifest is a claim about what a reader will
     read, and until PQ #898 nothing compared the two.
     """
-    index_path = os.path.join(model_dir, "model.safetensors.index.json")
-    with open(index_path, encoding="utf-8") as handle:
-        weight_map = json.load(handle)["weight_map"]
-    pattern = re.compile(rf"^{re.escape(checkpoint_layers_prefix)}([0-9]+)\.")
-    wanted: dict[str, list[tuple[int, str]]] = {}
-    for name, shard in weight_map.items():
-        match = pattern.match(name)
-        if match is None or int(match.group(1)) >= num_layers:
-            continue
-        wanted.setdefault(shard, []).append((int(match.group(1)), name))
+    _index_path, wanted = _layer_source_shards(
+        model_dir, num_layers, checkpoint_layers_prefix=checkpoint_layers_prefix)
     spans: dict[int, list[tuple[str, int, int]]] = {
         layer: [] for layer in range(num_layers)}
     for shard in sorted(wanted):
         path = os.path.normpath(os.path.join(model_dir, shard))
         size = os.path.getsize(path)
         with open(path, "rb") as handle:
-            raw = handle.read(8)
-            if len(raw) != 8:
-                raise ValueError(f"{path} is too short to be a safetensors file")
-            (length,) = struct.unpack("<Q", raw)
-            if not 0 < length <= min(_SAFETENSORS_HEADER_MAX_BYTES, size - 8):
-                raise ValueError(f"{path} has an invalid safetensors header length")
+            length = _safetensors_header_length(handle, path, size)
             header = json.loads(handle.read(length))
         base = 8 + length
         for layer, name in wanted[shard]:

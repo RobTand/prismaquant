@@ -1,5 +1,37 @@
 # PrismaQuant Architecture
 
+The Stage B preparation runs as a PrismaBuild action that declares what it
+reads and commits what it writes (2026-09-23, `ws-tq/1070-stage-b-prep-on-pb`,
+PQ #1070). `tools/prepare_extended_joint_quanta.py` and the generator it runs,
+`tools/regenerate_joint_quanta.py`, used to read the parent manifest, the
+production pickle, the head walk's inputs and the checkpoint's safetensors
+headers undeclared, and to write every metadata file straight to the pool.
+`tools/stage_b_preparation_submission.py` now writes, beside the metadata
+root, a one-phase v2 data manifest of those reads (the base parent's head
+phase, the control files `control_paths` names, the argument files, the Stage
+A proofs, the production pickle, and the index and header ranges
+`joint_layer_quanta.layer_source_header_reads` returns) and a write-only
+produced-output template over the metadata root (PB #912: zero window, one
+`stage_b_metadata` payload slot, a ceiling of 64 MiB per file it can write).
+`tools/prepare_stageb_after_capture.sh` submits the preparation with both,
+with `--residency stage`, and with the tools' new `--produced-output` flag.
+Under that flag `prismaquant.stage_b_prep_io.publish_files` files one
+prewrite per group of files it creates (extension, inputs, manifests,
+records, launch), writes them first-writer as before and commits them with
+`produced_output.commit_origin_batch`; a later action can declare them with
+`origin_batch_manifest`. Without the flag both tools write exactly as before,
+including inside a test shard. `--residency stage` is required, not a tuning
+choice: PrismaBuild sets `PRISMABUILD_RESIDENCY_MAP` only for an action with a
+residency plan, and the produced-output binding derives the queue root from
+it. The preparation's reads are plain file reads, so the staged copy is not
+yet what they read. Gates: `tests/test_stage_b_prep_io_1070.py` (an audit
+hook shows every file the generator opens is in its manifest),
+`tests/test_stage_b_prep_produced_1070.py` (a real admitted owner on the
+published generation pinned in `tests/stage_b_prep_pb_pin.json`: every file
+under the metadata root is in a committed batch with its digest, and a replay
+commits nothing). A new submission contract for one tool; no format, pipeline
+default, stage or ship gate changes.
+
 A Stage B quantum refuses a bf16 reduction setting its Stage A slice does
 not record (2026-09-23, `ws-tq/1065-bf16-slice-stamp`, PQ #1065, part of
 #1028). A quantum rebuilds Stage A's chain from its checkpoint, and
@@ -821,8 +853,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-tq/1065-bf16-slice-stamp`.
+As of: 2026-09-23 · `ws-tq/1070-stage-b-prep-on-pb`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-tq/1070-stage-b-prep-on-pb`) for **the Stage B
+preparation as a declared PrismaBuild action** (PQ #1070): a data manifest of
+its reads, a write-only produced-output template over the metadata root, and
+`--produced-output`, under which every metadata file is committed at its
+origin. See the entry at the top. No format, default, stage or ship gate
+changes.
 
 Re-stamped (2026-09-23, `ws-tq/1065-bf16-slice-stamp`) for **the Stage B
 quantum's bf16 slice check** (PQ #1065): a quantum refuses, before any head

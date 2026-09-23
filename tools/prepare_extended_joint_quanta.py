@@ -20,8 +20,15 @@ import json
 from pathlib import Path
 
 from prismaquant.joint_catalog_extension import create_extension, require_extension
-from tools.regenerate_joint_quanta import (_load_json, _publish, _pretty, _retained_budget_provenance,
+from prismaquant.stage_b_prep_io import (
+    PreparationPublicationRefused, bind_preparation_publication, publish_files)
+from tools.regenerate_joint_quanta import (_load_json, _pretty, _retained_budget_provenance,
     main as regenerate)
+
+
+#: The checkpoint reader prefix the preparation passes to the generator
+#: (``--source-layers-prefix``, PQ #900).
+SOURCE_LAYERS_PREFIX = 'model.language_model.layers.'
 
 
 def bind(path):
@@ -81,8 +88,24 @@ def metadata_entries(inputs, plan, prepared, extension):
     against the slice's sealed checkpoint record (``load_adjoint_checkpoint``);
     its executable readset stages that checkpoint's tensor entries.
     """
+    entries = []
+    for path in sorted(control_paths(inputs, plan, prepared, extension)):
+        p = Path(path)
+        if not p.is_absolute() or not str(p).startswith('/mnt/shared/') or not p.is_file():
+            raise ValueError(f'control dependency is not a present shared file: {path}')
+        entries.append({'path': str(p), 'offset': 0, 'bytes': p.stat().st_size, 'sha256': None})
+    return entries
+
+
+def control_paths(inputs, plan, prepared, extension=None):
+    """The control files the Stage B head closes over, as a set of paths.
+
+    ``extension`` is None before the catalog extension exists: the
+    preparation read set (PQ #1070) is built before this action writes it.
+    """
     from prismaquant.tessera_joint_allocation import _read_bound
-    bindings = [*inputs.values(), extension, prepared['production_cache']]
+    bindings = [*inputs.values(), *([] if extension is None else [extension]),
+                prepared['production_cache']]
     bindings += [plan['stage_b_resource_policy'], plan['served_activation_policy'], plan['inputs']['candidate_overlay']]
     documents = [json.loads(_read_bound(b, 'Stage B metadata closure')) for b in
                  (plan['stage_b_resource_policy'], plan['served_activation_policy'], plan['inputs']['candidate_overlay'])]
@@ -94,13 +117,7 @@ def metadata_entries(inputs, plan, prepared, extension):
     paths = {b['path'] for b in bindings}
     paths.add(proof['fixture_id']['result'])
     paths.update(arm['result'] for arm in proof['arms'])
-    entries = []
-    for path in sorted(paths):
-        p = Path(path)
-        if not p.is_absolute() or not str(p).startswith('/mnt/shared/') or not p.is_file():
-            raise ValueError(f'control dependency is not a present shared file: {path}')
-        entries.append({'path': str(p), 'offset': 0, 'bytes': p.stat().st_size, 'sha256': None})
-    return entries
+    return paths
 
 
 def require_derived_budget(plan, *, plan_sha256):
@@ -183,6 +200,10 @@ def prepare(args):
     check_stage_b_spec(args.spec, spec, policy)
     replay_mode = stage_b_replay_mode(spec)
     root = args.metadata_root.resolve()
+    # With --produced-output, inside the admitted PrismaBuild action, every
+    # file below is a produced output committed at its origin (PQ #1070);
+    # without it each is published directly, as before.
+    publication = bind_preparation_publication(root, required=getattr(args, 'produced_output', False))
     root.mkdir(parents=True, exist_ok=True)
     proof_path = root/'catalog-extension.json'
     if proof_path.exists():
@@ -191,19 +212,23 @@ def prepare(args):
                           plan_sha256=inputs['extended_plan']['sha256'],
                           prepared_sha256=inputs['extended_prepared']['sha256'])
     else:
-        extension = create_extension(inputs=inputs, adjoint_capture=first_binding, output=proof_path)
+        extension = create_extension(
+            inputs=inputs, adjoint_capture=first_binding, output=proof_path,
+            publish=lambda path, raw: bool(publish_files(
+                publication, 'extension', [(path, raw, 'catalog extension')])))
     additions = metadata_entries(inputs, plan, prepared, extension)
     updated = extend_parent(parent, additions, old_plan=inputs['original_plan'],
         new_plan=inputs['extended_plan'], prepared=prepared, extension=extension)
     updated['produced_by']['original_parent_manifest'] = {'path': str(args.parent_manifest), 'sha256': args.parent_manifest_sha256}
     parent_path = root/'parent.json.gz'
-    _publish(parent_path, gzip.compress(_pretty(updated), mtime=0), where='extended control parent')
     partition_path = root/'partition.json'
-    _publish(partition_path, _pretty(policy['derivation']), where='actual resource partition')
     derivation_path = root/'derivation-input.json'
-    _publish(derivation_path, _pretty(derivation), where='original derivation')
     spec_path = root/'stage-b-spec.json'
-    _publish(spec_path, _pretty(spec), where='reviewed Stage B spec')
+    publish_files(publication, 'inputs', [
+        (parent_path, gzip.compress(_pretty(updated), mtime=0), 'extended control parent'),
+        (partition_path, _pretty(policy['derivation']), 'actual resource partition'),
+        (derivation_path, _pretty(derivation), 'original derivation'),
+        (spec_path, _pretty(spec), 'reviewed Stage B spec')])
     proof_argv = []
     for (path, _), document in zip(proofs, documents):
         proof_argv += ['--adjoint-receipt' if document['status'] == 'complete' else '--adjoint-band',
@@ -215,12 +240,15 @@ def prepare(args):
         '--output-root', plan['output_root'], '--metadata-root', str(root),
         *proof_argv, '--catalog-extension', extension['path'],
         '--catalog-extension-sha256', extension['sha256'], '--executable-readsets',
-        '--source-layers-prefix', 'model.language_model.layers.',
+        '--source-layers-prefix', SOURCE_LAYERS_PREFIX,
         # PQ #1010: the head intake runs once, here; each quantum's head
         # phase declares its layer's sealed slice instead of re-walking.
         '--head-slices',
         # PQ #1011: the read plan is sealed for the spec's replay mode.
         '--replay-mode', replay_mode]
+    if publication is not None:
+        # The generator files its groups under this action's publication.
+        generator.append('--produced-output')
     if regenerate(generator) != 0:
         raise ValueError('generator refused; no launch package published')
     launch = ['python3', 'tools/dispatch_joint_quanta.py', '--records', str(root/'records'),
@@ -231,11 +259,15 @@ def prepare(args):
     # instead of rewriting one (the completed receipt keeps launch.json).
     launch_name = ('launch.json' if args.adjoint_receipt else
                    'launch.bands-' + '-'.join(f'{b:03d}' for b in bands) + '.json')
-    _publish(root/launch_name, _pretty({'schema': 'prismaquant.extended_stage_b_launch.v1',
+    publish_files(publication, 'launch', [(root/launch_name, _pretty({
+        'schema': 'prismaquant.extended_stage_b_launch.v1',
         'catalog_extension': extension, 'resource_policy': plan['stage_b_resource_policy'],
         'generator_argv': generator, 'coordinator_argv': launch,
-        'requires': 'reviewed source checkout; all GPU work through published PB dispatcher'}), where='launch recipe')
-    print(json.dumps({'status': 'metadata_ready', 'launch': str(root/launch_name), 'catalog_extension': extension}))
+        'requires': 'reviewed source checkout; all GPU work through published PB dispatcher'}),
+        'launch recipe')])
+    print(json.dumps({'status': 'metadata_ready', 'launch': str(root/launch_name),
+                      'catalog_extension': extension,
+                      'produced_batches': [] if publication is None else publication.batches}))
 
 
 def main(argv=None):
@@ -250,10 +282,15 @@ def main(argv=None):
                         help='a sealed checkpoint band (repeatable, PQ #993)')
     parser.add_argument('--adjoint-band-sha256', action='append', default=[])
     parser.add_argument('--metadata-root', type=Path, required=True)
+    parser.add_argument('--produced-output', action='store_true',
+                        help='commit every file as a PrismaBuild produced output of this '
+                             'admitted action (PQ #1070); the action must declare '
+                             'the write-only template tools/stage_b_preparation_submission.py '
+                             'writes, over --metadata-root')
     args = parser.parse_args(argv)
     try:
         prepare(args)
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, PreparationPublicationRefused) as exc:
         parser.exit(3, f'Stage B metadata refused: {exc}\n')
 
 
