@@ -768,13 +768,100 @@ def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
     }
 
 
+def _resumed_chain_inputs(plan, *, recovery, n_batches, n_probes):
+    """What a resumed chain reads, checked before anything is removed (PQ #1001).
+
+    Returns ``(boundary_rows, own_boundaries, checkpoint_plane)``: every
+    forward boundary reference by layer, the ones this generation wrote
+    (the rest are the capsule's, already installed), and the sealed
+    checkpoint's activation cotangent references by ``(probe, batch)``.
+    """
+    from .joint_adjoint_checkpoints import reference_from_record
+
+    document = plan.document
+    num_layers = int(document["num_layers"])
+    table = document["boundary_entries"]
+    recovered = {} if recovery is None else recovery.records
+    rows = {}
+    for boundary in range(num_layers):
+        column = table[str(boundary)]
+        if [row["name"] for row in column] != [
+                f"boundary-{batch}-{boundary}-at-{boundary}" for batch in range(n_batches)]:
+            raise AdjointIdentityRefused(
+                f"chain resume refused: the chain state's boundary {boundary} is not "
+                f"{n_batches} batches in order")
+        if str(boundary) in recovered and recovered[str(boundary)] != column:
+            raise AdjointIdentityRefused(
+                f"chain resume refused: the chain state's boundary {boundary} is not the "
+                "capsule's")
+        rows[boundary] = [reference_from_record(row) for row in column]
+    own = [reference for boundary in range(num_layers) if str(boundary) not in recovered
+           for reference in rows[boundary]]
+    record = plan.checkpoints[-1]
+    if record["boundary"] != plan.boundary:
+        raise AdjointIdentityRefused(
+            "chain resume refused: the resume checkpoint is not the lowest sealed one")
+    plane = {}
+    for row in record["activation_entries"]:
+        probe, batch = (int(part) for part in
+                        row["name"].removeprefix("cotangent-").split("-"))
+        plane[(probe, batch)] = reference_from_record(row)
+    if set(plane) != {(probe, batch) for probe in range(n_probes)
+                      for batch in range(n_batches)}:
+        raise AdjointIdentityRefused(
+            f"chain resume refused: checkpoint {plan.boundary} is not a whole "
+            f"{n_probes} x {n_batches} cotangent plane")
+    return rows, own, plane
+
+
+def _restore_resumed_chain(runner, storage, space, plan, *, inputs, partitions, n_probes):
+    """The chain's state at the sealed checkpoint a resume starts from (PQ #1001).
+
+    Rebuilt the way a layer quantum rebuilds its chain from a checkpoint
+    (``joint_cost_quantum._rebuild_batches`` and ``load_state_dict``), so a
+    resumed chain runs the arithmetic a quantum's chain is already tested to
+    run bitwise. The one difference: the checkpoint's activation cotangents
+    stay references, read one bounded window at a time by the first roll,
+    instead of a plane loaded into memory.
+
+    Returns ``(batches, cotangents, grad_outs)`` as the uninterrupted run
+    holds them right after sealing checkpoint ``plan.boundary``.
+    """
+    from .joint_adjoint_checkpoints import load_checkpoint_shared_states
+    from .joint_cost_quantum import _rebuild_batches
+    from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
+
+    rows, own, plane = inputs
+    num_layers = int(plan.document["num_layers"])
+    n_batches = len(partitions)
+    storage.authorize_resume_inputs(own, list(plane.values()), boundary=plan.boundary)
+    storage.adopt_committed_checkpoints(plan.checkpoints, plan.checkpoint_directories)
+    shared_adjoint, shared_pass = load_checkpoint_shared_states(
+        space, plan.checkpoints[-1],
+        shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+    batches = _rebuild_batches(runner, partitions=partitions, shared_pass=shared_pass)
+    for batch_index, batch in enumerate(batches):
+        batch.activations_cpu = [rows[boundary][batch_index]
+                                 for boundary in range(num_layers)] + [torch.empty(0)]
+    cotangents = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
+                   for _ in batches] for _ in range(n_probes)]
+    for (probe, batch), state in shared_adjoint.items():
+        cotangents[probe][batch].load_state_dict(state)
+    grad_outs = [[plane[(probe, batch)] for batch in range(n_batches)]
+                 for probe in range(n_probes)]
+    storage.watch_auxiliary(batches, cotangents)
+    storage.check_auxiliary(batches, cotangents=cotangents)
+    return batches, cotangents, grad_outs
+
+
 def run_adjoint_capture_core(
     runner, calib_ids, *, execution, output_root, stride,
     source_model_identity, unit_roster_sha256, plan_sha256, prepared_sha256,
     read_manifest_sha256, implementation_sha256, campaign_scope=None,
     boundary_artifact_bytes=None, artifact_budget_stamp=None,
     min_free_gib=0.0, progress=None, produced_output=None, forward_recovery=None,
-    chain_batch_size=1, chain_probe_fusion=False,
+    chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
+    arithmetic_extra=None,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -814,6 +901,18 @@ def run_adjoint_capture_core(
     regime is stamped into the receipt's ``run_identity`` under
     ``chain_regime``, so every band and slice carries it and a quantum
     rebuilds its chain with the same batch size. The default stamps nothing.
+
+    ``chain_resume`` (optional) relaunches this same run from its lowest
+    sealed checkpoint (RobTand/prismaquant#1001, ``stage_a_chain_resume``):
+    ``{"chain_state_sha256", "declaration", "resume_from"}``. The run's own
+    header, session and forward boundaries are adopted from the sealed chain
+    state a fresh run writes after its tail checkpoint; the forward capture
+    and the tail are not run again. ``implementation_sha256`` is always the
+    running implementation: under a resume the header keeps the one the
+    chain state sealed, and a different running implementation needs the
+    declaration. ``arithmetic_extra`` adds the entry point's fields (the
+    container image, the projection backend) to the arithmetic stamp the
+    chain state seals.
     """
     from .cost_streaming import (
         StreamedBoundaryArtifacts,
@@ -823,6 +922,20 @@ def run_adjoint_capture_core(
     )
     from .kl_fisher import ROW_PROBE_LAYOUT, fisher_probe_scalar
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
+    from .stage_a_chain_resume import (
+        RESUME_COMPATIBILITY_KEY,
+        ChainResumeRefused,
+        apply_chain_resume,
+        build_chain_state,
+        chain_arithmetic_stamp,
+        chain_state_path,
+        load_chain_state,
+        plan_chain_resume,
+        producer_binding,
+        resume_declarations,
+        resume_directory,
+        write_chain_state,
+    )
 
     chain_regime = normalize_chain_regime(chain_batch_size, chain_probe_fusion)
     regime_identity = chain_regime_identity(chain_regime)
@@ -882,10 +995,31 @@ def run_adjoint_capture_core(
             "gradient_diagnostics": "sum_output_operators_fp32_before_norm",
         }
 
+    # Under a chain resume the run header keeps the implementation the chain
+    # state sealed; the running one is only compared (PQ #1001).
+    chain_state = None
+    if chain_resume is not None:
+        try:
+            chain_state = load_chain_state(space, chain_resume["chain_state_sha256"])
+        except ChainResumeRefused as exc:
+            raise AdjointIdentityRefused(f"chain resume refused: {exc}") from exc
+    else:
+        # A fresh run writes the chain state once, after its tail, and seals
+        # its receipt over the resume records it finds: another run's must
+        # refuse now, not after the forward pass (PQ #1001).
+        stale = [path for path in (chain_state_path(space), resume_directory(space))
+                 if path.exists()]
+        if stale:
+            raise AdjointIdentityRefused(
+                "stage A output root already holds another run's chain state or "
+                f"resume records ({', '.join(str(path) for path in stale)}): relaunch "
+                "that run with --resume-chain-state-sha256, or rename them aside")
+    header_implementation = (implementation_sha256 if chain_state is None
+                             else chain_state["run_identity"]["implementation_sha256"])
     bind_identity = {
         "source_model": validate_streamed_model_identity(
             source_model_identity, where="adjoint capture"),
-        "producer_source_sha256": implementation_sha256,
+        "producer_source_sha256": header_implementation,
         "calibration_sha256": hashlib.sha256(
             calib_ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
         "calibration_shape": list(calib_ids.shape),
@@ -895,6 +1029,50 @@ def run_adjoint_capture_core(
         "execution_partition": execution_partition,
         "campaign_stage": "joint_adjoint_capture",
     }
+    run_identity = {
+        "plan_sha256": str(plan_sha256),
+        "prepared_sha256": str(prepared_sha256),
+        "read_manifest_sha256": str(read_manifest_sha256),
+        "implementation_sha256": str(header_implementation),
+        "unit_roster_sha256": str(unit_roster_sha256),
+        "campaign_scope": campaign_scope,
+        "n_probes": n_probes,
+        "seed_base": seed_base,
+        "calibration_shape": list(calib_ids.shape),
+        "calibration_sha256": bind_identity["calibration_sha256"],
+        **({CHAIN_REGIME_KEY: regime_identity}
+           if regime_identity is not None else {}),
+    }
+    stride_block = {"value": int(stride), "boundaries": [int(b) for b in boundaries],
+                    "max_chain_layers": int(stride) - 1}
+    arithmetic = chain_arithmetic_stamp(runner, arithmetic_extra)
+    resume_plan = None
+    if chain_state is not None:
+        from .cost_stage_checkpoint import canonical_json
+        try:
+            resume_plan = plan_chain_resume(
+                space, chain_state, recomputed=canonical_json({
+                    "run_identity": run_identity, "stride": stride_block,
+                    "bind_identity": bind_identity, "arithmetic": arithmetic,
+                    "n_batches": len(row_offsets), "num_layers": num_layers,
+                    "artifact_budget_override": artifact_budget_stamp,
+                    "boundary_policy": storage.identity,
+                    "boundary_directory": str(boundary_entry_directory(space)),
+                }, where="Stage A chain resume"),
+                running_implementation_sha256=implementation_sha256,
+                declaration=chain_resume.get("declaration"),
+                resume_from=chain_resume.get("resume_from"))
+        except ChainResumeRefused as exc:
+            raise AdjointIdentityRefused(f"chain resume refused: {exc}") from exc
+
+    def boundary_storage_block(recovery):
+        return {
+            "session": storage.session,
+            "policy": storage.identity,
+            "directory": str(boundary_entry_directory(space)),
+            **({"forward_recovery": recovery.receipt_binding}
+               if recovery is not None else {}),
+        }
 
     for parameter in runner.model.parameters():
         parameter.requires_grad_(False)
@@ -911,8 +1089,13 @@ def run_adjoint_capture_core(
     def log(message: str) -> None:
         print(f"joint_cost_stage_a: {message}", flush=True)
 
+    resume_record = None
     with storage:
-        storage.bind(bind_identity, n_probes=n_probes, published=True)
+        if resume_plan is None:
+            storage.bind(bind_identity, n_probes=n_probes, published=True)
+        else:
+            storage.rebind(resume_plan.session, identity=bind_identity,
+                           n_probes=n_probes)
         if produced_output is not None:
             # After bind, because the entry directory this owner chose is
             # what must sit inside the publication's bound output prefix;
@@ -950,58 +1133,12 @@ def run_adjoint_capture_core(
         if recovery is not None:
             log(f"verified forward recovery through boundary {recovery.frontier}, "
                 f"{recovery.n_batches} complete calibration partitions")
-        log(f"boundary capture: calib {tuple(calib_ids.shape)} in "
-            f"{len(row_offsets)} partition(s) across {num_layers} layers ...")
-        capture_started = time.time()
-        batches = runner.capture_layer_major_boundaries(
-            [calib_ids[offset:offset + batch_rows] for offset in row_offsets],
-            storage=storage,
-            **({"forward_recovery": recovery} if recovery is not None else {}),
-            source_phase=(stage_a_forward_observer(progress)
-                          if progress is not None else None))
-        log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} min; "
-            f"starting {n_probes}-probe tail cotangents")
-
-        device, dtype = runner.device, runner.dtype
-        cotangents = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
-                       for _ in batches] for _ in range(n_probes)]
-        grad_outs = [[] for _ in range(n_probes)]
-        storage.watch_auxiliary(batches, cotangents)
-        storage.check_auxiliary(batches, cotangents=cotangents)
-        tail_started = time.time()
-        with prefetched_boundary_batches(storage, batches, num_layers) as tail_batches:
-            for batch_index, batch, tail_cpu, _unused in tail_batches:
-                try:
-                    for probe_index in range(n_probes):
-                        tail = tail_cpu.to(device=device, dtype=dtype).detach().requires_grad_(True)
-                        logits = runner.tail_logits(batch, tail)
-                        if probe_layout is not None and list(logits.shape) != [
-                                len(batch.input_ids), int(calib_ids.shape[1]),
-                                probe_layout["vocab_size"]]:
-                            raise RuntimeError(
-                                "adjoint capture tail differs from bound probe geometry")
-                        probe = fisher_probe_scalar(
-                            logits, seed=seed_base + probe_index,
-                            token_scope=token_scope, temperature=temperature,
-                            distribution="rademacher",
-                            **({"token_count_override": probe_layout["global_token_count"],
-                                "global_row_offset": row_offsets[batch_index]}
-                               if probe_layout is not None else {}),
-                        )
-                        probe.backward()
-                        if tail.grad is None:
-                            raise RuntimeError(
-                                "adjoint capture tail produced no cotangent")
-                        grad_outs[probe_index].append(storage.write(
-                            tail.grad, batch_index=batch_index,
-                            boundary_index=num_layers, probe_index=probe_index))
-                        del logits, probe, tail
-                    storage.retire(batch.activations_cpu[-1])
-                    batch.activations_cpu[-1] = torch.empty(0)
-                finally:
-                    tail_cpu = logits = probe = tail = None
-        log(f"tail cotangents done in {(time.time() - tail_started) / 60:.1f} min; "
-            f"publishing the tail checkpoint at boundary {num_layers}")
+        if resume_plan is not None and (
+                (None if recovery is None else recovery.receipt_binding)
+                != resume_plan.document["boundary_storage"].get("forward_recovery")):
+            raise AdjointIdentityRefused(
+                "chain resume refused: the relaunch binds another forward-recovery "
+                "capsule than the run its chain state seals")
 
         def serialize_checkpoint(boundary: int) -> None:
             # The rolling entries already own durable, digest-bound bytes.
@@ -1022,30 +1159,120 @@ def run_adjoint_capture_core(
             log(f"checkpoint published at boundary {boundary} "
                 f"({len(plane)} cotangent entries)")
 
-        # The tail set is the first checkpoint: layer num_layers-1's quantum
-        # chains nothing (§3.1).
-        serialize_checkpoint(num_layers)
-        if progress is not None:
-            # The tail checkpoint is durable work landed while the read plan
-            # stays on forward-last: count it without leaving the phase the
-            # tier still holds. There is deliberately no tail progress phase
-            # (a name the sealed plan does not carry would reset its
-            # tracking); the phase name survives only in the log line below.
-            progress.entry(layer=num_layers, partition=0,
-                           kind="tail_checkpoint")
-            progress.flush(force=True)
-            log(f"{ADJOINT_TAIL_PHASE} checkpoint published at boundary "
-                f"{num_layers}; read plan stays on "
-                f"{adjoint_forward_phase_name(num_layers - 1)}")
+        if resume_plan is not None:
+            # Every check first; the interrupted attempt's working entries
+            # are removed only once the relaunch is known to continue it.
+            inputs = _resumed_chain_inputs(resume_plan, recovery=recovery,
+                                           n_batches=len(row_offsets), n_probes=n_probes)
+            resume_record = apply_chain_resume(
+                space, resume_plan, producer=producer_binding(produced_output))
+            batches, cotangents, grad_outs = _restore_resumed_chain(
+                runner, storage, space, resume_plan, inputs=inputs,
+                partitions=[calib_ids[offset:offset + batch_rows]
+                            for offset in row_offsets],
+                n_probes=n_probes)
+            checkpoints.extend(resume_plan.checkpoints)
+            chain_top = resume_plan.boundary
+            log(f"chain resume {resume_record['index']}: continuing below sealed "
+                f"checkpoint {chain_top}; removed "
+                f"{resume_record['removed_rolling_entries']} rolling entries, set aside "
+                f"{len(resume_record['partial_checkpoints_set_aside'])} partial "
+                "checkpoint directories")
+        else:
+            chain_top = num_layers
+        if resume_plan is None:
+            log(f"boundary capture: calib {tuple(calib_ids.shape)} in "
+                f"{len(row_offsets)} partition(s) across {num_layers} layers ...")
+            capture_started = time.time()
+            batches = runner.capture_layer_major_boundaries(
+                [calib_ids[offset:offset + batch_rows] for offset in row_offsets],
+                storage=storage,
+                **({"forward_recovery": recovery} if recovery is not None else {}),
+                source_phase=(stage_a_forward_observer(progress)
+                              if progress is not None else None))
+            log(f"boundary capture done in {(time.time() - capture_started) / 60:.1f} min; "
+                f"starting {n_probes}-probe tail cotangents")
+
+            device, dtype = runner.device, runner.dtype
+            cotangents = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
+                           for _ in batches] for _ in range(n_probes)]
+            grad_outs = [[] for _ in range(n_probes)]
+            storage.watch_auxiliary(batches, cotangents)
+            storage.check_auxiliary(batches, cotangents=cotangents)
+            tail_started = time.time()
+            with prefetched_boundary_batches(storage, batches, num_layers) as tail_batches:
+                for batch_index, batch, tail_cpu, _unused in tail_batches:
+                    try:
+                        for probe_index in range(n_probes):
+                            tail = tail_cpu.to(device=device, dtype=dtype).detach().requires_grad_(True)
+                            logits = runner.tail_logits(batch, tail)
+                            if probe_layout is not None and list(logits.shape) != [
+                                    len(batch.input_ids), int(calib_ids.shape[1]),
+                                    probe_layout["vocab_size"]]:
+                                raise RuntimeError(
+                                    "adjoint capture tail differs from bound probe geometry")
+                            probe = fisher_probe_scalar(
+                                logits, seed=seed_base + probe_index,
+                                token_scope=token_scope, temperature=temperature,
+                                distribution="rademacher",
+                                **({"token_count_override": probe_layout["global_token_count"],
+                                    "global_row_offset": row_offsets[batch_index]}
+                                   if probe_layout is not None else {}),
+                            )
+                            probe.backward()
+                            if tail.grad is None:
+                                raise RuntimeError(
+                                    "adjoint capture tail produced no cotangent")
+                            grad_outs[probe_index].append(storage.write(
+                                tail.grad, batch_index=batch_index,
+                                boundary_index=num_layers, probe_index=probe_index))
+                            del logits, probe, tail
+                        storage.retire(batch.activations_cpu[-1])
+                        batch.activations_cpu[-1] = torch.empty(0)
+                    finally:
+                        tail_cpu = logits = probe = tail = None
+            log(f"tail cotangents done in {(time.time() - tail_started) / 60:.1f} min; "
+                f"publishing the tail checkpoint at boundary {num_layers}")
+
+            # The tail set is the first checkpoint: layer num_layers-1's quantum
+            # chains nothing (§3.1).
+            serialize_checkpoint(num_layers)
+            if progress is not None:
+                # The tail checkpoint is durable work landed while the read plan
+                # stays on forward-last: count it without leaving the phase the
+                # tier still holds. There is deliberately no tail progress phase
+                # (a name the sealed plan does not carry would reset its
+                # tracking); the phase name survives only in the log line below.
+                progress.entry(layer=num_layers, partition=0,
+                               kind="tail_checkpoint")
+                progress.flush(force=True)
+                log(f"{ADJOINT_TAIL_PHASE} checkpoint published at boundary "
+                    f"{num_layers}; read plan stays on "
+                    f"{adjoint_forward_phase_name(num_layers - 1)}")
+            # The chain state a relaunch resumes from (PQ #1001): written
+            # once, after the tail checkpoint is sealed, so its existence
+            # implies the tail checkpoint's.
+            write_chain_state(space, build_chain_state(
+                run_identity=run_identity, stride=stride_block,
+                boundary_storage=boundary_storage_block(recovery),
+                bind_identity=bind_identity, arithmetic=arithmetic,
+                boundary_entries={
+                    str(boundary): [exact_entry_record(batch.activations_cpu[boundary])
+                                    for batch in batches]
+                    for boundary in range(num_layers)},
+                n_batches=len(batches), num_layers=num_layers,
+                artifact_budget_override=artifact_budget_stamp,
+                tail_checkpoint=checkpoints[0],
+                producer=producer_binding(produced_output)))
 
         chain_started = time.time()
-        if num_layers > 0:
+        if chain_top > 0:
             # The chain's first layer reads a plane the forward pass wrote
             # and retired long ago; every later layer's plane is asked for
             # by the roll before it (``render_free_layer_roll``). Asking
             # here starts its movers before the first window needs them.
-            storage.stage_produced_boundary_ahead(num_layers - 1)
-        for layer in reversed(range(num_layers)):
+            storage.stage_produced_boundary_ahead(chain_top - 1)
+        for layer in reversed(range(chain_top)):
             if progress is not None:
                 progress.enter(adjoint_chain_phase_name(layer))
                 progress.flush(force=True)
@@ -1123,33 +1350,20 @@ def run_adjoint_capture_core(
                 for batch in batches]
         retention = storage.receipt()
 
+    # Every implementation declaration of this run's resumes, outside the
+    # header digest (PQ #1001). A run never resumed, or resumed only under
+    # the implementation that sealed its checkpoints, carries none.
+    declarations = resume_declarations(space, storage.session)
     receipt = {
         "schema": ADJOINT_RECEIPT_SCHEMA,
         "entry_point": ADJOINT_CAPTURE_ENTRY_POINT,
         "status": "complete",
-        "run_identity": {
-            "plan_sha256": str(plan_sha256),
-            "prepared_sha256": str(prepared_sha256),
-            "read_manifest_sha256": str(read_manifest_sha256),
-            "implementation_sha256": str(implementation_sha256),
-            "unit_roster_sha256": str(unit_roster_sha256),
-            "campaign_scope": campaign_scope,
-            "n_probes": n_probes,
-            "seed_base": seed_base,
-            "calibration_shape": list(calib_ids.shape),
-            "calibration_sha256": bind_identity["calibration_sha256"],
-            **({CHAIN_REGIME_KEY: regime_identity}
-               if regime_identity is not None else {}),
-        },
+        "run_identity": run_identity,
         "stride": {"value": int(stride), "source": None,  # filled by caller
                    "boundaries": [int(b) for b in boundaries],
                    "max_chain_layers": int(stride) - 1},
-        "boundary_storage": {
-            "session": storage.session,
-            "policy": storage.identity,
-            "directory": str(boundary_entry_directory(space)),
-            **({"forward_recovery": recovery.receipt_binding} if recovery is not None else {}),
-        },
+        "boundary_storage": boundary_storage_block(recovery),
+        **({RESUME_COMPATIBILITY_KEY: declarations} if declarations else {}),
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
         "retention": retention,
@@ -1165,6 +1379,10 @@ def run_adjoint_capture_core(
                              if chain_started else None),
             "chain_backwards": chain_backwards,
             "chain_layers": chain_telemetry,
+            **({"chain_resume": {key: resume_record[key] for key in (
+                "index", "switch_checkpoint", "implementation_sha256",
+                "removed_rolling_entries", "partial_checkpoints_set_aside")}}
+               if resume_record is not None else {}),
         },
         "dev_mode": dev_mode_stamp(),
     }
@@ -1327,9 +1545,14 @@ def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
     prefetch_override=None, artifact_budget_bytes=None, forward_recovery=None,
-    chain_batch_size=1, chain_probe_fusion=False,
+    chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
 ) -> dict:
-    """Load the head phase and run the adjoint capture (one PB action)."""
+    """Load the head phase and run the adjoint capture (one PB action).
+
+    ``chain_resume`` relaunches the run from its lowest sealed checkpoint
+    (``run_adjoint_capture_core``, PQ #1001). It implies the head walk's own
+    ``--resume``: the relaunch re-verifies the head journal it banked.
+    """
     from .aura_cost import _aura_source_sha256
     from .calibration_data import load_calibration_input
     from .cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
@@ -1371,7 +1594,7 @@ def run_adjoint_capture(
     except ChainRegimeRefused as exc:
         raise AdjointIdentityRefused(str(exc)) from exc
     occupied = occupied_checkpoint_directories(adjoint_space(output_root))
-    if occupied:
+    if occupied and chain_resume is None:
         # write_adjoint_checkpoint creates each boundary with exist_ok=False,
         # so an occupied path fails the run only when the adjoint sweep
         # reaches it -- after the head intake and the forward pass. Refuse
@@ -1399,6 +1622,7 @@ def run_adjoint_capture(
         "prefetch_override": prefetch["override"],
         "artifact_budget_override": artifact["override"],
         **({"chain_regime": regime_stamp} if regime_stamp is not None else {}),
+        **({"chain_resume": dict(chain_resume)} if chain_resume is not None else {}),
         "env": {"host": socket.gethostname(), "started_epoch": time.time(),
                 "torch": str(torch.__version__), "cuda": torch.version.cuda,
                 "affinity": sorted(os.sched_getaffinity(0))},
@@ -1444,7 +1668,8 @@ def run_adjoint_capture(
         data = load_measured_anchor_input(
             config["inputs"], reader=reader, synthesis_device="cuda",
             progress_phase="head",
-            head_checkpoint=space / "head-walk", head_resume=resume,
+            head_checkpoint=space / "head-walk",
+            head_resume=bool(resume or chain_resume is not None),
             require_existing_renders=True, verify_payloads=False,
             historical_encoder_reuse=config.get("historical_encoder_reuse"))
         _same(config["model"], data.census["model"], "requested source model")
@@ -1526,7 +1751,11 @@ def run_adjoint_capture(
             artifact_budget_stamp=artifact["override"],
             min_free_gib=config.get("min_free_gib", 0.0), progress=progress,
             produced_output=publication, forward_recovery=forward_recovery,
-            chain_batch_size=chain_batch_size, chain_probe_fusion=chain_probe_fusion)
+            chain_batch_size=chain_batch_size, chain_probe_fusion=chain_probe_fusion,
+            chain_resume=chain_resume,
+            arithmetic_extra={
+                "container_content_sha256": result["env"]["container_content_sha256"],
+                "projection_backend": projection_backend.identity})
         receipt["stride"]["source"] = stride_source
         receipt["device_envelope"] = result["device_envelope"]
         torch.cuda.synchronize()
@@ -1603,6 +1832,19 @@ def run_adjoint_capture(
     return result
 
 
+def _chain_resume_argument(args):
+    """The core's ``chain_resume`` from the CLI flags, or ``None``."""
+    if args.resume_chain_state_sha256 is None:
+        return None
+    from .stage_a_chain_resume import ChainResumeRefused, parse_declaration
+    try:
+        declaration = parse_declaration(args.resume_implementation_compatibility)
+    except ChainResumeRefused as exc:
+        raise AdjointIdentityRefused(str(exc)) from exc
+    return {"chain_state_sha256": args.resume_chain_state_sha256,
+            "declaration": declaration, "resume_from": args.resume_from_checkpoint}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Run stage A of the distributed joint-AURA cost campaign: "
@@ -1653,7 +1895,30 @@ def main(argv=None) -> int:
                              "backward per probe (default %(default)s); "
                              "bitwise-neutral at a fixed batch size, stamped "
                              "into the run identity")
+    parser.add_argument("--resume-chain-state-sha256", default=None,
+                        help="relaunch this run from its lowest sealed checkpoint: "
+                             "the digest of <output-root>/layer-quanta/adjoint/"
+                             "chain-state.json, which the run wrote after its tail "
+                             "checkpoint (RobTand/prismaquant#1001). The relaunch "
+                             "adopts the run's header and boundary session and "
+                             "refuses on any regime, plan, preparation, capsule "
+                             "or arithmetic difference")
+    parser.add_argument("--resume-from-checkpoint", type=int, default=None,
+                        help="the checkpoint boundary the relaunch expects to "
+                             "resume from; refuses unless it is the run's lowest "
+                             "sealed checkpoint")
+    parser.add_argument("--resume-implementation-compatibility", default=None,
+                        metavar="FROM:TO",
+                        help="dev mode only: declare that the relaunch continues "
+                             "a chain sealed by implementation FROM under "
+                             "implementation TO. Recorded in the receipt and in "
+                             "every band sealed below the switch; never inferred")
     args = parser.parse_args(argv)
+    if args.resume_chain_state_sha256 is None and (
+            args.resume_from_checkpoint is not None
+            or args.resume_implementation_compatibility is not None):
+        parser.error("--resume-from-checkpoint and --resume-implementation-compatibility "
+                     "need --resume-chain-state-sha256")
     if bool(args.forward_recovery) != bool(args.forward_recovery_sha256):
         parser.error("--forward-recovery and --forward-recovery-sha256 must be paired")
     try:
@@ -1680,7 +1945,8 @@ def main(argv=None) -> int:
                                "sha256": args.forward_recovery_sha256}
                               if args.forward_recovery else None),
             chain_batch_size=args.chain_batch_size,
-            chain_probe_fusion=args.chain_probe_fusion == "on")
+            chain_probe_fusion=args.chain_probe_fusion == "on",
+            chain_resume=_chain_resume_argument(args))
     except AdjointIdentityRefused as exc:
         print(f"adjoint_identity_refused: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED

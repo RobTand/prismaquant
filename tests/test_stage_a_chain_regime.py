@@ -297,11 +297,17 @@ def test_fusion_is_bitwise_neutral_at_a_fixed_batch_size(
     a, b = _tree(aside), _tree(root)
     generation = _generation_files(a)
     assert generation and generation == _generation_files(b)
-    assert {k: v for k, v in a.items() if k not in generation} == \
-        {k: v for k, v in b.items() if k not in generation}
+    # The chain state (PQ #1001) seals the run identity, regime stamp included.
+    state = "layer-quanta/adjoint/chain-state.json"
+    assert state in a and state in b
+    assert {k: v for k, v in a.items() if k not in generation | {state}} == \
+        {k: v for k, v in b.items() if k not in generation | {state}}
     for name in generation:
         assert _without(json.loads((aside / name).read_text()), "telemetry") == \
             _without(json.loads((root / name).read_text()), "telemetry")
+    stamp = f"run_identity.{CHAIN_REGIME_KEY}"
+    assert _without(json.loads((aside / state).read_text()), stamp, "chain_state_sha256") == \
+        _without(json.loads((root / state).read_text()), stamp, "chain_state_sha256")
 
     variable = ("telemetry", f"run_identity.{CHAIN_REGIME_KEY}", "retention.telemetry")
     assert _without(fused, *variable) == _without(unfused, *variable)
