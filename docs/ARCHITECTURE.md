@@ -20700,7 +20700,10 @@ new entries.
 A quantum whose record binds a slice (`run_layer_quantum`) reads the slice
 first and refuses, as an identity refusal, a slice for another layer, one
 bound to another preparation or plan input, or bytes that do not hash to the
-record's digest. It applies the slice's verified device limits, reads the
+record's digest. The producer's implementation digest must equal the
+executing package's (dev mode records a difference, as it does for the
+prepared completion), because the policy re-derivations ran under the
+producer's package. It applies the slice's verified device limits, reads the
 prepared completion, calibration, production pickle, served policy and
 identity cache as declared head entries (staged under an active tier
 policy), compares its installed encoder seal with the slice's under the

@@ -2162,7 +2162,9 @@ def run_layer_quantum(
             result["calibration_input"] = calibration
             result["renders_synthesized_now"] = 0
             result["wire_validation"] = "historical-qualified-wire"
-            result["head_slice"] = dict(head_slice_binding)
+            result["head_slice"] = {
+                **head_slice_binding,
+                "producer_implementation_sha256": head.producer_implementation_sha256}
             head_units, head_cells = head.units, head.measured_cells
             progress_base = head.progress_units
             identity_cache_bytes = head.identity_cache_bytes

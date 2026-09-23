@@ -252,6 +252,31 @@ def test_refuses_a_slice_bound_to_another_plan(tmp_path):
                                 prepared=campaign["prepared"], plan_sha256="d" * 64)
 
 
+def test_refuses_a_slice_produced_by_another_implementation(tmp_path, monkeypatch):
+    """The producer re-derived the policies under its own package."""
+    from prismaquant.aura_cost import _aura_source_sha256
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    campaign = _campaign(tmp_path)
+    slices, bindings = _produce(campaign)
+    foreign = copy.deepcopy(slices[0])
+    foreign["campaign"]["producer_implementation_sha256"] = "e" * 64
+    path = Path(bindings[0]["path"])
+    raw = head_slice_bytes(foreign)
+    path.write_bytes(raw)
+    record = _record(0, dict(bindings[0], sha256=hashlib.sha256(raw).hexdigest(),
+                             bytes=len(raw)))
+    head_slice, _, files = read_quantum_head_slice(
+        campaign["config"], record=record, prepared=campaign["prepared"],
+        plan_sha256=PLAN_SHA)
+    with pytest.raises(HeadSliceRefused, match="head slice producer implementation"):
+        load_quantum_head(
+            campaign["config"], record=record, head_slice=head_slice, files=files,
+            completion=read_prepared_head(files), plan_sha256=PLAN_SHA,
+            implementation_sha256=_aura_source_sha256(), reader_identity=None,
+            projection_backend=PROJECTION)
+
+
 def test_refuses_a_tampered_slice(tmp_path):
     campaign = _campaign(tmp_path)
     slices, bindings = _produce(campaign)

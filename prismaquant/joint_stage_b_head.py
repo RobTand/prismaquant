@@ -356,11 +356,20 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
     from .calibration_data import load_calibration_input
     from .production_weight_cache import ProductionWeightCache
     from .tessera_joint_aura import (
-        _pb_commit, check_prepared_completion, normalize_historical_encoder_reuse,
-        require_prepared_digests, resolve_encoder_source_reuse)
+        _pb_commit, _prepared_digest_recorded, check_prepared_completion,
+        normalize_historical_encoder_reuse, require_prepared_digests,
+        resolve_encoder_source_reuse)
     from . import tessera_campaign as tc
 
     intake = head_slice["intake"]
+    # The policy re-derivations ran under the producer's package, so the
+    # slice binds to this executing package exactly as the prepared
+    # completion does: certified mode refuses a different implementation,
+    # dev mode records it.
+    producer = head_slice["campaign"].get("producer_implementation_sha256")
+    if not _prepared_digest_recorded("implementation_sha256", producer,
+                                     implementation_sha256):
+        _same(producer, implementation_sha256, "head slice producer implementation")
     completion = check_prepared_completion(
         completion, plan_sha256=plan_sha256, implementation_sha256=implementation_sha256,
         reader_identity=reader_identity, projection_backend=projection_backend)
@@ -431,7 +440,7 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
         # a resumed walk reports its reverified prefix (#822).
         _pb_commit(progress_units, progress_phase)
     return SimpleNamespace(
-        completion=completion, formats_by_qname=formats_by_qname,
+        producer_implementation_sha256=producer, completion=completion, formats_by_qname=formats_by_qname,
         calibration_ids=ids, calibration=calibration, cache=cache,
         identity_cache_bytes=identity_cache,
         units=int(intake["units"]), measured_cells=int(intake["measured_cells"]),
