@@ -15,8 +15,9 @@ published for them. The consumer stages them as ordinary inputs of its
 derived readset. ``test_band_serial_handoff_spool_real_pb`` drives the same
 emitter through PrismaBuild's local output spool.
 
-Run it in its own pytest invocation: resolving the pinned candidate leaves
-``prismabuild`` in ``sys.modules`` (the harness defect that module records).
+The module is marked ``own_process``: resolving the pinned candidate leaves
+``prismabuild`` in ``sys.modules``, so in a shared session its tests run in a
+child pytest of their own (``tests/conftest.py``, PQ #1008).
 """
 from __future__ import annotations
 
@@ -26,6 +27,9 @@ from pathlib import Path
 
 import pytest
 import torch
+
+# PQ #1008: one pinned prismabuild per process (tests/conftest.py).
+pytestmark = pytest.mark.own_process
 
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):
