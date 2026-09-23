@@ -74,3 +74,56 @@ def report(phase: str, units_completed: int, *, unit: str = "anchors") -> bool:
         # which is the honest verdict rather than a reason to stop pricing.
         return False
     return True
+
+
+#: What a consumer blocked on its own staged range writes beside its progress
+#: report (PrismaBuild #989).  PrismaBuild's ``no_progress`` rung reads it,
+#: checks every named mover against the consumer's own plan, and leaves the
+#: blocked time out of the quiet only while a named mover is still coming.
+#: The wire format of ``prismabuild.progress.declare_staged_wait``, written
+#: here for the same reason ``report`` is: the rows run where PrismaBuild may
+#: not be importable.
+STAGED_WAIT_SCHEMA = "prismabuild.staged_wait.v1"
+STAGED_WAIT_SUFFIX = ".staged-wait"
+
+
+def declare_staged_wait(movers, *, since_unix: float) -> bool:
+    """Say that this row is blocked until one of ``movers`` lands its range.
+
+    Replaces any earlier record, so a caller with several waits passes their
+    union.  Returns whether a record was written; ``False`` without a
+    progress channel, which leaves the wait counted as quiet, as before.
+    Never raises.
+    """
+
+    destination = os.environ.get(PATH_ENV) or ""
+    token = os.environ.get(TOKEN_ENV) or ""
+    names = sorted({str(mover) for mover in movers})
+    if not destination or not token or not names:
+        return False
+    record = {"schema": STAGED_WAIT_SCHEMA, "token": token,
+              "since_unix": float(since_unix), "movers": names}
+    path = Path(destination + STAGED_WAIT_SUFFIX)
+    try:
+        temporary = path.parent / f".{path.name}.{os.getpid()}.tmp"
+        temporary.write_text(json.dumps(record, sort_keys=True) + "\n",
+                             encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        return False
+    return True
+
+
+def clear_staged_wait() -> bool:
+    """End the declared wait.  Never raises."""
+
+    destination = os.environ.get(PATH_ENV) or ""
+    if not destination:
+        return False
+    try:
+        os.unlink(destination + STAGED_WAIT_SUFFIX)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True

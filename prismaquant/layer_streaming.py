@@ -1758,7 +1758,8 @@ def _await_layer_readset(by_shard, *, source_authentication=None,
         # 300s" would send an operator looking for a stall that never
         # happened.
         print(f"[residency] layer readset not staged ({verdict}) after "
-              f"{time.monotonic() - began:.1f}s of a {budget:.0f}s bound; "
+              f"{time.monotonic() - began:.1f}s (the landing record bounds the "
+              f"wait; {budget:.0f}s where none covers it); "
               "the read below decides", flush=True)
 
 

@@ -74,6 +74,7 @@ import os
 from pathlib import Path
 import stat
 import threading
+import time
 
 SCHEMA = "prismaquant.prismabuild.residency_map.v1"
 FRAGMENT_SCHEMA = "prismaquant.prismabuild.residency_map_fragment.v1"
@@ -181,6 +182,62 @@ def _identity(info: os.stat_result) -> tuple[int, int, int, int]:
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
 
 
+#: PrismaBuild's landing record (PB #989, ``residency_map.write_landing``).
+LANDING_SCHEMA = "prismaquant.prismabuild.residency_landing.v1"
+#: What a landing range's ``state`` can say. ``ready``/``claimed``: its mover
+#: is queued or copying. ``unpublished``: the window has not published its
+#: mover yet, or will recopy a failed one. ``evicted``: the range was evicted
+#: and the window publishes it again inside the horizon.
+#: ``done-not-resident``: the copy finished and holds its tokens, and the
+#: range waits on adoption (briefly, under adoption lag). ``terminal-no-
+#: receipt``: nothing will produce it. Only the last is a refusal; the
+#: record is PrismaBuild's own (PB #989, ``residency_map.LANDING_STATES``),
+#: and a state this list lacks makes the whole record unread, which falls
+#: back to the bounded wait.
+LANDING_STATES = ("ready", "claimed", "unpublished", "evicted",
+                  "done-not-resident", "terminal-no-receipt")
+
+
+def _read_landing(path: str, identity) -> dict | None:
+    """A landing record read and checked, or ``None`` for anything else.
+
+    The fields the reader acts on are checked here; the rest travel as PB
+    wrote them, for the log. A torn or malformed record is "nothing
+    published", never a verdict, so the caller keeps its bounded wait.
+    """
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_MAP_BYTES + 1)
+            after = os.fstat(handle.fileno())
+    except OSError:
+        return None
+    if _identity(after) != identity or len(raw) > MAX_MAP_BYTES:
+        return None
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        return None
+    if type(payload) is not dict or payload.get("schema") != LANDING_SCHEMA:
+        return None
+    liveness = payload.get("tier_loop_liveness_s")
+    if (type(liveness) not in (int, float) or not liveness > 0
+            or liveness == float("inf")):
+        return None
+    if not isinstance(payload.get("tier_id"), str) or not isinstance(
+            payload.get("manifest_sha256"), str):
+        return None
+    ranges = payload.get("ranges")
+    if not isinstance(ranges, list):
+        return None
+    for row in ranges:
+        if (type(row) is not dict or row.get("state") not in LANDING_STATES
+                or not isinstance(row.get("mover_action_key"), str)
+                or type(row.get("range_start_bytes")) is not int
+                or type(row.get("range_end_bytes")) is not int):
+            return None
+    return payload
+
+
 class ResidencyResolver:
     """Where to open a declared path, and what each tier actually served."""
 
@@ -248,6 +305,14 @@ class ResidencyResolver:
         self._declared_attempted = False
         self._range_wait_polls = 0
         self._range_wait_seconds = 0.0
+        # PB's landing record (PB #989), identity-cached like the map, and
+        # the sealed read order it names ranges in, loaded on first need.
+        self._landing_identity: tuple[int, int, int, int] | None = None
+        self._landing: dict | None = None
+        self._read_order: dict[str, list[tuple[int, int, int]]] | None = None
+        self._read_order_reason: str | None = None
+        self._read_order_attempted = False
+        self._range_wait_refusal: str | None = None
         self._range_waits_served = 0
         self._range_waits_refused = 0
         # Spans a later covering entry served after a lower-offset one failed
@@ -298,6 +363,11 @@ class ResidencyResolver:
                 self._declared = None
                 self._declared_reason = None
                 self._declared_attempted = False
+                self._landing_identity = None
+                self._landing = None
+                self._read_order = None
+                self._read_order_reason = None
+                self._read_order_attempted = False
 
     # -- the map ---------------------------------------------------------
 
@@ -1107,6 +1177,108 @@ class ResidencyResolver:
         with self._lock:
             self._record_fallback(_normal(declared), reason)
 
+    def landing_record(self) -> dict | None:
+        """PrismaBuild's landing record for this consumer, or ``None``.
+
+        ``<consumer>.landing.json`` beside the map (PB #989): for every
+        pending in-horizon range, its mover, the mover's state and the
+        tier's expectation of when it lands. ``None`` when the generation
+        that composed the map writes no such record, when the record is not
+        a regular file, or when it names another tier or manifest than the
+        map this resolver is bound to -- each is "nothing published to wait
+        on", which keeps the reader's bounded wait. Re-read when its stat
+        identity changes, so a poll that finds it unchanged costs one lstat.
+        """
+        if not self._map_path.endswith(".map.json"):
+            return None
+        path = self._map_path[:-len(".map.json")] + ".landing.json"
+        with self._lock:
+            try:
+                before = os.lstat(path)
+            except OSError:
+                self._landing_identity, self._landing = None, None
+                return None
+            if not stat.S_ISREG(before.st_mode):
+                return None
+            identity = _identity(before)
+            if identity != self._landing_identity:
+                self._landing_identity = identity
+                self._landing = _read_landing(path, identity)
+            record = self._landing
+            if record is None:
+                return None
+            if (self._manifest_sha256 is not None
+                    and record["manifest_sha256"] != self._manifest_sha256):
+                return None
+            if self._tier_id is not None and record["tier_id"] != self._tier_id:
+                return None
+            return record
+
+    def tier_record_age(self, tier_id: str) -> float | None:
+        """Seconds since the tier loop last announced ``tier_id``.
+
+        ``None`` when the record is missing or unreadable, which PrismaBuild's
+        own liveness judgment (``PoolQueue._tier_loop_alive``) reads as dead.
+        """
+        if not isinstance(tier_id, str) or not tier_id or "/" in tier_id:
+            return None
+        try:
+            with open(Path(self._tiers_dir) / f"{tier_id}.json", "rb") as handle:
+                payload = json.loads(handle.read(MAX_MAP_BYTES + 1).decode("utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return None
+        if type(payload) is not dict or payload.get("schema") != TIER_RECORD_SCHEMA:
+            return None
+        announced = payload.get("announced_unix")
+        if type(announced) not in (int, float) or announced != announced:
+            return None
+        return max(0.0, time.time() - float(announced))
+
+    def read_order_positions(self, declared: str | Path, start: int,
+                             end: int) -> list[tuple[int, int]]:
+        """Where ``declared``'s ``[start, end)`` sits in the sealed read order.
+
+        Landing records name ranges by read-order byte position, the running
+        sum over the manifest's entries in the order the action reads them
+        (``staged_lease.load_sealed_read_order``). One file span can appear
+        more than once in that order when a read plan revisits it, so the
+        answer is a list. Empty when the read order is not bound here, which
+        the reader treats as "nothing published to wait on".
+        """
+        path = _normal(declared)
+        with self._lock:
+            if not self._read_order_attempted:
+                self._load_read_order()
+            index = (self._read_order or {}).get(path, ())
+        out = []
+        for offset, stop, base in index:
+            low, high = max(start, offset), min(end, stop)
+            if low < high:
+                out.append((base + low - offset, base + high - offset))
+        return out
+
+    def _load_read_order(self) -> None:
+        """Caller holds the lock. Runs at most once per binding."""
+        self._read_order_attempted = True
+        if self._manifest_sha256 is None:
+            self._read_order_reason = "no data manifest digest is bound"
+            return
+        try:
+            from .staged_lease import load_sealed_read_order
+            rows = load_sealed_read_order(self._manifest_sha256)
+        except Exception as error:  # never let this path fail a read
+            self._read_order_reason = f"sealed read order unavailable: {error}"
+            print(f"[residency] {self._read_order_reason}", flush=True)
+            return
+        order: dict[str, list[tuple[int, int, int]]] = {}
+        cursor = 0
+        for path, offset, count in rows:
+            order.setdefault(_normal(path), []).append(
+                (offset, offset + count, cursor))
+            cursor += count
+        self._read_order = order
+        self._read_order_reason = None
+
     def record_range_wait(self, declared: str | Path, *, polls: int,
                           seconds: float, served: bool) -> None:
         """One strict read that waited for a range the map did not hold yet.
@@ -1130,6 +1302,19 @@ class ResidencyResolver:
             print(f"[residency] range wait {_normal(declared)}: "
                   f"{polls} poll(s) over {seconds:.1f}s -> "
                   f"{'staged' if served else 'still not staged, refusing'}",
+                  flush=True)
+
+    def record_range_refusal(self, declared: str | Path, detail: str) -> None:
+        """Why a strict read stopped waiting for a range (PQ #1107).
+
+        The state PrismaBuild's landing record gave, or that no landing
+        record covered the range and the bounded wait ran out. Kept as the
+        report's ``range_wait_refusal``, the latest one only: the log line
+        is the record of each.
+        """
+        with self._lock:
+            self._range_wait_refusal = str(detail)
+            print(f"[residency] range wait {_normal(declared)} refused: {detail}",
                   flush=True)
 
     def record_ram_fallback(self, declared: str | Path, reason: str) -> None:
@@ -1259,6 +1444,17 @@ class ResidencyResolver:
                 "range_wait_seconds": round(self._range_wait_seconds, 3),
                 "range_waits_served": self._range_waits_served,
                 "range_waits_refused": self._range_waits_refused,
+                "range_wait_refusal": self._range_wait_refusal,
+                # Whether a landing record could be followed (PQ #1107):
+                # without a bound read order every wait falls back to the
+                # bounded one, and this says so where results.json shows it.
+                "read_order": (
+                    {"state": "bound", "paths": len(self._read_order)}
+                    if self._read_order is not None else
+                    {"state": "unbound", "reason": self._read_order_reason}
+                    if self._read_order_attempted else
+                    {"state": "unread",
+                     "reason": "no wait asked where a range sits in the read order"}),
                 "range_rows_passed_over": self._range_rows_passed_over,
                 "declared_readset": (
                     {"state": "bound", "paths": len(self._declared)}

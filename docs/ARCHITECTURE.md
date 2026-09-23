@@ -1,5 +1,54 @@
 # PrismaQuant Architecture
 
+A staged-range reader waits on PrismaBuild's landing record, not a constant
+(2026-09-23, `fix/1107-wait-on-expected-landing`, PQ #1107, PB #989).
+
+- **What changed.** PrismaBuild's tier loop now writes
+  `<consumer>.landing.json` beside the residency map. For every pending
+  in-horizon range it names the mover, the mover's state (`ready`,
+  `claimed`, `unpublished`, `evicted`, `done-not-resident` or
+  `terminal-no-receipt`), the tier's expected
+  landing time and the numbers behind it (queue position, bytes ahead, the
+  measured copy rates). `residency_shard_reader.await_staged_spans` reads it
+  through the resolver (`ResidencyResolver.landing_record`, identity-cached
+  and bound to the map's tier and manifest) and maps each pending span to
+  its read-order bytes (`read_order_positions`, from PB's own
+  `storage_tiers.manifest_read_entries` via
+  `staged_lease.load_sealed_read_order`).
+- **The rule** (`residency_shard_reader.landing_verdict`). The reader waits
+  while the span's mover is `ready` or `claimed`, or while its range is
+  `unpublished`, `evicted` (the window publishes it again) or
+  `done-not-resident` (the copy finished and waits for adoption) and the
+  tier loop is alive. `residency_map.LANDING_STATES` must list every state
+  PrismaBuild writes: a state it lacks makes the whole record unread, and
+  the reader falls back to the bounded wait. It refuses at once when every
+  range covering the span is `terminal-no-receipt`, or when the tier record
+  is older than the record's `tier_loop_liveness_s` (PrismaBuild's own offer
+  freshness bound, the judgment `PoolQueue._tier_loop_alive` makes). The
+  expected landing time is logged, never enforced, so a copy slower than
+  every earlier receipt is still waited on. Every refusal names the state,
+  and every wait logs the state and the expectation.
+- **The wait is declared.** While it follows the landing record, the reader
+  writes `<progress path>.staged-wait` (`prismabuild.staged_wait.v1`,
+  `prismabuild_progress.declare_staged_wait`) naming the movers it waits on,
+  the union across the process's concurrent reads. PrismaBuild's
+  `no_progress` rung checks each named mover against the consumer's own
+  plan and leaves the blocked time out of the quiet while one is still
+  coming.
+- **The fallback.** Where no landing record covers the pending spans (an
+  older PrismaBuild generation, a produced-output map, a span outside the
+  bound read order), the reader keeps the bounded wait of
+  `PRISMAQUANT_STAGED_RANGE_WAIT_S` (default 300 s), and its refusal says
+  that no landing record covered it. The clock runs only while nothing is
+  published to wait on. `dispatch_joint_quanta.require_staged_wait_below_grace`
+  still refuses a fallback wait at or above the row's smallest grace; its
+  message and docstring say the landing record bounds every other wait.
+
+Gates: `tests/test_staged_wait_follows_pb_landing.py`,
+`tests/test_stagea_startup_hygiene.py`,
+`tests/test_strict_reader_tier_enforcement.py`. No format, pipeline default,
+stage or ship gate changes.
+
 The Stage A chain reads nothing below its walk, a Stage A row reserves its
 plan's memory bound, and the Stage B preparation declares its read phases as
 progress phases (2026-09-23, `ws-sa/997-1098-fixes`, PQ #1100 item 1,
@@ -1174,8 +1223,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-sa/997-1098-fixes`.
+As of: 2026-09-23 · `fix/1107-wait-on-expected-landing`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `fix/1107-wait-on-expected-landing`) for **a
+staged-range reader that waits on PrismaBuild's landing record** (PQ #1107,
+PB #989): the reader waits while the range's mover is coming, refuses on a
+terminal mover or a silent tier loop, declares the wait to PrismaBuild, and
+keeps the 300 s bound only where no landing record covers the range. See the
+entry at the top. No format, pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-sa/997-1098-fixes`) for **a Stage A chain that
 reads only its own walk** (PQ #1100 item 1), a Stage A row that reserves its
@@ -2179,7 +2235,10 @@ layer's gather — a prefetch worker — and never inside one. The gather runs o
 the module-global bounded `_LAYER_READ_POOL`, so a worker sleeping on a cold
 future range is a worker the current layer's already-staged reads queue
 behind; a ready current-layer read now proceeds while every lookahead layer is
-cold. It waits under one deadline for the whole layer, however many shards it
+cold. Where PrismaBuild's landing record covers the pending spans (PB #989,
+PQ #1107), it waits while their movers are queued or copying and refuses on a
+terminal mover or a silent tier loop; otherwise it waits under one deadline
+for the whole layer, however many shards it
 spans (`PRISMAQUANT_STAGED_RANGE_WAIT_S`, default 300 s, `0` restores the
 pre-#874 behaviour, and the value must be finite; the joint dispatcher
 refuses a campaign spec whose wait is not strictly below the row's smallest
