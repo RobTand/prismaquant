@@ -10,7 +10,9 @@ from prismaquant.cost_streaming import build_streamed_causal_lm
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
 from prismaquant.tessera_campaign import _collect_activations
-from test_glm_campaign_streaming import glm_checkpoint
+from test_glm_campaign_streaming import (  # noqa: F401
+    _torch_only_causal_conv1d, glm_checkpoint,
+)
 
 
 def test_current_packed_storage_dies_before_cpu_return_and_next_stays_resident(

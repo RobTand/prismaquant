@@ -354,6 +354,41 @@ def pytest_sessionfinish(session, exitstatus):
     session.exitstatus = pytest.ExitCode.OK
 
 
+#: Distributions whose versions decide what this suite can run. The GLM
+#: modules need transformers >= 5.16 (``test_glm5_next_streamed_forward_parity``
+#: and the five modules that import from it), and Tessera and PrismaBuild are
+#: pinned (``tools/resolve_*_dev_pin.py``).
+ENVIRONMENT_DISTRIBUTIONS = ("torch", "transformers", "tessera-quant", "prismabuild")
+
+
+def environment_line() -> str:
+    """The interpreter and the gating versions, as one summary line."""
+
+    from importlib import metadata
+    import platform
+
+    parts = [f"python={platform.python_version()}"]
+    for name in ENVIRONMENT_DISTRIBUTIONS:
+        try:
+            parts.append(f"{name}={metadata.version(name)}")
+        except metadata.PackageNotFoundError:
+            parts.append(f"{name}=absent")
+    return f"pq-test-environment: {' '.join(parts)} ({sys.executable})"
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Name the environment in every session's output (PQ #1090).
+
+    Six GLM modules skipped at collection in every PrismaBuild run because
+    the test interpreter had transformers 5.6.0, and nothing in a receipt
+    said which transformers a run had. A shard's output is its receipt, and
+    ``pbtest`` runs pytest with ``--no-header``, so the report header cannot
+    carry this; the terminal summary is printed either way.
+    """
+
+    terminalreporter.write_line(environment_line())
+
+
 # ---------------------------------------------------------------------------
 # Modules that need a pytest process of their own (PQ #1008)
 # ---------------------------------------------------------------------------
