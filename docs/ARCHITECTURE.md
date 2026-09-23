@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Stage B holds no kernel-time profiler session unless asked (2026-09-23,
+`ws-1a/stageb-profiler-optin-1029`, PQ #1029). `run_layer_quantum_core` opened
+a `torch.profiler` CUDA session (`KernelTimeProfiler`) around the render-free
+chain and around every retained window. Each close sums every kernel the
+session recorded through `key_averages`, and on a GLM-shaped proxy quantum
+that close took 15.6 s of the main thread (py-spy, PB `a3d982334572`). Both
+sessions now open only under `PRISMAQUANT_STAGE_B_KERNEL_PROFILE=1`, exactly
+as Stage A's does under `PRISMAQUANT_STAGE_A_KERNEL_PROFILE=1` (#899).
+Otherwise `counters.json` reports `kernel_active_s: None` for the quantum, the
+chain and each window, with the reason in `kernel_profiler_error`, never a
+zero. The GPU power sampler stays on. Telemetry only: no identity, record or
+arithmetic changes. Gates: `tests/test_stage_b_kernel_profile_scope.py`.
+
 Stage B replay regimes are stamped in the statistics identity (2026-09-23,
 `ws-1a/stageb-spill-batched-994`, PQ #994). `PRISMAQUANT_STAGE_B_REPLAY_REGIME`
 names the capture batch and the statistics accumulation of a quantum that
@@ -537,8 +550,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-1a/stageb-spill-batched-994`.
+As of: 2026-09-23 · `ws-1a/stageb-profiler-optin-1029`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-1a/stageb-profiler-optin-1029`) for **Stage B's
+kernel-time profiler** (PQ #1029): the chain and per-window
+`torch.profiler` sessions open only under
+`PRISMAQUANT_STAGE_B_KERNEL_PROFILE=1`, as Stage A's does; see the entry of
+that name at the top. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-1a/stageb-spill-batched-994`) for **Stage B
 replay regimes** (PQ #994): `PRISMAQUANT_STAGE_B_REPLAY_REGIME` names a
@@ -1099,7 +1118,7 @@ not measure no longer reports `0.0`. The GPU power sampler is bounded and stays
 on, so the receipt still carries power against the envelope (principle 15).
 A failing capture prints `capture failed: <type>: <message>` before any
 teardown. Stage B's per-chain and per-window sessions are bounded scopes and are
-unchanged. No format, lane, pin, kernel order or ship gate changes. Gates:
+unchanged (they became opt-in on 2026-09-23, PQ #1029). No format, lane, pin, kernel order or ship gate changes. Gates:
 `tests/test_stage_a_kernel_profile_scope.py`.
 Re-stamped (2026-09-21, `feat/stagea-owner-loop-readahead-20260921`) for
 **read-ahead in the Stage A produced-boundary owner loop** (PQ #887). No
