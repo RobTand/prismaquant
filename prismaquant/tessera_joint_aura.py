@@ -79,6 +79,43 @@ STAGE = "Tessera campaign"
 HEAD_WALK_STAGE = "joint head walk"
 HEAD_WALK_STATE_SCHEMA = "prismaquant.tessera_joint_aura.head_walk_unit.v1"
 HEAD_WALK_JOURNAL_SCHEMA = "prismaquant.tessera_joint_aura.head_walk.v1"
+#: The campaign inputs the head walk reads, each bound by digest in a plan's
+#: ``inputs`` block (``load_measured_anchor_input``).
+HEAD_WALK_INPUT_KEYS = ("campaign_plan", "census", "campaign_receipts", "merged_cost",
+                        "merged_checkpoint")
+
+
+def merged_checkpoint_parts(path) -> Path:
+    """The directory of the merged anchor checkpoint's per-unit part files."""
+    path = Path(path)
+    return path.with_name(path.name + ".parts")
+
+
+def head_walk_read_set(inputs) -> tuple[frozenset[str], tuple[str, ...]]:
+    """``(files, directories)`` the head walk reads, from a plan's ``inputs``.
+
+    The files are the bound inputs; the directory is the merged checkpoint's
+    parts, whose per-unit files the walk loads. Stage A takes its head from
+    the prepared completion instead of walking (PQ #1051), so a Stage A data
+    manifest declares none of these (``stage_a_head.drop_head_walk_reads``).
+    A key the plan does not bind names no read: the walk itself refuses such
+    a plan, and a catalog extension's plan binds other inputs.
+    """
+    bound = {key: inputs[key] for key in HEAD_WALK_INPUT_KEYS if key in inputs}
+    files = frozenset(os.path.normpath(str(item["path"])) for item in bound.values())
+    parts = (() if "merged_checkpoint" not in bound else (os.path.normpath(
+        str(merged_checkpoint_parts(bound["merged_checkpoint"]["path"]))),))
+    return files, parts
+
+
+def is_head_walk_read(path, read_set) -> bool:
+    """Whether ``path`` is one of the head walk's reads (``head_walk_read_set``)."""
+    files, directories = read_set
+    path = os.path.normpath(str(path))
+    return path in files or any(path.startswith(directory + os.sep)
+                                for directory in directories)
+
+
 # The walk's worker pool is the CPU set PrismaBuild assigned this container
 # (``os.sched_getaffinity``: PB applies its allocation with taskset before
 # exec and the container inherits it) -- never a guessed core. The cap keeps
@@ -918,8 +955,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     # that reads as a verified campaign input.
     _require(unit_scope is None or not verify_payloads,
              "a scoped read cannot also verify the complete campaign payload")
-    paths = {key: _bound(inputs[key], key) for key in (
-        "campaign_plan", "census", "campaign_receipts", "merged_cost", "merged_checkpoint")}
+    paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
     census = json.loads(paths["census"].read_text())
     plan = json.loads(paths["campaign_plan"].read_text())
     _same(plan.get("schema"), "prismaquant.tessera_campaign_plan.v1", "campaign plan schema")
@@ -1006,7 +1042,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     encoder_source_reuse = resolve_encoder_source_reuse(
         identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
         reuse_policy, where="joint anchor checkpoint encoder source")
-    parts = paths["merged_checkpoint"].with_name(paths["merged_checkpoint"].name + ".parts")
+    parts = merged_checkpoint_parts(paths["merged_checkpoint"])
     for row in manifest["units"]:
         _same(parts / row["file"], unit_path(parts, row["qname"]), "canonical checkpoint unit path")
 

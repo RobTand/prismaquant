@@ -1785,13 +1785,22 @@ def run_adjoint_capture(
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
     prefetch_override=None, artifact_budget_bytes=None, forward_recovery=None,
     chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
-    chain_seed=None,
+    chain_seed=None, head_walk=False,
 ) -> dict:
     """Load the head phase and run the adjoint capture (one PB action).
 
+    The head is the prepared completion's (``stage_a_head``, PQ #1051): the
+    roster, the counts and the progress base come from the completion the
+    ``prepared`` binding pins, and Stage A reads none of the anchor catalog.
+    ``head_walk=True`` is the verification arm: it walks the catalog as
+    Stage A did before #1051 (``load_measured_anchor_input``), runs the
+    walk's checks, and requires the walk's roster and cell count to equal the
+    completion's. The two arms' receipts differ only in ``head.walked``.
+
     ``chain_resume`` relaunches the run from its lowest sealed checkpoint
-    (``run_adjoint_capture_core``, PQ #1001). It implies the head walk's own
-    ``--resume``: the relaunch re-verifies the head journal it banked.
+    (``run_adjoint_capture_core``, PQ #1001). With ``head_walk``, it implies
+    the walk's own ``resume``: the relaunch re-verifies the head journal it
+    banked.
 
     ``chain_seed`` (a normalized ``stage_a_chain_seed`` spec, PQ #1016) runs
     the plan's own run's sealed checkpoint on into ``output_root``, a scratch
@@ -1808,9 +1817,11 @@ def run_adjoint_capture(
     from .joint_run_progress import JointRunProgress
     from .model_profiles import detect_profile
     from .residency_map import bind_residency_manifest, residency_report
+    from .stage_a_head import prepared_head, stage_a_roster, walked_head
     from .tessera_joint_aura import (
         ACTIVATION_SCALE_ENV,
         _bound,
+        _pb_commit,
         _preflight_run_prepared,
         _same,
         _seed_source_identity_cache,
@@ -1933,33 +1944,46 @@ def run_adjoint_capture(
         projection_backend = prewarm_projection_backend(
             execution.get("projection_backend"), device="cuda")
         result["projection_backend"] = projection_backend.identity
-        _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
-                                implementation_sha256=implementation,
-                                reader_identity=reader_identity,
-                                projection_backend=projection_backend.identity)
-        data = load_measured_anchor_input(
-            config["inputs"], reader=reader, synthesis_device="cuda",
-            progress_phase="head",
-            head_checkpoint=space / "head-walk",
-            head_resume=bool(resume or chain_resume is not None),
-            require_existing_renders=True, verify_payloads=False,
-            historical_encoder_reuse=config.get("historical_encoder_reuse"))
-        _same(config["model"], data.census["model"], "requested source model")
-        _same(data.census["attention_implementation"], "eager",
-              "qualified source attention")
+        completion = _preflight_run_prepared(
+            prepared, plan_sha256=plan_sha256, implementation_sha256=implementation,
+            reader_identity=reader_identity, projection_backend=projection_backend.identity)
+        # A wall in dev mode too, where the preflight only records a plan
+        # mismatch: the completion's roster is this plan's only because the
+        # prepare ran under it (PQ #1051).
+        _same(completion.get("plan_sha256"), plan_sha256, "prepared plan")
+        data = None
+        if head_walk:
+            data = load_measured_anchor_input(
+                config["inputs"], reader=reader, synthesis_device="cuda",
+                progress_phase="head",
+                head_checkpoint=space / "head-walk",
+                head_resume=bool(resume or chain_resume is not None),
+                require_existing_renders=True, verify_payloads=False,
+                historical_encoder_reuse=config.get("historical_encoder_reuse"))
+            _same(config["model"], data.census["model"], "requested source model")
+            _same(data.census["attention_implementation"], "eager",
+                  "qualified source attention")
         ids, calibration = load_calibration_input(
             config["calibration_input"]["path"],
             expected_sha256=config["calibration_input"]["sha256"],
             n_samples=execution["n_calib_samples"],
             seqlen=execution["calib_seqlen"])
-        original_draw = data.payload["provenance"]["hessian"]["calibration_identity"]
-        for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
-            _same(calibration["provenance"].get(name), original_draw.get(name),
-                  f"original full draw {name}")
+        if data is not None:
+            original_draw = data.payload["provenance"]["hessian"]["calibration_identity"]
+            for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
+                _same(calibration["provenance"].get(name), original_draw.get(name),
+                      f"original full draw {name}")
+            head = walked_head(data, completion, prepared=prepared,
+                               calibration=calibration)
+        else:
+            head = prepared_head(completion, prepared=prepared, calibration=calibration)
+            # The completion attests the units the prepare's walk verified:
+            # reported once, at the cumulative count the walk would have
+            # reached, as the Stage B head slice does (PQ #1010).
+            from .joint_run_progress import HEAD_PHASE
+            _pb_commit(head.progress_units, HEAD_PHASE)
         result["calibration_input"] = calibration
-
-        completion = json.loads(_bound(prepared, "prepared anchors").read_text())
-        _same(completion.get("plan_sha256"), plan_sha256, "prepared plan")
+        result["head"] = head.record
 
         identity_cache_path = _seed_source_identity_cache(config, space / "run")
         # The single-run path threads the plan's derivative binding and its
@@ -1984,24 +2008,16 @@ def run_adjoint_capture(
                                                identity_cache_path=identity_cache_path)
         _same(completion.get("source_model_identity"), source,
               "prepared source identity")
-        result.update(source_model_identity=source, units=len(data.formats_by_qname),
-                      measured_cells=len(data.cells))
-        roster_digest = hashlib.sha256("".join(
-            f"{name}\n" for name in sorted(data.formats_by_qname)).encode()).hexdigest()
-        capture_scope = config.get("campaign_scope")
+        result.update(source_model_identity=source, units=head.units,
+                      measured_cells=head.measured_cells)
         # A seed's capsule names the campaign the way a recovery capsule does.
-        campaign_capsule = (forward_recovery if chain_seed is None
-                            else chain_seed["capsule"])
-        if campaign_capsule is not None:
-            from .joint_forward_resume import _read
-            from .joint_forward_campaign import resolve_forward_campaign
-            recovery_document, _ = _read(campaign_capsule["path"], campaign_capsule["sha256"])
-            recovered_campaign = resolve_forward_campaign(recovery_document,
-                plan_sha256=plan_sha256, prepared_sha256=prepared["sha256"],
-                read_manifest_sha256=read_manifest_sha256 or "0" * 64,
-                formats_by_qname=data.formats_by_qname, calibration_shape=list(ids.shape))
-            roster_digest = recovered_campaign["unit_roster_sha256"]
-            capture_scope = recovered_campaign["campaign_scope"]
+        roster_digest, capture_scope = stage_a_roster(
+            head.formats_by_qname,
+            capsule=forward_recovery if chain_seed is None else chain_seed["capsule"],
+            plan_sha256=plan_sha256, prepared_sha256=prepared["sha256"],
+            read_manifest_sha256=read_manifest_sha256 or "0" * 64,
+            calibration_shape=list(ids.shape),
+            campaign_scope=config.get("campaign_scope"))
 
         result["artifact_preflight"] = _run_artifact_preflight(
             runner, ids, execution, stride_value, space, artifact)
@@ -2009,7 +2025,7 @@ def run_adjoint_capture(
         kernel.__enter__()
         progress = JointRunProgress(
             layers=runner.num_layers, partitions=1,
-            base_units=data.progress_committed, log=lambda message: print(
+            base_units=head.progress_units, log=lambda message: print(
                 f"joint_cost_stage_a: {message}", flush=True))
         publication = bind_stage_a_produced_output(
             artifact_max_bytes=int(artifact["run_used"]))
@@ -2038,6 +2054,9 @@ def run_adjoint_capture(
         result["peak_gpu_reserved_bytes"] = torch.cuda.max_memory_reserved()
         if result["peak_gpu_bytes"] > config["max_gpu_bytes"]:
             raise RuntimeError("observed GPU allocation exceeds declared budget")
+        # Outside the run identity and the chain state: which arm read the
+        # head is a fact about this launch, not about the science.
+        receipt["head"] = head.record
         if chain_seed is not None:
             from .stage_a_chain_seed import write_seed_receipt
             result["seed_receipt"] = write_seed_receipt(space, receipt)
@@ -2176,7 +2195,10 @@ def main(argv=None) -> int:
                              "run only, with the deviation stamped into "
                              "results.json, counters.json and the adjoint "
                              "receipt; the sealed plan is unchanged")
-    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--resume", action="store_true",
+                        help="accepted from the sealed Stage A row; Stage A takes "
+                             "its head from the prepared completion and has no "
+                             "head walk to resume (PQ #1051)")
     parser.add_argument("--forward-recovery", type=Path)
     parser.add_argument("--forward-recovery-sha256")
     parser.add_argument("--chain-batch-size", type=int, default=1,
@@ -2221,8 +2243,7 @@ def main(argv=None) -> int:
     if args.chain_seed is not None and (
             args.resume_chain_state_sha256 is not None or args.forward_recovery):
         parser.error("--chain-seed binds a fresh scratch run: it takes no "
-                     "--resume-chain-state-sha256 or --forward-recovery; with "
-                     "--resume it resumes only the scratch root's own head walk")
+                     "--resume-chain-state-sha256 or --forward-recovery")
     if args.resume_chain_state_sha256 is None and (
             args.resume_from_checkpoint is not None
             or args.resume_implementation_compatibility is not None):
