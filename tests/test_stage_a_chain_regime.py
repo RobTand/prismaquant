@@ -22,6 +22,7 @@ import hashlib
 import json
 from types import SimpleNamespace
 import uuid
+import warnings
 
 import pytest
 import torch
@@ -636,7 +637,7 @@ def _routes_by_sample(layer, n_samples, *, first_forwards):
     return rows
 
 
-def test_batch_eight_is_as_close_to_float64_as_batch_one(capsys):
+def test_batch_eight_is_as_close_to_float64_as_batch_one():
     """B = 8 vs B = 1 on a bf16 routed layer, against a float64 reference.
 
     Per-sample relative L2 of every rolled cotangent, over the tokens whose
@@ -698,6 +699,9 @@ def test_batch_eight_is_as_close_to_float64_as_batch_one(capsys):
               "b1": {"mean": float(e1.mean()), "max": float(e1.max())},
               "b8": {"mean": float(e8.mean()), "max": float(e8.max())},
               "b8_bitwise_equal_b1": digests(eight) == digests(one)}
-    print("chain-regime precision:", json.dumps(report, sort_keys=True))
+    # A warning, not a print: the pool's pytest runs without -rP, and the
+    # warnings summary is what reaches the shard log.
+    warnings.warn("chain-regime precision: " + json.dumps(report, sort_keys=True),
+                  UserWarning)
     assert int(agree.sum()) > samples * tokens // 2, report
     assert float(e8.mean()) <= float(e1.mean()) + 2.0 ** -8, report
