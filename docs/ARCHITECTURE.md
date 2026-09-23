@@ -1,5 +1,25 @@
 # PrismaQuant Architecture
 
+A Stage B quantum refuses a bf16 reduction setting its Stage A slice does
+not record (2026-09-23, `ws-tq/1065-bf16-slice-stamp`, PQ #1065, part of
+#1028). A quantum rebuilds Stage A's chain from its checkpoint, and
+`allow_bf16_reduced_precision_reduction` sets that chain's rounding as the
+chain batch size does. Stage A's run identity already carries the flag's
+stamp (absent at PyTorch's default, `false` under
+`PRISMAQUANT_BF16_REDUCED_PRECISION_REDUCTION=off`), but no quantum compared
+it with its own setting, so a Stage B launched under the other setting would
+have rebuilt a different chain and only the join would have noticed.
+`joint_cost_quantum.require_slice_bf16_reduction` now makes the comparison
+twice: `run_layer_quantum` checks the launch setting before any head work,
+and `run_layer_quantum_core` checks the live flag after it verifies the
+slice, for every caller. A mismatch raises `QuantumIdentityRefused` (exit 3,
+nothing written) and names both settings; dev mode prints a `[DEV-MODE]`
+line and runs on, as the prepared-digest check does. A malformed stamp is
+refused in either mode. Gates: `tests/test_quantum_bf16_slice_stamp.py`,
+`tests/test_joint_cost_quantum_runtime.py`. A new Stage B refusal; no format,
+pipeline default or stage changes, and a quantum launched under its Stage
+A's setting runs as before.
+
 Stage A checkpoints pack their shared states into one sealed file
 (2026-09-23, `ws-tq/1037-packed-shared-states`, PQ #1037). A GLM checkpoint
 wrote 2,048 shared-adjoint and 512 shared-pass pickles as separate NFS
@@ -133,7 +153,8 @@ stamps `allow_bf16_reduced_precision_reduction: false` into
 identity and cost row), the Stage A chain arithmetic stamp and the Stage A
 run identity. `on` spells the default and is refused. The stamp is read from
 the live flag. The launchers and the dispatcher refuse a malformed setting
-before any work, the join refuses a quantum whose flag differs from the
+before any work, a quantum refuses a setting its Stage A slice does not
+record (PQ #1065), the join refuses a quantum whose flag differs from the
 rest, and a stamped True fails a row's currency check. The campaign should
 seal `off`: batch 8 is admissible only with it, and under it batch 8 sits at
 batch 1's distance from the FP32 reference. The code default stays PyTorch's,
@@ -800,8 +821,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-tq/1014-real-data-tests`.
+As of: 2026-09-23 · `ws-tq/1065-bf16-slice-stamp`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-tq/1065-bf16-slice-stamp`) for **the Stage B
+quantum's bf16 slice check** (PQ #1065): a quantum refuses, before any head
+work and again in the core, a bf16 reduction setting that its Stage A
+slice's run identity does not record; dev mode records the mismatch. See the
+entry at the top. A new Stage B refusal; no format, default or stage changes.
 
 Re-stamped (2026-09-23, `ws-tq/1014-real-data-tests`) for **fleet-data tests
 skipped by default** (PQ #1014). Test infrastructure only. A test that reads
