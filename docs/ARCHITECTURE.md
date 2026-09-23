@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Stage A seed mode (2026-09-23, `ws-sa/chain-seed-1016`, PQ #1016, part of
+#997). A dev-mode measurement run can continue a campaign run's sealed
+checkpoint under a different implementation, in a scratch output root
+(`--chain-seed`, `prismaquant/stage_a_chain_seed.py`). It borrows the
+checkpoint and the capsule rows its chain reads under pinned digests, checks
+that the source run differs from it only in the declared implementation, and
+rolls the chain down to a chosen boundary. With a `compare` checkpoint it
+records, entry by entry, whether its rolled plane is sha256-equal to the
+source run's. It never writes under the source run's root, writes
+`seed-receipt.json` instead of `adjoint-capture.json`, and the band tool
+refuses its space and its sealed request. See "Stage A seed mode (#1016)".
+Gate: `tests/test_stage_a_chain_seed.py`. No format, pipeline default or ship
+gate changes; a run without `--chain-seed` writes the same bytes.
+
 Stage A chain resume (2026-09-23, `ws-sa/chain-resume-997`, PQ #1001, part
 of #997). A Stage A run that dies in its reverse chain can be relaunched
 from its lowest sealed checkpoint instead of from the start
@@ -449,6 +463,13 @@ infrastructure only: modules marked `own_process` (the Stage A produced-output
 harness and the ten modules that import it) run in a child pytest of their own
 when a session collects other modules too (`tests/conftest.py`), instead of
 skipping. No format, default, stage or ship gate changes.
+
+Re-stamped (2026-09-23, `ws-sa/chain-seed-1016`) for **Stage A seed mode**
+(PQ #1016, part of #997): the `--chain-seed` spec, the scratch-root and
+borrowed-digest checks, the seed marker and receipt, the plane comparison,
+and the band tool's refusal of a seed; see "Stage A seed mode (#1016)". A run
+without a seed keeps its bytes. No format, default, stage or ship gate
+changes.
 
 Re-stamped (2026-09-23, `ws-sa/chain-resume-997`) for **Stage A chain
 resume** (PQ #1001, part of #997): the sealed chain state a fresh run writes
@@ -20881,6 +20902,88 @@ state as inputs, contain the original owner first, and give it an output
 prefix that holds the run's generation directory (`bind_produced_output`
 refuses an own-generation path outside it). The fixture tests do not exercise
 that dispatcher contract.
+
+### Stage A seed mode (#1016)
+
+A chain resume continues **the same run**, and its implementation is part of
+the run's bind identity. So it cannot measure a new implementation against a
+campaign run still sealed under an old one: the new implementation can
+neither rebind the old session nor pass the capsule's
+`validate_forward_state`. A **seed** run makes that measurement instead
+(`prismaquant/stage_a_chain_seed.py`). It is dev-mode only and is never a
+campaign run.
+
+**The spec.** `--chain-seed PATH --chain-seed-sha256 SHA` names a
+`prismaquant.stage_a.chain_seed.v1` document with exactly these fields:
+
+- `checkpoint`: `{path, sha256}` of the source run's sealed
+  `checkpoint.json` at boundary `b`;
+- `capsule`: `{path, sha256}` of the source run's forward-recovery capsule;
+- `through`: the boundary the chain stops at, `0 <= through < b`;
+- `implementation_compatibility`: `null`, or `{from, to}` when the running
+  implementation is not the one that sealed `b`;
+- `compare`: `null`, or `{path, sha256}` of the source run's own sealed
+  checkpoint at `through`.
+
+The plan is the source run's own sealed plan, so its `output_root` is the
+source run's root; `--output-root` is the scratch root. `--resume` resumes
+only the scratch root's own head walk. A seed takes no
+`--resume-chain-state-sha256` and no `--forward-recovery`.
+
+**Checks.** Before the head walk, and again in `plan_chain_seed` before
+anything is written, the seed refuses unless:
+
+- dev mode is on and the spec has exactly the fields above;
+- the checkpoint has its pinned digest, is the writer's own serialization of a
+  record that seals itself, and sits under a Stage A output root;
+- the scratch root is not the source run's root, inside it or around it,
+  and holds no receipt, seed marker, chain state, resume record, checkpoint
+  directory or boundary generation.
+
+Once the bind identity is known, `plan_chain_seed` also refuses unless:
+
+- the declaration, when given, names the running implementation as `to` and
+  another one as `from`;
+- the seed's bind identity, with the sealing implementation (`from`, or the
+  running one when undeclared) as its `producer_source_sha256`, hashes to
+  checkpoint `b`'s session. So the source run and the seed differ in nothing
+  but the implementation and the chain regime;
+- the capsule has its pinned digest, names the sealed source campaign
+  (`require_published_campaign`) and passes `validate_forward_state` under the
+  same substitution, and holds the rows `through .. b - 1`;
+- the compare checkpoint, when given, has its pinned digest, belongs to the
+  source run's root and session, and sits at `through`.
+
+**The run.** The seed writes `layer-quanta/adjoint/chain-seed.json` before it
+binds, then binds a fresh generation in the scratch root. It borrows the
+capsule rows (`authorize_forward_inputs`) and checkpoint `b`'s cotangent plane
+under that checkpoint's session (`authorize_seed_checkpoint`), loads `b`'s
+shared states, rebuilds the batches as a chain resume does, and rolls layers
+`b - 1` down to `through`. It seals its own checkpoints at the stride
+boundaries on the way. It runs no forward pass and no tail, writes no chain
+state, and never unlinks a borrowed file. The capsule rows are pinned by the
+capsule's digest, as a Stage B owner's attached chain is (`attached_chain`);
+each read still checks the entry's own metadata and waits on PrismaBuild's
+map.
+
+**The receipt.** `seed-receipt.json` (`prismaquant.stage_a.seed_receipt.v1`,
+`bandable: false`) records the seed binding: the checkpoint and its session,
+the capsule rows, the declaration (scope `stage-a-chain-seed`), and the
+compare checkpoint. It also records the seed's own run identity, stride and
+checkpoints, retention and telemetry. With a compare checkpoint, the seed
+hashes each rolled `(probe, batch)` payload at `through` as it writes it,
+then reads the reference's entries one at a time. `plane_comparison`
+(`prismaquant.stage_a.seed_plane_comparison.v1`) lists both digests per entry
+with `equal`, `different` and `bitwise_equal`.
+
+**The band tool refuses a seed.** `build_band_receipt` refuses a space that
+holds a seed marker or seed receipt, and `stage_a_argv` refuses a sealed
+request that carries `--chain-seed`. A seed's checkpoints never feed Stage B.
+
+**Limits.** Under PrismaBuild the seed's dispatcher must declare checkpoint
+`b`'s entries, the capsule rows `through .. b - 1` and, with a compare
+checkpoint, its entries, as inputs. The compare read is the reference plane's
+full size. No dispatcher builds such a request yet.
 
 ### Band-serial Stage B quanta (#996)
 
