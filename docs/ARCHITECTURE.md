@@ -2,8 +2,8 @@
 
 Stage A's reverse chain prefetches its own first layers (2026-09-23,
 `ws-sa/chain-first-prefetch`, part of PQ #997). The chain installs each
-source layer with `require_prefetched`, and each roll asks only for the layer
-`lookahead` below it, so nothing asked for the chain's first layers. A fresh
+source layer with `require_prefetched`, and each layer asks only for the
+layers below it, so nothing asked for the chain's first layers. A fresh
 walk got by because its forward pass leaves its top layers resident; a seed
 and a chain resume run no forward pass and refused their first layer. Run
 (a), a seed from R12's checkpoint 045 (`2c164969c33c` on sparklina), failed

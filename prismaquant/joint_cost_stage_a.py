@@ -1446,7 +1446,7 @@ def run_adjoint_capture_core(
             storage.stage_produced_boundary_ahead(chain_top - 1)
             # The same holds for the chain's source layers: each install
             # refuses a layer that is neither resident nor in flight, and each
-            # roll asks only for the layer ``lookahead`` below it. The first
+            # layer asks only for the layers below it. The first
             # ``lookahead`` layers are asked for here, nearest first, the
             # reverse twin of the forward pass's opening prefetches. A seed or
             # a resume runs no forward pass, so nothing else asks for them
