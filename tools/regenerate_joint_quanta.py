@@ -864,6 +864,13 @@ def main(argv=None) -> int:
                          "intake once and seal one Stage B head slice per "
                          "layer, declared in each quantum's head phase "
                          "(PQ #1010)")
+    ap.add_argument("--replay-mode", choices=("windowed", "spill"),
+                    default="windowed",
+                    help="with --executable-readsets: the replay mode the "
+                         "read plan is sealed for (PQ #1011). spill stages "
+                         "the own boundary run once per probe for the "
+                         "one-pass spill; the quantum refuses a launch in "
+                         "the other mode. Default %(default)s")
     ap.add_argument("--source-layers-prefix", default=None,
                     help="with --executable-readsets: complete each chain/own "
                          "source phase from the actual checkpoint tensor "
@@ -876,6 +883,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     if args.head_slices and not args.executable_readsets:
         return _fail("--head-slices needs --executable-readsets")
+    if args.replay_mode != "windowed" and not args.executable_readsets:
+        return _fail("--replay-mode needs --executable-readsets")
     if args.source_layers_prefix is not None and (
             not args.executable_readsets or not args.source_layers_prefix):
         return _fail("--source-layers-prefix needs --executable-readsets "
@@ -1209,7 +1218,8 @@ def main(argv=None) -> int:
                             source_model_root=source_model_root,
                             prepared_inputs=layer_prepared,
                             head_slice=(head_slices[layer]["binding"]
-                                        if head_slices else None)):
+                                        if head_slices else None),
+                            replay_mode=args.replay_mode):
                         emitted.append(row)
                 produced["records"] = [row["record"] for row in emitted]
                 bound_manifests.extend(
