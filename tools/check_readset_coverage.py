@@ -79,7 +79,10 @@ def _stage_a(args) -> dict:
     layers_prefix = roster_layers_prefix(prepared.get("formats_by_qname") or {})
     prefetch = plan.get("source_prefetch") or {}
     if args.prefetch_override is not None:
-        prefetch = {**prefetch, **_load_json(args.prefetch_override)}
+        # A joint_adjoint_capture prefetch override input: its
+        # ``source_prefetch`` block replaces the plan's.
+        override = _load_json(args.prefetch_override)
+        prefetch = {**prefetch, **override.get("source_prefetch", override)}
     lookahead = prefetch.get("prefetch_lookahead")
     if type(lookahead) is not int or lookahead < 1:
         raise ValueError(f"no positive prefetch lookahead ({lookahead!r})")
