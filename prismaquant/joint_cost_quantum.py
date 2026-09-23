@@ -2105,7 +2105,22 @@ def run_layer_quantum(
 
     execution = config["execution"]
     from .joint_stageb_resources import enforce_device_policy
-    device_envelope = enforce_device_policy(config)
+    head_slice = None
+    readset_block = record.get("executable_readset")
+    if isinstance(readset_block, dict) and readset_block.get("head_slice") is not None:
+        # PQ #1010: the head intake ran once, at prepare. The slice is the
+        # first head read; the device limits it carries were verified there.
+        from .joint_stage_b_head import (
+            HeadSliceRefused, head_slice_limits, read_quantum_head_slice)
+        try:
+            head_slice, head_slice_binding, head_files = read_quantum_head_slice(
+                config, record=record, prepared=prepared, plan_sha256=plan_sha256)
+        except HeadSliceRefused as exc:
+            raise QuantumIdentityRefused(str(exc)) from exc
+        device_envelope = enforce_device_policy(
+            config, verified_limits=head_slice_limits(head_slice))
+    else:
+        device_envelope = enforce_device_policy(config)
     if (config.get("qualification_window") is not None
             or execution.get("retained_operator_windows") is not None):
         require_bounded_capture_environment(os.environ)
@@ -2163,7 +2178,14 @@ def run_layer_quantum(
     try:
         # Bind before cache/intake work. The core repeats this idempotently
         # for direct callers and stamps the actual arithmetic in row identity.
-        prepared_header = json.loads(_bound(prepared, "prepared anchors").read_text())
+        if head_slice is not None:
+            from .joint_stage_b_head import load_quantum_head, read_prepared_head
+            try:
+                prepared_header = read_prepared_head(head_files)
+            except HeadSliceRefused as exc:
+                raise QuantumIdentityRefused(str(exc)) from exc
+        else:
+            prepared_header = json.loads(_bound(prepared, "prepared anchors").read_text())
         result["served_quantizer"] = bind_joint_served_quantizer(
             prepared_header["formats_by_qname"])
         reader = load_declared_reader(config.get("reader"))
@@ -2172,76 +2194,108 @@ def run_layer_quantum(
         projection_backend = prewarm_projection_backend(
             execution.get("projection_backend"), device="cuda")
         result["projection_backend"] = projection_backend.identity
-        _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
-                                implementation_sha256=implementation,
-                                reader_identity=reader_identity,
-                                projection_backend=projection_backend.identity)
-        data = load_measured_anchor_input(
-            config["inputs"], reader=reader, synthesis_device="cuda",
-            progress_phase=HEAD_PHASE,
-            head_checkpoint=space / "checkpoints" / "head-walk",
-            head_resume=resume,
-            require_existing_renders=True, verify_payloads=False)
-        _same(config["model"], data.census["model"], "requested source model")
-        _same(data.census["attention_implementation"], "eager",
-              "qualified source attention")
-        ids, calibration = load_calibration_input(
-            config["calibration_input"]["path"],
-            expected_sha256=config["calibration_input"]["sha256"],
-            n_samples=execution["n_calib_samples"],
-            seqlen=execution["calib_seqlen"])
-        original_draw = data.payload["provenance"]["hessian"]["calibration_identity"]
-        for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
-            _same(calibration["provenance"].get(name), original_draw.get(name),
-                  f"original full draw {name}")
-        result["calibration_input"] = calibration
-        result["renders_synthesized_now"] = data.synthesized_now
+        if head_slice is not None:
+            try:
+                head = load_quantum_head(
+                    config, record=record, head_slice=head_slice, files=head_files,
+                    completion=prepared_header, plan_sha256=plan_sha256,
+                    implementation_sha256=implementation,
+                    reader_identity=reader_identity,
+                    projection_backend=projection_backend.identity,
+                    progress_phase=HEAD_PHASE)
+            except HeadSliceRefused as exc:
+                raise QuantumIdentityRefused(str(exc)) from exc
+            completion, cache = head.completion, head.cache
+            formats_by_qname = head.formats_by_qname
+            ids, calibration = head.calibration_ids, head.calibration
+            result["calibration_input"] = calibration
+            result["renders_synthesized_now"] = 0
+            result["wire_validation"] = "historical-qualified-wire"
+            result["head_slice"] = {
+                **head_slice_binding,
+                "producer_implementation_sha256": head.producer_implementation_sha256}
+            head_units, head_cells = head.units, head.measured_cells
+            progress_base = head.progress_units
+            identity_cache_bytes = head.identity_cache_bytes
+        else:
+            _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
+                                    implementation_sha256=implementation,
+                                    reader_identity=reader_identity,
+                                    projection_backend=projection_backend.identity)
+            data = load_measured_anchor_input(
+                config["inputs"], reader=reader, synthesis_device="cuda",
+                progress_phase=HEAD_PHASE,
+                head_checkpoint=space / "checkpoints" / "head-walk",
+                head_resume=resume,
+                require_existing_renders=True, verify_payloads=False)
+            _same(config["model"], data.census["model"], "requested source model")
+            _same(data.census["attention_implementation"], "eager",
+                  "qualified source attention")
+            ids, calibration = load_calibration_input(
+                config["calibration_input"]["path"],
+                expected_sha256=config["calibration_input"]["sha256"],
+                n_samples=execution["n_calib_samples"],
+                seqlen=execution["calib_seqlen"])
+            original_draw = data.payload["provenance"]["hessian"]["calibration_identity"]
+            for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
+                _same(calibration["provenance"].get(name), original_draw.get(name),
+                      f"original full draw {name}")
+            result["calibration_input"] = calibration
+            result["renders_synthesized_now"] = data.synthesized_now
 
-        completion = json.loads(_bound(prepared, "prepared anchors").read_text())
-        _same(completion.get("schema"), "prismaquant.tessera_joint_aura.prepared.v3",
-              "prepared schema")
-        require_prepared_digests(completion, plan_sha256=plan_sha256,
-                                 implementation_sha256=implementation)
-        _same(completion.get("calibration_input"), calibration,
-              "prepared calibration")
-        _same(completion["formats_by_qname"],
-              {n: list(v) for n, v in data.formats_by_qname.items()},
-              "prepared exact candidate roster")
-        cache = pickle.loads(
-            _bound(completion["production_cache"], "qualified PWC").read_bytes())
-        if not isinstance(cache, ProductionWeightCache):
-            raise RuntimeError("prepared cache is not ProductionWeightCache")
-        _same(cache.metadata["inputs"], data.inputs, "prepared source bindings")
-        _same(completion.get("stage_b_resource_policy"), config.get("stage_b_resource_policy"),
-              "prepared Stage B resource policy")
-        if config.get("stage_b_resource_policy") is not None:
-            cache._joint_stage_b_resource_policy = dict(config["stage_b_resource_policy"])
-        _same(completion.get("served_activation_policy"), config.get("served_activation_policy"),
-              "prepared served activation policy")
-        if config.get("served_activation_policy") is not None:
-            if record.get("catalog_extension") is None:
-                raise RuntimeError("served activation policy requires an explicit catalog extension")
-            from .joint_served_activation import activate_policy
-            activate_policy(cache, config["served_activation_policy"])
-        expected_renders = {pair: cache.metadata["verified_cells"][pair]["render_file_sha256"]
-                            for pair in data.cells}
-        cache.require_file_load_sha256(
-            expected_renders,
-            max_file_bytes=_prepare_file_read_bound(
-                data, max_render_bytes=config["max_render_bytes"]))
-        result["wire_validation"] = "historical-qualified-wire"
+            completion = json.loads(_bound(prepared, "prepared anchors").read_text())
+            _same(completion.get("schema"), "prismaquant.tessera_joint_aura.prepared.v3",
+                  "prepared schema")
+            require_prepared_digests(completion, plan_sha256=plan_sha256,
+                                     implementation_sha256=implementation)
+            _same(completion.get("calibration_input"), calibration,
+                  "prepared calibration")
+            _same(completion["formats_by_qname"],
+                  {n: list(v) for n, v in data.formats_by_qname.items()},
+                  "prepared exact candidate roster")
+            cache = pickle.loads(
+                _bound(completion["production_cache"], "qualified PWC").read_bytes())
+            if not isinstance(cache, ProductionWeightCache):
+                raise RuntimeError("prepared cache is not ProductionWeightCache")
+            _same(cache.metadata["inputs"], data.inputs, "prepared source bindings")
+            _same(completion.get("stage_b_resource_policy"), config.get("stage_b_resource_policy"),
+                  "prepared Stage B resource policy")
+            if config.get("stage_b_resource_policy") is not None:
+                cache._joint_stage_b_resource_policy = dict(config["stage_b_resource_policy"])
+            _same(completion.get("served_activation_policy"), config.get("served_activation_policy"),
+                  "prepared served activation policy")
+            if config.get("served_activation_policy") is not None:
+                if record.get("catalog_extension") is None:
+                    raise RuntimeError("served activation policy requires an explicit catalog extension")
+                from .joint_served_activation import activate_policy
+                activate_policy(cache, config["served_activation_policy"])
+            expected_renders = {pair: cache.metadata["verified_cells"][pair]["render_file_sha256"]
+                                for pair in data.cells}
+            cache.require_file_load_sha256(
+                expected_renders,
+                max_file_bytes=_prepare_file_read_bound(
+                    data, max_render_bytes=config["max_render_bytes"]))
+            result["wire_validation"] = "historical-qualified-wire"
+            formats_by_qname = data.formats_by_qname
+            head_units, head_cells = len(data.formats_by_qname), len(data.cells)
+            progress_base = data.progress_committed
+            identity_cache_bytes = None
 
-        identity_cache_path = _seed_source_identity_cache(config, space / "run")
-        runner = build_quantum_source_runner(config, offload_folder=space / "run" / "offload")
         from .cost_streaming import build_streamed_model_identity
+        if identity_cache_bytes is not None:
+            # The slice declared the bound cache and the head read it: no
+            # copy into the output space, and nothing is written back.
+            identity_cache = {"identity_cache_bytes": identity_cache_bytes}
+        else:
+            identity_cache = {"identity_cache_path": _seed_source_identity_cache(
+                config, space / "run")}
+        runner = build_quantum_source_runner(config, offload_folder=space / "run" / "offload")
 
-        source = build_streamed_model_identity(runner, config["model"],
-                                               identity_cache_path=identity_cache_path)
+        source = build_streamed_model_identity(runner, config["model"], **identity_cache)
         _same(completion.get("source_model_identity"), source,
               "prepared source identity")
         result.update(source_model_identity=source,
-                      units=len(data.formats_by_qname),
-                      measured_cells=len(data.cells))
+                      units=head_units, measured_cells=head_cells)
 
         execution_runtime = dict(execution)
         execution_runtime.setdefault("device_envelope_bytes", config.get("max_gpu_bytes"))
@@ -2251,7 +2305,10 @@ def run_layer_quantum(
         # counters and progress all size from the resolved windows -- never
         # from the record's index entries.
         retained = quantum_retained_state(execution_runtime)
-        roster = quantum_layer_roster(runner, data.formats_by_qname, layer)
+        roster = quantum_layer_roster(runner, formats_by_qname, layer)
+        if head_slice is not None:
+            _same(roster.names, sorted(head_slice["intake"]["layer_formats"]),
+                  "head slice layer roster")
         resolved_windows = resolve_quantum_windows(
             record, layer=layer, names=roster.names, linears=roster.linears,
             render_formats=roster.render_formats, production_cache=cache,
@@ -2279,9 +2336,9 @@ def run_layer_quantum(
         # Head-phase currency continues from the head-committed base (§6.2
         # step 5): the same cumulative units the single run reports.
         progress = QuantumProgress(frontier=counters._frontier,
-                                   base_units=data.progress_committed)
+                                   base_units=progress_base)
         payload = run_layer_quantum_core(
-            runner, cache, ids.to(runner.device), data.formats_by_qname,
+            runner, cache, ids.to(runner.device), formats_by_qname,
             record=record, adjoint_slice=adjoint_slice, execution=execution_runtime,
             output_root=output_root, projection_backend=projection_backend,
             resume=resume, resolved_windows=resolved_windows,

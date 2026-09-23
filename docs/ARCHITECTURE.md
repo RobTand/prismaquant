@@ -1,5 +1,25 @@
 # PrismaQuant Architecture
 
+Stage B reads its head from a sealed per-layer slice (2026-09-23,
+`ws-tq/1010-stage-b-head-slice`, PQ #1010). Every layer quantum used to
+repeat the whole campaign's metadata intake before its first GPU allocation:
+`load_measured_anchor_input` over the merged checkpoint, cost pickle and
+journal, a stat of every render, a head-walk journal written into the pool,
+the resource and served activation policy re-derivations, and a copy of the
+source-identity cache into its output space. None of it was declared. With
+`tools/regenerate_joint_quanta.py --head-slices` (on by default in
+`tools/prepare_extended_joint_quanta.py`) the producer runs that intake once
+and seals one head slice per layer (`joint_stage_b_head`,
+`{metadata_root}/head-slices/layer-NNN.json`): the layer's candidate roster,
+the campaign facts the intake checked, the render read bound, the verified
+device limits, and the digest-bound head files a quantum still opens. The
+executable readset's `head` phase declares the slice and those files after
+the calibration entry, and the record binds the slice under
+`executable_readset.head_slice`. A quantum whose record binds a slice reads
+only those entries; a record without one runs the historical intake. See
+"Stage B head slice (#1010)". Gate: `tests/test_stage_b_head_slice.py`. No
+format, pipeline default or ship gate changes.
+
 Stage A seed mode (2026-09-23, `ws-sa/chain-seed-1016`, PQ #1016, part of
 #997). A dev-mode measurement run can continue a campaign run's sealed
 checkpoint under a different implementation, in a scratch output root
@@ -479,6 +499,13 @@ spill pairs, so PB #911 charges their ceilings to the box's `spool_gb`; see
 "Bounded local scratch is declared to PrismaBuild". A row with no scratch is
 unchanged. No format, default, stage or ship gate changes. Gate:
 `tests/test_dispatch_joint_quanta.py`.
+
+Re-stamped (2026-09-23, `ws-tq/1010-stage-b-head-slice`) for **the Stage B
+head slice** (PQ #1010): the metadata producer runs the Stage B head intake
+once and seals one slice per layer; each quantum's executable `head` phase
+declares the slice and its head files, and the record binds it; see "Stage B
+head slice (#1010)". Records produced without `--head-slices` keep their
+bytes. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-br/handoff-tiers-1007`) for **the band-serial
 handoff record as a produced group** (PQ #1015, part 1 of #1007):
@@ -20702,6 +20729,65 @@ It emits a coordinator launch recipe without submitting nested PB work.
 A spec may explicitly bind `container_admission_reference` to PB's portable
 content identity while keeping the distinct scientifically inspected Docker
 content identity; both checks must succeed before execution.
+
+### Stage B head slice (#1010)
+
+A layer quantum's head used to be the whole campaign's intake. The metadata
+producer now runs it once (`tools/regenerate_joint_quanta.py --head-slices`,
+which needs `--executable-readsets`): `load_measured_anchor_input` over the
+plan's inputs with the options a quantum used (existing renders required,
+payloads unverified, the plan's `historical_encoder_reuse`, no head
+journal), then `joint_stage_b_head.build_head_slices`. That runs every
+campaign-wide check the quantum ran: source model and eager attention, the
+prepared roster against the intake roster, the PWC's source bindings and
+render roster against the intake cells, a render digest for every cell, the
+resource policy's re-derivation and device limit, and the served activation
+policy's re-derivation. It then cuts one slice per layer, as canonical JSON
+(`prismaquant.joint_stage_b_head_slice.v1`):
+
+- `campaign`: the plan, prepared and production-pickle digests, the digest
+  of the plan's `inputs`, the digest of the complete candidate roster, and
+  the producer's implementation digest;
+- `intake`: the source model, attention implementation, the original draw's
+  calibration identity, the checkpoint's encoder seal, the unit, cell and
+  progress counts, the render read bound, and this layer's `layer_formats`;
+- `resource_policy` (binding and verified limits) and
+  `served_activation_policy` (binding), or null;
+- `head_files`: path, size and SHA-256 of the prepared completion, the
+  production pickle and, when the plan binds them, the served activation
+  policy and the source-identity cache.
+
+Slices publish under `{metadata_root}/head-slices/` before any record, and
+their digests are re-verified. The executable manifest's `head` phase is the
+calibration entry, the slice, then its head files
+(`joint_layer_quanta.check_head_slice_binding` refuses another layer's
+slice, another preparation, another production pickle, and an unknown or
+repeated role), and `annotations.head_slice` carries the binding. The
+record's `executable_readset.head_slice` is the slice's path, digest, size
+and schema; every other record field keeps its value, and the readset's
+`manifest_sha256`, `entry_count`, `total_bytes` and `read_bytes` count the
+new entries.
+
+A quantum whose record binds a slice (`run_layer_quantum`) reads the slice
+first and refuses, as an identity refusal, a slice for another layer, one
+bound to another preparation or plan input, or bytes that do not hash to the
+record's digest. The producer's implementation digest must equal the
+executing package's (dev mode records a difference, as it does for the
+prepared completion), because the policy re-derivations ran under the
+producer's package. It applies the slice's verified device limits, reads the
+prepared completion, calibration, production pickle, served policy and
+identity cache as declared head entries (staged under an active tier
+policy), compares its installed encoder seal with the slice's under the
+plan's allowance, checks the roster digest and this layer's roster against
+the live model, and binds every PWC render digest. The source-identity
+cache is parsed from the declared bytes and never copied or written
+(`build_streamed_model_identity(identity_cache_bytes=...)`). The head
+reports its cumulative unit count once. A record without a slice runs the
+historical intake unchanged.
+
+Gate: `tests/test_stage_b_head_slice.py` (producer/consumer round trip,
+refusals, an opened-path audit of the head, the progress report, and the
+record diff).
 
 ### Stage B reads Stage A by slice (#993)
 

@@ -5367,9 +5367,11 @@ def _read_streamed_model_identity_cache(
     cache_path: Path,
     *,
     source_model: str,
+    raw: bytes | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     try:
-        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        cached = json.loads(cache_path.read_text(encoding="utf-8")
+                            if raw is None else raw.decode("utf-8"))
     except Exception as exc:
         raise RuntimeError(
             f"streamed model identity cache {cache_path} is corrupt; "
@@ -5395,6 +5397,7 @@ def build_streamed_model_identity(
     source_model: str,
     *,
     identity_cache_path: str | Path | None = None,
+    identity_cache_bytes: bytes | None = None,
 ) -> dict[str, object]:
     """Hash the complete checkpoint backing a streamed cost run.
 
@@ -5404,11 +5407,19 @@ def build_streamed_model_identity(
     checkpoint-key map and resolved config.  It is an initialization integrity
     pass, not a residency mechanism; decoder execution still uses the existing
     streaming cache.
+
+    ``identity_cache_bytes`` is a read-only cache the caller already read
+    and bound by digest (the Stage B head slice, PQ #1010): it is parsed and
+    reused exactly like a cache file, and nothing is ever written back.
     """
     from prismaquant.cost_stage_checkpoint import (
         canonical_json,
         canonical_json_sha256,
     )
+
+    if identity_cache_bytes is not None and identity_cache_path is not None:
+        raise ValueError("a streamed identity cache is either a path or "
+                         "declared bytes, never both")
 
     config = getattr(runner.model, "config", None)
     config_dict = config.to_dict() if hasattr(config, "to_dict") else {}
@@ -5444,9 +5455,13 @@ def build_streamed_model_identity(
     cache_path = Path(identity_cache_path) if identity_cache_path else None
     cached: dict[str, object] | None = None
     cached_identity: dict[str, object] | None = None
-    if cache_path is not None and cache_path.is_file():
+    have_cache = identity_cache_bytes is not None or (
+        cache_path is not None and cache_path.is_file())
+    if have_cache:
         cached, cached_identity = _read_streamed_model_identity_cache(
-            cache_path, source_model=str(source_model)
+            cache_path if cache_path is not None
+            else Path("<declared identity cache>"),
+            source_model=str(source_model), raw=identity_cache_bytes,
         )
         stored = cached.get("fingerprints")
         reusable = (
@@ -5528,7 +5543,7 @@ def build_streamed_model_identity(
             "client device-number difference (dev-only portable reuse; "
             "certified mode would rehash): uncertified")
     if dev_mode_enabled():
-        if cache_path is None or not cache_path.is_file():
+        if not have_cache:
             total_live = sum(
                 int(fingerprint["size"]) for fingerprint in fingerprints)
             where = (f"at the declared {cache_path}" if cache_path is not None
