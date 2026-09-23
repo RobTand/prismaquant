@@ -15,6 +15,24 @@ checkpoints written as the chain rolls (#1002)". Gate:
 `tests/test_stage_a_checkpoint_tee.py`. No format, pipeline default or ship
 gate changes.
 
+Stage B metadata refuses a retained budget its roster does not fit
+(2026-09-23, `ws-tq/1022-retained-window-admission`, PQ #1022). The base GLM
+plan (`0b2cc006`) sealed an operator-declared retained budget whose
+`candidate_delta_bytes` was 4 MiB, while every matrix in the roster needs an
+fp32 delta of 32 to 192 MiB, so every Stage B quantum built on it would have
+refused at its preflight. The resource policy
+(`joint_stageb_resources.derive_policy`) derives that budget from the roster,
+and every one of the 45 layers is admitted under it. `prepare_extended_joint_quanta`
+now refuses an extended plan that binds no `stage_b_resource_policy`, or seals
+a budget other than the policy's, with a named refusal instead of a
+`KeyError`. `regenerate_joint_quanta --executable-readsets` settles every
+layer's retained admission before the head intake. A plan that binds a policy
+must seal the policy's budget. A plan that binds none keeps its declared
+budget only while the roster fits it; otherwise it refuses in seconds, naming
+the plan digest and `derive_policy`. See "GLM Stage B runs from main".
+Gate: `tests/test_retained_budget_provenance_1022.py`. No format, pipeline
+default or ship gate changes.
+
 Stage B replay regimes are stamped in the statistics identity (2026-09-23,
 `ws-1a/stageb-spill-batched-994`, PQ #994). `PRISMAQUANT_STAGE_B_REPLAY_REGIME`
 names the capture batch and the statistics accumulation of a quantum that
@@ -275,7 +293,10 @@ against its writable identity mount and seals both scratch variables into the
 outer PB request from the same inlined spec bytes. `prepare_extended_joint_quanta`
 runs the dispatcher's own spec check with the quantum row's grace set, so a
 spec whose `PRISMAQUANT_STAGED_RANGE_WAIT_S` is not below 900 s refuses before
-any metadata is published. `tools/prepare_stageb_after_capture.sh` is the
+any metadata is published. It also refuses a plan whose retained budget is not
+its resource policy's (PQ #1022), and the generator settles every layer's
+retained admission before the head intake, naming `derive_policy` when an
+operator-declared budget does not fit the roster. `tools/prepare_stageb_after_capture.sh` is the
 repository launcher for that step; it resolves the interpreter from the Tessera
 dev pin. Gates: `tests/test_joint_catalog_extension.py`,
 `tests/test_prepare_extended_joint_quanta.py`,
@@ -562,6 +583,12 @@ into it as the pass writes it, and seals after the pass, instead of reading
 the plane back; see "Stage A checkpoints written as the chain rolls
 (#1002)". The checkpoint bytes are unchanged. No format, default, stage or
 ship gate changes. Gate: `tests/test_stage_a_checkpoint_tee.py`.
+
+Re-stamped (2026-09-23, `ws-tq/1022-retained-window-admission`) for **the
+derived retained budget** (PQ #1022): the Stage B metadata producers refuse a
+plan whose retained budget is not its resource policy's, or an
+operator-declared budget the roster does not fit, before the head intake; see
+"GLM Stage B runs from main". No format, default or stage changes.
 
 Re-stamped (2026-09-23, `ws-1a/stageb-spill-batched-994`) for **Stage B
 replay regimes** (PQ #994): `PRISMAQUANT_STAGE_B_REPLAY_REGIME` names a
