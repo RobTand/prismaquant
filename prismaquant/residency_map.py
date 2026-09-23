@@ -1438,6 +1438,16 @@ class ResidencyResolver:
                 "range_waits_served": self._range_waits_served,
                 "range_waits_refused": self._range_waits_refused,
                 "range_wait_refusal": self._range_wait_refusal,
+                # Whether a landing record could be followed (PQ #1107):
+                # without a bound read order every wait falls back to the
+                # bounded one, and this says so where results.json shows it.
+                "read_order": (
+                    {"state": "bound", "paths": len(self._read_order)}
+                    if self._read_order is not None else
+                    {"state": "unbound", "reason": self._read_order_reason}
+                    if self._read_order_attempted else
+                    {"state": "unread",
+                     "reason": "no wait asked where a range sits in the read order"}),
                 "range_rows_passed_over": self._range_rows_passed_over,
                 "declared_readset": (
                     {"state": "bound", "paths": len(self._declared)}

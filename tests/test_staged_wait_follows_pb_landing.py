@@ -215,3 +215,88 @@ def test_the_dispatcher_gate_says_the_bound_is_the_fallback_wait():
         dispatch.require_staged_wait_below_grace(
             {"env": {reader.STAGED_RANGE_WAIT_ENV: "900"}}, [("chain-000", 900)])
     assert "landing record" in dispatch.require_staged_wait_below_grace.__doc__
+
+
+# -- the real resolver: files on disk, the read order through PB's helper ---
+
+
+def _real_resolver(tmp_path, monkeypatch, *, state, tier_age_s=5.0):
+    """A ``ResidencyResolver`` reading a landing record and a tier record
+    from disk, with the sealed read order cut by ``load_sealed_read_order``.
+
+    Only the two hops that need a live PrismaBuild claim are stood in for:
+    the sealed manifest (``_load_sealed_payload``) and the generation's
+    ``storage_tiers`` module, whose v1 read order is list order.
+    """
+    import time as real_time
+    from types import SimpleNamespace
+
+    from prismaquant import staged_lease
+    from prismaquant.residency_map import ResidencyResolver
+
+    manifest = "ef" * 32
+    entries = [{"path": "/pool/a", "offset": 0, "bytes": 100},
+               {"path": "/pool/b", "offset": 0, "bytes": 50},
+               {"path": "/pool/a", "offset": 100, "bytes": 100}]
+    monkeypatch.setattr(staged_lease, "_load_sealed_payload",
+                        lambda digest: {"schema": "v1", "entries": entries})
+    monkeypatch.setattr(staged_lease, "sdk_submodule", lambda name: SimpleNamespace(
+        manifest_read_entries=lambda payload: list(payload["entries"])))
+    consumer = "cd" * 32
+    root = tmp_path / "residency"
+    root.mkdir(parents=True)
+    tiers = tmp_path / "tiers"
+    tiers.mkdir(parents=True)
+    now = real_time.time()
+    (tiers / f"{TIER}.json").write_text(json.dumps({
+        "schema": "prismabuild.storage_tier.v1", "tier_id": TIER,
+        "announced_unix": now - tier_age_s}))
+    record = _record(state, expected_in_s=400.0 if state in ("ready", "claimed")
+                     else None, now=now)
+    record["consumer_action_key"] = consumer
+    record["manifest_sha256"] = manifest
+    # The third entry, a[100, 200), is read-order bytes [150, 250).
+    record["ranges"][0].update({"range_start_bytes": 150, "range_end_bytes": 250})
+    (root / f"{consumer}.landing.json").write_text(json.dumps(record))
+    resolver = ResidencyResolver(root / f"{consumer}.map.json", tiers_dir=tiers)
+    resolver.bind_manifest_sha256(manifest)
+    return resolver
+
+
+def test_the_real_resolver_places_a_span_in_the_read_order_and_waits(
+        tmp_path, monkeypatch):
+    resolver = _real_resolver(tmp_path, monkeypatch, state="claimed")
+
+    assert resolver.read_order_positions("/pool/a", 120, 130) == [(170, 180)]
+    assert resolver.read_order_positions("/pool/b", 10, 20) == [(110, 120)]
+    kind, why, movers = reader.landing_verdict(
+        resolver, [("/pool/a", 120, 130, 200)])
+    assert (kind, movers) == ("wait", (MOVER,))
+    assert "claimed" in why
+    assert resolver.report()["read_order"] == {"state": "bound", "paths": 2}
+    # A span the record does not list keeps the bounded wait.
+    assert reader.landing_verdict(
+        resolver, [("/pool/a", 10, 20, 200)])[0] == "absent"
+
+
+def test_the_real_resolver_refuses_a_terminal_range_and_a_silent_loop(
+        tmp_path, monkeypatch):
+    terminal = _real_resolver(tmp_path / "t", monkeypatch,
+                              state="terminal-no-receipt")
+    assert reader.landing_verdict(
+        terminal, [("/pool/a", 120, 130, 200)])[0] == "refuse"
+    silent = _real_resolver(tmp_path / "s", monkeypatch, state="claimed",
+                            tier_age_s=600.0)
+    kind, why, _movers = reader.landing_verdict(
+        silent, [("/pool/a", 120, 130, 200)])
+    assert kind == "refuse" and "tier loop" in why
+
+
+def test_a_landing_record_for_another_manifest_is_not_followed(
+        tmp_path, monkeypatch):
+    resolver = _real_resolver(tmp_path, monkeypatch, state="claimed")
+    resolver.bind_manifest_sha256("12" * 32)
+
+    assert resolver.landing_record() is None
+    assert reader.landing_verdict(
+        resolver, [("/pool/a", 120, 130, 200)])[0] == "absent"

@@ -656,13 +656,17 @@ def load_sealed_read_order(bound_manifest_sha256: str) -> list[tuple[str, int, i
     ``storage_tiers.manifest_read_entries`` -- list order for a v1 manifest,
     the ``read_plan`` expansion for v2, revisits included -- so this reader
     and the plan agree about one order by construction rather than by a
-    second parser. Raises :class:`ReadsetUnbound` when PB's helper is not
-    importable or the manifest describes no read order.
+    second parser. The module comes through :func:`sdk_submodule`, from the
+    same sealed generation as the lease SDK, never from whatever
+    ``prismabuild`` a bare import would find. Raises :class:`ReadsetUnbound`
+    when PB's helper is not available or the manifest describes no read
+    order.
     """
     payload = _load_sealed_payload(bound_manifest_sha256)
     try:
-        from prismabuild.storage_tiers import manifest_read_entries
-    except ImportError as error:
+        tiers = sdk_submodule("storage_tiers")
+        manifest_read_entries = tiers.manifest_read_entries
+    except (LeaseRefused, AttributeError) as error:
         raise ReadsetUnbound(f"PB read-order helper unavailable: {error}") from None
     entries = manifest_read_entries(payload)
     if not entries:
