@@ -25,7 +25,8 @@ from prismaquant.joint_adjoint_slices import stage_a_slice, write_adjoint_slice
 from prismaquant.joint_layer_quanta import adjoint_binding_fields
 
 from test_stage_b_band_binding import band_from_receipt, synthetic_receipt
-from stage_a_spool_spec import SPOOL_ENV, SPOOL_MOUNT, SPOOL_ROOT, with_spool
+from stage_a_spool_spec import (SPOOL_ENV, SPOOL_MOUNT, SPOOL_ROOT, SPOOL_WINDOW_BYTES,
+                                 STAGE_A_SPOOL_ENV, stage_a_plan, with_spool)
 
 from dispatch_joint_quanta import (  # noqa: E402
     ADJOINT_SCHEMA,
@@ -63,8 +64,8 @@ def campaign(tmp_path):
     # The plan file must exist: stage A's payload --output-root and the
     # receipt default are both read from the plan's sealed output_root.
     plan_path = tmp_path / "plan.json"
-    plan_path.write_text(json.dumps(
-        {"output_root": str(tmp_path / "campaign-root")}))
+    plan_path.write_text(json.dumps(stage_a_plan(
+        tmp_path, output_root=str(tmp_path / "campaign-root"))))
     return {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
             "manifest_sha256": "c" * 64, "scope": scope,
             "read_manifest_sha256": "d" * 64,
@@ -629,14 +630,69 @@ def test_stage_a_seals_the_paced_spool_and_the_ram_tier(tmp_path, campaign):
     assert envelope[envelope.index("--residency") + 1] == "stage"
     assert envelope[envelope.index("--residency-ram") + 1] == "auto"
     assert _envelope_envs(argv) == [
-        *(f"{name}={value}" for name, value in SPOOL_ENV.items()),
+        *(f"{name}={value}" for name, value in STAGE_A_SPOOL_ENV.items()),
         "PRISMAQUANT_DEV_MODE=1"]
     # The spec the container launches from declares the same spool, so the
     # launcher's own check (the sealed launch equals the spec) holds.
     tail = argv[argv.index("--") + 1:]
     sealed = json.loads(tail[tail.index("--spec") + 1])
-    assert {name: sealed["env"][name] for name in SPOOL_ENV} == SPOOL_ENV
+    assert {name: sealed["env"][name] for name in SPOOL_ENV} == STAGE_A_SPOOL_ENV
     assert SPOOL_MOUNT in sealed["container"]["mounts"]
+
+
+def test_stage_a_seals_the_plans_two_plane_window_not_the_spec_bound(tmp_path, campaign):
+    """PQ #1110: the chain reads its own cotangent planes back from the
+    spool, so the row seals the plan's two-plane window in place of the
+    spec's bound, in the request environment and in the launched spec alike.
+    The spec on disk is unchanged."""
+    import dispatch_joint_quanta
+    before = dispatch_joint_quanta.SPEC_PATH.read_text()
+    argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
+    assert f"PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES={SPOOL_WINDOW_BYTES}" in _envelope_envs(argv)
+    assert SPOOL_WINDOW_BYTES != int(SPOOL_ENV["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"])
+    tail = argv[argv.index("--") + 1:]
+    sealed = json.loads(tail[tail.index("--spec") + 1])
+    assert sealed["env"]["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"] == str(SPOOL_WINDOW_BYTES)
+    assert dispatch_joint_quanta.SPEC_PATH.read_text() == before
+
+
+def test_the_two_plane_window_at_the_glm_shape(tmp_path):
+    """R12's shape: 4 probes x 512 one-row entries, each 512 tokens x 4096
+    hidden x 4 mHC streams of bf16 plus the 64 KiB envelope, two planes."""
+    from dispatch_joint_quanta import stage_a_spool_window_bytes
+    model = tmp_path / "glm"
+    model.mkdir()
+    (model / "config.json").write_text(json.dumps({"text_config": {
+        "hidden_size": 4096, "hc_mult": 4, "dtype": "bfloat16"}}))
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"model": str(model), "execution": {
+        "n_probes": 4, "n_calib_samples": 512, "calib_seqlen": 512,
+        "probe_microbatch": 1, "boundary_storage": {"prefetch_batches": 64}}}))
+    window = stage_a_spool_window_bytes({"plan_path": str(plan)})
+    assert window == 2 * 4 * 512 * (512 * 4096 * 4 * 2 + 65536) == 68_987_912_192
+
+
+@pytest.mark.parametrize("defect, reason", [
+    ("no execution", "plane geometry"),
+    ("no dtype", "known dtype"),
+    ("no hidden size", "hidden size"),
+])
+def test_stage_a_refuses_a_plan_it_cannot_derive_the_window_from(
+        tmp_path, campaign, defect, reason):
+    plan_path = Path(campaign["plan_path"])
+    plan = json.loads(plan_path.read_text())
+    config_path = Path(plan["model"]) / "config.json"
+    config = json.loads(config_path.read_text())
+    if defect == "no execution":
+        plan.pop("execution")
+    elif defect == "no dtype":
+        config.pop("dtype")
+    else:
+        config.pop("hidden_size")
+    plan_path.write_text(json.dumps(plan))
+    config_path.write_text(json.dumps(config))
+    with pytest.raises(DispatchRefused, match=reason):
+        stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
 
 
 @pytest.mark.parametrize("aggregate, expected", [

@@ -82,7 +82,7 @@ def _owner(tmp_path, monkeypatch, *, n_batches=chain.GROUP_SIZE):
     owner._published = True
     backend = ControlledExport(tmp_path / "local")
     owner._local_output_spool = ProducedOutputSpool(
-        backend, capacity_deferred=CapacityDeferred, timeout_s=2)
+        backend, capacity_deferred=CapacityDeferred)
     return owner, publication, backend
 
 
@@ -127,10 +127,9 @@ def test_local_write_does_not_publish_or_advance_before_durable_ack(tmp_path, mo
     assert all(not Path(ref.path).exists() for ref in refs)
     assert group["published"] is None and progress == []
     assert len(list((tmp_path / "local").rglob("*.pt"))) == chain.GROUP_SIZE
-    with pytest.raises(TimeoutError, match="export has not landed"):
-        with owner._produced_lock.held():
-            owner._produced_publish(next(iter(owner._produced_groups)), group,
-                                    deadline=time.monotonic() + 0.05)
+    # One look, and nothing advances on it: no progress, no publication.
+    assert owner._local_output_spool.landed(batch_id) is False
+    owner._commit_local_output_progress()
     assert group["published"] is None and progress == []
     backend.acknowledge(batch_id)
     owner.settle_local_output()
@@ -179,7 +178,7 @@ def test_incomplete_group_retains_reservation_on_failure(tmp_path, monkeypatch):
 
 def test_full_spool_waits_only_until_prior_export_is_released(tmp_path):
     backend = ControlledExport(tmp_path / "local", capacity=65536)
-    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred, timeout_s=2)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
     adapter.reserve("one", 65536)
     # A real tiny writer reference is enough to exercise reservation ownership.
     ref = write_exact_activation_cache_entry(
@@ -228,7 +227,7 @@ def test_local_atomic_publication_never_overwrites_or_deletes_foreign_file(tmp_p
 
 def test_a_checkpoint_entry_declares_its_class_and_a_payload_entry_stays_unchanged(tmp_path):
     backend = ControlledExport(tmp_path / "local")
-    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred, timeout_s=2)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
     adapter.reserve("g", 1 << 20)
     references = []
     for name in ("payload-entry", "checkpoint-entry"):

@@ -33,7 +33,7 @@ import types
 
 import pytest
 
-from stage_a_spool_spec import with_spool
+from stage_a_spool_spec import stage_a_plan, with_spool
 
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):
@@ -93,7 +93,8 @@ def joint_spec(tmp_path, monkeypatch):
 
 def _joint_campaign(tmp_path: Path) -> dict:
     plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps({"output_root": str(tmp_path / "campaign-root")}))
+    plan.write_text(json.dumps(stage_a_plan(
+        tmp_path, output_root=str(tmp_path / "campaign-root"))))
     return {"plan_sha256": "1" * 64, "prepared_sha256": "2" * 64,
             "read_manifest_sha256": "4" * 64,
             "plan_path": str(plan), "prepared_path": "/fixture/prepared.json"}
@@ -228,7 +229,8 @@ def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsy
     """End to end through the dispatcher's own plan output."""
 
     plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps({"output_root": str(tmp_path / "campaign-root")}))
+    plan.write_text(json.dumps(stage_a_plan(
+        tmp_path, output_root=str(tmp_path / "campaign-root"))))
     records = tmp_path / "records"
     records.mkdir()
     record_path = _quantum_record(tmp_path)

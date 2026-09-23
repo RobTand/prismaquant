@@ -1,5 +1,45 @@
 # PrismaQuant Architecture
 
+The Stage A chain reads its own cotangent planes from the producing box's
+local spool, and its exports are write-behind (2026-09-23,
+`fix/1110-same-box-readback`, PQ #1110).
+
+- **Same-box reads.** A group the owner wrote on this box stays in its local
+  spool after PrismaBuild acknowledges the export, while a read of it can
+  follow. The reverse chain reads the plane it wrote one layer earlier from
+  that copy (`ProducedOutputSpool.local_reads`, then
+  `prefetch_exact_activation_cache_entries(local_paths=...)`), with the same
+  per-entry identity checks as a staged read: size, SHA-256, metadata, shape
+  and dtype against the entry's record. PrismaBuild staging serves only the
+  groups this box no longer holds. The publish-ahead and stage-ahead paths
+  skip a held group and count the skip (`produced_group_ahead_local_skips`).
+- **A two-plane window.** The Stage A row seals the spool bound
+  (`PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES`) as two cotangent planes derived
+  from the plan and the model config
+  (`dispatch_joint_quanta.stage_a_spool_window_bytes`): 68,987,912,192 B
+  (64.25 GiB) at R12's shape, in place of the spec's 32 GiB. At bind the
+  capture recomputes the need from the live model and refuses, before any
+  byte, a sealed bound or a spool disk with less free space
+  (`StreamedBoundaryArtifacts._require_local_window`).
+- **Write-behind.** The chain waits for an export only at its ordering
+  barriers: a checkpoint's references before its seal, the handoff record's
+  groups before the record (`write_produced_files`), progress after its
+  bytes land, and the capture's end after its outputs land
+  (`settle_local_output`). No barrier has a clock: it waits while
+  PrismaBuild reports the export live and refuses at once, naming the export
+  action and its state, when PrismaBuild reports it failed, withdrawn or done
+  without an acknowledgement. A retire of a held entry becomes a deferred
+  unlink, run once the spool releases the group, because PrismaBuild's
+  `release_group` re-checks every landed file.
+
+See "Same-box readback and write-behind export (#1110)". Gates:
+`tests/test_stage_a_same_box_readback.py`,
+`tests/test_produced_output_spool.py`,
+`tests/test_produced_output_spool_real_pb.py`,
+`tests/test_stage_a_produced_lookahead.py`,
+`tests/test_dispatch_joint_quanta.py`. No format, pipeline default or ship
+gate changes; the Stage A row's sealed spool bound changes.
+
 A staged-range reader waits on PrismaBuild's landing record, not a constant
 (2026-09-23, `fix/1107-wait-on-expected-landing`, PQ #1107, PB #989).
 
@@ -1416,6 +1456,13 @@ once per probe in `spill-p{probe}` phases, and a quantum refuses a plan sealed
 for the other replay mode; see "Stage B can replay its windows from a local
 spill". No format, default or stage changes.
 
+Re-stamped (2026-09-23, `fix/1110-same-box-readback`) for **same-box
+cotangent readback and write-behind export** (PQ #1110): the Stage A row
+seals the plan's two-plane spool window, a same-box read uses the local copy,
+and export waits happen only at ordering barriers, on evidence; see
+"Same-box readback and write-behind export (#1110)". No format, pipeline
+default, stage or ship gate changes.
+
 Re-stamped (2026-09-23, `ws-sa/stage-a-spool-1012`) for **the Stage A
 dispatch's required spool** (PQ #1012): the dispatcher's default spec
 declares the paced produced-output spool, the Stage A row refuses a spec
@@ -1701,7 +1748,9 @@ The container requires an explicitly declared writable bind preserving host
 path identity. This is per-owner bounded precommit storage, not a global host
 disk ledger; checkpoint serialization is unchanged. (The client is now
 `produced_output_spool.ProducedOutputSpool`; see the 2026-09-22 declared-output
-note at the top.) Tests distinguish adapter
+note at the top. Since PQ #1110 a same-box read uses the local copy and a
+landed group stays in the spool while a read can follow; see "Same-box
+readback and write-behind export (#1110)".) Tests distinguish adapter
 transport doubles from qualification of PB's actual exporter. Deployment is
 separate from source qualification.
 
@@ -22472,6 +22521,96 @@ spool to a box's `spool_gb` only through the host window (PB #910).
 The fixture tests check the sealed request, not PrismaBuild's exporter; the
 real-scale evidence that entries drain through the paced spool comes from
 #997's measurement runs.
+
+(Since PQ #1110 the Stage A row seals the plan's two-plane window in place of
+the spec's 32 GiB bound; see "Same-box readback and write-behind export
+(#1110)". The spec on disk is unchanged, and a quantum row still seals the
+spec's bound.)
+
+### Same-box readback and write-behind export (#1110)
+
+The reverse chain retires plane L+1 entry by entry while it writes plane L,
+and it reads each plane one layer after writing it. Before #1110 every read
+went through PrismaBuild staging, so the producing box asked PrismaBuild to
+copy its own cotangent bytes back from the pool, and every write waited for
+its export before the owner released the local copy.
+
+**The local window** (`prismaquant/produced_output_spool.py`). An
+acknowledged group stays in the spool while a read of it can follow. The
+spool releases it when:
+
+- the export is acknowledged, and every entry is retired or was written
+  with `read_back=False` (the last layer's plane, which nothing reads); or
+- the window needs room and nothing else can give it. The oldest
+  acknowledged group that is not being read and has no retired entry goes
+  first (`_make_room_locked`). Boundaries written in the forward are never
+  retired in Stage A, so this is how they leave the window.
+
+A read takes its groups under the spool lock and holds them for the read
+(`local_reads`), so eviction cannot race it. The stager's claim-ahead reserves
+with `wait=False`: it neither waits nor evicts, and a full window defers it.
+
+**The size.** `two_plane_window_bytes` prices one plane as `n_probes` x
+`n_batches` entries, each at the writer's own per-entry bound (tensor bytes
+plus the 64 KiB envelope), in groups of `prefetch_batches`; the window is two
+planes. `tools/dispatch_joint_quanta.stage_a_spool_window_bytes` derives it
+from the plan's `execution` fields and the model config's hidden size,
+`hc_mult` and dtype, and `_container_wrap` seals it into the spec the row
+launches and into its `--env`. The capture recomputes it at bind from the
+live model (`_stage_a_per_tensor_nbytes`) and refuses a sealed bound below it
+or a spool disk with less free space (`ProducedWindowRefused`).
+
+**Reads.** `StreamedBoundaryArtifacts.prefetch` splits a window's
+references into the ones this box holds and the rest. The held ones are read
+from their local paths through `prefetch_exact_activation_cache_entries`
+(`local_paths`), with the same identity checks as a staged read; only the
+rest go through publication, materialization and the strict reader. The
+local path bypasses the strict tier policy's no-pool rule because it reads
+no pool bytes.
+
+**Barriers.** A wait for an export happens only where order requires it:
+
+- `await_checkpoint_references` before a checkpoint manifest is sealed;
+- `write_produced_files` before the handoff record is written after its
+  entry groups;
+- progress, which advances only for acknowledged entries (#480);
+- `settle_local_output` at the capture's end, which drains every export,
+  releases the landed groups and runs the deferred unlinks.
+
+Each barrier waits on PrismaBuild's evidence, with no clock
+(`ProducedOutputSpool.await_group`): it waits while `poll_group` reports the
+export incomplete and live, and refuses at once with
+`ProducedExportRefused`, naming the group, the export action and the state,
+when PrismaBuild reports `export-failed-without-ack`,
+`export-withdrawn-without-ack` or `export-done-without-ack`. Every refusal is
+kept in `produced_output_report()["local_spool"]["refusals"]`. A live export
+that is slow is waited on; PrismaBuild's dead-producer recovery (PB #1001)
+owns an export whose worker dies.
+
+**Deferred unlink.** PrismaBuild's `release_group` re-checks each landed
+destination against the export's receipt, so a retired entry's canonical
+file must outlive its group's local release. `_retire` of an entry in a held
+group records it (`produced_deferred_unlinks`) and unlinks it once the spool
+no longer holds the group. A group read only on this box and never published
+releases its prewrite charge when its last entry retires (`abort_prewrite`,
+`produced_groups_prewrite_released`); one still held at exit is recorded in
+`retained_uncommitted`.
+
+**Limits.**
+
+- A barrier wait is not declared to PrismaBuild's `no_progress` rung: the
+  staged-wait declaration names movers in the consumer's residency plan, and
+  an export action is not one. A barrier that waits longer than the row's
+  grace ends as a no-progress kill.
+- PrismaBuild charges the spool to a box's `spool_gb` only with
+  `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1`, which the campaign spec does
+  not set. Until it does, the free-space refusal happens at bind, not at
+  placement.
+- The capture binds `n_batches` as the calibration row count, so a plan with
+  `probe_microbatch` above 1 seals a window larger than its planes.
+- The fixture chain (`tests/test_stage_a_same_box_readback.py`) and the real
+  PrismaBuild exporter test check behavior, not real-scale time. A
+  real-scale profile of one GLM step is owed.
 
 ### Stage A takes its head from the prepared completion (#1051)
 

@@ -78,8 +78,7 @@ def _spool_owner(tmp_path, *, backend_type=LandingExport, capacity=1 << 30,
     storage._published = True
     backend = backend_type(tmp_path / "local", capacity=capacity)
     storage._local_output_spool = ProducedOutputSpool(
-        backend, capacity_deferred=spool_tests.CapacityDeferred,
-        timeout_s=staging_timeout_s)
+        backend, capacity_deferred=spool_tests.CapacityDeferred)
     return storage, publication, q, env, pb_repo, backend
 
 
@@ -299,9 +298,10 @@ def test_a_slow_live_export_is_waited_on_without_a_clock(
         tmp_path, closing, barrier):
     """A live export that outlasts every configured budget is still waited on.
 
-    Both the spool's and the staging budget are 0.2 s; the export lands after
-    ten times that. Before #1110 the barrier raised ``TimeoutError`` at its
-    clock while PrismaBuild still had the export in hand.
+    The owner's staging budget is 0.2 s and the export lands after ten times
+    that. Before #1110 the barrier raised ``TimeoutError`` at its own clock
+    while PrismaBuild still had the export in hand; now nothing but the
+    export's state ends the wait.
     """
 
     storage, _pub, _q, _env, _pb, backend = _spool_owner(

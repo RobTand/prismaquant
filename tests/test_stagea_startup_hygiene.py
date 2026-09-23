@@ -107,7 +107,9 @@ def _spec(monkeypatch, tmp_path, env):
 @pytest.fixture
 def campaign(tmp_path):
     plan_path = tmp_path / "plan.json"
-    plan_path.write_text(json.dumps({"output_root": str(tmp_path / "campaign-root")}))
+    from stage_a_spool_spec import stage_a_plan
+    plan_path.write_text(json.dumps(stage_a_plan(
+        tmp_path, output_root=str(tmp_path / "campaign-root"))))
     return {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
             "manifest_sha256": "c" * 64, "scope": {"campaign": "fixture"},
             "read_manifest_sha256": "d" * 64, "plan_path": str(plan_path),

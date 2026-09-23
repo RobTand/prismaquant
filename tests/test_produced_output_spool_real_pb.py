@@ -1,4 +1,4 @@
-"""Real PB source-host export -> canonical descriptor -> strict staged read.
+"""Real PB source-host export, and the same-box read that needs none of it.
 
 Executed inside an admitted CPU test. The private fleet uses the actual PB
 claim/execute/finish path for both export and stage movement; no payload mover,
@@ -66,28 +66,30 @@ def test_actual_export_ack_precedes_pq_publication_progress_and_strict_read(tmp_
         return original_path_open(path, mode, *args, **kwargs)
     monkeypatch.setattr(builtins, "open", guarded_open)
     monkeypatch.setattr(Path, "open", guarded_path_open)
-    # The real fleet begins only after the no-ack assertions; PQ's read must
-    # wait for its export, then publish and wait for the separately admitted
-    # stage mover before opening any tensor.
+    # The read is on the box that wrote the group, so it takes the spool's
+    # own copy before the export has even run (PQ #1110): no publication,
+    # no mover, no canonical open. The real fleet then runs the real export,
+    # and the action's end waits for it on its own state.
+    from prismaquant.perturbed_x_cache import exact_lease_counters
+    chain._strict(monkeypatch, env, pb_repo, queue)
+    leases_before = exact_lease_counters()
+    with storage.prefetch(references) as window:
+        for index, reference in enumerate(references):
+            assert torch.equal(storage.get(window, reference),
+                               torch.arange(8, dtype=torch.float32) + index)
+    assert exact_lease_counters() == leases_before, "no staged lease was taken"
+    assert storage.telemetry["produced_local_reads"] == chain.GROUP_SIZE
+    assert storage.telemetry["read_tensor_bytes"] == sum(ref.tensor_bytes for ref in references)
+    assert group["published"] is None and group["context"] is None
+    assert progress.units == 0, "a local read is not durable progress"
     with chain._fleet(queue, tmp_path, capacity={"cpu": 4, "mem_gb": 4}) as fleet:
-        chain._strict(monkeypatch, env, pb_repo, queue)
-        with storage.prefetch(references) as window:
-            for index, reference in enumerate(references):
-                assert torch.equal(storage.get(window, reference),
-                                   torch.arange(8, dtype=torch.float32) + index)
-            resolver = group["context"][0]
-            report = resolver.report()
-            assert report["bytes_from_pool"] == 0
-            assert report["serving_tiers"] and all(
-                row["pin_id"] and row["serving_tier"] == "stage" for row in report["serving_tiers"])
-            assert storage.telemetry["read_tensor_bytes"] == sum(ref.tensor_bytes for ref in references)
         storage.settle_local_output()
         assert progress.units == chain.GROUP_SIZE
         assert not any(path.exists() for path in source_paths)
         assert all(Path(ref.path).stat().st_size == ref.file_bytes for ref in references)
     outcomes = [json.loads(line) for line in fleet.stdout.splitlines() if line.startswith("{")]
-    assert len(outcomes) >= 2 and all(row["rc"] == 0 for row in outcomes), outcomes
-    assert storage.telemetry["produced_groups_published"] == 1
-    assert storage.telemetry["produced_groups_materialized"] == 1
+    assert len(outcomes) >= 1 and all(row["rc"] == 0 for row in outcomes), outcomes
+    assert storage.telemetry["produced_groups_published"] == 0
+    assert storage.telemetry["produced_groups_materialized"] == 0
     assert storage.produced_output_report()["local_spool"]["pending_groups"] == 0
     assert not list(queue.root.rglob("*.lease.json"))
