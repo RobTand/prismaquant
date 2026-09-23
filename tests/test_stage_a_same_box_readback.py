@@ -39,6 +39,18 @@ N_BATCHES = 2 * GROUP_SIZE
 N_PROBES = 2
 #: Boundaries 0..TOP-1 are the forward's; TOP is the tail cotangent plane.
 TOP = 4
+#: The owner's durable payload maxima, priced as production prices its
+#: artifact budget (``joint_cost_stage_a`` planning allowance): every file at
+#: its tensor bound plus the 64 KiB envelope, which is also PrismaBuild's
+#: prewrite ceiling. A group read only on this box is never committed, so its
+#: prewrite stays charged at that ceiling until its last file goes (PQ #1110).
+#: The forward's boundary groups are never retired here, so they stay; the
+#: roll needs two cotangent planes at once. Without the group-final prewrite
+#: release the chain would hold every plane it wrote (TOP + 1 of them) and
+#: this refuses the first write past two.
+GROUP_CEILING_BYTES = GROUP_SIZE * ((1 << 14) + 65536)
+PAYLOAD_MAX_BYTES = GROUP_CEILING_BYTES * (
+    TOP * N_BATCHES // GROUP_SIZE + 2 * N_PROBES * N_BATCHES // GROUP_SIZE)
 
 
 class LandingExport(spool_tests.ControlledExport):
@@ -73,7 +85,7 @@ def _spool_owner(tmp_path, *, backend_type=LandingExport, capacity=1 << 30,
 
     storage, publication, q, env, pb_repo = chain._bound_owner(
         tmp_path, n_batches=N_BATCHES, window_gib=8, gib=16,
-        payload_max_bytes=1 << 22, n_probes=N_PROBES,
+        payload_max_bytes=PAYLOAD_MAX_BYTES, n_probes=N_PROBES,
         staging_timeout_s=staging_timeout_s)
     storage._published = True
     backend = backend_type(tmp_path / "local", capacity=capacity)
@@ -202,17 +214,25 @@ def test_a_chain_on_one_host_stages_none_of_its_own_cotangent_groups(
         assert storage.drain_produced_stager(60.0)
         storage.settle_local_output()
         storage.settle_produced_releases()
+        # The last plane's prewrite releases run on the stager.
+        assert storage.drain_produced_stager(60.0)
     assert counts.get("cotangent", {}) == {}, (
         "an own cotangent group read on its own box was staged through "
         "PrismaBuild", counts)
     assert storage.telemetry.get("produced_local_reads", 0) > 0
+    # Every rolled-away plane gave its prewrite back (the tail and planes
+    # TOP-1..1; plane 0 is written with no read to follow and settles).
+    assert storage.telemetry["produced_groups_prewrite_released"] >= (
+        TOP * N_PROBES * N_BATCHES // GROUP_SIZE)
 
     staged = _spool_owner(tmp_path / "staged-run")
     s_storage, s_publication, s_q, s_env, s_pb_repo, _s_backend = staged
     closing(s_storage)
-    # The path every read took before #1110: nothing is read locally.
-    monkeypatch.setattr(s_storage, "_produced_local_copy",
-                        lambda reference: None, raising=False)
+    # The path every read took before #1110: no entry is read locally, so
+    # every group a read needs is published and staged through PrismaBuild.
+    from contextlib import nullcontext
+    monkeypatch.setattr(s_storage._local_output_spool, "local_reads",
+                        lambda references: nullcontext({}))
     s_counts = _count_staging_requests(s_publication)
     with chain._fleet(s_q, tmp_path / "staged-run"):
         chain._strict(monkeypatch, s_env, s_pb_repo, s_q)
@@ -326,3 +346,8 @@ def test_a_slow_live_export_is_waited_on_without_a_clock(
         thread.join(timeout=10)
     assert landed.is_set()
     assert storage._local_output_spool.landed(batch_id)
+    # The wait is a record: which export, where, and for how long.
+    waits = [w for w in storage.produced_output_report()["local_spool"]["waits"]
+             if w["kind"] == "export" and w["batch_id"] == batch_id]
+    assert waits and waits[0]["export_key"] == backend.groups[batch_id]["export_key"]
+    assert sum(w["seconds"] for w in waits) >= 1.5, waits

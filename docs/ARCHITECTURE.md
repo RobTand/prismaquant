@@ -22583,9 +22583,13 @@ export incomplete and live, and refuses at once with
 `ProducedExportRefused`, naming the group, the export action and the state,
 when PrismaBuild reports `export-failed-without-ack`,
 `export-withdrawn-without-ack` or `export-done-without-ack`. Every refusal is
-kept in `produced_output_report()["local_spool"]["refusals"]`. A live export
-that is slow is waited on; PrismaBuild's dead-producer recovery (PB #1001)
-owns an export whose worker dies.
+kept in `produced_output_report()["local_spool"]["refusals"]`, every wait
+that waited in `["waits"]` (the export or the live exports it waited on, and
+its seconds), and every group released for room in `["evictions"]`. A claim
+ahead of the writer that the window declines is counted
+(`window_declines`, with the latest reason). A live export that is slow is
+waited on; PrismaBuild's dead-producer recovery (PB #1001) owns an export
+whose worker dies.
 
 **Deferred unlink.** PrismaBuild's `release_group` re-checks each landed
 destination against the export's receipt, so a retired entry's canonical
@@ -22596,8 +22600,31 @@ releases its prewrite charge when its last entry retires (`abort_prewrite`,
 `produced_groups_prewrite_released`); one still held at exit is recorded in
 `retained_uncommitted`.
 
+**Uncommitted groups.** PrismaBuild commits a read-back template's batch only
+as part of publishing it (`publish_prepaid_batch` → `commit_batch`, which
+transfers it to a mover); `commit_origin_batch` refuses a template that reads
+back (`template-reads-back`). A group this box reads locally is never
+published, so it is never committed: its durable charge stays its prewrite,
+priced at the ceiling (tensor bytes plus the 64 KiB envelope per entry),
+where a committed batch is priced at its actual bytes. A rolled-away
+cotangent group gives its prewrite back once its files are gone
+(`abort_prewrite`). The forward's boundary groups are never retired in Stage
+A, so their prewrites stay for the whole capture: at R13's shape about 0.4%
+over their actual bytes. The Stage A budget preflight's planning allowance
+prices every file at the same 64 KiB envelope
+(`joint_cost_stage_a.ARTIFACT_FILE_HEADER_BYTES`), so a budget at or above
+that allowance holds them. Files stay at their canonical paths either way;
+PrismaBuild does not sweep an ended owner's outstanding read-back prewrites.
+
 **Limits.**
 
+- PrismaBuild has no commit at the origin for a read-back template's batch
+  without a stage copy; see "Uncommitted groups". Each `require_prewrite`
+  reads every outstanding prewrite record of the instance under
+  `stage_ownership_lock` (`produced_output._outstanding_sums`). Before #1110
+  the set shrank as read groups were committed; now the forward's boundary
+  prewrites stay outstanding through the reverse chain, so each prewrite
+  reads them all. An index or fingerprint in PrismaBuild is the remedy.
 - A barrier wait is not declared to PrismaBuild's `no_progress` rung: the
   staged-wait declaration names movers in the consumer's residency plan, and
   an export action is not one. A barrier that waits longer than the row's

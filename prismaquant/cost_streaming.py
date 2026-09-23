@@ -3115,12 +3115,6 @@ class StreamedBoundaryArtifacts:
         spool = self._local_output_spool
         return spool is not None and spool.holds(group["batch_id"])
 
-    def _produced_local_copy(self, reference):
-        """The local file an own entry is read from on this box, or None."""
-
-        spool = self._local_output_spool
-        return None if spool is None else spool.local_path(reference)
-
     def _produced_publish_ahead(self, key, group):
         import time
         from .produced_stager import Requeue

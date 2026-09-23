@@ -468,8 +468,9 @@ def _dispatcher_argv_fixture(tmp_path, monkeypatch):
     manifest = tmp_path / "adjoint.data-manifest.json.gz"
     manifest.write_bytes(gzip.compress(json.dumps(manifest_doc).encode()))
     plan_path = tmp_path / "plan.json"
-    plan_path.write_text(json.dumps(
-        {"output_root": str(tmp_path / "campaign-root")}))
+    from stage_a_spool_spec import stage_a_plan
+    plan_path.write_text(json.dumps(stage_a_plan(
+        tmp_path, output_root=str(tmp_path / "campaign-root"))))
     campaign = {"plan_path": str(plan_path), "plan_sha256": "d" * 64,
                 "prepared_path": "prepared.json",
                 "prepared_sha256": "e" * 64,

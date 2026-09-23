@@ -1030,13 +1030,19 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     ``progress`` is the row's ``--progress-phase`` list; the same parse is
     checked against it (:func:`require_staged_wait_below_grace`).
 
-    ``spool_max_bytes`` replaces the spec's produced-spool byte bound when
-    the spec declares a spool (the Stage A row's two-plane window,
-    :func:`stage_a_spool_window_bytes`), in the one parse that is sealed.
+    ``spool_max_bytes`` replaces the spec's produced-spool byte bound (the
+    Stage A row's two-plane window, :func:`stage_a_spool_window_bytes`), in
+    the one parse that is sealed. It replaces only a well-formed bound: a
+    spec that declares a spool root with no bound, or with one that is not a
+    positive decimal byte count, is left as it is, so the row's spool check
+    (:func:`produced_spool_row_environment`) refuses it as before.
     """
     spec = json.loads(Path(spec_path).read_text())
+    declared = spec.get("env", {}).get(PRODUCED_SPOOL_MAX_ENV)
     if (spool_max_bytes is not None
-            and PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})):
+            and PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})
+            and isinstance(declared, str) and declared.isascii()
+            and declared.isdigit() and int(declared) > 0):
         spec["env"] = {**spec["env"],
                        PRODUCED_SPOOL_MAX_ENV: str(int(spool_max_bytes))}
     require_staged_wait_below_grace(spec, progress)

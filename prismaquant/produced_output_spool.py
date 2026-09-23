@@ -32,7 +32,7 @@ An acknowledged group is not released at once any more. Its local copy stays
 while the writer may still read one of its entries on this box, so the
 reverse chain reads the cotangent plane it wrote one layer earlier from here
 and never asks PrismaBuild to stage its own bytes back to itself
-(``local_path``). The copy is released when the last of three things holds:
+(``local_reads``). The copy is released when the last of three things holds:
 
 * the export is acknowledged (PB's ``release_group`` refuses before that);
 * no read of it follows here: every entry was retired (``retire_entry``),
@@ -47,8 +47,10 @@ here has a clock. A barrier (``await_group``, ``drain``) waits while
 PrismaBuild reports the export live and refuses the moment it reports it
 failed, withdrawn or done without an acknowledgement, naming the export
 action and that state; a full window waits while an export that would free
-room is live and refuses at once when none is. Every such refusal is also
-kept as a record (``report()["refusals"]``).
+room is live and refuses at once when none is. Every refusal, every wait
+that waited and every group released for room is kept as a record
+(``report()["refusals"]``, ``["waits"]``, ``["evictions"]``); a claim ahead
+of the writer that the window declines is counted, with its latest reason.
 
 Because PB's ``release_group`` re-checks every landed destination against
 the export's receipt, a retired entry's canonical file must outlive the
@@ -146,8 +148,15 @@ class ProducedOutputSpool:
         self._sequence = 0
         #: Local paths by canonical entry path, while their group holds them.
         self._local = {}
+        #: One record per refused export or unfundable window, per wait that
+        #: waited, and per group released for room. Each list grows by at
+        #: most one per group the owner writes, so it is bounded by the run.
         self.refusals = []
+        self.waits = []
+        self.evictions = []
         self.telemetry = {"export_wait_s": 0.0, "window_wait_s": 0.0,
+                          "export_waits": 0, "window_waits": 0,
+                          "window_declines": 0, "last_window_decline": None,
                           "groups_released_retired": 0,
                           "groups_released_write_only": 0,
                           "groups_released_for_room": 0,
@@ -221,12 +230,24 @@ class ProducedOutputSpool:
                             continue
                         live = self._live_exports_locked()
                         if not live or not wait:
-                            raise ProducedWindowRefused(
+                            reason = (
                                 f"local output spool cannot hold group {batch_id!r} "
                                 f"({ceiling_bytes} B): PrismaBuild deferred it "
                                 f"({deferred}); {self._window_summary_locked()}; "
                                 + ("no export is live, so nothing will free room"
                                    if not live else "the caller does not wait"))
+                            if wait:
+                                self.refusals.append({
+                                    "batch_id": str(batch_id), "export_key": None,
+                                    "state": "window-full-no-live-export",
+                                    "where": "reserve", "reason": reason,
+                                    "unix": time.time()})
+                            else:
+                                # A claim ahead of the writer: the writer's own
+                                # reservation asks again and waits.
+                                self.telemetry["window_declines"] += 1
+                                self.telemetry["last_window_decline"] = reason
+                            raise ProducedWindowRefused(reason)
                     else:
                         self._sequence += 1
                         self._groups[batch_id] = dict(
@@ -237,10 +258,17 @@ class ProducedOutputSpool:
                         return Path(directory)
                 if waited is None:
                     waited = time.monotonic()
+                    with self._lock:
+                        waiting_on = self._live_exports_locked()
                 time.sleep(POLL_S)
         finally:
             if waited is not None:
-                self.telemetry["window_wait_s"] += time.monotonic() - waited
+                seconds = time.monotonic() - waited
+                self.telemetry["window_wait_s"] += seconds
+                self.telemetry["window_waits"] += 1
+                self.waits.append({"kind": "window", "batch_id": str(batch_id),
+                                   "waiting_on": [str(b) for b in waiting_on],
+                                   "seconds": seconds, "unix": time.time()})
 
     def directory(self, batch_id):
         with self._lock:
@@ -291,6 +319,7 @@ class ProducedOutputSpool:
             if not answer.get("ok"):
                 self._refuse(batch_id, answer, where="submit")
             group["submitted"] = True
+            group["export_key"] = answer.get("export_key")
             self._pending.add(batch_id)
 
     def _poll_locked(self, batch_id, group, *, where="poll"):
@@ -305,7 +334,7 @@ class ProducedOutputSpool:
                 return False
             # Only the backend's verified durable receipt establishes this.
             group["durable"] = True
-            group["export_key"] = answer.get("export_key")
+            group["export_key"] = answer.get("export_key") or group.get("export_key")
             self._pending.discard(batch_id)
             self._durable_progress.extend(ref for _, ref, _ in group["references"])
         if not group["released"] and self._done_locked(group):
@@ -370,9 +399,12 @@ class ProducedOutputSpool:
             and not group["reading"] and not group["retired"])
         if not candidates:
             return 0
-        _sequence, batch_id = candidates[0]
-        self._release_locked(batch_id, self._groups[batch_id],
-                             "groups_released_for_room")
+        sequence, batch_id = candidates[0]
+        group = self._groups[batch_id]
+        self._release_locked(batch_id, group, "groups_released_for_room")
+        self.evictions.append({"batch_id": str(batch_id), "sequence": sequence,
+                               "ceiling_bytes": group["ceiling_bytes"],
+                               "where": str(where), "unix": time.time()})
         return 1
 
     def _window_summary_locked(self):
@@ -421,7 +453,14 @@ class ProducedOutputSpool:
                 time.sleep(POLL_S)
         finally:
             if started is not None:
-                self.telemetry["export_wait_s"] += time.monotonic() - started
+                seconds = time.monotonic() - started
+                self.telemetry["export_wait_s"] += seconds
+                self.telemetry["export_waits"] += 1
+                with self._lock:
+                    export_key = self._groups[batch_id].get("export_key")
+                self.waits.append({"kind": "export", "batch_id": str(batch_id),
+                                   "export_key": export_key, "where": str(where),
+                                   "seconds": seconds, "unix": time.time()})
 
     def holds(self, batch_id):
         """Does this spool still hold the group's local copy?"""
@@ -433,14 +472,6 @@ class ProducedOutputSpool:
         with self._lock:
             group = self._groups.get(batch_id)
             return group is not None and group["released"]
-
-    def local_path(self, canonical_reference):
-        """The local file of an entry this spool still holds, or None."""
-        with self._lock:
-            held = self._local.get(canonical_reference.path)
-            if held is None or self._groups[held[0]]["released"]:
-                return None
-            return Path(held[1].path)
 
     @contextmanager
     def local_reads(self, references):
@@ -591,4 +622,6 @@ class ProducedOutputSpool:
                         retained_ceiling_bytes=sum(g["ceiling_bytes"] for g in held),
                         window_bytes=self.max_bytes,
                         refusals=[dict(record) for record in self.refusals],
+                        waits=[dict(record) for record in self.waits],
+                        evictions=[dict(record) for record in self.evictions],
                         **{key: value for key, value in self.telemetry.items()})

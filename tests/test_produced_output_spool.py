@@ -252,3 +252,56 @@ def test_the_former_stage_a_import_names_the_same_client():
     from prismaquant import stage_a_local_spool as former
     assert former.BoundaryOutputSpool is ProducedOutputSpool
     assert former.BoundarySpoolRefused is ProducedOutputSpoolRefused
+
+
+def _landed_read_back_group(adapter, backend, batch_id, tmp_path):
+    """One acknowledged group whose entry a read on this box may follow."""
+    adapter.reserve(batch_id, 65536)
+    ref = write_exact_activation_cache_entry(
+        adapter.directory(batch_id), f"{batch_id}-entry", torch.arange(8),
+        identity={"session": "fixture"}, max_tensor_bytes=64, max_file_bytes=65536)
+    canonical = adapter.record(batch_id, ref, tmp_path / "canonical", read_back=True)
+    adapter.submit(batch_id)
+    backend.acknowledge(batch_id)
+    adapter.await_group(batch_id)
+    return canonical
+
+
+def test_a_full_window_releases_the_oldest_unread_landed_group_with_a_record(tmp_path):
+    """PQ #1110: a landed copy kept for a later read goes when the window
+    needs its room, oldest first, and the release is recorded."""
+    backend = ControlledExport(tmp_path / "local", capacity=2 * 65536)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    first = _landed_read_back_group(adapter, backend, "one", tmp_path)
+    _landed_read_back_group(adapter, backend, "two", tmp_path)
+    assert adapter.holds("one") and adapter.holds("two")
+    adapter.reserve("three", 65536)
+    assert not adapter.holds("one") and adapter.holds("two")
+    assert [(e["batch_id"], e["where"]) for e in adapter.report()["evictions"]] == [
+        ("one", "reserve three")]
+    # Its entry is read through PrismaBuild now: the spool names no copy.
+    with adapter.local_reads([first]) as local:
+        assert local == {}
+
+
+def test_a_window_nothing_can_free_refuses_at_once_with_a_record(tmp_path):
+    """Every held copy is being read and no export is live: nothing will
+    free room, so the writer's reservation refuses at once and says why; a
+    claim ahead of the writer is declined and counted, not refused."""
+    from prismaquant.produced_output_spool import ProducedWindowRefused
+    backend = ControlledExport(tmp_path / "local", capacity=65536)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    held = _landed_read_back_group(adapter, backend, "one", tmp_path)
+    with adapter.local_reads([held]) as local:
+        assert list(local) == [held]
+        with pytest.raises(ProducedWindowRefused, match="the caller does not wait|no export is live"):
+            adapter.reserve("ahead", 65536, wait=False)
+        assert adapter.report()["refusals"] == []
+        assert adapter.report()["window_declines"] == 1
+        started = time.monotonic()
+        with pytest.raises(ProducedWindowRefused, match="no export is live"):
+            adapter.reserve("two", 65536)
+        assert time.monotonic() - started < 1.0
+    (record,) = adapter.report()["refusals"]
+    assert (record["batch_id"], record["state"]) == ("two", "window-full-no-live-export")
+    assert adapter.holds("one")
