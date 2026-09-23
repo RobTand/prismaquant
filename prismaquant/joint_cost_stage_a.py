@@ -1444,6 +1444,18 @@ def run_adjoint_capture_core(
             # by the roll before it (``render_free_layer_roll``). Asking
             # here starts its movers before the first window needs them.
             storage.stage_produced_boundary_ahead(chain_top - 1)
+            # The same holds for the chain's source layers: each install
+            # refuses a layer that is neither resident nor in flight, and each
+            # roll asks only for the layer ``lookahead`` below it. The first
+            # ``lookahead`` layers are asked for here, nearest first, the
+            # reverse twin of the forward pass's opening prefetches. A seed or
+            # a resume runs no forward pass, so nothing else asks for them
+            # (RobTand/prismaquant#997). After a fresh walk the top layers are
+            # usually still resident, and ``schedule_prefetch`` returns None
+            # for a resident layer, so nothing is read twice.
+            for layer in range(chain_top - 1, max(
+                    chain_bottom, chain_top - max(1, runner.prefetch_lookahead)) - 1, -1):
+                runner.context.schedule_prefetch(layer)
         for layer in reversed(range(chain_bottom, chain_top)):
             if progress is not None:
                 progress.enter(adjoint_chain_phase_name(layer))
