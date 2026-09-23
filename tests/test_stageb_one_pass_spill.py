@@ -245,7 +245,7 @@ def campaign(tmp_path_factory):
 
 
 def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
-             resume=False, label=None):
+             resume=False, label=None, regime=None, emit_handoff=False):
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress, quantum_layer_roster,
         quantum_retained_state, resolve_quantum_windows, run_layer_quantum_core)
@@ -268,6 +268,8 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
                                 campaign.root / "shared")
     record = campaign.records[layer]
     execution = _execution(campaign.root / "exec")
+    if regime is not None:
+        execution["replay_regime"] = regime
     retained = quantum_retained_state(execution)
     roster = quantum_layer_roster(runner, campaign.formats_by_qname, layer)
     resolved = resolve_quantum_windows(
@@ -280,19 +282,31 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
                                identity_sha256=record["identity_sha256"],
                                chunks=record["chunks"], frontier=frontier)
     progress = QuantumProgress(frontier=frontier, base_units=0)
-    state = SimpleNamespace(context=context, counters=counters, resolved=resolved)
+    state = SimpleNamespace(context=context, counters=counters, resolved=resolved,
+                            handoff=None)
+    # A band-serial producer (PQ #996), built as ``main`` builds it. The
+    # keyword is passed only when asked, so a wrapper that adds its own
+    # emitter (tests/test_band_serial_spill.py) sees the call unchanged.
+    band = {}
+    if emit_handoff:
+        from prismaquant.joint_quantum_handoff import HandoffEmitter
+        band["handoff_emitter"] = HandoffEmitter(
+            record=record, adjoint_slice=campaign.slices[layer],
+            boundary_storage=execution["boundary_storage"])
     try:
         payload = run_layer_quantum_core(
             runner, cache, _calibration(), campaign.formats_by_qname,
             record=record, adjoint_slice=campaign.slices[layer], execution=execution,
             output_root=campaign.output_root, projection_backend=None, resume=resume,
-            resolved_windows=resolved, counters=counters, progress=progress)
+            resolved_windows=resolved, counters=counters, progress=progress, **band)
     except BaseException as exc:
         state.error = exc
         return None, state
     state.counters_block = counters.finish(
         units_done=len(payload["costs"]),
         units_total=sum(len(w["names"]) for w in resolved))
+    if emit_handoff:
+        state.handoff = band["handoff_emitter"].published
     return payload, state
 
 
@@ -650,6 +664,318 @@ def test_spill_ceiling_refuses_before_any_gpu_work(campaign, monkeypatch, tmp_pa
     # Refused before the chain: no layer was installed, no checkpoint read.
     assert state.context.install_calls == 0
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+
+
+def _observations(monkeypatch):
+    """Record every window lease's per-Linear (observed tokens, calls)."""
+    import prismaquant.joint_aura as joint
+
+    seen = []
+    original = joint.JointOperatorStatisticsLease.operator_diagnostics
+
+    def recording(self, *, collect_col_energy):
+        result = original(self, collect_col_energy=collect_col_energy)
+        seen.append({name: (row["observed_tokens"], row["observed_calls"])
+                     for name, row in result.items()})
+        return result
+
+    monkeypatch.setattr(joint.JointOperatorStatisticsLease, "operator_diagnostics",
+                        recording)
+    return seen
+
+
+def _token_totals(seen):
+    totals = {}
+    for window in seen:
+        for name, (tokens, _calls) in window.items():
+            totals[name] = totals.get(name, 0) + tokens
+    return totals
+
+
+def test_batched_spill_capture_is_stamped_and_reruns_bitwise(campaign, monkeypatch,
+                                                             tmp_path):
+    """capture_batch=2: two stored batches per layer pass, stamped rows.
+
+    A rerun at the same regime is bitwise (the rows and unit files hash
+    equal). Against the batch-1 spill, every dense Linear observes the same
+    tokens, and a packed projection's experts observe the same total, since
+    every token still routes to top-k experts; a route flip only moves rows
+    between experts.
+    """
+    from prismaquant.joint_replay_regime import normalize_replay_regime, replay_regime_of
+
+    regime = "capture_batch=2"
+    layer = 0
+    seen = _observations(monkeypatch)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "b1"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    single = _token_totals(seen)
+    single_evidence = _evidence(campaign, layer, payload)
+    runs = []
+    for attempt in range(2):
+        seen.clear()
+        _clear_output(campaign, layer)
+        spill_root = _spill_root(tmp_path / f"b2-{attempt}")
+        payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                                  spill_root=spill_root, ceiling=1 << 30, regime=regime)
+        assert payload is not None, _chain(state.error)
+        for rows in payload["costs"].values():
+            for row in rows.values():
+                assert replay_regime_of(row["probe_identity"]["arithmetic"]) == (
+                    normalize_replay_regime(regime))
+        replay = state.counters_block["replay"]
+        assert replay["mode"] == "one_pass_spill"
+        assert replay["layer_passes"] == N_PROBES
+        assert replay["capture_groups"] == 2
+        assert replay["regime"]["capture_batch"] == 2
+        assert replay["row_local_qdq"] == [["FP8_E4M3", WIDTH], ["FP8_E4M3", INTER]]
+        assert len(set(replay["spill"]["records_per_probe"])) == 1
+        assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+        runs.append((_evidence(campaign, layer, payload), _token_totals(seen)))
+    assert runs[0][0] == runs[1][0]
+    assert runs[0][0]["identity"] != single_evidence["identity"]
+    batched = runs[0][1]
+    assert set(batched) == set(single)
+    model, _context, runner = _runner(campaign.state, campaign.device)
+    linears = _targets(model, runner.profile)
+    packed = {}
+    for name, tokens in single.items():
+        module = linears[name]
+        if isinstance(module, spill_mod.PackedExpertProjection):
+            key = (module.module_qname, module.projection_name)
+            totals = packed.setdefault(key, [0, 0])
+            totals[0] += tokens
+            totals[1] += batched[name]
+        else:
+            assert batched[name] == tokens, name
+    assert packed and all(left == right for left, right in packed.values())
+    _report(f"batched-rerun-{campaign.device.type}", {
+        "regime": regime, "evidence": runs[0][0],
+        "route_moves": sum(abs(batched[name] - single[name]) for name in single)})
+
+
+def _operator_snapshots(monkeypatch):
+    """Record every window lease's FP32 statistics matrices, in order."""
+    import prismaquant.joint_aura as joint
+
+    seen = []
+    original = joint.JointOperatorStatisticsLease.finish_observations
+
+    def recording(self):
+        seen.append({key: value.detach().to("cpu", copy=True)
+                     for key, value in self._operators.items()})
+        return original(self)
+
+    monkeypatch.setattr(joint.JointOperatorStatisticsLease, "finish_observations",
+                        recording)
+    return seen
+
+
+def _relative_frobenius(left, right):
+    """max over (window, probe, key) of ||left - right|| / ||right||."""
+    assert len(left) == len(right)
+    worst = 0.0
+    for mine, reference in zip(left, right):
+        assert set(mine) == set(reference)
+        for key, matrix in reference.items():
+            norm = float(torch.linalg.matrix_norm(matrix.double()))
+            delta = float(torch.linalg.matrix_norm((mine[key] - matrix).double()))
+            worst = max(worst, delta / norm if norm else delta)
+    return worst
+
+
+@pytest.mark.parametrize("regime", [
+    "accumulation=operator_gemm,chunk_rows=5",
+    "accumulation=operator_gemm,chunk_rows=65536",
+    "capture_batch=2,accumulation=operator_gemm,chunk_rows=7",
+])
+def test_operator_gemm_replay_matches_the_invocation_counts_and_reruns_bitwise(
+        campaign, monkeypatch, tmp_path, regime):
+    """One GEMM per operator over a Linear's spilled rows, chunked.
+
+    At capture batch 1 it observes exactly the bitwise replay's tokens and
+    calls per Linear, and its statistics matrices differ from the bitwise
+    ones only by FP32 summation order. A rerun at the same regime is
+    bitwise. A chunk of 5 or 7 rows cuts across invocations; 65536 is one
+    GEMM per operator per window and probe.
+    """
+    from prismaquant.joint_replay_regime import normalize_replay_regime, replay_regime_of
+
+    expected = normalize_replay_regime(regime)
+    layer = 0
+    seen = _observations(monkeypatch)
+    matrices = _operator_snapshots(monkeypatch)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "bitwise"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    bitwise_seen, bitwise_matrices = list(seen), list(matrices)
+    runs = []
+    for attempt in range(2):
+        seen.clear()
+        matrices.clear()
+        _clear_output(campaign, layer)
+        spill_root = _spill_root(tmp_path / f"gemm-{attempt}")
+        payload, state = _quantum(campaign, monkeypatch, layer=layer, spill_root=spill_root,
+                                  ceiling=1 << 30, regime=regime)
+        assert payload is not None, _chain(state.error)
+        for rows in payload["costs"].values():
+            for row in rows.values():
+                arithmetic = row["probe_identity"]["arithmetic"]
+                assert replay_regime_of(arithmetic) == expected
+                assert arithmetic["operator_accumulation"] == (
+                    "fp32_gemm_over_spilled_rows_in_capture_order_by_row_chunk")
+        telemetry = state.counters_block["replay"]["spill"]
+        assert telemetry["accumulation"] == "operator_gemm"
+        assert telemetry["chunk_rows"] == expected["chunk_rows"]
+        assert telemetry["row_chunks"] > 0
+        assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+        runs.append((_evidence(campaign, layer, payload), list(seen), list(matrices)))
+    assert runs[0][0] == runs[1][0]
+    assert all(torch.equal(a[key], b[key]) for a, b in zip(runs[0][2], runs[1][2])
+               for key in b)
+    if expected["capture_batch"] == 1:
+        assert runs[0][1] == bitwise_seen
+        worst = _relative_frobenius(runs[0][2], bitwise_matrices)
+        assert worst < 1e-5, worst
+    else:
+        assert _token_totals(runs[0][1]).keys() == _token_totals(bitwise_seen).keys()
+        worst = _relative_frobenius(runs[0][2], bitwise_matrices)
+    _report(f"operator-gemm-{campaign.device.type}-{regime}", {
+        "regime": regime, "worst_relative_frobenius": worst,
+        "row_chunks": telemetry["row_chunks"]})
+
+
+def test_capture_batch_that_splits_a_read_window_refuses_before_any_gpu_work(
+        campaign, monkeypatch, tmp_path):
+    _clear_output(campaign, 0)
+    payload, state = _quantum(campaign, monkeypatch, layer=0,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                              regime="capture_batch=4")
+    assert payload is None
+    assert "does not divide the sealed read window of 2" in _chain(state.error)
+    assert state.context.install_calls == 0
+
+
+def test_batched_capture_refuses_shared_pass_state_before_the_chain(
+        campaign, monkeypatch, tmp_path):
+    monkeypatch.setattr(Lfm2MoeProfile, "isolated_layer_pass_state",
+                        lambda self, captured, layer: {"shared_kv": object()})
+    _clear_output(campaign, 0)
+    spill_root = _spill_root(tmp_path)
+    payload, state = _quantum(campaign, monkeypatch, layer=0, spill_root=spill_root,
+                              ceiling=1 << 30, regime="capture_batch=2")
+    assert payload is None
+    assert "carries shared pass state" in _chain(state.error)
+    assert state.context.install_calls == 0
+    assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+
+
+def _published_plane(handoff):
+    from test_quantum_band_serial import _handoff_plane, _state_digest, _tensor_digest
+
+    document, plane, states = _handoff_plane(handoff)
+    return (document["boundary"],
+            {key: _tensor_digest(tensor) for key, tensor in sorted(plane.items())},
+            {key: _state_digest(state) for key, state in sorted(states.items())})
+
+
+@pytest.mark.parametrize("regime", [
+    "capture_batch=2",
+    "capture_batch=2,accumulation=operator_gemm,chunk_rows=7",
+    "accumulation=operator_gemm,chunk_rows=5",
+])
+def test_a_band_serial_producer_runs_only_a_batch_one_capture(campaign, monkeypatch,
+                                                            tmp_path, regime):
+    """A band-serial producer (PQ #996) hands off the plane its capture wrote.
+
+    The handoff must equal the plane the consumer's chain rebuild ends on, a
+    batch-1 backward, so a capture batch above 1 refuses before any GPU work.
+    One GEMM per operator changes only the statistics: its producer hands off
+    the default spill's plane, sha256-equal entry by entry.
+    """
+    from prismaquant.joint_replay_regime import normalize_replay_regime
+
+    spill_root = _spill_root(tmp_path)
+    if normalize_replay_regime(regime)["capture_batch"] > 1:
+        _clear_output(campaign, 1)
+        payload, state = _quantum(campaign, monkeypatch, layer=1, spill_root=spill_root,
+                                  ceiling=1 << 30, regime=regime, emit_handoff=True)
+        assert payload is None
+        assert "band-serial handoff must equal the batch-1 plane" in _chain(state.error)
+        assert state.context.install_calls == 0
+        assert state.counters.replay["layer_passes"] == 0
+        return
+    planes = []
+    for label, run_regime in (("default", None), ("gemm", regime)):
+        _clear_output(campaign, 1)
+        payload, state = _quantum(campaign, monkeypatch, layer=1,
+                                  spill_root=_spill_root(tmp_path / label), ceiling=1 << 30,
+                                  regime=run_regime, emit_handoff=True)
+        assert payload is not None, _chain(state.error)
+        assert state.handoff is not None
+        planes.append(_published_plane(state.handoff))
+    assert planes[0][0] == 1 and planes[0][1]
+    assert planes[0] == planes[1]
+
+
+def test_row_local_qdq_admission_refuses_a_tensor_wide_scale(monkeypatch):
+    import prismaquant.format_registry as fr
+    import prismaquant.perturbed_x_cache as pxc
+
+    linear = nn.Linear(WIDTH, 3, bias=False).to(DTYPE)
+    specs = {"u": {"FP8_E4M3": fr.get_format("FP8_E4M3"),
+                   "NVFP4A16": fr.get_format("NVFP4A16")}}
+    assert spill_mod.require_row_local_activation_qdq(
+        {"u": linear}, specs, {}, device="cpu", dtype=DTYPE) == [("FP8_E4M3", WIDTH)]
+
+    def tensor_wide(x, spec, maxima, name, *args, **kwargs):
+        scale = x.float().abs().amax() / 448.0
+        return ((x.float() / scale).to(torch.float8_e4m3fn).float() * scale).to(x.dtype)
+
+    monkeypatch.setattr(pxc, "_activation_qdq", tensor_wide)
+    with pytest.raises(spill_mod.ReplayRegimeInadmissible, match="not row-local"):
+        spill_mod.require_row_local_activation_qdq(
+            {"u": linear}, specs, {}, device="cpu", dtype=DTYPE)
+
+
+@pytest.mark.parametrize("served", [False, True], ids=["dynamic-rtn", "served-static-scale"])
+def test_row_local_qdq_admission_admits_the_nvfp4_activation_paths(monkeypatch, served):
+    """W4A4 rows reach the QDQ through NVFP4's static activation contract.
+
+    By default that is the dynamic per-16-group RTN screen; with
+    ``PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES=1`` and a calibrated
+    maximum it is the contract's static-scale oracle, the same
+    ``quantize_dequantize`` a Tessera ``measured_as_served`` row calls. Both
+    are row-local on this device, so the admission passes them.
+    """
+    import prismaquant.format_registry as fr
+    import prismaquant.perturbed_x_cache as pxc
+
+    if served:
+        monkeypatch.setenv("PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES", "1")
+    else:
+        monkeypatch.delenv("PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES", raising=False)
+    assert pxc._served_nvfp4_act_qdq_enabled() is served
+    spec = fr.get_format("NVFP4")
+    assert spec.act_quant_changes_input and spec.static_activation_contract is not None
+    device = _device()
+    linear = nn.Linear(64, 3, bias=False).to(device=device, dtype=DTYPE)
+    assert spill_mod.require_row_local_activation_qdq(
+        {"u": linear}, {"u": {"NVFP4": spec}}, {"u": 4.0},
+        device=device, dtype=DTYPE) == [("NVFP4", 64)]
+
+
+def test_replay_regime_without_the_spill_refuses_before_any_gpu_work(
+        campaign, monkeypatch):
+    _clear_output(campaign, 0)
+    payload, state = _quantum(campaign, monkeypatch, layer=0, regime="capture_batch=2")
+    assert payload is None
+    assert "replays from the spill" in _chain(state.error)
+    assert state.context.install_calls == 0
+    assert state.counters.replay["layer_passes"] == 0
 
 
 @pytest.mark.parametrize("root,message", [

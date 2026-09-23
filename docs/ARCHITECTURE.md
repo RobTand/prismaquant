@@ -18,6 +18,54 @@ the plan digest and `derive_policy`. See "GLM Stage B runs from main".
 Gate: `tests/test_retained_budget_provenance_1022.py`. No format, pipeline
 default or ship gate changes.
 
+Stage B replay regimes are stamped in the statistics identity (2026-09-23,
+`ws-1a/stageb-spill-batched-994`, PQ #994). `PRISMAQUANT_STAGE_B_REPLAY_REGIME`
+names the capture batch and the statistics accumulation of a quantum that
+replays from the #994 spill, for example
+`capture_batch=4,accumulation=operator_gemm,chunk_rows=65536`
+(`joint_replay_regime`). Unset is the default: batch 1 and one FP32 GEMM per
+backward invocation, the bitwise regime. The default stamps nothing, so every
+existing quantum keeps its identity, and the default spelled out is refused.
+Any other regime changes the arithmetic, so `statistics_arithmetic_identity`
+stamps a `stage_b_replay_regime` block into the probe identity every cost row
+carries; `operator_gemm` also replaces `operator_accumulation`. The campaign
+join then refuses quanta whose regimes differ ("probe or measurement identity
+differs"), and every joint row's validation refuses a stamped default. The
+regime is a launch setting, not a plan field: the prepared completion records
+the plan's digest and certified mode refuses a mismatch, so a plan field would
+need a fresh prepare per regime. The one campaign container spec that wraps
+every quantum of a dispatch carries it instead. The dispatcher refuses a
+malformed regime and one declared without the spill. The quantum refuses a
+regime in the plan's execution block, and a non-default regime without the
+spill, before any GPU work. `capture_batch` B > 1 carries B consecutive stored
+batches through each capture pass, one forward and one backward, as the
+batched render-free chain (#997) does: no graft or harvest, the group's ids
+re-prepared so positions and masks are the group's own, and the input
+cotangent split back per stored batch. The last group is short when the batch
+count is not a multiple of B. Before the checkpoint load the quantum refuses a
+B that does not divide the sealed read window (a window's tensors are released
+when it closes) and any activation QDQ in the roster that is not row-local
+(`joint_replay_spill.require_row_local_activation_qdq` compares, bit for bit on
+the run's device, the QDQ of a block of rows with the rows' own QDQs, through
+the lease's own QDQ function). Before the chain it refuses any profile shared
+pass state or shared-state cotangent, and it checks again per group. The
+workspace reserve the capture pass charges scales with B.
+`accumulation=operator_gemm` replays each Linear's spilled rows, in capture
+order, through one FP32 GEMM per operator per `chunk_rows` rows
+(`JointOperatorStatisticsLease.observe_row_chunk`), instead of one per
+backward invocation. It shares the upcasts, QDQ and accumulation with the
+invocation path (`_observe_rows`), and it counts the same observed tokens and
+calls. The `contraction_order` field is unchanged: operators are still summed
+before each signed component is projected. A band-serial producer (#996)
+hands off the plane its capture pass wrote, which must equal the batch-1
+plane of the consumer's chain rebuild, so it refuses a capture batch above 1
+(`joint_replay_regime.handoff_regime_refusal`): the dispatcher refuses the
+producer row, and the quantum refuses before any GPU work. It admits
+`operator_gemm` at batch 1, which changes only the statistics. Gates:
+`tests/test_stageb_replay_regime.py`, `tests/test_stageb_one_pass_spill.py`,
+`tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
+changes.
+
 Stage B reads its head from a sealed per-layer slice (2026-09-23,
 `ws-tq/1010-stage-b-head-slice`, PQ #1010). Every layer quantum used to
 repeat the whole campaign's metadata intake before its first GPU allocation:
@@ -518,6 +566,14 @@ derived retained budget** (PQ #1022): the Stage B metadata producers refuse a
 plan whose retained budget is not its resource policy's, or an
 operator-declared budget the roster does not fit, before the head intake; see
 "GLM Stage B runs from main". No format, default or stage changes.
+
+Re-stamped (2026-09-23, `ws-1a/stageb-spill-batched-994`) for **Stage B
+replay regimes** (PQ #994): `PRISMAQUANT_STAGE_B_REPLAY_REGIME` names a
+capture batch and a statistics accumulation for the spill replay, and any
+non-default regime is stamped into `statistics_arithmetic_identity`, so the
+join refuses mixed regimes; see the entry of that name at the top. The
+default stamps nothing. A band-serial producer (#996, merged here) refuses a
+capture batch above 1. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-br/scratch-pairs-1019`) for **bounded local
 scratch declared to PrismaBuild** (PQ #1019): a Stage B quantum row seals
@@ -21166,7 +21222,10 @@ capture is the same `replay_backward(final=True)` pass that writes it. A
 spill producer and a windowed producer emit the same plane, and a
 band-serial consumer under either replay mode matches its chain-mode bytes
 (`tests/test_band_serial_spill.py`, on the spill suite's bf16
-packed-expert fixture).
+packed-expert fixture). A spill capture batch above 1 (#994's replay
+regimes) would change the plane, so a producer refuses one; one GEMM per
+operator at batch 1 hands off the same plane
+(`test_a_band_serial_producer_runs_only_a_batch_one_capture`).
 
 **The handoff.** `joint_quantum_handoff.HandoffEmitter` writes one
 generation under `{output_space.root}/handoff/{generation}/`: the plane as
