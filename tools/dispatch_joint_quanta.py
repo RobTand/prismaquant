@@ -908,6 +908,10 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     try:
         local_scratch_environment(spec, spec.get("env", {}))
         _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload)
+        # The bf16 reduction flag is sealed in the same spec, so it is
+        # uniform across every quantum of the dispatch (PQ #1028).
+        from prismaquant.matmul_arithmetic import bf16_reduction_from_environment
+        bf16_reduction_from_environment(spec.get("env", {}))
     except (ValueError, RuntimeError) as exc:
         raise DispatchRefused(str(exc)) from exc
     if resource_policy is not None:
