@@ -310,8 +310,10 @@ def test_a_seed_that_does_not_match_what_it_borrows_refuses(tmp_path, monkeypatc
 def test_a_seed_never_writes_under_the_source_root(tmp_path, monkeypatch):
     source = _source(tmp_path, monkeypatch)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
-    for scratch in (source.root, source.root / "scratch",
-                    adjoint_space(source.root) / "seed", tmp_path):
+    # Inside the source root first: a refusal after the core's first mkdir
+    # would still leave a directory there.
+    for scratch in (source.root / "scratch", adjoint_space(source.root) / "seed",
+                    source.root, tmp_path):
         _refused(tmp_path, source, monkeypatch, scratch, _spec(source),
                  "is the source run's root .*, inside it, or around it")
     assert not (source.root / "scratch").exists()
