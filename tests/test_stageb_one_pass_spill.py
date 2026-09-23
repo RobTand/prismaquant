@@ -941,6 +941,33 @@ def test_row_local_qdq_admission_refuses_a_tensor_wide_scale(monkeypatch):
             {"u": linear}, specs, {}, device="cpu", dtype=DTYPE)
 
 
+@pytest.mark.parametrize("served", [False, True], ids=["dynamic-rtn", "served-static-scale"])
+def test_row_local_qdq_admission_admits_the_nvfp4_activation_paths(monkeypatch, served):
+    """W4A4 rows reach the QDQ through NVFP4's static activation contract.
+
+    By default that is the dynamic per-16-group RTN screen; with
+    ``PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES=1`` and a calibrated
+    maximum it is the contract's static-scale oracle, the same
+    ``quantize_dequantize`` a Tessera ``measured_as_served`` row calls. Both
+    are row-local on this device, so the admission passes them.
+    """
+    import prismaquant.format_registry as fr
+    import prismaquant.perturbed_x_cache as pxc
+
+    if served:
+        monkeypatch.setenv("PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES", "1")
+    else:
+        monkeypatch.delenv("PRISMAQUANT_NVFP4_ACT_EMULATE_SERVED_SCALES", raising=False)
+    assert pxc._served_nvfp4_act_qdq_enabled() is served
+    spec = fr.get_format("NVFP4")
+    assert spec.act_quant_changes_input and spec.static_activation_contract is not None
+    device = _device()
+    linear = nn.Linear(64, 3, bias=False).to(device=device, dtype=DTYPE)
+    assert spill_mod.require_row_local_activation_qdq(
+        {"u": linear}, {"u": {"NVFP4": spec}}, {"u": 4.0},
+        device=device, dtype=DTYPE) == [("NVFP4", 64)]
+
+
 def test_replay_regime_without_the_spill_refuses_before_any_gpu_work(
         campaign, monkeypatch):
     _clear_output(campaign, 0)
