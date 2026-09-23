@@ -2386,7 +2386,10 @@ def run_layer_quantum(
                 progress_phase=HEAD_PHASE,
                 head_checkpoint=space / "checkpoints" / "head-walk",
                 head_resume=resume,
-                require_existing_renders=True, verify_payloads=False)
+                require_existing_renders=True, verify_payloads=False,
+                # The plan's allowance, as Stage A, the prepare and the
+                # head-slice producer pass it (PQ #1023).
+                historical_encoder_reuse=config.get("historical_encoder_reuse"))
             _same(config["model"], data.census["model"], "requested source model")
             _same(data.census["attention_implementation"], "eager",
                   "qualified source attention")

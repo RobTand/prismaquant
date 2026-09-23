@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+The no-slice Stage B head walk honours the plan's encoder reuse (2026-09-23,
+`ws-tq/1023-legacy-head-encoder-reuse`, PQ #1023). A layer quantum whose
+record binds no head slice runs the whole-journal intake itself, and that call
+omitted `historical_encoder_reuse`. Stage A, the prepare and the slice
+producer all pass the plan's allowance, so on the GLM plan (the Stage B pin's
+encoder seal is not the checkpoint's) this path alone would have refused. It
+now passes the same allowance. The path is kept rather than retired: it is the
+documented behaviour of a record produced without `--head-slices`, and a
+dispatch-time refusal by model scale would need a threshold no objective
+gives. Gate: `tests/test_legacy_head_encoder_reuse_1023.py`. No format,
+pipeline default or ship gate changes.
+
 Stage A writes each checkpoint as the chain rolls (2026-09-23,
 `ws-sa/checkpoint-overlap-1002`, PQ #1002, part of #997). The read-back
 writer read each checkpoint's plane back through the owner after the pass
@@ -583,6 +595,11 @@ into it as the pass writes it, and seals after the pass, instead of reading
 the plane back; see "Stage A checkpoints written as the chain rolls
 (#1002)". The checkpoint bytes are unchanged. No format, default, stage or
 ship gate changes. Gate: `tests/test_stage_a_checkpoint_tee.py`.
+
+Re-stamped (2026-09-23, `ws-tq/1023-legacy-head-encoder-reuse`) for **the
+no-slice head walk's encoder reuse** (PQ #1023): the quantum's whole-journal
+intake passes the plan's `historical_encoder_reuse`; see "Stage B head slice
+(#1010)". No format, default or stage changes.
 
 Re-stamped (2026-09-23, `ws-tq/1022-retained-window-admission`) for **the
 derived retained budget** (PQ #1022): the Stage B metadata producers refuse a
@@ -20895,7 +20912,8 @@ the live model, and binds every PWC render digest. The source-identity
 cache is parsed from the declared bytes and never copied or written
 (`build_streamed_model_identity(identity_cache_bytes=...)`). The head
 reports its cumulative unit count once. A record without a slice runs the
-historical intake unchanged.
+historical intake, with the plan's `historical_encoder_reuse` allowance
+(PQ #1023), as Stage A, the prepare and the slice producer do.
 
 Gate: `tests/test_stage_b_head_slice.py` (producer/consumer round trip,
 refusals, an opened-path audit of the head, the progress report, and the
