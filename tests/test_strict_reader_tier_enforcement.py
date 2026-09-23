@@ -1467,16 +1467,28 @@ def _states_equal(left, right):
     return True
 
 
-def _stage_checkpoint_entries(tmp_path, monkeypatch, record):
-    """Stage BOTH entry classes (activation + shared-state) with real PB
-    writers under one mover; returns (resolver, consumer, entry_paths)."""
+def _checkpoint_manifest_path(record):
+    """Where the writer published ``checkpoint.json``: beside ``entries/``."""
+    entries = Path(record["activation_entries"][0]["path"]).parent
+    return str(entries.parent / "checkpoint.json")
+
+
+def _stage_checkpoint_entries(tmp_path, monkeypatch, record, *,
+                              stage_manifest=True):
+    """Stage every file the loader reads -- ``checkpoint.json`` plus BOTH
+    entry classes (activation + shared-state) -- with real PB writers
+    under one mover; returns (resolver, consumer, staged_paths).
+    ``stage_manifest=False`` leaves ``checkpoint.json`` unstaged."""
     rl, pool_mod, map_mod = _pb()
     consumer = _hex64(f"consumer-{tmp_path}")
     mover = _hex64(f"mover-{tmp_path}")
     queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
     root = tmp_path / 'residency'
     entries, rows, paths = {}, {}, []
-    for entry in record["activation_entries"] + record["shared_state_entries"]:
+    manifest = ([{"path": _checkpoint_manifest_path(record)}]
+                if stage_manifest else [])
+    for entry in manifest + record["activation_entries"] \
+            + record["shared_state_entries"]:
         declared = Path(entry["path"])
         paths.append(str(declared))
         staged = stage / declared.name
@@ -1530,7 +1542,24 @@ def test_strict_checkpoint_roundtrip_pinned_never_opens_pool(tmp_path, monkeypat
     report = resolver.report()
     assert report['bytes_from_pool'] == 0
     assert any(row.get('pin_id') for row in report['serving_tiers'])
+    # checkpoint.json is a declared staged read, never a pool read.
+    manifest_path = _checkpoint_manifest_path(record)
+    assert any(row.get('path') == manifest_path and row.get('pin_id')
+               for row in report['serving_tiers']), report['serving_tiers']
     assert _pins_live(tmp_path, consumer) == []
+
+
+def test_strict_checkpoint_manifest_unstaged_refuses(tmp_path, monkeypatch):
+    """A readset that stages every entry but not ``checkpoint.json``
+    refuses before the loader reads the manifest from the pool."""
+    from prismaquant.joint_adjoint_checkpoints import (
+        adjoint_space, load_adjoint_checkpoint)
+    record, _tensor, _state = _write_checkpoint(tmp_path)
+    resolver, _consumer, _paths = _stage_checkpoint_entries(
+        tmp_path, monkeypatch, record, stage_manifest=False)
+    with pytest.raises(TierPolicyRefused):
+        load_adjoint_checkpoint(adjoint_space(tmp_path), record)
+    assert resolver.report()['bytes_from_pool'] == 0
 
 
 def test_strict_checkpoint_shared_state_altered_refuses(tmp_path, monkeypatch):

@@ -1507,8 +1507,9 @@ def _collect_quantum_bulk_entries(*, adjoint_slice: Mapping,
     Returns checkpoint entry indices, per-boundary index runs, the sealed
     prefetch window, batch windows and the flat entries list -- one index
     space both the boundary readset and the executable manifest seal
-    against. Entry order is deterministic: the checkpoint plane first,
-    then needed boundaries ascending, batches ascending. A path that
+    against. Entry order is deterministic: ``checkpoint.json`` and the
+    checkpoint plane first, then needed boundaries ascending, batches
+    ascending. A path that
     resolves twice, a boundary without entries, or uneven batch counts
     refuses; only callers decide the phase table laid over these indices.
     Reads only the quantum's stage-A slice (PQ #993).
@@ -1541,12 +1542,17 @@ def _collect_quantum_bulk_entries(*, adjoint_slice: Mapping,
         raise ValueError(
             "the stage-A slice does not carry the checkpoint boundary "
             f"{checkpoint_boundary}: refusing")
-    checkpoint_indices: list[int] = []
+    from .joint_adjoint_slices import checkpoint_manifest_entry
+    # ``load_adjoint_checkpoint`` opens checkpoint.json first; its bytes
+    # follow from the record, so the readset declares them too.
+    checkpoint_indices: list[int] = [_take(
+        checkpoint_manifest_entry(checkpoint_record),
+        where=f"checkpoint boundary {checkpoint_boundary} manifest")]
     for exact in list(checkpoint_record.get("activation_entries", [])) \
             + list(checkpoint_record.get("shared_state_entries", [])):
         checkpoint_indices.append(_take(
             exact, where=f"checkpoint boundary {checkpoint_boundary}"))
-    if not checkpoint_indices:
+    if len(checkpoint_indices) < 2:
         raise ValueError("the checkpoint plane is empty: refusing")
     batch_counts = set()
     boundary_runs: dict[int, list[int]] = {}

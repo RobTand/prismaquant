@@ -212,8 +212,14 @@ def test_declared_repeat_arithmetic(tmp_path):
               for i in p["entry_indices"] if i in runs[3])
     assert own == len(runs[3]) * len(REPLAY_WINDOWS) * N_PROBES
     first = phases["checkpoint"]
-    assert len(first) == len(set(first)) == 2 * N_BATCHES + (
+    # checkpoint.json, then the cotangent plane, then the shared states.
+    assert len(first) == len(set(first)) == 1 + 2 * N_BATCHES + (
         N_PROBES * N_BATCHES + N_BATCHES)
+    manifest_path = tmp_path / "adjoint" / "checkpoints" / "boundary-008" / "checkpoint.json"
+    payload = manifest_path.read_bytes()
+    assert manifest["entries"][first[0]] == {
+        "path": str(manifest_path), "offset": 0, "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest()}
     assert manifest["read_plan"]["read_bytes"] == sum(
         p["bytes"] for p in manifest["read_plan"]["phases"])
 

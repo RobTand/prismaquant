@@ -415,8 +415,21 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-1a/stageb-one-pass-spill-994`.
+As of: 2026-09-23 · `ws-br/band-serial-996`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-br/band-serial-996`) for **the checkpoint
+manifest as a declared read** (PQ #996). `load_adjoint_checkpoint` opens a
+checkpoint's `checkpoint.json` before any entry, and until now no readset
+declared it, so a staged quantum read it from the pool. Its bytes follow
+from the checkpoint record (`joint_adjoint_slices.checkpoint_manifest_bytes`,
+the one serialization the writer publishes), so both quantum readsets now
+declare it first in the checkpoint phase
+(`checkpoint_manifest_entry`), and the loader reads it through the staged
+path under an active tier policy and refuses unless its bytes equal the
+record's. Gates: `tests/test_quantum_executable_readset.py`,
+`tests/test_quantum_boundary_readset.py`,
+`tests/test_strict_reader_tier_enforcement.py`.
 
 Re-stamped (2026-09-23, `ws-1a/stageb-one-pass-spill-994`) for **the Stage B
 one-pass replay spill** (PQ #994): with the spill declared, a layer quantum
@@ -20653,9 +20666,10 @@ wrote its receipt.
 
 Limits: each Stage A launch binds its own boundary-session generation
 (`StreamedBoundaryArtifacts.bind`), so bands whose checkpoints two launches
-sealed carry two run headers, and every gate refuses them as mixed runs. The
-checkpoint manifest a quantum reads (`checkpoint.json`) is checked against its
-slice but is not a declared entry of its readset. The pinned Tessera reader accepts only a v1
+sealed carry two run headers, and every gate refuses them as mixed runs.
+The checkpoint manifest a quantum reads (`checkpoint.json`) is a declared
+entry of both quantum readsets, first in the checkpoint phase, with the
+bytes its slice's checkpoint record determines (PQ #996). The pinned Tessera reader accepts only a v1
 extension as rooted cached-unit authority (`tessera.cached_unit`), so a
 campaign whose extension a band created cannot export selected cached units
 until Tessera reads v2 (`tests/test_tessera_selected_cache.py` records the
