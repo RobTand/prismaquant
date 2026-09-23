@@ -198,6 +198,12 @@ def test_a_seed_under_another_implementation_continues_bitwise(
         "to_implementation_sha256": THREE, "seed_checkpoint": 4}
     assert receipt["seed"]["capsule"]["rows"] == [2, 3]
     assert receipt["run_identity"]["implementation_sha256"] == THREE
+    # The bf16 reduction flag the chain ran under, read and never set (#1038).
+    import torch
+    assert receipt["matmul_reduction"] == {
+        "allow_bf16_reduced_precision_reduction":
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction}
+    assert "matmul_reduction" not in receipt["run_identity"]
     assert seed_marker_path(space).is_file()
     assert not adjoint_receipt_path(space).exists()
     assert not chain_state_path(space).exists()
@@ -232,7 +238,13 @@ def test_the_band_tool_refuses_a_seed_space_and_a_seed_request(tmp_path, monkeyp
     source = _source(tmp_path, monkeypatch)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     scratch = tmp_path / "seed"
-    _seed(scratch, monkeypatch, _spec(source))
+    # The receipt records the flag's value, whichever it is (#1038).
+    import torch
+    monkeypatch.setattr(torch.backends.cuda.matmul,
+                        "allow_bf16_reduced_precision_reduction", False)
+    receipt = _seed(scratch, monkeypatch, _spec(source))
+    assert receipt["matmul_reduction"] == {
+        "allow_bf16_reduced_precision_reduction": False}
     with pytest.raises(BandRefused, match="marks a Stage A seed run"):
         build_band_receipt(output_root=scratch, boundary=2, stride_value=2,
                            forward_recovery=source.capsule, **DIGESTS)

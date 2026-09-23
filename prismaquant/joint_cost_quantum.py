@@ -74,6 +74,7 @@ from .joint_layer_quanta import (
     executable_own_source_phase_name,
     executable_render_phase_name,
     executable_replay_phase_name,
+    executable_spill_phase_name,
     executable_source_phase_name,
     qname_layer,
 )
@@ -1254,6 +1255,24 @@ def run_layer_quantum_core(
         raise QuantumIdentityRefused(
             f"quantum {quantum_id}: {handoff_regime_refusal(replay_regime)}")
     capture_batch = replay_regime["capture_batch"]
+    # PQ #1011: an executable read plan is sealed for one replay mode, and a
+    # launch in the other mode would stage reads this quantum never makes.
+    sealed_spill = False
+    sealed_block = record.get("executable_readset")
+    if isinstance(sealed_block, dict):
+        from .joint_layer_quanta import normalize_replay_mode
+        try:
+            sealed_mode = normalize_replay_mode(sealed_block.get("replay_mode"))
+        except ValueError as exc:
+            raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
+        launched_mode = "windowed" if stage_b_spill_config() is None else "spill"
+        if sealed_mode != launched_mode:
+            raise QuantumIdentityRefused(
+                f"quantum {quantum_id}: its read plan is sealed for the "
+                f"{sealed_mode} replay, but this launch runs the {launched_mode} "
+                "replay (PRISMAQUANT_STAGE_B_SPILL_ROOT); regenerate the "
+                f"executable readsets with --replay-mode {launched_mode}")
+        sealed_spill = sealed_mode == "spill"
 
     retained = quantum_retained_state(execution)
     operator_windows = retained.operator_windows
@@ -2023,8 +2042,11 @@ def run_layer_quantum_core(
             # is entered here and the boundary prefetch inside
             # replay_backward runs under the already-reported phase.
             if executable:
+                # A spill-sealed plan has no window replay phases: the
+                # zero-pending resume reads under the probe's spill phase.
                 progress.enter_read_phase(
-                    executable_replay_phase_name(replay_window, probe_index))
+                    executable_spill_phase_name(probe_index) if sealed_spill
+                    else executable_replay_phase_name(replay_window, probe_index))
             return replay_backward(
                 final=final, lease=lease, probe=probe_index)
 
@@ -2056,13 +2078,13 @@ def run_layer_quantum_core(
                            for name in spill_modules}
 
             def spill_capture(probe_index):
-                # The probe's one pass reads its boundaries under the first
-                # active window's replay phase, where the sealed read schedule
-                # stages them. No statistics lease exists yet, so no
-                # statistics hook fires during it.
+                # The probe's one pass reads its boundaries under its spill
+                # phase, where the spill-sealed read plan stages them (PQ
+                # #1011). No statistics lease exists yet, so no statistics
+                # hook fires during it.
                 if executable:
                     progress.enter_read_phase(
-                        executable_replay_phase_name(replay_window, probe_index))
+                        executable_spill_phase_name(probe_index))
                 with spill.capture(
                         probe_index, spill_modules, spill_specs,
                         activation_max_abs=joint_activation_maxima(production_cache),
@@ -2071,9 +2093,7 @@ def run_layer_quantum_core(
                                     observer=observer)
 
             def spill_replay(*, window_index, probe_index, lease):
-                if executable:
-                    progress.enter_read_phase(
-                        executable_replay_phase_name(replay_window, probe_index))
+                # Reads nothing: the window's render phase stays current.
                 if guard is not None:
                     check_operator_allocation(
                         guard, "before_joint_spill_window_replay", reserve_bytes=(
@@ -2287,6 +2307,10 @@ def run_layer_quantum(
     if emit_handoff and handoff_regime_refusal(replay_regime):
         raise QuantumIdentityRefused(handoff_regime_refusal(replay_regime))
     from .joint_stageb_resources import enforce_device_policy
+    # Bind the readset before the first head read, so the head slice and
+    # every declared entry after it resolve through residency (PQ #1024).
+    bind_residency_manifest(
+        data_manifest_sha256 or record["campaign"].get("read_manifest_sha256"))
     head_slice = None
     readset_block = record.get("executable_readset")
     if isinstance(readset_block, dict) and readset_block.get("head_slice") is not None:
@@ -2315,8 +2339,6 @@ def run_layer_quantum(
     layer = int(record["layer"])
     space = Path(record["output_space"]["root"])
     space.mkdir(parents=True, exist_ok=True)
-    bind_residency_manifest(
-        data_manifest_sha256 or record["campaign"].get("read_manifest_sha256"))
 
     result = {
         "schema": "prismaquant.joint_cost_quantum.execution.v1",
@@ -2409,7 +2431,10 @@ def run_layer_quantum(
                 progress_phase=HEAD_PHASE,
                 head_checkpoint=space / "checkpoints" / "head-walk",
                 head_resume=resume,
-                require_existing_renders=True, verify_payloads=False)
+                require_existing_renders=True, verify_payloads=False,
+                # The plan's allowance, as Stage A, the prepare and the
+                # head-slice producer pass it (PQ #1023).
+                historical_encoder_reuse=config.get("historical_encoder_reuse"))
             _same(config["model"], data.census["model"], "requested source model")
             _same(data.census["attention_implementation"], "eager",
                   "qualified source attention")
@@ -2638,7 +2663,9 @@ def main(argv=None) -> int:
         return EXIT_IDENTITY_REFUSED
     from .tessera_joint_aura import _load_plan
 
-    config = _load_plan(args.plan, args.plan_sha256)
+    # The readset is bound inside run_layer_quantum; until then the plan
+    # itself is the only input read (PQ #1024).
+    config = _load_plan(args.plan, args.plan_sha256, defer_pool_reads=True)
     if Path(config["output_root"]).resolve() != Path(args.output_root).resolve():
         print(f"{IDENTITY_REFUSED_MARKER}: plan output_root "
               f"{config['output_root']} is not --output-root {args.output_root}",
