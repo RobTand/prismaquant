@@ -1105,6 +1105,17 @@ class StageBSpillScratch:
     There is therefore never an orphan to sweep. The whole geometry bound is
     allocated up front with ``posix_fallocate``, so a disk too small for
     the layer refuses before any GPU work instead of partway through it.
+
+    All I/O is direct (``O_DIRECT``, PQ #1060): the device reads from and
+    writes into the caller's pinned buffers, with no page cache in between.
+    The buffered path cost a kernel copy out of CUDA-pinned memory (3.7 GB/s
+    on a GB10, a fifth of the pageable rate), a journal commit and a cache
+    flush per ``fdatasync``, and a writeback burst of a whole arena at once.
+    Direct I/O needs every file offset and length to be a multiple of
+    ``block`` and every buffer address to be aligned to it, which the
+    kernel reports per file (``statx`` ``STATX_DIOALIGN``); the caller lays
+    its buffers and the file out on that grid. Each system call carries at
+    most ``call_bytes``, which bounds the requests one call puts in flight.
     """
 
     #: Local block filesystems only. ZFS is refused as well as NFS, tmpfs
@@ -1141,24 +1152,60 @@ class StageBSpillScratch:
                 "and overlay are refused)")
         return resolved
 
-    def __init__(self, *, directory, max_bytes, nbytes):
+    def __init__(self, *, directory, max_bytes, nbytes, parts=0, part_padding=0,
+                 alignment=1):
+        """Reserve ``nbytes`` of payload plus the padding ``parts`` slots may need.
+
+        ``block`` is the grid every offset, length and buffer address must
+        sit on: the kernel's direct-I/O alignment, raised to the filesystem
+        block and to ``alignment`` (a power of two) when the caller needs a
+        coarser one. ext4 serializes a direct write whose ends are not on a
+        filesystem block: it takes the inode lock exclusively, waits for all
+        direct I/O in flight and zeroes the partial blocks. Each of at most
+        ``parts`` slots starts on a ``block`` boundary, is placed fewer than
+        ``part_padding`` bytes into it, and ends on the next boundary, so the
+        file reserves ``parts * (part_padding + block)`` bytes beyond the
+        payload. The ceiling covers the whole reservation.
+        """
         import tempfile
         self._file = None
         if type(max_bytes) is not int or max_bytes <= 0:
             raise ValueError("Stage B spill requires a positive byte ceiling")
         if type(nbytes) is not int or nbytes <= 0:
             raise ValueError("Stage B spill geometry bound must be a positive byte count")
+        if type(parts) is not int or parts < 0 or type(part_padding) is not int \
+                or part_padding < 0:
+            raise ValueError("Stage B spill slot bound must be nonnegative integers")
+        if type(alignment) is not int or alignment <= 0 or alignment & (alignment - 1):
+            raise ValueError("Stage B spill alignment must be a power of two")
         if nbytes > max_bytes:
+            # The payload alone is over: refuse before a file exists.
             raise RuntimeError(
-                f"Stage B spill needs {nbytes} bytes for this layer but its "
-                f"ceiling is {max_bytes}")
+                f"Stage B spill needs at least {nbytes} bytes for this layer but "
+                f"its ceiling is {max_bytes}")
         root = self.require_local_root(directory)
         self.root = root
-        self.capacity = nbytes
         self.allocated = 0
         self._file = tempfile.TemporaryFile(prefix='pq-stage-b-spill-', dir=root)
         try:
-            os.posix_fallocate(self._file.fileno(), 0, nbytes)
+            fd = self._file.fileno()
+            filesystem = os.fstatvfs(fd).f_bsize
+            if filesystem <= 0 or filesystem & (filesystem - 1):
+                raise RuntimeError(
+                    f"Stage B spill filesystem block {filesystem} is not a power of two")
+            self.block = max(_direct_io_block(fd), filesystem, alignment)
+            capacity = nbytes + parts * (part_padding + self.block)
+            capacity += -capacity % self.block
+            if capacity > max_bytes:
+                raise RuntimeError(
+                    f"Stage B spill needs {capacity} bytes for this layer "
+                    f"({nbytes} of payload and slot padding for {parts} parts at "
+                    f"{self.block}-byte direct-I/O alignment) but its ceiling is "
+                    f"{max_bytes}")
+            self.capacity = capacity
+            import fcntl
+            fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_DIRECT)
+            os.posix_fallocate(fd, 0, capacity)
         except BaseException:
             self.close()
             raise
@@ -1167,8 +1214,9 @@ class StageBSpillScratch:
         """Reserve the next ``nbytes`` of the file; refuse past the bound."""
         if self._file is None:
             raise RuntimeError("Stage B spill is closed")
-        if type(nbytes) is not int or nbytes < 0:
-            raise ValueError("Stage B spill allocation must be a nonnegative byte count")
+        if type(nbytes) is not int or nbytes < 0 or nbytes % self.block:
+            raise ValueError("Stage B spill allocation must be a nonnegative multiple "
+                             f"of its {self.block}-byte direct-I/O block")
         offset = self.allocated
         if offset + nbytes > self.capacity:
             raise RuntimeError(
@@ -1177,44 +1225,52 @@ class StageBSpillScratch:
         self.allocated = offset + nbytes
         return offset
 
-    def write(self, offset, views):
-        """Write ``views`` back to back at ``offset``; the pages are dropped."""
-        fd = self._file.fileno()
+    def _aligned(self, offset, views, what):
+        views = [view for view in views if len(view)]
         total = sum(len(view) for view in views)
         if offset < 0 or offset + total > self.allocated:
-            raise RuntimeError("Stage B spill write is outside its allocation")
-        for batch in _iov_batches(views):
+            raise RuntimeError(f"Stage B spill {what} is outside its allocation")
+        if offset % self.block or any(len(view) % self.block for view in views):
+            raise RuntimeError(
+                f"Stage B spill {what} is not on its {self.block}-byte direct-I/O grid")
+        return views, total
+
+    def write(self, offset, views, *, call_bytes):
+        """Write ``views`` back to back at ``offset``, ``call_bytes`` per call.
+
+        Returns the number of system calls made.
+        """
+        fd = self._file.fileno()
+        views, _total = self._aligned(offset, views, "write")
+        calls = 0
+        for batch in _direct_batches(views, call_bytes, self.block):
             done, size = 0, sum(len(view) for view in batch)
             while done < size:
-                put = os.pwritev(fd, _iov_tail(batch, done), offset + done)
-                if put <= 0:
-                    raise RuntimeError("Stage B spill short write")
+                try:
+                    put = os.pwritev(fd, _iov_tail(batch, done), offset + done)
+                except OSError as exc:
+                    raise _direct_io_error(exc, "write", self.block) from exc
+                if put <= 0 or put % self.block:
+                    # A resumed direct write would start off the grid.
+                    raise RuntimeError("Stage B spill short direct write")
                 done += put
             offset += size
-        return total
-
-    def sync_and_release(self, offset, nbytes):
-        """Make written pages clean, then drop them from the page cache."""
-        fd = self._file.fileno()
-        os.fdatasync(fd)
-        os.posix_fadvise(fd, offset, nbytes, os.POSIX_FADV_DONTNEED)
+            calls += 1
+        return calls
 
     def read_into(self, offset, views):
-        """Fill ``views`` from the file at ``offset``; the pages are dropped."""
+        """Fill ``views`` from the file at ``offset`` in one call; return the bytes."""
         fd = self._file.fileno()
-        total = sum(len(view) for view in views)
-        if offset < 0 or offset + total > self.allocated:
-            raise RuntimeError("Stage B spill read is outside its allocation")
-        start = offset
-        for batch in _iov_batches(views):
-            done, size = 0, sum(len(view) for view in batch)
-            while done < size:
-                got = os.preadv(fd, _iov_tail(batch, done), offset + done)
-                if got <= 0:
-                    raise RuntimeError("Stage B spill is truncated")
-                done += got
-            offset += size
-        os.posix_fadvise(fd, start, total, os.POSIX_FADV_DONTNEED)
+        views, total = self._aligned(offset, views, "read")
+        done = 0
+        while done < total:
+            try:
+                got = os.preadv(fd, _iov_tail(views, done), offset + done)
+            except OSError as exc:
+                raise _direct_io_error(exc, "read", self.block) from exc
+            if got <= 0 or got % self.block:
+                raise RuntimeError("Stage B spill short direct read")
+            done += got
         return total
 
     def close(self):
@@ -1223,11 +1279,67 @@ class StageBSpillScratch:
             self._file = None
 
 
-def _iov_batches(views):
+def _direct_io_block(fd):
+    """The file's direct-I/O alignment, from ``statx(STATX_DIOALIGN)``.
+
+    The larger of the offset and the memory alignment: one grid serves
+    file offsets, lengths and buffer addresses. A file that reports no
+    direct-I/O support, or a kernel without ``STATX_DIOALIGN``, is refused.
+    """
+    import ctypes
+    statx_dioalign, at_empty_path = 0x2000, 0x1000
+    libc = ctypes.CDLL(None, use_errno=True)
+    statx = getattr(libc, 'statx', None)
+    if statx is None:
+        raise RuntimeError("Stage B spill needs statx(STATX_DIOALIGN) for direct I/O")
+    statx.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_uint,
+                      ctypes.c_void_p]
+    buf = ctypes.create_string_buffer(256)
+    if statx(fd, b'', at_empty_path, statx_dioalign, buf) != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, f"statx on the Stage B spill: {os.strerror(err)}")
+    raw = buf.raw
+    mask = int.from_bytes(raw[0:4], 'little')
+    memory = int.from_bytes(raw[152:156], 'little')
+    offset = int.from_bytes(raw[156:160], 'little')
+    if not mask & statx_dioalign or not memory or not offset:
+        raise RuntimeError("Stage B spill root does not support direct I/O "
+                           "(statx reports no STATX_DIOALIGN)")
+    block = max(memory, offset)
+    if block & (block - 1):
+        raise RuntimeError(f"Stage B spill direct-I/O alignment {block} is not a power of two")
+    return block
+
+
+def _direct_io_error(exc, what, block):
+    import errno
+    if exc.errno == errno.EINVAL:
+        return RuntimeError(
+            f"Stage B spill direct-I/O {what} refused (EINVAL): a buffer address, "
+            f"offset or length is off the {block}-byte grid, or the filesystem "
+            "declined O_DIRECT")
+    return exc
+
+
+def _direct_batches(views, call_bytes, block):
+    """Group block-aligned ``views`` into calls of at most ``call_bytes``.
+
+    A view longer than a call is cut on block boundaries. A call also holds
+    at most ``IOV_MAX`` vectors.
+    """
     limit = os.sysconf('SC_IOV_MAX') if 'SC_IOV_MAX' in os.sysconf_names else 1024
-    views = [view for view in views if len(view)]
-    for start in range(0, len(views), limit):
-        yield views[start:start + limit]
+    step = max(block, call_bytes - call_bytes % block)
+    batch, size = [], 0
+    for view in views:
+        for start in range(0, len(view), step):
+            piece = view[start:start + step]
+            if batch and (size + len(piece) > step or len(batch) == limit):
+                yield batch
+                batch, size = [], 0
+            batch.append(piece)
+            size += len(piece)
+    if batch:
+        yield batch
 
 
 def _iov_tail(views, skip):
