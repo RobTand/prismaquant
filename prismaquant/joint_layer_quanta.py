@@ -1327,9 +1327,37 @@ def check_adjoint_run_header(header: Mapping, *, plan_sha256: str, prepared_sha2
     ``stride``, ``boundary_storage``). It must name this campaign's plan and
     prepared digests (or, for a catalog extension, the original capture the
     extension binds), its scope, and exactly the stride checkpoints this
-    campaign derives.
+    campaign derives. Only the producer holds that derivation
+    (``derive_stride`` over the parent's layers), so only the producer
+    calls this; consumers of a bound record call
+    :func:`check_adjoint_run_identity`.
     """
     from .joint_adjoint_slices import stage_a_run_header_sha256
+    check_adjoint_run_identity(
+        header, plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
+        scope=scope, catalog_extension=catalog_extension)
+    stride = header.get("stride")
+    marks = stride.get("boundaries") if isinstance(stride, dict) else None
+    if not isinstance(marks, list) or sorted(marks) != sorted(checkpoints):
+        raise ValueError("the stage-A run checkpoints differ from the stride "
+                         "derivation: refusing")
+    return stage_a_run_header_sha256(header)
+
+
+def check_adjoint_run_identity(header: Mapping, *, plan_sha256: str,
+                               prepared_sha256: str, scope: Mapping,
+                               catalog_extension: Mapping | None = None) -> None:
+    """Check that a stage-A run header answers for this campaign's identity.
+
+    The plan and prepared digests (or, for a catalog extension, the original
+    capture the extension binds) and the scope. A consumer of bound records
+    (the dispatcher, the quantum, the joiner) checks only this. It holds no
+    stride derivation of its own: the producer compared the header's stride
+    with its derivation when it bound each record's slice, the record's
+    slice digest covers that header, and ``verify_adjoint_slice`` checks
+    that the header's stride places each record's layer at the record's
+    checkpoint.
+    """
     if not isinstance(header, dict) or not isinstance(header.get("run_identity"), dict):
         raise ValueError("a stage-A run header must carry a run identity: refusing")
     identity = header["run_identity"]
@@ -1344,12 +1372,6 @@ def check_adjoint_run_header(header: Mapping, *, plan_sha256: str, prepared_sha2
                 raise ValueError(f"the stage-A run answers for another {field}: refusing")
     if canonical_bytes(identity.get("campaign_scope")) != canonical_bytes(scope):
         raise ValueError("the stage-A run answers for another scope: refusing")
-    stride = header.get("stride")
-    marks = stride.get("boundaries") if isinstance(stride, dict) else None
-    if not isinstance(marks, list) or sorted(marks) != sorted(checkpoints):
-        raise ValueError("the stage-A run checkpoints differ from the stride "
-                         "derivation: refusing")
-    return stage_a_run_header_sha256(header)
 
 
 def _proof_slices(proof: Mapping, layers: Sequence[int]) -> dict[int, dict]:
@@ -1507,8 +1529,9 @@ def _collect_quantum_bulk_entries(*, adjoint_slice: Mapping,
     Returns checkpoint entry indices, per-boundary index runs, the sealed
     prefetch window, batch windows and the flat entries list -- one index
     space both the boundary readset and the executable manifest seal
-    against. Entry order is deterministic: the checkpoint plane first,
-    then needed boundaries ascending, batches ascending. A path that
+    against. Entry order is deterministic: ``checkpoint.json`` and the
+    checkpoint plane first, then needed boundaries ascending, batches
+    ascending. A path that
     resolves twice, a boundary without entries, or uneven batch counts
     refuses; only callers decide the phase table laid over these indices.
     Reads only the quantum's stage-A slice (PQ #993).
@@ -1541,12 +1564,17 @@ def _collect_quantum_bulk_entries(*, adjoint_slice: Mapping,
         raise ValueError(
             "the stage-A slice does not carry the checkpoint boundary "
             f"{checkpoint_boundary}: refusing")
-    checkpoint_indices: list[int] = []
+    from .joint_adjoint_slices import checkpoint_manifest_entry
+    # ``load_adjoint_checkpoint`` opens checkpoint.json first; its bytes
+    # follow from the record, so the readset declares them too.
+    checkpoint_indices: list[int] = [_take(
+        checkpoint_manifest_entry(checkpoint_record),
+        where=f"checkpoint boundary {checkpoint_boundary} manifest")]
     for exact in list(checkpoint_record.get("activation_entries", [])) \
             + list(checkpoint_record.get("shared_state_entries", [])):
         checkpoint_indices.append(_take(
             exact, where=f"checkpoint boundary {checkpoint_boundary}"))
-    if not checkpoint_indices:
+    if len(checkpoint_indices) < 2:
         raise ValueError("the checkpoint plane is empty: refusing")
     batch_counts = set()
     boundary_runs: dict[int, list[int]] = {}
@@ -1570,24 +1598,6 @@ def _collect_quantum_bulk_entries(*, adjoint_slice: Mapping,
             "batch_total": batch_total,
             "batch_windows": (batch_total + prefetch_batches - 1)
                              // prefetch_batches}
-    """A v2 data-manifest entry for one sealed exact record.
-
-    Carries the writer's path, wire byte length and digest -- the triple a
-    staging contract admits and verifies without rehashing payloads. Any
-    malformed record is a refusal, never a skipped file.
-    """
-    if not isinstance(exact, dict):
-        raise ValueError(f"{where} is not an exact entry record: refusing")
-    path = exact.get("path")
-    digest = exact.get("sha256")
-    size = exact.get("file_bytes")
-    if type(path) is not str or not path:
-        raise ValueError(f"{where} names no entry path: refusing")
-    if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
-        raise ValueError(f"{where} carries no entry digest: refusing")
-    if type(size) is not int or isinstance(size, bool) or size <= 0:
-        raise ValueError(f"{where} carries no entry byte length: refusing")
-    return {"path": path, "offset": 0, "bytes": size, "sha256": digest}
 
 
 def _require_stage_a_input(adjoint: Mapping) -> None:

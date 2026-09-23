@@ -193,6 +193,58 @@ def checkpoint_seal_sha256(record) -> str:
         where="adjoint checkpoint")
 
 
+CHECKPOINT_MANIFEST_NAME = "checkpoint.json"
+_CHECKPOINT_MANIFEST_FIELDS = (*_CHECKPOINT_SEALED_FIELDS, "cotangent_sha256")
+
+
+def checkpoint_manifest_bytes(record) -> bytes:
+    """The exact bytes of a checkpoint's ``checkpoint.json``.
+
+    The writer publishes this serialization of the record it returns, and
+    Stage A carries that record unchanged into its receipt and bands. A
+    reader therefore knows the manifest's bytes and digest before it opens
+    the file, and a readset can declare them. A record with any other
+    field set is not a checkpoint record and refuses.
+    """
+    if not isinstance(record, dict) or set(record) != set(_CHECKPOINT_MANIFEST_FIELDS):
+        raise ValueError("not an adjoint checkpoint record: refusing")
+    return (json.dumps(record, sort_keys=True, indent=2, allow_nan=False)
+            + "\n").encode()
+
+
+def checkpoint_manifest_entry(record) -> dict:
+    """``checkpoint.json`` as an exact-entry record: name, path, digest, size.
+
+    The path is the directory that holds the record's ``entries/``, which
+    the writer creates as ``checkpoints/boundary-NNN``. Entries spread over
+    more than one directory, or a directory that does not name the
+    record's boundary, refuse.
+    """
+    payload = checkpoint_manifest_bytes(record)
+    directories = set()
+    for field in ("activation_entries", "shared_state_entries"):
+        rows = record[field]
+        if not isinstance(rows, list):
+            raise ValueError(f"adjoint checkpoint {field} is not a list: refusing")
+        for entry in rows:
+            path = entry.get("path") if isinstance(entry, dict) else None
+            if type(path) is not str or not path:
+                raise ValueError(
+                    f"adjoint checkpoint {field} entry names no path: refusing")
+            directories.add(Path(path).parent)
+    if len(directories) != 1:
+        raise ValueError("adjoint checkpoint entries do not share one directory: refusing")
+    entries_dir = directories.pop()
+    if (not entries_dir.is_absolute() or entries_dir.name != "entries"
+            or entries_dir.parent.name != f"boundary-{int(record['boundary']):03d}"):
+        raise ValueError("adjoint checkpoint entries are not under their "
+                         "boundary's checkpoint directory: refusing")
+    return {"name": CHECKPOINT_MANIFEST_NAME,
+            "path": str(entries_dir.parent / CHECKPOINT_MANIFEST_NAME),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "file_bytes": len(payload)}
+
+
 def stage_a_receipt_kind(receipt_like) -> str:
     """``"complete"`` or ``"band"``; anything else refuses.
 
