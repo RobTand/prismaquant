@@ -982,8 +982,12 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
 
     Stage A walks the source backward render-free, so chain phases carry each
     layer phase's source-extent entries only (paths under the plan's model
-    dir); the shared head prefix is tiled verbatim. Renders never enter this
-    manifest.
+    dir); the shared head prefix is tiled verbatim, less the head walk's
+    reads. Stage A takes its head from the prepared completion (PQ #1051), so
+    when the plan names its ``inputs``, every head entry the walk would read
+    (``tessera_joint_aura.head_walk_read_set``) is left out, and
+    ``annotations.head_walk_reads_dropped`` counts them. Renders never enter
+    this manifest.
 
     The phase table is the v2 ``read_plan`` in true consumption order --
     head, forward ascending, reverse descending -- with ``entry_indices``
@@ -1018,6 +1022,16 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
         raise ValueError("the parent manifest has no head phase")
     entries = parent_manifest["entries"]
     head_entries = entries[head["entry_begin"]:head["entry_end"]]
+    head_walk_dropped = None
+    if plan.get("inputs") is not None:
+        from .tessera_joint_aura import head_walk_read_set, is_head_walk_read
+        read_set = head_walk_read_set(plan["inputs"])
+        walk = [entry for entry in head_entries
+                if is_head_walk_read(entry["path"], read_set)]
+        head_entries = [entry for entry in head_entries
+                        if not is_head_walk_read(entry["path"], read_set)]
+        head_walk_dropped = {"entries": len(walk),
+                             "bytes": sum(entry["bytes"] for entry in walk)}
     layers = sorted(int(name.split("-", 1)[1]) for name in rows
                     if name.startswith("layer-"))
     manifest_entries = [
@@ -1121,6 +1135,8 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
             "parent_manifest_sha256": parent_manifest_sha256,
             "campaign_scope": scope,
             **completion_block,
+            **({} if head_walk_dropped is None
+               else {"head_walk_reads_dropped": head_walk_dropped}),
             "argv": ["python3", "-m", ADJOINT_ENTRY_POINT, "--plan", plan_path,
                      "--plan-sha256", plan_sha256, "--prepared", prepared_path,
                      "--prepared-sha256", prepared_sha256,

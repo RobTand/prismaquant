@@ -1,5 +1,22 @@
 # PrismaQuant Architecture
 
+Stage A takes its head from the prepared completion (2026-09-23,
+`ws-sa/stage-a-skip-head-1051`, PQ #1051, closes #1042, part of #997). Stage A
+walked the whole anchor catalog on every root to re-derive the roster, the
+counts and its progress base: about 78 minutes on R12. The digest-pinned
+prepared completion already holds all of them, so Stage A now reads it, for
+fresh, forward-recovery, chain-resume and seed roots alike
+(`prismaquant/stage_a_head.py`). It still refuses a completion under another
+digest or plan, a calibration other than the completion's, and a capsule
+whose campaign record changed. The receipt gains a `head` record outside the
+run identity; run identities, checkpoints and planes are unchanged. No Stage
+A data manifest declares the walk's reads any more: on R12's manifest the
+head phase falls from 10.97 GB to 2.87 GB. See "Stage A takes its head from
+the prepared completion (#1051)". Gates: `tests/test_stage_a_head_skip.py`,
+`tests/test_stage_a_seed_package.py`,
+`tests/test_forward_recovery_chain_tools.py`. No format, pipeline default or
+ship gate changes; Stage A no longer runs the head walk.
+
 Stage A checkpoints reference the chain's own cotangent entries instead of
 copying them (2026-09-23, `ws-tq/1036-referenced-checkpoints`, PQ #1036).
 A checkpoint copied its whole plane into `checkpoints/boundary-NNN/entries/`.
@@ -764,8 +781,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-br/handoff-template-id-1054`.
+As of: 2026-09-23 · `ws-sa/stage-a-skip-head-1051`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-sa/stage-a-skip-head-1051`) for **Stage A's head
+from the prepared completion** (PQ #1051, closes #1042): Stage A no longer
+walks the anchor catalog, its receipt records a `head` block, and no Stage A
+data manifest declares the walk's reads; the seed and forward-recovery
+package builders take `--plan`; see "Stage A takes its head from the prepared
+completion (#1051)". No format, pipeline default or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-br/handoff-template-id-1054`) for **a Stage B
 handoff template id derived from its body** (PQ #1054):
@@ -1863,7 +1887,10 @@ declared `head` phase before the storage watcher is wired: the head base is
 the head walk's committed total, the initial durable boundary entries count
 cumulatively under `head`, and the forward source observer owns the
 transition to `forward-000`. The generic `layer-*` phase contract for other
-callers is unchanged. Gate: `tests/test_stage_a_head_progress.py`.
+callers is unchanged. Gate: `tests/test_stage_a_head_progress.py`. (Since
+#1051, the head base is the prepared completion's unit count, committed once
+under `head`; see "Stage A takes its head from the prepared completion
+(#1051)".)
 
 Re-stamped (2026-09-20, `flash/slice-zero-head-20260920`) for
 **stageable quantum slice phases** (PQ #851). Both slice producers seal
@@ -20915,7 +20942,7 @@ the pinned commit itself — no synthetic tree needed. The re-freeze itself is s
 | D42 | **Two things the fp4 attestation still does not reach** (added 2026-09-13, RobTand/prismaquant#574). (a) **The dynamic-scale lane is unattested.** `fp8_per_token_dynamic` derives its scale from `x`, so both sides compute the same function of the same tensor and every measured fp8 cell agreed at exactly 0.0 -- evidence, not attestation. Its table is a different shape (no static `G` to publish against), so panels on that lane carry an explicit `unattested_dynamic_scale` stamp rather than a silent absence, and the exact gate still applies. (b) **Non-dyadic used scales are unreachable by a contract table.** Every probe is a value both sides represent exactly, by construction; a probe whose inputs are inexact cannot be checked without the checker owning the runtime's arithmetic, which is the thing being avoided. Also unclosed: the receipt harness applies one scalar `atol`/`rtol` pair to both gates, so the derived GEMM bound is the maximum over output elements and is loose wherever the worst row cancels. | `prismaquant/native_operator_panel.py` `require_attested_activation_oracle`, `derive_gemm_numerics`; Tessera `experiments/bench_native_operator.py` `compare_tensors` | MEDIUM | Publish a dynamic-scale table shape for fp8; move the receipt's numerical comparison to a per-element bound so the GEMM gate stops being the maximum over `j`. The non-dyadic question is D41's bulk differential probe, not a contract row. |
 | D43 | **The residency-map reader is unmeasured, and on the shard path the map's word is the only check** (added 2026-09-18, RobTand/prismaquant#707, RobTand/prismabuild#583; shard reads added 2026-09-18, RobTand/prismaquant#732). **(a) Measured at the read layer, not end to end.** The export landed and one declared 5.37 GB shard was read whole on sparky through PrismaBuild (keys `90fad9550c94` stage copy, `204afd4b69e9` and `07c87dbdabfe` reads): cold pool 251 MB/s, stage 690 MB/s, ARC-warm pool 2,110 MB/s, bytes bit-identical, `read_bytes` within 1% of `rchar` on every pass. The read layer was measured again on 2026-09-18 for PQ #746, and the rate above was a single-stream rate: with the span split on the mount's own `rsize` and `nconnect`, two 1.21 GiB tensors go from 1,575 to 3,435 MB/s median on a warm tier (key `5cf5c36b85cc`) and from 808 to 3,339 MB/s on the harness's own first touch (keys `a9d32a80fd63`, `efe4e4564a6d`). The py-spy profiles of the two arms (keys `e88182c9ad22`, `72ccfde50886`) are weak evidence on their own and say so: py-spy drops threads blocked in a syscall, which is most of what this path does, so the wall time against a fixed payload with `rchar`, `read_bytes` and the NFS mount counters beside it is the measurement and the profile is the corroboration. That is a rate comparison on one file, not a campaign delta: no joint pass has yet run with a real map, so the `residency` block has never been written by a production run, and the payoff the design names -- the second and later artifacts' prepare reading the retained overlap -- is unmeasured. dl380g10 reports to neither Netdata server reachable from here, so the server-side disk series for that window is not in evidence; the box-level view is the client's `nfs.rpc` series on sparky, which is mixed with other traffic and attributes nothing per path. **(b) Coverage.** Three read sites ask the resolver. Two are digest-fused: PWC's shard load and the wire read. Measured against the live prepare manifest (469,036 entries, 6.83 TB) that is about 61% of the prepare's declared bytes; the run's is about 84%. The third, added by #732, is the streamed source extents (`layer_streaming._source_safe_open`, ~9% of prepare and ~15% of run), which had to learn to read byte ranges before it could read anything: 34 of the live run's 55 staged shard entries are ranges, which `staged_read` refuses by contract. What still opens the pool: activation captures (`perturbed_x_cache.load_verified_activation_cache_entry`, ~30% of prepare) and the head category (<0.2%). **(b2) What the shard path admits on.** The decision this row used to hold open was taken one way, and the cost is recorded rather than hidden. A shard read takes one tensor's span out of a multi-gigabyte staged range whose only published digest covers the whole range, so `residency_shard_reader` re-hashes nothing: its fences are the entry fitting inside the declared file, the staged copy's regular-file status and exact length, and that copy's stat signature across every read. The map's word is therefore the only check, which is a weaker admission than the two digest-fused sites. Three consequences. First, under `source_authentication` (`tessera_calibration_cache._CaptureSourceSafeOpen`) the payload handed to the caller may come from the stage while the `prismaquant.selected_source_authentication.v1` receipt's SHA-256 is of the declared pool file; the receipt's structured fields stay literally true and no gate reads it, but its `authentication` prose no longer describes where the payload bytes came from, and an honest fix is an additive per-file staged-read count on that receipt, not filed here. Second, hashing each staged range once on first touch would close that gap at the price of a second full read of every staged extent before its first tensor can be served, which is a hot-path change owing a principle-15 before/after profile. Third, in *fresh* authentication mode the first payload read hashes the whole pool file anyway (`_authenticate`), so a redirect there adds a read rather than removing one; the joint run adopts `prepare/source-identity.json` (`tessera_joint_aura._prepare_source_owner`) and so runs in the adopted mode where no pool payload read is issued, but nothing in the reader knows which mode it is in. **(c) Page release.** `release_activation_cache_file_pages` advises the *declared* path with the declared stat, which is correct and a no-op for pages a staged read never faulted in; the staged copy's pages stay resident and are not counted against the qualification guard's `source_page_cache_bytes`. Since 2026-09-18 the same gap applies to shards: `_advise_consumed_safetensors_pages` advises the declared file, whose payload pages a staged read never faults in, while the staged range's pages land in page cache through `preadv` and are advised by nothing. **(c2) The shard read's own memory shape changed, unmeasured.** `safe_open` materializes a tensor from the shard's mmap; `residency_shard_reader` `preadv`s into an anonymous buffer and then copies to the device, so a staged tensor costs one extra copy and a transient anonymous allocation the size of the in-flight tensor, per reader thread (`PRISMAQUANT_LAYER_READ_THREADS`, 4 on the live run). Since PQ #746 the buffer is filled by up to `nconnect` threads at once, which changes how fast the allocation is touched but not how large it is: the buffer is still one per in-flight tensor, allocated whole before the first chunk reads. On 121 GB of unified memory beside a 13.8 GB layer that fits, but it shows up as a peak `MemAvailable` dip rather than a wall-clock change, and nothing here measures it. **(d) Two costs the accounting should be read with.** Every staged read still stats the declared file once, to bind the entry to the file it stands for, so a `bytes_from_stage` read is not a pool-free read; and the map is parsed under the resolver's lock, so a recompose of a whole-manifest map stalls every prefetch worker for one parse. Neither is measured. | `prismaquant/residency_map.py`; `production_weight_cache._read_file_tensor`; `tessera_joint_aura._read_wire_bytes`; `tests/test_prismabuild_residency_map.py` | MED | Run one joint pass under a real map and read its `residency` block against a pool-only run of the same pass, with dl380g10's disk series either side once that box reports to a reachable Netdata; then decide, with Rob, whether captures and source join the redirect and on what identity. |
 | D44 | **The ram half of the residency map is fenced but unmeasured, and two of the three read sites have not adopted the preference** (added 2026-09-18, RobTand/prismaquant#750, RobTand/prismabuild#640/#641). **(a) No consumer-side ram read has been measured.** The reader offers a ram copy only while the map's `ram_epoch` equals the epoch the pool's tier record announces, and the identity fence is the stage copy's own (regular file, exact byte count), both proven by `tests/test_prismabuild_ram_tier_residency.py`; but every rate this file carries is a stage-or-pool rate (D43). No joint pass has written a `bytes_from_ram` number, and the tmpfs is served over NFS like the stage is, so the ram tier's payoff to a consumer -- reads that skip the SSD and the ARC entirely -- is a design claim until one joint pass on the new generation reports its per-tier counters. The first `bytes_from_ram` numbers come from the executed band-serial handoff pair after PQ #1026 (12,918 bytes producer, 17,332 consumer, each equal to the bytes read): byte counts on a KB-scale qualification pair, not rates. **(b) Coverage.** Only the wire reader prefers the ram copy (`tessera_joint_aura._read_verified_wire_blob`: ram, then stage, then declared). `production_weight_cache` and `residency_shard_reader` take the resolver's answer and read `stage_path` unchanged -- correct, and still stage-served, so a map whose entries are all ram-promoted serves those two sites from the SSD. Adopting the preference at those two sites is the open half. **(c) One more stat per lookup.** While a map carries ram paths, every `staged_read`/`staged_range` additionally lstats the tier record (identity-cached, re-read on change) beside the map itself; not measured, expected to be noise against the read it guards. | `prismaquant/residency_map.py`; `tessera_joint_aura._read_verified_wire_blob`; `tests/test_prismabuild_ram_tier_residency.py`; `/mnt/shared/prismabuild-fleet/pb-queue/tiers/ram:dl380g10.json` | MED | Run one joint pass on the #640 generation with a ram-promoted window and read `ram_hits`/`bytes_from_ram`/`bytes_from_stage`/`bytes_from_pool` against the stage-only arm; then extend the preference to the PWC shard load and the streamed source extents if the numbers hold. |
-| D45 | **The resumable, parallel head walk is landed but its campaign speedup is unmeasured** (added 2026-09-19, RobTand/prismaquant#754). The mechanism is gated by `tests/test_joint_head_walk_754.py`: a resumed walk equals a fresh one, parallel equals serial, the worker pool never exceeds `os.sched_getaffinity(0)`, and unverifiable journal state is discarded fail-closed. What no test can say is what the change buys on the real campaign, because no flagship joint pass has run since: the only measured head walks are the ones that motivated the issue — `c5c88680bd86` walked 54m37s and lost it on restart, `cd2dd86bad21` re-paid it, and the #678 warm walk was 669.97 s over 36,423 units / 15.95 GB single-threaded. Three things are therefore owed as measurements on the campaign's own resubmission: (a) the parallel/serial A/B of the walk itself (`PRISMAQUANT_HEAD_WALK_WORKERS=1` against the affinity default, same reservation, head-phase wall time and `/proc/PID/io` either side — threads are the bet that the walk is I/O-latency-bound, and the unpickle half of each unit still holds the GIL, so the honest expectation is a partial not a linear speedup); (b) a restart mid-walk resumed from the journal rather than zero (`head_walk_resumed_units` in `results.json` beside the resumed wall time); (c) whether the 4-CPU reservation the withdrawn submission carried should be raised — PB's placement already prefers physical cores and demotes SMT siblings and E-cores on both boxes (`prismabuild/cpu_topology.py`: GB10 `cpu_capacity` classes X925 `5-9,15-19` / A725 `0-4,10-14`; dl380g10 `thread_siblings_list` leadership), applied with taskset before exec, so a larger reservation lands on P cores by construction and the only open question is its size. | `prismaquant/tessera_joint_aura.py` `load_measured_anchor_input`, `_drive_ordered_walk`, `_open_head_journal`; `tests/test_joint_head_walk_754.py` | MED | Run the campaign's head phase twice under the same reservation — affinity-default workers and `PRISMAQUANT_HEAD_WALK_WORKERS=1` — read the two `results.json` `head_walk_*` records and `/proc/PID/io`, restart one action mid-walk to observe the resume, and reprice the CPU reservation from the measured bottleneck. |
+| D45 | **The resumable, parallel head walk is landed but its campaign speedup is unmeasured** (added 2026-09-19, RobTand/prismaquant#754). The mechanism is gated by `tests/test_joint_head_walk_754.py`: a resumed walk equals a fresh one, parallel equals serial, the worker pool never exceeds `os.sched_getaffinity(0)`, and unverifiable journal state is discarded fail-closed. Since #1051 (2026-09-23) Stage A no longer walks the head, so this debt concerns the prepare action's walk, a Stage B quantum without a head slice, and the joint AURA run. What no test can say is what the change buys on the real campaign, because no flagship joint pass has run since: the only measured head walks are the ones that motivated the issue — `c5c88680bd86` walked 54m37s and lost it on restart, `cd2dd86bad21` re-paid it, and the #678 warm walk was 669.97 s over 36,423 units / 15.95 GB single-threaded. Three things are therefore owed as measurements on the campaign's own resubmission: (a) the parallel/serial A/B of the walk itself (`PRISMAQUANT_HEAD_WALK_WORKERS=1` against the affinity default, same reservation, head-phase wall time and `/proc/PID/io` either side — threads are the bet that the walk is I/O-latency-bound, and the unpickle half of each unit still holds the GIL, so the honest expectation is a partial not a linear speedup); (b) a restart mid-walk resumed from the journal rather than zero (`head_walk_resumed_units` in `results.json` beside the resumed wall time); (c) whether the 4-CPU reservation the withdrawn submission carried should be raised — PB's placement already prefers physical cores and demotes SMT siblings and E-cores on both boxes (`prismabuild/cpu_topology.py`: GB10 `cpu_capacity` classes X925 `5-9,15-19` / A725 `0-4,10-14`; dl380g10 `thread_siblings_list` leadership), applied with taskset before exec, so a larger reservation lands on P cores by construction and the only open question is its size. | `prismaquant/tessera_joint_aura.py` `load_measured_anchor_input`, `_drive_ordered_walk`, `_open_head_journal`; `tests/test_joint_head_walk_754.py` | MED | Run the campaign's head phase twice under the same reservation — affinity-default workers and `PRISMAQUANT_HEAD_WALK_WORKERS=1` — read the two `results.json` `head_walk_*` records and `/proc/PID/io`, restart one action mid-walk to observe the resume, and reprice the CPU reservation from the measured bottleneck. |
 
 **Open items carried from session handovers.** Of the 41 items the handover census could not
 map to a verified closure, the prior FP4-CB fast-expander/Triton item is now closed by the
@@ -21558,8 +21585,9 @@ digest and the projection backend identity.
 
 **The relaunch.** The Stage A CLI takes `--resume-chain-state-sha256` (the
 digest of `chain-state.json`), optionally `--resume-from-checkpoint b` and, in
-dev mode only, `--resume-implementation-compatibility FROM:TO`. A chain resume
-implies the head walk's `--resume`. Before anything is removed,
+dev mode only, `--resume-implementation-compatibility FROM:TO`. Stage A takes
+its head from the prepared completion (#1051), so a relaunch has no head walk
+to resume. Before anything is removed,
 `plan_chain_resume` checks, and refuses on any failure:
 
 - the run has no receipt, and its generation status is `running` (killed) or
@@ -21643,11 +21671,11 @@ campaign run.
   checkpoint at `through`.
 
 The plan is the source run's own sealed plan, so its `output_root` is the
-source run's root; `--output-root` is the scratch root. `--resume` resumes
-only the scratch root's own head walk. A seed takes no
+source run's root; `--output-root` is the scratch root. A seed takes its
+head from the prepared completion like any Stage A run (#1051). It takes no
 `--resume-chain-state-sha256` and no `--forward-recovery`.
 
-**Checks.** Before the head walk, and again in `plan_chain_seed` before
+**Checks.** Before the head is read, and again in `plan_chain_seed` before
 anything is written, the seed refuses unless:
 
 - dev mode is on and the spec has exactly the fields above;
@@ -21726,9 +21754,15 @@ request that carries `--chain-seed`. A seed's checkpoints never feed Stage B.
 must be in its action's data manifest. `tools/build_stagea_seed_package.py`
 derives that manifest from the source run's own submitted manifest (PQ
 #1043), as `build_stagea_forward_recovery_package` derives a recovery
-manifest. It keeps the source run's `head` phase and its phases
-`chain-(b-1)` down to `chain-(through)`, whose boundary rows are the capsule
-rows the seed borrows, and drops every `forward-*` phase. It adds the seed
+manifest. It keeps the source run's `head` phase, less the head walk's
+reads (#1051), and its phases `chain-(b-1)` down to `chain-(through)`, whose
+boundary rows are the capsule rows the seed borrows, and drops every
+`forward-*` phase. Its `--plan` is the plan the source manifest names, and
+the seed's Stage A `--plan` must be the same file: the prepared completion
+and the capsule's published campaign both bind the plan's digest, so a seed
+under another plan refuses. On R12 that is
+`complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.plan.json`
+(`0b2cc006…`), not its `hostcap32` variants. It adds the seed
 spec, checkpoint `b`'s `checkpoint.json` and shared states to `head`, `b`'s
 cotangent plane to `chain-(b-1)`, and the compare checkpoint's
 `checkpoint.json` and plane to `chain-(through)`, each with its exact size and
@@ -21794,6 +21828,97 @@ spool to a box's `spool_gb` only through the host window (PB #910).
 The fixture tests check the sealed request, not PrismaBuild's exporter; the
 real-scale evidence that entries drain through the paced spool comes from
 #997's measurement runs.
+
+### Stage A takes its head from the prepared completion (#1051)
+
+Stage A (`joint_cost_stage_a.run_adjoint_capture`) needs these facts from its
+head: the unit roster, whose digest names the campaign in the run identity;
+the unit and measured-cell counts its result records; and the unit count its
+PrismaBuild progress starts from. Until #1051 it re-derived them by walking
+the whole anchor catalog (`tessera_joint_aura.load_measured_anchor_input`) on
+every root. On R12 the walk held the GPU claim for about 78 minutes, judging
+by its `head-walk/` and `run/` directory timestamps. The prepare action had
+already walked the same plan-bound inputs and sealed these facts into its
+completion (`prepared.json`: `formats_by_qname`, `measured_cells`,
+`calibration_input` and `source_model_identity`), which Stage A binds by
+digest.
+
+**The head.** Stage A takes its head from the completion on every root:
+fresh, forward recovery, chain resume and seed (`prismaquant/stage_a_head.py`).
+
+- `_preflight_run_prepared` checks the completion against its pinned digest,
+  the implementation, the reader and the projection backend, as before.
+  Stage A then requires the completion's `plan_sha256` to equal the run's
+  plan, in dev mode too, where the preflight only records a plan mismatch:
+  the roster is this plan's only because the prepare ran under it.
+- `prepared_head` requires the completion's `calibration_input` to equal the
+  calibration record Stage A loads, a nonempty roster, and an integer cell
+  count.
+- The run commits the roster's unit count once, under the `head` phase, as
+  the Stage B head slice does. The capture's progress continues from it.
+- `stage_a_roster` gives the run identity its roster digest and scope: the
+  digest of the sorted unit names and the plan's scope or, with a forward
+  recovery or seed capsule, what `resolve_forward_campaign` resolves against
+  the completion's roster. That still refuses a campaign record whose bytes
+  do not match the capsule's digest.
+
+Run identities, chain states, checkpoints and planes are unchanged. The
+receipt gains `head` (`prismaquant.stage_a.head.v1`): `walked`, the prepared
+completion's path and digest, `units` and `measured_cells`. It sits outside
+the run identity.
+
+**What each walk check becomes.**
+
+| Walk check | After #1051 |
+|---|---|
+| Source model and eager attention, on the census | The prepare checked both on the same census. Stage A still compares the completion's source model identity with the model it builds, and builds it with eager attention. |
+| Calibration draw against the anchor payload's | The prepare checked it. Stage A requires the completion's calibration record to equal the one it loads. |
+| Roster and measured-cell count | Read from the completion, which its digest binds. |
+| Encoder seal and existing renders | Not checked. Stage A reads no render; Stage B checks both. |
+
+**The verification arm.** `run_adjoint_capture(head_walk=True)` walks the
+catalog as before, runs the old checks, and then requires the walk's roster
+and cell count to equal the completion's (`walked_head`). Its progress
+continues from the walk's committed count. The two arms seal the same roster
+digest and the same checkpoint bytes, and their receipts differ only in
+`head.walked` and wall clocks. The CLI does not expose the arm. The CLI still
+accepts `--resume` from sealed rows, and it does nothing.
+
+**The data manifest.** Stage A reads none of the walk's inputs, so no Stage A
+manifest declares them. `tessera_joint_aura.head_walk_read_set` names them:
+the five plan inputs the walk binds (`campaign_plan`, `census`,
+`campaign_receipts`, `merged_cost` and `merged_checkpoint`) and every file
+under the merged checkpoint's `.parts` directory. An input the plan does not
+bind names no read, so a catalog extension's plan, which binds other inputs,
+loses only the walk's inputs it does bind.
+
+- `build_adjoint_manifest` leaves them out of the head phase when the plan
+  names its `inputs`, and records `annotations.head_walk_reads_dropped`.
+- `tools/build_stagea_seed_package.py` and
+  `tools/build_stagea_forward_recovery_package.py` derive a manifest from a
+  source run's submitted one, which may predate #1051. Both leave the walk's
+  reads out (`stage_a_head.drop_source_head_walk_reads`) and take `--plan`
+  and `--plan-sha256`. Each refuses a plan whose bytes do not match its
+  digest, and a source manifest built for another plan. The recovery builder
+  also refuses a plan that the campaign fields do not bind. The seed's
+  `package.json` and the recovery package's `launch-fields.json` record the
+  entries and bytes left out.
+
+On R12's submitted manifest (`7b1c2962…`, plan `0b2cc006…`) the head phase
+falls from 36,441 entries and 10.97 GB to 13 entries and 2.87 GB. The 36,428
+entries left out, 8.10 GB, are the five plan inputs and 36,423 unit parts.
+The whole read plan falls from 1,045.15 GB to 1,037.06 GB.
+
+**Limits.**
+
+- The head phase's wall time at real scale after the change is owed by
+  #997's run (a) or R13. Before, it was about 78 minutes on R12.
+- The fixtures show that the capture opens nothing under the walk's inputs.
+  Only a real run under the strict tier policy shows that the head entries
+  left in R12's manifest cover every head read.
+- An extended plan's `candidate_overlay` reads
+  (`joint_catalog_extension.attach_candidate_overlay`) are not in the read
+  set, so its manifest still declares them. The GLM plan has no overlay.
 
 ### Band-serial Stage B quanta (#996)
 
