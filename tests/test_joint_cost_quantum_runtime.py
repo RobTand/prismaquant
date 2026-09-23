@@ -1053,6 +1053,103 @@ def test_the_core_refuses_a_live_bf16_flag_the_slice_does_not_record(
     assert not (output_root / "layer-quanta" / "layer-001" / "checkpoints").exists()
 
 
+def _skeleton_until_install(real_fixture, *, layer, skeleton_dtype=None,
+                            installed_dtype=None):
+    """``fixture`` with one layer's weight as the streaming skeleton holds it.
+
+    Until the layer installs, its ``proj.weight`` is a meta parameter in
+    ``skeleton_dtype``: GLM's skeleton is torch's default float32 against a
+    bf16 checkpoint.  Install replaces it with the checkpoint tensor, as
+    ``_fast_install`` does, cast to ``installed_dtype`` when one is given.
+    """
+
+    def build(layers):
+        model, context, runner, cache = real_fixture(layers)
+        proj = model.model.layers[layer].proj
+        real = proj.weight
+        if installed_dtype is not None:
+            real = torch.nn.Parameter(real.detach().to(installed_dtype),
+                                      requires_grad=real.requires_grad)
+        if skeleton_dtype is not None:
+            proj.weight = torch.nn.Parameter(
+                torch.empty(real.shape, dtype=skeleton_dtype, device="meta"),
+                requires_grad=real.requires_grad)
+        install = context.install
+
+        def install_checkpoint(index, **kwargs):
+            if int(index) == layer and proj.weight is not real:
+                proj.weight = real
+            return install(index, **kwargs)
+
+        context.install = install_checkpoint
+        return model, context, runner, cache
+
+    return build
+
+
+def _campaign_receipt(tmp_path, monkeypatch, output_root):
+    runner_a, _ = _stage_a(tmp_path, monkeypatch)
+    runner_a.context.settle_prefetch_layers = lambda layers: None
+    return run_adjoint_capture_core(
+        runner_a, draw(), execution=_execution(tmp_path),
+        output_root=output_root, stride=2,
+        source_model_identity=_model_identity("joint-source"),
+        unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
+        prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
+        implementation_sha256=aura._aura_source_sha256())
+
+
+def test_the_proof_reads_only_the_shape_off_a_meta_skeleton(tmp_path, monkeypatch):
+    """PQ #1102: a skeleton's dtype is torch's default, not the checkpoint's.
+
+    The layer-44 quantum refused its own prepare on the first routed expert,
+    comparing the prepared bf16 bytes with GLM's float32 meta skeleton.  Before
+    install the proof may compare only the shape; the installed tensor proves
+    the dtype and bytes, and the replay is unchanged.
+    """
+    single_root = tmp_path / "single"
+    single = _single_run(single_root, monkeypatch,
+                         checkpoint=single_root / "checkpoints")
+    output_root = tmp_path / "campaign"
+    receipt = _campaign_receipt(tmp_path, monkeypatch, output_root)
+    monkeypatch.setitem(globals(), "fixture", _skeleton_until_install(
+        fixture, layer=1, skeleton_dtype=torch.float64))
+    payload, _record, _counters = _run_quantum(
+        tmp_path, monkeypatch, single=single, layer=1, receipt=receipt,
+        output_root=output_root, plan_sha=_hex("d"), prepared_sha=_hex("e"))
+    assert payload["costs"]
+    for name, rows in payload["costs"].items():
+        for fmt, row in rows.items():
+            single_row = single[0]["costs"][name][fmt]
+            assert row["signed_components_per_probe"] == \
+                single_row["signed_components_per_probe"], (name, fmt)
+            assert row["x2_per_probe"] == single_row["x2_per_probe"]
+
+
+def test_the_installed_source_still_proves_dtype_and_bytes(tmp_path, monkeypatch):
+    """PQ #1102: the skeleton check moved, it was not dropped.
+
+    A layer that installs in a dtype the prepare never proved is refused at
+    install, before its first render is consumed, and the refusal names both
+    sides.
+    """
+    single_root = tmp_path / "single"
+    single = _single_run(single_root, monkeypatch,
+                         checkpoint=single_root / "checkpoints")
+    output_root = tmp_path / "campaign"
+    receipt = _campaign_receipt(tmp_path, monkeypatch, output_root)
+    monkeypatch.setitem(globals(), "fixture", _skeleton_until_install(
+        fixture, layer=1, installed_dtype=torch.float64))
+    with pytest.raises(RuntimeError) as refused:
+        _run_quantum(tmp_path, monkeypatch, single=single, layer=1,
+                     receipt=receipt, output_root=output_root,
+                     plan_sha=_hex("d"), prepared_sha=_hex("e"))
+    message = str(refused.value)
+    assert "differs from the installed source for model.layers.1.proj@" in message
+    assert "prepared shape [16, 16] dtype torch.float32 bytes 1024" in message
+    assert "installed shape [16, 16] dtype torch.float64 bytes 2048" in message
+
+
 def test_quantum_writes_only_inside_its_output_space(tmp_path, monkeypatch):
     single_root = tmp_path / "single"
     single = _single_run(single_root, monkeypatch,
