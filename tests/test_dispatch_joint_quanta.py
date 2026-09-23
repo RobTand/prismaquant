@@ -639,6 +639,35 @@ def test_stage_a_seals_the_paced_spool_and_the_ram_tier(tmp_path, campaign):
     assert SPOOL_MOUNT in sealed["container"]["mounts"]
 
 
+@pytest.mark.parametrize("aggregate, expected", [
+    (None, "104"),                       # a plan stating no bound: the old reservation
+    (108447924224, "101"),               # the GLM plan's bound, exactly 101 GiB
+    (101 * 1024 ** 3 + 1, "102"),        # one byte over rounds up to a whole GiB
+])
+def test_stage_a_reserves_the_plans_memory_bound(tmp_path, campaign, aggregate, expected):
+    """PQ #997: the Stage A row reserves the plan's combined physical bound
+    (``aggregate_memory_bytes``, rounded up to whole GiB), not a constant 104
+    that a GB10 offering 102 GiB live could never place."""
+    plan_path = Path(campaign["plan_path"])
+    plan = json.loads(plan_path.read_text())
+    if aggregate is not None:
+        plan["aggregate_memory_bytes"] = aggregate
+    plan_path.write_text(json.dumps(plan))
+    argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
+    envelope = argv[:argv.index("--")]
+    assert envelope[envelope.index("--demand") + 1] == f"gpu=1,mem_gb={expected}"
+
+
+@pytest.mark.parametrize("aggregate", [0, -1, 1.5, True, "108447924224"])
+def test_stage_a_refuses_a_malformed_memory_bound(tmp_path, campaign, aggregate):
+    plan_path = Path(campaign["plan_path"])
+    plan = json.loads(plan_path.read_text())
+    plan["aggregate_memory_bytes"] = aggregate
+    plan_path.write_text(json.dumps(plan))
+    with pytest.raises(DispatchRefused, match="aggregate_memory_bytes"):
+        stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
+
+
 def test_stage_a_refuses_a_spec_without_the_spool(tmp_path, campaign):
     """A spec with no spool root would let the owner write every boundary
     entry synchronously into the pool: the Stage A dispatch refuses it."""

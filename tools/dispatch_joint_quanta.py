@@ -781,6 +781,35 @@ def _row_manifest_sha256(record: dict) -> str:
     return record["read_set"]["manifest_sha256"]
 
 
+#: The Stage A row's host memory reservation when its plan states no
+#: combined bound (``aggregate_memory_bytes``): the reservation every Stage A
+#: row sealed before the plan's bound was read (PQ #997).
+STAGE_A_UNBOUNDED_MEMORY_GIB = 104
+
+
+def stage_a_memory_gib(campaign: Mapping) -> int:
+    """The Stage A row's ``mem_gb``: the plan's combined physical bound, in GiB.
+
+    ``aggregate_memory_bytes`` is the bound the plan states for the capture's
+    host side and its device envelope together
+    (``dispatch_tessera_campaign.joint_submission_memory_bound`` reads it
+    first too), rounded up to the whole GiB ``--demand`` counts in. The GLM
+    plan states 108447924224 B, so the row reserves 101 GiB. A constant 104
+    reserved 3 GiB more than the plan's own bound, and a GB10 whose live offer
+    was 102 GiB could never place the row (PQ #997, 2026-09-23). A plan that
+    states no bound keeps ``STAGE_A_UNBOUNDED_MEMORY_GIB``.
+    """
+    plan = json.loads(Path(campaign["plan_path"]).read_text())
+    bound = plan.get("aggregate_memory_bytes")
+    if bound is None:
+        return STAGE_A_UNBOUNDED_MEMORY_GIB
+    if isinstance(bound, bool) or not isinstance(bound, int) or bound <= 0:
+        raise DispatchRefused(
+            f"plan {campaign['plan_path']} states aggregate_memory_bytes "
+            f"{bound!r}, not a positive integer byte count")
+    return -(-bound // 1024 ** 3)
+
+
 def _plan_output_root(campaign: Mapping) -> Path:
     """The plan's sealed output_root: the only root the stage-A capture will
     write into (its identity guard refuses any other --output-root), and the
@@ -1289,8 +1318,8 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
             "--residency", "stage", "--residency-ram", "auto"]
     for phase, grace in progress:
         argv += ["--progress-phase", f"{phase}={grace}"]
-    argv += ["--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
-             "--cpus", "10"]
+    argv += ["--demand", f"gpu=1,mem_gb={stage_a_memory_gib(campaign)}",
+             "--gpu-memory-gb", "80", "--cpus", "10"]
     if produced_output_template is not None:
         # An ENVELOPE option, before the payload separator, like every
         # other pbrun flag. Not a payload flag: the seal has to happen on

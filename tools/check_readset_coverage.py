@@ -21,8 +21,9 @@ covered and 3 when it is not.
     ``--phase-format`` names (``chain-{layer:03d}`` by default). The prefetch
     lookahead is the plan's, or ``--prefetch-override``'s. ``--schedule``
     picks the prefetch schedule: ``stage-a`` is the one ``joint_cost_stage_a``
-    runs today (``readset_coverage.stage_a_prefetch_targets``); ``walk`` stops
-    at the walk's last layer (``source_read_plan.chain_prefetch_window``).
+    runs (``readset_coverage.stage_a_prefetch_targets``); ``walk`` is a Stage
+    B quantum's (``source_read_plan.chain_prefetch_window``). Both stop at the
+    walk's last layer since PQ #1100.
 """
 from __future__ import annotations
 

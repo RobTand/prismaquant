@@ -161,9 +161,10 @@ def test_a_quantum_asks_for_its_first_layer_and_reads_nothing_past_its_walk():
     assert jl.quantum_source_layer_order([46, 45], 44) == (46, 45, 44)
 
 
-def test_the_stage_a_schedule_reads_below_its_walk():
+def test_the_stage_a_schedule_stops_at_its_walk():
+    """PQ #1100: the Stage A chain reads nothing below its last layer."""
     order = list(range(44, 39, -1))
-    assert rc.stage_a_prefetch_targets(order, 2) - set(order) == {38, 39}
+    assert rc.stage_a_prefetch_targets(order, 2) == set(order)
     assert rc.quantum_prefetch_targets(order, 2) == set(order)
     assert srp.chain_opening_window(order, 2) == (44, 43)
 

@@ -20,9 +20,10 @@ loader's own enumeration:
 
 The install order and the prefetch schedule are the runtime's own:
 ``joint_layer_quanta.quantum_source_layer_order`` and
-``source_read_plan.chain_prefetch_window`` for a Stage B quantum. Stage A
-still schedules its prefetch in ``joint_cost_stage_a``;
-:func:`stage_a_prefetch_targets` states that schedule for its check.
+``source_read_plan.chain_prefetch_window`` for a Stage B quantum. The
+Stage A chain in ``joint_cost_stage_a`` schedules with the same two
+windows (PQ #1100); :func:`stage_a_prefetch_targets` states that schedule
+for its check.
 
 A gap is a dict with ``kind``, ``phase``, ``layer`` and, for a span,
 ``path``, ``start``, ``end``, ``bytes`` and ``tensor``. Kinds:
@@ -60,6 +61,7 @@ from .joint_layer_quanta import (
     quantum_source_layer_order,
 )
 from .source_read_plan import (
+    chain_opening_window,
     chain_prefetch_window,
     roster_layers_prefix,
     uncovered_spans,
@@ -142,17 +144,18 @@ def quantum_prefetch_targets(order: Sequence[int], lookahead: int) -> set[int]:
 
 
 def stage_a_prefetch_targets(order: Sequence[int], lookahead: int) -> set[int]:
-    """Every layer the Stage A chain walk prefetches, as scheduled today.
+    """Every layer the Stage A chain walk prefetches.
 
-    ``joint_cost_stage_a`` prefetches the walk's first ``lookahead`` layers
-    before it starts, then, after installing layer ``L``, the ``lookahead``
-    layers below it, ``range(max(0, L - lookahead), L)``, without stopping at
-    the walk's last layer. A walk that ends at layer 40 with lookahead 2 also
-    reads layers 38 and 39.
+    ``joint_cost_stage_a`` prefetches ``chain_opening_window`` before its
+    first install, then ``chain_prefetch_window`` after each install: the
+    next ``lookahead`` layers of its own order, never one past its last layer
+    (PQ #1100). Until then it read ``range(max(0, L - lookahead), L)``, so a
+    walk that ended at layer 40 with lookahead 2 also read layers 38 and 39,
+    which its manifest does not declare.
     """
-    targets = set(order[:max(1, int(lookahead))])
-    for layer in order:
-        targets.update(range(max(0, layer - int(lookahead)), layer))
+    targets = set(chain_opening_window(order, lookahead))
+    for position in range(len(order)):
+        targets.update(chain_prefetch_window(order, position, lookahead))
     return targets
 
 
