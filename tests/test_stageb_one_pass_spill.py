@@ -581,11 +581,14 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     """Spill mode on a bound executable readset: phases, reads and records.
 
     The executable-readset acceptance harness drives the real quantum with
-    its reporter and read seams instrumented. In spill mode every target
-    boundary read still happens under an already-reported replay phase with
-    a retained window open, every window still reports its replay phases,
+    its reporter and read seams instrumented. In spill mode the plan is
+    sealed for the spill (PQ #1011): the phases reported equal the sealed
+    plan in order, every target boundary read happens under an
+    already-reported ``spill-p{probe}`` phase with a retained window open,
     the target layer's boundaries are read once per probe instead of once
-    per (window, probe), and the cost rows equal the windowed run's.
+    per (window, probe), the read plan counts them once per probe, and the
+    cost rows equal the windowed run's. A plan sealed for one mode refuses
+    a launch in the other before any GPU work.
     """
     import test_quantum_executable_readset as phases
 
@@ -618,14 +621,43 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     assert not constructed
     shutil.rmtree(record0["output_space"]["root"])
 
+    from prismaquant.joint_cost_quantum import QuantumIdentityRefused
+
+    # A windowed launch of a spill-sealed plan refuses before any read.
+    with pytest.raises(QuantumIdentityRefused, match="sealed for the spill"):
+        phases._drive_quantum(tmp_path, monkeypatch, setup, layer=0,
+                              resume=False, replay_mode="spill")
+    assert not constructed
+    shutil.rmtree(record0["output_space"]["root"], ignore_errors=True)
+
     spill_root = _spill_root(tmp_path)
     monkeypatch.setenv(spill_mod.SPILL_ENV[0], str(spill_root))
     monkeypatch.setenv(spill_mod.SPILL_ENV[1], str(1 << 30))
+    # ... and a spill launch of a windowed plan.
+    with pytest.raises(QuantumIdentityRefused, match="sealed for the windowed"):
+        phases._drive_quantum(tmp_path, monkeypatch, setup, layer=0,
+                              resume=False)
+    assert not constructed
+    shutil.rmtree(record0["output_space"]["root"], ignore_errors=True)
     events_s, manifest_s, payload_s, _ = phases._drive_quantum(
-        tmp_path, monkeypatch, setup, layer=0, resume=False)
+        tmp_path, monkeypatch, setup, layer=0, resume=False,
+        replay_mode="spill")
     assert len(constructed) == 1
     phases._assert_acceptance_run(events_s, manifest_s, record0, tmp_path,
-                                  expect_replay_windows="all")
+                                  expect_replay_windows=set())
+    sealed = [phase["name"] for phase in manifest_s["read_plan"]["phases"]]
+    reported = phases._reported(events_s)
+    assert [name for i, name in enumerate(reported)
+            if i == 0 or name != reported[i - 1]] == sealed
+    assert sealed[-4:] == [f"spill-p{probe}" for probe in range(4)]
+    assert manifest_s["annotations"]["replay_mode"] == "spill"
+    by_phase = {phase["name"]: phase for phase in manifest_s["read_plan"]["phases"]}
+    windowed_manifest = _manifest_w
+    own_run = sum(phase["bytes"] for phase in windowed_manifest["read_plan"]["phases"]
+                  if phase["name"].startswith("replay-00-"))
+    assert sum(by_phase[f"spill-p{probe}"]["bytes"] for probe in range(4)) == own_run
+    assert (windowed_manifest["read_plan"]["read_bytes"]
+            - manifest_s["read_plan"]["read_bytes"]) == (n_windows - 1) * own_run
     assert target_reads(events_w) == n_windows * target_reads(events_s) > 0
     assert rows(payload_s) == rows(payload_w)
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
@@ -636,11 +668,12 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     for name in (n for window in resolved[1:] for n in window["names"]):
         _aura_unit_checkpoint_path(checkpoint_dir, name).unlink()
     events_p, manifest_p, payload_p, _ = phases._drive_quantum(
-        tmp_path, monkeypatch, setup, layer=0, resume=True)
+        tmp_path, monkeypatch, setup, layer=0, resume=True,
+        replay_mode="spill")
     assert len(constructed) == 2
     assert constructed[1]["x_bytes"] < constructed[0]["x_bytes"]
     phases._assert_acceptance_run(events_p, manifest_p, record0, tmp_path,
-                                  expect_replay_windows=set(range(1, n_windows)))
+                                  expect_replay_windows=set())
     assert rows(payload_p) == rows(payload_w)
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
     _report("executable-readset-spill", {

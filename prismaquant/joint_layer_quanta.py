@@ -1963,6 +1963,32 @@ def executable_replay_phase_name(window_index: int | None, probe: int) -> str:
     return f"replay-{window:02d}-p{probe}"
 
 
+#: The replay modes an executable read plan is sealed for (PQ #1011).
+#: ``windowed`` re-reads the own boundary run once per (window, probe);
+#: ``spill`` reads it once per probe, into the one-pass replay spill.
+REPLAY_MODES = ("windowed", "spill")
+
+
+def normalize_replay_mode(value) -> str:
+    """``windowed`` (the default, also for ``None``) or ``spill``."""
+    mode = "windowed" if value is None else value
+    if mode not in REPLAY_MODES:
+        raise ValueError(f"replay mode must be one of {REPLAY_MODES}, "
+                         f"not {value!r}")
+    return mode
+
+
+def executable_spill_phase_name(probe: int) -> str:
+    """The executable-manifest phase for one probe's spill capture.
+
+    Under the one-pass spill (PQ #994/#1011) each probe reads the own
+    boundary run once, during its capture; the window replays read nothing.
+    """
+    if type(probe) is not int or isinstance(probe, bool) or probe < 0:
+        raise ValueError(f"a spill phase needs a probe, not {probe!r}")
+    return f"spill-p{probe}"
+
+
 def executable_render_phase_name(window_index: int) -> str:
     """The executable-manifest phase staging one retained window's prepared renders.
 
@@ -1980,7 +2006,8 @@ def executable_render_phase_name(window_index: int) -> str:
 def quantum_executable_phase_names(chain_layers: Sequence[int], layer: int,
                                     *, n_probes: int,
                                     replay_windows: int,
-                                    render_phases: bool = False) -> tuple[str, ...]:
+                                    render_phases: bool = False,
+                                    replay_mode: str | None = None) -> tuple[str, ...]:
     """The frozen executable staging order (PQ #862): calibration head,
     the checkpoint plane once, then per chain layer descending its source
     extents and its boundary entries, the quantum's own source extents,
@@ -1991,6 +2018,13 @@ def quantum_executable_phase_names(chain_layers: Sequence[int], layer: int,
     window's replay phases: the window's selected prepared renders get
     their own consumption phases while source phases stay source-only.
     Without it the historical sequencing-only order reproduces unchanged.
+
+    ``replay_mode="spill"`` (PQ #1011) seals the one-pass spill's real
+    consumption order instead: each probe's capture reads the own boundary
+    run once, inside the first window's retained lifetime, and every window
+    replay reads nothing. After the own source come ``render-00`` (with
+    ``render_phases``), one ``spill-p{probe}`` phase per probe, then the
+    remaining windows' render phases. The windowed default is unchanged.
 
     Every name is reported by the runtime through the existing semantic
     reporter as its bytes are consumed -- a staging contract declares
@@ -2012,11 +2046,20 @@ def quantum_executable_phase_names(chain_layers: Sequence[int], layer: int,
             raise ValueError(f"{label} must be positive, not {value!r}")
     if type(render_phases) is not bool:
         raise ValueError(f"render phases must be a flag, not {render_phases!r}")
+    replay_mode = normalize_replay_mode(replay_mode)
     names = ["head", CHECKPOINT_LOAD_PHASE]
     for boundary in chain:
         names.append(executable_source_phase_name(boundary))
         names.append(executable_bound_phase_name(boundary))
     names.append(executable_own_source_phase_name(layer))
+    if replay_mode == "spill":
+        for window_index in range(replay_windows):
+            if render_phases:
+                names.append(executable_render_phase_name(window_index))
+            if window_index == 0:
+                names.extend(executable_spill_phase_name(probe)
+                             for probe in range(n_probes))
+        return tuple(names)
     for window_index in range(replay_windows):
         if render_phases:
             names.append(executable_render_phase_name(window_index))
@@ -2304,7 +2347,8 @@ def build_quantum_executable_manifest(
         layer_source_spans: Mapping[int, Sequence] | None = None,
         source_model_root: str | None = None,
         prepared_inputs: Mapping | None = None,
-        head_slice: Mapping | None = None) -> dict:
+        head_slice: Mapping | None = None,
+        replay_mode: str | None = None) -> dict:
     """ONE executable v2 read manifest for a quantum row (PQ #862).
 
     Derived post-capture from the quantum's stage-A slice (``receipt`` is the
@@ -2370,9 +2414,17 @@ def build_quantum_executable_manifest(
     The quantum then reads nothing else from the campaign inputs before its
     first GPU allocation. Without it the historical manifest bytes
     reproduce unchanged.
+
+    With ``replay_mode="spill"`` (PQ #1011) the plan is sealed for the
+    one-pass spill: the own boundary run is staged once per probe, in
+    ``spill-p{probe}`` phases after ``render-00``, and no window replay
+    phase is sealed (:func:`quantum_executable_phase_names`).
+    ``annotations.replay_mode`` records the mode. The windowed default
+    reproduces the historical manifest bytes unchanged.
     """
     from .joint_adjoint_slices import chain_layers_for
 
+    replay_mode = normalize_replay_mode(replay_mode)
     _require_stage_a_input(receipt)
     if not isinstance(record, dict):
         raise ValueError("a quantum record must be an object: refusing")
@@ -2600,6 +2652,12 @@ def build_quantum_executable_manifest(
         if prepared_windows:
             _seal_phase(executable_render_phase_name(window_index),
                         render_runs[window_index])
+        if replay_mode == "spill":
+            if window_index == 0:
+                for probe in range(n_probes):
+                    _seal_phase(executable_spill_phase_name(probe),
+                                boundary_runs[layer])
+            continue
         for probe in range(n_probes):
             _seal_phase(executable_replay_phase_name(window_index, probe),
                         boundary_runs[layer])
@@ -2607,7 +2665,8 @@ def build_quantum_executable_manifest(
     if names != list(quantum_executable_phase_names(
             chain, layer, n_probes=n_probes,
             replay_windows=len(replay_windows),
-            render_phases=bool(prepared_windows))):
+            render_phases=bool(prepared_windows),
+            replay_mode=replay_mode)):
         raise ValueError("the executable read plan is not the frozen "
                          "consumption order: refusing")
     unique_bytes = sum(entry["bytes"] for entry in manifest_entries)
@@ -2657,6 +2716,7 @@ def build_quantum_executable_manifest(
             "render_prerequisite": prerequisite,
             **prepared_annotation,
             **head_annotation,
+            **({"replay_mode": replay_mode} if replay_mode == "spill" else {}),
             **({"source_completion": {
                 "schema": SOURCE_COMPLETION_SCHEMA,
                 "layers_checked": len(needed),
@@ -2737,7 +2797,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             layer_source_spans: Mapping[int, Sequence] | None = None,
                             source_model_root: str | None = None,
                             prepared_inputs: Mapping | None = None,
-                            head_slice: Mapping | None = None) -> dict:
+                            head_slice: Mapping | None = None,
+                            replay_mode: str | None = None) -> dict:
     """Bind a sealed executable read manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying an ``executable_readset``
@@ -2755,7 +2816,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     dispatcher and the runtime can compare it without re-reading the
     manifest bytes. With ``head_slice`` (PQ #1010) the block carries the
     head slice's path, digest, size and schema, which is how the quantum
-    finds its head.
+    finds its head. With ``replay_mode="spill"`` (PQ #1011) the block
+    carries ``replay_mode``, which the quantum compares with its launch.
     """
     import copy
     import os
@@ -2829,7 +2891,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
             calib=calib, render_prerequisite=render_prerequisite,
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
-            prepared_inputs=prepared_inputs, head_slice=head_slice)
+            prepared_inputs=prepared_inputs, head_slice=head_slice,
+            replay_mode=replay_mode)
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         raise ValueError("the executable readset does not derive from its "
                          f"record, receipt and parent: refusing ({exc})") from exc
@@ -2870,6 +2933,9 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     if head_sealed is not None:
         fresh["executable_readset"]["head_slice"] = {
             key: head_sealed[key] for key in ("path", "sha256", "bytes", "schema")}
+    sealed_mode = manifest.get("annotations", {}).get("replay_mode")
+    if sealed_mode is not None:
+        fresh["executable_readset"]["replay_mode"] = sealed_mode
     body = {key: value for key, value in fresh.items()
             if key != "identity_sha256"}
     fresh["identity_sha256"] = canonical_sha256(
@@ -2885,7 +2951,8 @@ def emit_quantum_executable_readsets(
         layer_source_spans: Mapping[int, Sequence] | None = None,
         source_model_root: str | None = None,
         prepared_inputs: Mapping | None = None,
-        head_slice: Mapping | None = None) -> list[dict]:
+        head_slice: Mapping | None = None,
+        replay_mode: str | None = None) -> list[dict]:
     """The post-capture generation path for executable read manifests.
 
     For every record, derives the executable manifest, seals it, and binds
@@ -2914,7 +2981,8 @@ def emit_quantum_executable_readsets(
             calib=calib, render_prerequisite=render_prerequisite,
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
-            prepared_inputs=prepared_inputs, head_slice=head_slice)
+            prepared_inputs=prepared_inputs, head_slice=head_slice,
+            replay_mode=replay_mode)
         quantum_id = record.get("quantum_id")
         manifest_path = f"{bound_dir}/{quantum_id}.executable.json.gz"
         if quantum_id in seen or manifest_path in seen:
@@ -2935,7 +3003,8 @@ def emit_quantum_executable_readsets(
                 metadata_root=metadata_root,
                 layer_source_spans=layer_source_spans,
                 source_model_root=source_model_root,
-                prepared_inputs=prepared_inputs, head_slice=head_slice),
+                prepared_inputs=prepared_inputs, head_slice=head_slice,
+                replay_mode=replay_mode),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,

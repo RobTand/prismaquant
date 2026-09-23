@@ -693,7 +693,7 @@ def _check_event_order(events, manifest, *, layer, chain,
         kind = event[0]
         if kind == "report":
             assert event[1] in names, event[1]
-            if event[1].startswith("replay-"):
+            if event[1].startswith(("replay-", "spill-")):
                 w_idxs = [i for i, e in enumerate(events)
                           if e[0] == "window-open"]
                 r_idx = events.index(event)
@@ -719,7 +719,7 @@ def _check_event_order(events, manifest, *, layer, chain,
                 assert opened == layer, events
                 assert seen_window_open or not require_window, events
                 assert current is not None and current.startswith(
-                    "replay-"), events
+                    ("replay-", "spill-")), events
         elif kind == "setup-open":
             pass
         elif kind == "window-open":
@@ -739,8 +739,13 @@ def _check_event_order(events, manifest, *, layer, chain,
             raise AssertionError(f"unknown event {event!r}")
 
 
-def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
-    """One real run_layer_quantum_core with instrumented seams."""
+def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
+                   replay_mode=None):
+    """One real run_layer_quantum_core with instrumented seams.
+
+    ``replay_mode`` is the mode the executable plan is sealed for (PQ
+    #1011); the launch mode is the spill environment the caller set.
+    """
     import contextlib
 
     import test_joint_cost_quantum_runtime as rt
@@ -881,7 +886,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
     manifest = build_quantum_executable_manifest(
         record, receipt, setup["parent"], strided_boundaries=strided,
         n_probes=n_probes, calib=dict(calib),
-        render_prerequisite=dict(setup["render_prerequisite"]))
+        render_prerequisite=dict(setup["render_prerequisite"]),
+        replay_mode=replay_mode)
     # Bind the executable block exactly as the post-capture regen does,
     # and run the bound generation: the hooks follow the block.
     from prismaquant.joint_layer_quanta import bind_quantum_executable
@@ -897,7 +903,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
         output_root=output_root, strided_boundaries=strided,
         n_probes=n_probes,
         calib=dict(calib),
-        render_prerequisite=dict(setup["render_prerequisite"]))
+        render_prerequisite=dict(setup["render_prerequisite"]),
+        replay_mode=replay_mode)
     monkeypatch.setenv(
         "PRISMABUILD_ACTION_PROGRESS_PHASES",
         json.dumps([p["name"] for p in manifest["read_plan"]["phases"]]))
