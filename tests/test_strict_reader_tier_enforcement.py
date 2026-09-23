@@ -2493,3 +2493,238 @@ def test_clearing_the_injection_removes_only_the_modules_it_imported():
 
     for name in loaded():
         del sys.modules[name]
+
+
+# -- one lease per read window (PQ #997) ---------------------------------------
+#
+# Stage A R12 spent 36% of its main thread in the per-entry lease path: a
+# cover lookup, an ownership-lock acquire and an ownership-lock release per
+# 64-entry window ENTRY. These run the real chain and count the SDK calls.
+
+
+def _exact_entries(tmp_path, count):
+    from prismaquant.perturbed_x_cache import write_exact_activation_cache_entry
+    directory = tmp_path / 'pool' / 'entries'
+    directory.mkdir(parents=True, exist_ok=True)
+    refs, tensors = [], []
+    for index in range(count):
+        tensor = torch.arange(32, dtype=torch.float32).reshape(8, 4) + 100 * index
+        nbytes = tensor.numel() * tensor.element_size()
+        refs.append(write_exact_activation_cache_entry(
+            directory, f"entry-{index}", tensor,
+            identity=_exact_identity(f"entry-{index}"),
+            max_tensor_bytes=nbytes, max_file_bytes=nbytes + 65536))
+        tensors.append(tensor)
+    return refs, tensors
+
+
+def _count_sdk_calls(monkeypatch, rl):
+    calls = {"acquire_for": 0, "release": 0, "covers_for_keys": 0}
+    for name in calls:
+        original = getattr(rl, name)
+
+        def counted(*args, _name=name, _original=original, **kwargs):
+            calls[_name] += 1
+            return _original(*args, **kwargs)
+        monkeypatch.setattr(rl, name, counted)
+    return calls
+
+
+def _read_exact(refs):
+    from prismaquant.perturbed_x_cache import prefetch_exact_activation_cache_entries
+    nbytes = sum(ref.tensor_bytes for ref in refs)
+    with prefetch_exact_activation_cache_entries(
+            refs, max_tensor_bytes=nbytes, expected_session="strict-tier-session",
+            release_file_pages=False) as window:
+        return {ref: window._tensors[ref].clone() for ref in refs}
+
+
+def _lease_deltas(before):
+    from prismaquant.perturbed_x_cache import exact_lease_counters
+    return {name: count - before[name] for name, count in exact_lease_counters().items()}
+
+
+def _ram_fixture(tmp_path, monkeypatch, refs, *, ram_offered, ram_published):
+    """Every entry staged on SSD. The entries in ``ram_offered`` also offer
+    a tmpfs copy in the map, and the RAM mover publishes only the ones in
+    ``ram_published``. Returns ``(resolver, consumer, rl)``."""
+    rl, pool_mod, map_mod = _pb()
+    consumer = _hex64(f"consumer-{tmp_path}")
+    mover_ssd = _hex64(f"mover-ssd-{tmp_path}")
+    mover_ram = _hex64(f"mover-ram-{tmp_path}")
+    _pb_queue(tmp_path, pool_mod, consumer)
+    root = _stage_root(tmp_path)
+    staged = {i: _stage_whole(root, Path(ref.path)) for i, ref in enumerate(refs)}
+    ram_root, ram = _promote_ram(tmp_path, {i: staged[i] for i in ram_offered})
+    _announce(tmp_path)
+    residency = tmp_path / 'residency'
+    keys = {i: residency_map_key(str(ref.path), 0) for i, ref in enumerate(refs)}
+    _pb_publish(rl, map_mod, residency, root, consumer, mover_ssd, MANIFEST,
+                {keys[i]: (Path(refs[i].path), staged[i]) for i in staged})
+    if ram_published:
+        _pb_publish_ram(rl, map_mod, residency, ram_root, consumer, mover_ram,
+                        MANIFEST, {keys[i]: (Path(refs[i].path), ram[i])
+                                   for i in ram_published}, EPOCH)
+    map_path = _write_map(tmp_path, {i: (Path(refs[i].path), staged[i], ram.get(i))
+                                     for i in staged},
+                          ram_root=ram_root, leads=[mover_ssd])
+    monkeypatch.setenv(ENV_VAR, str(map_path))
+    _launch_env(monkeypatch, consumer)
+    reset_residency_resolver_for_tests()
+    bind_residency_manifest(MANIFEST)
+    activate_staged_tier_policy("ram,ssd")
+    return residency_resolver(), consumer, rl
+
+
+def test_an_exact_window_takes_one_lease_for_all_its_entries(tmp_path, monkeypatch):
+    from prismaquant.perturbed_x_cache import exact_lease_counters
+    refs, tensors = _exact_entries(tmp_path, 4)
+    root = _stage_root(tmp_path)
+    resolver, consumer, _mover = _leased_fixture(
+        tmp_path, monkeypatch,
+        {f'e{i}': (Path(ref.path), _stage_whole(root, Path(ref.path)), None)
+         for i, ref in enumerate(refs)})
+    calls = _count_sdk_calls(monkeypatch, _pb()[0])
+    before = exact_lease_counters()
+    batched = _read_exact(refs)
+    assert calls == {"acquire_for": 1, "release": 1, "covers_for_keys": 1}, calls
+    assert _lease_deltas(before) == {"windows_batched": 1, "entries_batched": 4,
+                                     "entries_single": 0, "batch_fallbacks": 0}
+    for ref, tensor in zip(refs, tensors):
+        assert torch.equal(batched[ref].view(torch.uint8), tensor.view(torch.uint8))
+    served = resolver.report()['serving_tiers'][-4:]
+    assert {row['serving_tier'] for row in served} == {'stage'}
+    assert len({row['pin_id'] for row in served}) == 1 and served[0]['pin_id']
+    assert resolver.report()['bytes_from_pool'] == 0
+    assert _pins_live(tmp_path, consumer) == []
+
+    # The per-entry path (one entry per window) serves the same bytes with
+    # one lease each: the batched window changes the lease count, never
+    # the bytes.
+    for key in calls:
+        calls[key] = 0
+    before = exact_lease_counters()
+    single = {}
+    for ref in refs:
+        single.update(_read_exact([ref]))
+    assert calls == {"acquire_for": 4, "release": 4, "covers_for_keys": 4}, calls
+    assert _lease_deltas(before)["entries_single"] == 4
+    for ref in refs:
+        assert torch.equal(single[ref].view(torch.uint8), batched[ref].view(torch.uint8))
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_ram_entries_share_a_ram_window_and_the_rest_an_ssd_window(
+        tmp_path, monkeypatch):
+    from prismaquant.perturbed_x_cache import exact_lease_counters
+    refs, tensors = _exact_entries(tmp_path, 3)
+    resolver, consumer, rl = _ram_fixture(
+        tmp_path, monkeypatch, refs, ram_offered=[0, 1], ram_published=[0, 1])
+    calls = _count_sdk_calls(monkeypatch, rl)
+    before = exact_lease_counters()
+    got = _read_exact(refs)
+    assert calls["acquire_for"] == 2 and calls["release"] == 2, calls
+    assert _lease_deltas(before) == {"windows_batched": 2, "entries_batched": 3,
+                                     "entries_single": 0, "batch_fallbacks": 0}
+    for ref, tensor in zip(refs, tensors):
+        assert torch.equal(got[ref].view(torch.uint8), tensor.view(torch.uint8))
+    tiers = {row['path']: row['serving_tier']
+             for row in resolver.report()['serving_tiers'][-3:]}
+    assert [tiers[str(ref.path)] for ref in refs] == ['ram', 'ram', 'stage']
+    assert resolver.report()['ram_fallbacks'] == []
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_an_unpublished_ram_tier_folds_the_window_into_one_ssd_lease(
+        tmp_path, monkeypatch):
+    """No RAM mover published anything at the announced epoch: every entry
+    records the RAM fallback, exactly as the single-entry leg does, and the
+    whole window leases once on SSD."""
+    from prismaquant.perturbed_x_cache import exact_lease_counters
+    refs, tensors = _exact_entries(tmp_path, 3)
+    resolver, consumer, rl = _ram_fixture(
+        tmp_path, monkeypatch, refs, ram_offered=[0, 1, 2], ram_published=[])
+    calls = _count_sdk_calls(monkeypatch, rl)
+    before = exact_lease_counters()
+    got = _read_exact(refs)
+    assert calls["acquire_for"] == 1 and calls["release"] == 1, calls
+    assert _lease_deltas(before) == {"windows_batched": 1, "entries_batched": 3,
+                                     "entries_single": 0, "batch_fallbacks": 0}
+    for ref, tensor in zip(refs, tensors):
+        assert torch.equal(got[ref].view(torch.uint8), tensor.view(torch.uint8))
+    report = resolver.report()
+    assert len(report['ram_fallbacks']) == 3
+    assert {row['serving_tier'] for row in report['serving_tiers'][-3:]} == {'stage'}
+    assert report['bytes_from_pool'] == 0
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_partial_ram_cover_rereads_the_window_one_entry_at_a_time(
+        tmp_path, monkeypatch):
+    """The RAM mover published one of two entries. A batched lookup refuses
+    the pair as a coverage gap (integrity) where each entry alone answers
+    precisely, so the window falls back: the published entry serves from
+    RAM and the other falls to SSD, as they did before #997."""
+    from prismaquant.perturbed_x_cache import exact_lease_counters
+    refs, tensors = _exact_entries(tmp_path, 2)
+    resolver, consumer, _rl = _ram_fixture(
+        tmp_path, monkeypatch, refs, ram_offered=[0, 1], ram_published=[0])
+    before = exact_lease_counters()
+    got = _read_exact(refs)
+    assert _lease_deltas(before) == {"windows_batched": 0, "entries_batched": 0,
+                                     "entries_single": 2, "batch_fallbacks": 1}
+    for ref, tensor in zip(refs, tensors):
+        assert torch.equal(got[ref].view(torch.uint8), tensor.view(torch.uint8))
+    tiers = {row['path']: row['serving_tier']
+             for row in resolver.report()['serving_tiers'][-2:]}
+    assert [tiers[str(ref.path)] for ref in refs] == ['ram', 'stage']
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_range_evicted_between_windows_is_refused_or_restaged_never_read_stale(
+        tmp_path, monkeypatch):
+    """PB #904 lets a landed range be evicted past its refill horizon. No
+    proof carries from one window to the next: each window's lease
+    re-verifies every key under the ownership lock, so a staged copy that
+    changed after window 1 refuses in window 2, and a honest re-stage
+    serves the right bytes again."""
+    refs, tensors = _exact_entries(tmp_path, 3)
+    root = _stage_root(tmp_path)
+    staged = {i: _stage_whole(root, Path(ref.path)) for i, ref in enumerate(refs)}
+    resolver, consumer, mover = _leased_fixture(
+        tmp_path, monkeypatch,
+        {f'e{i}': (Path(ref.path), staged[i], None) for i, ref in enumerate(refs)})
+    first = _read_exact(refs)
+    for ref, tensor in zip(refs, tensors):
+        assert torch.equal(first[ref].view(torch.uint8), tensor.view(torch.uint8))
+
+    # Evicted, and a different copy of the same length lands at the path.
+    victim = staged[1]
+    blob = victim.read_bytes()
+    landed = victim.stat()
+    victim.unlink()
+    victim.write_bytes(bytes(reversed(blob)))
+    # A later landing, stated rather than left to timestamp granularity.
+    os.utime(victim, ns=(landed.st_atime_ns, landed.st_mtime_ns + 10 ** 9))
+    with pytest.raises(TierPolicyRefused):
+        _read_exact(refs)
+    assert resolver.report()['bytes_from_pool'] == 0
+    assert _pins_live(tmp_path, consumer) == []
+
+    # Evicted outright: the map row's staged file is gone.
+    victim.unlink()
+    with pytest.raises(TierPolicyRefused):
+        _read_exact(refs)
+    assert _pins_live(tmp_path, consumer) == []
+
+    # Re-staged honestly: a mover lands the right bytes and republishes.
+    victim.write_bytes(blob)
+    rl, _pool_mod, map_mod = _pb()
+    _pb_publish(rl, map_mod, tmp_path / 'residency', root, consumer, mover, MANIFEST,
+                {residency_map_key(str(ref.path), 0): (Path(ref.path), staged[i])
+                 for i, ref in enumerate(refs)})
+    again = _read_exact(refs)
+    for ref, tensor in zip(refs, tensors):
+        assert torch.equal(again[ref].view(torch.uint8), tensor.view(torch.uint8))
+    assert resolver.report()['bytes_from_pool'] == 0
+    assert _pins_live(tmp_path, consumer) == []

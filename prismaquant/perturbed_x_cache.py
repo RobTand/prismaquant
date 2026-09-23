@@ -1104,6 +1104,183 @@ class _ExactActivationPrefetch:
         return self._tensors[reference]
 
 
+#: How the strict exact-entry reader leased its windows, this process
+#: (PQ #997). ``windows_batched`` counts multi-entry lease windows and
+#: ``entries_batched`` the entries they served; ``entries_single`` counts
+#: entries leased one at a time, and ``batch_fallbacks`` the groups whose
+#: batched lease was refused and re-read one entry at a time.
+EXACT_LEASE_COUNTERS = {"windows_batched": 0, "entries_batched": 0,
+                        "entries_single": 0, "batch_fallbacks": 0}
+
+
+def exact_lease_counters() -> dict:
+    """A copy of :data:`EXACT_LEASE_COUNTERS` for a report."""
+    return dict(EXACT_LEASE_COUNTERS)
+
+
+def _strict_lease_groups(references, resolver):
+    """``[(entry resolver, [(ref, staged entry), ...]), ...]`` in read order.
+
+    One group per resolver object: every entry of a group is vouched in one
+    material namespace, which is what one lease window may pin. A window
+    that spans a boundary plane and incoming cotangent planes of different
+    produced batches is therefore one group per batch. The staged entry is
+    looked up here exactly as the single-entry path looks it up, and a miss
+    refuses the same way, before anything is pinned.
+    """
+    from .residency_map import residency_resolver
+    from .staged_lease import LeaseRefused
+    groups: dict[int, tuple[object, list]] = {}
+    for ref in references:
+        entry_resolver = resolver(ref) if callable(resolver) else resolver
+        if entry_resolver is None:
+            entry_resolver = residency_resolver()
+        if entry_resolver is None:
+            raise LeaseRefused("readset-not-staged", kind="availability")
+        staged = entry_resolver.staged_read(Path(ref.path), expected_sha256=ref.sha256)
+        if staged is None:
+            raise LeaseRefused("staged-not-serving", kind="availability")
+        groups.setdefault(id(entry_resolver), (entry_resolver, []))[1].append((ref, staged))
+    return list(groups.values())
+
+
+def _enter_group_lease(entry_resolver, members, live_windows):
+    """Pin one group in at most two windows (RAM, then SSD), or ``None``.
+
+    The group-granular form of ``acquire_entry_window``'s RAM-first rule.
+    Entries offering a RAM copy share one RAM window when RAM is allowed,
+    and the rest share one SSD window. When the RAM cover lookup refuses as
+    availability for the whole set (the epoch moved, nothing is published
+    at it, the tier is not announced), each of those entries records the
+    RAM fallback and joins the SSD window, which is what the single-entry
+    leg does for each of them.
+
+    Every other refusal returns ``None`` after releasing whatever this call
+    pinned, and the caller re-reads the group one entry at a time, keeping
+    the single-entry refusal kinds exactly. This covers a partial RAM cover,
+    any refusal of the SSD lookup, and any refusal to enter. A batched
+    lookup that misses one key refuses the whole set as
+    ``source-coverage-gap`` (integrity), where that entry alone would
+    refuse ``unpublished`` (availability). A read is never served on a
+    batched proof alone: the SDK re-verifies every key under the ownership
+    lock at acquire, and every key is still opened through the SDK under
+    the pin.
+    """
+    from .staged_lease import LeaseRefused, acquire_entries_window
+    from .staged_tier_policy import tier_is_allowed
+    ram = ([member for member in members if member[1].get("ram_path") is not None]
+           if tier_is_allowed("ram") else [])
+    ssd = [member for member in members if member not in ram]
+    assignments, entered = {}, []
+
+    def items(subset):
+        return [(Path(ref.path), staged) for ref, staged in subset]
+
+    try:
+        plans = []
+        if ram:
+            try:
+                plans.append(acquire_entries_window(entry_resolver, items(ram), tier="ram")
+                             + (ram,))
+            except LeaseRefused as refusal:
+                # ``source-coverage-gap`` (a partial RAM cover) is classed
+                # integrity, so it takes the per-entry path below.
+                if refusal.kind != "availability":
+                    raise
+                for ref, _staged in ram:
+                    entry_resolver.record_ram_fallback(Path(ref.path), str(refusal))
+                ssd = list(members)
+        if ssd:
+            plans.append(acquire_entries_window(entry_resolver, items(ssd), tier="ssd")
+                         + (ssd,))
+        for lease_window, keys, subset in plans:
+            lease_window.__enter__()
+            # Owned by the caller's cleanup from the moment it is entered,
+            # so a failed release below can never strand the pin.
+            live_windows.append(lease_window)
+            entered.append(lease_window)
+            for (ref, _staged), key in zip(subset, keys):
+                assignments[ref] = (lease_window, key)
+    except LeaseRefused:
+        for lease_window in entered:
+            lease_window.__exit__(None, None, None)
+            live_windows.remove(lease_window)
+        EXACT_LEASE_COUNTERS["batch_fallbacks"] += 1
+        return None
+    EXACT_LEASE_COUNTERS["windows_batched"] += len(entered)
+    EXACT_LEASE_COUNTERS["entries_batched"] += len(members)
+    return assignments
+
+
+def _exact_entry_prechecks(ref, *, expected_session, session_for_reference):
+    """The declared-file fences every read runs first: ``(path, stat, signature)``."""
+    metadata = json.loads(ref.metadata_json)
+    bound_session = (expected_session if session_for_reference is None
+                     else session_for_reference(ref))
+    if (metadata.get("schema") != EXACT_ACTIVATION_SCHEMA
+            or metadata.get("identity", {}).get("session") != bound_session):
+        raise RuntimeError("exact activation reference has a different session identity")
+    path = Path(ref.path)
+    prefetched_stat = path.lstat()
+    signature = _activation_file_signature(path)
+    if signature[2] != ref.file_bytes:
+        raise RuntimeError("exact activation entry size changed")
+    return path, prefetched_stat, signature
+
+
+def _read_exact_entry(ref, *, path, signature, source, source_before, lease_fd,
+                      owned, release_file_pages):
+    """Read, hash and deserialize one entry; returns its verified tensor.
+
+    ``lease_fd`` is the pinned descriptor under the strict policy (read, not
+    closed, here) or ``None`` to open ``source``. The declared file's
+    signature is re-checked after the hash and after the load.
+    """
+    raw = owned.buffer(ref.file_bytes)
+    running = hashlib.sha256()
+    consumed = 0
+    opener = (source.open("rb", buffering=0) if lease_fd is None
+              else os.fdopen(lease_fd, "rb", buffering=0, closefd=False))
+    with opener as handle:
+        while consumed < ref.file_bytes:
+            view = memoryview(raw)[consumed:min(
+                ref.file_bytes, consumed + _ENTRY_READ_BLOCK_BYTES)]
+            try:
+                size = handle.readinto(view)
+                if not size:
+                    raise RuntimeError("exact activation entry size changed")
+                running.update(view[:size])
+            finally:
+                view.release()
+            consumed += size
+        if handle.read(1):
+            raise RuntimeError("exact activation entry size changed")
+    if running.hexdigest() != ref.sha256 or _activation_file_signature(path) != signature:
+        raise RuntimeError("exact activation entry checksum changed")
+    body = memoryview(raw)[:ref.file_bytes]
+    reader = _VerifiedBufferReader(body, max_copy_bytes=ref.file_bytes)
+    try:
+        payload = torch.load(reader, map_location="cpu", weights_only=True)
+    finally:
+        reader.close()
+        body.release()
+    tensor = payload.get("inputs") if isinstance(payload, dict) else None
+    if (not isinstance(tensor, torch.Tensor) or tensor.layout != torch.strided
+            or set(payload) != {"inputs", "name", "source", "exact"}
+            or payload["name"] != ref.name or payload["source"] != "exact_activation"
+            or _exact_activation_json(payload["exact"]) != ref.metadata_json
+            or tuple(tensor.shape) != ref.shape or str(tensor.dtype) != ref.dtype
+            or tensor.numel() * tensor.element_size() != ref.tensor_bytes
+            or tensor.untyped_storage().nbytes() != ref.tensor_bytes
+            or not tensor.is_contiguous() or tensor.requires_grad):
+        raise RuntimeError("exact activation entry tensor/metadata differs from its receipt")
+    if _activation_file_signature(path) != signature:
+        raise RuntimeError("exact activation entry changed during prefetch")
+    if release_file_pages:
+        release_activation_cache_file_pages(source, expected_stat=source_before)
+    return tensor
+
+
 @contextmanager
 def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                                             expected_session, residency_check=None,
@@ -1122,6 +1299,16 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     one per reference when the window spans two batches; nothing else about
     the read changes, and every identity fence below still runs on the
     declared file.
+
+    Under the strict tier policy the window is leased per material
+    namespace, not per entry (PQ #997): the entries each resolver vouches
+    share one pinned lease window per tier, opened key by key and released
+    once after the group is verified. A refused batched lease re-reads that
+    group one entry at a time, exactly as before. Every entry's staged row
+    and session fence are checked before the window pins anything, so an
+    unstaged entry refuses (``staged-not-serving``) before any entry of the
+    window is read, where the per-entry reader had already read the ones
+    before it. The refusal and its kind are unchanged.
     """
     references = tuple(references)
     if any(not isinstance(ref, ExactActivationReference) for ref in references):
@@ -1133,10 +1320,82 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         raise RuntimeError("exact activation prefetch exceeds tensor residency budget")
     window = _ExactActivationPrefetch()
     reserved = False
-    payload = tensor = raw = reader = body = owned = None
+    owned = None
     live_windows: list = []
     from .staged_tier_policy import policy_is_active
     strict = policy_is_active()
+    prechecks = dict(expected_session=expected_session,
+                     session_for_reference=session_for_reference)
+
+    def read_single(ref, lease_resolver=None):
+        """The single-entry read: its own window, released after verifying."""
+        path, prefetched_stat, signature = _exact_entry_prechecks(ref, **prechecks)
+        source, source_before = path, prefetched_stat
+        lease_window = lease_fd = None
+        if strict:
+            lease_window, lease_key, _staged, lease_resolver = (
+                _acquire_bulk_window(path, ref.sha256, resolver=lease_resolver))
+            live_windows.append(lease_window)
+            try:
+                lease_fd, _serving, _tier = _enter_and_open_window(
+                    lease_resolver, lease_window, lease_key, path)
+            except BaseException:
+                # ``_enter_and_open_window`` already exited the window on
+                # every failure it raises, so leaving it in the live list
+                # makes the cleanup below exit it a SECOND time -- and a
+                # released manager refuses re-exit, which replaces the
+                # real refusal with "LeaseWindow re-exit is refused" and
+                # hides why the read failed.
+                live_windows.remove(lease_window)
+                raise
+            source = Path(lease_window.stage_path(lease_key) or path)
+            source_before = os.fstat(lease_fd)
+            EXACT_LEASE_COUNTERS["entries_single"] += 1
+        window._tensors[ref] = _read_exact_entry(
+            ref, path=path, signature=signature, source=source,
+            source_before=source_before, lease_fd=lease_fd, owned=owned,
+            release_file_pages=release_file_pages)
+        if lease_window is not None:
+            # Entry verified: descriptor closed, exact ref released
+            # before the next entry acquires.
+            lease_window.__exit__(None, None, None)
+            live_windows.remove(lease_window)
+
+    def read_group(entry_resolver, members):
+        """One material namespace's entries under shared lease windows."""
+        from .staged_lease import LeaseRefused
+        checked = [(ref, _exact_entry_prechecks(ref, **prechecks)) for ref, _ in members]
+        assignments = (_enter_group_lease(entry_resolver, members, live_windows)
+                       if len(members) > 1 else None)
+        if assignments is None:
+            for ref, _staged in members:
+                read_single(ref, entry_resolver)
+            return
+        for ref, (path, _prefetched_stat, signature) in checked:
+            lease_window, key = assignments[ref]
+            try:
+                lease_fd, serving = lease_window.open(key)
+            except LeaseRefused as refusal:
+                entry_resolver.record_fallback(path, str(refusal))
+                raise
+            entry_resolver.record_serving_tier(
+                path, lease_window.serving_tier or "stage",
+                pin_id=str(serving.get("pin_id") or ""),
+                range_ref=str(serving.get("range_ref") or ""))
+            try:
+                window._tensors[ref] = _read_exact_entry(
+                    ref, path=path, signature=signature,
+                    source=Path(lease_window.stage_path(key) or path),
+                    source_before=os.fstat(lease_fd), lease_fd=lease_fd,
+                    owned=owned, release_file_pages=release_file_pages)
+            finally:
+                lease_window.close_fd(lease_fd)
+        # Every entry verified: each window closes its descriptors (already
+        # closed) and releases its one ref.
+        for lease_window in {id(w): w for w, _key in assignments.values()}.values():
+            lease_window.__exit__(None, None, None)
+            live_windows.remove(lease_window)
+
     try:
         if residency_check is not None:
             residency_check(nbytes)
@@ -1146,99 +1405,12 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         # buffer holds one entry, not the window; a caller that owns an
         # EntryReadScratch keeps it across windows.
         owned = EntryReadScratch() if scratch is None else scratch
-        for ref in references:
-            metadata = json.loads(ref.metadata_json)
-            bound_session = (expected_session if session_for_reference is None
-                             else session_for_reference(ref))
-            if (metadata.get("schema") != EXACT_ACTIVATION_SCHEMA
-                    or metadata.get("identity", {}).get("session") != bound_session):
-                raise RuntimeError("exact activation reference has a different session identity")
-            path = Path(ref.path)
-            prefetched_stat = path.lstat()
-            signature = _activation_file_signature(path)
-            if signature[2] != ref.file_bytes:
-                raise RuntimeError("exact activation entry size changed")
-            source, source_before = path, prefetched_stat
-            lease_window = None
-            if strict:
-                # One window may span more than one produced batch (a
-                # boundary plane plus the incoming cotangent plane read in
-                # the same 64-entry window), and each batch is vouched in
-                # its own material namespace. A callable resolver answers
-                # per entry; a plain one answers for the whole window, which
-                # is what every input read passes.
-                entry_resolver = resolver(ref) if callable(resolver) else resolver
-                lease_window, lease_key, _staged, lease_resolver = (
-                    _acquire_bulk_window(path, ref.sha256,
-                                         resolver=entry_resolver))
-                live_windows.append(lease_window)
-                try:
-                    lease_fd, _serving, _tier = _enter_and_open_window(
-                        lease_resolver, lease_window, lease_key, path)
-                except BaseException:
-                    # ``_enter_and_open_window`` already exited the window on
-                    # every failure it raises, so leaving it in the live list
-                    # makes the cleanup below exit it a SECOND time -- and a
-                    # released manager refuses re-exit, which replaces the
-                    # real refusal with "LeaseWindow re-exit is refused" and
-                    # hides why the read failed.
-                    live_windows.remove(lease_window)
-                    raise
-                source = Path(lease_window.stage_path(lease_key) or path)
-                source_before = os.fstat(lease_fd)
-            raw = owned.buffer(ref.file_bytes)
-            running = hashlib.sha256()
-            consumed = 0
-            opener = (source.open("rb", buffering=0) if lease_window is None
-                      else os.fdopen(lease_fd, "rb", buffering=0, closefd=False))
-            with opener as handle:
-                while consumed < ref.file_bytes:
-                    view = memoryview(raw)[consumed:min(
-                        ref.file_bytes, consumed + _ENTRY_READ_BLOCK_BYTES)]
-                    try:
-                        size = handle.readinto(view)
-                        if not size:
-                            raise RuntimeError("exact activation entry size changed")
-                        running.update(view[:size])
-                    finally:
-                        view.release()
-                    consumed += size
-                if handle.read(1):
-                    raise RuntimeError("exact activation entry size changed")
-            if running.hexdigest() != ref.sha256 or _activation_file_signature(path) != signature:
-                raise RuntimeError("exact activation entry checksum changed")
-            body = memoryview(raw)[:ref.file_bytes]
-            reader = _VerifiedBufferReader(body, max_copy_bytes=ref.file_bytes)
-            try:
-                payload = torch.load(reader, map_location="cpu", weights_only=True)
-            finally:
-                reader.close()
-                body.release()
-                reader = body = None
-            tensor = payload.get("inputs") if isinstance(payload, dict) else None
-            if (not isinstance(tensor, torch.Tensor) or tensor.layout != torch.strided
-                    or set(payload) != {"inputs", "name", "source", "exact"}
-                    or payload["name"] != ref.name or payload["source"] != "exact_activation"
-                    or _exact_activation_json(payload["exact"]) != ref.metadata_json
-                    or tuple(tensor.shape) != ref.shape or str(tensor.dtype) != ref.dtype
-                    or tensor.numel() * tensor.element_size() != ref.tensor_bytes
-                    or tensor.untyped_storage().nbytes() != ref.tensor_bytes
-                    or not tensor.is_contiguous() or tensor.requires_grad):
-                raise RuntimeError("exact activation entry tensor/metadata differs from its receipt")
-            if _activation_file_signature(path) != signature:
-                raise RuntimeError("exact activation entry changed during prefetch")
-            window._tensors[ref] = tensor
-            payload = tensor = None
-            if release_file_pages:
-                release_activation_cache_file_pages(
-                    source, expected_stat=source_before)
-            raw = None
-            if lease_window is not None:
-                # Entry verified: descriptor closed, exact ref released
-                # before the next entry acquires.
-                lease_window.__exit__(None, None, None)
-                live_windows.remove(lease_window)
-                lease_window = None
+        if strict:
+            for entry_resolver, members in _strict_lease_groups(references, resolver):
+                read_group(entry_resolver, members)
+        else:
+            for ref in references:
+                read_single(ref)
         if scratch is None:
             owned.release()
         window.active = True
@@ -1246,7 +1418,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     finally:
         window.active = False
         window._tensors.clear()
-        payload = tensor = raw = reader = body = owned = None
+        owned = None
         while live_windows:
             # Error paths must not strand pins: close descriptors and
             # release exact refs, first failure raised last.

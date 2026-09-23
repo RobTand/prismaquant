@@ -356,13 +356,17 @@ def await_forward_inputs(references):
     import time
     from .residency_map import RANGE_HIT, residency_resolver
     from .residency_shard_reader import await_staged_spans, staged_range_wait_s
-    from .staged_lease import LeaseRefused, stage_cover_is_published
+    from .staged_lease import (LeaseRefused, stage_cover_is_published,
+                               stage_covers_are_published)
     resolver = residency_resolver()
     if resolver is None:
         raise LeaseRefused('forward-recovery-input-map-absent', kind='availability')
+    # One cover lookup per poll for the whole window (PQ #997), falling back
+    # to one per entry when the batched answer cannot name the missing key.
     verdict = await_staged_spans(resolver,
         [(ref.path, 0, ref.file_bytes, ref.file_bytes) for ref in references],
-        deadline=time.monotonic() + staged_range_wait_s(), published=stage_cover_is_published)
+        deadline=time.monotonic() + staged_range_wait_s(), published=stage_cover_is_published,
+        published_batch=stage_covers_are_published)
     if verdict != RANGE_HIT:
         raise LeaseRefused('forward-recovery-input-' + verdict, kind='availability')
 
