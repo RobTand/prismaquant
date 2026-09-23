@@ -28,6 +28,9 @@ import test_stage_a_produced_boundary_chain as chain
 from test_stage_a_produced_boundary_chain import (  # noqa: F401
     _isolated_launch_context)
 
+# PQ #1008: one pinned prismabuild per process (tests/conftest.py).
+pytestmark = pytest.mark.own_process
+
 GROUP_SIZE = chain.GROUP_SIZE
 
 
