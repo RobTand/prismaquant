@@ -1576,7 +1576,10 @@ def test_strict_checkpoint_shared_state_altered_refuses(tmp_path, monkeypatch):
         load_adjoint_checkpoint(adjoint_space(tmp_path), record)
     assert excinfo.value.kind == "integrity"
     assert resolver.report()['bytes_from_pool'] == 0
-    assert resolver.report()['bytes_from_stage'] == 0
+    # Only checkpoint.json, read before the altered pickle, counts as a
+    # stage read; none of the altered bytes do.
+    manifest_bytes = Path(_checkpoint_manifest_path(record)).stat().st_size
+    assert resolver.report()['bytes_from_stage'] == manifest_bytes
 
 
 def test_strict_checkpoint_shared_state_unmapped_refuses(tmp_path, monkeypatch):
