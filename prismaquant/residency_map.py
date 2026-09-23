@@ -186,9 +186,16 @@ def _identity(info: os.stat_result) -> tuple[int, int, int, int]:
 LANDING_SCHEMA = "prismaquant.prismabuild.residency_landing.v1"
 #: What a landing range's ``state`` can say. ``ready``/``claimed``: its mover
 #: is queued or copying. ``unpublished``: the window has not published its
-#: mover yet, or will recopy a failed one. ``terminal-no-receipt``: nothing
-#: will produce it.
-LANDING_STATES = ("ready", "claimed", "unpublished", "terminal-no-receipt")
+#: mover yet, or will recopy a failed one. ``evicted``: the range was evicted
+#: and the window publishes it again inside the horizon.
+#: ``done-not-resident``: the copy finished and holds its tokens, and the
+#: range waits on adoption (briefly, under adoption lag). ``terminal-no-
+#: receipt``: nothing will produce it. Only the last is a refusal; the
+#: record is PrismaBuild's own (PB #989, ``residency_map.LANDING_STATES``),
+#: and a state this list lacks makes the whole record unread, which falls
+#: back to the bounded wait.
+LANDING_STATES = ("ready", "claimed", "unpublished", "evicted",
+                  "done-not-resident", "terminal-no-receipt")
 
 
 def _read_landing(path: str, identity) -> dict | None:
