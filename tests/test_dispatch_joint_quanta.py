@@ -477,6 +477,27 @@ def test_bands_of_another_run_or_slice_refuse(tmp_path, campaign, records_dir):
     assert gateway.submitted == []
 
 
+def test_a_proof_whose_stride_places_a_record_elsewhere_refuses(
+        tmp_path, campaign, records_dir):
+    """The dispatcher derives no stride. The slice gate holds the property:
+    records sealed at stride 1 (layer 0 reads checkpoint 1) bound to the
+    slices of a stride-2 run (layer 0 reads checkpoint 2) refuse, because
+    ``load_adjoint_slice`` checks where the header's stride places each
+    record's layer."""
+    receipt = synthetic_receipt(
+        plan_sha256=campaign["plan_sha256"],
+        prepared_sha256=campaign["prepared_sha256"], scope=campaign["scope"],
+        num_layers=N_LAYERS, stride=2)
+    assert receipt["stride"]["boundaries"] == [3, 2]
+    receipt_path = tmp_path / "adjoint-capture.json"
+    _write_receipt(receipt_path, receipt)
+    _stamp_receipt(records_dir, receipt_path)
+    gateway = FakeGateway(terminal=True)
+    assert main(_argv(records_dir, tmp_path / "out", receipt_path),
+                _gateway=gateway) == 3
+    assert gateway.submitted == []
+
+
 # -- dry-run: plan with digests, submits nothing ---------------------------------
 
 

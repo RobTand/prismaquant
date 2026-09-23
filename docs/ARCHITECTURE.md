@@ -419,7 +419,8 @@ As of: 2026-09-23 · `ws-br/band-serial-996`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-23, `ws-br/band-serial-996`) for **the checkpoint
-manifest as a declared read** (PQ #996). `load_adjoint_checkpoint` opens a
+manifest as a declared read** and the consumers' Stage A header check
+(PQ #996). `load_adjoint_checkpoint` opens a
 checkpoint's `checkpoint.json` before any entry, and until now no readset
 declared it, so a staged quantum read it from the pool. Its bytes follow
 from the checkpoint record (`joint_adjoint_slices.checkpoint_manifest_bytes`,
@@ -427,9 +428,15 @@ the one serialization the writer publishes), so both quantum readsets now
 declare it first in the checkpoint phase
 (`checkpoint_manifest_entry`), and the loader reads it through the staged
 path under an active tier policy and refuses unless its bytes equal the
-record's. Gates: `tests/test_quantum_executable_readset.py`,
+record's. Consumers of bound records (dispatcher, quantum, joiner) check the
+Stage A run identity only (`check_adjoint_run_identity`): their stride
+check compared the header's stride with itself. The producer still checks
+the stride against its derivation when it binds a slice, and
+`verify_adjoint_slice` checks where the header's stride places each
+record's layer. Gates: `tests/test_quantum_executable_readset.py`,
 `tests/test_quantum_boundary_readset.py`,
-`tests/test_strict_reader_tier_enforcement.py`.
+`tests/test_strict_reader_tier_enforcement.py`,
+`tests/test_dispatch_joint_quanta.py`.
 
 Re-stamped (2026-09-23, `ws-1a/stageb-one-pass-spill-994`) for **the Stage B
 one-pass replay spill** (PQ #994): with the spill declared, a layer quantum

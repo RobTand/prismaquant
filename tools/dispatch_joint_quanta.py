@@ -1127,7 +1127,7 @@ def check_stage_a_proofs(proofs: Sequence[tuple[Path, dict]],
         AdjointSliceRefused, adjoint_slice_sha256, band_set,
         load_adjoint_slice, stage_a_receipt_kind, stage_a_run_header,
         stage_a_run_header_sha256, stage_a_slice)
-    from prismaquant.joint_layer_quanta import check_adjoint_run_header
+    from prismaquant.joint_layer_quanta import check_adjoint_run_identity
     if not proofs:
         return {}
     campaign = records[0][1]["campaign"]
@@ -1155,11 +1155,13 @@ def check_stage_a_proofs(proofs: Sequence[tuple[Path, dict]],
             raise DispatchRefused("stage-A proofs carry different run headers: mixed runs")
         header = stage_a_run_header(proofs[0][1])
         try:
-            check_adjoint_run_header(
+            # The stride is not checked here: the dispatcher derives none.
+            # load_adjoint_slice below checks that the header's stride
+            # places each record at its checkpoint.
+            check_adjoint_run_identity(
                 header, plan_sha256=campaign["plan_sha256"],
                 prepared_sha256=campaign["prepared_sha256"],
                 scope=campaign["campaign_scope"],
-                checkpoints=header["stride"]["boundaries"],
                 catalog_extension=extensions[0])
         except (ValueError, OSError, KeyError) as exc:
             raise DispatchRefused(f"stage-A proof does not answer for this campaign: {exc}") from exc

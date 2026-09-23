@@ -65,7 +65,7 @@ from .joint_adjoint_slices import (
 from .joint_layer_quanta import (
     CHECKPOINT_LOAD_PHASE,
     PREPARED_INPUT_SCHEMA,
-    check_adjoint_run_header,
+    check_adjoint_run_identity,
     check_prepared_windows_against_resolved,
     executable_bound_phase_name,
     executable_own_source_phase_name,
@@ -186,10 +186,11 @@ def verify_quantum_identity(
         # run the extension binds (checked by the extension owner).
         header = slice_run_header(adjoint_slice)
         try:
-            check_adjoint_run_header(
+            # load_adjoint_slice above checked that the header's stride
+            # places this layer at the record's checkpoint.
+            check_adjoint_run_identity(
                 header, plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
                 scope=campaign["campaign_scope"],
-                checkpoints=header["stride"]["boundaries"],
                 catalog_extension=record.get("catalog_extension"))
         except ValueError as exc:
             raise QuantumIdentityRefused(
