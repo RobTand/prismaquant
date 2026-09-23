@@ -82,12 +82,34 @@ POLL_S = 0.1
 ENTRY_HEADER_ENVELOPE_BYTES = 65536
 
 
+def plane_partitions(*, n_rows, probe_microbatch):
+    """The calibration batches a cotangent plane holds one entry for.
+
+    The Stage A capture splits its ``n_rows`` calibration rows into
+    contiguous batches of ``probe_microbatch`` rows (all ``n_rows`` when it
+    is 0, and never more than ``n_rows``), the last one partial, and writes
+    one entry per batch into each probe's plane
+    (``joint_cost_stage_a.run_adjoint_capture_core``). Returns
+    ``(batch_rows, row_offsets)``: the rows of a full batch, and each batch's
+    first row. ``len(row_offsets)`` is the entries a plane holds, which the
+    capture binds and the Stage A dispatcher seals its window from
+    (PQ #1121).
+    """
+    if type(n_rows) is not int or n_rows <= 0:
+        raise ValueError("plane partitions need a positive int row count")
+    if type(probe_microbatch) is not int or probe_microbatch < 0:
+        raise ValueError("plane partitions need a nonnegative int probe_microbatch")
+    batch_rows = min(probe_microbatch or n_rows, n_rows)
+    return batch_rows, list(range(0, n_rows, batch_rows))
+
+
 def two_plane_window_bytes(*, n_probes, n_batches, group_size, group_ceiling=None,
                            max_entry_tensor_bytes=None):
     """The local window a same-box reverse chain needs: two cotangent planes.
 
     A cotangent plane is ``n_probes`` x ``n_batches`` entries, reserved in
-    groups of ``group_size`` (the last one partial). The chain reads one
+    groups of ``group_size`` (the last one partial). ``n_batches`` is the
+    entry count :func:`plane_partitions` gives, not the row count. The chain reads one
     plane while it writes the next, so one plane is live and one more is the
     room its writes and exports turn over in (PQ #1110). ``group_ceiling``
     maps an entry count to the bytes PrismaBuild reserves for such a group;

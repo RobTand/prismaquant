@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+A microbatched Stage A plan seals the two cotangent planes its capture
+writes, not its rows (2026-09-23, `fix/1120-1121-readback-budget-window`,
+PQ #1121). The capture writes one entry per batch of `probe_microbatch`
+rows into each probe's plane, but it bound the row count as the plane's
+entry count, and the dispatcher sealed the spool window from the same
+count: at `probe_microbatch` = m both were about m times the real window.
+One function now gives the partition
+(`produced_output_spool.plane_partitions`): the capture splits its rows with
+it and binds its batch count, and `stage_a_spool_window_bytes` seals from
+it, so the seal and the bind's need
+(`StreamedBoundaryArtifacts._require_local_window`) are one number. At R12's
+shape with `probe_microbatch` 4 that is 68,786,585,600 B, where main sealed
+275,146,342,400 B. A partial last batch is one more entry at the full
+batch's bound, the size PrismaBuild reserves. R12 and R13 run at
+`probe_microbatch` 1, where nothing changes. Gates:
+`tests/test_stage_a_plane_window_1121.py`,
+`tests/test_dispatch_joint_quanta.py`. No format, pipeline default or ship
+gate changes.
+
 The Stage A chain reads its own cotangent planes from the producing box's
 local spool, and its exports are write-behind (2026-09-23,
 `fix/1110-same-box-readback`, PQ #1110).
@@ -1263,8 +1282,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `fix/1107-wait-on-expected-landing`.
+As of: 2026-09-23 · `fix/1120-1121-readback-budget-window`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `fix/1120-1121-readback-budget-window`) for **a
+microbatched Stage A plan that seals the planes its capture writes**
+(PQ #1121): the capture binds its batch count, not its row count, and the
+dispatcher seals the spool window from the same partition
+(`plane_partitions`). See the entry at the top. No format, pipeline default,
+stage or ship gate changes.
 
 Re-stamped (2026-09-23, `fix/1107-wait-on-expected-landing`) for **a
 staged-range reader that waits on PrismaBuild's landing record** (PQ #1107,
@@ -22553,7 +22579,10 @@ with `wait=False`: it neither waits nor evicts, and a full window defers it.
 **The size.** `two_plane_window_bytes` prices one plane as `n_probes` x
 `n_batches` entries, each at the writer's own per-entry bound (tensor bytes
 plus the 64 KiB envelope), in groups of `prefetch_batches`; the window is two
-planes. `tools/dispatch_joint_quanta.stage_a_spool_window_bytes` derives it
+planes. `n_batches` is the capture's batch count, one entry per batch of
+`probe_microbatch` rows (`plane_partitions`, PQ #1121), and a partial last
+batch is priced at the full batch's bound, as PrismaBuild reserves it.
+`tools/dispatch_joint_quanta.stage_a_spool_window_bytes` derives it
 from the plan's `execution` fields and the model config's hidden size,
 `hc_mult` and dtype, and `_container_wrap` seals it into the spec the row
 launches and into its `--env`. The capture recomputes it at bind from the
@@ -22637,8 +22666,6 @@ PrismaBuild does not sweep an ended owner's outstanding read-back prewrites.
   `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1`, which the campaign spec does
   not set. Until it does, the free-space refusal happens at bind, not at
   placement.
-- The capture binds `n_batches` as the calibration row count, so a plan with
-  `probe_microbatch` above 1 seals a window larger than its planes.
 - The fixture chain (`tests/test_stage_a_same_box_readback.py`) and the real
   PrismaBuild exporter test check behavior, not real-scale time. A
   real-scale profile of one GLM step is owed.

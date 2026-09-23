@@ -78,6 +78,7 @@ from .joint_layer_quanta import (
     adjoint_chain_phase_name,
     adjoint_forward_phase_name,
 )
+from .produced_output_spool import plane_partitions
 from .source_read_plan import chain_opening_window, chain_prefetch_window
 
 
@@ -685,7 +686,8 @@ def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
     _probe_microbatch = int(execution.get("probe_microbatch", 0))
     _n_rows = int(calib_ids.shape[0])
     _seqlen = int(calib_ids.shape[1])
-    _batch_rows = min(_probe_microbatch or _n_rows, _n_rows)
+    _batch_rows, _ = plane_partitions(n_rows=_n_rows,
+                                      probe_microbatch=_probe_microbatch)
     _n_full = _n_rows // _batch_rows
     _rem_rows = _n_rows % _batch_rows
     _per_full = _stage_a_per_tensor_nbytes(
@@ -1058,8 +1060,10 @@ def run_adjoint_capture_core(
             "stage A artifact_budget_stamp must be a mapping or None")
     storage = StreamedBoundaryArtifacts(storage_policy)
 
-    batch_rows = min(probe_microbatch or len(calib_ids), len(calib_ids))
-    row_offsets = list(range(0, len(calib_ids), batch_rows))
+    # One entry per batch in each probe's plane; the dispatcher seals the
+    # spool window from the same partition (PQ #1121).
+    batch_rows, row_offsets = plane_partitions(
+        n_rows=len(calib_ids), probe_microbatch=probe_microbatch)
     # The regime must fit the sealed read window before anything is
     # captured: a refusal at the first chain layer would come after the
     # whole forward capture (RobTand/prismaquant#997).
@@ -1225,7 +1229,9 @@ def run_adjoint_capture_core(
             storage.bind_produced_output(
                 produced_output,
                 group_size=int(storage_policy["prefetch_batches"]),
-                n_batches=len(calib_ids),
+                # The entries a plane holds, one per batch, not the rows: a
+                # microbatched plan writes fewer (PQ #1121).
+                n_batches=len(row_offsets),
                 max_entry_tensor_bytes=_stage_a_per_tensor_nbytes(
                     runner, batch_rows=batch_rows,
                     seqlen=int(calib_ids.shape[1])),

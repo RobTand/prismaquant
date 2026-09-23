@@ -820,15 +820,20 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
     from the producing box's own spool, so the spool holds one live plane
     and one more for the writes and exports turning over
     (``produced_output_spool.two_plane_window_bytes``). A plane is the
-    plan's ``n_probes`` x ``n_calib_samples`` entries (the count the capture
-    binds), each reserved at the writer's bound: one
-    ``probe_microbatch``-row batch's boundary tensor bytes plus the per-entry
-    file envelope. The
+    plan's ``n_probes`` x one entry per batch of ``probe_microbatch`` rows
+    of its ``n_calib_samples`` (``produced_output_spool.plane_partitions``,
+    the partition the capture writes and binds, PQ #1121). Each entry is
+    reserved at the writer's bound: one full batch's boundary tensor bytes
+    plus the per-entry file envelope, a partial last batch included,
+    because PrismaBuild reserves every entry of a group at the bound entry
+    size (``boundary_group_ceiling_bytes``). The
     tensor is ``rows x calib_seqlen x hidden_size x hc_mult`` elements of the
     model config's dtype; ``hc_mult`` is the residual-stream count the GLM
     profile expands to, read off the same config key it reads, and 1 for a
     config that declares none. At R12's shape (4 probes, 512 one-row
-    batches, 512 tokens, 4096 x 4 bf16) that is 68,987,912,192 B (64.25 GiB).
+    batches, 512 tokens, 4096 x 4 bf16) that is 68,987,912,192 B (64.25 GiB);
+    at ``probe_microbatch`` 4 it is 128 four-row entries a plane,
+    68,786,585,600 B.
 
     This is the planning derivation the row seals. The capture recomputes it
     from the live model at bind and refuses a sealed window below it
@@ -836,7 +841,8 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
     reads differently from the runner fails before any forward work.
     """
 
-    from prismaquant.produced_output_spool import two_plane_window_bytes
+    from prismaquant.produced_output_spool import (plane_partitions,
+                                                   two_plane_window_bytes)
 
     plan = json.loads(Path(campaign["plan_path"]).read_text())
     try:
@@ -847,6 +853,8 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
         microbatch = int(execution.get("probe_microbatch", 0))
         group_size = int(execution["boundary_storage"]["prefetch_batches"])
         model = Path(plan["model"])
+        rows, row_offsets = plane_partitions(n_rows=n_rows,
+                                             probe_microbatch=microbatch)
     except (KeyError, TypeError, ValueError) as exc:
         raise DispatchRefused(
             f"plan {campaign['plan_path']} does not state the Stage A plane "
@@ -861,15 +869,13 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
             f"model config {model / 'config.json'} does not state a hidden "
             f"size and a known dtype (dtype {dtype!r}); the Stage A spool "
             "window cannot be derived")
-    rows = min(microbatch or n_rows, n_rows)
-    # The capture binds n_batches=len(calib_ids), the row count
-    # (joint_cost_stage_a.py bind_produced_output), and derives its need from
-    # it; sealing from the same count keeps the seal at or above that need.
-    n_batches = n_rows
     tensor_bytes = (rows * seqlen * int(text["hidden_size"])
                     * int(text.get("hc_mult") or 1) * _CONFIG_DTYPE_BYTES[dtype])
+    # The capture binds n_batches=len(row_offsets) from the same partition
+    # (joint_cost_stage_a.py bind_produced_output) and derives its need from
+    # it, so the seal and the bind's need are one number.
     return two_plane_window_bytes(
-        n_probes=n_probes, n_batches=n_batches, group_size=group_size,
+        n_probes=n_probes, n_batches=len(row_offsets), group_size=group_size,
         max_entry_tensor_bytes=tensor_bytes)
 
 
