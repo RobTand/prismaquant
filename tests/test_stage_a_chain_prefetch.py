@@ -15,7 +15,10 @@ hold it to, on every entry path:
 * A resume, likewise.
 
 On every path the chain holds no more source reads in flight than its
-lookahead, which is what the forward pass holds too.
+lookahead, which is what the forward pass holds too. Each path runs with the
+plan's operator windows, which ask for a layer's successors after its
+install, and without them, where each roll asks for the layer ``lookahead``
+below it.
 
 The context is a bounded LRU source cache that refuses an install the way
 ``StreamingContext.ensure_loaded`` does. The fixture's own context accepts
@@ -32,7 +35,9 @@ import torch
 from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.model_profiles.default import DefaultProfile
 
+from test_joint_cost_quantum_runtime import _boundary_policy, _execution
 from test_stage_a_chain_resume import (
+    CAP,
     _DeepTinyLM,
     _at,
     _interrupted,
@@ -127,16 +132,31 @@ def _factory(contexts, *, slots, lookahead):
     return build
 
 
+def _execution_for(root, windows):
+    """``_run``'s own execution, with or without the plan's operator windows."""
+    execution = _execution(root)
+    policy = _boundary_policy(root / "boundaries")
+    policy["max_resident_bytes"] = CAP
+    execution["boundary_storage"] = policy
+    if windows == "none":
+        del execution["operator_windows"]
+    return execution
+
+
 LOOKAHEAD = pytest.mark.parametrize("lookahead", [1, 2], ids=["lookahead1", "lookahead2"])
 SLOTS = pytest.mark.parametrize("slots", [1, 2], ids=["slots1", "slots2"])
+WINDOWS = pytest.mark.parametrize("windows", ["operator", "none"],
+                                  ids=["operator-windows", "no-operator-windows"])
 
 
+@WINDOWS
 @LOOKAHEAD
 @SLOTS
 def test_a_fresh_walk_starts_its_chain_on_what_the_forward_pass_left(
-        tmp_path, monkeypatch, lookahead, slots):
+        tmp_path, monkeypatch, lookahead, slots, windows):
     contexts = []
-    receipt = _run(tmp_path / "run", monkeypatch,
+    root = tmp_path / "run"
+    receipt = _run(root, monkeypatch, execution=_execution_for(root, windows),
                    runner_factory=_factory(contexts, slots=slots, lookahead=lookahead))
     [context] = contexts
     assert [c["boundary"] for c in receipt["checkpoints"]] == [5, 4, 2]
@@ -159,12 +179,16 @@ def test_a_fresh_walk_starts_its_chain_on_what_the_forward_pass_left(
     assert context.max_in_flight <= lookahead
 
 
+@WINDOWS
 @LOOKAHEAD
-def test_a_seed_starts_its_chain_with_nothing_resident(tmp_path, monkeypatch, lookahead):
+def test_a_seed_starts_its_chain_with_nothing_resident(
+        tmp_path, monkeypatch, lookahead, windows):
     source = _source(tmp_path, monkeypatch)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     contexts = []
-    receipt = _seed(tmp_path / "seed", monkeypatch, _spec(source),
+    scratch = tmp_path / "seed"
+    receipt = _seed(scratch, monkeypatch, _spec(source),
+                    execution=_execution_for(scratch, windows),
                     runner_factory=_factory(contexts, slots=1, lookahead=lookahead))
     [context] = contexts
 
@@ -178,12 +202,16 @@ def test_a_seed_starts_its_chain_with_nothing_resident(tmp_path, monkeypatch, lo
     assert receipt["plane_comparison"]["bitwise_equal"] is True
 
 
+@WINDOWS
 @LOOKAHEAD
-def test_a_resume_starts_its_chain_with_nothing_resident(tmp_path, monkeypatch, lookahead):
+def test_a_resume_starts_its_chain_with_nothing_resident(
+        tmp_path, monkeypatch, lookahead, windows):
     root = tmp_path / "run"
-    _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
+    execution = _execution_for(root, windows)
+    _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2), execution=execution)
     contexts = []
     receipt = _run(root, monkeypatch, chain_resume=_resume(root, resume_from=4),
+                   execution=execution,
                    runner_factory=_factory(contexts, slots=1, lookahead=lookahead))
     [context] = contexts
     assert [c["boundary"] for c in receipt["checkpoints"]] == [5, 4, 2]
