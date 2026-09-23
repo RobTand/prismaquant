@@ -200,6 +200,24 @@ def prefetch_joint_cache(cache, names, formats_by_qname, *, max_resident_bytes, 
     return {"entries": len(keys), "resident_bytes": nbytes, "loaded": loaded, "misses": 0}
 
 
+def select_invocation_gradient(name, source_weight, x, gradient, *,
+                               output_slice=None, row_slice=None):
+    """One observed invocation's gradient operand, geometry-checked.
+
+    A packed expert's hook sees the whole grouped output gradient; its rows
+    are ``row_slice`` and its projection's columns ``output_slice``. The live
+    statistics hook and the Stage B spill observer both select through here.
+    """
+    selected = gradient if row_slice is None else gradient[row_slice]
+    selected = selected if output_slice is None else selected[..., output_slice]
+    if x.device != selected.device or x.device != source_weight.device:
+        raise RuntimeError(f"joint statistics residency mismatch for {name}")
+    if (x.shape[:-1] != selected.shape[:-1] or x.shape[-1] != source_weight.shape[1]
+            or selected.shape[-1] != source_weight.shape[0]):
+        raise RuntimeError(f"joint statistics Linear geometry/shape mismatch for {name}")
+    return selected
+
+
 @dataclass(frozen=True)
 class _JointActivationGroup:
     spec: object
@@ -606,6 +624,58 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
             inputs.clear()
         self._observation_inputs.clear()
 
+    def _fail_observation(self):
+        # A QDQ/GEMM may fail after an earlier operator committed.
+        # Never allow a caught backward failure to become a retry.
+        self._phase, self.active = 'failed', False
+        self._remove_observers()
+        self.modules.clear()
+        self._operators.clear()
+        self._release_observation_inputs()
+
+    @torch.no_grad()
+    def _observe_invocation(self, name, source_weight, x, gradient,
+                            output_slice=None, row_slice=None):
+        """The one statistics arithmetic for one observed backward invocation.
+
+        The live hook below and the Stage B spill replay
+        (``joint_replay_spill``) both call this, so they share the slice
+        selection, the ``.float()`` upcasts, the GEMMs, the QDQ, the
+        accumulation and the observation counters. ``x`` is the Linear's
+        input as the hook holds it and ``gradient`` its output gradient; a
+        spill replay passes the already selected gradient with no slices.
+        """
+        if self._phase != 'observing' or not self.active:
+            raise RuntimeError("joint statistics backward outside active observation")
+        try:
+            self._require_source(name, source_weight)
+            selected = select_invocation_gradient(
+                name, source_weight, x, gradient,
+                output_slice=output_slice, row_slice=row_slice)
+            x2 = x.reshape(-1, x.shape[-1]).float()
+            g2 = selected.reshape(-1, selected.shape[-1]).float()
+            # Count actual backward observations, including an invoked
+            # expert whose exact contribution is zero. An uninvoked
+            # expert remains count=0 and has UNKNOWN pilot cost.
+            self._observed_tokens[name] += int(x2.shape[0])
+            self._observed_calls[name] += 1
+            self._accumulate((name, None), g2.T @ x2)
+            self.telemetry['operator_gemms'] += 1
+            for index, (spec, _) in enumerate(self.groups[name]):
+                if not spec.act_quant_changes_input:
+                    continue
+                quantized = _activation_qdq(x, spec, self.activation_max_abs, name)
+                if (not isinstance(quantized, torch.Tensor) or quantized.shape != x.shape
+                        or quantized.device != x.device or quantized.dtype != x.dtype):
+                    raise RuntimeError(f"joint statistics QDQ changed residency/dtype/shape for {name}")
+                dx = quantized.reshape_as(x2).float() - x2
+                self._accumulate((name, index), g2.T @ dx)
+                self.telemetry['qdq_calls'] += 1
+                self.telemetry['operator_gemms'] += 1
+        except BaseException:
+            self._fail_observation()
+            raise
+
     def _observe(self, name, source_weight, x, output, output_slice=None, row_slice=None):
         if self._phase != 'observing' or not self.active:
             raise RuntimeError("joint statistics forward outside active observation")
@@ -622,44 +692,12 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
                 raise RuntimeError("joint statistics backward outside active observation")
             try:
                 x, source_weight = inputs
-                self._require_source(name, source_weight)
-                selected = gradient if row_slice is None else gradient[row_slice]
-                selected = selected if output_slice is None else selected[..., output_slice]
-                if x.device != selected.device or x.device != source_weight.device:
-                    raise RuntimeError(f"joint statistics residency mismatch for {name}")
-                if (x.shape[:-1] != selected.shape[:-1] or x.shape[-1] != source_weight.shape[1]
-                        or selected.shape[-1] != source_weight.shape[0]):
-                    raise RuntimeError(f"joint statistics Linear geometry/shape mismatch for {name}")
-                x2 = x.reshape(-1, x.shape[-1]).float()
-                g2 = selected.reshape(-1, selected.shape[-1]).float()
-                # Count actual backward observations, including an invoked
-                # expert whose exact contribution is zero. An uninvoked
-                # expert remains count=0 and has UNKNOWN pilot cost.
-                self._observed_tokens[name] += int(x2.shape[0])
-                self._observed_calls[name] += 1
-                self._accumulate((name, None), g2.T @ x2)
-                self.telemetry['operator_gemms'] += 1
-                for index, (spec, _) in enumerate(self.groups[name]):
-                    if not spec.act_quant_changes_input:
-                        continue
-                    quantized = _activation_qdq(x, spec, self.activation_max_abs, name)
-                    if (not isinstance(quantized, torch.Tensor) or quantized.shape != x.shape
-                            or quantized.device != x.device or quantized.dtype != x.dtype):
-                        raise RuntimeError(f"joint statistics QDQ changed residency/dtype/shape for {name}")
-                    dx = quantized.reshape_as(x2).float() - x2
-                    self._accumulate((name, index), g2.T @ dx)
-                    self.telemetry['qdq_calls'] += 1
-                    self.telemetry['operator_gemms'] += 1
+                self._observe_invocation(name, source_weight, x, gradient,
+                                         output_slice, row_slice)
                 consumed = True
                 self._pending_backwards -= 1
             except BaseException:
-                # A QDQ/GEMM may fail after an earlier operator committed.
-                # Never allow a caught backward failure to become a retry.
-                self._phase, self.active = 'failed', False
-                self._remove_observers()
-                self.modules.clear()
-                self._operators.clear()
-                self._release_observation_inputs()
+                self._fail_observation()
                 raise
             finally:
                 inputs.clear()
