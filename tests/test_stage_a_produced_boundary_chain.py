@@ -390,13 +390,16 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
                  payload_max_bytes: int = 1 << 20, window_gib: int = 2,
                  gib: int = 4, staging_timeout_s: float = 900.0,
                  published=False, producer_environment=None, claim_capacity=None,
-                 n_probes=1, read_order=None):
+                 n_probes=1, read_order=None, storage_config=None,
+                 max_entry_tensor_bytes=1 << 14):
     """A real queue, admitted owner, declared template, bound publication,
     and a real ``StreamedBoundaryArtifacts`` writing inside its prefix.
 
     ``n_probes`` and ``read_order`` are the owner's probe count and the
     roll's read order (``bind_produced_output``); the defaults are the
-    probe-major roll every test here was written for."""
+    probe-major roll every test here was written for. ``storage_config``
+    overrides the owner's byte bounds and ``max_entry_tensor_bytes`` the
+    entry bound, for a fixture with larger entries (PQ #1128's profile)."""
 
     _src, pb_repo = _pb_source()
     from prismaquant.staged_lease import set_lease_helper_root
@@ -444,11 +447,12 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
         "schema": BOUNDARY_STORAGE_SCHEMA,
         "directory": str(prefix / "exact"),
         "max_resident_bytes": 1 << 24, "max_auxiliary_bytes": 1 << 24,
-        "max_artifact_bytes": 1 << 24, "prefetch_batches": GROUP_SIZE})
+        "max_artifact_bytes": 1 << 24, "prefetch_batches": GROUP_SIZE,
+        **(storage_config or {})})
     storage.bind({"source_model": "fixture"}, n_probes=n_probes, published=published)
     storage.bind_produced_output(
         publication, group_size=GROUP_SIZE, n_batches=n_batches,
-        max_entry_tensor_bytes=1 << 14,
+        max_entry_tensor_bytes=max_entry_tensor_bytes,
         staging_timeout_s=staging_timeout_s,
         **({"read_order": read_order} if read_order is not None else {}))
     return storage, publication, q, env, pb_repo
