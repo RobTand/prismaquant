@@ -150,8 +150,9 @@ def test_a_test_that_never_reached_its_call_phase_is_not_a_pass(tmp_path):
 
 #: The per-test bound the hanging sample runs under. pytest-timeout bounds a
 #: test's setup and call together, and the first test in the child pays the
-#: conftest's first imports in its setup, so the bound leaves room for them.
-BOUND_S = 10
+#: conftest's first imports in its setup: at 6 s that setup and a 3.5 s test
+#: ran out the bound on a loaded sparklina, so the bound leaves wide room.
+BOUND_S = 30
 
 #: Each per-test bound a session can run under: the module that must be
 #: importable, the parent session's arguments and environment, and the words
