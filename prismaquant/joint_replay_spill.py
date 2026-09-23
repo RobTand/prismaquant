@@ -29,9 +29,12 @@ The spill is laid out per Linear (``_Window``): one input stream per Linear
 that first read a tensor, and one gradient stream per Linear and probe, so a
 per-operator GEMM over a Linear's rows reads two ordered streams.
 
-The arithmetic identity and the resource policy are unchanged; the replay
-mode is recorded only in the quantum counters. Without the spill
-environment the windowed path runs unchanged and is the bitwise reference.
+At the default replay regime the arithmetic identity and the resource
+policy are unchanged; the replay mode is recorded only in the quantum
+counters. Without the spill environment the windowed path runs unchanged and
+is the bitwise reference. A non-default regime (``joint_replay_regime``:
+several stored batches per capture pass, or one GEMM per operator over row
+chunks) changes the arithmetic and is stamped in the statistics identity.
 
 The scratch is declared like the #956 cotangent sink: an environment root and
 a byte ceiling, forwarded by the campaign container launcher through an
@@ -58,6 +61,7 @@ from .joint_aura import (
     SignedJointProjectionLease,
     select_invocation_gradient,
 )
+from .joint_replay_regime import OPERATOR_GEMM, PER_INVOCATION, normalize_replay_regime
 from .routed_experts import PackedExpertProjection
 
 SPILL_ENV = ("PRISMAQUANT_STAGE_B_SPILL_ROOT", "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
@@ -364,6 +368,8 @@ class _Window:
         self.entry_cursor: dict[str, int] = {}
         self.record_cursor = 0
         self.dedupe: dict = {}
+        # operator_gemm: Linear -> (rows per probe, input width, output width)
+        self.rows: dict[str, list[int]] = {}
 
 
 class _Arena:
@@ -373,6 +379,17 @@ class _Arena:
         self.buffer = torch.empty(nbytes, dtype=torch.uint8, pin_memory=pinned)
         self.view = memoryview(self.buffer.numpy())
         self.used, self.parts, self.event, self.probe = 0, [], None, None
+
+
+class _RowBlock:
+    """One Linear's rows awaiting the operator GEMM (``operator_gemm``)."""
+
+    __slots__ = ("x", "g", "filled", "calls")
+
+    def __init__(self, rows, x_width, g_width, dtype, device):
+        self.x = torch.empty((rows, x_width), dtype=dtype, device=device)
+        self.g = torch.empty((rows, g_width), dtype=dtype, device=device)
+        self.filled = self.calls = 0
 
 
 class _SpillObserver(SignedJointProjectionLease):
@@ -452,9 +469,14 @@ class StageBReplaySpill:
     """
 
     def __init__(self, *, root, max_bytes, geometry, window_names, n_probes,
-                 dtype, device, threads=None):
+                 dtype, device, threads=None, accumulation=PER_INVOCATION,
+                 chunk_rows=None):
         from .perturbed_x_cache import StageBSpillScratch
 
+        regime = normalize_replay_regime({"accumulation": accumulation,
+                                          "chunk_rows": chunk_rows})
+        self.accumulation, self.chunk_rows = regime["accumulation"], regime["chunk_rows"]
+        self._gemm_reserve = 0
         if dtype not in SPILL_DTYPES:
             raise RuntimeError(
                 f"Stage B spill replays 16-bit measurement only, not {dtype}: "
@@ -507,6 +529,9 @@ class StageBReplaySpill:
             "read_buffers": READ_BUFFER_COUNT if self._threads else 1,
             "threads": self._threads,
         }
+        if self.accumulation == OPERATOR_GEMM:
+            self.telemetry.update(accumulation=self.accumulation,
+                                  chunk_rows=self.chunk_rows, row_chunks=0)
         self._scratch = StageBSpillScratch(directory=root, max_bytes=max_bytes,
                                            nbytes=geometry.total_bytes)
 
@@ -519,9 +544,13 @@ class StageBReplaySpill:
 
     @property
     def replay_reserve_bytes(self):
-        """Pinned read buffers plus the device staging a window keeps live."""
+        """Pinned read buffers plus the device staging a window keeps live.
+
+        Under ``operator_gemm`` also one input stream's row blocks and one
+        chunk's FP32 GEMM operands (bounded at the probe-0 capture).
+        """
         buffers = 0 if self._read_buffers else self.read_bytes * self.telemetry["read_buffers"]
-        return buffers + 2 * (self.read_bytes + ADDRESS_ALIGNMENT)
+        return buffers + 2 * (self.read_bytes + ADDRESS_ALIGNMENT) + self._gemm_reserve
 
     # -- lifetime -------------------------------------------------------------
     def __enter__(self):
@@ -808,6 +837,8 @@ class StageBReplaySpill:
         for index, window in enumerate(self._windows):
             if probe == 0:
                 window.plan = self._plan(window)
+                if self.accumulation == OPERATOR_GEMM:
+                    self._gemm_reserve = max(self._gemm_reserve, self._row_bounds(window))
                 window.x_starts = {owner: [run[0] for run in runs]
                                    for owner, runs in window.x_runs.items()}
                 self.telemetry["x_entries"] += sum(len(e) for e in window.entries.values())
@@ -837,6 +868,31 @@ class StageBReplaySpill:
             self._arena = None
 
     # -- replay ---------------------------------------------------------------
+    def _row_bounds(self, window):
+        """Record each Linear's rows; return the window's operator-GEMM bytes.
+
+        One input stream's Linears hold row blocks at once (the plan replays
+        a stream to its end before the next), and one chunk at a time is
+        upcast: FP32 input and gradient rows, the QDQ output and its FP32
+        difference.
+        """
+        es = self.element_size
+        for name, _owner, _entry, _logical, _g_bytes, (shape, _, _) in window.records:
+            rows = 1
+            for size in shape[:-1]:
+                rows *= int(size)
+            counts = window.rows.setdefault(name, [0, 0, int(shape[-1])])
+            counts[0] += rows
+        for name, owner in window.x_source.items():
+            window.rows[name][1] = int(window.entries[owner][0].layout[0][-1])
+        blocks, upcast = {}, 0
+        for name, (rows, x_width, g_width) in window.rows.items():
+            held = min(rows, self.chunk_rows)
+            blocks[window.x_source[name]] = (blocks.get(window.x_source[name], 0)
+                                             + held * (x_width + g_width) * es)
+            upcast = max(upcast, held * (x_width * (8 + es) + g_width * 4))
+        return max(blocks.values(), default=0) + upcast
+
     def _plan(self, window):
         """Replay order: one input stream's records at a time, in read chunks.
 
@@ -988,9 +1044,16 @@ class StageBReplaySpill:
         started = time.time()
         live: dict[tuple[str, int], torch.Tensor] = {}
         es = self.element_size
+        gemm = self.accumulation == OPERATOR_GEMM
+        blocks: dict[str, _RowBlock] = {}
+        stream = None
         try:
             for item, buffer in self._chunks(window, probe_index, window.plan):
                 owner, (records, new, gradients, used) = item
+                if gemm and owner != stream:
+                    # The plan replays one input stream to its end first.
+                    self._emit_blocks(blocks, lease)
+                    stream = owner
                 staging = torch.empty(used + 2 * ADDRESS_ALIGNMENT, dtype=torch.uint8,
                                       device=self.device)
                 shift = (-staging.data_ptr()) % ADDRESS_ALIGNMENT
@@ -1010,11 +1073,17 @@ class StageBReplaySpill:
                     name, _, entry, _, _, (shape, stride, _) = window.records[position]
                     gradient = torch.as_strided(typed, shape, stride,
                                                 (shift + gradient_at[position]) // es)
-                    lease._observe_invocation(name, lease.modules[name].weight,
-                                              live[(owner, entry)], gradient)
+                    if gemm:
+                        self._append_rows(window, blocks, lease, name,
+                                          live[(owner, entry)], gradient)
+                    else:
+                        lease._observe_invocation(name, lease.modules[name].weight,
+                                                  live[(owner, entry)], gradient)
                     if window.last_ref[(owner, entry)] == position:
                         del live[(owner, entry)]
                 del staging, typed
+            if gemm:
+                self._emit_blocks(blocks, lease)
             if live:
                 raise RuntimeError("Stage B spill replay left an input unconsumed")
         except BaseException:
@@ -1022,4 +1091,43 @@ class StageBReplaySpill:
             raise
         finally:
             live.clear()
+            blocks.clear()
         self.telemetry["replay_wall_s"] += time.time() - started
+
+    def _append_rows(self, window, blocks, lease, name, x, gradient):
+        """Copy one invocation's rows into ``name``'s block, emitting full chunks."""
+        x2 = x.reshape(-1, x.shape[-1])
+        g2 = gradient.reshape(-1, gradient.shape[-1])
+        if x2.shape[0] != g2.shape[0]:
+            raise RuntimeError(f"Stage B spill rows differ between input and gradient for {name}")
+        block = blocks.get(name)
+        if block is None:
+            rows, x_width, g_width = window.rows[name]
+            block = blocks[name] = _RowBlock(min(rows, self.chunk_rows), x_width, g_width,
+                                             self.dtype, self.device)
+        block.calls += 1
+        start, total, capacity = 0, int(x2.shape[0]), int(block.x.shape[0])
+        while start < total:
+            take = min(capacity - block.filled, total - start)
+            if take <= 0:
+                raise RuntimeError(f"Stage B spill rows exceed their bound for {name}")
+            block.x.narrow(0, block.filled, take).copy_(x2.narrow(0, start, take))
+            block.g.narrow(0, block.filled, take).copy_(g2.narrow(0, start, take))
+            block.filled += take
+            start += take
+            if block.filled == capacity:
+                self._emit(lease, name, block)
+
+    def _emit(self, lease, name, block):
+        lease.observe_row_chunk(name, lease.modules[name].weight,
+                                block.x.narrow(0, 0, block.filled),
+                                block.g.narrow(0, 0, block.filled), calls=block.calls)
+        block.filled = block.calls = 0
+        self.telemetry["row_chunks"] += 1
+
+    def _emit_blocks(self, blocks, lease):
+        """Emit every partial chunk of the stream just replayed, then free it."""
+        for name, block in blocks.items():
+            if block.filled or block.calls:
+                self._emit(lease, name, block)
+        blocks.clear()

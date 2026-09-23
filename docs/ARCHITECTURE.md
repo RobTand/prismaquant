@@ -31,8 +31,14 @@ when it closes) and any activation QDQ in the roster that is not row-local
 the run's device, the QDQ of a block of rows with the rows' own QDQs, through
 the lease's own QDQ function). Before the chain it refuses any profile shared
 pass state or shared-state cotangent, and it checks again per group. The
-workspace reserve the capture pass charges scales with B. The operator GEMM is
-not implemented yet, so `accumulation=operator_gemm` still refuses. Gates:
+workspace reserve the capture pass charges scales with B.
+`accumulation=operator_gemm` replays each Linear's spilled rows, in capture
+order, through one FP32 GEMM per operator per `chunk_rows` rows
+(`JointOperatorStatisticsLease.observe_row_chunk`), instead of one per
+backward invocation. It shares the upcasts, QDQ and accumulation with the
+invocation path (`_observe_rows`), and it counts the same observed tokens and
+calls. The `contraction_order` field is unchanged: operators are still summed
+before each signed component is projected. Gates:
 `tests/test_stageb_replay_regime.py`, `tests/test_stageb_one_pass_spill.py`,
 `tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
 changes.

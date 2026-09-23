@@ -1158,9 +1158,6 @@ def run_layer_quantum_core(
                 "the spill; declare PRISMAQUANT_STAGE_B_SPILL_ROOT and "
                 "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
         counters.replay["regime"] = replay_regime_identity(replay_regime)
-        if replay_regime["accumulation"] != DEFAULT_REPLAY_REGIME["accumulation"]:
-            raise QuantumIdentityRefused(
-                f"quantum {quantum_id}: replay regime {replay_regime} is not implemented")
     capture_batch = replay_regime["capture_batch"]
 
     retained = quantum_retained_state(execution)
@@ -1442,7 +1439,8 @@ def run_layer_quantum_core(
         spill = StageBReplaySpill(
             root=spill_config[0], max_bytes=spill_config[1], geometry=spill_bound,
             window_names=spill_windows, n_probes=n_probes, dtype=runner.dtype,
-            device=runner.device)
+            device=runner.device, accumulation=replay_regime["accumulation"],
+            chunk_rows=replay_regime["chunk_rows"])
         counters.replay.update(mode=REPLAY_SPILL, spill_geometry=spill_bound.as_dict())
         if capture_batch > 1:
             counters.replay["capture_groups"] = len(capture_groups)

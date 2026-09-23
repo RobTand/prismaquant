@@ -744,6 +744,98 @@ def test_batched_spill_capture_is_stamped_and_reruns_bitwise(campaign, monkeypat
         "route_moves": sum(abs(batched[name] - single[name]) for name in single)})
 
 
+def _operator_snapshots(monkeypatch):
+    """Record every window lease's FP32 statistics matrices, in order."""
+    import prismaquant.joint_aura as joint
+
+    seen = []
+    original = joint.JointOperatorStatisticsLease.finish_observations
+
+    def recording(self):
+        seen.append({key: value.detach().to("cpu", copy=True)
+                     for key, value in self._operators.items()})
+        return original(self)
+
+    monkeypatch.setattr(joint.JointOperatorStatisticsLease, "finish_observations",
+                        recording)
+    return seen
+
+
+def _relative_frobenius(left, right):
+    """max over (window, probe, key) of ||left - right|| / ||right||."""
+    assert len(left) == len(right)
+    worst = 0.0
+    for mine, reference in zip(left, right):
+        assert set(mine) == set(reference)
+        for key, matrix in reference.items():
+            norm = float(torch.linalg.matrix_norm(matrix.double()))
+            delta = float(torch.linalg.matrix_norm((mine[key] - matrix).double()))
+            worst = max(worst, delta / norm if norm else delta)
+    return worst
+
+
+@pytest.mark.parametrize("regime", [
+    "accumulation=operator_gemm,chunk_rows=5",
+    "accumulation=operator_gemm,chunk_rows=65536",
+    "capture_batch=2,accumulation=operator_gemm,chunk_rows=7",
+])
+def test_operator_gemm_replay_matches_the_invocation_counts_and_reruns_bitwise(
+        campaign, monkeypatch, tmp_path, regime):
+    """One GEMM per operator over a Linear's spilled rows, chunked.
+
+    At capture batch 1 it observes exactly the bitwise replay's tokens and
+    calls per Linear, and its statistics matrices differ from the bitwise
+    ones only by FP32 summation order. A rerun at the same regime is
+    bitwise. A chunk of 5 or 7 rows cuts across invocations; 65536 is one
+    GEMM per operator per window and probe.
+    """
+    from prismaquant.joint_replay_regime import normalize_replay_regime, replay_regime_of
+
+    expected = normalize_replay_regime(regime)
+    layer = 0
+    seen = _observations(monkeypatch)
+    matrices = _operator_snapshots(monkeypatch)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "bitwise"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    bitwise_seen, bitwise_matrices = list(seen), list(matrices)
+    runs = []
+    for attempt in range(2):
+        seen.clear()
+        matrices.clear()
+        _clear_output(campaign, layer)
+        spill_root = _spill_root(tmp_path / f"gemm-{attempt}")
+        payload, state = _quantum(campaign, monkeypatch, layer=layer, spill_root=spill_root,
+                                  ceiling=1 << 30, regime=regime)
+        assert payload is not None, _chain(state.error)
+        for rows in payload["costs"].values():
+            for row in rows.values():
+                arithmetic = row["probe_identity"]["arithmetic"]
+                assert replay_regime_of(arithmetic) == expected
+                assert arithmetic["operator_accumulation"] == (
+                    "fp32_gemm_over_spilled_rows_in_capture_order_by_row_chunk")
+        telemetry = state.counters_block["replay"]["spill"]
+        assert telemetry["accumulation"] == "operator_gemm"
+        assert telemetry["chunk_rows"] == expected["chunk_rows"]
+        assert telemetry["row_chunks"] > 0
+        assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+        runs.append((_evidence(campaign, layer, payload), list(seen), list(matrices)))
+    assert runs[0][0] == runs[1][0]
+    assert all(torch.equal(a[key], b[key]) for a, b in zip(runs[0][2], runs[1][2])
+               for key in b)
+    if expected["capture_batch"] == 1:
+        assert runs[0][1] == bitwise_seen
+        worst = _relative_frobenius(runs[0][2], bitwise_matrices)
+        assert worst < 1e-5, worst
+    else:
+        assert _token_totals(runs[0][1]).keys() == _token_totals(bitwise_seen).keys()
+        worst = _relative_frobenius(runs[0][2], bitwise_matrices)
+    _report(f"operator-gemm-{campaign.device.type}-{regime}", {
+        "regime": regime, "worst_relative_frobenius": worst,
+        "row_chunks": telemetry["row_chunks"]})
+
+
 def test_capture_batch_that_splits_a_read_window_refuses_before_any_gpu_work(
         campaign, monkeypatch, tmp_path):
     _clear_output(campaign, 0)
