@@ -25,7 +25,8 @@ so the relaunch can neither rebind the old session nor pass the capsule's
   A different implementation must be declared (``implementation_compatibility``,
   ``FROM`` and ``TO``); it is never inferred.
 * It rolls the chain from ``b`` down to ``through``, sealing its own
-  checkpoints at the stride boundaries on the way, and stops. With a
+  checkpoints at the stride boundaries on the way and at ``through``, its
+  result, and stops. With a
   ``compare`` checkpoint of the source run at ``through``, it hashes each
   rolled ``(probe, batch)`` tensor payload as it writes it and each of the
   reference's, and records both in its receipt.
@@ -52,6 +53,7 @@ SEED_SPEC_SCHEMA = "prismaquant.stage_a.chain_seed.v1"
 SEED_MARKER_SCHEMA = "prismaquant.stage_a.chain_seed_marker.v1"
 SEED_RECEIPT_SCHEMA = "prismaquant.stage_a.seed_receipt.v1"
 SEED_COMPARISON_SCHEMA = "prismaquant.stage_a.seed_plane_comparison.v1"
+PLANE_DISTANCE_SCHEMA = "prismaquant.stage_a.checkpoint_plane_distance.v1"
 SEED_COMPATIBILITY_SCOPE = "stage-a-chain-seed"
 SEED_MARKER_NAME = "chain-seed.json"
 SEED_RECEIPT_NAME = "seed-receipt.json"
@@ -447,4 +449,126 @@ def compare_seed_plane(plan: ChainSeed, digests: dict) -> dict:
         "equal": equal,
         "different": len(entries) - equal,
         "bitwise_equal": equal == len(entries),
+    }
+
+
+def load_pinned_checkpoint(binding, where="checkpoint") -> dict:
+    """The record of a pinned, self-sealing ``checkpoint.json``.
+
+    The same checks a seed makes of the checkpoint it borrows: the pinned
+    digest, the writer's own serialization, the self-seal, and the file's
+    place beside its entries under a Stage A output root.
+    """
+    record, _ = _sealed_checkpoint(_pinned(binding, where), where)
+    return record
+
+
+def _cotangent_plane(record, where) -> dict:
+    plane = {}
+    for row in record["activation_entries"]:
+        match = re.fullmatch(r"cotangent-(\d+)-(\d+)", row["name"])
+        if match is None:
+            raise ChainSeedRefused(f"the {where} lists a non-cotangent entry")
+        plane[int(match[1]), int(match[2])] = row
+    if not plane:
+        raise ChainSeedRefused(f"the {where} holds no cotangent entry")
+    return plane
+
+
+def _quantile(values, q):
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(q * len(ordered)))]
+
+
+def checkpoint_plane_distance(reference, candidate, *, device="cpu",
+                              read_ahead=8) -> dict:
+    """Per-entry distance of one sealed cotangent plane from another (PQ #997).
+
+    ``reference`` and ``candidate`` are ``{path, sha256}`` bindings of two
+    sealed ``checkpoint.json`` files at the same boundary, for example two
+    seed runs of one checkpoint under different chain regimes or matmul
+    reduction settings. They must be sealed under one bind identity (the
+    chain regime and the reduction flag are outside it), sit at one
+    boundary, and list the same ``(probe, batch)`` entries,
+    each of one shape and dtype. Every entry is read digest-verified, one
+    pair at a time with a bounded read-ahead of ``read_ahead`` pairs, and
+    compared in fp32 with fp64 sums: ``relative_l2`` is
+    ``||candidate - reference|| / ||reference||``, and ``max_abs`` the
+    largest elementwise difference. Each batch of a Stage A plane is one
+    calibration sample, so an entry is one (probe, sample).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    import torch
+
+    from .joint_adjoint_checkpoints import read_exact_entry_tensors
+
+    records = {"reference": load_pinned_checkpoint(reference, "reference checkpoint"),
+               "candidate": load_pinned_checkpoint(candidate, "candidate checkpoint")}
+    if records["reference"]["boundary"] != records["candidate"]["boundary"]:
+        raise ChainSeedRefused(
+            f"the reference checkpoint is boundary {records['reference']['boundary']} "
+            f"and the candidate {records['candidate']['boundary']}")
+    if (records["reference"]["session"]["run_identity_sha256"]
+            != records["candidate"]["session"]["run_identity_sha256"]):
+        raise ChainSeedRefused(
+            "the two checkpoints were sealed under different bind identities: they "
+            "are not arms of one science")
+    planes = {name: _cotangent_plane(record, f"{name} checkpoint")
+              for name, record in records.items()}
+    if set(planes["reference"]) != set(planes["candidate"]):
+        raise ChainSeedRefused("the two checkpoints do not hold the same cotangent entries")
+    for key, row in planes["reference"].items():
+        other = planes["candidate"][key]
+        if (row["shape"], row["dtype"]) != (other["shape"], other["dtype"]):
+            raise ChainSeedRefused(
+                f"cotangent {key} is {row['dtype']} {row['shape']} in the reference and "
+                f"{other['dtype']} {other['shape']} in the candidate")
+    if type(read_ahead) is not int or read_ahead < 1:
+        raise ValueError("read_ahead is a positive number of entry pairs")
+
+    def read(key):
+        return tuple(
+            read_exact_entry_tensors([planes[name][key]],
+                                     expected_session=records[name]["session"]).popitem()[1]
+            for name in ("reference", "candidate"))
+
+    keys = sorted(planes["reference"])
+    entries = []
+    with ThreadPoolExecutor(max_workers=read_ahead) as pool:
+        pending = {}
+        for index, key in enumerate(keys[:read_ahead]):
+            pending[index] = pool.submit(read, key)
+        for index, key in enumerate(keys):
+            ours, theirs = pending.pop(index).result()
+            following = index + read_ahead
+            if following < len(keys):
+                pending[following] = pool.submit(read, keys[following])
+            equal = tensor_payload_sha256(ours) == tensor_payload_sha256(theirs)
+            ref = ours.to(device=device, dtype=torch.float32)
+            diff = theirs.to(device=device, dtype=torch.float32) - ref
+            norm = float(ref.double().pow(2).sum().sqrt())
+            dist = float(diff.double().pow(2).sum().sqrt())
+            entries.append({
+                "probe": key[0], "batch": key[1], "bitwise_equal": equal,
+                "relative_l2": (0.0 if dist == 0.0 else
+                                float("inf") if norm == 0.0 else dist / norm),
+                "max_abs": float(diff.abs().max()) if diff.numel() else 0.0,
+            })
+            del ours, theirs, ref, diff
+    relative = [entry["relative_l2"] for entry in entries]
+    return {
+        "schema": PLANE_DISTANCE_SCHEMA,
+        "boundary": records["reference"]["boundary"],
+        "reference": {**_pinned(reference, "reference checkpoint"),
+                      "session": records["reference"]["session"]},
+        "candidate": {**_pinned(candidate, "candidate checkpoint"),
+                      "session": records["candidate"]["session"]},
+        "entries": entries,
+        "equal": sum(entry["bitwise_equal"] for entry in entries),
+        "different": sum(not entry["bitwise_equal"] for entry in entries),
+        "relative_l2": {"mean": sum(relative) / len(relative),
+                        "median": _quantile(relative, 0.5),
+                        "p99": _quantile(relative, 0.99),
+                        "max": max(relative)},
+        "max_abs": max(entry["max_abs"] for entry in entries),
     }

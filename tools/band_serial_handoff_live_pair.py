@@ -126,9 +126,13 @@ def prepare(root: Path, tier: str) -> dict:
     def slice_of(record):
         return json.loads(Path(record["adjoint"]["slice_path"]).read_text())
 
+    # Named for this root: PB files a template under its id and refuses a
+    # different one under the same id, and the default id is the one a
+    # campaign's own layer-3 row would file.
     template = dispatch.handoff_template_path(
         producer, plan={"execution": {"boundary_storage": storage}},
-        adjoint_slice=slice_of(producer), tier=tier, output_root=root / "out")
+        adjoint_slice=slice_of(producer), tier=tier, output_root=root / "out",
+        template_id=f"pq-stageb-handoff-{producer['quantum_id']}-{root.name}")
 
     # The producer's staged input: its checkpoint plane (boundary 4).
     plane = slice_of(producer)["checkpoint"]["activation_entries"]
@@ -232,7 +236,13 @@ def _serving(paths) -> dict:
         "tier_id", "bytes_from_stage", "bytes_from_ram", "bytes_from_pool",
         "fallback_count", "ram_fallback_count", "serving_tier_count",
         "declared_readset")}
-    return {"served": served, "resolver": counters}
+    # PQ #1026: the tiers' byte counters must sum to every byte read, so
+    # the per-tier split is a measurement, not a partial sample.
+    tier_bytes = sum(int(counters.get(key) or 0) for key in (
+        "bytes_from_stage", "bytes_from_ram", "bytes_from_pool"))
+    read_bytes = sum(Path(path).stat().st_size for path in paths)
+    return {"served": served, "resolver": counters,
+            "tier_bytes": tier_bytes, "read_bytes": read_bytes}
 
 
 def producer_role(root: Path, data_manifest_sha256: str) -> int:
@@ -268,6 +278,8 @@ def producer_role(root: Path, data_manifest_sha256: str) -> int:
     checks["checkpoint_plane_staged"] = all(
         tiers and set(tiers) <= {"stage", "ram"}
         for tiers in out["checkpoint_read"]["served"].values())
+    checks["checkpoint_counts_complete"] = (
+        out["checkpoint_read"]["tier_bytes"] == out["checkpoint_read"]["read_bytes"])
 
     publication = bind_handoff_publication(boundary_storage=pair["storage"])
     env = getattr(publication, "env", {}) or {}
@@ -397,6 +409,8 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
         tiers and set(tiers) <= {"stage", "ram"} for tiers in served.values())
     checks["owner_states_staged"] = bool(served.get(handoff_doc["owner_states"]["path"]))
     checks["no_pool_bytes"] = not out["handoff_load"]["resolver"].get("bytes_from_pool")
+    checks["counts_complete"] = (
+        out["handoff_load"]["tier_bytes"] == out["handoff_load"]["read_bytes"])
     out["rows"] = len(rows)
     out["checks"] = checks
     ok = all(checks.values())

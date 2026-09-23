@@ -375,10 +375,20 @@ def pytest_sessionfinish(session, exitstatus):
 # never reported fails and names the child's exit status. Under xdist the
 # workers share one child per module through a lock in the run's common
 # temporary root, so a module is never run twice in a session.
+#
+# The per-test bound applies to each test in the child, not to the module
+# (PQ #1027). The child starts before any bound is armed for the first proxy,
+# and runs under the bound the parent runs under: pytest-timeout's
+# ``--timeout``, PrismaBuild's ``prismabuild.pytest_test_bound``, or both. A
+# test that hangs in the child fails alone, with the bound named in its
+# failure, and the tests after it still run.
 
 OWN_PROCESS_MARK = "own_process"
 #: Set in a child session only: the file the child appends its reports to.
 OWN_PROCESS_REPORT_ENV = "PQ_OWN_PROCESS_REPORT"
+#: PrismaBuild's per-test bound plugin, by the name ``-p`` loads it under. It
+#: reads ``PRISMABUILD_TEST_TIMEOUT_S``, which the child inherits.
+PRISMABUILD_TEST_BOUND_PLUGIN = "prismabuild.pytest_test_bound"
 
 
 def pytest_configure(config):
@@ -432,6 +442,23 @@ def _fold_own_process_reports(records, *, log):
     return outcomes, collection
 
 
+def _own_process_bound_args(config) -> list[str]:
+    """The child's arguments for the per-test bound the parent runs under.
+
+    pytest-timeout's ``--timeout``, and PrismaBuild's plugin when the parent
+    loaded it by name (``-p`` or ``pytest_plugins``). A plugin loaded from an
+    entry point loads in the child the same way, so it is not named again. A
+    bound the parent does not run under is not added.
+    """
+    argv = []
+    timeout = getattr(config.option, "timeout", None)
+    if timeout:
+        argv.append(f"--timeout={timeout}")
+    if config.pluginmanager.has_plugin(PRISMABUILD_TEST_BOUND_PLUGIN):
+        argv += ["-p", PRISMABUILD_TEST_BOUND_PLUGIN]
+    return argv
+
+
 def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
     """Run ``nodeids`` in one child pytest, once per session, and read it."""
     key = hashlib.sha256("\n".join(nodeids).encode()).hexdigest()[:16]
@@ -455,9 +482,7 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
                         "--basetemp", str(root / f"{key}.tmp")]
                 if config.inipath is not None:
                     argv += ["-c", str(config.inipath)]
-                timeout = getattr(config.option, "timeout", None)
-                if timeout:
-                    argv.append(f"--timeout={timeout}")
+                argv += _own_process_bound_args(config)
                 argv += list(nodeids)
                 returncode, error = None, None
                 try:
@@ -487,8 +512,24 @@ class _OwnProcessGroup:
     def __init__(self, nodeids):
         self.nodeids = tuple(nodeids)
         self.result = None
+        self.error = None
+
+    def start(self, config):
+        """Run the child before any test's bound is armed.
+
+        An error is kept for the proxies to report as test failures: raised
+        here, outside any test, it would end the session instead.
+        """
+        if self.result is None and self.error is None:
+            try:
+                self.result = _run_own_process(config, self.nodeids)
+            except Exception as exc:
+                self.error = f"{type(exc).__name__}: {exc}"
 
     def run(self, config):
+        if self.error is not None:
+            raise OwnProcessFailure(
+                f"the module's own pytest process did not run: {self.error}")
         if self.result is None:
             self.result = _run_own_process(config, self.nodeids)
         return self.result
@@ -557,6 +598,26 @@ def pytest_collection_modifyitems(session, config, items):
             original = items[index]
             items[index] = OwnProcessItem.from_parent(
                 original.parent, name=original.name, group=group)
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_protocol(item, nextitem):
+    """Start an own-process module's child outside every per-test bound.
+
+    The first proxy used to start the child inside its own call phase, so one
+    test's bound covered the whole module (PQ #1027): a module could time out
+    on its test count, and the proxy that failed was the first one, not the
+    one that hung. ``tryfirst`` makes this the outermost wrapper, so the child
+    runs before pytest-timeout's protocol timer or PrismaBuild's per-phase
+    alarms are armed for the proxy, and each test in the child runs under a
+    bound of its own (``_own_process_bound_args``). The child's collection
+    and exit are bounded as the parent session's own are, by the run's
+    ceiling. Its wall time is not attributed to any proxy in ``--durations``
+    or the junit report.
+    """
+    if isinstance(item, OwnProcessItem):
+        item.group.start(item.config)
+    return (yield)
 
 
 def _own_process_record(report) -> dict:

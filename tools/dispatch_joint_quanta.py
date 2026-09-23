@@ -1465,7 +1465,8 @@ def band_serial_roles(records: Sequence[tuple[Path, dict]]) -> dict[str, dict]:
 
 def handoff_template_path(record: Mapping, *, plan: Mapping,
                           adjoint_slice: Mapping, tier: str,
-                          output_root: Path) -> Path:
+                          output_root: Path,
+                          template_id: str | None = None) -> Path:
     """Write and return a producer row's handoff produced-output template.
 
     Derived from the numbers the producer's emitter binds with: the plan's
@@ -1475,6 +1476,11 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
     tier the declaration permits, a fleet fact the submitter names. The file
     is named by its content digest, so a changed tier or plan writes a new
     template and never rewrites one a submitted row already declared.
+
+    ``template_id`` defaults to ``pq-stageb-handoff-<quantum id>``. PrismaBuild
+    files a template under its id and refuses a different template under the
+    same id, so a caller that writes into a scratch root passes an id of its
+    own (the live pair does) rather than the one a campaign row would file.
     """
     from prismaquant.cost_streaming import normalize_boundary_storage
     from prismaquant.joint_quantum_handoff import handoff_root
@@ -1497,7 +1503,8 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
             artifact_max_bytes=int(policy["max_artifact_bytes"]),
             group_size=int(policy["prefetch_batches"]),
             max_entry_tensor_bytes=max(tensors),
-            template_id=f"pq-stageb-handoff-{quantum_id}")
+            template_id=(template_id if template_id is not None
+                         else f"pq-stageb-handoff-{quantum_id}"))
     except (KeyError, TypeError, ValueError) as exc:
         raise DispatchRefused(
             f"quantum {quantum_id!r}: no handoff template derives from the "

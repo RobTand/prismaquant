@@ -213,6 +213,141 @@ def test_a_seed_under_another_implementation_continues_bitwise(
     assert _tree(source.root) == before
 
 
+# -- a seed seals its through plane, stride boundary or not (#997) --------------
+
+def _stride_plane(source, boundary):
+    return {(probe, batch): digest for (at, probe, batch), digest in source.planes.items()
+            if at == boundary}
+
+
+@pytest.mark.parametrize("fusion", [False, True], ids=["unfused", "fused"])
+def test_a_seed_seals_its_through_plane_off_the_stride(tmp_path, monkeypatch, fusion):
+    """A one-step seed from checkpoint 4 through 3, where 3 is no stride
+    boundary: the walk's end retires the rolling entries, so the plane at
+    ``through`` survives only as the seed's own sealed checkpoint. The stride
+    in its receipt stays the plan's."""
+    source = _source(tmp_path, monkeypatch)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    receipt = _seed(tmp_path / "seed", monkeypatch, _spec(source, through=3, compare=None),
+                    chain_batch_size=1, chain_probe_fusion=fusion)
+    [sealed] = receipt["checkpoints"]
+    assert sealed["boundary"] == 3
+    assert _plane(sealed) == _stride_plane(source, 3)
+    assert receipt["stride"]["boundaries"] == source.receipt["stride"]["boundaries"]
+    assert 3 not in receipt["stride"]["boundaries"]
+    assert receipt["plane_comparison"] is None
+    [layer] = receipt["telemetry"]["chain_layers"]
+    assert layer["layer"] == 3 and layer["checkpoint"] is True
+    assert layer["checkpoint_seal_s"] is not None
+
+
+def _sealed_pin(root, boundary):
+    return _pin(_manifest(root, boundary))
+
+
+def test_the_plane_distance_of_two_seeds(tmp_path, monkeypatch):
+    """``checkpoint_plane_distance`` against known answers: a plane against
+    itself is zero and bitwise equal everywhere, a plane rolled as twice the
+    reference is exactly one relative L2 away, and a batched seed's distance
+    agrees with its payload digests."""
+    from prismaquant.stage_a_chain_seed import (
+        PLANE_DISTANCE_SCHEMA,
+        checkpoint_plane_distance,
+    )
+
+    source = _source(tmp_path, monkeypatch)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    spec = _spec(source, through=3, compare=None)
+    _seed(tmp_path / "one", monkeypatch, spec)
+    reference = _sealed_pin(tmp_path / "one", 3)
+    entries = N_PROBES * len(draw())
+
+    same = checkpoint_plane_distance(reference, reference)
+    assert same["schema"] == PLANE_DISTANCE_SCHEMA and same["boundary"] == 3
+    assert same["equal"] == entries and same["different"] == 0
+    assert same["relative_l2"] == {"mean": 0.0, "median": 0.0, "p99": 0.0, "max": 0.0}
+    assert same["max_abs"] == 0.0
+
+    # Mutation: a seed whose roll writes twice every cotangent.
+    roll = stage_a.render_free_layer_roll
+
+    def doubled(*args, **kw):
+        inner = kw["roll"]
+        kw["roll"] = lambda tensor, batch, probe: inner(tensor * 2, batch, probe)
+        return roll(*args, **kw)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(stage_a, "render_free_layer_roll", doubled)
+        _seed(tmp_path / "two", monkeypatch, spec)
+    twice = checkpoint_plane_distance(reference, _sealed_pin(tmp_path / "two", 3))
+    assert twice["different"] == entries
+    assert {entry["relative_l2"] for entry in twice["entries"]} == {1.0}
+    record = json.loads(Path(reference["path"]).read_text())
+    largest = max(float(tensor.abs().max()) for tensor in (
+        read_exact_entry_tensors([row], expected_session=record["session"]).popitem()[1]
+        for row in record["activation_entries"]))
+    assert twice["max_abs"] == largest
+
+    # A batched, fused seed: the distance names exactly the entries whose
+    # payload digests differ.
+    _seed(tmp_path / "batched", monkeypatch, spec, chain_batch_size=2,
+          chain_probe_fusion=True)
+    batched = _sealed_pin(tmp_path / "batched", 3)
+    distance = checkpoint_plane_distance(reference, batched, read_ahead=1)
+    ours = _plane(json.loads(Path(reference["path"]).read_text()))
+    theirs = _plane(json.loads(Path(batched["path"]).read_text()))
+    assert {(entry["probe"], entry["batch"]): entry["bitwise_equal"]
+            for entry in distance["entries"]} == {
+        key: ours[key] == theirs[key] for key in ours}
+    assert all((entry["relative_l2"] == 0.0) == entry["bitwise_equal"]
+               for entry in distance["entries"])
+    assert distance["relative_l2"]["max"] < 1e-3
+
+
+def test_the_plane_distance_refuses_what_it_cannot_compare(tmp_path, monkeypatch):
+    from prismaquant.stage_a_chain_seed import ChainSeedRefused, checkpoint_plane_distance
+
+    source = _source(tmp_path, monkeypatch)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    _seed(tmp_path / "seed", monkeypatch, _spec(source, through=3, compare=None))
+    ours = _sealed_pin(tmp_path / "seed", 3)
+    with pytest.raises(ChainSeedRefused, match="reference checkpoint is boundary 2 and "
+                                                "the candidate 3"):
+        checkpoint_plane_distance(_sealed_pin(source.root, 2), ours)
+    # The source run's checkpoint 2 and a seed's are one boundary, but not
+    # one science: the seed runs under another implementation.
+    _seed(tmp_path / "seed-2", monkeypatch, _spec(source, compare=None))
+    with pytest.raises(ChainSeedRefused, match="different bind identities"):
+        checkpoint_plane_distance(_sealed_pin(source.root, 2),
+                                  _sealed_pin(tmp_path / "seed-2", 2))
+    with pytest.raises(ChainSeedRefused, match="does not have the pinned digest"):
+        checkpoint_plane_distance(ours, _wrong(ours))
+    with pytest.raises(ValueError, match="read_ahead"):
+        checkpoint_plane_distance(ours, ours, read_ahead=0)
+
+
+def test_the_plane_distance_tool_writes_its_record_once(tmp_path, monkeypatch, capsys):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "tools"))
+    from compare_stage_a_checkpoints import main
+
+    source = _source(tmp_path, monkeypatch)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    _seed(tmp_path / "seed", monkeypatch, _spec(source, through=3, compare=None))
+    ours = _sealed_pin(tmp_path / "seed", 3)
+    output = tmp_path / "distance.json"
+    argv = ["--reference", ours["path"], "--reference-sha256", ours["sha256"],
+            "--candidate", ours["path"], "--candidate-sha256", ours["sha256"],
+            "--output", str(output), "--device", "cpu"]
+    capsys.readouterr()
+    assert main(argv) == 0
+    record = json.loads(output.read_text())
+    assert record["equal"] == N_PROBES * len(draw()) and record["device"] == "cpu"
+    assert json.loads(capsys.readouterr().out.strip())["different"] == 0
+    with pytest.raises(SystemExit):
+        main(argv)
+    assert json.loads(output.read_text()) == record
+
+
 def test_the_seed_receipt_is_written_once_beside_its_marker(tmp_path, monkeypatch):
     from prismaquant.stage_a_chain_seed import ChainSeedRefused, write_seed_receipt
 
