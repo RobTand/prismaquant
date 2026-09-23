@@ -1,5 +1,20 @@
 # PrismaQuant Architecture
 
+The Stage A dispatch requires the paced produced-output spool and seals the
+RAM tier (2026-09-23, `ws-sa/stage-a-spool-1012`, PQ #1012, part of #997).
+Without a sealed spool root, Stage A's owner writes every boundary entry
+synchronously into the pool, and the campaign's default spec declared none.
+`tools/dispatch_joint_quanta.py` now defaults to a new spec,
+`spec-hostcap32-ram-dev-spool.json`, which declares the spool root
+`/home/rob/pb-spool/glm-campaign`, a 32 GiB byte bound, the paced export and
+the root's writable identity bind; the spec it replaced is left unchanged.
+`stage_a_argv` refuses a spec that declares no spool, or a root under
+`/mnt/shared`, and seals the spool's environment and `--residency-ram auto`
+into the request. A Stage B quantum row seals the spool its spec declares.
+See "Stage A dispatch requires the paced spool (#1012)". Gate:
+`tests/test_dispatch_joint_quanta.py`. No format, pipeline default, stage or
+ship gate changes; the campaign dispatcher's default spec changes.
+
 A Stage A seed receipt records the bf16 reduced-precision-reduction flag
 (2026-09-23, `ws-sa/seed-bf16-flag-1038`, PQ #1038, part of #1028).
 `seed-receipt.json` gains `matmul_reduction`, the value of
@@ -362,7 +377,10 @@ names. Each recorded entry may declare PB's `checkpoint` artifact class, which
 PB charges to the checkpoint prewrite budget instead of the payload one. Stage
 A boundary entries are its only caller today; routing adjoint checkpoints and
 renders through it is owed work. No format, default, stage or ship gate
-changes.
+changes. (Since PQ #1015 the band-serial handoff record also writes through
+it; checkpoints and renders still do not. Since PQ #1012 the Stage A dispatch
+refuses a spec without a spool; see "Stage A dispatch requires the paced
+spool (#1012)".)
 
 Fully loaded modules skip checkpoint initialization (2026-09-22, PQ #968):
 the Transformers compatibility hook now marks a module `_is_hf_initialized`
@@ -582,8 +600,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-sa/seed-bf16-flag-1038`.
+As of: 2026-09-23 · `ws-sa/stage-a-spool-1012`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-sa/stage-a-spool-1012`) for **the Stage A
+dispatch's required spool** (PQ #1012): the dispatcher's default spec
+declares the paced produced-output spool, the Stage A row refuses a spec
+without it and seals `--residency-ram auto`, and a quantum row seals the
+spool its spec declares; see "Stage A dispatch requires the paced spool
+(#1012)". No format, pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-sa/seed-bf16-flag-1038`) for **the seed
 receipt's bf16 flag** (PQ #1038): `seed-receipt.json` records
@@ -836,7 +861,9 @@ untouched. Gate: `tests/test_stageb_cotangent_scratch.py`.
 
 Re-stamped (2026-09-22, `feat/pq-local-output-shuttle-20260922`) for
 **PB-owned precommit local output spooling** (PQ #928, PB #857). The default
-remains canonical shared writes. An explicitly sealed local spool root and
+remains canonical shared writes. (Since PQ #1012 the Stage A dispatch refuses
+a spec that declares no spool root; see "Stage A dispatch requires the paced
+spool (#1012)".) An explicitly sealed local spool root and
 byte ceiling opt Stage A into exact boundary/cotangent serialization on local
 disk. The existing canonical group prewrite precedes PB's per-owner local
 reservation; each serializer preallocates and fills the same temporary inode
@@ -21309,6 +21336,60 @@ request that carries `--chain-seed`. A seed's checkpoints never feed Stage B.
 `b`'s entries, the capsule rows `through .. b - 1` and, with a compare
 checkpoint, its entries, as inputs. The compare read is the reference plane's
 full size. No dispatcher builds such a request yet.
+
+### Stage A dispatch requires the paced spool (#1012)
+
+A bound `StreamedBoundaryArtifacts` owner writes its produced groups through
+PrismaBuild's local output spool (`prismaquant/produced_output_spool.py`)
+only when the producer's sealed environment names a spool root. Without one
+it writes every boundary entry synchronously into the pool: about 368 GiB per
+GLM Stage A run. The campaign dispatcher's default spec declared no root.
+
+**The default spec.** `tools/dispatch_joint_quanta.py` `DEFAULT_SPEC_PATH` is
+`spec-hostcap32-ram-dev-spool.json` in the joint-panel allocation directory.
+It is the spec it replaced, `spec-hostcap32-ram-dev.json` (left unchanged),
+plus:
+
+- `PRISMABUILD_PRODUCED_SPOOL_ROOT=/home/rob/pb-spool/glm-campaign`, a
+  directory on each Spark's own NVMe;
+- `PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES=34359738368` (32 GiB);
+- `PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT=1` (PB #891);
+- a writable identity bind of the root, which the campaign container
+  requires (`tessera_campaign_container.produced_spool_environment`).
+
+It carries no `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW`; that opt-in waits for
+PB #910. The root directory must exist on the executing box before launch,
+because the container's bind source must.
+
+**The rows.** `produced_spool_row_environment` reads the spool from the spec
+a row seals. It runs the container's own check, so a declared root without a
+positive byte bound or a writable identity bind refuses at dispatch. It also
+refuses a root under `/mnt/shared`, an opt-in other than `"0"` or `"1"`, and
+an opt-in without a root. It returns the root, the bound and each declared
+opt-in, and the row seals them as `--env`, because PrismaBuild reads the
+spool from the producer's sealed environment and the container refuses a
+declared spool the action does not carry.
+
+- `stage_a_argv` refuses a spec that declares no spool, and seals the spool
+  and `--residency stage --residency-ram auto`, as the quantum row does.
+- `quantum_argv` seals the spool its spec declares, and nothing when the spec
+  declares none.
+
+**Per owner, not per box.** PrismaBuild (`src/prismabuild/produced_spool.py`
+at published generation `c2bda68758a3`) creates the root if needed, refuses a
+root that is not a local disk filesystem, and writes each produced-output
+instance into its own subdirectory, named by `instance_namespace` (the
+template, owner action key and attempt). `reserve_group` sums only that
+subdirectory's unreleased reservations against the byte bound, and checks
+physical headroom with `statvfs`. Two actions on one box therefore share the
+root without collision, and the 32 GiB bound applies to each owner attempt:
+two concurrent owners on one box may hold 64 GiB. PrismaBuild charges the
+spool to a box's `spool_gb` only through the host window (PB #910).
+
+**Limits.** Adjoint checkpoints and renders do not write through the spool.
+The fixture tests check the sealed request, not PrismaBuild's exporter; the
+real-scale evidence that entries drain through the paced spool comes from
+#997's measurement runs.
 
 ### Band-serial Stage B quanta (#996)
 
