@@ -1899,6 +1899,17 @@ class SharedStateCotangents:
             "nondifferentiable": list(self.nondifferentiable),
         }
 
+    def is_empty(self) -> bool:
+        """No accumulated cotangent and no live graft.
+
+        With an empty isolated pass state, ``graft`` returns it unchanged,
+        ``produced_roots`` is ``([], [])`` and ``harvest`` folds nothing: the
+        owner changes no backward. The batched and fused render-free chain
+        (RobTand/prismaquant#997) runs only while every owner it would skip
+        is empty.
+        """
+        return not (self._acc or self._live or self._containers or self._live_ids)
+
     def state_dict(self) -> dict:
         """The completed shared-pass adjoint state, CPU-pinned and picklable.
 

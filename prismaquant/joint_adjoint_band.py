@@ -37,16 +37,20 @@ from .joint_adjoint_checkpoints import (
     ADJOINT_BAND_SCHEMA,
     ADJOINT_CAPTURE_ENTRY_POINT,
     ADJOINT_CHECKPOINT_SCHEMA,
+    CHAIN_REGIME_KEY,
     AdjointSliceRefused,
+    ChainRegimeRefused,
     _CHECKPOINT_NAME,
     adjoint_slice_sha256,
     adjoint_space,
     band_layers,
     boundary_entry_directory,
+    chain_regime_identity,
     checkpoint_directory,
     checkpoint_seal_sha256,
     derive_checkpoint_boundaries,
     exact_entry_record,
+    normalize_chain_regime,
     reference_from_record,
     stage_a_run_header,
     stage_a_run_header_sha256,
@@ -257,7 +261,8 @@ def build_band_receipt(*, output_root, boundary: int, plan_sha256: str, prepared
                        stride_source, unit_roster_sha256: str | None = None,
                        campaign_scope=None, bind_identity: dict | None = None,
                        forward_recovery: dict | None = None,
-                       sources: dict | None = None) -> dict:
+                       sources: dict | None = None,
+                       chain_regime: dict | None = None) -> dict:
     """Reconstruct the band of checkpoint ``boundary`` from sealed sources.
 
     Without a forward-recovery capsule the caller supplies the run's bind
@@ -266,8 +271,16 @@ def build_band_receipt(*, output_root, boundary: int, plan_sha256: str, prepared
     scope. With a capsule, all three come from it. Either way the bind
     identity must hash to the generation's ``run_identity_sha256``: a header
     that does not answer for the run that sealed the checkpoint refuses.
+
+    ``chain_regime`` is the run's sealed ``--chain-batch-size`` and
+    ``--chain-probe-fusion`` (RobTand/prismaquant#997); ``None`` is the
+    default regime, which stamps nothing.
     """
     boundary = int(boundary)
+    try:
+        regime_identity = chain_regime_identity(chain_regime or {})
+    except ChainRegimeRefused as exc:
+        raise BandRefused(str(exc)) from exc
     output_root = Path(output_root)
     space = adjoint_space(output_root)
     checkpoint, checkpoint_binding = read_sealed_checkpoint(space, boundary)
@@ -335,6 +348,7 @@ def build_band_receipt(*, output_root, boundary: int, plan_sha256: str, prepared
             "seed_base": int(bind_identity["seed_base"]),
             "calibration_shape": list(bind_identity["calibration_shape"]),
             "calibration_sha256": bind_identity["calibration_sha256"],
+            **({CHAIN_REGIME_KEY: regime_identity} if regime_identity is not None else {}),
         },
         "stride": {"value": int(stride_value), "source": stride_source,
                    "boundaries": [int(b) for b in boundaries],
@@ -410,7 +424,8 @@ def stage_a_argv(command) -> dict:
     flags = {}
     for name in ("--plan", "--plan-sha256", "--prepared", "--prepared-sha256",
                  "--output-root", "--stride", "--read-manifest-sha256",
-                 "--forward-recovery", "--forward-recovery-sha256"):
+                 "--forward-recovery", "--forward-recovery-sha256",
+                 "--chain-batch-size", "--chain-probe-fusion"):
         positions = [index for index, word in enumerate(tail) if word == name]
         if len(positions) > 1:
             raise BandRefused(f"the sealed request repeats {name}")
@@ -423,6 +438,23 @@ def stage_a_argv(command) -> dict:
     if ("--forward-recovery" in flags) != ("--forward-recovery-sha256" in flags):
         raise BandRefused("the sealed request pairs no forward-recovery digest")
     return flags
+
+
+def request_chain_regime(flags) -> dict:
+    """The chain regime a sealed request's flags run (RobTand/prismaquant#997).
+
+    Absent flags are the Stage A CLI's defaults: batch size 1, fusion off.
+    """
+    size = flags.get("--chain-batch-size", "1")
+    fusion = flags.get("--chain-probe-fusion", "off")
+    if not size.isdecimal() or fusion not in ("on", "off"):
+        raise BandRefused(
+            f"the sealed request carries a malformed chain regime: "
+            f"--chain-batch-size {size!r} --chain-probe-fusion {fusion!r}")
+    try:
+        return normalize_chain_regime(int(size), fusion == "on")
+    except ChainRegimeRefused as exc:
+        raise BandRefused(str(exc)) from exc
 
 
 def band_from_request(request_path, *, boundary: int, request_sha256: str | None = None) -> dict:
@@ -460,7 +492,7 @@ def band_from_request(request_path, *, boundary: int, request_sha256: str | None
         read_manifest_sha256=flags.get("--read-manifest-sha256"),
         stride_value=stride_value, stride_source=stride_source,
         unit_roster_sha256=roster, campaign_scope=scope, bind_identity=bind_identity,
-        forward_recovery=forward_recovery,
+        forward_recovery=forward_recovery, chain_regime=request_chain_regime(flags),
         sources={"request": {"path": str(request_path), "sha256": digest,
                              "action_key": request.get("action_key")},
                  "plan": {"path": flags["--plan"], "sha256": plan_sha256},
