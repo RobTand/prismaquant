@@ -77,6 +77,7 @@ from .joint_layer_quanta import (
     adjoint_chain_phase_name,
     adjoint_forward_phase_name,
 )
+from .source_read_plan import chain_opening_window, chain_prefetch_window
 
 
 def stage_a_forward_observer(progress):
@@ -1438,6 +1439,13 @@ def run_adjoint_capture_core(
                 producer=producer_binding(produced_output)))
 
         chain_started = time.time()
+        # The chain's install order, top down. Every prefetch below stays
+        # inside it: a walk that ends above layer 0 (a seed, or a chain
+        # through a stride boundary) declares no source below
+        # ``chain_bottom``, so the strict reader refuses such a read and the
+        # settlement re-raises it (PQ #1100). The next process to need the
+        # layer below reads it itself.
+        chain_order = list(range(chain_top - 1, chain_bottom - 1, -1))
         if chain_top > chain_bottom:
             # The chain's first layer reads a plane the forward pass wrote
             # and retired long ago; every later layer's plane is asked for
@@ -1453,10 +1461,9 @@ def run_adjoint_capture_core(
             # (RobTand/prismaquant#997). After a fresh walk the top layers are
             # usually still resident, and ``schedule_prefetch`` returns None
             # for a resident layer, so nothing is read twice.
-            for layer in range(chain_top - 1, max(
-                    chain_bottom, chain_top - max(1, runner.prefetch_lookahead)) - 1, -1):
+            for layer in chain_opening_window(chain_order, runner.prefetch_lookahead):
                 runner.context.schedule_prefetch(layer)
-        for layer in reversed(range(chain_bottom, chain_top)):
+        for position, layer in enumerate(chain_order):
             if progress is not None:
                 progress.enter(adjoint_chain_phase_name(layer))
                 progress.flush(force=True)
@@ -1469,12 +1476,14 @@ def run_adjoint_capture_core(
                     **({"prefetch_following": False}
                        if operator_windows is not None else {}),
                 )
+                successors = chain_prefetch_window(
+                    chain_order, position, runner.prefetch_lookahead)
                 if operator_windows is None:
-                    runner.schedule_reverse_prefetch(layer)
+                    # The roll's one read ``lookahead`` below, inside the walk.
+                    if len(successors) == runner.prefetch_lookahead:
+                        runner.schedule_reverse_prefetch(layer)
                 else:
-                    successors = range(
-                        max(0, layer - runner.prefetch_lookahead), layer)
-                    for successor in reversed(successors):
+                    for successor in successors:
                         runner.context.schedule_prefetch(successor)
                     settle = getattr(runner.context, "settle_prefetched_layers", None)
                     if callable(settle):

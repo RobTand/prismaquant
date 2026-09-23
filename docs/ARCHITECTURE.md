@@ -1,5 +1,40 @@
 # PrismaQuant Architecture
 
+The Stage A chain reads nothing below its walk, a Stage A row reserves its
+plan's memory bound, and the Stage B preparation declares its read phases as
+progress phases (2026-09-23, `ws-sa/997-1098-fixes`, PQ #1100 item 1,
+PQ #1098, part of #997).
+
+- **The chain stops at its last layer (PQ #1100, item 1).** After each
+  install, `joint_cost_stage_a` prefetched `range(max(0, L - lookahead), L)`,
+  so a chain that ends above layer 0 read up to `lookahead` layers its
+  manifest does not declare: layers 38 and 39 for the seed that walks 44..40
+  with lookahead 2. The strict reader refuses such a read, the refusal is
+  not `StagedRangeNotLanded`, so `settle_prefetched_layers` re-raises it,
+  and the action fails at the first layer whose window reaches below the
+  walk: layer 41 for that seed. The chain now schedules
+  with the Stage B quantum's windows, `source_read_plan.chain_opening_window`
+  and `chain_prefetch_window`, over its own install order. Without operator
+  windows, the roll's read `lookahead` below is skipped when it falls
+  outside the walk. `readset_coverage.stage_a_prefetch_targets` states the
+  same schedule. Gates: `tests/test_stage_a_chain_prefetch.py` (a seed reads
+  exactly its own layers) and `tests/test_readset_coverage_1095.py`.
+- **Stage A demand from the plan (PQ #1098).** `stage_a_argv` reserved a
+  constant `mem_gb=104`. It now reserves the plan's
+  `aggregate_memory_bytes` rounded up to whole GiB
+  (`dispatch_joint_quanta.stage_a_memory_gib`): 101 GiB for the GLM Stage A
+  plan, which fits a Spark whose live offer is 102 GiB. A plan that states
+  no bound keeps 104; a malformed bound refuses. Gate:
+  `tests/test_dispatch_joint_quanta.py`.
+- **Stage B preparation progress phases (PQ #1098).**
+  `tools/prepare_stageb_after_capture.sh` passes one `--progress-phase` per
+  read phase of the manifest it submits, in order, because pbrun refuses a
+  v2 read plan otherwise (`require_linear_read_plan_progress`). The
+  preparation commits no progress units, so each allowance is the run's
+  `--timeout-s`. Gate: `tests/test_prepare_stageb_after_capture_1098.py`.
+
+No format, pipeline default, stage or ship gate changes.
+
 A read manifest and the streaming loader enumerate one set of source reads
 (2026-09-23, `ws-1a/readset-coverage-1095`, PQ #1095). The first strictly
 staged Stage B quantum (PB `55cf01d2501f`) refused 54 s in, on its first
@@ -47,8 +82,8 @@ compared the declaration with the reads before the GPU was admitted.
   executable row before it prints a dry run or submits, and refuses once,
   listing every gap. `tools/check_readset_coverage.py` runs it on a Stage B
   records directory or a Stage A chain walk; for Stage A it models the
-  schedule `joint_cost_stage_a` runs today, which also prefetches the
-  `lookahead` layers below the walk's last layer.
+  schedule `joint_cost_stage_a` runs, which since PQ #1100 stops at the
+  walk's last layer (see the entry above).
 
 Gates:
 - `tests/test_readset_coverage_1095.py`;
@@ -1139,8 +1174,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-1a/readset-coverage-1095`.
+As of: 2026-09-23 · `ws-sa/997-1098-fixes`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-sa/997-1098-fixes`) for **a Stage A chain that
+reads only its own walk** (PQ #1100 item 1), a Stage A row that reserves its
+plan's memory bound, and a Stage B preparation that declares its read phases
+as progress phases (PQ #1098). See the entry at the top. No format, pipeline
+default or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-1a/readset-coverage-1095`) for **one enumeration
 of source reads** (PQ #1095): the readsets take their source spans, now

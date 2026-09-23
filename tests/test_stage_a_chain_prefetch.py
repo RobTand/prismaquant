@@ -11,7 +11,8 @@ hold it to, on every entry path:
   starts on them without reading any of them a second time, and asks for
   whatever the source cache no longer holds.
 * A seed, which runs no forward pass, so nothing is resident when its chain
-  starts.
+  starts, and whose chain ends above layer 0: it reads nothing below its
+  last layer (PQ #1100).
 * A resume, likewise.
 
 On every path the chain holds no more source reads in flight than its
@@ -193,10 +194,12 @@ def test_a_seed_starts_its_chain_with_nothing_resident(
     [context] = contexts
 
     # No forward pass: the chain from checkpoint 4 through 2 read layers 3
-    # and 2 first, once each, and installed them top down...
+    # and 2, once each and nothing below them, and installed them top
+    # down. Its manifest declares no layer below 2, so a read of layer 1
+    # or 0 is one the strict reader refuses (PQ #1100)...
     assert [layer for kind, layer in context.events if kind == "install"] == [3, 2]
     assert all(context.install_require_prefetched)
-    assert context.reads[:2] == [3, 2]
+    assert context.reads == [3, 2]
     assert context.max_in_flight <= lookahead
     # ...and continued the source run bitwise.
     assert receipt["plane_comparison"]["bitwise_equal"] is True
