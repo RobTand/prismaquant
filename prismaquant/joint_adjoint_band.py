@@ -40,7 +40,7 @@ from .cost_stage_checkpoint import canonical_json_sha256
 from .joint_adjoint_checkpoints import (
     ADJOINT_BAND_SCHEMA,
     ADJOINT_CAPTURE_ENTRY_POINT,
-    ADJOINT_CHECKPOINT_SCHEMA,
+    ADJOINT_CHECKPOINT_SCHEMAS,
     CHAIN_REGIME_KEY,
     AdjointSliceRefused,
     ChainRegimeRefused,
@@ -50,7 +50,9 @@ from .joint_adjoint_checkpoints import (
     band_layers,
     boundary_entry_directory,
     chain_regime_identity,
+    checkpoint_cotangent_plane,
     checkpoint_directory,
+    checkpoint_is_referenced,
     checkpoint_seal_sha256,
     derive_checkpoint_boundaries,
     exact_entry_record,
@@ -111,7 +113,7 @@ def read_sealed_checkpoint(space: Path, boundary: int) -> tuple[dict, dict]:
     path = directory / "checkpoint.json"
     raw = path.read_bytes()
     record = json.loads(raw)
-    if (not isinstance(record, dict) or record.get("schema") != ADJOINT_CHECKPOINT_SCHEMA
+    if (not isinstance(record, dict) or record.get("schema") not in ADJOINT_CHECKPOINT_SCHEMAS
             or record.get("boundary") != int(boundary)):
         raise BandRefused(f"{path} is not the sealed checkpoint of boundary {boundary}")
     if set(record) != {"schema", "boundary", "session", "activation_entries",
@@ -122,10 +124,21 @@ def read_sealed_checkpoint(space: Path, boundary: int) -> tuple[dict, dict]:
     if record["session"].get("kind") != "adjoint_checkpoint":
         raise BandRefused(f"{path} is not an adjoint checkpoint session")
     expected_parent = directory / "entries"
+    try:
+        # PQ #1036: a referenced checkpoint's cotangent rows are the owner's
+        # own entries at this boundary, in this generation's directory; the
+        # helper holds them to that identity. Its shared states, like every
+        # entry of a copied checkpoint, sit in the checkpoint's own entries.
+        checkpoint_cotangent_plane(record)
+    except ValueError as exc:
+        raise BandRefused(f"{path}: {exc}") from exc
+    own = (record["shared_state_entries"] if checkpoint_is_referenced(record)
+           else record["activation_entries"] + record["shared_state_entries"])
+    for entry in own:
+        if Path(entry["path"]).parent != expected_parent:
+            raise BandRefused(f"checkpoint entry {entry['name']} escaped {expected_parent}")
     for entry in record["activation_entries"] + record["shared_state_entries"]:
         entry_path = Path(entry["path"])
-        if entry_path.parent != expected_parent:
-            raise BandRefused(f"checkpoint entry {entry['name']} escaped {expected_parent}")
         try:
             size = entry_path.stat().st_size
         except OSError as exc:
@@ -137,10 +150,10 @@ def read_sealed_checkpoint(space: Path, boundary: int) -> tuple[dict, dict]:
 
 def checkpoint_batches(record: dict) -> int:
     """The calibration partition count a checkpoint's cotangent plane covers."""
-    coordinates = set()
-    for entry in record["activation_entries"]:
-        probe, batch = entry["name"].removeprefix("cotangent-").split("-")
-        coordinates.add((int(probe), int(batch)))
+    try:
+        coordinates = set(checkpoint_cotangent_plane(record))
+    except ValueError as exc:
+        raise BandRefused(str(exc)) from exc
     batches = sorted({batch for _, batch in coordinates})
     probes = sorted({probe for probe, _ in coordinates})
     if (not batches or batches != list(range(len(batches)))

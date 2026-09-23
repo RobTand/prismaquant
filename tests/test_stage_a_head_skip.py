@@ -34,7 +34,9 @@ from prismaquant import joint_cost_stage_a as stage_a
 from prismaquant.joint_adjoint_checkpoints import (
     adjoint_receipt_path,
     adjoint_space,
+    checkpoint_cotangent_plane,
     checkpoint_directory,
+    checkpoint_entry_session,
     read_exact_entry_tensors,
 )
 from prismaquant.stage_a_chain_seed import (
@@ -237,17 +239,29 @@ def _receipt(root):
 def _plane(record):
     """``{(probe, batch): payload sha256}`` of a sealed checkpoint's cotangents."""
     plane = {}
-    for row in record["activation_entries"]:
-        _, probe, batch = row["name"].split("-")
-        tensors = read_exact_entry_tensors([row], expected_session=record["session"])
-        plane[int(probe), int(batch)] = tensor_payload_sha256(tensors.pop(row["name"]))
+    for key, row in checkpoint_cotangent_plane(record).items():
+        tensors = read_exact_entry_tensors(
+            [row], expected_session=checkpoint_entry_session(record))
+        plane[key] = tensor_payload_sha256(tensors.pop(row["name"]))
     return plane
 
 
 def _checkpoint_files(root):
-    base = adjoint_space(root) / "checkpoints"
-    return {str(path.relative_to(base)): _sha(path)
-            for path in sorted(base.rglob("*")) if path.is_file()}
+    """Each sealed checkpoint's own files and its plane's files, by digest.
+
+    A referenced checkpoint (PQ #1036) keeps its plane in the owner's
+    entries, so those files are hashed too.
+    """
+    space = adjoint_space(root).resolve()
+    base = space / "checkpoints"
+    files = {str(path.relative_to(space)): _sha(path)
+             for path in sorted(base.rglob("*")) if path.is_file()}
+    for record_path in sorted(base.glob("boundary-*/checkpoint.json")):
+        record = json.loads(record_path.read_text())
+        for row in checkpoint_cotangent_plane(record).values():
+            path = Path(row["path"]).resolve()
+            files[str(path.relative_to(space))] = _sha(path)
+    return files
 
 
 def _newline_roster(names):

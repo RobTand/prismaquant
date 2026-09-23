@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 from .cost_stage_checkpoint import (
@@ -27,6 +28,13 @@ from .cost_stage_checkpoint import (
 
 ADJOINT_RECEIPT_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 ADJOINT_CHECKPOINT_SCHEMA = "prismaquant.joint_adjoint_checkpoint.v1"
+#: A checkpoint whose activation rows reference the owner's committed
+#: cotangent entries instead of copies (RobTand/prismaquant#1036). Its
+#: shared states and ``checkpoint.json`` stay in ``checkpoints/boundary-NNN``;
+#: see :func:`checkpoint_cotangent_plane` for the rows' identity rules.
+ADJOINT_CHECKPOINT_REFERENCED_SCHEMA = "prismaquant.joint_adjoint_checkpoint.v2"
+ADJOINT_CHECKPOINT_SCHEMAS = (ADJOINT_CHECKPOINT_SCHEMA,
+                              ADJOINT_CHECKPOINT_REFERENCED_SCHEMA)
 
 
 def derive_checkpoint_boundaries(num_layers: int, stride: int) -> tuple[int, ...]:
@@ -212,17 +220,53 @@ def checkpoint_manifest_bytes(record) -> bytes:
             + "\n").encode()
 
 
-def checkpoint_manifest_entry(record) -> dict:
-    """``checkpoint.json`` as an exact-entry record: name, path, digest, size.
+def checkpoint_is_referenced(record) -> bool:
+    """Whether a checkpoint record references the owner's entries (v2).
 
-    The path is the directory that holds the record's ``entries/``, which
-    the writer creates as ``checkpoints/boundary-NNN``. Entries spread over
-    more than one directory, or a directory that does not name the
-    record's boundary, refuse.
+    ``False`` for a copied (v1) checkpoint; any other schema refuses.
     """
-    payload = checkpoint_manifest_bytes(record)
+    schema = record.get("schema") if isinstance(record, dict) else None
+    if schema not in ADJOINT_CHECKPOINT_SCHEMAS:
+        raise ValueError(f"not an adjoint checkpoint schema: {schema!r}: refusing")
+    return schema == ADJOINT_CHECKPOINT_REFERENCED_SCHEMA
+
+
+def checkpoint_owner_session(record) -> dict:
+    """The owner session a referenced checkpoint's cotangent entries carry.
+
+    A checkpoint session is ``{generation, kind: adjoint_checkpoint,
+    run_identity_sha256}``; the owner that wrote the rolling entries binds
+    the same generation and run identity without ``kind``.
+    """
+    session = record.get("session") if isinstance(record, dict) else None
+    if (not isinstance(session, dict)
+            or set(session) != {"generation", "kind", "run_identity_sha256"}
+            or session["kind"] != "adjoint_checkpoint"):
+        raise ValueError("adjoint checkpoint session is not an adjoint "
+                         "checkpoint generation: refusing")
+    return {"generation": session["generation"],
+            "run_identity_sha256": session["run_identity_sha256"]}
+
+
+def checkpoint_entry_session(record) -> dict:
+    """The session an exact reader expects on this checkpoint's cotangents."""
+    if checkpoint_is_referenced(record):
+        return checkpoint_owner_session(record)
+    return record["session"]
+
+
+def _checkpoint_own_directory(record) -> Path:
+    """``checkpoints/boundary-NNN``: where the checkpoint's own files live.
+
+    A copied (v1) checkpoint keeps every entry there; a referenced (v2) one
+    keeps only its shared states there. Rows spread over more than one
+    directory, or a directory that does not name the record's boundary,
+    refuse.
+    """
+    own_fields = (("shared_state_entries",) if checkpoint_is_referenced(record)
+                  else ("activation_entries", "shared_state_entries"))
     directories = set()
-    for field in ("activation_entries", "shared_state_entries"):
+    for field in own_fields:
         rows = record[field]
         if not isinstance(rows, list):
             raise ValueError(f"adjoint checkpoint {field} is not a list: refusing")
@@ -236,13 +280,100 @@ def checkpoint_manifest_entry(record) -> dict:
         raise ValueError("adjoint checkpoint entries do not share one directory: refusing")
     entries_dir = directories.pop()
     if (not entries_dir.is_absolute() or entries_dir.name != "entries"
-            or entries_dir.parent.name != f"boundary-{int(record['boundary']):03d}"):
+            or entries_dir.parent.name != f"boundary-{int(record['boundary']):03d}"
+            or (checkpoint_is_referenced(record)
+                and entries_dir.parent.parent.name != "checkpoints")):
         raise ValueError("adjoint checkpoint entries are not under their "
                          "boundary's checkpoint directory: refusing")
+    return entries_dir.parent
+
+
+def checkpoint_manifest_entry(record) -> dict:
+    """``checkpoint.json`` as an exact-entry record: name, path, digest, size.
+
+    The path is the directory that holds the record's own ``entries/``,
+    which the writer creates as ``checkpoints/boundary-NNN``. Entries spread
+    over more than one directory, or a directory that does not name the
+    record's boundary, refuse. For a referenced checkpoint (PQ #1036) the
+    rule covers its shared states; its cotangent rows are checked by
+    :func:`checkpoint_cotangent_plane`.
+    """
+    payload = checkpoint_manifest_bytes(record)
+    directory = _checkpoint_own_directory(record)
     return {"name": CHECKPOINT_MANIFEST_NAME,
-            "path": str(entries_dir.parent / CHECKPOINT_MANIFEST_NAME),
+            "path": str(directory / CHECKPOINT_MANIFEST_NAME),
             "sha256": hashlib.sha256(payload).hexdigest(),
             "file_bytes": len(payload)}
+
+
+_COPIED_COTANGENT = re.compile(r"cotangent-(\d+)-(\d+)")
+_REFERENCED_COTANGENT = re.compile(r"cotangent-(\d+)-(\d+)-at-(\d+)")
+
+
+def checkpoint_cotangent_plane(record) -> dict:
+    """The checkpoint's cotangent rows keyed ``(probe, batch)``, checked.
+
+    The one reader of ``activation_entries`` (PQ #1036); every consumer of a
+    checkpoint plane goes through it, so the two layouts are told apart in
+    one place.
+
+    - A copied (v1) row is named ``cotangent-{p}-{b}`` and sits in the
+      checkpoint's own ``checkpoints/boundary-NNN/entries``. Its identity is
+      the exact reader's to check against the checkpoint session, as before.
+    - A referenced (v2) row is the Stage A owner's own committed entry at
+      this boundary, verbatim: named ``cotangent-{p}-{b}-at-{B}``, in
+      ``exact-boundaries/<generation>/entries`` of the same adjoint space,
+      and carrying exactly the owner identity ``{session: {generation,
+      run_identity_sha256}, slot: cotangent-{p}-{b}, kind: cotangent,
+      coordinates: {batch: b, boundary: B, probe: p}}``. Anything else
+      refuses: another boundary, generation, run, slot or directory.
+
+    Digests and sizes stay the exact reader's to verify. Whether the plane
+    is a whole probe x batch grid is the caller's to check.
+    """
+    directory = _checkpoint_own_directory(record)
+    referenced = checkpoint_is_referenced(record)
+    boundary = int(record["boundary"])
+    rows = record.get("activation_entries")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("adjoint checkpoint carries no cotangent rows: refusing")
+    if referenced:
+        owner_session = checkpoint_owner_session(record)
+        expected_parent = (directory.parent.parent / "exact-boundaries"
+                           / str(owner_session["generation"]) / "entries")
+    else:
+        expected_parent = directory / "entries"
+    plane = {}
+    for row in rows:
+        name = row.get("name") if isinstance(row, dict) else None
+        path = row.get("path") if isinstance(row, dict) else None
+        if type(name) is not str or type(path) is not str:
+            raise ValueError("adjoint checkpoint cotangent row names no "
+                             "entry: refusing")
+        pattern = _REFERENCED_COTANGENT if referenced else _COPIED_COTANGENT
+        match = pattern.fullmatch(name)
+        if match is None:
+            raise ValueError(f"adjoint checkpoint row {name!r} is not a "
+                             "cotangent entry of this layout: refusing")
+        probe, batch = int(match[1]), int(match[2])
+        if Path(path).parent != expected_parent:
+            raise ValueError(f"adjoint checkpoint row {name!r} escaped "
+                             f"{expected_parent}: refusing")
+        if referenced:
+            slot = f"cotangent-{probe}-{batch}"
+            identity = (row.get("metadata") or {}).get("identity")
+            if int(match[3]) != boundary or identity != {
+                    "session": owner_session, "slot": slot, "kind": "cotangent",
+                    "coordinates": {"batch": batch, "boundary": boundary,
+                                    "probe": probe}}:
+                raise ValueError(
+                    f"adjoint checkpoint row {name!r} is not the owner's "
+                    f"cotangent at boundary {boundary}: refusing")
+        if (probe, batch) in plane:
+            raise ValueError(f"adjoint checkpoint repeats cotangent "
+                             f"({probe}, {batch}): refusing")
+        plane[probe, batch] = row
+    return plane
 
 
 def stage_a_receipt_kind(receipt_like) -> str:
@@ -346,7 +477,7 @@ def verify_adjoint_slice(adjoint_slice, *, layer: int,
             f"layer {layer} reads checkpoint {boundary}, not {checkpoint_boundary}")
     checkpoint = adjoint_slice["checkpoint"]
     if (not isinstance(checkpoint, dict)
-            or checkpoint.get("schema") != ADJOINT_CHECKPOINT_SCHEMA
+            or checkpoint.get("schema") not in ADJOINT_CHECKPOINT_SCHEMAS
             or checkpoint.get("boundary") != boundary):
         raise AdjointSliceRefused(
             f"the slice checkpoint is not the sealed boundary {boundary} layer {layer} reads")
@@ -363,6 +494,13 @@ def verify_adjoint_slice(adjoint_slice, *, layer: int,
                                  "run_identity_sha256": session.get("run_identity_sha256")}:
         raise AdjointSliceRefused(
             f"checkpoint {boundary} was sealed by another Stage A generation")
+    if checkpoint_is_referenced(checkpoint):
+        # PQ #1036: a referenced plane names the owner's own entries at this
+        # boundary, in this generation's directory, and nothing else.
+        try:
+            checkpoint_cotangent_plane(checkpoint)
+        except ValueError as exc:
+            raise AdjointSliceRefused(str(exc)) from exc
     needed = {str(k) for k in (*chain_layers_for(boundary, layer), layer)}
     entries = adjoint_slice["boundary_entries"]
     if not isinstance(entries, dict) or set(entries) != needed or any(

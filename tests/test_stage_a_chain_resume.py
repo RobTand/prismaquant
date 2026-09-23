@@ -380,7 +380,15 @@ def test_a_resumed_run_writes_what_the_uninterrupted_run_writes(tmp_path, monkey
     sealed = sorted(int(path.parent.name.removeprefix("boundary-"))
                     for path in (space / "checkpoints").glob("boundary-*/checkpoint.json"))
     assert min(sealed) == resumes_from
-    leftovers = sorted(path.name for path in entries.iterdir() if "cotangent" in path.name)
+    # A sealed (v2, PQ #1036) checkpoint names the owner's own cotangent
+    # entries: those are the checkpoint's, not rolling leftovers.
+    pinned = {Path(row["path"]).name
+              for boundary in sealed
+              for row in json.loads((space / "checkpoints" / f"boundary-{boundary:03d}"
+                                     / "checkpoint.json").read_text())["activation_entries"]}
+    assert pinned and all((entries / name).is_file() for name in pinned)
+    leftovers = sorted(path.name for path in entries.iterdir()
+                       if "cotangent" in path.name and path.name not in pinned)
     assert leftovers, "the interrupted attempt left rolling entries behind"
     if killed:
         status["status"] = "running"
@@ -396,6 +404,7 @@ def test_a_resumed_run_writes_what_the_uninterrupted_run_writes(tmp_path, monkey
     assert record["compatibility"] is None
     assert record["implementation_sha256"] == run.get("implementation", ONE)
     assert record["removed_rolling_entries"] == len(leftovers)
+    assert all((entries / name).is_file() for name in pinned)
     set_aside = ["boundary-002.partial-resume-001"] if shape == "partial-checkpoint" else []
     assert record["partial_checkpoints_set_aside"] == set_aside
     assert resumed["telemetry"]["chain_resume"]["switch_checkpoint"] == resumes_from

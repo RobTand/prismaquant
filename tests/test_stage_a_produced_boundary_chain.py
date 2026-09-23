@@ -2120,3 +2120,42 @@ def test_a_changed_outcome_is_handled_not_re_driven_unseen(
         debt)
     assert "a third call would hide the pin" not in recorded, (
         "an extra retirement would have overwritten it", debt)
+
+
+@pytest.mark.parametrize("lifetime", ["consumed", None])
+def test_a_referenced_checkpoint_refuses_a_consumed_origin_batch(tmp_path, lifetime):
+    """PQ #1036: the pin lives in PQ, so a consumed origin batch fails closed.
+
+    PrismaBuild's retirement tick unlinks the origins of an origin-only batch
+    committed ``consumed`` once its consumers succeed. Stage A commits staged
+    batches today. If a group a checkpoint names were ever filed consumed,
+    the seal's reference wait (``await_checkpoint_references``) refuses. One
+    filed without a lifetime (retain) seals. The record is PB's own
+    ``commitments.json`` of the real bound instance, written as PB files an
+    origin-only batch.
+    """
+
+    import torch
+
+    storage, publication, q, _env, _repo = _bound_owner(tmp_path, n_probes=1)
+    references = [storage.write(torch.full((8,), float(batch)), batch_index=batch,
+                                boundary_index=3, probe_index=0)
+                  for batch in range(GROUP_SIZE)]
+    _key, group = storage._produced_group_for(references[0])
+    assert group is not None
+    path = Path(publication._po.instance_dir(q.root, publication.instance)) / (
+        "commitments.json")
+    record = json.loads(path.read_text()) if path.exists() else {"batches": {}}
+    entry = {**(record["batches"].get(group["batch_id"]) or {}), "origin_only": True}
+    if lifetime is not None:
+        entry["lifetime"] = lifetime
+    record["batches"][group["batch_id"]] = entry
+    path.write_text(json.dumps(record))
+
+    assert publication.origin_only_lifetimes()[group["batch_id"]] == (
+        lifetime or "retain")
+    if lifetime == "consumed":
+        with pytest.raises(RuntimeError, match="lifetime consumed"):
+            storage.await_checkpoint_references(references)
+    else:
+        storage.await_checkpoint_references(references)
