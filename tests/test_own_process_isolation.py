@@ -10,9 +10,11 @@ and each proxy reports its own test's outcome.
 These tests drive real pytest sessions over the samples in
 ``tests/own_process_samples``: ``sample_isolated`` (marked),
 ``sample_shared``, whose import plants a module that stands in for a second
-``prismabuild``, and ``sample_hangs`` (marked), whose one hanging test must
-fail alone under the per-test bound (PQ #1027). The samples write their
-process ids, so the tests check where each test ran, not only what it
+``prismabuild``, ``sample_hangs`` (marked), whose one hanging test must
+fail alone under the per-test bound (PQ #1027), and ``sample_bound_loaded``
+(marked), which reports the bound it runs under when only
+``PRISMABUILD_TEST_TIMEOUT_S`` asks for one (PQ #1055). The samples write
+their process ids, so the tests check where each test ran, not only what it
 reported.
 """
 from __future__ import annotations

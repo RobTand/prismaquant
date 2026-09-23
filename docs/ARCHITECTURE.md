@@ -764,8 +764,17 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-br/handoff-template-id-1054`.
+As of: 2026-09-23 · `ws-br/pb-test-bound-1055`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-br/pb-test-bound-1055`) for **PrismaBuild's
+per-test bound on every PQ shard** (PQ #1055). Test infrastructure only:
+when `PRISMABUILD_TEST_TIMEOUT_S` is set, `tests/conftest.py` registers
+`prismabuild.pytest_test_bound` from its file, without importing the
+`prismabuild` package, so the bound `pbtest` exports now applies to each test
+on a shard and in an `own_process` child. An `own_process` child is passed
+`-p` only when the parent was. Unset, nothing changes. No format, default,
+stage or ship gate changes. Gate: `tests/test_own_process_isolation.py`.
 
 Re-stamped (2026-09-23, `ws-br/handoff-template-id-1054`) for **a Stage B
 handoff template id derived from its body** (PQ #1054):
