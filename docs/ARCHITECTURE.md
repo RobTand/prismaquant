@@ -12,6 +12,32 @@ dispatch-time refusal by model scale would need a threshold no objective
 gives. Gate: `tests/test_legacy_head_encoder_reuse_1023.py`. No format,
 pipeline default or ship gate changes.
 
+A Stage B quantum reads nothing but its plan before its readset is bound
+(2026-09-23, `ws-tq/1024-load-plan-readset`, PQ #1024). `_load_plan` hashed
+the plan's `source_identity_cache` and resolved the `boundary_storage`
+directory (an lstat per path component) before the quantum bound its data
+manifest, so neither could resolve through residency. The quantum now calls
+`_load_plan(..., defer_pool_reads=True)`, which admits the identity binding by
+shape; the cache is digest-checked where the quantum reads it (the head
+slice's declared entry, or `_seed_source_identity_cache` on the legacy walk).
+The plan admission now uses `cost_streaming.check_boundary_storage`, which
+validates the policy without resolving the directory, in every caller;
+`normalize_boundary_storage` still resolves it where storage is opened. The
+quantum's `bind_residency_manifest` moved above the head slice read: the slice
+was read before the bind, so under an active tier policy the staged read of
+a slice-bound quantum's first head entry refused as `readset-not-staged`.
+Gate: `tests/test_load_plan_readset_1024.py`. No format, pipeline default or
+ship gate changes.
+
+A Stage A seed receipt records the bf16 reduced-precision-reduction flag
+(2026-09-23, `ws-sa/seed-bf16-flag-1038`, PQ #1038, part of #1028).
+`seed-receipt.json` gains `matmul_reduction`, the value of
+`torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction` the seed's
+chain ran under, so a seed's bitwise comparison names the flag. Stage A reads
+the flag and sets nothing. See "Stage A seed mode (#1016)". Gate:
+`tests/test_stage_a_chain_seed.py`. No format, default, stage or ship gate
+changes; a run without `--chain-seed` is unchanged.
+
 Stage A writes each checkpoint as the chain rolls (2026-09-23,
 `ws-sa/checkpoint-overlap-1002`, PQ #1002, part of #997). The read-back
 writer read each checkpoint's plane back through the owner after the pass
@@ -585,8 +611,24 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-sa/checkpoint-overlap-1002`.
+As of: 2026-09-23 · `ws-tq/1023-legacy-head-encoder-reuse`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-tq/1023-legacy-head-encoder-reuse`) for **the
+no-slice head walk's encoder reuse** (PQ #1023): the quantum's whole-journal
+intake passes the plan's `historical_encoder_reuse`; see "Stage B head slice
+(#1010)". No format, default or stage changes.
+
+Re-stamped (2026-09-23, `ws-tq/1024-load-plan-readset`) for **the Stage B
+readset order** (PQ #1024): a layer quantum binds its data manifest before its
+first head read, and its plan load reads no pool input; see "Stage B head
+slice (#1010)". No format, default or stage changes.
+
+Re-stamped (2026-09-23, `ws-sa/seed-bf16-flag-1038`) for **the seed
+receipt's bf16 flag** (PQ #1038): `seed-receipt.json` records
+`matmul_reduction`, the bf16 reduced-precision-reduction flag the seed ran
+under, read and never set; see "Stage A seed mode (#1016)". No format,
+default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-sa/checkpoint-overlap-1002`) for **Stage A
 checkpoints written as the chain rolls** (PQ #1002): Stage A reserves each
@@ -595,11 +637,6 @@ into it as the pass writes it, and seals after the pass, instead of reading
 the plane back; see "Stage A checkpoints written as the chain rolls
 (#1002)". The checkpoint bytes are unchanged. No format, default, stage or
 ship gate changes. Gate: `tests/test_stage_a_checkpoint_tee.py`.
-
-Re-stamped (2026-09-23, `ws-tq/1023-legacy-head-encoder-reuse`) for **the
-no-slice head walk's encoder reuse** (PQ #1023): the quantum's whole-journal
-intake passes the plan's `historical_encoder_reuse`; see "Stage B head slice
-(#1010)". No format, default or stage changes.
 
 Re-stamped (2026-09-23, `ws-tq/1022-retained-window-admission`) for **the
 derived retained budget** (PQ #1022): the Stage B metadata producers refuse a
@@ -20915,6 +20952,10 @@ reports its cumulative unit count once. A record without a slice runs the
 historical intake, with the plan's `historical_encoder_reuse` allowance
 (PQ #1023), as Stage A, the prepare and the slice producer do.
 
+The quantum binds its data manifest before it reads the slice, and loads its
+plan with `defer_pool_reads=True`, so the plan file is the only input it
+reads before the bind (PQ #1024).
+
 Gate: `tests/test_stage_b_head_slice.py` (producer/consumer round trip,
 refusals, an opened-path audit of the head, the progress report, and the
 record diff).
@@ -21298,7 +21339,11 @@ checkpoints, retention and telemetry. With a compare checkpoint, the seed
 hashes each rolled `(probe, batch)` payload at `through` as it writes it,
 then reads the reference's entries one at a time. `plane_comparison`
 (`prismaquant.stage_a.seed_plane_comparison.v1`) lists both digests per entry
-with `equal`, `different` and `bitwise_equal`.
+with `equal`, `different` and `bitwise_equal`. `matmul_reduction` records
+`torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction` as the
+core read it before the chain (PQ #1038). Stage A reads the flag and never
+sets it, and the flag is outside the run identity; the shared setter and its
+identity stamp are PQ #1028's.
 
 **The band tool refuses a seed.** `build_band_receipt` refuses a space that
 holds a seed marker or seed receipt, and `stage_a_argv` refuses a sealed
