@@ -145,6 +145,23 @@ packed experts failed after its source install; it now imports it from
 `tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
 changes.
 
+Bounded local scratch is declared to PrismaBuild (2026-09-23,
+`ws-br/scratch-pairs-1019`, PQ #1019). A Stage B quantum row that seals the
+cotangent scratch or the replay spill also seals
+`PRISMABUILD_LOCAL_SCRATCH_PAIRS`, which lists each declared pair as
+`ROOT_ENV:MAX_ENV` (`tessera_campaign_container.local_scratch_environment`,
+over `LOCAL_SCRATCH_KINDS`). pbrun charges each ceiling, rounded up to whole
+GiB, to the executing box's `spool_gb` at claim, so PrismaBuild places the
+quantum only on a box whose measured disk budget holds it (PB #911). A new
+scratch kind is added to `LOCAL_SCRATCH_KINDS`, which forwards and lists it in
+one call. The produced spool is not listed: PrismaBuild charges its window
+separately and refuses its pair in the list. The dispatcher refuses a root
+without a positive ceiling, two kinds on one root, and a spec that declares
+the list itself. A row with no scratch seals the same request as before. The
+charge applies once PB #911 is published; the generation published on
+2026-09-23 (`c2bda68758a3`) predates it and carries the list as an ordinary
+variable. Gate: `tests/test_dispatch_joint_quanta.py`.
+
 One reader lease per read window (2026-09-23, `ws-sa/window-leases-997`,
 PQ #1000, part of #997). The strict exact-entry reader
 (`perturbed_x_cache.prefetch_exact_activation_cache_entries`) now pins a
@@ -364,7 +381,9 @@ There are no mmap tensor views and no second retained checkpoint plane.
 Checkpoint/source/bound/replay phases and layer/probe/batch arithmetic order
 remain unchanged. The container requires the explicitly sealed same-path
 writable mount; NFS, tmpfs and overlay scratch roots refuse. The per-job disk
-ceiling is checked before physical allocation and is not a global disk ledger.
+ceiling is checked before physical allocation. The dispatcher also lists the
+pair for PrismaBuild, which charges it to the box's disk budget at claim
+(PQ #1019; see "Bounded local scratch is declared to PrismaBuild").
 Interrupted scratch is discarded; original authenticated checkpoints and
 committed cost journals remain the recovery authority. No GPU throughput or
 large-model peak claim follows from the tiny CPU equality qualification.
@@ -528,6 +547,14 @@ non-default regime is stamped into `statistics_arithmetic_identity`, so the
 join refuses mixed regimes; see the entry of that name at the top. The
 default stamps nothing. A band-serial producer (#996, merged here) refuses a
 capture batch above 1. No format, default, stage or ship gate changes.
+
+Re-stamped (2026-09-23, `ws-br/scratch-pairs-1019`) for **bounded local
+scratch declared to PrismaBuild** (PQ #1019): a Stage B quantum row seals
+`PRISMABUILD_LOCAL_SCRATCH_PAIRS` beside its cotangent scratch and replay
+spill pairs, so PB #911 charges their ceilings to the box's `spool_gb`; see
+"Bounded local scratch is declared to PrismaBuild". A row with no scratch is
+unchanged. No format, default, stage or ship gate changes. Gate:
+`tests/test_dispatch_joint_quanta.py`.
 
 Re-stamped (2026-09-23, `ws-tq/1010-stage-b-head-slice`) for **the Stage B
 head slice** (PQ #1010): the metadata producer runs the Stage B head intake

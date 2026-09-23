@@ -916,6 +916,8 @@ def test_cotangent_scratch_is_validated_and_sealed_in_outer_request(
     sealed = dict(outer[i + 1].split('=', 1) for i, value in enumerate(outer[:-1])
                   if value == '--env' and '=' in outer[i + 1])
     assert all(sealed.get(name) == value for name, value in env.items())
+    assert sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == (
+        'PRISMAQUANT_STAGE_B_COTANGENT_ROOT:PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES')
     actual = json.loads(argv[argv.index('--spec') + 1])
     assert cotangent_scratch_environment(actual, sealed) == env
 
@@ -945,8 +947,100 @@ def test_stage_b_spill_is_validated_and_sealed_in_outer_request(
     sealed = dict(outer[i + 1].split('=', 1) for i, value in enumerate(outer[:-1])
                   if value == '--env' and '=' in outer[i + 1])
     assert all(sealed.get(name) == value for name, value in env.items())
+    assert sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == (
+        'PRISMAQUANT_STAGE_B_SPILL_ROOT:PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES')
     actual = json.loads(argv[argv.index('--spec') + 1])
     assert stage_b_spill_environment(actual, sealed) == env
+
+
+_COTANGENT = ('PRISMAQUANT_STAGE_B_COTANGENT_ROOT', 'PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES')
+_SPILL = ('PRISMAQUANT_STAGE_B_SPILL_ROOT', 'PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES')
+
+
+def _scratch_quantum_argv(tmp_path, campaign, env, roots):
+    """A Stage B quantum's argv under a spec declaring ``env`` over ``roots``."""
+    import dispatch_joint_quanta as dispatch
+    spec = {'container': {'image': 'sha256:' + '0' * 64,
+             'mounts': [{'source': root, 'target': root} for root in roots]},
+            'env': env}
+    dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+                   tmp_path / 'adjoint-slices')
+    path = tmp_path / 'record.json'; path.write_text(json.dumps(record))
+    return lambda: quantum_argv(record, record_path=path, output_root=tmp_path / 'out')
+
+
+def _outer_env(argv):
+    """The ``--env`` entries pbrun seals, in order, before the payload."""
+    outer = argv[:argv.index('--')]
+    return [outer[i + 1] for i, value in enumerate(outer[:-1]) if value == '--env']
+
+
+def test_every_declared_scratch_pair_is_listed_for_pb(tmp_path, campaign):
+    """PQ #1019: the sealed request lists each pair, cotangent first, so PB
+    #911 charges both ceilings to the executing box's ``spool_gb``."""
+    cotangent, spill = '/home/rob/pb-scratch/cot', '/home/rob/pb-scratch/spill'
+    env = {_COTANGENT[0]: cotangent, _COTANGENT[1]: str(36 << 30),
+           _SPILL[0]: spill, _SPILL[1]: str(178_000_000_000)}
+    argv = _scratch_quantum_argv(tmp_path, campaign, env, (cotangent, spill))()
+    sealed = dict(item.split('=', 1) for item in _outer_env(argv))
+    assert all(sealed.get(name) == value for name, value in env.items())
+    assert sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == ','.join(
+        ':'.join(pair) for pair in (_COTANGENT, _SPILL))
+    # PB's grammar: ROOT_ENV:MAX_ENV items, each variable sealed beside it,
+    # each ceiling a positive decimal byte count.
+    for item in sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'].split(','):
+        root_env, max_env = item.split(':')
+        assert sealed[root_env].startswith('/')
+        assert sealed[max_env].isdecimal() and int(sealed[max_env]) > 0
+    # The list is a request option, never forwarded into the container.
+    wrapped = argv[argv.index('--') + 1:]
+    assert not any('PRISMABUILD_LOCAL_SCRATCH_PAIRS' in part for part in wrapped)
+
+
+def test_a_row_without_scratch_seals_todays_request(tmp_path, campaign, monkeypatch):
+    """No scratch declared: no pair list, and the argv is what it was."""
+    import dispatch_joint_quanta as dispatch
+    build = _scratch_quantum_argv(tmp_path, campaign, {}, ())
+    argv = build()
+    assert _outer_env(argv) == [dispatch.DEV_MODE_ENV]
+    container = sys.modules[dispatch.local_scratch_environment.__module__]
+    monkeypatch.setattr(container, 'LOCAL_SCRATCH_KINDS', ())
+    assert build() == argv
+
+
+@pytest.mark.parametrize('names', [_COTANGENT, _SPILL], ids=['cotangent', 'spill'])
+@pytest.mark.parametrize('bound', [None, '0', '-5', '1.5'], ids=['unset', 'zero', 'negative', 'fraction'])
+def test_a_scratch_root_without_a_positive_bound_is_refused(
+        tmp_path, campaign, names, bound):
+    import dispatch_joint_quanta as dispatch
+    root = '/home/rob/pb-scratch/unbounded'
+    env = {names[0]: root}
+    if bound is not None:
+        env[names[1]] = bound
+    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
+    with pytest.raises(dispatch.DispatchRefused, match='positive byte ceiling'):
+        build()
+
+
+def test_a_spec_cannot_declare_the_pair_list(tmp_path, campaign):
+    import dispatch_joint_quanta as dispatch
+    root = '/home/rob/pb-scratch/spill'
+    env = {_SPILL[0]: root, _SPILL[1]: str(1 << 30),
+           'PRISMABUILD_LOCAL_SCRATCH_PAIRS': ''}
+    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
+    with pytest.raises(dispatch.DispatchRefused, match='derived from the declared'):
+        build()
+
+
+def test_two_scratch_kinds_cannot_share_a_root(tmp_path, campaign):
+    import dispatch_joint_quanta as dispatch
+    root = '/home/rob/pb-scratch/shared'
+    env = {_COTANGENT[0]: root, _COTANGENT[1]: str(1 << 30),
+           _SPILL[0]: root, _SPILL[1]: str(1 << 30)}
+    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
+    with pytest.raises(dispatch.DispatchRefused, match='same root'):
+        build()
 
 
 @pytest.mark.parametrize('regime,spill,message', [
