@@ -9,8 +9,8 @@ export is acknowledged. The export actions run on a real private fleet
 (claim, execute, finish), pinned to the qualified bundle
 ``test_produced_output_spool_real_pb`` uses.
 
-Run it in its own pytest invocation, for the reason
-``test_stage_a_produced_boundary_chain`` records.
+The module is marked ``own_process`` for the reason
+``test_stage_a_produced_boundary_chain`` records (PQ #1008).
 """
 from __future__ import annotations
 
@@ -18,10 +18,15 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 import test_stage_a_produced_boundary_chain as chain
 from test_band_serial_handoff_produced import (
     band_campaign, check_consumer_binds, emit_handoff, producer_owner)
 from test_stage_a_produced_boundary_chain import _isolated_launch_context  # noqa: F401
+
+# PQ #1008: one pinned prismabuild per process (tests/conftest.py).
+pytestmark = pytest.mark.own_process
 
 
 def test_the_handoff_exports_through_the_spool_before_its_record(

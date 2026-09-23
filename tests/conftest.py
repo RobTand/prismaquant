@@ -18,7 +18,13 @@ contract is a version it no longer is.
 from __future__ import annotations
 
 import copy
+import fcntl
+import hashlib
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -346,3 +352,240 @@ def pytest_sessionfinish(session, exitstatus):
     if reporter is None or not reporter.stats.get("skipped"):
         return
     session.exitstatus = pytest.ExitCode.OK
+
+
+# ---------------------------------------------------------------------------
+# Modules that need a pytest process of their own (PQ #1008)
+# ---------------------------------------------------------------------------
+#
+# Some harnesses cannot share a process. The Stage A produced-output harness
+# (``test_stage_a_produced_boundary_chain``) resolves a pinned PrismaBuild
+# bundle, and one process can hold only one ``prismabuild``: in a session
+# that has already imported the deployed one, the harness used to skip every
+# test that needed the bundle, so a multi-file shard reported them as
+# skipped and stayed green (25 tests in the #996 run).
+#
+# A module marked ``own_process`` keeps its tests and their node ids. When
+# the session collects only that module, nothing changes. When it collects
+# other modules too, each of the module's items is replaced by a proxy with
+# the same node id. The first proxy to run starts one child pytest over
+# exactly the module's collected node ids, and every proxy then reports its
+# own test's outcome from the child: a failure with the child's traceback, a
+# skip with the child's reason, an expected failure as one. A test the child
+# never reported fails and names the child's exit status. Under xdist the
+# workers share one child per module through a lock in the run's common
+# temporary root, so a module is never run twice in a session.
+
+OWN_PROCESS_MARK = "own_process"
+#: Set in a child session only: the file the child appends its reports to.
+OWN_PROCESS_REPORT_ENV = "PQ_OWN_PROCESS_REPORT"
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        f"{OWN_PROCESS_MARK}: the module needs a pytest process of its own. In "
+        "a session that collects other modules too, its tests run in one "
+        "child pytest and report back under their own node ids (PQ #1008).")
+
+
+class OwnProcessFailure(Exception):
+    """A test failed, or never reported, in its module's own process."""
+
+
+def _own_process_root(config) -> Path:
+    base = Path(config._tmp_path_factory.getbasetemp())
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        # Every xdist worker's basetemp sits under the run's one root.
+        base = base.parent
+    return base / "own-process"
+
+
+def _fold_own_process_reports(records, *, log):
+    """Per node id, one outcome from a child's phase reports."""
+    outcomes, collection = {}, []
+    for record in records:
+        if record["when"] == "collect":
+            collection.append(record)
+            continue
+        folded = outcomes.setdefault(record["nodeid"],
+                                     {"outcome": "passed", "phases": []})
+        folded["phases"].append(record["when"])
+        if record["outcome"] == "failed":
+            message = f"[{record['when']}] {record['longrepr']}"
+            if folded["outcome"] == "failed":
+                folded["message"] += "\n" + message
+            else:
+                folded.update(outcome="failed", message=message)
+        elif record["outcome"] == "skipped" and folded["outcome"] != "failed":
+            if record.get("wasxfail") is not None:
+                folded.update(outcome="xfailed", reason=record["wasxfail"])
+            else:
+                folded.update(outcome="skipped", reason=record["reason"])
+    for folded in outcomes.values():
+        # A test counts as passed only once its call phase reported: a child
+        # that died inside a test leaves a setup report and nothing else.
+        if folded["outcome"] == "passed" and "call" not in folded["phases"]:
+            folded.update(outcome="failed", message=(
+                "the test never reported its call phase in its own process "
+                f"(phases: {folded['phases']}); see {log}"))
+    return outcomes, collection
+
+
+def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
+    """Run ``nodeids`` in one child pytest, once per session, and read it."""
+    key = hashlib.sha256("\n".join(nodeids).encode()).hexdigest()[:16]
+    root = _own_process_root(config)
+    root.mkdir(parents=True, exist_ok=True)
+    reports = root / f"{key}.jsonl"
+    done = root / f"{key}.done.json"
+    log = root / f"{key}.log"
+    with open(root / f"{key}.lock", "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            if not done.exists():
+                reports.unlink(missing_ok=True)
+                env = {name: value for name, value in os.environ.items()
+                       if not name.startswith("PYTEST_XDIST_")
+                       and name not in ("PYTEST_ADDOPTS", "PYTEST_CURRENT_TEST")}
+                env[OWN_PROCESS_REPORT_ENV] = str(reports)
+                argv = [sys.executable, "-m", "pytest", "-q", "--no-header",
+                        "-p", "no:cacheprovider",
+                        "--rootdir", str(config.rootpath),
+                        "--basetemp", str(root / f"{key}.tmp")]
+                if config.inipath is not None:
+                    argv += ["-c", str(config.inipath)]
+                timeout = getattr(config.option, "timeout", None)
+                if timeout:
+                    argv.append(f"--timeout={timeout}")
+                argv += list(nodeids)
+                returncode, error = None, None
+                try:
+                    with open(log, "wb") as out:
+                        returncode = subprocess.run(
+                            argv, cwd=str(config.rootpath), env=env,
+                            stdout=out, stderr=subprocess.STDOUT).returncode
+                except BaseException as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+                    raise
+                finally:
+                    done.write_text(json.dumps(
+                        {"returncode": returncode, "error": error}))
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+    state = json.loads(done.read_text())
+    lines = reports.read_text().splitlines() if reports.exists() else []
+    outcomes, collection = _fold_own_process_reports(
+        [json.loads(line) for line in lines], log=log)
+    return {"state": state, "outcomes": outcomes, "collection": collection,
+            "log": log}
+
+
+class _OwnProcessGroup:
+    """One own-process module's collected node ids, run at most once."""
+
+    def __init__(self, nodeids):
+        self.nodeids = tuple(nodeids)
+        self.result = None
+
+    def run(self, config):
+        if self.result is None:
+            self.result = _run_own_process(config, self.nodeids)
+        return self.result
+
+
+class OwnProcessItem(pytest.Item):
+    """Stands in for one test of an own-process module in a shared session."""
+
+    def __init__(self, *, group, **kwargs):
+        super().__init__(**kwargs)
+        self.group = group
+
+    def runtest(self):
+        result = self.group.run(self.config)
+        outcome = result["outcomes"].get(self.nodeid)
+        if outcome is None:
+            for record in result["collection"]:
+                if record["outcome"] == "skipped":
+                    pytest.skip(record["reason"])
+            try:
+                tail = result["log"].read_text(errors="replace").splitlines()[-40:]
+            except OSError:
+                tail = []
+            state = result["state"]
+            raise OwnProcessFailure(
+                f"{self.nodeid} reported nothing from its own pytest process "
+                f"(exit {state['returncode']}"
+                + (f", {state['error']}" if state.get("error") else "")
+                + f"; log {result['log']}):\n" + "\n".join(
+                    [record["longrepr"] for record in result["collection"]
+                     if record["outcome"] == "failed"] + tail))
+        if outcome["outcome"] == "failed":
+            raise OwnProcessFailure(outcome["message"])
+        if outcome["outcome"] == "xfailed":
+            pytest.xfail(outcome["reason"])
+        if outcome["outcome"] == "skipped":
+            pytest.skip(outcome["reason"])
+
+    def repr_failure(self, excinfo):
+        if isinstance(excinfo.value, OwnProcessFailure):
+            return str(excinfo.value)
+        return super().repr_failure(excinfo)
+
+    def reportinfo(self):
+        return self.path, None, f"{self.nodeid} (own process)"
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(session, config, items):
+    """Give each ``own_process`` module its own process in a shared session.
+
+    ``trylast`` so that ``-k``, ``-m`` and every other plugin have already
+    chosen the items: the child runs exactly the node ids chosen here.
+    """
+    if os.environ.get(OWN_PROCESS_REPORT_ENV):
+        return
+    if len({item.path for item in items}) < 2:
+        return
+    modules: dict[Path, list[int]] = {}
+    for index, item in enumerate(items):
+        if item.get_closest_marker(OWN_PROCESS_MARK) is not None:
+            modules.setdefault(item.path, []).append(index)
+    for indices in modules.values():
+        group = _OwnProcessGroup(items[index].nodeid for index in indices)
+        for index in indices:
+            original = items[index]
+            items[index] = OwnProcessItem.from_parent(
+                original.parent, name=original.name, group=group)
+
+
+def _own_process_record(report) -> dict:
+    reason = ""
+    if report.skipped:
+        longrepr = report.longrepr
+        reason = (str(longrepr[2]) if isinstance(longrepr, tuple)
+                  and len(longrepr) == 3 else str(longrepr or ""))
+        if reason.startswith("Skipped: "):
+            reason = reason[len("Skipped: "):]
+    return {"nodeid": report.nodeid, "when": getattr(report, "when", "collect"),
+            "outcome": report.outcome,
+            "longrepr": report.longreprtext if report.failed else "",
+            "reason": reason, "wasxfail": getattr(report, "wasxfail", None)}
+
+
+def _append_own_process_record(report) -> None:
+    path = os.environ.get(OWN_PROCESS_REPORT_ENV)
+    if path:
+        with open(path, "a", encoding="utf-8") as out:
+            out.write(json.dumps(_own_process_record(report)) + "\n")
+
+
+def pytest_runtest_logreport(report):
+    """In a child session, hand each phase's report to the parent."""
+    _append_own_process_record(report)
+
+
+def pytest_collectreport(report):
+    """In a child session, hand a failed or skipped collection to the parent."""
+    if not report.passed:
+        _append_own_process_record(report)
