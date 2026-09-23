@@ -533,27 +533,59 @@ def test_spill_resume_after_partial_completion_is_bitwise(campaign, monkeypatch,
              "spill_geometry": replay_block["spill_geometry"]})
 
 
+@pytest.mark.parametrize("probe", [1, N_PROBES - 1])
 def test_spill_refuses_an_input_that_differs_at_a_later_probe(campaign, monkeypatch,
-                                                              tmp_path):
+                                                              tmp_path, probe):
+    """One flipped bit in one input of a later probe fails the capture (#1030).
+
+    The input is digested on its device when the hook fires; the flip is made
+    there, on a copy of the operand the hook read, so the real digest and the
+    real comparison see a real difference.
+    """
     layer = 1
     spill_root = _spill_root(tmp_path)
-    original = spill_mod.StageBReplaySpill._stage
+    original = spill_mod.StageBReplaySpill._input_digest
     injected = {"done": False}
 
-    def stage(self, window_index, stream, index, logical, tensor):
-        if stream[0] == "x" and self._probe == 1 and not injected["done"]:
+    def digest(self, x):
+        if self._probe == probe and not injected["done"]:
             injected["done"] = True
-            tensor = tensor.clone()
-            tensor.view(-1)[0] += 1
-        return original(self, window_index, stream, index, logical, tensor)
+            # Same shape and strides, so the storage order is the operand's.
+            flipped = torch.empty_strided(x.size(), x.stride(), dtype=x.dtype,
+                                          device=x.device)
+            flipped.copy_(x.detach())
+            spill_mod._storage_order(flipped).view(torch.int16)[-1] ^= 1
+            x = flipped
+        return original(self, x)
 
-    monkeypatch.setattr(spill_mod.StageBReplaySpill, "_stage", stage)
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "_input_digest", digest)
     _clear_output(campaign, layer)
     payload, state = _quantum(campaign, monkeypatch, layer=layer, spill_root=spill_root,
                               ceiling=1 << 30)
     assert payload is None and injected["done"]
-    assert "input differs from probe 0" in _chain(state.error)
+    assert f"probe {probe} input differs from probe 0" in _chain(state.error)
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+
+
+def test_only_probe_zero_inputs_reach_the_host(campaign, monkeypatch, tmp_path):
+    """A later probe's input is digested on its device and never staged (#1030)."""
+    layer = 1
+    staged: dict[int, int] = {}
+    original = spill_mod.StageBReplaySpill._stage
+
+    def stage(self, window_index, stream, index, logical, tensor):
+        if stream[0] == "x":
+            staged[self._probe] = staged.get(self._probe, 0) + 1
+        return original(self, window_index, stream, index, logical, tensor)
+
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "_stage", stage)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    spill = state.counters_block["replay"]["spill"]
+    assert set(staged) == {0} and staged[0] == spill["x_entries"]
+    assert spill["x_digest_checks"] == (N_PROBES - 1) * spill["x_entries"]
 
 
 def _bf16_expert_fixture():

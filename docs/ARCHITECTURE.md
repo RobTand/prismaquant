@@ -19,6 +19,28 @@ default, stage or ship gate changes. A Stage B band slice built from a v2 checkp
 other rows than one built from v1, so its slice digests differ. The tensor
 payloads are identical.
 
+The Stage B spill checks its inputs on the GPU, not with SHA-256 on the host
+(2026-09-23, `ws-1a/spill-digest-1030`, PQ #1030). Every probe's forward is
+the same, so every later probe's inputs must equal probe 0's, the ones the
+spill writes and the replay reads. The spill writer checked this by hashing
+every staged input with SHA-256 on its thread, and copied each later probe's
+input to the host only to hash it. On the GLM-shaped proxy of #994 the hash
+was 57% of the writer's py-spy samples (PB `028b76eef2fa`), and the capture
+waited 14 to 22 s per quantum for free arenas. Now
+`joint_replay_spill._InputDigest` digests each input on its own device when
+the hook fires: two independent multilinear digests of the input's 16-bit
+words mod 2^31 - 1, in exact int64 arithmetic, so the value does not depend
+on reduction order or device. Probe 0's digests stay on the device beside
+its entries. A later probe's input is digested and never staged, and its
+digests are compared with probe 0's when that probe's capture ends, in one
+stacked comparison per window; the first input that differs fails the
+capture, as before. For inputs that differ, both digests agree with
+probability below 2^-59. Records and identities do not change: the digest
+lived only in memory. `x_digest_checks` in the spill telemetry is now
+counted when a capture ends. Gates: `tests/test_stageb_spill_input_digest.py`,
+`tests/test_stageb_one_pass_spill.py`. No format, default, stage or ship
+gate changes.
+
 Stage B holds no kernel-time profiler session unless asked (2026-09-23,
 `ws-1a/stageb-profiler-optin-1029`, PQ #1029). `run_layer_quantum_core` opened
 a `torch.profiler` CUDA session (`KernelTimeProfiler`) around the render-free
@@ -315,7 +337,11 @@ order, and a replayed operand keeps the live shape, strides and, on CUDA, the
 address residue modulo 512. The file is laid out per Linear: one input stream
 per Linear that first read a tensor (an expert's up projection reads its gate
 projection's stream) and one gradient stream per Linear and probe. Inputs are
-written once, at probe 0, and every later probe's inputs must hash-equal them.
+written once, at probe 0, and every later probe's inputs must equal them bit
+for bit: each input is digested on its own device when the hook fires
+(`joint_replay_spill._InputDigest`, two exact multilinear digests mod
+2^31 - 1, PQ #1030), the capture fails at the end of the first probe whose
+input differs, and a later probe's input is never copied to the host.
 The spill refuses a non-dense input, a measurement dtype that is not 16-bit,
 and non-contiguous shared-state cotangent accumulators.
 `joint_replay_spill.spill_geometry` bounds the layer's bytes from shapes and
@@ -746,6 +772,12 @@ Re-stamped (2026-09-23, `ws-tq/1036-referenced-checkpoints`) for
 rows are the owner's pinned entries, not copies, and every checkpoint reader
 parses v1 and v2 through `checkpoint_cotangent_plane`; see "Referenced
 checkpoints (#1036)". No format, default, stage or ship gate changes.
+
+Re-stamped (2026-09-23, `ws-1a/spill-digest-1030`) for **the Stage B
+spill's input check** (PQ #1030): each input is digested on its device
+(`joint_replay_spill._InputDigest`) and a later probe's input is never
+copied to the host; the writer no longer hashes. See the entry at the top.
+No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-1a/stageb-profiler-optin-1029`) for **Stage B's
 kernel-time profiler** (PQ #1029): the chain and per-window
