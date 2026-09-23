@@ -1592,6 +1592,9 @@ def _real_plan() -> Path | None:
     return None
 
 
+#: Walks about 36k checkpoint shards and the campaign tree that no
+#: PrismaBuild action declares: skipped unless asked for (PQ #1014).
+@pytest.mark.fleet_data
 def test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases(scratch):
     plan = _real_plan()
     if plan is None:
