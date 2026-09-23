@@ -12,6 +12,15 @@ and its own ``verified_cell`` digest. Each rebinding row records the result
 file's digest, both cell digests and the previous anchor. With those,
 ``assemble_t4_overlay.py`` rebuilds the previous cell from the new one and
 checks the result's digest without reading the previous catalog.
+
+The two catalog headers must be equal, except the anchor journal and one
+case of ``old_prepared``: a run restarted on the same production cache
+re-prepares it under its own plan, so its prepared differs from the previous
+one only in ``plan_sha256`` (R12 to R13, RobTand/prismaquant#1117). Both
+prepared files are read at their bound digests and compared, and the
+document records the change as ``old_prepared_rebound``. Any other change
+refuses. Every header field the catalog takes from the prepared is still
+compared as it is.
 """
 import argparse
 import hashlib
@@ -37,6 +46,16 @@ def bound_json(path, expected):
     raw = Path(path).read_bytes()
     assert sha(raw) == expected, (path, 'SHA256 mismatch')
     return json.loads(raw)
+
+
+def rebound_prepared(previous, new):
+    """The record of a prepared that changed only its plan digest, or an AssertionError."""
+    old = bound_json(previous['path'], previous['sha256'])
+    now = bound_json(new['path'], new['sha256'])
+    changed = sorted(key for key in set(old) | set(now)
+                     if key not in old or key not in now or old[key] != now[key])
+    assert changed == ['plan_sha256'], ('old_prepared changed beyond its plan digest', changed)
+    return {'previous': previous, 'new': new, 'differs_only_in': changed}
 
 
 def rebind_cell(new, previous, raw_result):
@@ -84,9 +103,14 @@ def main():
     previous = bound_json(args.previous_catalog, args.previous_catalog_sha256)
     previous_cells = {(cell['qname'], cell['format']): cell for cell in previous['cells']}
     assert len(previous_cells) == len(previous['cells']) == len(catalog['cells'])
+    rebound = None
     for key in set(catalog) | set(previous):
-        if key not in ('cells', 'anchor_journal'):
-            assert catalog.get(key) == previous.get(key), ('catalog field changed', key)
+        if key in ('cells', 'anchor_journal'):
+            continue
+        if key == 'old_prepared' and catalog.get(key) != previous.get(key):
+            rebound = rebound_prepared(previous[key], catalog[key])
+            continue
+        assert catalog.get(key) == previous.get(key), ('catalog field changed', key)
     rows = []
     for cell in catalog['cells']:
         raw = result_path(args.qualified_dir, cell['qname']).read_bytes()
@@ -97,6 +121,8 @@ def main():
                 'qualified_dir': str(Path(args.qualified_dir)),
                 'scope': 'each new cell equals its previous cell except anchor; the qualifier never reads the anchor',
                 'rows': rows}
+    if rebound is not None:
+        document['old_prepared_rebound'] = rebound
     raw = (json.dumps(document, sort_keys=True, separators=(',', ':')) + '\n').encode()
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open('xb') as handle:
