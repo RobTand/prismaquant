@@ -1598,24 +1598,6 @@ def _collect_quantum_bulk_entries(*, adjoint_slice: Mapping,
             "batch_total": batch_total,
             "batch_windows": (batch_total + prefetch_batches - 1)
                              // prefetch_batches}
-    """A v2 data-manifest entry for one sealed exact record.
-
-    Carries the writer's path, wire byte length and digest -- the triple a
-    staging contract admits and verifies without rehashing payloads. Any
-    malformed record is a refusal, never a skipped file.
-    """
-    if not isinstance(exact, dict):
-        raise ValueError(f"{where} is not an exact entry record: refusing")
-    path = exact.get("path")
-    digest = exact.get("sha256")
-    size = exact.get("file_bytes")
-    if type(path) is not str or not path:
-        raise ValueError(f"{where} names no entry path: refusing")
-    if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
-        raise ValueError(f"{where} carries no entry digest: refusing")
-    if type(size) is not int or isinstance(size, bool) or size <= 0:
-        raise ValueError(f"{where} carries no entry byte length: refusing")
-    return {"path": path, "offset": 0, "bytes": size, "sha256": digest}
 
 
 def _require_stage_a_input(adjoint: Mapping) -> None:
