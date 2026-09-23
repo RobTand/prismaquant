@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+A Stage A seed seals its result, and two new tools compare and stage seeds
+(2026-09-23, `ws-sa/seed-through-checkpoint`, PQ #1043, part of #997). A
+seed now seals a checkpoint at `through` even off the stride; before, the end
+of the walk retired that plane unless `through` was a stride boundary.
+`tools/compare_stage_a_checkpoints.py` writes the per-entry distance of one
+sealed plane from another under one bind identity: bitwise equality,
+relative L2 and largest difference. `tools/build_stagea_seed_package.py`
+derives a seed's data manifest from the source run's own and seals the spec
+beside it. See "Stage A seed mode (#1016)". Gates:
+`tests/test_stage_a_chain_seed.py`, `tests/test_stage_a_seed_package.py`. No
+format, pipeline default, stage or ship gate changes; a run without
+`--chain-seed` is unchanged.
+
 One helper pins the matmul settings, and a launch setting pins the bf16
 reduction flag (2026-09-23, `ws-1a/bf16-reduction-1028`, PQ #1028).
 `torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction` lets
@@ -704,6 +717,13 @@ armed for its first proxy, and runs under the bound the parent runs under
 name), so a hanging test fails alone with the bound named instead of the
 module timing out as one test (`tests/conftest.py`). No format, default,
 stage or ship gate changes. Gate: `tests/test_own_process_isolation.py`.
+
+Re-stamped (2026-09-23, `ws-sa/seed-through-checkpoint`) for **the seed's
+sealed result and its tools** (PQ #1043): a seed seals its plane at
+`through`, `tools/compare_stage_a_checkpoints.py` measures the distance
+between two sealed planes, and `tools/build_stagea_seed_package.py` builds a
+seed's data manifest; see "Stage A seed mode (#1016)". No format, default,
+stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-br/resolver-bytes-1026`) for **complete tier
 byte counts** (PQ #1026): the exact-entry readers (`read_single`,
@@ -21449,9 +21469,13 @@ capsule rows (`authorize_forward_inputs`) and checkpoint `b`'s cotangent plane
 under that checkpoint's session (`authorize_seed_checkpoint`), loads `b`'s
 shared states, rebuilds the batches as a chain resume does, and rolls layers
 `b - 1` down to `through`. It seals its own checkpoints at the stride
-boundaries on the way. It runs no forward pass and no tail, writes no chain
-state, and never unlinks a borrowed file. The capsule rows are pinned by the
-capsule's digest, as a Stage B owner's attached chain is (`attached_chain`);
+boundaries on the way and at `through`, its result, whether or not `through`
+is a stride boundary (PQ #1043): the end of the walk retires the rolling
+entries, so an unsealed plane at `through` would be gone. The stride block
+and the run identity keep the plan's boundaries. It runs no forward pass and
+no tail, writes no chain state, and never unlinks a borrowed file. The
+capsule rows are pinned by the capsule's digest, as a Stage B owner's
+attached chain is (`attached_chain`);
 each read still checks the entry's own metadata and waits on PrismaBuild's
 map.
 
@@ -21471,14 +21495,43 @@ identity carries it only when it is off (PQ #1028). A seed's bind identity
 does not carry it, so a seed from a checkpoint sealed under one setting runs
 on under the other; `matmul_reduction` records which.
 
+**Comparing two planes.** `stage_a_chain_seed.checkpoint_plane_distance`,
+run as `tools/compare_stage_a_checkpoints.py`, measures how far one sealed
+plane is from another at the same boundary, for example two seeds of one
+checkpoint under different chain batch sizes or matmul reduction settings
+(PQ #1043). Both checkpoints are pinned and checked as a seed checks the one
+it borrows. It refuses two boundaries, two bind identities (two sessions'
+`run_identity_sha256`), two entry sets, or a shape or dtype mismatch. It
+reads each entry pair digest-verified through a bounded read-ahead window and
+writes `prismaquant.stage_a.checkpoint_plane_distance.v1`: per
+`(probe, batch)`, `bitwise_equal`, the relative L2 distance of the candidate
+from the reference (float32 differences, float64 sums) and the largest
+elementwise difference, then `equal`, `different`, and the mean, median, p99
+and maximum relative L2. The tool writes its record once and refuses an
+existing output.
+
 **The band tool refuses a seed.** `build_band_receipt` refuses a space that
 holds a seed marker or seed receipt, and `stage_a_argv` refuses a sealed
 request that carries `--chain-seed`. A seed's checkpoints never feed Stage B.
 
-**Limits.** Under PrismaBuild the seed's dispatcher must declare checkpoint
-`b`'s entries, the capsule rows `through .. b - 1` and, with a compare
-checkpoint, its entries, as inputs. The compare read is the reference plane's
-full size. No dispatcher builds such a request yet.
+**Staging.** Under the `ram,ssd` tier policy every bulk byte a seed reads
+must be in its action's data manifest. `tools/build_stagea_seed_package.py`
+derives that manifest from the source run's own submitted manifest (PQ
+#1043), as `build_stagea_forward_recovery_package` derives a recovery
+manifest. It keeps the source run's `head` phase and its phases
+`chain-(b-1)` down to `chain-(through)`, whose boundary rows are the capsule
+rows the seed borrows, and drops every `forward-*` phase. It adds the seed
+spec, checkpoint `b`'s `checkpoint.json` and shared states to `head`, `b`'s
+cotangent plane to `chain-(b-1)`, and the compare checkpoint's
+`checkpoint.json` and plane to `chain-(through)`, each with its exact size and
+digest. It refuses a source manifest that names no forward-recovery capsule,
+or another one than the seed's, a missing phase, a compare checkpoint at
+another boundary, and `through >= b`. The package directory holds
+`seed-spec.json`, `seed-manifest.json.gz` and `package.json`, which records
+both digests and the largest bytes of two consecutive phases, the lead and
+next windows PrismaBuild admits together. The CLI validates the manifest with
+PrismaBuild's `validate_data_manifest` before it writes anything. No
+dispatcher submits a seed; a launcher seals the request from the package.
 
 ### Stage A dispatch requires the paced spool (#1012)
 
