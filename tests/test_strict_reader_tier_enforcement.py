@@ -1132,8 +1132,10 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="TIER-04"):
         parse_allowed_tiers("pool")
 
+    from stage_a_spool_spec import with_spool
     spec = tmp_path / "spec.json"
-    spec.write_text(json.dumps({"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
+    spec.write_text(json.dumps(with_spool(
+        {"container": {"image": "sha256:" + "0" * 64}, "env": {}})))
     monkeypatch.setattr(dispatch_joint_quanta, "SPEC_PATH", spec)
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps({"output_root": str(tmp_path / "campaign-root")}))

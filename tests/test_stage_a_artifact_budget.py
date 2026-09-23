@@ -445,9 +445,10 @@ def _dispatcher_argv_fixture(tmp_path, monkeypatch):
     import dispatch_joint_quanta
     import gzip
 
+    from stage_a_spool_spec import with_spool
     spec = tmp_path / "spec.json"
-    spec.write_text(json.dumps(
-        {"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
+    spec.write_text(json.dumps(with_spool(
+        {"container": {"image": "sha256:" + "0" * 64}, "env": {}})))
     monkeypatch.setattr(dispatch_joint_quanta, "SPEC_PATH", spec)
 
     parent = "d" * 64

@@ -2264,6 +2264,10 @@ def run_layer_quantum(
     if emit_handoff and handoff_regime_refusal(replay_regime):
         raise QuantumIdentityRefused(handoff_regime_refusal(replay_regime))
     from .joint_stageb_resources import enforce_device_policy
+    # Bind the readset before the first head read, so the head slice and
+    # every declared entry after it resolve through residency (PQ #1024).
+    bind_residency_manifest(
+        data_manifest_sha256 or record["campaign"].get("read_manifest_sha256"))
     head_slice = None
     readset_block = record.get("executable_readset")
     if isinstance(readset_block, dict) and readset_block.get("head_slice") is not None:
@@ -2292,8 +2296,6 @@ def run_layer_quantum(
     layer = int(record["layer"])
     space = Path(record["output_space"]["root"])
     space.mkdir(parents=True, exist_ok=True)
-    bind_residency_manifest(
-        data_manifest_sha256 or record["campaign"].get("read_manifest_sha256"))
 
     result = {
         "schema": "prismaquant.joint_cost_quantum.execution.v1",
@@ -2386,7 +2388,10 @@ def run_layer_quantum(
                 progress_phase=HEAD_PHASE,
                 head_checkpoint=space / "checkpoints" / "head-walk",
                 head_resume=resume,
-                require_existing_renders=True, verify_payloads=False)
+                require_existing_renders=True, verify_payloads=False,
+                # The plan's allowance, as Stage A, the prepare and the
+                # head-slice producer pass it (PQ #1023).
+                historical_encoder_reuse=config.get("historical_encoder_reuse"))
             _same(config["model"], data.census["model"], "requested source model")
             _same(data.census["attention_implementation"], "eager",
                   "qualified source attention")
@@ -2615,7 +2620,9 @@ def main(argv=None) -> int:
         return EXIT_IDENTITY_REFUSED
     from .tessera_joint_aura import _load_plan
 
-    config = _load_plan(args.plan, args.plan_sha256)
+    # The readset is bound inside run_layer_quantum; until then the plan
+    # itself is the only input read (PQ #1024).
+    config = _load_plan(args.plan, args.plan_sha256, defer_pool_reads=True)
     if Path(config["output_root"]).resolve() != Path(args.output_root).resolve():
         print(f"{IDENTITY_REFUSED_MARKER}: plan output_root "
               f"{config['output_root']} is not --output-root {args.output_root}",

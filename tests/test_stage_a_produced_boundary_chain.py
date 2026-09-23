@@ -1277,9 +1277,14 @@ def test_the_dispatcher_seals_the_template_the_client_supports(
     # The stub keeps the real wrapper's keyword surface: the dispatcher
     # passes the declared progress phases (and, after #991, the Stage B
     # resource policy). A narrower stub fails on the call, not on the seal.
+    # The wrapper seals a spec; the Stage A row reads its spool from it
+    # (PQ #1012).
+    from stage_a_spool_spec import with_spool
+    sealed = json.dumps(with_spool({"container": {"image": "sha256:" + "0" * 64}}))
     monkeypatch.setattr(djq, "_container_wrap",
                         lambda spec, payload, *, progress, resource_policy=None:
-                        (list(payload), None))
+                        (["python3", "-m", "tools.tessera_campaign_container",
+                          "--spec", sealed, "--", *payload], None))
     monkeypatch.setattr(djq, "_plan_output_root", lambda campaign: "/tmp/out")
     argv = stage_a_argv(Path("/nonexistent/manifest.json"),
                         {"plan_path": "/p", "plan_sha256": "c" * 64,
