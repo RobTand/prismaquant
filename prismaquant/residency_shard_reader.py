@@ -318,11 +318,14 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
             started=started, bound=bound)
     finally:
         _staged_wait(id(token), None, ())
-    if polls or detail:
+    declared = pending[0][0] if pending else wanted[0][0]
+    if polls:
         resolver.record_range_wait(
-            pending[0][0] if pending else wanted[0][0], polls=polls,
-            seconds=time.monotonic() - started, served=verdict == RANGE_HIT,
-            **({"detail": detail} if detail else {}))
+            declared, polls=polls,
+            seconds=time.monotonic() - started, served=verdict == RANGE_HIT)
+    note = getattr(resolver, "record_range_refusal", None)
+    if detail and callable(note):
+        note(declared, detail)
     return verdict
 
 

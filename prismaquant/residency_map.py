@@ -1273,8 +1273,7 @@ class ResidencyResolver:
         self._read_order_reason = None
 
     def record_range_wait(self, declared: str | Path, *, polls: int,
-                          seconds: float, served: bool,
-                          detail: str | None = None) -> None:
+                          seconds: float, served: bool) -> None:
         """One strict read that waited for a range the map did not hold yet.
 
         The resolver itself still never waits (module docstring): this only
@@ -1293,12 +1292,22 @@ class ResidencyResolver:
                 self._range_waits_served += 1
             else:
                 self._range_waits_refused += 1
-                if detail:
-                    self._range_wait_refusal = str(detail)
             print(f"[residency] range wait {_normal(declared)}: "
                   f"{polls} poll(s) over {seconds:.1f}s -> "
-                  f"{'staged' if served else 'still not staged, refusing'}"
-                  + (f": {detail}" if detail else ""),
+                  f"{'staged' if served else 'still not staged, refusing'}",
+                  flush=True)
+
+    def record_range_refusal(self, declared: str | Path, detail: str) -> None:
+        """Why a strict read stopped waiting for a range (PQ #1107).
+
+        The state PrismaBuild's landing record gave, or that no landing
+        record covered the range and the bounded wait ran out. Kept as the
+        report's ``range_wait_refusal``, the latest one only: the log line
+        is the record of each.
+        """
+        with self._lock:
+            self._range_wait_refusal = str(detail)
+            print(f"[residency] range wait {_normal(declared)} refused: {detail}",
                   flush=True)
 
     def record_ram_fallback(self, declared: str | Path, reason: str) -> None:

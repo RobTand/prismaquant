@@ -66,6 +66,9 @@ class _Resolver:
     def record_range_wait(self, declared, **kwargs):
         self.waits.append(dict(kwargs))
 
+    def record_range_refusal(self, declared, detail):
+        self.waits.append({"served": False, "detail": detail})
+
     # What PrismaBuild publishes, and where the span sits in its read order.
     def landing_record(self):
         return self.record
