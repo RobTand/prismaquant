@@ -121,6 +121,45 @@ class QuantumIdentityRefused(RuntimeError):
     """A digest, schema or binding mismatch: refuse before writing anything."""
 
 
+def require_slice_bf16_reduction(adjoint_slice, allow: bool, *, where: str) -> None:
+    """Refuse a quantum whose bf16 reduction flag differs from Stage A's (#1065).
+
+    The quantum rebuilds Stage A's chain from its checkpoint, so it must run
+    that chain under the arithmetic Stage A ran it under. The slice's run
+    identity carries ``allow_bf16_reduced_precision_reduction: false`` when
+    Stage A ran with the flag off and nothing when it ran at PyTorch's
+    default (PQ #1028). ``allow`` is this quantum's own setting. Certified
+    mode refuses a mismatch and names both settings; dev mode records it,
+    as the prepared implementation-digest check does.
+    """
+    from .dev_mode import dev_mode_enabled, dev_warning
+    from .matmul_arithmetic import (
+        BF16_REDUCTION_ENV, BF16_REDUCTION_FIELD, MatmulArithmeticRefused,
+        bf16_reduction_of)
+
+    identity = adjoint_slice.get("run_identity") if isinstance(adjoint_slice, dict) else None
+    if not isinstance(identity, dict):
+        raise QuantumIdentityRefused(f"{where}: the stage-A slice carries no run identity")
+    try:
+        stamped = bf16_reduction_of(identity)
+    except MatmulArithmeticRefused as exc:
+        raise QuantumIdentityRefused(
+            f"{where}: the stage-A slice's bf16 reduction stamp: {exc}") from exc
+    if stamped == bool(allow):
+        return
+
+    def spelled(value):
+        return f"{BF16_REDUCTION_ENV} unset" if value else f"{BF16_REDUCTION_ENV}=off"
+
+    message = (f"{where}: Stage A ran its chain with {BF16_REDUCTION_FIELD}={stamped} "
+               f"({spelled(stamped)}), this quantum runs with "
+               f"{BF16_REDUCTION_FIELD}={bool(allow)} ({spelled(allow)})")
+    if dev_mode_enabled():
+        dev_warning(f"{message}; recorded, not gated (dev mode)")
+        return
+    raise QuantumIdentityRefused(message)
+
+
 # --------------------------------------------------------------------------
 # Record verification (§6.2 step 1)
 # --------------------------------------------------------------------------
@@ -1241,6 +1280,12 @@ def run_layer_quantum_core(
     except ChainRegimeRefused as exc:
         raise QuantumIdentityRefused(
             f"quantum {quantum_id}: the stage-A slice's chain regime: {exc}") from exc
+    # The bf16 reduction flag sets the chain's rounding too (PQ #1065): the
+    # live flag, which the runtime pinned from its environment, must be the
+    # one the slice's run identity records.
+    require_slice_bf16_reduction(
+        adjoint_slice, bool(torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction),
+        where=f"quantum {quantum_id}")
     checkpoint_dir = Path(record["output_space"]["checkpoint_dir"])
     n_probes = int(execution["n_probes"])
     seed_base = int(execution["seed_base"])
@@ -2328,9 +2373,16 @@ def run_layer_quantum(
     from .matmul_arithmetic import (
         MatmulArithmeticRefused, bf16_reduction_from_environment, pin_matmul_arithmetic)
     try:
-        bf16_reduction_from_environment(os.environ)
+        bf16_reduction = bf16_reduction_from_environment(os.environ)
     except MatmulArithmeticRefused as exc:
         raise QuantumIdentityRefused(str(exc)) from exc
+    # PQ #1065: compare the setting with the slice's stamp before any head
+    # work. The core repeats the check on the verified slice and the live
+    # flag, for every caller.
+    if isinstance(adjoint_slice, dict) and "run_identity" in adjoint_slice:
+        require_slice_bf16_reduction(
+            adjoint_slice, bf16_reduction,
+            where=f"quantum {record.get('quantum_id', '?')}")
     if emit_handoff and handoff_regime_refusal(replay_regime):
         raise QuantumIdentityRefused(handoff_regime_refusal(replay_regime))
     from .joint_stageb_resources import enforce_device_policy

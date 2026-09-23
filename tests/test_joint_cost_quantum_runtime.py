@@ -1010,6 +1010,49 @@ def test_quantum_matches_single_run_bitwise(tmp_path, monkeypatch):
         assert verdict["matched"] == verdict["units_shared"] == 1
 
 
+def test_the_core_refuses_a_live_bf16_flag_the_slice_does_not_record(
+        tmp_path, monkeypatch):
+    """PQ #1065: the core compares the live flag with the verified slice.
+
+    Stage A ran at PyTorch's default, so its slice carries no bf16 stamp; a
+    quantum core running with the flag off would rebuild another chain. It
+    refuses before the checkpoint is read, naming both settings.
+    """
+    from prismaquant.joint_cost_quantum import QuantumIdentityRefused
+    from prismaquant.matmul_arithmetic import BF16_REDUCTION_ENV, BF16_REDUCTION_FIELD
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    single_root = tmp_path / "single"
+    single = _single_run(single_root, monkeypatch,
+                         checkpoint=single_root / "checkpoints")
+    output_root = tmp_path / "campaign"
+    runner_a, _ = _stage_a(tmp_path, monkeypatch)
+    runner_a.context.settle_prefetch_layers = lambda layers: None
+    matmul = torch.backends.cuda.matmul
+    saved = matmul.allow_bf16_reduced_precision_reduction
+    matmul.allow_bf16_reduced_precision_reduction = True
+    try:
+        receipt = run_adjoint_capture_core(
+            runner_a, draw(), execution=_execution(tmp_path),
+            output_root=output_root, stride=2,
+            source_model_identity=_model_identity("joint-source"),
+            unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
+            prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
+            implementation_sha256=aura._aura_source_sha256())
+        assert BF16_REDUCTION_FIELD not in receipt["run_identity"]
+        matmul.allow_bf16_reduced_precision_reduction = False
+        with pytest.raises(QuantumIdentityRefused) as refused:
+            _run_quantum(tmp_path, monkeypatch, single=single, layer=1,
+                         receipt=receipt, output_root=output_root,
+                         plan_sha=_hex("d"), prepared_sha=_hex("e"))
+    finally:
+        matmul.allow_bf16_reduced_precision_reduction = saved
+    message = str(refused.value)
+    assert f"{BF16_REDUCTION_FIELD}=True ({BF16_REDUCTION_ENV} unset)" in message
+    assert f"{BF16_REDUCTION_FIELD}=False ({BF16_REDUCTION_ENV}=off)" in message
+    assert not (output_root / "layer-quanta" / "layer-001" / "checkpoints").exists()
+
+
 def test_quantum_writes_only_inside_its_output_space(tmp_path, monkeypatch):
     single_root = tmp_path / "single"
     single = _single_run(single_root, monkeypatch,
