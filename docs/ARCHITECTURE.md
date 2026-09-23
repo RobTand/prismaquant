@@ -19,8 +19,20 @@ need a fresh prepare per regime. The one campaign container spec that wraps
 every quantum of a dispatch carries it instead. The dispatcher refuses a
 malformed regime and one declared without the spill. The quantum refuses a
 regime in the plan's execution block, and a non-default regime without the
-spill, before any GPU work. The batched capture and the operator GEMM are not
-implemented yet, so a non-default regime still refuses. Gates:
+spill, before any GPU work. `capture_batch` B > 1 carries B consecutive stored
+batches through each capture pass, one forward and one backward, as the
+batched render-free chain (#997) does: no graft or harvest, the group's ids
+re-prepared so positions and masks are the group's own, and the input
+cotangent split back per stored batch. The last group is short when the batch
+count is not a multiple of B. Before the checkpoint load the quantum refuses a
+B that does not divide the sealed read window (a window's tensors are released
+when it closes) and any activation QDQ in the roster that is not row-local
+(`joint_replay_spill.require_row_local_activation_qdq` compares, bit for bit on
+the run's device, the QDQ of a block of rows with the rows' own QDQs, through
+the lease's own QDQ function). Before the chain it refuses any profile shared
+pass state or shared-state cotangent, and it checks again per group. The
+workspace reserve the capture pass charges scales with B. The operator GEMM is
+not implemented yet, so `accumulation=operator_gemm` still refuses. Gates:
 `tests/test_stageb_replay_regime.py`, `tests/test_stageb_one_pass_spill.py`,
 `tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
 changes.

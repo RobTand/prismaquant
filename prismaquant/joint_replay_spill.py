@@ -107,6 +107,51 @@ def experts_per_token(model):
     return None
 
 
+class ReplayRegimeInadmissible(RuntimeError):
+    """A non-default replay regime this quantum cannot run as declared."""
+
+
+def require_row_local_activation_qdq(modules, specs_by_qname, activation_max_abs, *,
+                                     device, dtype, rows=8):
+    """Refuse a replay regime unless every activation QDQ is row-local.
+
+    A batched capture (``capture_batch`` > 1) hands the QDQ B samples' rows
+    at once, and ``operator_gemm`` hands it row chunks that cut across
+    invocations. Both measure the same thing only if the QDQ of a block of
+    rows is the rows' own QDQs stacked: no scale may be shared across rows.
+    This checks exactly that, bit for bit, on this device and dtype, through
+    the function the statistics lease calls (``perturbed_x_cache.
+    _activation_qdq``), for one Linear of each (format, input width) in the
+    roster. Row ``r`` is scaled by ``2**r`` so that a tensor-wide scale would
+    show. Returns the checked ``(format, input width)`` pairs.
+    """
+    from .perturbed_x_cache import _activation_qdq
+
+    generator = torch.Generator(device="cpu").manual_seed(994)
+    checked = {}
+    for name in sorted(modules):
+        width = int(modules[name].weight.shape[1])
+        for fmt, spec in sorted(specs_by_qname[name].items()):
+            if not spec.act_quant_changes_input or (fmt, width) in checked:
+                continue
+            scale = torch.pow(2.0, torch.arange(rows, dtype=torch.float32) - rows // 2)
+            block = (torch.randn(rows, width, generator=generator) * scale[:, None]).to(
+                device=device, dtype=dtype)
+            with torch.no_grad():
+                whole = _activation_qdq(block.reshape(2, rows // 2, width), spec,
+                                        activation_max_abs, name).reshape(rows, width)
+                alone = torch.cat([_activation_qdq(block[row:row + 1], spec,
+                                                   activation_max_abs, name)
+                                   for row in range(rows)])
+            if not torch.equal(whole, alone):
+                raise ReplayRegimeInadmissible(
+                    f"{fmt}'s activation QDQ is not row-local at input width {width} "
+                    f"({name}): a batched or row-chunked replay would change what it "
+                    "measures")
+            checked[(fmt, width)] = name
+    return sorted(checked)
+
+
 @dataclass(frozen=True)
 class SpillGeometry:
     """Upper bound on one layer's spill, from shapes and token counts only."""

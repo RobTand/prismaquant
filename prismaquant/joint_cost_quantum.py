@@ -49,6 +49,9 @@ from .joint_adjoint_checkpoints import (
     adjoint_space,
     boundary_entry_directory,
     chain_layers_for,
+    _chain_group_batch,
+    _require_per_sample_state,
+    _stack_to_device,
     dev_mode_stamp,
     load_adjoint_checkpoint,
     require_dev_mode,
@@ -1155,8 +1158,10 @@ def run_layer_quantum_core(
                 "the spill; declare PRISMAQUANT_STAGE_B_SPILL_ROOT and "
                 "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
         counters.replay["regime"] = replay_regime_identity(replay_regime)
-        raise QuantumIdentityRefused(
-            f"quantum {quantum_id}: replay regime {replay_regime} is not implemented")
+        if replay_regime["accumulation"] != DEFAULT_REPLAY_REGIME["accumulation"]:
+            raise QuantumIdentityRefused(
+                f"quantum {quantum_id}: replay regime {replay_regime} is not implemented")
+    capture_batch = replay_regime["capture_batch"]
 
     retained = quantum_retained_state(execution)
     operator_windows = retained.operator_windows
@@ -1397,13 +1402,40 @@ def run_layer_quantum_core(
     spill_config = stage_b_spill_config()
     spill_pending = {name for name in names
                      if render_formats[name] and name not in completed_units}
+    # The capture carries ``capture_batch`` stored batches through each
+    # layer pass: consecutive batches, never across a sealed read window
+    # (the window's tensors are released when it closes), the last group
+    # ragged when the batch count is not a multiple.
+    capture_groups = [list(range(start, min(start + capture_batch, len(row_offsets))))
+                      for start in range(0, len(row_offsets), capture_batch)]
+    if capture_batch > 1 and int(storage.config["prefetch_batches"]) % capture_batch:
+        raise QuantumIdentityRefused(
+            f"quantum {quantum_id}: capture batch {capture_batch} does not divide "
+            f"the sealed read window of {storage.config['prefetch_batches']} batches")
     if spill_config is not None and spill_pending:
+        if replay_regime != DEFAULT_REPLAY_REGIME:
+            from .joint_replay_spill import (
+                ReplayRegimeInadmissible,
+                require_row_local_activation_qdq,
+            )
+            from .joint_served_activation import joint_activation_maxima
+            try:
+                checked = require_row_local_activation_qdq(
+                    {name: linears[name] for name in spill_pending},
+                    {name: {fmt: fr.get_format(fmt) for fmt in render_formats[name]}
+                     for name in spill_pending},
+                    joint_activation_maxima(production_cache),
+                    device=runner.device, dtype=runner.dtype)
+            except ReplayRegimeInadmissible as exc:
+                raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
+            counters.replay["row_local_qdq"] = [list(pair) for pair in checked]
         spill_windows = [tuple(name for name in window["names"] if name in spill_pending)
                          for window in resolved_windows]
         spill_bound = spill_geometry(
             linears, spill_windows, pending=spill_pending,
-            batch_tokens=[int(calib_ids[offset:offset + batch_rows].numel())
-                          for offset in row_offsets],
+            batch_tokens=[sum(int(calib_ids[row_offsets[index]:row_offsets[index]
+                                            + batch_rows].numel()) for index in group)
+                          for group in capture_groups],
             n_probes=n_probes,
             element_size=torch.empty((), dtype=runner.dtype).element_size(),
             experts_per_token=experts_per_token(runner.model))
@@ -1412,6 +1444,8 @@ def run_layer_quantum_core(
             window_names=spill_windows, n_probes=n_probes, dtype=runner.dtype,
             device=runner.device)
         counters.replay.update(mode=REPLAY_SPILL, spill_geometry=spill_bound.as_dict())
+        if capture_batch > 1:
+            counters.replay["capture_groups"] = len(capture_groups)
 
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
@@ -1440,6 +1474,17 @@ def run_layer_quantum_core(
                 for boundary in range(runner.num_layers + 1)]
         storage.watch_auxiliary(batches, cotangent_owners)
         storage.check_auxiliary(batches, cotangents=cotangent_owners)
+        if spill is not None and capture_batch > 1:
+            # Before the chain: a batched capture merges samples, so every
+            # sample's pass state must be empty (no profile shared state, no
+            # shared-state cotangent). Rechecked per group at capture time.
+            try:
+                _require_per_sample_state(
+                    runner, batches, layer,
+                    [owner for owners in cotangent_owners for owner in owners],
+                    range(len(batches)), where="batched Stage B spill capture")
+            except ChainRegimeRefused as exc:
+                raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
 
         # ---- the render-free chain: stage A's arithmetic, reused ---------
         chain_started = time.time()
@@ -1636,6 +1681,74 @@ def run_layer_quantum_core(
             counters.mark_phase_units(len(completed_units))
 
         noncontiguous_seeds: set[tuple[int, int]] = set()
+        capture_group_cache: dict = {}
+
+        def capture_group(group, active_probe, observer):
+            # One backward over a batch group (capture_batch > 1), as the
+            # batched render-free chain runs it: the samples' pass state is
+            # empty, so there is nothing to graft or harvest, and the input
+            # cotangent is split back per stored batch.
+            indices = [item[0] for item in group]
+            _require_per_sample_state(
+                runner, batches, layer,
+                [cotangent_owners[active_probe][index] for index in indices],
+                indices, where="batched Stage B spill capture")
+            x_in = out = incoming_grad = gradient = None
+            try:
+                storage.check_auxiliary(batches, cotangents=cotangent_owners)
+                if _free_gib() < min_free_gib:
+                    raise RuntimeError("joint window replay crossed free UMA floor")
+                cpu_rng = torch.get_rng_state()
+                cuda_rng = (torch.cuda.get_rng_state(runner.device)
+                            if torch.device(runner.device).type == "cuda" else None)
+                incoming_grad = _stack_to_device(
+                    [grad_plane[(active_probe, index)] for index in indices],
+                    device=runner.device)
+                x_in = _stack_to_device(
+                    [item[2] for item in group], device=runner.device,
+                    dtype=runner.dtype).detach().requires_grad_(True)
+                batch = (batches[indices[0]] if len(indices) == 1 else
+                         _chain_group_batch(runner, batches, indices, capture_group_cache))
+                out = runner.isolated_layer(batch, layer, x_in, pass_state={})
+                torch.autograd.backward([out], [incoming_grad])
+                observer.end_batch()
+                if not torch.equal(cpu_rng, torch.get_rng_state()) or (
+                        cuda_rng is not None and not torch.equal(
+                            cuda_rng, torch.cuda.get_rng_state(runner.device))):
+                    raise RuntimeError("joint operator replay source consumed Torch RNG")
+                if x_in.grad is None:
+                    raise RuntimeError("joint operator replay produced no input cotangent")
+                gradient = x_in.grad.detach().to("cpu")
+                start = 0
+                for index, item in zip(indices, group):
+                    rows = int(item[2].shape[0])
+                    grad_plane[(active_probe, index)] = (
+                        gradient if len(indices) == 1
+                        else gradient[start:start + rows].clone())
+                    start += rows
+                if start != int(gradient.shape[0]):
+                    raise RuntimeError("batched Stage B spill capture split its cotangent "
+                                       "into the wrong rows")
+                storage.check_auxiliary(batches, cotangents=cotangent_owners)
+            finally:
+                group = x_in = out = incoming_grad = gradient = None
+
+        def batched_capture(active_probe, observer):
+            last, expected = len(batches) - 1, iter(capture_groups)
+            with prefetched_boundary_batches(storage, batches, layer) as reverse_batches:
+                pending_items = []
+                for item in reverse_batches:
+                    pending_items.append(item)
+                    if len(pending_items) < capture_batch and item[0] != last:
+                        continue
+                    group, pending_items = pending_items, []
+                    if [entry[0] for entry in group] != next(expected, None):
+                        raise RuntimeError(
+                            "Stage B spill capture group differs from its geometry")
+                    capture_group(group, active_probe, observer)
+                    group = None
+                if pending_items or next(expected, None) is not None:
+                    raise RuntimeError("Stage B spill capture left batches ungrouped")
 
         def replay_backward(*, final, lease, probe, observer=None):
             active_probe = int(probe)
@@ -1652,11 +1765,16 @@ def run_layer_quantum_core(
                 check_operator_allocation(
                     guard, "before_joint_window_backward", reserve_bytes=(
                         operator_windows["workspace_reserve_bytes"]
+                        * (1 if observer is None else capture_batch)
                         + (0 if lease is None
                            else lease.statistics_capacity_bytes
                            - lease.resident_statistics_bytes)
                         + (0 if observer is None
                            else spill.capture_reserve_bytes)))
+            if observer is not None and capture_batch > 1:
+                batched_capture(active_probe, observer)
+                counters.replay["layer_passes"] += 1
+                return
             with prefetched_boundary_batches(storage, batches, layer) as reverse_batches:
                 for batch_index, batch, boundary_cpu, _unused in reverse_batches:
                     owner = cotangent_owners[active_probe][batch_index]

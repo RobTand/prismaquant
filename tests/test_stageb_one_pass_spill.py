@@ -654,6 +654,141 @@ def test_spill_ceiling_refuses_before_any_gpu_work(campaign, monkeypatch, tmp_pa
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
 
 
+def _observations(monkeypatch):
+    """Record every window lease's per-Linear (observed tokens, calls)."""
+    import prismaquant.joint_aura as joint
+
+    seen = []
+    original = joint.JointOperatorStatisticsLease.operator_diagnostics
+
+    def recording(self, *, collect_col_energy):
+        result = original(self, collect_col_energy=collect_col_energy)
+        seen.append({name: (row["observed_tokens"], row["observed_calls"])
+                     for name, row in result.items()})
+        return result
+
+    monkeypatch.setattr(joint.JointOperatorStatisticsLease, "operator_diagnostics",
+                        recording)
+    return seen
+
+
+def _token_totals(seen):
+    totals = {}
+    for window in seen:
+        for name, (tokens, _calls) in window.items():
+            totals[name] = totals.get(name, 0) + tokens
+    return totals
+
+
+def test_batched_spill_capture_is_stamped_and_reruns_bitwise(campaign, monkeypatch,
+                                                             tmp_path):
+    """capture_batch=2: two stored batches per layer pass, stamped rows.
+
+    A rerun at the same regime is bitwise (the rows and unit files hash
+    equal). Against the batch-1 spill, every dense Linear observes the same
+    tokens, and a packed projection's experts observe the same total, since
+    every token still routes to top-k experts; a route flip only moves rows
+    between experts.
+    """
+    from prismaquant.joint_replay_regime import normalize_replay_regime, replay_regime_of
+
+    regime = "capture_batch=2"
+    layer = 0
+    seen = _observations(monkeypatch)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "b1"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    single = _token_totals(seen)
+    single_evidence = _evidence(campaign, layer, payload)
+    runs = []
+    for attempt in range(2):
+        seen.clear()
+        _clear_output(campaign, layer)
+        spill_root = _spill_root(tmp_path / f"b2-{attempt}")
+        payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                                  spill_root=spill_root, ceiling=1 << 30, regime=regime)
+        assert payload is not None, _chain(state.error)
+        for rows in payload["costs"].values():
+            for row in rows.values():
+                assert replay_regime_of(row["probe_identity"]["arithmetic"]) == (
+                    normalize_replay_regime(regime))
+        replay = state.counters_block["replay"]
+        assert replay["mode"] == "one_pass_spill"
+        assert replay["layer_passes"] == N_PROBES
+        assert replay["capture_groups"] == 2
+        assert replay["regime"]["capture_batch"] == 2
+        assert replay["row_local_qdq"] == [["FP8_E4M3", WIDTH], ["FP8_E4M3", INTER]]
+        assert len(set(replay["spill"]["records_per_probe"])) == 1
+        assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+        runs.append((_evidence(campaign, layer, payload), _token_totals(seen)))
+    assert runs[0][0] == runs[1][0]
+    assert runs[0][0]["identity"] != single_evidence["identity"]
+    batched = runs[0][1]
+    assert set(batched) == set(single)
+    model, _context, runner = _runner(campaign.state, campaign.device)
+    linears = _targets(model, runner.profile)
+    packed = {}
+    for name, tokens in single.items():
+        module = linears[name]
+        if isinstance(module, spill_mod.PackedExpertProjection):
+            key = (module.module_qname, module.projection_name)
+            totals = packed.setdefault(key, [0, 0])
+            totals[0] += tokens
+            totals[1] += batched[name]
+        else:
+            assert batched[name] == tokens, name
+    assert packed and all(left == right for left, right in packed.values())
+    _report(f"batched-rerun-{campaign.device.type}", {
+        "regime": regime, "evidence": runs[0][0],
+        "route_moves": sum(abs(batched[name] - single[name]) for name in single)})
+
+
+def test_capture_batch_that_splits_a_read_window_refuses_before_any_gpu_work(
+        campaign, monkeypatch, tmp_path):
+    _clear_output(campaign, 0)
+    payload, state = _quantum(campaign, monkeypatch, layer=0,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                              regime="capture_batch=4")
+    assert payload is None
+    assert "does not divide the sealed read window of 2" in _chain(state.error)
+    assert state.context.install_calls == 0
+
+
+def test_batched_capture_refuses_shared_pass_state_before_the_chain(
+        campaign, monkeypatch, tmp_path):
+    monkeypatch.setattr(Lfm2MoeProfile, "isolated_layer_pass_state",
+                        lambda self, captured, layer: {"shared_kv": object()})
+    _clear_output(campaign, 0)
+    spill_root = _spill_root(tmp_path)
+    payload, state = _quantum(campaign, monkeypatch, layer=0, spill_root=spill_root,
+                              ceiling=1 << 30, regime="capture_batch=2")
+    assert payload is None
+    assert "carries shared pass state" in _chain(state.error)
+    assert state.context.install_calls == 0
+    assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+
+
+def test_row_local_qdq_admission_refuses_a_tensor_wide_scale(monkeypatch):
+    import prismaquant.format_registry as fr
+    import prismaquant.perturbed_x_cache as pxc
+
+    linear = nn.Linear(WIDTH, 3, bias=False).to(DTYPE)
+    specs = {"u": {"FP8_E4M3": fr.get_format("FP8_E4M3"),
+                   "NVFP4A16": fr.get_format("NVFP4A16")}}
+    assert spill_mod.require_row_local_activation_qdq(
+        {"u": linear}, specs, {}, device="cpu", dtype=DTYPE) == [("FP8_E4M3", WIDTH)]
+
+    def tensor_wide(x, spec, maxima, name, *args, **kwargs):
+        scale = x.float().abs().amax() / 448.0
+        return ((x.float() / scale).to(torch.float8_e4m3fn).float() * scale).to(x.dtype)
+
+    monkeypatch.setattr(pxc, "_activation_qdq", tensor_wide)
+    with pytest.raises(spill_mod.ReplayRegimeInadmissible, match="not row-local"):
+        spill_mod.require_row_local_activation_qdq(
+            {"u": linear}, specs, {}, device="cpu", dtype=DTYPE)
+
+
 def test_replay_regime_without_the_spill_refuses_before_any_gpu_work(
         campaign, monkeypatch):
     _clear_output(campaign, 0)

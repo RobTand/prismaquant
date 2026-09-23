@@ -247,3 +247,18 @@ def test_launcher_reads_the_regime_from_the_environment_only(monkeypatch):
     monkeypatch.setenv(REPLAY_REGIME_ENV, "capture_batch=x")
     with pytest.raises(QuantumIdentityRefused, match="canonical integer"):
         run_layer_quantum({"execution": {}}, **arguments)
+
+
+def test_the_container_forwards_the_sealed_regime_verbatim():
+    """The regime rides the spec's ``env``, which the container forwards as is."""
+    from tools.tessera_campaign_container import docker_command
+
+    regime = "capture_batch=2,accumulation=operator_gemm,chunk_rows=4096"
+    spec = {"model": "/mnt/shared/model", "cwd": "/original/checkout",
+            "python": "python3", "campaign_argv": [],
+            "env": {"PYTHONPATH": ".", REPLAY_REGIME_ENV: regime},
+            "container": {"image": "qualified:fixed", "mounts": [
+                {"source": "/mnt/shared", "target": "/mnt/shared"}]}}
+    argv = docker_command(spec, ["python3"], cwd="/snapshot", uid=1, gid=1,
+                          image_id="sha256:x", environ={})
+    assert f"{REPLAY_REGIME_ENV}={regime}" in argv
