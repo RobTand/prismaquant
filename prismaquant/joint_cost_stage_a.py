@@ -1185,6 +1185,10 @@ def run_adjoint_capture_core(
     checkpoints: list[dict] = []
     chain_telemetry: list[dict] = []
     started = time.time()
+    # Read, never set, here: the shared setter and its identity stamp are
+    # PQ #1028's. A seed records the value its chain ran under (PQ #1038).
+    bf16_reduction = bool(
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction)
     capture_started = None
     tail_started = None
     chain_started = None
@@ -1543,6 +1547,10 @@ def run_adjoint_capture_core(
             "stride": receipt_stride,
             "boundary_storage": boundary_storage_block(None),
             "seed": seed_plan.binding,
+            # Outside run_identity: the flag is not part of the seed's bind
+            # identity until PQ #1028 stamps it for every run.
+            "matmul_reduction": {
+                "allow_bf16_reduced_precision_reduction": bf16_reduction},
             "checkpoints": checkpoints,
             "plane_comparison": compare_seed_plane(seed_plan, plane_digests),
             "retention": retention,
