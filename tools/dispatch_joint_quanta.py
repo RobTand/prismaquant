@@ -1463,6 +1463,24 @@ def band_serial_roles(records: Sequence[tuple[Path, dict]]) -> dict[str, dict]:
     return roles
 
 
+#: The prefix of a Stage B handoff template's derived id.
+HANDOFF_TEMPLATE_ID_PREFIX = "pq-stageb-handoff-"
+
+
+def handoff_template_id(quantum_id: str, template: Mapping) -> str:
+    """``pq-stageb-handoff-<quantum id>-<digest>``: a handoff template's id.
+
+    The digest covers every field of the template except its id, so two
+    bodies never share an id and one body always gets the same one. The
+    body names the handoff directory inside the quantum's own output space,
+    so the same quantum id under another root gets another id (PQ #1054).
+    """
+    body = {key: value for key, value in template.items() if key != "template_id"}
+    digest = _sha_bytes(json.dumps(body, sort_keys=True,
+                                   separators=(",", ":")).encode())
+    return f"{HANDOFF_TEMPLATE_ID_PREFIX}{quantum_id}-{digest[:16]}"
+
+
 def handoff_template_path(record: Mapping, *, plan: Mapping,
                           adjoint_slice: Mapping, tier: str,
                           output_root: Path,
@@ -1477,10 +1495,13 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
     is named by its content digest, so a changed tier or plan writes a new
     template and never rewrites one a submitted row already declared.
 
-    ``template_id`` defaults to ``pq-stageb-handoff-<quantum id>``. PrismaBuild
-    files a template under its id and refuses a different template under the
-    same id, so a caller that writes into a scratch root passes an id of its
-    own (the live pair does) rather than the one a campaign row would file.
+    ``template_id`` defaults to :func:`handoff_template_id`, derived from the
+    template's own body. PrismaBuild files a template under its id and
+    refuses a different template under the same id, so the id changes
+    exactly when the body does: the same quantum under another root (another
+    ``output_prefix``), tier or plan files a template of its own, and a
+    re-dispatch of the same row files the same one again (PQ #1054). An
+    explicit ``template_id`` overrides the derived one.
     """
     from prismaquant.cost_streaming import normalize_boundary_storage
     from prismaquant.joint_quantum_handoff import handoff_root
@@ -1498,13 +1519,18 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
             "directory": str(handoff_root(record["output_space"]["root"]))})
         tensors = [int(entry["tensor_bytes"]) for entry in
                    adjoint_slice["checkpoint"]["activation_entries"]]
-        template = build_boundary_template(
-            output_prefix=policy["directory"], tier=str(tier),
-            artifact_max_bytes=int(policy["max_artifact_bytes"]),
-            group_size=int(policy["prefetch_batches"]),
-            max_entry_tensor_bytes=max(tensors),
-            template_id=(template_id if template_id is not None
-                         else f"pq-stageb-handoff-{quantum_id}"))
+
+        def build(name: str) -> dict:
+            return build_boundary_template(
+                output_prefix=policy["directory"], tier=str(tier),
+                artifact_max_bytes=int(policy["max_artifact_bytes"]),
+                group_size=int(policy["prefetch_batches"]),
+                max_entry_tensor_bytes=max(tensors), template_id=name)
+
+        template = build(HANDOFF_TEMPLATE_ID_PREFIX + str(quantum_id)
+                         if template_id is None else template_id)
+        if template_id is None:
+            template = build(handoff_template_id(quantum_id, template))
     except (KeyError, TypeError, ValueError) as exc:
         raise DispatchRefused(
             f"quantum {quantum_id!r}: no handoff template derives from the "
