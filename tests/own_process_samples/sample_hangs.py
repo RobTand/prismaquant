@@ -1,7 +1,7 @@
 """An ``own_process`` sample with one test that hangs (PQ #1027).
 
 Not collected by the suite (no ``test_`` prefix): the isolation test names it
-on a child pytest's command line, under a per-test bound of a few seconds.
+on a child pytest's command line, under a per-test bound of 30 seconds.
 The hang alone outlasts one bound, so a test after it can pass only if each
 test is bounded on its own rather than the module as a whole. Each test
 writes its process id where the outer test can read it.
