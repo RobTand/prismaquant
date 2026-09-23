@@ -311,6 +311,20 @@ def test_a_failed_export_refuses_at_its_barrier_at_once_with_a_record(
     records = storage.produced_output_report()["local_spool"]["refusals"]
     assert [(r["batch_id"], r["export_key"], r["state"]) for r in records] == [
         (batch_id, export_key, "export-failed-without-ack")], records
+    # A failed capture writes no receipt, so Stage A keeps the same record
+    # in the adjoint space, one line per failed attempt.
+    import json
+    from prismaquant.joint_cost_stage_a import (
+        FAILED_PRODUCED_OUTPUT_RECORDS, _failed_produced_output_record)
+    space = tmp_path / "space"
+    space.mkdir()
+    with pytest.raises(ProducedOutputSpoolRefused):
+        with _failed_produced_output_record(space, storage):
+            raise refused.value
+    (line,) = (space / FAILED_PRODUCED_OUTPUT_RECORDS).read_text().splitlines()
+    kept = json.loads(line)["produced_output"]["local_spool"]["refusals"]
+    assert [(r["batch_id"], r["export_key"], r["state"]) for r in kept] == [
+        (batch_id, export_key, "export-failed-without-ack")]
 
 
 @pytest.mark.parametrize("barrier", ["settle", "checkpoint"])

@@ -157,6 +157,7 @@ class ProducedOutputSpool:
         self.telemetry = {"export_wait_s": 0.0, "window_wait_s": 0.0,
                           "export_waits": 0, "window_waits": 0,
                           "window_declines": 0, "last_window_decline": None,
+                          "release_held_s": 0.0, "release_held_max_s": 0.0,
                           "groups_released_retired": 0,
                           "groups_released_write_only": 0,
                           "groups_released_for_room": 0,
@@ -355,7 +356,14 @@ class ProducedOutputSpool:
         return bool(names) and names <= group["retired"]
 
     def _release_locked(self, batch_id, group, reason):
+        # PrismaBuild re-checks and unlinks every file of the group under
+        # this lock; its seconds are recorded (total and longest hold).
+        started = time.monotonic()
         answer = self.backend.release_group(batch_id)
+        held = time.monotonic() - started
+        self.telemetry["release_held_s"] += held
+        self.telemetry["release_held_max_s"] = max(
+            self.telemetry["release_held_max_s"], held)
         if not answer.get("ok"):
             raise ProducedOutputSpoolRefused(f"PB retained local export debt: {answer!r}")
         group["released"] = True

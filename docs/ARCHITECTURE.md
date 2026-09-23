@@ -22587,9 +22587,13 @@ kept in `produced_output_report()["local_spool"]["refusals"]`, every wait
 that waited in `["waits"]` (the export or the live exports it waited on, and
 its seconds), and every group released for room in `["evictions"]`. A claim
 ahead of the writer that the window declines is counted
-(`window_declines`, with the latest reason). A live export that is slow is
-waited on; PrismaBuild's dead-producer recovery (PB #1001) owns an export
-whose worker dies.
+(`window_declines`, with the latest reason). A finished capture seals these
+records into its receipt (`telemetry.produced_output`); a failed one appends
+them, with its error, as one line to
+`layer-quanta/adjoint/produced-output.failures.jsonl`
+(`joint_cost_stage_a._failed_produced_output_record`). A live export that is
+slow is waited on; PrismaBuild's dead-producer recovery (PB #1001) owns an
+export whose worker dies.
 
 **Deferred unlink.** PrismaBuild's `release_group` re-checks each landed
 destination against the export's receipt, so a retired entry's canonical
