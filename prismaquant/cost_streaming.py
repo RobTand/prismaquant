@@ -102,8 +102,13 @@ BOUNDARY_STORAGE_SCHEMA = "prismaquant.aura.boundary_storage.v1"
 LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA = "prismaquant.aura.boundary_storage.v2"
 
 
-def normalize_boundary_storage(config):
-    """Validate the explicit exact-artifact policy without touching storage."""
+def check_boundary_storage(config):
+    """Validate the explicit exact-artifact policy without touching storage.
+
+    Returns the policy unchanged (``None`` for none). The directory is not
+    resolved, so no path component is stat'ed: a caller that only admits the
+    policy, before its readset is bound, uses this (PQ #1024).
+    """
     if config is None:
         return None
     fields = {"schema", "directory", "max_resident_bytes", "max_auxiliary_bytes",
@@ -123,6 +128,18 @@ def normalize_boundary_storage(config):
             raise ValueError(f"exact boundary storage requires positive {key}")
     if not isinstance(config["directory"], str) or not config["directory"].strip():
         raise ValueError("exact boundary storage requires an artifact directory")
+    return config
+
+
+def normalize_boundary_storage(config):
+    """The checked policy with its directory resolved.
+
+    Resolving stats every component of the directory path; callers that
+    only need the admission check use :func:`check_boundary_storage`.
+    """
+    config = check_boundary_storage(config)
+    if config is None:
+        return None
     return {**config, "directory": str(Path(config["directory"]).resolve())}
 
 
