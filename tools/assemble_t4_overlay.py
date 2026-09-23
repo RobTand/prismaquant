@@ -7,6 +7,13 @@ the digest of the cell it qualified. With ``--rebinding``
 (``rebind_t4_qualified_results.py``), a result that qualified the previous
 catalog's cell is admitted for the new cell when the two differ only in
 ``anchor``. The rebinding proves this, and it is checked again here per cell.
+
+The original plan and prepared are named by ``--original-plan`` and
+``--original-prepared``, each with its SHA-256; a path without its digest, or
+a digest without its path, refuses. With neither, the assembler binds
+``OLDPLAN`` and ``OLDPREP``, the pair every overlay before R13 extended
+(RobTand/prismaquant#1117). A digest mismatch refuses before anything is
+published.
 """
 import argparse
 import copy
@@ -39,10 +46,6 @@ def doc(value):
     return (json.dumps(value, sort_keys=True, indent=2) + '\n').encode()
 
 
-def bound(path):
-    return dict(path=str(path), sha256=sha(path.read_bytes()))
-
-
 def publish(path, raw):
     assert not path.exists(), path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +67,21 @@ def add_overlay_format(formats_by_qname, qname, fmt):
     order (RobTand/prismaquant#990).
     """
     formats_by_qname[qname] = list(extended_roster(formats_by_qname[qname], fmt))
+
+
+def original_input(parser, path, digest, default, flag):
+    """The bytes and binding of one original input, by flag or by default.
+
+    The bytes are read once, so the binding describes what was assembled.
+    """
+    if (path is None) != (digest is None):
+        parser.error(f'{flag} and {flag}-sha256 go together')
+    path = default if path is None else Path(path)
+    raw = path.read_bytes()
+    binding = {'path': str(path), 'sha256': sha(raw)}
+    if digest is not None and binding['sha256'] != digest:
+        parser.error(f'{flag} {path}: SHA-256 is {binding["sha256"]}, not {digest}')
+    return raw, binding
 
 
 def bind_stage_b_resources(plan, prepared, policy_binding, resources):
@@ -100,8 +118,16 @@ def main():
     parser.add_argument('--qualified-dir', required=True)
     parser.add_argument('--rebinding')
     parser.add_argument('--rebinding-sha256')
+    parser.add_argument('--original-plan', help='the plan the overlay extends (default: OLDPLAN)')
+    parser.add_argument('--original-plan-sha256')
+    parser.add_argument('--original-prepared', help='the prepared the overlay extends (default: OLDPREP)')
+    parser.add_argument('--original-prepared-sha256')
     parser.add_argument('--out', required=True, help='overlay root; must not exist')
     args = parser.parse_args()
+    planraw, planorigin = original_input(parser, args.original_plan, args.original_plan_sha256,
+                                         OLDPLAN, '--original-plan')
+    prepraw, preporigin = original_input(parser, args.original_prepared, args.original_prepared_sha256,
+                                         OLDPREP, '--original-prepared')
     policy = {'path': args.served_activation_policy, 'sha256': args.served_activation_policy_sha256}
     assert sha(Path(policy['path']).read_bytes()) == policy['sha256']
     resource_policy = {'path': args.stage_b_resource_policy, 'sha256': args.stage_b_resource_policy_sha256}
@@ -123,8 +149,9 @@ def main():
         assert Path(rebinding['qualified_dir']) == Path(args.qualified_dir)
         rebinding_rows = {(row['qname'], row['format']): row for row in rebinding['rows']}
         assert len(rebinding_rows) == len(rebinding['rows']) == len(catalog['cells'])
-    oldprep = json.loads(OLDPREP.read_bytes())
-    plan = json.loads(OLDPLAN.read_bytes())
+    oldprep = json.loads(prepraw)
+    plan = json.loads(planraw)
+    del planraw, prepraw
     raw = Path(oldprep['production_cache']['path']).read_bytes()
     assert sha(raw) == oldprep['production_cache']['sha256']
     cache = pickle.loads(raw)
@@ -170,7 +197,7 @@ def main():
     prepared['production_cache'] = publish(overlay / 'prepare/production.pkl',
                                            pickle.dumps(cache, protocol=pickle.HIGHEST_PROTOCOL))
     prepbinding = publish(overlay / 'prepare/prepared.json', doc(prepared))
-    inputs = {'original_plan': bound(OLDPLAN), 'original_prepared': bound(OLDPREP),
+    inputs = {'original_plan': planorigin, 'original_prepared': preporigin,
               'extended_plan': planbinding, 'extended_prepared': prepbinding}
     publish(overlay / 'catalog-pair-inputs.json', doc(inputs))
     print(json.dumps({'status': 'proposed_candidate_metadata_only', 'inputs': inputs,

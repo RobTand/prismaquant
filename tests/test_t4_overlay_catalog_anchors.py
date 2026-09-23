@@ -150,6 +150,71 @@ def test_the_assembler_rechecks_every_rebinding_row(tamper):
         assemble.qualified_result(new, raw, {(QNAME, FMT): row})
 
 
+# --------------------------------------------- a prepared rebuilt for R13
+
+def _bind(path, value):
+    raw = json.dumps(value, sort_keys=True).encode()
+    path.write_bytes(raw)
+    return {"path": str(path), "sha256": rebind.sha(raw)}
+
+
+def _rebind_fixture(tmp_path, *, new_prepared_changes=None, same_prepared=False):
+    """Two catalogs whose cells differ in their anchor and whose headers
+    bind the prepared of R12 and of R13, which differ in ``plan_sha256``."""
+    prepared = {"plan_sha256": "a" * 64, "production_cache": {"sha256": "c" * 64}}
+    old = _bind(tmp_path / "r12-prepared.json", prepared)
+    new = old if same_prepared else _bind(
+        tmp_path / "r13-prepared.json", {**prepared, "plan_sha256": "b" * 64, **(new_prepared_changes or {})})
+    previous_cell, new_cell = _cells()
+    header = {"schema": "prismaquant.t4_adopted_catalog.v1", "format": FMT}
+    previous = _bind(tmp_path / "previous.json", {**header, "old_prepared": old, "cells": [previous_cell]})
+    catalog = _bind(tmp_path / "catalog.json", {**header, "old_prepared": new, "cells": [new_cell]})
+    qualified = tmp_path / "qualified"
+    qualified.mkdir()
+    rebind.result_path(qualified, QNAME).write_bytes(_result(previous_cell))
+    argv = ["rebind_t4_qualified_results.py", "--catalog", catalog["path"],
+            "--catalog-sha256", catalog["sha256"], "--previous-catalog", previous["path"],
+            "--previous-catalog-sha256", previous["sha256"], "--qualified-dir", str(qualified),
+            "--out", str(tmp_path / "rebinding.json")]
+    return argv, old, new, tmp_path / "rebinding.json"
+
+
+def test_a_prepared_that_changed_only_its_plan_digest_rebinds(tmp_path, monkeypatch):
+    """R13 re-prepared R12's cache under its own plan (RobTand/prismaquant#1117)."""
+    argv, old, new, out = _rebind_fixture(tmp_path)
+    monkeypatch.setattr(sys, "argv", argv)
+    rebind.main()
+    document = json.loads(out.read_bytes())
+    assert document["old_prepared_rebound"] == {"previous": old, "new": new,
+                                                "differs_only_in": ["plan_sha256"]}
+    assert len(document["rows"]) == 1
+
+
+def test_an_unchanged_prepared_writes_no_rebound_field(tmp_path, monkeypatch):
+    argv, _old, _new, out = _rebind_fixture(tmp_path, same_prepared=True)
+    monkeypatch.setattr(sys, "argv", argv)
+    rebind.main()
+    assert "old_prepared_rebound" not in json.loads(out.read_bytes())
+
+
+@pytest.mark.parametrize("changes", [{"production_cache": {"sha256": "d" * 64}}, {"extra": 1}])
+def test_a_prepared_that_changed_beyond_its_plan_digest_refuses(tmp_path, monkeypatch, changes):
+    argv, _old, _new, out = _rebind_fixture(tmp_path, new_prepared_changes=changes)
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(AssertionError, match="beyond its plan digest"):
+        rebind.main()
+    assert not out.exists()
+
+
+def test_a_rebuilt_prepared_that_does_not_match_its_binding_refuses(tmp_path, monkeypatch):
+    argv, _old, new, out = _rebind_fixture(tmp_path)
+    Path(new["path"]).write_bytes(b"{}")
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(AssertionError, match="SHA256 mismatch"):
+        rebind.main()
+    assert not out.exists()
+
+
 # ------------------------------------------------------------ script hygiene
 
 IMPORT_SAFE = ["audit_existing_t4.py", "audit_t4_render_paths.py", "pilot_existing_t4.py",
