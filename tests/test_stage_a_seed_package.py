@@ -114,9 +114,11 @@ def test_the_seed_stages_its_borrowed_checkpoint_where_it_reads_it(tmp_path, mon
                                    *(row["path"] for row in two["activation_entries"])]
     assert len(four["activation_entries"]) == N_PROBES * len(draw())
     # PQ #1036: the source run's checkpoints reference its own cotangent
-    # entries, so the staged plane is the owner's files, not a copy.
+    # entries, so the staged plane is the owner's files, not a copy. PQ #1037:
+    # their shared states are one pack, the head's one shared-state read.
+    assert len(shared) == 1 and shared[0].endswith("/entries/shared-states.pack")
     for record, boundary in ((four, 4), (two, 2)):
-        assert record["schema"] == "prismaquant.joint_adjoint_checkpoint.v2"
+        assert record["schema"] == "prismaquant.joint_adjoint_checkpoint.v3"
         for row in record["activation_entries"]:
             path = Path(row["path"])
             assert path.parent.parent.parent.name == "exact-boundaries"

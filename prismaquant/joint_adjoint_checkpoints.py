@@ -20,6 +20,7 @@ import json
 import os
 import pickle
 import re
+import struct
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -29,13 +30,16 @@ import torch
 from .cost_stage_checkpoint import (
     atomic_write_bytes,
     canonical_json,
+    canonical_json_bytes,
     canonical_json_sha256,
     publish_new_bytes,
 )
 
 from .joint_adjoint_slices import (  # noqa: F401 -- re-exported: one spelling
     ADJOINT_BAND_SCHEMA,
+    ADJOINT_CHECKPOINT_PACKED_SCHEMA,
     ADJOINT_CHECKPOINT_REFERENCED_SCHEMA,
+    ADJOINT_CHECKPOINT_REFERENCED_SCHEMAS,
     ADJOINT_CHECKPOINT_SCHEMA,
     ADJOINT_CHECKPOINT_SCHEMAS,
     ADJOINT_RECEIPT_SCHEMA,
@@ -44,6 +48,8 @@ from .joint_adjoint_slices import (  # noqa: F401 -- re-exported: one spelling
     STAGE_A_BOUNDARY_STORAGE_FIELDS,
     STAGE_A_RUN_HEADER_FIELDS,
     STAGE_A_SLICE_FIELDS,
+    SHARED_STATE_PACK_FILENAME,
+    SHARED_STATE_PACK_NAME,
     AdjointSliceRefused,
     ChainRegimeRefused,
     adjoint_slice_sha256,
@@ -55,6 +61,7 @@ from .joint_adjoint_slices import (  # noqa: F401 -- re-exported: one spelling
     chain_regime_of,
     checkpoint_cotangent_plane,
     checkpoint_entry_session,
+    checkpoint_is_packed,
     checkpoint_is_referenced,
     checkpoint_manifest_bytes,
     checkpoint_manifest_entry,
@@ -276,8 +283,27 @@ def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
     entry never publishes. Not a new serializer or cache: stdlib pickling
     plus the activation owner's sink and atomic-publication shape.
     """
-    import os
+    path = checkpoint_dir / "entries" / f"{name}.pkl"
+    if path.with_suffix(".pkl.tmp").exists():
+        raise RuntimeError("exact boundary checkpoint entry already exists")
 
+    def body(sink):
+        pickle.dump(state, sink, protocol=pickle.HIGHEST_PROTOCOL)
+
+    return _publish_streamed_file(path, name, body, max_file_bytes=max_file_bytes,
+                                  label=f"shared state {name}")
+
+
+def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
+                           label: str) -> dict:
+    """Publish what ``body(sink)`` streams as one new file; returns its row.
+
+    The one atomic-publication shape of the checkpoint's own small files: a
+    unique temp beside ``path``, a bounded hash-while-writing sink over it
+    (the admitted envelope refuses before the handle can cross it), one
+    fsync, ``os.replace``, one directory fsync. A failure unlinks the temp;
+    an existing ``path`` refuses before anything is written.
+    """
     from .cost_stage_checkpoint import unique_temp_suffix
     from .perturbed_x_cache import SerializedEntryDigest
 
@@ -285,17 +311,14 @@ def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
         raise RuntimeError(
             "exact boundary checkpoint shared-state write needs an "
             "admitted per-file envelope")
-    path = checkpoint_dir / "entries" / f"{name}.pkl"
-    if path.exists() or path.with_suffix(".pkl.tmp").exists():
+    if path.exists():
         raise RuntimeError("exact boundary checkpoint entry already exists")
-    sink = _BoundedDigestSink(SerializedEntryDigest(), max_file_bytes,
-                              label=f"shared state {name}")
+    sink = _BoundedDigestSink(SerializedEntryDigest(), max_file_bytes, label=label)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + unique_temp_suffix())
     try:
         with temporary.open("wb") as handle:
-            pickle.dump(state, sink.sink(handle),
-                        protocol=pickle.HIGHEST_PROTOCOL)
+            body(sink.sink(handle))
             handle.flush()
             os.fsync(handle.fileno())
         published = temporary.stat().st_size
@@ -322,6 +345,190 @@ def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
         "sha256": sink.hexdigest(),
         "file_bytes": published,
     }
+
+
+# --------------------------------------------------------------------------
+# The shared-state pack (RobTand/prismaquant#1037)
+#
+# A packed (v3) checkpoint writes its shared states as one file instead of
+# one pickle per state: 2,048 shared-adjoint and 512 shared-pass files per
+# GLM checkpoint were 2,560 fsync + rename + directory-fsync rounds on NFS.
+#
+# Layout: the member pickles, each a standalone ``pickle.dump``, concatenated
+# in ascending name order from offset 0; then the index, canonical JSON
+# ``{"schema": SHARED_STATE_PACK_SCHEMA, "members": [{name, offset, bytes,
+# sha256}, ...]}``; then a 16-byte trailer, the index length as a
+# little-endian u64 and ``_SHARED_STATE_PACK_MAGIC``. The checkpoint row's
+# sha256 covers the whole file; each member's sha256 covers its range.
+# --------------------------------------------------------------------------
+
+SHARED_STATE_PACK_SCHEMA = "prismaquant.shared_state_pack.v1"
+_SHARED_STATE_PACK_MAGIC = b"PQSSPK01"
+_SHARED_STATE_PACK_TRAILER_BYTES = 8 + len(_SHARED_STATE_PACK_MAGIC)
+_SHARED_STATE_MEMBER = re.compile(
+    r"shared-adjoint-(0|[1-9]\d*)-(0|[1-9]\d*)|shared-pass-(0|[1-9]\d*)")
+
+
+def shared_state_slot(name: str):
+    """``("adjoint", (probe, batch))`` or ``("pass", batch)`` for a state name.
+
+    The writer's spelling (``_iter_shared_states``) exactly; anything else
+    refuses.
+    """
+    match = _SHARED_STATE_MEMBER.fullmatch(name) if type(name) is str else None
+    if match is None:
+        raise RuntimeError(f"not a checkpoint shared-state name: {name!r}")
+    if match[3] is not None:
+        return "pass", int(match[3])
+    return "adjoint", (int(match[1]), int(match[2]))
+
+
+def _shared_state_pack_index(members) -> bytes:
+    return canonical_json_bytes(
+        {"schema": SHARED_STATE_PACK_SCHEMA, "members": members},
+        where="shared-state pack index")
+
+
+def _shared_state_pack_trailer(index_bytes: int) -> bytes:
+    return struct.pack("<Q", index_bytes) + _SHARED_STATE_PACK_MAGIC
+
+
+def _shared_state_pack_envelope(estimates) -> int:
+    """Upper-bound a pack's file size from its members' admitted envelopes.
+
+    The index is sized the way the manifest envelope is: its exact shape
+    with 64-character placeholder digests and every offset and size at its
+    envelope value. Actual offsets and sizes are at or under those, so
+    their decimal widths can only shrink.
+    """
+    members, offset = [], 0
+    for name in sorted(estimates):
+        members.append({"name": name, "offset": offset,
+                        "bytes": int(estimates[name]), "sha256": "0" * 64})
+        offset += int(estimates[name])
+    return (offset + len(_shared_state_pack_index(members))
+            + _SHARED_STATE_PACK_TRAILER_BYTES)
+
+
+def _write_shared_state_pack(plan: dict, states: dict, *, hold) -> dict:
+    """Stream every shared state into the one pack file ``plan`` admits.
+
+    ``states`` maps state name -> state and must name exactly the members
+    ``plan`` sized. Each member is its own ``pickle.dump`` through its own
+    bounded digest sink (so a member range is a standalone pickle and can
+    never outgrow its admitted estimate), nested in the file's bounded
+    sink. ``hold(bytes, label)`` accounts each member's serialization as
+    the per-file writer did. One fsync and one directory fsync per pack.
+    """
+    from .perturbed_x_cache import SerializedEntryDigest
+
+    envelopes = plan["members"]
+    if sorted(states) != sorted(envelopes):
+        raise RuntimeError(
+            "exact boundary checkpoint shared states differ from the pack "
+            "it planned")
+
+    def body(file_sink):
+        members, offset = [], 0
+        for name in sorted(states):
+            member = _BoundedDigestSink(SerializedEntryDigest(), envelopes[name],
+                                        label=f"shared state {name}")
+            with hold(envelopes[name], f"checkpoint shared state {name}"):
+                pickle.dump(states[name], member.sink(file_sink),
+                            protocol=pickle.HIGHEST_PROTOCOL)
+            members.append({"name": name, "offset": offset,
+                            "bytes": member.bytes_written,
+                            "sha256": member.hexdigest()})
+            offset += member.bytes_written
+        # The index is the one buffer the pack materializes; it is held at
+        # its admitted share of the pack envelope.
+        with hold(plan["file_envelope"] - sum(envelopes.values()),
+                  "checkpoint shared-state pack index"):
+            index = _shared_state_pack_index(members)
+            file_sink.write(index)
+            file_sink.write(_shared_state_pack_trailer(len(index)))
+
+    return _publish_streamed_file(
+        Path(plan["path"]), plan["name"], body,
+        max_file_bytes=plan["file_envelope"], label="shared-state pack")
+
+
+def unpack_shared_states(payload) -> list:
+    """``[(name, member bytes)]`` of one digest-verified pack, in pack order.
+
+    The caller has already checked the whole file against its checkpoint
+    row. This checks the pack's own structure before trusting any number in
+    it: the trailer's magic and index length, a canonical index of this
+    schema, member names in the writer's spelling and strictly ascending,
+    ranges contiguous from offset 0 to the index with no gap or overlap,
+    and each member's sha256. Any divergence refuses. Members are views
+    into ``payload``.
+    """
+    view = memoryview(payload).cast("B")
+    size = view.nbytes
+    trailer = _SHARED_STATE_PACK_TRAILER_BYTES
+    if size < trailer or bytes(view[size - len(_SHARED_STATE_PACK_MAGIC):]) \
+            != _SHARED_STATE_PACK_MAGIC:
+        raise RuntimeError("adjoint checkpoint shared-state pack has no trailer")
+    (index_bytes,) = struct.unpack("<Q", view[size - trailer:size - trailer + 8])
+    if index_bytes > size - trailer:
+        raise RuntimeError(
+            "adjoint checkpoint shared-state pack index overruns the file")
+    body_end = size - trailer - index_bytes
+    raw_index = bytes(view[body_end:size - trailer])
+    try:
+        index = json.loads(raw_index)
+    except ValueError as exc:
+        raise RuntimeError(
+            "adjoint checkpoint shared-state pack index is not JSON") from exc
+    if (not isinstance(index, dict) or set(index) != {"schema", "members"}
+            or index["schema"] != SHARED_STATE_PACK_SCHEMA
+            or not isinstance(index["members"], list)):
+        raise RuntimeError(
+            "adjoint checkpoint shared-state pack index is not a "
+            f"{SHARED_STATE_PACK_SCHEMA} index")
+    try:
+        canonical = _shared_state_pack_index(index["members"])
+    except ValueError as exc:
+        raise RuntimeError(
+            "adjoint checkpoint shared-state pack index is not canonical") from exc
+    if canonical != raw_index:
+        raise RuntimeError(
+            "adjoint checkpoint shared-state pack index is not canonical")
+    members, offset, previous = [], 0, None
+    for row in index["members"]:
+        if (not isinstance(row, dict)
+                or set(row) != {"name", "offset", "bytes", "sha256"}
+                or type(row["offset"]) is not int or type(row["bytes"]) is not int
+                or row["bytes"] <= 0 or type(row["sha256"]) is not str
+                or len(row["sha256"]) != 64):
+            raise RuntimeError(
+                "adjoint checkpoint shared-state pack member is malformed")
+        name = row["name"]
+        shared_state_slot(name)
+        if previous is not None and name <= previous:
+            raise RuntimeError(
+                "adjoint checkpoint shared-state pack members are not in "
+                f"strictly ascending name order at {name!r}")
+        if row["offset"] != offset:
+            raise RuntimeError(
+                "adjoint checkpoint shared-state pack member does not start "
+                f"where the previous one ends: {name!r}")
+        end = offset + row["bytes"]
+        if end > body_end:
+            raise RuntimeError(
+                f"adjoint checkpoint shared-state pack member {name!r} "
+                "overruns the index")
+        member = view[offset:end]
+        if hashlib.sha256(member).hexdigest() != row["sha256"]:
+            raise RuntimeError(
+                f"adjoint checkpoint shared-state pack member changed: {name!r}")
+        members.append((name, member))
+        offset, previous = end, name
+    if offset != body_end:
+        raise RuntimeError(
+            "adjoint checkpoint shared-state pack members do not reach its index")
+    return members
 
 
 class _BoundedDigestSink:
@@ -457,7 +664,8 @@ def _checkpoint_coordinate_keys(mapping, *, arity: int, where: str) -> None:
 
 def _checkpoint_manifest_envelope_bytes(*, boundary: int, session: dict,
                                         activation_plan, shared_plan,
-                                        referenced: bool = False) -> int:
+                                        referenced: bool = False,
+                                        packed: bool = False) -> int:
     """Upper-bound the checkpoint manifest size before digests exist.
 
     Builds the exact manifest shape with 64-character placeholder digests
@@ -512,8 +720,7 @@ def _checkpoint_manifest_envelope_bytes(*, boundary: int, session: dict,
         }
 
     skeleton = {
-        "schema": (ADJOINT_CHECKPOINT_REFERENCED_SCHEMA if referenced
-                   else ADJOINT_CHECKPOINT_SCHEMA),
+        "schema": _checkpoint_schema(referenced=referenced, packed=packed),
         "boundary": int(boundary),
         "session": canonical_session,
         "activation_entries": sorted(
@@ -528,6 +735,17 @@ def _checkpoint_manifest_envelope_bytes(*, boundary: int, session: dict,
     }
     return len((json.dumps(skeleton, sort_keys=True, indent=2, allow_nan=False)
                 + "\n").encode())
+
+
+def _checkpoint_schema(*, referenced: bool, packed: bool) -> str:
+    """The schema a writer seals: v1 copied, v2 referenced, v3 packed."""
+    if packed:
+        if not referenced:
+            raise RuntimeError(
+                "a packed checkpoint (v3) is a referenced checkpoint")
+        return ADJOINT_CHECKPOINT_PACKED_SCHEMA
+    return (ADJOINT_CHECKPOINT_REFERENCED_SCHEMA if referenced
+            else ADJOINT_CHECKPOINT_SCHEMA)
 
 
 def _checkpoint_tensor_spec(value, owner):
@@ -579,6 +797,7 @@ def _checkpoint_tensor_window(cotangents, plans, owner):
 def write_adjoint_checkpoint(
     space: str | os.PathLike, *, boundary: int, session: dict,
     cotangents, shared_adjoint, shared_pass, owner=None, referenced=False,
+    packed=None,
 ) -> dict:
     """Serialize one strided checkpoint; returns its §3.3 record.
 
@@ -610,8 +829,15 @@ def write_adjoint_checkpoint(
     ``referenced=True`` (PQ #1036) needs an owner and a plane of the owner's
     own entries at ``boundary``: the checkpoint names them instead of
     reading them back and copying them.
+
+    ``packed`` (PQ #1037) defaults to ``referenced``: a referenced checkpoint
+    writes its shared states as one pack and seals v3. ``packed=False``
+    with ``referenced=True`` still seals v2; it exists so fixtures can write
+    the same states both ways and compare them.
     """
     checkpoint_dir = checkpoint_directory(space, boundary)
+    packed = bool(referenced) if packed is None else bool(packed)
+    _checkpoint_schema(referenced=bool(referenced), packed=packed)
     if referenced:
         from .perturbed_x_cache import ExactActivationReference
 
@@ -626,14 +852,15 @@ def write_adjoint_checkpoint(
                  for key, value in cotangents.items()}
         owner.check_transient_buffer("checkpoint shared-state serialization")
         shared_plan = _shared_state_plan(
-            checkpoint_dir, _shared_state_estimates(shared_adjoint, shared_pass))
+            checkpoint_dir, _shared_state_estimates(shared_adjoint, shared_pass),
+            packed=packed)
         attempt = _reserve_checkpoint_attempt(
             owner, checkpoint_dir, boundary=boundary, session=session,
             activation_plan=_checkpoint_activation_plan(
                 checkpoint_dir, specs, boundary=boundary,
                 owner_entries=_owner_entries(owner, session)),
             shared_plan=shared_plan, manifest_shared_plan=shared_plan,
-            referenced=True)
+            referenced=True, packed=packed)
         try:
             attempt.write_shared_states(shared_adjoint, shared_pass)
             for key in sorted(cotangents):
@@ -751,11 +978,14 @@ class AdjointCheckpointAttempt:
     def __init__(self, *, owner, checkpoint_dir, boundary, session,
                  activation_plan, shared_plan, shared_names,
                  manifest_envelope, temp_overlap, reservation,
-                 referenced=False):
+                 referenced=False, packed=False):
         self.owner = owner
         #: PQ #1036: the cotangents are the owner's own entries, named by
         #: ``reference_activation``, never copied.
         self.referenced = bool(referenced)
+        #: PQ #1037: the shared states are one pack file (v3).
+        self.packed = bool(packed)
+        _checkpoint_schema(referenced=self.referenced, packed=self.packed)
         self._references = {}
         self.checkpoint_dir = checkpoint_dir
         self.boundary = int(boundary)
@@ -906,7 +1136,15 @@ class AdjointCheckpointAttempt:
                         "exact boundary checkpoint artifact budget exceeded: "
                         f"shared state {name} needs {estimate} bytes, the "
                         f"ceiling is {ceiling}")
-            shared_plan = _shared_state_plan(self.checkpoint_dir, estimates)
+            shared_plan = _shared_state_plan(self.checkpoint_dir, estimates,
+                                             packed=self.packed)
+            # The manifest was sized with each shared file at the ceiling.
+            for plan in shared_plan:
+                if plan["file_envelope"] > ceiling:
+                    raise RuntimeError(
+                        "exact boundary checkpoint artifact budget exceeded: "
+                        f"{plan['name']} needs {plan['file_envelope']} bytes, "
+                        f"the ceiling is {ceiling}")
             if shared_plan:
                 temp_overlap = max([self._temp_overlap]
                                    + [plan["file_envelope"] for plan in shared_plan])
@@ -918,6 +1156,12 @@ class AdjointCheckpointAttempt:
                     temp_overlap_bytes=temp_overlap)
                 self._temp_overlap = temp_overlap
             self._shared_plan = shared_plan
+        if self.packed:
+            (plan,) = self._shared_plan
+            self._shared_state_entries = [_write_shared_state_pack(
+                plan, dict(_iter_shared_states(shared_adjoint, shared_pass)),
+                hold=self.owner.hold_transient_metadata)]
+            return
         # Holds count live auxiliary usage plus transient bytes against the
         # one auxiliary ceiling. An empty shared set skips the loop.
         entries = []
@@ -951,8 +1195,8 @@ class AdjointCheckpointAttempt:
             self.reference_wait_seconds = self.owner.await_checkpoint_references(
                 references)
         record = {
-            "schema": (ADJOINT_CHECKPOINT_REFERENCED_SCHEMA if self.referenced
-                       else ADJOINT_CHECKPOINT_SCHEMA),
+            "schema": _checkpoint_schema(referenced=self.referenced,
+                                         packed=self.packed),
             "boundary": self.boundary,
             "session": canonical_json(dict(self.session),
                                       where="adjoint checkpoint session"),
@@ -998,6 +1242,7 @@ class AdjointCheckpointAttempt:
 def open_adjoint_checkpoint(
     space: str | os.PathLike, *, boundary: int, session: dict, specs: dict,
     shared_adjoint_keys, shared_pass_keys, owner, referenced: bool = False,
+    packed: bool | None = None,
 ) -> AdjointCheckpointAttempt:
     """Reserve checkpoint ``boundary`` before the pass that produces its plane.
 
@@ -1012,8 +1257,12 @@ def open_adjoint_checkpoint(
 
     ``referenced=True`` (Stage A, PQ #1036) opens a checkpoint that names the
     owner's own cotangent entries at ``boundary`` instead of copying them:
-    the roll hands each entry over with ``reference_activation``.
+    the roll hands each entry over with ``reference_activation``. Its shared
+    states are one pack (v3, PQ #1037) unless ``packed=False``, as in
+    ``write_adjoint_checkpoint``.
     """
+    packed = bool(referenced) if packed is None else bool(packed)
+    _checkpoint_schema(referenced=bool(referenced), packed=packed)
     _checkpoint_boundary(boundary)
     _checkpoint_coordinate_keys(specs, arity=2, where="cotangents")
     if not specs:
@@ -1040,8 +1289,8 @@ def open_adjoint_checkpoint(
             owner_entries=(_owner_entries(owner, session) if referenced else None)),
         shared_plan=None, shared_names=names,
         manifest_shared_plan=_shared_state_plan(
-            checkpoint_dir, dict.fromkeys(names, widest)),
-        referenced=referenced)
+            checkpoint_dir, dict.fromkeys(names, widest), packed=packed),
+        referenced=referenced, packed=packed)
 
 
 def _owner_entries(owner, session) -> Path:
@@ -1113,7 +1362,18 @@ def _checkpoint_activation_plan(checkpoint_dir: Path, specs, *, boundary=None,
     return activation_plan
 
 
-def _shared_state_plan(checkpoint_dir: Path, estimates) -> list:
+def _shared_state_plan(checkpoint_dir: Path, estimates, *, packed=False) -> list:
+    """One row per shared-state file the attempt writes.
+
+    Unpacked: one pickle per state. Packed (PQ #1037): exactly one row, the
+    pack, even for an empty set, whose envelope bounds its members, index
+    and trailer; ``members`` carries each member's admitted estimate.
+    """
+    if packed:
+        return [{"name": SHARED_STATE_PACK_NAME,
+                 "path": str(checkpoint_dir / "entries" / SHARED_STATE_PACK_FILENAME),
+                 "file_envelope": _shared_state_pack_envelope(estimates),
+                 "members": {name: int(estimates[name]) for name in estimates}}]
     return [{"name": name,
              "path": str(checkpoint_dir / "entries" / f"{name}.pkl"),
              "file_envelope": estimates[name]} for name in sorted(estimates)]
@@ -1122,7 +1382,7 @@ def _shared_state_plan(checkpoint_dir: Path, estimates) -> list:
 def _reserve_checkpoint_attempt(owner, checkpoint_dir: Path, *, boundary, session,
                                 activation_plan, shared_plan,
                                 manifest_shared_plan, shared_names=None,
-                                referenced=False):
+                                referenced=False, packed=False):
     """Admit the whole planned envelope, then create the attempt directory.
 
     ``shared_plan`` is ``None`` when the shared states are admitted later
@@ -1134,7 +1394,7 @@ def _reserve_checkpoint_attempt(owner, checkpoint_dir: Path, *, boundary, sessio
     manifest_envelope = _checkpoint_manifest_envelope_bytes(
         boundary=boundary, session=session,
         activation_plan=activation_plan, shared_plan=manifest_shared_plan,
-        referenced=referenced)
+        referenced=referenced, packed=packed)
     planned_shared = shared_plan or []
     own_activations = [] if referenced else activation_plan
     file_envelopes = ([plan["file_envelope"] for plan in own_activations]
@@ -1167,7 +1427,7 @@ def _reserve_checkpoint_attempt(owner, checkpoint_dir: Path, *, boundary, sessio
         shared_plan=shared_plan,
         shared_names=(None if shared_plan is not None else list(shared_names)),
         manifest_envelope=manifest_envelope, temp_overlap=temp_overlap,
-        reservation=reservation, referenced=referenced)
+        reservation=reservation, referenced=referenced, packed=packed)
 
 
 def _iter_shared_states(shared_adjoint, shared_pass):
@@ -1345,6 +1605,9 @@ def _verified_checkpoint_manifest(space, record: dict, *, deadline,
 
 def _load_checkpoint_shared_states(stored: dict, *, deadline,
                                    shared_state_max_bytes=None) -> tuple[dict, dict]:
+    if checkpoint_is_packed(stored):
+        return _load_packed_shared_states(
+            stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
     shared_adjoint, shared_pass = {}, {}
     shared_tensor_bytes = 0
     for entry in stored["shared_state_entries"]:
@@ -1362,6 +1625,39 @@ def _load_checkpoint_shared_states(stored: dict, *, deadline,
             shared_adjoint[(int(parts[2]), int(parts[3]))] = state
         else:
             shared_pass[int(parts[2])] = state
+        if shared_state_max_bytes is not None:
+            from .cost_streaming import _state_storage_bytes
+            shared_tensor_bytes += _state_storage_bytes(state)
+            if shared_tensor_bytes > shared_state_max_bytes:
+                raise RuntimeError("adjoint shared-state tensors exceed auxiliary byte ceiling")
+    return shared_adjoint, shared_pass
+
+
+def read_shared_state_pack(entry: dict, *, deadline) -> list:
+    """``[(name, member bytes)]`` of a packed checkpoint's one pack row.
+
+    Read through the same staged small-file reader as every shared-state
+    file (so tier counts are per whole file), checked against the row's
+    digest and size, then unpacked and checked member by member.
+    """
+    _await_checkpoint_entry(entry, deadline=deadline)
+    payload = _read_shared_state_payload(Path(entry["path"]), entry)
+    if (hashlib.sha256(payload).hexdigest() != entry["sha256"]
+            or len(payload) != entry["file_bytes"]):
+        raise RuntimeError(
+            f"adjoint checkpoint shared-state entry changed: {entry['name']}")
+    return unpack_shared_states(payload)
+
+
+def _load_packed_shared_states(stored: dict, *, deadline,
+                               shared_state_max_bytes=None) -> tuple[dict, dict]:
+    (entry,) = stored["shared_state_entries"]
+    shared_adjoint, shared_pass = {}, {}
+    shared_tensor_bytes = 0
+    for name, member in read_shared_state_pack(entry, deadline=deadline):
+        state = pickle.loads(member)
+        kind, key = shared_state_slot(name)
+        (shared_adjoint if kind == "adjoint" else shared_pass)[key] = state
         if shared_state_max_bytes is not None:
             from .cost_streaming import _state_storage_bytes
             shared_tensor_bytes += _state_storage_bytes(state)

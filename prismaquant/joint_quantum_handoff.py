@@ -417,8 +417,9 @@ def handoff_read_entries(handoff: Mapping, checkpoint_record: Mapping) -> list[d
     """Every staged file a band-serial quantum reads at its head, in order.
 
     The plane entries, the owner-state file, and the slice checkpoint's
-    forward shared-pass pickles: the ``handoff-load`` phase of the
-    consumer's executable readset.
+    forward shared-pass states: the ``handoff-load`` phase of the
+    consumer's executable readset. A packed (v3) checkpoint (PQ #1037)
+    holds those in its one shared-state pack, staged whole.
     """
     rows = [{"path": entry["path"], "offset": 0, "bytes": int(entry["file_bytes"]),
              "sha256": entry["sha256"]} for entry in handoff["activation_entries"]]
@@ -432,6 +433,15 @@ def handoff_read_entries(handoff: Mapping, checkpoint_record: Mapping) -> list[d
 
 
 def _shared_pass_entries(checkpoint_record: Mapping) -> list[dict]:
+    """The checkpoint files that hold its forward shared-pass states.
+
+    One pickle per batch for v1/v2; for a packed (v3) checkpoint, its one
+    pack row, which also holds the shared-adjoint states (PQ #1037).
+    """
+    from .joint_adjoint_slices import checkpoint_is_packed
+
+    if checkpoint_is_packed(checkpoint_record):
+        return list(checkpoint_record["shared_state_entries"])
     return [entry for entry in checkpoint_record["shared_state_entries"]
             if entry["name"].startswith("shared-pass-")]
 
@@ -447,13 +457,21 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     states keyed the same way, and the checkpoint's forward shared-pass
     states keyed by batch. Every byte is digest-verified; under an active
     tier policy every read is staged.
+
+    The payload ceiling charges the files read whole: for a packed (v3)
+    checkpoint that is the whole pack, shared-adjoint members included
+    (about 285 KB on a GLM checkpoint), of which only the shared-pass
+    members are deserialized.
     """
     from .cost_streaming import _state_storage_bytes
     from .joint_adjoint_checkpoints import (
         _await_checkpoint_entry,
         _read_shared_state_payload,
         read_exact_entry_tensors,
+        read_shared_state_pack,
+        shared_state_slot,
     )
+    from .joint_adjoint_slices import checkpoint_is_packed
     from .residency_shard_reader import staged_range_wait_s
 
     if (handoff["n_probes"], handoff["n_batches"]) != (int(n_probes), int(n_batches)):
@@ -507,10 +525,18 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                                for b in range(int(n_batches))}:
         raise RuntimeError("handoff owner states do not cover the plane")
     shared_pass = {}
-    for entry in shared_pass_entries:
-        payload = staged(entry["path"], entry, "adjoint checkpoint shared-state entry")
-        shared_pass[int(entry["name"].split("-")[2])] = pickle.loads(payload)
-        del payload
+    if checkpoint_is_packed(checkpoint_record):
+        (pack,) = shared_pass_entries
+        for name, member in read_shared_state_pack(pack, deadline=deadline):
+            kind, batch = shared_state_slot(name)
+            if kind == "pass":
+                shared_pass[batch] = pickle.loads(member)
+    else:
+        for entry in shared_pass_entries:
+            payload = staged(entry["path"], entry,
+                             "adjoint checkpoint shared-state entry")
+            shared_pass[int(entry["name"].split("-")[2])] = pickle.loads(payload)
+            del payload
     if shared_state_max_bytes is not None and _state_storage_bytes(
             (list(shared_adjoint.values()), list(shared_pass.values()))) \
             > shared_state_max_bytes:

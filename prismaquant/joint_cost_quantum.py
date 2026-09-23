@@ -1135,10 +1135,11 @@ def quantum_adjoint_space(record, adjoint_slice, output_root):
     checkpoint = adjoint_slice["checkpoint"]
     expected = space / "checkpoints" / f"boundary-{int(checkpoint['boundary']):03d}" / "entries"
     from .joint_adjoint_slices import (
-        ADJOINT_CHECKPOINT_REFERENCED_SCHEMA, checkpoint_cotangent_plane)
+        ADJOINT_CHECKPOINT_REFERENCED_SCHEMAS, checkpoint_cotangent_plane)
     # The slice was verified upstream (``verify_adjoint_slice``); a copied
-    # checkpoint keeps the one-directory rule unchanged.
-    referenced = checkpoint.get("schema") == ADJOINT_CHECKPOINT_REFERENCED_SCHEMA
+    # checkpoint keeps the one-directory rule unchanged. Referenced: v2, and
+    # v3 whose one shared-state row is its pack (PQ #1037).
+    referenced = checkpoint.get("schema") in ADJOINT_CHECKPOINT_REFERENCED_SCHEMAS
     plane = {}
     if referenced:
         try:
