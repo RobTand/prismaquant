@@ -445,6 +445,8 @@ handoff record as a produced group** (PQ #1015, part 1 of #1007):
 produced-output template and the local output spool, as one group after
 the entries, instead of `atomic_write_bytes`; see "Band-serial Stage B
 quanta (#996)". The group still ends as a retained prewrite until PB #912.
+An executed producer and consumer pair (PB `0e748c47c927`,
+`074394f797b8`) shows `L - 1` reading its handoff from PrismaBuild's tiers.
 No format, default, stage or ship gate changes. Gates:
 `tests/test_band_serial_handoff_produced.py`,
 `tests/test_band_serial_handoff_spool_real_pb.py`.
@@ -21008,7 +21010,12 @@ dispatcher (`_producer_handoff`) and by the consumer's head check
 (`load_quantum_handoff`); it is a sealed control file, not a staged input.
 The producer's template
 reserves a stage window it never reads, because PrismaBuild has no
-write-only produced-output declaration. No executed PrismaBuild action has
-yet staged handoff entries as a consumer's declared inputs; the derived
-manifest is checked against PrismaBuild's phase planner
-(`tests/test_band_serial_dispatch.py`).
+write-only produced-output declaration. One executed pair shows the
+consumer side on PrismaBuild's tiers: `tools/band_serial_handoff_live_pair.py`
+ran a producer (PB `0e748c47c927`) and then its `L - 1` consumer (PB
+`074394f797b8`) with `--residency stage` on a two-row qualification slice.
+The consumer read its head entry, every cotangent entry, `owner-states.pkl`
+and the shared passes from the tiers (11 entries, 0 bytes from the pool), and
+was refused a path outside its derived readset. That pair is a qualification run, not a
+campaign layer. The derived manifest is also checked against PrismaBuild's
+phase planner (`tests/test_band_serial_dispatch.py`).
