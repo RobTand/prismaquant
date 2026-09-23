@@ -248,12 +248,20 @@ def test_settle_fails_closed_on_failed_future(monkeypatch):
 
 
 def test_snapshot_never_waits_nor_loads(monkeypatch):
-    """Inspection describes a pending future without touching it."""
+    """Inspection describes a pending future without touching it.
+
+    The read blocks until the test releases it, after the snapshot. A read
+    that slept instead held teardown for its whole sleep: ``shutdown`` joins
+    a read already in progress (PQ #1066). The release wait stays bounded,
+    so a snapshot that waits on the future fails the elapsed assertion
+    instead of hanging.
+    """
     entered = threading.Event()
+    release = threading.Event()
 
     def reader(prefix, *args, **kwargs):
         entered.set()
-        time.sleep(30.0)
+        release.wait(timeout=30.0)
         return _tensors(3)
 
     ctx = _make_ctx(monkeypatch, reader)
@@ -271,4 +279,5 @@ def test_snapshot_never_waits_nor_loads(monkeypatch):
         assert states == ["pending"], f"expected one pending future, got {states}"
         fut.cancel()
     finally:
+        release.set()
         ctx.shutdown()
