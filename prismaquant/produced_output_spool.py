@@ -20,6 +20,10 @@ advance durable entry progress or release the PB-owned local reservation. Each
 entry carries PB's artifact class. Every writer today records ``payload``;
 ``checkpoint`` is PB's class for a checkpoint charged to the prewrite budget
 its producer declared, and no writer uses it yet.
+
+An owner whose template is write-only (PB #912, the band-serial handoff since
+PQ #1075) commits each acknowledged group at its origin through
+``commit_origin``; the ack is what that commit checks the origins against.
 """
 from __future__ import annotations
 
@@ -181,6 +185,34 @@ class ProducedOutputSpool:
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"local output group {batch_id!r} export has not landed")
             time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+
+    def commit_origin(self, batch_id, descriptors, *, lifetime):
+        """Commit one exported group of a write-only owner at its origin.
+
+        PrismaBuild's ``ProducedSpool.commit_origin_group`` (#912): only
+        after the group's export is acknowledged, against the identities
+        the export receipt recorded, because a retried export can still
+        replace a landed copy before that. ``descriptors`` must name exactly
+        the files the export landed. ``lifetime`` is the commit's (#914),
+        ``retain`` or ``consumed``. Returns PrismaBuild's answer, whose
+        ``ref`` a consumer declares; a refusal raises.
+        """
+        commit = getattr(self.backend, "commit_origin_group", None)
+        if not callable(commit):
+            raise ProducedOutputSpoolRefused(
+                "the sealed PB helper cannot commit an exported group at its "
+                "origin (PrismaBuild #912)")
+        with self._lock:
+            group = self._groups[batch_id]
+            if not group["durable"]:
+                raise ProducedOutputSpoolRefused(
+                    "a group commits at its origin only after PB acknowledged "
+                    "its export")
+        answer = commit(batch_id, list(descriptors), lifetime=lifetime)
+        if not answer.get("ok"):
+            raise ProducedOutputSpoolRefused(
+                f"PB refused the origin commit: {answer!r}")
+        return answer
 
     def durable_entries(self):
         """Drain newly acknowledged references on the compute thread only."""

@@ -487,6 +487,11 @@ def test_band_serial_publishes_producers_then_their_consumers(
             handoff_root(bound[layer]["output_space"]["root"]).resolve())
         assert template["durable_maxima"]["payload_max_bytes"] == ARTIFACT_MAX
         assert template["permitted_tiers"] == [TIER]
+        # Write-only (PQ #1075): the producer never reads its handoff back,
+        # so it reserves no stage window and commits each group at origin.
+        assert template["write_only"] is True
+        assert template["working_demands"] == {
+            TIER: {"minimum_gib": 0, "window_gib": 0}}
         assert _phases(argv)[:2] == ["head", "checkpoint-load"]
 
     # Layer 3 executes, publishes its handoff and reports complete; layer 1

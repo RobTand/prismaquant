@@ -301,6 +301,9 @@ class StreamedBoundaryArtifacts:
         self._produced_plan = None
         self._local_output_spool = None
         self._produced_groups = {}
+        # The refs of the groups a write-only owner committed at their origin
+        # (PrismaBuild #912), in commit order: what a consumer declares.
+        self._produced_origin_batches = []
         self._produced_release_errors = []
         self._produced_index = {}
         self._produced_window_keys = ()
@@ -374,6 +377,7 @@ class StreamedBoundaryArtifacts:
             "hot_read_misses": 0,
             "produced_groups_prewritten": 0, "produced_groups_published": 0,
             "produced_file_groups": 0,
+            "produced_groups_committed_at_origin": 0,
             "produced_groups_materialized": 0, "produced_groups_retired": 0,
             "produced_groups_rematerialized": 0,
             "produced_group_release_failures": 0,
@@ -848,6 +852,13 @@ class StreamedBoundaryArtifacts:
         from .perturbed_x_cache import write_exact_activation_cache_entry
         if self._status != "running":
             raise RuntimeError("exact boundary generation is not running")
+        if (read_back and self._produced_plan is not None
+                and self._produced_plan["write_only"]):
+            # Before any byte: a write-only template funds no window, so no
+            # read of this group could ever be staged for this action.
+            raise RuntimeError(
+                "a write-only produced output is never read back by the action "
+                "that writes it: write its entries with read_back=False")
         self._commit_local_output_progress()
         kind = "boundary" if probe_index is None else "cotangent"
         coordinates = {"batch": batch_index, "boundary": boundary_index, "probe": probe_index}
@@ -933,6 +944,11 @@ class StreamedBoundaryArtifacts:
                             == len(produced_group["planned"]) // 2)
             if complete and self._local_output_spool is not None:
                 self._local_output_spool.submit(produced_group["batch_id"])
+            elif complete and self._produced_plan["write_only"]:
+                # Written straight to its canonical paths, so it commits at
+                # its origin now. Through the spool it commits once its
+                # export is acknowledged (``settle_local_output``).
+                self._produced_commit_origin(produced_group)
             if complete and read_back:
                 # The group's last entry is durable, and everything its
                 # publication needs is on the references already. Publishing
@@ -973,10 +989,56 @@ class StreamedBoundaryArtifacts:
                                      partition=coordinates["batch"], kind=identity["kind"])
 
     def settle_local_output(self):
-        """Finish PB durable exports before a successful capture receipt."""
+        """Finish PB durable exports before a successful capture receipt.
+
+        A write-only owner then commits every complete group at its origin
+        (PrismaBuild #912), in the order it wrote them, against the
+        identities each export receipt recorded. A group already committed
+        is not committed again.
+        """
         if self._local_output_spool is not None:
             self._local_output_spool.drain()
             self._commit_local_output_progress()
+            if self._produced_plan is not None and self._produced_plan["write_only"]:
+                for group in list(self._produced_groups.values()):
+                    if len(group["references"]) == len(group["planned"]) // 2:
+                        self._produced_commit_origin(group)
+
+    def _produced_commit_origin(self, group):
+        """Commit one complete group of a write-only owner at its origin.
+
+        The descriptors are the ones a staged publication would seal
+        (``descriptor_for`` over the group's references, the batch id as
+        the producer generation), so the manifest names exactly the files
+        and digests the writer recorded. Through the spool, PrismaBuild
+        checks them against the export it landed. Returns the batch ref.
+        """
+        if group.get("origin_ref") is not None:
+            return group["origin_ref"]
+        batch_id = group["batch_id"]
+        descriptors = [self._produced.descriptor_for(
+                           reference, producer_generation=batch_id)
+                       for reference in group["references"]]
+        lifetime = self._produced_plan["origin_lifetime"]
+        if self._local_output_spool is None:
+            out = self._produced.commit_origin(
+                batch_id=batch_id, descriptors=descriptors, lifetime=lifetime)
+        else:
+            out = self._local_output_spool.commit_origin(
+                batch_id, descriptors, lifetime=lifetime)
+        group["origin_ref"] = dict(out["ref"])
+        self._produced_origin_batches.append(dict(out["ref"]))
+        self.telemetry["produced_groups_committed_at_origin"] += 1
+        return group["origin_ref"]
+
+    def produced_origin_batches(self):
+        """The refs of the groups committed at their origin, in commit order.
+
+        Each is PrismaBuild's ``origin_batch_ref`` (#912): owner action,
+        attempt nonce, template, batch id and manifest digest. It is what a
+        consumer declares, and what pins the bytes it reads.
+        """
+        return [dict(ref) for ref in self._produced_origin_batches]
 
     def write_produced_files(self, files, *, kind, boundary_index):
         """Write small files into the generation directory as one group.
@@ -992,10 +1054,13 @@ class StreamedBoundaryArtifacts:
         Without the spool each file is written through its ``.tmp`` name
         and linked into place, in the same order.
 
-        The group is prewritten and never committed: no read follows in
-        this action, as for the entries a handoff writes with
-        ``read_back=False``. It stays a retained prewrite until PrismaBuild
-        can commit a write-only group for another action (PB #912).
+        No read follows in this action, so a bound owner's template must be
+        write-only (PrismaBuild #912), and the group is committed at its
+        origin once its files are durable, with the owner's origin lifetime
+        (PQ #1075): directly after the last file is linked, or through the
+        spool once PrismaBuild acknowledged the export. A read-back template
+        refuses before the first byte, because nothing could ever commit
+        the group.
 
         An unbound owner writes each file with ``atomic_write_bytes``.
         Returns one :class:`ProducedFileReference` per file, in order.
@@ -1033,6 +1098,11 @@ class StreamedBoundaryArtifacts:
                 atomic_write_bytes(self.directory / name, payload)
             self._count_produced_files(total)
             return references
+        if not self._produced_plan["write_only"]:
+            raise RuntimeError(
+                "produced files are never read back by the action that writes "
+                "them, so they commit at their origin, which needs a "
+                "write-only produced-output template (PrismaBuild #912)")
         self._produced_raise_stager_failure()
         batch_id = self._produced.batch_id_for(
             kind=kind, boundary_index=boundary_index, group_index=0)
@@ -1062,6 +1132,8 @@ class StreamedBoundaryArtifacts:
                 # the claim, and retains it otherwise.
                 self._produced.abort_prewrite(batch_id=batch_id)
             raise
+        self._produced_commit_origin(
+            {"batch_id": batch_id, "references": references})
         self.telemetry["produced_file_groups"] += 1
         self._count_produced_files(total)
         return references
@@ -1927,7 +1999,7 @@ class StreamedBoundaryArtifacts:
     def bind_produced_output(self, publication, *, group_size, n_batches,
                              max_entry_tensor_bytes,
                              staging_timeout_s=900.0, window_groups=None,
-                             read_order="probe_major"):
+                             read_order="probe_major", origin_lifetime=None):
         """Stage this generation's entries through ``publication``.
 
         Called after :meth:`bind`, because the entry directory this owner
@@ -1984,6 +2056,17 @@ class StreamedBoundaryArtifacts:
         A read-only attached generation can never take this binding: an
         attached owner does not write, so it has nothing to declare and its
         entries stay ordinary input-map reads.
+
+        A **write-only** publication (PrismaBuild #912, the band-serial
+        handoff since PQ #1075) funds no window and is never read back:
+        ``window_groups`` and ``read_order`` do not apply, every entry is
+        written with ``read_back=False``, and each complete group is
+        committed at its origin as a batch another action declares. Without
+        the local spool the group commits when its last entry lands.
+        Through the spool it commits once PrismaBuild acknowledges its
+        export, in :meth:`settle_local_output`. ``origin_lifetime`` is the
+        lifetime of those commits (#914) and is required for a write-only
+        publication and refused for any other: ``retain`` or ``consumed``.
         """
 
         if self._produced is not None:
@@ -2013,25 +2096,43 @@ class StreamedBoundaryArtifacts:
                 staging_timeout_s <= 0):
             raise ValueError(
                 "produced output staging_timeout_s must be a positive number")
-        if window_groups is None:
-            window_groups = self._sealed_window_groups(
-                publication, group_size=int(group_size),
-                max_entry_tensor_bytes=int(max_entry_tensor_bytes))
-        if type(window_groups) is not int or window_groups < 2:
-            raise ValueError(
-                "produced output window_groups must be an int of at least 2: "
-                "one read window holds a boundary group and a cotangent group")
-        if read_order == "probe_major":
-            read_groups = 2
-        elif read_order == "sample_major":
-            read_groups = 1 + int(self._n_probes)
+        write_only = getattr(publication, "write_only", False) is True
+        if write_only:
+            if origin_lifetime not in ("retain", "consumed"):
+                raise ValueError(
+                    "a write-only produced output commits each group at its "
+                    "origin: name the commit's lifetime, 'retain' or "
+                    f"'consumed', not {origin_lifetime!r}")
+            if window_groups not in (None, 0):
+                raise ValueError(
+                    "a write-only produced output funds no window: its owner "
+                    "never reads its groups back")
+            # Nothing is read back, so nothing is staged ahead either.
+            window_groups = read_groups = 0
         else:
-            raise ValueError(f"unknown produced read order {read_order!r}")
-        if window_groups < read_groups:
-            raise ValueError(
-                f"the sealed window funds {window_groups} groups; a "
-                f"{read_order} read window holds {read_groups} at once "
-                "(one boundary group and one incoming group per probe)")
+            if origin_lifetime is not None:
+                raise ValueError(
+                    "only a write-only produced output commits its groups at "
+                    "their origin; a read-back one stages them for its reads")
+            if window_groups is None:
+                window_groups = self._sealed_window_groups(
+                    publication, group_size=int(group_size),
+                    max_entry_tensor_bytes=int(max_entry_tensor_bytes))
+            if type(window_groups) is not int or window_groups < 2:
+                raise ValueError(
+                    "produced output window_groups must be an int of at least 2: "
+                    "one read window holds a boundary group and a cotangent group")
+            if read_order == "probe_major":
+                read_groups = 2
+            elif read_order == "sample_major":
+                read_groups = 1 + int(self._n_probes)
+            else:
+                raise ValueError(f"unknown produced read order {read_order!r}")
+            if window_groups < read_groups:
+                raise ValueError(
+                    f"the sealed window funds {window_groups} groups; a "
+                    f"{read_order} read window holds {read_groups} at once "
+                    "(one boundary group and one incoming group per probe)")
         self._produced_read_order = read_order
         self._produced_plan = {"group_size": int(group_size),
                                "n_batches": int(n_batches),
@@ -2039,7 +2140,10 @@ class StreamedBoundaryArtifacts:
                                "staging_timeout_s": float(staging_timeout_s),
                                "window_groups": int(window_groups),
                                "read_groups": read_groups,
-                               "ahead_groups": int(window_groups) - read_groups}
+                               "ahead_groups": int(window_groups) - read_groups,
+                               "write_only": write_only,
+                               "origin_lifetime": (str(origin_lifetime)
+                                                   if write_only else None)}
 
         from .produced_output_spool import ProducedOutputSpool
         self._local_output_spool = ProducedOutputSpool.from_publication(
@@ -3577,7 +3681,9 @@ class StreamedBoundaryArtifacts:
         if self._produced is None:
             return
         for group in self._produced_groups.values():
-            if group["published"] is not None:
+            if group["published"] is not None or group.get("origin_ref") is not None:
+                # Committed, staged or at its origin: the commit consumed the
+                # prewrite, and the charge now ends with the batch.
                 continue
             if (self._local_output_spool is not None
                     and self._local_output_spool.pending(group["batch_id"])):

@@ -1495,6 +1495,10 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
     is named by its content digest, so a changed tier or plan writes a new
     template and never rewrites one a submitted row already declared.
 
+    The template is write-only (PrismaBuild #912, PQ #1075): the producer
+    never reads its handoff back, so it reserves no stage window and commits
+    each group at its origin for the consumer to stage as an input.
+
     ``template_id`` defaults to :func:`handoff_template_id`, derived from the
     template's own body. PrismaBuild files a template under its id and
     refuses a different template under the same id, so the id changes
@@ -1525,7 +1529,8 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
                 output_prefix=policy["directory"], tier=str(tier),
                 artifact_max_bytes=int(policy["max_artifact_bytes"]),
                 group_size=int(policy["prefetch_batches"]),
-                max_entry_tensor_bytes=max(tensors), template_id=name)
+                max_entry_tensor_bytes=max(tensors), template_id=name,
+                write_only=True)
 
         template = build(HANDOFF_TEMPLATE_ID_PREFIX + str(quantum_id)
                          if template_id is None else template_id)
