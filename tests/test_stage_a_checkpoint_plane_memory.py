@@ -23,14 +23,23 @@ def _capture(tmp_path, monkeypatch):
 
 
 def test_capture_checkpoint_planes_retain_descriptors_only(tmp_path, monkeypatch):
+    """Stage A seals checkpoints its rolls wrote, holding only their records.
+
+    The cotangents go into the open checkpoint as each is rolled (PQ #1002),
+    so the seal gets no plane at all, and the attempt keeps each written
+    entry's record, never its tensor.
+    """
     original = stage_a.write_checkpoint_with_snapshot
     planes = []
 
-    def checked(*args, plane, **kwargs):
-        assert not any(isinstance(value, torch.Tensor) for value in plane.values()), (
-            'checkpoint plane retains all probe/batch tensors outside resident budget')
-        planes.append(len(plane))
-        return original(*args, plane=plane, **kwargs)
+    def checked(*args, attempt, **kwargs):
+        assert kwargs.get('plane') is None, 'Stage A reads a checkpoint plane back'
+        written = attempt._activation_entries
+        assert not any(isinstance(value, torch.Tensor) for value in written.values()), (
+            'checkpoint attempt retains probe/batch tensors outside resident budget')
+        assert all(isinstance(value, dict) for value in written.values())
+        planes.append(attempt.written_activations)
+        return original(*args, attempt=attempt, **kwargs)
 
     monkeypatch.setattr(stage_a, 'write_checkpoint_with_snapshot', checked)
     receipt = _capture(tmp_path, monkeypatch)

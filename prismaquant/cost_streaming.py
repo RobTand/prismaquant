@@ -1415,12 +1415,84 @@ class StreamedBoundaryArtifacts:
         self._checkpoint_reservations[reservation] = {
             "envelope_bytes": envelope_bytes, "files": files,
             "manifest_bytes": file_plan["manifest_bytes"],
+            "temp_overlap_bytes": file_plan["temp_overlap_bytes"],
             "dir": str(directory), "label": str(label), "state": "active",
             "receipt_digest": None,
         }
         self._checkpoint_active = reservation
         self.telemetry["checkpoint_reservations"] += 1
         return reservation
+
+    def extend_checkpoint_artifact(self, reservation_id, *, files,
+                                   temp_overlap_bytes):
+        """Admit files an attempt could only plan after it started writing.
+
+        A checkpoint written while its plane is rolled (PQ #1002) reserves
+        its tensor files before the roll, but its shared states exist only
+        after it. This adds their envelopes to the one active reservation,
+        against the same remaining ceiling ``reserve_checkpoint_artifact``
+        admits against, before any of them is written. The manifest
+        envelope does not change, so the attempt must have planned the
+        manifest for these files already; ``temp_overlap_bytes`` may only
+        grow. A refusal (counted like a reservation refusal) changes
+        nothing, and the attempt, which has written files, must abandon.
+        """
+        if self._readonly:
+            raise RuntimeError(
+                "an attached read-only generation cannot reserve checkpoint artifacts")
+        if self._status != "running":
+            raise RuntimeError("exact boundary generation is not running")
+        if type(reservation_id) is not int:
+            raise RuntimeError("exact boundary checkpoint reservation is not an integer")
+        entry = self._checkpoint_reservations.get(reservation_id)
+        if entry is None:
+            raise RuntimeError("exact boundary checkpoint reservation is unknown")
+        if entry["state"] != "active" or self._checkpoint_active != reservation_id:
+            raise RuntimeError(
+                "exact boundary checkpoint reservation is not active; "
+                "only an open attempt extends")
+        if not isinstance(files, list) or not files:
+            raise RuntimeError("exact boundary checkpoint extension is malformed")
+        if (type(temp_overlap_bytes) is not int
+                or temp_overlap_bytes < entry["temp_overlap_bytes"]):
+            raise RuntimeError(
+                "exact boundary checkpoint extension may only grow its "
+                "temp overlap")
+        for row in files:
+            if (not isinstance(row, dict) or type(row.get("name")) is not str
+                    or not row["name"]
+                    or type(row.get("path")) is not str or not row["path"]
+                    or type(row.get("envelope_bytes")) is not int
+                    or row["envelope_bytes"] <= 0):
+                raise RuntimeError("exact boundary checkpoint extension is malformed")
+        planned = {row["name"] for row in entry["files"]}
+        names = [row["name"] for row in files]
+        if len(set(names)) != len(names) or planned & set(names):
+            raise RuntimeError(
+                "exact boundary checkpoint extension repeats a planned file")
+        directory = Path(entry["dir"])
+        for row in files:
+            try:
+                inside = Path(row["path"]).is_relative_to(directory)
+            except ValueError:
+                inside = False
+            if not inside:
+                raise RuntimeError(
+                    "exact boundary checkpoint file plan escapes its "
+                    f"attempt directory: {row['name']}")
+        delta = (sum(row["envelope_bytes"] for row in files)
+                 + temp_overlap_bytes - entry["temp_overlap_bytes"])
+        remaining = self.checkpoint_remaining_bytes()
+        if delta > remaining:
+            self.telemetry["checkpoint_refusals"] += 1
+            raise RuntimeError(
+                "exact boundary checkpoint artifact budget exceeded: "
+                f"{entry['label']} needs {delta} more bytes, {remaining} "
+                f"remain of {self.config['max_artifact_bytes']}")
+        entry["files"] = list(entry["files"]) + list(files)
+        entry["envelope_bytes"] += delta
+        entry["temp_overlap_bytes"] = temp_overlap_bytes
+        return entry["envelope_bytes"]
 
     def commit_checkpoint_artifact(self, reservation_id, record):
         """Commit a writer receipt's ACTUAL bytes/digests against its reservation.
