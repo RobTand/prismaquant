@@ -1,5 +1,22 @@
 # PrismaQuant Architecture
 
+A Stage B quantum reads nothing but its plan before its readset is bound
+(2026-09-23, `ws-tq/1024-load-plan-readset`, PQ #1024). `_load_plan` hashed
+the plan's `source_identity_cache` and resolved the `boundary_storage`
+directory (an lstat per path component) before the quantum bound its data
+manifest, so neither could resolve through residency. The quantum now calls
+`_load_plan(..., defer_pool_reads=True)`, which admits the identity binding by
+shape; the cache is digest-checked where the quantum reads it (the head
+slice's declared entry, or `_seed_source_identity_cache` on the legacy walk).
+The plan admission now uses `cost_streaming.check_boundary_storage`, which
+validates the policy without resolving the directory, in every caller;
+`normalize_boundary_storage` still resolves it where storage is opened. The
+quantum's `bind_residency_manifest` moved above the head slice read: the slice
+was read before the bind, so under an active tier policy the staged read of
+a slice-bound quantum's first head entry refused as `readset-not-staged`.
+Gate: `tests/test_load_plan_readset_1024.py`. No format, pipeline default or
+ship gate changes.
+
 A Stage A seed receipt records the bf16 reduced-precision-reduction flag
 (2026-09-23, `ws-sa/seed-bf16-flag-1038`, PQ #1038, part of #1028).
 `seed-receipt.json` gains `matmul_reduction`, the value of
@@ -582,8 +599,13 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-sa/seed-bf16-flag-1038`.
+As of: 2026-09-23 · `ws-tq/1024-load-plan-readset`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-tq/1024-load-plan-readset`) for **the Stage B
+readset order** (PQ #1024): a layer quantum binds its data manifest before its
+first head read, and its plan load reads no pool input; see "Stage B head
+slice (#1010)". No format, default or stage changes.
 
 Re-stamped (2026-09-23, `ws-sa/seed-bf16-flag-1038`) for **the seed
 receipt's bf16 flag** (PQ #1038): `seed-receipt.json` records
@@ -20911,6 +20933,10 @@ cache is parsed from the declared bytes and never copied or written
 (`build_streamed_model_identity(identity_cache_bytes=...)`). The head
 reports its cumulative unit count once. A record without a slice runs the
 historical intake unchanged.
+
+The quantum binds its data manifest before it reads the slice, and loads its
+plan with `defer_pool_reads=True`, so the plan file is the only input it
+reads before the bind (PQ #1024).
 
 Gate: `tests/test_stage_b_head_slice.py` (producer/consumer round trip,
 refusals, an opened-path audit of the head, the progress report, and the
