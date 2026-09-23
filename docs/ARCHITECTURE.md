@@ -791,6 +791,16 @@ data manifest declares the walk's reads; the seed and forward-recovery
 package builders take `--plan`; see "Stage A takes its head from the prepared
 completion (#1051)". No format, pipeline default or ship gate changes.
 
+Re-stamped (2026-09-23, `ws-br/handoff-template-id-1054`) for **a Stage B
+handoff template id derived from its body** (PQ #1054):
+`tools/dispatch_joint_quanta.py` `handoff_template_id` names a handoff
+template `pq-stageb-handoff-<quantum id>-<digest>`, where the digest covers
+every field but the id. The same quantum id under another root, tier or plan
+files its own template instead of being refused, a re-dispatch files the same
+one, and the live pair drops its root-named override; see "Band-serial Stage
+B quanta (#996)". No format, default, stage or ship gate changes. Gate:
+`tests/test_band_serial_handoff_produced.py`.
+
 Re-stamped (2026-09-23, `ws-tq/1036-referenced-checkpoints`) for
 **referenced Stage A checkpoints** (PQ #1036): a v2 checkpoint's cotangent
 rows are the owner's pinned entries, not copies, and every checkpoint reader
@@ -22060,9 +22070,16 @@ stage, or the pool for a declared-file read under a bound map), and the pair
 checks that the per-tier sum equals the bytes read. Re-run on sparklina into a
 fresh root (PB `894036b5fd0e` producer, `f0afbfae4ec0` consumer), the producer
 counted 12,918 of 12,918 bytes from RAM and the consumer 17,332 of 17,332 from
-RAM, both with 0 from the stage and the pool. The pair names its handoff
-template for its own root (`handoff_template_path(template_id=...)`):
-PrismaBuild files a template under its id and refuses a different one under
-the same id, and the dispatcher's id, `pq-stageb-handoff-<quantum id>`, is
-the same for every run of a layer. The derived manifest is also checked against PrismaBuild's
+RAM, both with 0 from the stage and the pool. PrismaBuild files a
+produced-output template under its id and refuses a different one under the
+same id. The dispatcher therefore derives a handoff template's id from its
+body (`handoff_template_id`: `pq-stageb-handoff-<quantum id>-<digest>`, where
+the digest covers every field but the id, PQ #1054). The body names the
+handoff directory inside the quantum's output space, so the same quantum id
+under another root, tier or plan files a template of its own, and a
+re-dispatch files the same one again. Before #1054 the id was
+`pq-stageb-handoff-<quantum id>`, so a second root's template for a layer was
+refused. An explicit `template_id` still overrides the derived id; the live
+pair uses the derived one (`tests/test_band_serial_handoff_produced.py`).
+The derived manifest is also checked against PrismaBuild's
 phase planner (`tests/test_band_serial_dispatch.py`).

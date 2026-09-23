@@ -126,13 +126,11 @@ def prepare(root: Path, tier: str) -> dict:
     def slice_of(record):
         return json.loads(Path(record["adjoint"]["slice_path"]).read_text())
 
-    # Named for this root: PB files a template under its id and refuses a
-    # different one under the same id, and the default id is the one a
-    # campaign's own layer-3 row would file.
+    # The dispatcher's default id: derived from the template's body, which
+    # names this root's handoff directory, so it is this root's own (PQ #1054).
     template = dispatch.handoff_template_path(
         producer, plan={"execution": {"boundary_storage": storage}},
-        adjoint_slice=slice_of(producer), tier=tier, output_root=root / "out",
-        template_id=f"pq-stageb-handoff-{producer['quantum_id']}-{root.name}")
+        adjoint_slice=slice_of(producer), tier=tier, output_root=root / "out")
 
     # The producer's staged input: its checkpoint plane (boundary 4).
     plane = slice_of(producer)["checkpoint"]["activation_entries"]

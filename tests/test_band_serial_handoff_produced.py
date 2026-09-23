@@ -220,3 +220,80 @@ def test_a_producer_writes_its_handoff_inside_its_declared_output(
     published, plane = emit_handoff(producer, storage, publication)
     check_consumer_binds(published, plane, consumer, publication)
     check_record_group(publication, producer, published)
+
+
+# -- the handoff template's id (PQ #1054) --------------------------------------
+
+def _dispatch_template(producer, storage, root, **kwargs):
+    """The dispatcher's handoff template for ``producer``: ``(path, template)``."""
+    import dispatch_joint_quanta as dispatch
+
+    path = dispatch.handoff_template_path(
+        producer, plan={"execution": {"boundary_storage": storage}},
+        adjoint_slice=_adjoint_slice(producer), tier=chain.TIER,
+        output_root=root / "out", **kwargs)
+    return path, json.loads(path.read_text())
+
+
+def test_two_scratch_roots_each_file_their_own_handoff_template(tmp_path):
+    """The same quantum id under two roots files two templates (PQ #1054).
+
+    PrismaBuild files a template under its id and refuses a different body
+    under the same id. The two roots' templates differ in their output
+    prefix, so each must carry an id of its own, or every fresh run, arm or
+    relaunch that reuses a quantum id is refused at its first producer.
+    """
+    _src, pb_repo = chain._pb_source()
+    from prismaquant.staged_lease import set_lease_helper_root
+    set_lease_helper_root(str(pb_repo))
+    from prismabuild import produced_output as po
+
+    q = chain._queue(tmp_path)
+    filed = {}
+    for name in ("root-a", "root-b"):
+        root = tmp_path / name
+        root.mkdir()
+        producer, _consumer, storage = band_campaign(root)
+        _path, template = _dispatch_template(producer, storage, root)
+        filed[name] = (producer["quantum_id"], template,
+                       po.declare_template(q.root, template))
+
+    (id_a, a, path_a), (id_b, b, path_b) = filed["root-a"], filed["root-b"]
+    assert id_a == id_b
+    assert a["output_prefix"] != b["output_prefix"]
+    assert a["template_id"] != b["template_id"]
+    for template in (a, b):
+        assert template["template_id"].startswith(f"pq-stageb-handoff-{id_a}-")
+    assert path_a != path_b
+    assert json.loads(path_a.read_text()) == a
+    assert json.loads(path_b.read_text()) == b
+
+
+def test_a_redispatch_in_one_root_files_the_same_handoff_template(tmp_path):
+    """Dispatching one root's producer again is idempotent (PQ #1054).
+
+    The same id and the same template, so PrismaBuild's second filing is a
+    no-op. An explicit ``template_id`` still overrides the derived one.
+    """
+    _src, pb_repo = chain._pb_source()
+    from prismaquant.staged_lease import set_lease_helper_root
+    set_lease_helper_root(str(pb_repo))
+    from prismabuild import produced_output as po
+
+    producer, _consumer, storage = band_campaign(tmp_path)
+    first_path, first = _dispatch_template(producer, storage, tmp_path)
+    second_path, second = _dispatch_template(producer, storage, tmp_path)
+    assert second_path == first_path
+    assert second == first
+
+    q = chain._queue(tmp_path)
+    filed = po.declare_template(q.root, first)
+    raw = filed.read_bytes()
+    assert po.declare_template(q.root, second) == filed
+    assert filed.read_bytes() == raw
+
+    _path, explicit = _dispatch_template(
+        producer, storage, tmp_path, template_id="pq-stageb-handoff-explicit")
+    assert explicit["template_id"] == "pq-stageb-handoff-explicit"
+    assert {k: v for k, v in explicit.items() if k != "template_id"} == {
+        k: v for k, v in first.items() if k != "template_id"}
