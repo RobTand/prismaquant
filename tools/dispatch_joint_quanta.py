@@ -47,8 +47,7 @@ if __package__:
     from tools.tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
-        cotangent_scratch_environment,
-        stage_b_spill_environment,
+        local_scratch_environment,
     )
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
@@ -59,8 +58,7 @@ else:
     from tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
-        cotangent_scratch_environment,
-        stage_b_spill_environment,
+        local_scratch_environment,
     )
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
@@ -810,8 +808,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     # inlined spec bytes supply its outer PB environment below; no ambient
     # coordinator environment or second spec read participates.
     try:
-        cotangent_scratch_environment(spec, spec.get("env", {}))
-        stage_b_spill_environment(spec, spec.get("env", {}))
+        local_scratch_environment(spec, spec.get("env", {}))
     except (ValueError, RuntimeError) as exc:
         raise DispatchRefused(str(exc)) from exc
     if resource_policy is not None:
@@ -1010,10 +1007,10 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         # must admit the row only where this image is already present, or
         # leave it ready for a box that has it (RobTand/prismabuild#714).
         argv += [CONTAINER_IMAGE_FLAG, container_image]
-    for name, value in cotangent_scratch_environment(
-            sealed_spec, sealed_spec.get("env", {})).items():
-        argv += ["--env", f"{name}={value}"]
-    for name, value in stage_b_spill_environment(
+    # Every bounded-local scratch pair and PrismaBuild's list of them (PB
+    # #911), so pbrun charges each ceiling to the executing box's disk
+    # budget at claim. Nothing declared, nothing added.
+    for name, value in local_scratch_environment(
             sealed_spec, sealed_spec.get("env", {})).items():
         argv += ["--env", f"{name}={value}"]
     argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
