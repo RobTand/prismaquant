@@ -295,7 +295,8 @@ def observe_and_project_retained_windows(
         modules, specs, cache, policy, *, retained_budget, n_probes,
         source_bytes, backward, record_operator, consume_probe,
         collect_col_energy, backend, guard=None, source_fingerprints=None,
-        completed_names=(), sealed_windows=None, before_window=None, after_window=None):
+        completed_names=(), sealed_windows=None, before_window=None, after_window=None,
+        spill=None):
     """Replay all probes inside each admitted target's retained PWC lifetime.
 
     The selected-key-only PWC preflight and scalar target planner run before
@@ -303,6 +304,14 @@ def observe_and_project_retained_windows(
     new statistics lease. ``consume_probe`` receives scalar signed components
     and compact diagnostics only after that lease has released its matrices.
     Callbacks must not retain borrowed source/render tensor references.
+
+    ``spill`` selects the one-pass replay (PQ #994): an object whose
+    ``capture(probe_index)`` runs the probe's single forward/backward and
+    whose ``replay(window_index=, probe_index=, lease=)`` feeds a lease from
+    it. Captures run inside the first active window's retained lifetime,
+    before that probe's lease exists, so no statistics hook fires during
+    them; every window, the first included, is then fed from the spill.
+    ``backward`` is not called for an active window in this mode.
 
     ``source_bytes`` is the caller's declared, separately checked source-owner
     cap. Passing a varying per-layer observation here would change the sealed
@@ -322,6 +331,9 @@ def observe_and_project_retained_windows(
         raise ValueError('retained joint replay requires a declared source byte cap')
     if any(not callable(callback) for callback in (backward, record_operator, consume_probe)):
         raise TypeError('retained joint replay callbacks must be callable')
+    if spill is not None and not all(callable(getattr(spill, attr, None))
+                                     for attr in ('capture', 'replay')):
+        raise TypeError('retained joint spill replay needs capture and replay callables')
     if type(collect_col_energy) is not bool:
         raise ValueError('retained joint replay column-energy flag must be boolean')
     for policy_key, budget_value in (
@@ -374,6 +386,7 @@ def observe_and_project_retained_windows(
                 raise RuntimeError('sealed retained window membership or footprint differs')
     active_indices = [i for i, window in enumerate(retained_plan.windows)
                       if set(window.names) - completed_names]
+    first_active = active_indices[0] if active_indices else None
     last_active = active_indices[-1] if active_indices else None
     candidate_receipts = []
     for window_index, window in enumerate(retained_plan.windows):
@@ -413,6 +426,9 @@ def observe_and_project_retained_windows(
                 ) as candidate_receipt:
             for probe_index in range(n_probes):
                 require_sources()
+                if spill is not None and window_index == first_active:
+                    spill.capture(probe_index)
+                    require_sources()
                 if guard is not None:
                     check_operator_allocation(
                         guard, 'before_joint_retained_statistics_probe',
@@ -427,9 +443,13 @@ def observe_and_project_retained_windows(
                         activation_max_abs=joint_activation_maxima(cache),
                         projection_backend=backend) as lease:
                     lease.begin_probe()
-                    backward(probe_index=probe_index,
-                             final=window_index == last_active,
-                             lease=lease)
+                    if spill is None:
+                        backward(probe_index=probe_index,
+                                 final=window_index == last_active,
+                                 lease=lease)
+                    else:
+                        spill.replay(window_index=window_index,
+                                     probe_index=probe_index, lease=lease)
                     require_sources()
                     lease.finish_observations()
                     diagnostics = lease.operator_diagnostics(

@@ -413,6 +413,11 @@ class QuantumCounters:
                        for chunk in chunks]
         self.windows: list[dict] = []
         self.chain = {"layers": 0, "backwards": 0, "wall_s": 0.0, "kernel_active_s": 0.0}
+        # How the target layer's statistics were replayed (PQ #994). The
+        # mode is telemetry only: both modes produce the same records.
+        # ``layer_passes`` counts full target-layer forward/backward passes.
+        self.replay = {"mode": "windowed", "layer_passes": 0,
+                       "noncontiguous_cotangent_seeds": 0}
         self._phase_cursor = None
         self._window_cursor = None
 
@@ -518,6 +523,7 @@ class QuantumCounters:
                     units_done / (joules / 3.6e6) if joules else None),
             },
             "chain": dict(self.chain),
+            "replay": dict(self.replay),
             "phases": self.phases,
             "windows": self.windows,
         }
@@ -1335,9 +1341,46 @@ def run_layer_quantum_core(
         raise RuntimeError(
             "stage-A slice does not carry the record's checkpoint boundary "
             f"{record['adjoint']['checkpoint_boundary']}")
+
+    # ---- one-pass replay spill (PQ #994) ---------------------------------
+    # Declared by environment, like the #956 cotangent sink, and outside the
+    # quantum identity: both replay modes produce the same records. The
+    # bound is geometry only and the scratch is allocated here, before the
+    # chain or any GPU work, so an undersized ceiling or disk refuses first.
+    # A resume recaptures the spill for its pending targets.
+    from contextlib import nullcontext
+
+    from .joint_replay_spill import (
+        REPLAY_SPILL,
+        StageBReplaySpill,
+        experts_per_token,
+        spill_geometry,
+        stage_b_spill_config,
+    )
+
+    spill = None
+    spill_config = stage_b_spill_config()
+    spill_pending = {name for name in names
+                     if render_formats[name] and name not in completed_units}
+    if spill_config is not None and spill_pending:
+        spill_windows = [tuple(name for name in window["names"] if name in spill_pending)
+                         for window in resolved_windows]
+        spill_bound = spill_geometry(
+            linears, spill_windows, pending=spill_pending,
+            batch_tokens=[int(calib_ids[offset:offset + batch_rows].numel())
+                          for offset in row_offsets],
+            n_probes=n_probes,
+            element_size=torch.empty((), dtype=runner.dtype).element_size(),
+            experts_per_token=experts_per_token(runner.model))
+        spill = StageBReplaySpill(
+            root=spill_config[0], max_bytes=spill_config[1], geometry=spill_bound,
+            window_names=spill_windows, n_probes=n_probes, dtype=runner.dtype,
+            device=runner.device)
+        counters.replay.update(mode=REPLAY_SPILL, spill_geometry=spill_bound.as_dict())
+
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
-    with storage:
+    with storage, (spill if spill is not None else nullcontext()):
         grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
             source_adjoint_space, checkpoint_record,
             cotangent_factory=storage.checkpoint_cotangent_sink,
@@ -1555,8 +1598,14 @@ def run_layer_quantum_core(
             progress.commit()
             counters.mark_phase_units(len(completed_units))
 
-        def replay_backward(*, final, lease, probe):
+        noncontiguous_seeds: set[tuple[int, int]] = set()
+
+        def replay_backward(*, final, lease, probe, observer=None):
             active_probe = int(probe)
+            if observer is not None and (not final or lease is not None):
+                raise RuntimeError(
+                    "the spill capture is the probe's one final pass, with no "
+                    "statistics lease")
             # One phase admission per pass, as check_operator_allocation's
             # contract states: it synchronizes, empties the allocator cache
             # and charges the guard, which is too much work per sample. The
@@ -1568,10 +1617,27 @@ def run_layer_quantum_core(
                         operator_windows["workspace_reserve_bytes"]
                         + (0 if lease is None
                            else lease.statistics_capacity_bytes
-                           - lease.resident_statistics_bytes)))
+                           - lease.resident_statistics_bytes)
+                        + (0 if observer is None
+                           else spill.capture_reserve_bytes)))
             with prefetched_boundary_batches(storage, batches, layer) as reverse_batches:
                 for batch_index, batch, boundary_cpu, _unused in reverse_batches:
                     owner = cotangent_owners[active_probe][batch_index]
+                    # A fork seeds its roots from contiguous clones of these
+                    # accumulators, the final pass from the originals. Only
+                    # when every original is contiguous are the two seed
+                    # layouts, and so the windows' bits, the same (#994).
+                    if not all(tensor.is_contiguous()
+                               for tensor in owner.resident_tensors()):
+                        noncontiguous_seeds.add((active_probe, batch_index))
+                        counters.replay["noncontiguous_cotangent_seeds"] = len(
+                            noncontiguous_seeds)
+                        if observer is not None:
+                            raise RuntimeError(
+                                "Stage B spill replay needs contiguous shared-state "
+                                "cotangent accumulators: the windowed replay seeds "
+                                "its earlier windows from contiguous forks, so a "
+                                "non-contiguous original would not reproduce them")
                     replay_owner = None
                     try:
                         if not final:
@@ -1602,6 +1668,8 @@ def run_layer_quantum_core(
                         roots, root_grads = owner.produced_roots()
                         torch.autograd.backward(
                             [out, *roots], [incoming_grad, *root_grads])
+                        if observer is not None:
+                            observer.end_batch()
                         owner.harvest()
                         if not final:
                             if _state_storage_bytes(owner.resident_tensors()) > \
@@ -1630,6 +1698,7 @@ def run_layer_quantum_core(
                         out = x_in = incoming_grad = isolated = None
                         roots = root_grads = None
                         replay_owner = owner = None
+            counters.replay["layer_passes"] += 1
 
         def consume_window_probe(probe_index, terms, diagnostics, window_receipt):
             operator_window_receipts.append(dict(layer=layer,
@@ -1718,6 +1787,43 @@ def run_layer_quantum_core(
             counters.mark_phase_units(len(completed_units))
             progress.commit()
 
+        spill_driver = None
+        if spill is not None:
+            spill_modules = {name: module for name, module in measured.items()
+                             if name in spill_pending}
+            spill_specs = {name: {fmt: fr.get_format(fmt) for fmt in render_formats[name]}
+                           for name in spill_modules}
+
+            def spill_capture(probe_index):
+                # The probe's one pass reads its boundaries under the first
+                # active window's replay phase, where the sealed read schedule
+                # stages them. No statistics lease exists yet, so no
+                # statistics hook fires during it.
+                if executable:
+                    progress.enter_read_phase(
+                        executable_replay_phase_name(replay_window, probe_index))
+                with spill.capture(
+                        probe_index, spill_modules, spill_specs,
+                        activation_max_abs=joint_activation_maxima(production_cache),
+                        projection_backend=projection_backend) as observer:
+                    replay_backward(final=True, lease=None, probe=probe_index,
+                                    observer=observer)
+
+            def spill_replay(*, window_index, probe_index, lease):
+                if executable:
+                    progress.enter_read_phase(
+                        executable_replay_phase_name(replay_window, probe_index))
+                if guard is not None:
+                    check_operator_allocation(
+                        guard, "before_joint_spill_window_replay", reserve_bytes=(
+                            operator_windows["workspace_reserve_bytes"]
+                            + lease.statistics_capacity_bytes
+                            - lease.resident_statistics_bytes
+                            + spill.replay_reserve_bytes))
+                spill.replay(window_index, probe_index, lease)
+
+            spill_driver = SimpleNamespace(capture=spill_capture, replay=spill_replay)
+
         counters.open()
         try:
             observe_and_project_retained_windows(
@@ -1736,8 +1842,11 @@ def run_layer_quantum_core(
                 sealed_windows=sealed_windows,
                 before_window=before_window,
                 after_window=after_window,
+                spill=spill_driver,
             )
         finally:
+            if spill is not None:
+                counters.replay["spill"] = dict(spill.telemetry)
             if window_kernel is not None:
                 window_kernel.__exit__(None, None, None)
                 window_kernel = None

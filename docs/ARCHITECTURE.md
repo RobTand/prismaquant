@@ -1,5 +1,47 @@
 # PrismaQuant Architecture
 
+Stage B can replay its windows from a local spill (2026-09-23,
+`ws-1a/stageb-one-pass-spill-994`, PQ #994). The windowed replay runs the
+target layer's forward and backward once per (retained window, probe),
+because each window's statistics lease hooks only that window's Linears. When
+`PRISMAQUANT_STAGE_B_SPILL_ROOT` and `PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES` are
+set, the quantum runs one forward and backward per probe instead
+(`joint_replay_spill.StageBReplaySpill`). That pass records each pending
+target's bf16 input and selected output gradient to an unlinked file on a
+local ext4, xfs or btrfs disk (`perturbed_x_cache.StageBSpillScratch`; NFS,
+ZFS, tmpfs, overlay and `/mnt/shared` are refused). Each window then feeds its
+own statistics lease from the file through
+`JointOperatorStatisticsLease._observe_invocation`, the one arithmetic the live
+hook also calls. The records are bit-identical to the windowed replay's:
+every statistics key is one Linear's FP32 accumulator and is fed in firing
+order, and a replayed operand keeps the live shape, strides and, on CUDA, the
+address residue modulo 512. The file is laid out per Linear: one input stream
+per Linear that first read a tensor (an expert's up projection reads its gate
+projection's stream) and one gradient stream per Linear and probe. Inputs are
+written once, at probe 0, and every later probe's inputs must hash-equal them.
+The spill refuses a non-dense input, a measurement dtype that is not 16-bit,
+and non-contiguous shared-state cotangent accumulators.
+`joint_replay_spill.spill_geometry` bounds the layer's bytes from shapes and
+token counts, and the whole bound is allocated before the checkpoint load, so
+a missing or undersized ceiling or disk refuses before any GPU work. A routed
+parameter is bounded by top-k rows per token across the whole layer, not per
+window, so the bound does not grow with the window count. For GLM-5.3-Flash
+(512 samples of 512 tokens, 4 probes) it is 185.76 GB per sparse layer and
+70.87 GB per dense layer. Identity,
+the resource policy and every record are unchanged; the counters' new
+`replay` block records the mode, the layer passes and the spill telemetry.
+Unset, the windowed path runs unchanged. The campaign container and the
+dispatcher forward and seal the two variables through a writable identity
+bind, as they do the #956 cotangent scratch. The sealed executable read
+schedule still stages the target layer's boundaries once per (window,
+probe); the spill reads them once per probe, under the first active window's
+replay phases. Separately, the layer quantum imported `PackedExpertProjection`
+from `production_weight_cache`, where it does not exist, so every quantum with
+packed experts failed after its source install; it now imports it from
+`routed_experts`. Gates: `tests/test_stageb_one_pass_spill.py`,
+`tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
+changes.
+
 Stage B reads Stage A by slice and by checkpoint band (2026-09-22,
 `ws-br/stageb-band-receipts-993`, PQ #993). A layer quantum reads one
 checkpoint and the forward boundary entries of its own chain, and Stage A
@@ -341,8 +383,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `ws-br/stageb-band-receipts-993`.
+As of: 2026-09-23 · `ws-1a/stageb-one-pass-spill-994`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-1a/stageb-one-pass-spill-994`) for **the Stage B
+one-pass replay spill** (PQ #994): with the spill declared, a layer quantum
+runs one forward and backward per probe and replays every retained window
+from a per-Linear local spill through the lease's one arithmetic, bit-identical
+to the windowed replay; see the entry of that name at the top. The per-sample
+guard check in `replay_backward` runs once per pass. The quantum's packed
+expert import is fixed. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-22, `ws-br/stageb-band-receipts-993`) for **Stage B
 reading Stage A by slice and by checkpoint band** (PQ #993). Records, the
@@ -3020,7 +3070,9 @@ enforces the container's cgroup cap whatever the aggregate says.
 side an owner lands on, so `HOST_RESIDENT_BUDGET_FIELDS` names the host-side
 owners and `host_cap_bytes` is a derivation input rather than a budget field.
 The host cap sets the replay multiplier, because each retained window replays
-every probe's reverse pass: on the GLM-5.3-Flash roster a 24 GiB container
+every probe's reverse pass (unless the #994 spill is declared, which runs one
+pass per probe and replays the windows from local disk): on the GLM-5.3-Flash
+roster a 24 GiB container
 admits 78 windows on the worst layer, 32 GiB admits 13, and 48 GiB admits 7,
 where the aggregate window becomes binding and the multiplier floors at
 4.98. `tools/derive_retained_window_budget.py`

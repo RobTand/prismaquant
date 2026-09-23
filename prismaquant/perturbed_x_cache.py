@@ -1067,6 +1067,157 @@ class ExactCotangentScratch:
         self._written.clear()
 
 
+class StageBSpillScratch:
+    """One job-local spill file for Stage B's one-pass replay (PQ #994).
+
+    The replay writes each probe's bf16 Linear inputs and output gradients
+    here once, then accumulates every retained window from it. Like
+    ``ExactCotangentScratch`` it is a disposable arithmetic workspace, not a
+    checkpoint: a resumed quantum recaptures it.
+
+    The file is created unlinked (``O_TMPFILE`` where the filesystem has
+    it), so it has no name that could outlive the process: closing the
+    descriptor, or the process dying for any reason, returns the space.
+    There is therefore never an orphan to sweep. The whole geometry bound is
+    allocated up front with ``posix_fallocate``, so a disk too small for
+    the layer refuses before any GPU work instead of partway through it.
+    """
+
+    #: Local block filesystems only. ZFS is refused as well as NFS, tmpfs
+    #: and overlay: the spill must never land on the ZFS pool, whose ARC
+    #: read tier synchronous scratch writes would evict.
+    FILESYSTEMS = frozenset({'ext4', 'xfs', 'btrfs'})
+    SHARED_ROOT = Path('/mnt/shared')
+
+    @classmethod
+    def require_local_root(cls, root):
+        """Resolve ``root`` to a local block-filesystem directory, or refuse."""
+        root = Path(root)
+        if not root.is_absolute():
+            raise ValueError("Stage B spill root must be an absolute path")
+        for candidate in (root, root.resolve()):
+            if candidate == cls.SHARED_ROOT or cls.SHARED_ROOT in candidate.parents:
+                raise ValueError("Stage B spill root must not be under /mnt/shared")
+        if not root.is_dir() or root.is_symlink():
+            raise ValueError("Stage B spill root must be an existing local directory")
+        resolved = root.resolve(strict=True)
+        best = None
+        for line in Path('/proc/self/mountinfo').read_text().splitlines():
+            left, right = line.split(' - ', 1)
+            mount = Path(re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)),
+                                left.split()[4]))
+            if resolved == mount or mount in resolved.parents:
+                # Later mountinfo rows stack over earlier ones at one target.
+                if best is None or len(mount.parts) >= len(best[0].parts):
+                    best = (mount, right.split()[0])
+        if best is None or best[1] not in cls.FILESYSTEMS:
+            raise ValueError(
+                "Stage B spill root must be on a local ext4/xfs/btrfs disk "
+                f"(found {best[1] if best else 'no mount'}; NFS, ZFS, tmpfs "
+                "and overlay are refused)")
+        return resolved
+
+    def __init__(self, *, directory, max_bytes, nbytes):
+        import tempfile
+        self._file = None
+        if type(max_bytes) is not int or max_bytes <= 0:
+            raise ValueError("Stage B spill requires a positive byte ceiling")
+        if type(nbytes) is not int or nbytes <= 0:
+            raise ValueError("Stage B spill geometry bound must be a positive byte count")
+        if nbytes > max_bytes:
+            raise RuntimeError(
+                f"Stage B spill needs {nbytes} bytes for this layer but its "
+                f"ceiling is {max_bytes}")
+        root = self.require_local_root(directory)
+        self.root = root
+        self.capacity = nbytes
+        self.allocated = 0
+        self._file = tempfile.TemporaryFile(prefix='pq-stage-b-spill-', dir=root)
+        try:
+            os.posix_fallocate(self._file.fileno(), 0, nbytes)
+        except BaseException:
+            self.close()
+            raise
+
+    def allocate(self, nbytes):
+        """Reserve the next ``nbytes`` of the file; refuse past the bound."""
+        if self._file is None:
+            raise RuntimeError("Stage B spill is closed")
+        if type(nbytes) is not int or nbytes < 0:
+            raise ValueError("Stage B spill allocation must be a nonnegative byte count")
+        offset = self.allocated
+        if offset + nbytes > self.capacity:
+            raise RuntimeError(
+                "Stage B spill exceeded its geometry bound: a target saw more "
+                "rows than one invocation per sample over the declared tokens")
+        self.allocated = offset + nbytes
+        return offset
+
+    def write(self, offset, views):
+        """Write ``views`` back to back at ``offset``; the pages are dropped."""
+        fd = self._file.fileno()
+        total = sum(len(view) for view in views)
+        if offset < 0 or offset + total > self.allocated:
+            raise RuntimeError("Stage B spill write is outside its allocation")
+        for batch in _iov_batches(views):
+            done, size = 0, sum(len(view) for view in batch)
+            while done < size:
+                put = os.pwritev(fd, _iov_tail(batch, done), offset + done)
+                if put <= 0:
+                    raise RuntimeError("Stage B spill short write")
+                done += put
+            offset += size
+        return total
+
+    def sync_and_release(self, offset, nbytes):
+        """Make written pages clean, then drop them from the page cache."""
+        fd = self._file.fileno()
+        os.fdatasync(fd)
+        os.posix_fadvise(fd, offset, nbytes, os.POSIX_FADV_DONTNEED)
+
+    def read_into(self, offset, views):
+        """Fill ``views`` from the file at ``offset``; the pages are dropped."""
+        fd = self._file.fileno()
+        total = sum(len(view) for view in views)
+        if offset < 0 or offset + total > self.allocated:
+            raise RuntimeError("Stage B spill read is outside its allocation")
+        start = offset
+        for batch in _iov_batches(views):
+            done, size = 0, sum(len(view) for view in batch)
+            while done < size:
+                got = os.preadv(fd, _iov_tail(batch, done), offset + done)
+                if got <= 0:
+                    raise RuntimeError("Stage B spill is truncated")
+                done += got
+            offset += size
+        os.posix_fadvise(fd, start, total, os.POSIX_FADV_DONTNEED)
+        return total
+
+    def close(self):
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+
+
+def _iov_batches(views):
+    limit = os.sysconf('SC_IOV_MAX') if 'SC_IOV_MAX' in os.sysconf_names else 1024
+    views = [view for view in views if len(view)]
+    for start in range(0, len(views), limit):
+        yield views[start:start + limit]
+
+
+def _iov_tail(views, skip):
+    """The unwritten remainder of ``views`` after ``skip`` bytes."""
+    out = []
+    for view in views:
+        if skip >= len(view):
+            skip -= len(view)
+            continue
+        out.append(view[skip:] if skip else view)
+        skip = 0
+    return out
+
+
 class EntryReadScratch:
     """One reusable read buffer for exact activation entries.
 
