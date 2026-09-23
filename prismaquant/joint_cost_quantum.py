@@ -1133,6 +1133,30 @@ def run_layer_quantum_core(
     temperature = 1.0
     probe_microbatch = int(execution.get("probe_microbatch", 0))
     min_free_gib = float(execution.get("min_free_gib", 0.0))
+    # The Stage B replay regime (#994): the capture batch and the statistics
+    # accumulation. The default stamps nothing and replays bitwise; any other
+    # regime changes the arithmetic, so it is stamped into the statistics
+    # identity below and replays only from the spill.
+    from .joint_replay_regime import (
+        DEFAULT_REPLAY_REGIME,
+        ReplayRegimeRefused,
+        normalize_replay_regime,
+        replay_regime_identity,
+    )
+    from .joint_replay_spill import stage_b_spill_config
+    try:
+        replay_regime = normalize_replay_regime(execution.get("replay_regime"))
+    except ReplayRegimeRefused as exc:
+        raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
+    if replay_regime != DEFAULT_REPLAY_REGIME:
+        if stage_b_spill_config() is None:
+            raise QuantumIdentityRefused(
+                f"quantum {quantum_id}: replay regime {replay_regime} replays from "
+                "the spill; declare PRISMAQUANT_STAGE_B_SPILL_ROOT and "
+                "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
+        counters.replay["regime"] = replay_regime_identity(replay_regime)
+        raise QuantumIdentityRefused(
+            f"quantum {quantum_id}: replay regime {replay_regime} is not implemented")
 
     retained = quantum_retained_state(execution)
     operator_windows = retained.operator_windows
@@ -1200,7 +1224,8 @@ def run_layer_quantum_core(
         "distribution": "rademacher", "normalization": "global_kl_fisher",
         "producer_source_sha256": _aura_source_sha256(),
         "source_execution": source_execution_identity(runner.model),
-        "arithmetic": statistics_arithmetic_identity(runner.dtype, projection_backend),
+        "arithmetic": statistics_arithmetic_identity(runner.dtype, projection_backend,
+                                                     replay_regime=replay_regime),
     }
     joint_probe_identity["arithmetic"]["operator_windows"] = operator_windows
     joint_probe_identity["arithmetic"]["gradient_diagnostics"] = (
@@ -2008,6 +2033,17 @@ def run_layer_quantum(
     from .autoscale import require_bounded_capture_environment
 
     execution = config["execution"]
+    # The replay regime is a launch setting sealed in the campaign container
+    # spec, never a plan field: the plan is bound to the prepared inputs.
+    from .joint_replay_regime import ReplayRegimeRefused, replay_regime_from_environment
+    if "replay_regime" in execution:
+        raise QuantumIdentityRefused(
+            "the Stage B replay regime is a launch setting "
+            "(PRISMAQUANT_STAGE_B_REPLAY_REGIME), not a plan execution field")
+    try:
+        replay_regime = replay_regime_from_environment(os.environ)
+    except ReplayRegimeRefused as exc:
+        raise QuantumIdentityRefused(str(exc)) from exc
     from .joint_stageb_resources import enforce_device_policy
     device_envelope = enforce_device_policy(config)
     if (config.get("qualification_window") is not None
@@ -2131,6 +2167,7 @@ def run_layer_quantum(
 
         execution_runtime = dict(execution)
         execution_runtime.setdefault("device_envelope_bytes", config.get("max_gpu_bytes"))
+        execution_runtime["replay_regime"] = replay_regime
         # D2 handshake, before any GPU work or progress: the record seals
         # window indices only, so membership and footprints are recomputed
         # from the sealed budget and handshook here. The chunk frontier,

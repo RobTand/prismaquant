@@ -901,6 +901,8 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
         validate_projection_backend_identity(arithmetic["projection_backend"])
         if arithmetic != probe["arithmetic"] or arithmetic["projection_dtype"] != "torch.float32" or arithmetic["delta_dtype"] != "torch.float32" or arithmetic["aggregation"] != "sum_signed_invocations_then_square":
             raise ValueError("invalid projection arithmetic")
+        from .joint_replay_regime import replay_regime_of
+        replay_regime_of(arithmetic)
     except (KeyError, TypeError, RuntimeError) as exc:
         raise ValueError(f"joint AURA incomplete identity: {exc}") from exc
     ids = entry.get("probe_ids")

@@ -926,3 +926,36 @@ def test_stage_b_spill_is_validated_and_sealed_in_outer_request(
     assert all(sealed.get(name) == value for name, value in env.items())
     actual = json.loads(argv[argv.index('--spec') + 1])
     assert stage_b_spill_environment(actual, sealed) == env
+
+
+@pytest.mark.parametrize('regime,spill,message', [
+    ('capture_batch=2', True, None),
+    ('capture_batch=2,accumulation=operator_gemm,chunk_rows=65536', True, None),
+    ('capture_batch=2', False, 'declare the spill'),
+    ('capture_batch=1', True, 'spells the default'),
+    ('capture_batch=two', True, 'canonical integer'),
+])
+def test_stage_b_replay_regime_is_validated_and_sealed_in_the_spec(
+        tmp_path, campaign, regime, spill, message):
+    """The #994 replay regime rides the one spec every quantum shares."""
+    import dispatch_joint_quanta as dispatch
+    from prismaquant.joint_replay_regime import REPLAY_REGIME_ENV
+    root = '/home/rob/pb-scratch/glm-stageb-spill'
+    env = {REPLAY_REGIME_ENV: regime}
+    if spill:
+        env.update({'PRISMAQUANT_STAGE_B_SPILL_ROOT': root,
+                    'PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES': str(200 << 30)})
+    spec = {'container': {'image': 'sha256:' + '0' * 64,
+             'mounts': [{'source': root, 'target': root, 'readonly': False}]}, 'env': env}
+    dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+                   tmp_path / 'adjoint-slices')
+    path = tmp_path / 'record.json'; path.write_text(json.dumps(record))
+    args = dict(record_path=path, output_root=tmp_path / 'out')
+    if message is not None:
+        with pytest.raises(dispatch.DispatchRefused, match=message):
+            quantum_argv(record, **args)
+        return
+    argv = quantum_argv(record, **args)
+    actual = json.loads(argv[argv.index('--spec') + 1])
+    assert actual['env'][REPLAY_REGIME_ENV] == regime

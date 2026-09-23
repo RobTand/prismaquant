@@ -1,5 +1,30 @@
 # PrismaQuant Architecture
 
+Stage B replay regimes are stamped in the statistics identity (2026-09-23,
+`ws-1a/stageb-spill-batched-994`, PQ #994). `PRISMAQUANT_STAGE_B_REPLAY_REGIME`
+names the capture batch and the statistics accumulation of a quantum that
+replays from the #994 spill, for example
+`capture_batch=4,accumulation=operator_gemm,chunk_rows=65536`
+(`joint_replay_regime`). Unset is the default: batch 1 and one FP32 GEMM per
+backward invocation, the bitwise regime. The default stamps nothing, so every
+existing quantum keeps its identity, and the default spelled out is refused.
+Any other regime changes the arithmetic, so `statistics_arithmetic_identity`
+stamps a `stage_b_replay_regime` block into the probe identity every cost row
+carries; `operator_gemm` also replaces `operator_accumulation`. The campaign
+join then refuses quanta whose regimes differ ("probe or measurement identity
+differs"), and every joint row's validation refuses a stamped default. The
+regime is a launch setting, not a plan field: the prepared completion records
+the plan's digest and certified mode refuses a mismatch, so a plan field would
+need a fresh prepare per regime. The one campaign container spec that wraps
+every quantum of a dispatch carries it instead. The dispatcher refuses a
+malformed regime and one declared without the spill. The quantum refuses a
+regime in the plan's execution block, and a non-default regime without the
+spill, before any GPU work. The batched capture and the operator GEMM are not
+implemented yet, so a non-default regime still refuses. Gates:
+`tests/test_stageb_replay_regime.py`, `tests/test_stageb_one_pass_spill.py`,
+`tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
+changes.
+
 Stage B can replay its windows from a local spill (2026-09-23,
 `ws-1a/stageb-one-pass-spill-994`, PQ #994). The windowed replay runs the
 target layer's forward and backward once per (retained window, probe),
@@ -415,8 +440,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-1a/stageb-one-pass-spill-994`.
+As of: 2026-09-23 · `ws-1a/stageb-spill-batched-994`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-1a/stageb-spill-batched-994`) for **Stage B
+replay regimes** (PQ #994): `PRISMAQUANT_STAGE_B_REPLAY_REGIME` names a
+capture batch and a statistics accumulation for the spill replay, and any
+non-default regime is stamped into `statistics_arithmetic_identity`, so the
+join refuses mixed regimes; see the entry of that name at the top. The
+default stamps nothing. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-1a/stageb-one-pass-spill-994`) for **the Stage B
 one-pass replay spill** (PQ #994): with the spill declared, a layer quantum

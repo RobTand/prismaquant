@@ -781,6 +781,22 @@ def require_staged_wait_below_grace(spec: Mapping,
             f"refusal. Set it below {grace} s")
 
 
+def _require_replay_regime(spec: dict) -> None:
+    """Validate the Stage B replay regime the sealed spec declares (#994).
+
+    One spec wraps every quantum of a dispatch, so the regime is uniform by
+    construction. It changes the statistics arithmetic, and it replays only
+    from the spill, so the spec must declare the spill beside it.
+    """
+    from prismaquant.joint_replay_regime import replay_regime_from_environment
+
+    env = spec.get("env", {})
+    if (replay_regime_from_environment(env) is not None
+            and not stage_b_spill_environment(spec, env)):
+        raise RuntimeError("a non-default Stage B replay regime replays from the "
+                           "spill; declare the spill in the same spec")
+
+
 def _container_wrap(spec_path: Path, payload: list[str], *,
                     progress: Sequence[tuple[str, int]],
                     resource_policy=None) -> tuple[list[str], str | None]:
@@ -810,6 +826,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     try:
         cotangent_scratch_environment(spec, spec.get("env", {}))
         stage_b_spill_environment(spec, spec.get("env", {}))
+        _require_replay_regime(spec)
     except (ValueError, RuntimeError) as exc:
         raise DispatchRefused(str(exc)) from exc
     if resource_policy is not None:

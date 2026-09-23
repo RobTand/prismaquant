@@ -245,7 +245,7 @@ def campaign(tmp_path_factory):
 
 
 def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
-             resume=False, label=None):
+             resume=False, label=None, regime=None):
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress, quantum_layer_roster,
         quantum_retained_state, resolve_quantum_windows, run_layer_quantum_core)
@@ -268,6 +268,8 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
                                 campaign.root / "shared")
     record = campaign.records[layer]
     execution = _execution(campaign.root / "exec")
+    if regime is not None:
+        execution["replay_regime"] = regime
     retained = quantum_retained_state(execution)
     roster = quantum_layer_roster(runner, campaign.formats_by_qname, layer)
     resolved = resolve_quantum_windows(
@@ -650,6 +652,16 @@ def test_spill_ceiling_refuses_before_any_gpu_work(campaign, monkeypatch, tmp_pa
     # Refused before the chain: no layer was installed, no checkpoint read.
     assert state.context.install_calls == 0
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+
+
+def test_replay_regime_without_the_spill_refuses_before_any_gpu_work(
+        campaign, monkeypatch):
+    _clear_output(campaign, 0)
+    payload, state = _quantum(campaign, monkeypatch, layer=0, regime="capture_batch=2")
+    assert payload is None
+    assert "replays from the spill" in _chain(state.error)
+    assert state.context.install_calls == 0
+    assert state.counters.replay["layer_passes"] == 0
 
 
 @pytest.mark.parametrize("root,message", [
