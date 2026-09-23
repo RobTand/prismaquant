@@ -49,6 +49,7 @@ from prismaquant.joint_adjoint_checkpoints import (
     load_checkpoint_shared_states,
     stage_a_run_header,
     stage_a_slice,
+    unpack_shared_states,
     write_adjoint_receipt,
 )
 from prismaquant.joint_cost_stage_a import AdjointIdentityRefused
@@ -467,7 +468,13 @@ def _shared_contents(receipt, root, where):
         for entry in record["shared_state_entries"]:
             path = Path(entry.pop("path").replace(str(root), str(where)))
             entry.pop("sha256"), entry.pop("file_bytes")
-            entry["content"] = _content(pickle.loads(path.read_bytes()))
+            if entry["name"] == "shared-states":
+                # PQ #1037: a packed checkpoint's one file holds every state.
+                entry["content"] = [
+                    (name, _content(pickle.loads(member)))
+                    for name, member in unpack_shared_states(path.read_bytes())]
+            else:
+                entry["content"] = _content(pickle.loads(path.read_bytes()))
     return receipt
 
 

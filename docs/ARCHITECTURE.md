@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+Stage A checkpoints pack their shared states into one sealed file
+(2026-09-23, `ws-tq/1037-packed-shared-states`, PQ #1037). A GLM checkpoint
+wrote 2,048 shared-adjoint and 512 shared-pass pickles as separate NFS
+files, each with its own fsync, rename and directory fsync: about 17 s per
+checkpoint by PR #1033's count, and 2,560 metadata operations for every
+reader. Stage A now seals `prismaquant.joint_adjoint_checkpoint.v3`: the
+cotangent rows are referenced as in v2, and `shared_state_entries` is one
+whole-file row, `entries/shared-states.pack`, which holds every state as its
+own pickle plus a digest-checked index. The pack is written with one fsync
+and one directory fsync. v1 and v2 checkpoints still read. See "Packed
+shared states (#1037)". Gates: `tests/test_packed_shared_states.py`,
+`tests/test_referenced_adjoint_checkpoint.py`,
+`tests/test_stage_a_seed_package.py`. No format, pipeline default, stage or
+ship gate changes. A Stage B band slice built from a v3 checkpoint differs
+from a v2 one in `checkpoint.schema`, `shared_state_entries` and
+`cotangent_sha256`, so its slice digests differ; the loaded states are
+identical. The real-scale seal time after the change is not measured yet:
+it comes from R13's first checkpoint.
+
 Stage A takes its head from the prepared completion (2026-09-23,
 `ws-sa/stage-a-skip-head-1051`, PQ #1051, closes #1042, part of #997). Stage A
 walked the whole anchor catalog on every root to re-derive the roster, the
@@ -781,8 +800,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-sa/stage-a-skip-head-1051`.
+As of: 2026-09-23 · `ws-tq/1037-packed-shared-states`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-tq/1037-packed-shared-states`) for **packed
+Stage A shared states** (PQ #1037): a v3 checkpoint's shared states are one
+sealed pack file instead of one pickle per state, and every reader accepts
+v1, v2 and v3; see "Packed shared states (#1037)". No format, default, stage
+or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-sa/stage-a-skip-head-1051`) for **Stage A's head
 from the prepared completion** (PQ #1051, closes #1042): Stage A no longer
@@ -21554,7 +21579,91 @@ refusal, and v1/v2 payload equality), `tests/test_stage_a_seed_package.py`
 (the seed stages the owner's plane) and
 `tests/test_stage_a_produced_boundary_chain.py` (the consumed-lifetime
 refusal on a real bound instance). The Stage A chain, resume, seed and
-band suites run on v2 checkpoints end to end.
+band suites ran on v2 checkpoints end to end until #1037 moved Stage A to
+v3.
+
+### Packed shared states (#1037)
+
+A referenced (v2) checkpoint still wrote each shared state as its own
+pickle: on GLM, 2,048 shared-adjoint states (282,624 B in all on the
+dry-1022 slice) and 512 shared-pass states (4 B each), 2,560 files with an
+fsync, a rename and a directory fsync apiece. PR #1033 put that at about
+17 s per checkpoint. Every reader then opened 2,560 files.
+
+**Record.** `prismaquant.joint_adjoint_checkpoint.v3`
+(`ADJOINT_CHECKPOINT_PACKED_SCHEMA`). Its activation rows follow the v2
+rules. `shared_state_entries` is exactly one row,
+`{name: "shared-states", path: <checkpoint>/entries/shared-states.pack,
+sha256, file_bytes}`, even when there are no states; `_checkpoint_own_directory`
+refuses any other shape. `checkpoint_is_referenced` is true for v2 and v3,
+and `checkpoint_is_packed` for v3 only. v1 and v2 are unchanged and still
+read.
+
+**Pack.** `joint_adjoint_checkpoints`, schema
+`prismaquant.shared_state_pack.v1`:
+- the member pickles, each a standalone `pickle.dump`, concatenated in
+  ascending name order from offset 0;
+- the index, canonical JSON `{schema, members: [{name, offset, bytes,
+  sha256}]}`;
+- a 16-byte trailer: the index length as a little-endian u64, then
+  `PQSSPK01`.
+
+The row's sha256 covers the whole file. `unpack_shared_states` then checks
+the trailer, that the index is canonical and of this schema, that member
+names are in the writer's spelling (`shared-adjoint-{p}-{b}`,
+`shared-pass-{b}`) and strictly ascending, that the ranges run from 0 to the
+index with no gap or overlap, and each member's sha256. Each member is
+the same `pickle.dump` of its state that v2 wrote to its own file.
+
+**Writer.** `_write_shared_state_pack` streams every member into one file
+through nested bounded digest sinks: each member's sink is bounded by its
+own admitted estimate, the file's by the pack envelope. It publishes with the
+one atomic shape the per-state writer uses (`_publish_streamed_file`: unique
+temp, one fsync, `os.replace`, one directory fsync). Each member's
+serialization is held against the auxiliary ceiling as before, and the
+index at its share of the envelope. The pack envelope is the sum of the
+member estimates plus the index sized the way the manifest envelope is: its
+exact shape with placeholder digests and every offset and size at its
+envelope value. Stage A's deferred plan (`open_adjoint_checkpoint`) adds the
+one pack file to the reservation (`extend_checkpoint_artifact`) after the
+pass, and refuses a pack envelope over `max_artifact_bytes`, because the
+manifest was sized with each shared file at that ceiling.
+`write_adjoint_checkpoint` and `open_adjoint_checkpoint` default `packed` to
+`referenced`. `packed=False` with `referenced=True` still seals v2, so
+fixtures can write the same states both ways.
+
+**Readers.** `load_adjoint_checkpoint` and `load_checkpoint_shared_states`
+(the seed and resume borrowers) return the same `(shared_adjoint,
+shared_pass)` from a pack. The band reader, the slice check, the readset
+builder (`joint_layer_quanta`), the catalog-extension namespace check and
+the seed package builder see one whole-file row, so no path repeats and
+their size checks hold. Band-serial (`joint_quantum_handoff`) stages the
+pack whole in its `handoff-load` phase and deserializes only its shared-pass
+members. Its payload ceiling therefore charges the whole pack, about 285 KB
+on a GLM checkpoint instead of about 2 KB, within the current auxiliary
+ceilings. The pack goes through the same staged small-file reader, so tier
+byte counts stay per whole file.
+
+**Not changed.** The Stage A preflight still sizes the manifest with one row
+per shared state, which over-covers the one pack row.
+
+**Measurement.** Before: about 17 s of shared-state writes per GLM
+checkpoint (PR #1033). The change is one file with one fsync and one
+directory fsync in place of 2,560 of each. The after number comes from R13's
+first checkpoint (045), read beside `checkpoint_reference_wait_s`; it is not
+measured yet.
+
+Gates: `tests/test_packed_shared_states.py`:
+- v2 and v3 of the same states load identically through every loader;
+- the records differ only in `schema`, `shared_state_entries` and
+  `cotangent_sha256`;
+- the Stage A tee seals a pack;
+- an empty set still seals one pack;
+- each pack structure fault refuses, forged with a valid whole-file digest;
+- the band reader and band-serial read the pack.
+
+`tests/test_stage_a_seed_package.py`, `tests/test_stage_a_chain_resume.py` and
+`tests/test_quantum_band_serial.py` run on v3 end to end.
 
 ### Stage A chain resume (#1001)
 
