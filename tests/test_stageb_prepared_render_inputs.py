@@ -44,6 +44,17 @@ from test_quantum_executable_readset import (
     CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bound_inputs,
 )
 import test_strict_reader_tier_enforcement as strict
+# The strict-PWC tests below drive ``strict._leased_fixture``, so they take
+# the same state reset its own module does, before and after each test. The
+# lease helper root, the test-only SDK injection and the residency resolver
+# are process-global in ``staged_lease`` and ``staged_tier``, and a PB action
+# also inherits ``PRISMABUILD_READER_HELPER_ROOT`` (the worker's runtime
+# generation). Without the reset, ``_sdk()`` checks that generation against
+# whatever ``prismabuild.reader_lease`` an earlier module in the same process
+# imported (the qualification bundle's, through ``_pb_source``), and the
+# window refuses ``lease-helper-divergent`` (PQ #1032, PB ``e75555fbef1c``).
+# The injection these tests make was also never cleared, so it outlived them.
+from test_strict_reader_tier_enforcement import _forget_state  # noqa: E402,F401 (autouse)
 
 WINDOW_PAIRS = (
     (0, (("unit-w00-a", "FMT-A"), ("unit-w00-b", "FMT-A"))),
