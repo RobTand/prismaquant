@@ -37,6 +37,7 @@ for _entry in (ROOT, ROOT / "tools"):
 
 from prismaquant import joint_layer_quanta as jl  # noqa: E402
 from prismaquant import stage_b_prep_io as io  # noqa: E402
+from prismaquant.layer_streaming import streaming_source_plan  # noqa: E402
 from test_stageb_readset_source_coverage import PREFIX, _cli_fixture  # noqa: E402
 from test_quantum_executable_readset import _exec_argv  # noqa: E402
 
@@ -171,8 +172,8 @@ def test_the_manifest_carries_the_header_ranges_the_generator_reads(tmp_path):
     _submission, manifest, _template = write_submission(
         tmp_path, campaign, receipt_path, tmp_path / "metadata-generation")
     plan = json.loads(campaign["plan_path"].read_text())
-    reads = jl.layer_source_header_reads(plan["model"], 4,
-                                         checkpoint_layers_prefix=PREFIX)
+    reads = streaming_source_plan(plan["model"], layers_prefix=PREFIX,
+                                  layers=range(4))["header_reads"]
     by_key = {(e["path"], e["offset"]): e["bytes"] for e in manifest["entries"]}
     for path, offset, size in reads:
         # A whole-file entry at the same offset covers the range too.
@@ -237,10 +238,11 @@ def test_the_read_manifest_is_one_phase_prismabuild_accepts(tmp_path):
             produced_by={}, annotations={})
 
 
-def test_layer_source_header_reads_name_the_index_and_each_header(tmp_path):
+def test_source_plan_header_reads_name_the_index_and_each_header(tmp_path):
     campaign, _receipt, spans = prep_fixture(tmp_path)
     model = json.loads(campaign["plan_path"].read_text())["model"]
-    reads = jl.layer_source_header_reads(model, 4, checkpoint_layers_prefix=PREFIX)
+    plan = streaming_source_plan(model, layers_prefix=PREFIX, layers=range(4))
+    reads = plan["header_reads"]
     index = Path(model) / "model.safetensors.index.json"
     assert reads[0] == (str(index), 0, index.stat().st_size)
     shards = {str(path): (offset, size) for path, offset, size in reads[1:]}
@@ -249,9 +251,8 @@ def test_layer_source_header_reads_name_the_index_and_each_header(tmp_path):
             0, 8 + struct.unpack(
                 "<Q", (Path(model) / f"layer-{n}.safetensors").read_bytes()[:8])[0])
         for n in range(4)}
-    # The spans the generator completes readsets from are unchanged by the
-    # refactor that shares the header reader.
-    assert jl.read_layer_source_spans(model, 4, checkpoint_layers_prefix=PREFIX) == spans
+    # The spans the generator completes readsets from are the plan's.
+    assert plan["layer_spans"] == spans
 
 
 # -- the template ------------------------------------------------------------

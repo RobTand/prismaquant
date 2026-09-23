@@ -292,7 +292,10 @@ def test_dispatch_main_accepts_complete_prepared_input_contract(
     gateway = dispatch.FakeGateway()
     code = dispatch.main(
         ["--records", str(records), "--output-root", str(out),
-         "--adjoint-receipt", str(receipt_path)], _gateway=gateway)
+         "--adjoint-receipt", str(receipt_path)], _gateway=gateway,
+        # No checkpoint behind the fixture; coverage is tested on its own
+        # (test_readset_coverage_1095).
+        _coverage=lambda rows: [])
     refused = capsys.readouterr().err
     assert code == 0, (
         f"production main refuses the complete prepared-input contract "

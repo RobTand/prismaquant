@@ -417,7 +417,10 @@ def test_generator_dispatch_waits_for_delayed_leased_render(shared_bridge_path, 
     gateway = dispatch.FakeGateway()
     assert dispatch.main([
         "--records", str(records), "--output-root", str(tmp_path / "dispatch"),
-        "--adjoint-receipt", str(layout["receipt_path"])], _gateway=gateway) == 0
+        "--adjoint-receipt", str(layout["receipt_path"])], _gateway=gateway,
+        # No checkpoint behind the fixture; coverage is tested on its own
+        # (test_readset_coverage_1095).
+        _coverage=lambda rows: []) == 0
     assert len(gateway.submitted) == len(LAYERS)
     record = json.loads((records / "layer-002.json").read_text())
     block = record["executable_readset"]

@@ -132,8 +132,9 @@ def preparation_read_entries(*, head: Sequence[Mapping], files: Iterable,
 
     ``head`` is the parent's head phase, ``files`` the whole files the tools
     read besides it (their own arguments, the Stage A proofs, the production
-    pickle), and ``ranges`` the partial reads (the safetensors index and
-    headers, :func:`joint_layer_quanta.layer_source_header_reads`). A range
+    pickle), and ``ranges`` the partial reads (the model config, the
+    safetensors index and headers: ``header_reads`` of
+    ``layer_streaming.streaming_source_plan``). A range
     that a whole-file entry at the same offset already covers is dropped;
     PrismaBuild refuses a repeated ``(path, offset)``.
 
@@ -280,9 +281,9 @@ class StagedPreparationReads:
     def prefix(self, path, *, nbytes: int, where: str) -> bytes:
         """The staged range entry at offset 0 that covers ``nbytes`` of ``path``.
 
-        The safetensors header reads (``joint_layer_quanta.
-        layer_source_header_reads``) are declared as ``[0, 8 + length)``
-        ranges. This returns that whole entry, so the caller reads the
+        The safetensors header reads (``header_reads`` of
+        ``layer_streaming.streaming_source_plan``) are declared as
+        ``[0, 8 + length)`` ranges. This returns that whole entry, so the caller reads the
         length prefix and the header from one staged, digest-checked copy.
         """
         path = Path(path)

@@ -76,12 +76,14 @@ from .layer_streaming import (
     _get_layer_list,
     _get_rotary,
     _head_prefixes,
+    construction_multimodal,
     _materialize,
     _read_layer_to_device,
     _resolve_base_prefix,
     _unload,
     set_module_tensor_to_device,
 )
+from .source_read_plan import select_source_tensors, check_sealed_selection
 from .tied_embeddings import resolve_tied_output_embedding
 
 
@@ -1662,6 +1664,7 @@ def _build_streaming_context(model_path: str, *,
                              attn_implementation: str | None = None,
                              source_authentication=None,
                              source_snapshot_only: bool = False,
+                             sealed_head_tensors=None,
                              ) -> StreamingContext:
     """One-time setup: AutoConfig + empty skeleton, then manually
     materialize only the always-resident head pieces. Decoder layers
@@ -1699,7 +1702,12 @@ def _build_streaming_context(model_path: str, *,
 
     ``source_snapshot_only`` requires authenticated source ownership. It keeps
     all nonbody state on meta and allows only a one-shot selected snapshot;
-    forward installation and initialization attestation fail closed."""
+    forward installation and initialization attestation fail closed.
+
+    ``sealed_head_tensors`` is the resident head a read manifest declared,
+    as ``source_read_plan.selection_checkpoint_names`` (PQ #1095). The head
+    selection this context computes from its skeleton must equal it before
+    any head tensor is read; a difference refuses, naming both sides."""
     if type(source_snapshot_only) is not bool:
         raise TypeError('source_snapshot_only must be a bool')
     if source_snapshot_only and source_authentication is None:
@@ -1744,7 +1752,7 @@ def _build_streaming_context(model_path: str, *,
         from .model_profiles import detect_profile
 
         _profile = detect_profile(model_path)
-        if _profile.requires_multimodal_skeleton():
+        if construction_multimodal(_profile, multimodal):
             print(f"{log_prefix} profile {_profile.name} has no text-only "
                   "skeleton route; using the multimodal construction "
                   "(skeleton only: the visual tower stays on meta unless the "
@@ -1813,6 +1821,10 @@ def _build_streaming_context(model_path: str, *,
 
     if not source_snapshot_only:
         head_pfxs = _head_prefixes(model, base_prefix)
+        if sealed_head_tensors is not None:
+            check_sealed_selection(
+                select_source_tensors(weight_shard, weight_ckpt, head_pfxs),
+                sealed_head_tensors, what="resident head")
         loaded_head = _materialize(
             model,
             head_pfxs,
