@@ -21,6 +21,9 @@ from prismaquant.perturbed_x_cache import write_exact_activation_cache_entry
 from test_stage_a_produced_boundary_chain import _isolated_launch_context  # noqa: F401
 import test_stage_a_produced_boundary_chain as chain
 
+# PQ #1008: one pinned prismabuild per process (tests/conftest.py).
+pytestmark = pytest.mark.own_process
+
 
 class CapacityDeferred(RuntimeError):
     pass

@@ -16,6 +16,9 @@ import torch
 import test_stage_a_produced_boundary_chain as chain
 from test_stage_a_produced_boundary_chain import _isolated_launch_context  # noqa: F401
 
+# PQ #1008: one pinned prismabuild per process (tests/conftest.py).
+pytestmark = pytest.mark.own_process
+
 
 def test_actual_export_ack_precedes_pq_publication_progress_and_strict_read(tmp_path, monkeypatch):
     from fleet_sdk import require_prismabuild_sdk

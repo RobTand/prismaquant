@@ -67,6 +67,7 @@ from .stage_a_chain_resume import (
     ChainResumeRefused,
     resume_declarations,
 )
+from .stage_a_chain_seed import seed_marker_path, seed_receipt_path
 
 BAND_TOOL_ENTRY_POINT = "prismaquant.joint_adjoint_band"
 BAND_RESULT_SCHEMA = "prismaquant.joint_adjoint_band.result.v1"
@@ -265,6 +266,20 @@ def capsule_recovery(forward_recovery: dict | None, *, plan_sha256, prepared_sha
 # --------------------------------------------------------------------------
 
 
+def refuse_seed_space(space) -> None:
+    """Refuse a Stage A seed run's space (RobTand/prismaquant#1016).
+
+    A seed is a measurement that borrows another run's checkpoint; its
+    checkpoints never feed Stage B.
+    """
+    held = [path for path in (seed_marker_path(space), seed_receipt_path(space))
+            if path.exists()]
+    if held:
+        raise BandRefused(
+            f"{held[0]} marks a Stage A seed run: a seed is a measurement, not a "
+            "campaign run, and its checkpoints feed no band")
+
+
 def build_band_receipt(*, output_root, boundary: int, plan_sha256: str, prepared_sha256: str,
                        read_manifest_sha256: str | None, stride_value: int,
                        stride_source, unit_roster_sha256: str | None = None,
@@ -292,6 +307,7 @@ def build_band_receipt(*, output_root, boundary: int, plan_sha256: str, prepared
         raise BandRefused(str(exc)) from exc
     output_root = Path(output_root)
     space = adjoint_space(output_root)
+    refuse_seed_space(space)
     checkpoint, checkpoint_binding = read_sealed_checkpoint(space, boundary)
     marker = checkpoint["session"]
     session, policy = read_generation(space, {
@@ -439,6 +455,9 @@ def stage_a_argv(command) -> dict:
     if len(starts) != 1:
         raise BandRefused("the sealed request runs no single Stage A entry point")
     tail = list(command[starts[0] + 2:])
+    if "--chain-seed" in tail:
+        raise BandRefused("the sealed request is a Stage A seed run: a seed is a "
+                          "measurement, not a campaign run, and feeds no band")
     flags = {}
     for name in ("--plan", "--plan-sha256", "--prepared", "--prepared-sha256",
                  "--output-root", "--stride", "--read-manifest-sha256",
