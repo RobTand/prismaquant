@@ -6,7 +6,8 @@ A staged-range reader waits on PrismaBuild's landing record, not a constant
 - **What changed.** PrismaBuild's tier loop now writes
   `<consumer>.landing.json` beside the residency map. For every pending
   in-horizon range it names the mover, the mover's state (`ready`,
-  `claimed`, `unpublished` or `terminal-no-receipt`), the tier's expected
+  `claimed`, `unpublished`, `evicted`, `done-not-resident` or
+  `terminal-no-receipt`), the tier's expected
   landing time and the numbers behind it (queue position, bytes ahead, the
   measured copy rates). `residency_shard_reader.await_staged_spans` reads it
   through the resolver (`ResidencyResolver.landing_record`, identity-cached
@@ -16,7 +17,11 @@ A staged-range reader waits on PrismaBuild's landing record, not a constant
   `staged_lease.load_sealed_read_order`).
 - **The rule** (`residency_shard_reader.landing_verdict`). The reader waits
   while the span's mover is `ready` or `claimed`, or while its range is
-  `unpublished` and the tier loop is alive. It refuses at once when every
+  `unpublished`, `evicted` (the window publishes it again) or
+  `done-not-resident` (the copy finished and waits for adoption) and the
+  tier loop is alive. `residency_map.LANDING_STATES` must list every state
+  PrismaBuild writes: a state it lacks makes the whole record unread, and
+  the reader falls back to the bounded wait. It refuses at once when every
   range covering the span is `terminal-no-receipt`, or when the tier record
   is older than the record's `tier_loop_liveness_s` (PrismaBuild's own offer
   freshness bound, the judgment `PoolQueue._tier_loop_alive` makes). The
