@@ -80,7 +80,11 @@ def test_a_window_that_cannot_hold_one_fused_read_is_refused_at_bind(tmp_path):
 
 
 def test_fused_windows_stage_each_group_once_across_the_pass(tmp_path, monkeypatch):
-    """Two windows of two batches read the same three groups: staged once."""
+    """Two windows of two batches read the same three groups: staged once.
+
+    The groups were published as their last entries landed, so they already
+    sit in the read-ahead share and the exit keeps them there; the mutated
+    driver below shows the same read staging all three again without it."""
     storage, _publication, q, env, pb_repo = _fused_owner(tmp_path)
     batches, incoming = _write_planes(storage)
     with chain._fleet(q, tmp_path):
@@ -92,7 +96,6 @@ def test_fused_windows_stage_each_group_once_across_the_pass(tmp_path, monkeypat
     assert telemetry["produced_groups_materialized"] == 1 + PROBES
     assert telemetry["produced_groups_rematerialized"] == 0, (
         "the second window found every group still staged")
-    assert telemetry["produced_groups_retained"] >= 1 + PROBES
     assert all(record["retired"] for record in storage.produced_group_records())
     assert storage.produced_release_debt() == chain._NO_DEBT
     assert storage._produced_retained_reads == frozenset(), (

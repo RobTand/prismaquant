@@ -3700,12 +3700,14 @@ def _fused_window_references(batches, boundary_index, incoming, indices):
 
 
 def fused_window_size(*, prefetch_batches, max_resident_bytes, per_batch_bytes,
-                      batch_size):
+                      batch_size, write_bytes=0):
     """How many batches one fused window reads (RobTand/prismaquant#997).
 
     The fused roll holds, for every batch of a window, its boundary entry
     and every probe's incoming entry (``per_batch_bytes``) inside the sealed
-    ``max_resident_bytes``. The window is the largest multiple of
+    ``max_resident_bytes``, beside the one rolled entry being written
+    (``write_bytes``; the writer reserves it while the window is open, as
+    the probe-major roll's does). The window is the largest multiple of
     ``batch_size`` that fits and divides ``prefetch_batches``, so a window
     never straddles a produced group. Refuses when no window holds one
     whole batch group: that regime does not fit this run's sealed policy,
@@ -3716,9 +3718,9 @@ def fused_window_size(*, prefetch_batches, max_resident_bytes, per_batch_bytes,
 
     group, batch_size = int(prefetch_batches), int(batch_size)
     per_batch_bytes = int(per_batch_bytes)
-    if per_batch_bytes <= 0:
-        raise ChainRegimeRefused("a fused window needs a positive per-batch size")
-    fits = int(max_resident_bytes) // per_batch_bytes
+    if per_batch_bytes <= 0 or int(write_bytes) < 0:
+        raise ChainRegimeRefused("a fused window needs positive entry sizes")
+    fits = max(0, int(max_resident_bytes) - int(write_bytes)) // per_batch_bytes
     sizes = [size for size in range(batch_size, group + 1, batch_size)
              if group % size == 0 and size <= fits]
     if not sizes:
@@ -3736,15 +3738,17 @@ def fused_window_batches(storage, batches, boundary_index, incoming, *, batch_si
 
     if storage is None:
         return max(len(batches), 1)
-    per_batch = max(batch.activations_cpu[boundary_index].tensor_bytes
-                    for batch in batches)
+    boundary = max(batch.activations_cpu[boundary_index].tensor_bytes
+                   for batch in batches)
+    per_batch = boundary
     if incoming is not None:
         per_batch += sum(max(entry.tensor_bytes for entry in entries)
                          for entries in incoming)
+    # The rolled cotangent has the boundary's shape and dtype.
     return fused_window_size(
         prefetch_batches=storage.config["prefetch_batches"],
         max_resident_bytes=storage.config["max_resident_bytes"],
-        per_batch_bytes=per_batch, batch_size=batch_size)
+        per_batch_bytes=per_batch, batch_size=batch_size, write_bytes=boundary)
 
 
 @contextmanager

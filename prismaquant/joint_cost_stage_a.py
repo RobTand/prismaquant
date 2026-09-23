@@ -523,7 +523,7 @@ def _require_chain_regime_fits(regime, storage_policy, *, n_probes, entry_bytes)
             prefetch_batches=window,
             max_resident_bytes=storage_policy["max_resident_bytes"],
             per_batch_bytes=(1 + int(n_probes)) * int(entry_bytes()),
-            batch_size=regime["batch_size"])
+            batch_size=regime["batch_size"], write_bytes=int(entry_bytes()))
 
 
 def _stage_a_per_tensor_nbytes(runner, *, batch_rows: int, seqlen: int) -> int:

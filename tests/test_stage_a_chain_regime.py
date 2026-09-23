@@ -155,6 +155,12 @@ def _legacy_render_free_probe_passes(
     return backwards
 
 
+def _legacy_roll_in_the_core(runner, *, batch_size, probe_fusion, **kwargs):
+    """The oracle as the current core calls it: the default regime only."""
+    assert (batch_size, probe_fusion) == (1, False)
+    return _legacy_render_free_layer_roll(runner, **kwargs)
+
+
 # -- the fixture Stage A run -------------------------------------------------
 
 def _capture(root, monkeypatch, *, batch_size=1, fusion=False, window=2, cap=None,
@@ -250,7 +256,7 @@ def test_the_default_regime_is_the_pre_997_roll_byte_for_byte(tmp_path, monkeypa
     """
     root = tmp_path / "run"
     legacy, legacy_planes, legacy_forwards = _capture(
-        root, monkeypatch, roll=_legacy_render_free_layer_roll)
+        root, monkeypatch, roll=_legacy_roll_in_the_core)
     aside = tmp_path / "legacy"
     root.rename(aside)
     current, planes, forwards = _capture(root, monkeypatch)
@@ -273,11 +279,12 @@ def test_fusion_is_bitwise_neutral_at_a_fixed_batch_size(
     """Fused and unfused runs write equal planes, entries and checkpoints.
 
     Both runs seal one policy, wide enough for a fused window of two
-    batches: 2 x (1 boundary + 4 probes) x 256 bytes. What may differ is
-    only what the regime is: its stamp, and the resident-byte telemetry of
-    windows that read every probe at once.
+    batches: 2 x (1 boundary + 4 probes) x 256 bytes, plus the one rolled
+    entry being written. What may differ is only what the regime is: its
+    stamp, and the resident-byte telemetry of windows that read every probe
+    at once.
     """
-    cap = 2 * (1 + N_PROBES) * ENTRY_BYTES
+    cap = 2 * (1 + N_PROBES) * ENTRY_BYTES + ENTRY_BYTES
     root = tmp_path / "run"
     unfused, unfused_planes, unfused_forwards = _capture(
         root, monkeypatch, batch_size=batch_size, cap=cap)
@@ -357,6 +364,9 @@ def test_fused_window_size_is_the_largest_fitting_divisor():
     assert size(max_resident_bytes=5 * 20, batch_size=1) == 16
     assert size(max_resident_bytes=5 * 20, batch_size=8) == 16
     assert size(max_resident_bytes=5 * 15, batch_size=8) == 8
+    # The rolled entry being written shares the ceiling.
+    assert size(max_resident_bytes=5 * 16, batch_size=8) == 16
+    assert size(max_resident_bytes=5 * 16, batch_size=8, write_bytes=1) == 8
     with pytest.raises(ChainRegimeRefused):
         size(max_resident_bytes=5 * 7, batch_size=8)
     with pytest.raises(ChainRegimeRefused):
@@ -396,6 +406,7 @@ def test_the_regime_stamp_grammar():
 def test_the_band_tool_reads_the_regime_from_the_sealed_request():
     command = ["python3", "-m", "prismaquant.joint_adjoint_capture",
                "--plan", "/p.json", "--plan-sha256", "b" * 64,
+               "--prepared", "/q.json", "--prepared-sha256", "c" * 64,
                "--output-root", "/o"]
     assert request_chain_regime(stage_a_argv(command)) == {
         "batch_size": 1, "probe_fusion": False}
