@@ -229,3 +229,67 @@ def test_without_a_proof_question_the_wait_is_what_it_was():
     verdict = reader.await_staged_spans(
         _Rows(), [("any", 0, 10, 4096)], deadline=time.monotonic() + 30)
     assert verdict == RANGE_HIT
+
+
+def test_the_wait_asks_one_batched_proof_question_per_poll(monkeypatch):
+    """PQ #997: one cover lookup for every entry a poll still needs. A
+    batched ``None`` (it cannot say which entry is missing) asks each entry
+    alone for that poll, so the verdict is the per-entry wait's verdict."""
+    from prismaquant import residency_shard_reader as reader
+    monkeypatch.setattr(reader, "STAGED_RANGE_POLL_S", 0.001)
+    batches, singles = [], []
+
+    def published(_resolver, declared, entry):
+        singles.append(declared)
+        return declared == "ready" or len(batches) > 2
+
+    def published_batch(_resolver, items):
+        batches.append(sorted(declared for declared, _entry in items))
+        return True if len(batches) > 2 else None
+
+    wanted = [("ready", 0, 10, 4096), ("ready", 10, 20, 4096),
+              ("landing", 0, 10, 4096), ("landing", 10, 20, 4096)]
+    resolver = _Rows()
+    verdict = reader.await_staged_spans(
+        resolver, wanted, deadline=time.monotonic() + 30, published=published,
+        published_batch=published_batch)
+    assert verdict == RANGE_HIT
+    # Poll 1 asks both entries at once, then each alone; "ready" is proven
+    # and never asked again. Poll 2 asks "landing" alone in the batch (a
+    # None again, so once more on its own). Poll 3's batch proves it.
+    assert batches == [["landing", "ready"], ["landing"], ["landing"]]
+    assert singles == ["ready", "landing", "landing"]
+    assert resolver.waited[1] == 2
+
+
+def test_a_batched_yes_proves_the_whole_window_in_one_question():
+    from prismaquant import residency_shard_reader as reader
+    batches = []
+    verdict = reader.await_staged_spans(
+        _Rows(), [(f"entry-{i}", 0, 10, 4096) for i in range(64)],
+        deadline=time.monotonic() + 30,
+        published=lambda *_row: pytest.fail("a batched yes needs no per-entry question"),
+        published_batch=lambda _resolver, items: batches.append(len(items)) or True)
+    assert verdict == RANGE_HIT and batches == [64]
+
+
+def test_the_batched_proof_is_the_real_cover_lookup(tmp_path, monkeypatch):
+    """Real SDK: every entry published proves at once; one entry whose
+    sidecar is not written yet makes the batched answer ``None``, and the
+    per-entry question then names it."""
+    from prismaquant.staged_lease import (
+        stage_cover_is_published, stage_covers_are_published)
+    mover = _Mover(tmp_path, monkeypatch)
+    activate_staged_tier_policy("ssd")
+    mover.write_fragment(["header", "body"])
+    mover.write_material(["header"])
+    resolver = mover.compose_map(["header", "body"])
+    header, body = mover.entry(resolver, "header"), mover.entry(resolver, "body")
+
+    assert stage_covers_are_published(resolver, [header]) is True
+    assert stage_covers_are_published(resolver, [header, body]) is None
+    assert stage_cover_is_published(resolver, *header)
+    assert not stage_cover_is_published(resolver, *body)
+
+    mover.write_material(["header", "body"])
+    assert stage_covers_are_published(resolver, [header, body]) is True

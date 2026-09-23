@@ -42,6 +42,25 @@ packed experts failed after its source install; it now imports it from
 `tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
 changes.
 
+One reader lease per read window (2026-09-23, `ws-sa/window-leases-997`,
+PQ #1000, part of #997). The strict exact-entry reader
+(`perturbed_x_cache.prefetch_exact_activation_cache_entries`) now pins a
+read window's entries together: the entries one material namespace vouches
+share one lease window per tier (`staged_lease.acquire_entries_window`),
+with one PrismaBuild cover lookup, one ownership-lock acquire and one
+release, instead of one of each per entry. Before this change, that
+per-entry path took 36% of Stage A R12's main thread. The RAM-first rule
+holds at window granularity: a RAM lookup refused as availability moves
+those entries to the SSD window, and every other batched refusal re-reads
+the window one entry at a time with the single-entry refusal kinds. The
+forward-input readiness wait asks one batched proof question per poll
+(`staged_lease.stage_covers_are_published`). No proof carries between
+windows: every window's acquire re-verifies each key under the ownership
+lock, so a range evicted between windows (PrismaBuild #904) is re-staged or
+refused, never read stale. Gates: `tests/test_strict_reader_tier_enforcement.py`,
+`tests/test_stage_cover_mid_copy_mover.py`. No format, default or ship gate
+changes.
+
 Stage A's chain regime (2026-09-23, `ws-sa/stagea-throughput-997`, PQ #997):
 the render-free chain (`render_free_layer_roll`) can now carry B samples per
 layer forward and backward (`--chain-batch-size B`), and run one forward per
@@ -406,6 +425,18 @@ from a per-Linear local spill through the lease's one arithmetic, bit-identical
 to the windowed replay; see the entry of that name at the top. The per-sample
 guard check in `replay_backward` runs once per pass. The quantum's packed
 expert import is fixed. No format, default, stage or ship gate changes.
+
+Re-stamped (2026-09-23, `ws-sa/window-leases-997`) for **one reader lease
+per read window** (PQ #1000, part of #997). This supersedes the "one window
+per entry" rule in the PQ #850 lease note below for the strict exact-entry
+reader. Each material namespace in a window gets one lease window per tier,
+opened key by key and released once after every entry is verified. The
+forward-input wait batches its proof question. The process counts how it
+leased (`perturbed_x_cache.exact_lease_counters`: windows and entries
+batched, entries leased singly, batch fallbacks); no receipt or generation
+status file carries them, so a default run's records are byte-identical to
+the per-entry reader's. The single-entry path and its refusals are
+unchanged. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-sa/stagea-throughput-997`) for **the Stage A
 chain regime** (PQ #997): batched and probe-fused render-free chain rolls,

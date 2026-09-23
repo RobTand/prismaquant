@@ -626,16 +626,25 @@ def test_own_boundary_group_publishes_stages_and_reads_back(
     assert storage.telemetry["produced_groups_published"] == 0, (
         "publishing at write time would spend the stage credit the first "
         "read needs")
+    from prismaquant.perturbed_x_cache import exact_lease_counters
     with _fleet(q, tmp_path):
         _strict(monkeypatch, env, pb_repo, q)
+        leases_before = exact_lease_counters()
         with storage.prefetch(references) as window:
             for index, reference in enumerate(references):
                 assert torch.equal(storage.get(window, reference),
                                    torch.arange(8, dtype=torch.float32) + index)
+        leases = {name: count - leases_before[name]
+                  for name, count in exact_lease_counters().items()}
     assert storage.telemetry["produced_groups_published"] == 1
     assert storage.telemetry["produced_groups_materialized"] == 1
     assert storage.telemetry["produced_group_release_failures"] == 0, (
         storage._produced_release_errors)
+    # One material namespace, one tier: the window's entries share ONE
+    # pinned lease, not one each (PQ #997).
+    assert leases == {"windows_batched": 1, "entries_batched": len(references),
+                      "entries_single": 0, "batch_fallbacks": 0}, leases
+    assert len(references) > 1
     report = storage.produced_group_records()
     assert len(report) == 1 and report[0]["retired"] is True, (
         "the window's stage copy is a LOAN: it goes back when the pins do",
