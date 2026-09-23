@@ -1272,7 +1272,9 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
         {"container": {"image": "sha256:" + "0" * 64}, "env": {}})))
     monkeypatch.setattr(dispatch_joint_quanta, "SPEC_PATH", spec)
     plan_path = tmp_path / "plan.json"
-    plan_path.write_text(json.dumps({"output_root": str(tmp_path / "campaign-root")}))
+    from stage_a_spool_spec import stage_a_plan
+    plan_path.write_text(json.dumps(stage_a_plan(
+        tmp_path, output_root=str(tmp_path / "campaign-root"))))
     campaign = {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
                 "manifest_sha256": "c" * 64,
                 "scope": {"campaign": "strict-tier-fixture", "layers": [1]},

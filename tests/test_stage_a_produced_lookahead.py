@@ -258,9 +258,16 @@ def _expected(index):
     return torch.arange(8, dtype=torch.float32) + index
 
 
-def test_a_publication_waiting_on_its_export_gives_the_lane_to_an_urgent_read(
+def test_a_group_held_on_this_box_is_never_published_ahead(
         tmp_path, closing):
-    """Defect 1. Red on the parent: the read waited out the export."""
+    """Defect 1, and what PQ #1110 made of it.
+
+    Before #1110 an optional ``publish-ahead`` waited on the stager for its
+    group's local export, and PQ #989 made it give the lane back while it
+    waited. A group this box still holds is now read from its local copy,
+    so it is never published ahead at all: nothing waits on its export on
+    the stager, and an urgent read runs at once.
+    """
 
     from prismaquant.produced_output_spool import ProducedOutputSpool
     from prismaquant.produced_stager import URGENT
@@ -275,7 +282,7 @@ def test_a_publication_waiting_on_its_export_gives_the_lane_to_an_urgent_read(
     storage._published = True
     backend = spool_tests.ControlledExport(tmp_path / "local")
     storage._local_output_spool = ProducedOutputSpool(
-        backend, capacity_deferred=spool_tests.CapacityDeferred, timeout_s=30)
+        backend, capacity_deferred=spool_tests.CapacityDeferred)
     polled_on_stager = threading.Event()
     real_poll = backend.poll_group
 
@@ -286,34 +293,38 @@ def test_a_publication_waiting_on_its_export_gives_the_lane_to_an_urgent_read(
 
     backend.poll_group = poll_group
     chain._write_group(storage)
-    assert polled_on_stager.wait(10.0), (
-        "the write-time publication looked at its export on the stager")
+    assert storage.drain_produced_stager(30.0)
     (key, group), = storage._produced_groups.items()
     started = threading.Event()
     storage._stager.submit(started.set, kind=URGENT, label="read")
-    assert started.wait(5.0), (
-        "an urgent read waited behind a publication whose local export has "
-        "not landed")
+    assert started.wait(5.0)
+    assert not polled_on_stager.is_set(), (
+        "nothing on the stager waits on the export of a group held here")
     assert group["published"] is None
-    assert key not in storage._produced_held, "a deferral holds no credit"
+    assert key not in storage._produced_held
     assert key not in storage._produced_ahead
 
     backend.acknowledge(group["batch_id"])
     assert storage.drain_produced_stager(30.0)
-    assert group["published"] is not None
-    assert storage._produced_held == {key}
-    assert storage._produced_ahead == {key}
+    assert group["published"] is None, "landing publishes nothing either"
+    assert storage._local_output_spool.holds(group["batch_id"])
     telemetry = storage.telemetry
-    assert telemetry["produced_groups_published_ahead"] == 1
+    assert telemetry["produced_groups_published_ahead"] == 0
+    assert telemetry["produced_group_ahead_local_skips"] == 1
     assert telemetry["produced_group_ahead_refusals"] == 0
-    assert telemetry["produced_group_ahead_export_deferrals"] >= 1
-    assert telemetry["produced_stager_requeues"] >= 1
+    assert telemetry["produced_group_ahead_export_deferrals"] == 0
     assert telemetry["produced_compute_blocked_publish_ahead_s"] == 0.0
 
 
-def test_a_publication_whose_export_never_lands_is_the_same_refusal(
+def test_a_group_whose_export_never_lands_is_not_staged_ahead(
         tmp_path, closing):
-    """A deferral changes where the step waits, not how it ends."""
+    """No staging step waits out an export any more (PQ #1110).
+
+    Before #1110 this ended in a counted ``export has not landed`` refusal
+    once the step's budget ran out. A group held here is skipped instead,
+    so there is no step to refuse; the export's own barrier is what waits
+    for it (``test_stage_a_same_box_readback``).
+    """
 
     from prismaquant.produced_output_spool import ProducedOutputSpool
 
@@ -324,15 +335,15 @@ def test_a_publication_whose_export_never_lands_is_the_same_refusal(
     storage._published = True
     backend = spool_tests.ControlledExport(tmp_path / "local")
     storage._local_output_spool = ProducedOutputSpool(
-        backend, capacity_deferred=spool_tests.CapacityDeferred, timeout_s=30)
+        backend, capacity_deferred=spool_tests.CapacityDeferred)
     chain._write_group(storage)
     assert storage.drain_produced_stager(30.0)
     (key, group), = storage._produced_groups.items()
     assert group["published"] is None
     assert not storage._produced_held and not storage._produced_ahead
-    assert storage.telemetry["produced_group_ahead_refusals"] == 1
-    (refusal,) = storage.produced_ahead_refusals()
-    assert "export has not landed" in refusal["reason"], refusal
+    assert storage.telemetry["produced_group_ahead_refusals"] == 0
+    assert storage.produced_ahead_refusals() == []
+    assert storage.telemetry["produced_group_ahead_local_skips"] == 1
 
 
 def _plane(storage, groups):

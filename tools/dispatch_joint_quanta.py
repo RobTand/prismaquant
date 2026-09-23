@@ -128,6 +128,9 @@ DEFAULT_SPEC_PATH = Path(
 SPEC_PATH = DEFAULT_SPEC_PATH
 #: The produced output spool's root and byte bound (``produced_output_spool``).
 PRODUCED_SPOOL_ROOT_ENV = "PRISMABUILD_PRODUCED_SPOOL_ROOT"
+PRODUCED_SPOOL_MAX_ENV = "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"
+#: Bytes per element of the execution dtypes a model config may name.
+_CONFIG_DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "float32": 4}
 #: Opt-ins PrismaBuild reads from the producer's sealed environment, each "0"
 #: or "1": the paced export (PB #891) and the host spool window (PB #910).
 PRODUCED_SPOOL_OPT_IN_ENV = ("PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT",
@@ -810,6 +813,66 @@ def stage_a_memory_gib(campaign: Mapping) -> int:
     return -(-bound // 1024 ** 3)
 
 
+def stage_a_spool_window_bytes(campaign: Mapping) -> int:
+    """The Stage A row's local output window: two cotangent planes (PQ #1110).
+
+    The reverse chain reads the cotangent plane it wrote one layer earlier
+    from the producing box's own spool, so the spool holds one live plane
+    and one more for the writes and exports turning over
+    (``produced_output_spool.two_plane_window_bytes``). A plane is the
+    plan's ``n_probes`` x ``n_calib_samples`` entries (the count the capture
+    binds), each reserved at the writer's bound: one
+    ``probe_microbatch``-row batch's boundary tensor bytes plus the per-entry
+    file envelope. The
+    tensor is ``rows x calib_seqlen x hidden_size x hc_mult`` elements of the
+    model config's dtype; ``hc_mult`` is the residual-stream count the GLM
+    profile expands to, read off the same config key it reads, and 1 for a
+    config that declares none. At R12's shape (4 probes, 512 one-row
+    batches, 512 tokens, 4096 x 4 bf16) that is 68,987,912,192 B (64.25 GiB).
+
+    This is the planning derivation the row seals. The capture recomputes it
+    from the live model at bind and refuses a sealed window below it
+    (``StreamedBoundaryArtifacts._require_local_window``), so a config this
+    reads differently from the runner fails before any forward work.
+    """
+
+    from prismaquant.produced_output_spool import two_plane_window_bytes
+
+    plan = json.loads(Path(campaign["plan_path"]).read_text())
+    try:
+        execution = plan["execution"]
+        n_probes = int(execution["n_probes"])
+        n_rows = int(execution["n_calib_samples"])
+        seqlen = int(execution["calib_seqlen"])
+        microbatch = int(execution.get("probe_microbatch", 0))
+        group_size = int(execution["boundary_storage"]["prefetch_batches"])
+        model = Path(plan["model"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DispatchRefused(
+            f"plan {campaign['plan_path']} does not state the Stage A plane "
+            f"geometry the spool window is derived from: {exc!r}") from exc
+    config = json.loads((model / "config.json").read_text())
+    text = config.get("text_config") or config
+    dtype = text.get("dtype") or text.get("torch_dtype") or config.get(
+        "dtype") or config.get("torch_dtype")
+    if dtype not in _CONFIG_DTYPE_BYTES or not isinstance(
+            text.get("hidden_size"), int):
+        raise DispatchRefused(
+            f"model config {model / 'config.json'} does not state a hidden "
+            f"size and a known dtype (dtype {dtype!r}); the Stage A spool "
+            "window cannot be derived")
+    rows = min(microbatch or n_rows, n_rows)
+    # The capture binds n_batches=len(calib_ids), the row count
+    # (joint_cost_stage_a.py bind_produced_output), and derives its need from
+    # it; sealing from the same count keeps the seal at or above that need.
+    n_batches = n_rows
+    tensor_bytes = (rows * seqlen * int(text["hidden_size"])
+                    * int(text.get("hc_mult") or 1) * _CONFIG_DTYPE_BYTES[dtype])
+    return two_plane_window_bytes(
+        n_probes=n_probes, n_batches=n_batches, group_size=group_size,
+        max_entry_tensor_bytes=tensor_bytes)
+
+
 def _plan_output_root(campaign: Mapping) -> Path:
     """The plan's sealed output_root: the only root the stage-A capture will
     write into (its identity guard refuses any other --output-root), and the
@@ -947,7 +1010,8 @@ def _warn_overlay_caches(spec: dict, scratch: dict) -> None:
 
 def _container_wrap(spec_path: Path, payload: list[str], *,
                     progress: Sequence[tuple[str, int]],
-                    resource_policy=None) -> tuple[list[str], str | None]:
+                    resource_policy=None,
+                    spool_max_bytes: int | None = None) -> tuple[list[str], str | None]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -965,8 +1029,22 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
 
     ``progress`` is the row's ``--progress-phase`` list; the same parse is
     checked against it (:func:`require_staged_wait_below_grace`).
+
+    ``spool_max_bytes`` replaces the spec's produced-spool byte bound (the
+    Stage A row's two-plane window, :func:`stage_a_spool_window_bytes`), in
+    the one parse that is sealed. It replaces only a well-formed bound: a
+    spec that declares a spool root with no bound, or with one that is not a
+    positive decimal byte count, is left as it is, so the row's spool check
+    (:func:`produced_spool_row_environment`) refuses it as before.
     """
     spec = json.loads(Path(spec_path).read_text())
+    declared = spec.get("env", {}).get(PRODUCED_SPOOL_MAX_ENV)
+    if (spool_max_bytes is not None
+            and PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})
+            and isinstance(declared, str) and declared.isascii()
+            and declared.isdigit() and int(declared) > 0):
+        spec["env"] = {**spec["env"],
+                       PRODUCED_SPOOL_MAX_ENV: str(int(spool_max_bytes))}
     require_staged_wait_below_grace(spec, progress)
     # Validate a declared workspace before publishing the row. These same
     # inlined spec bytes supply its outer PB environment below; no ambient
@@ -1308,8 +1386,11 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         payload += ["--artifact-budget-bytes", str(artifact_budget_bytes)]
     progress = [(phase, HEAD_PROGRESS_GRACE_S if phase == "head"
                  else CHUNK_PROGRESS_GRACE_S) for phase in binding["phases"]]
-    wrapped, container_image = _container_wrap(SPEC_PATH, payload,
-                                               progress=progress)
+    # The spool's window is the plan's two cotangent planes, not the spec's
+    # bound (PQ #1110): the chain reads its own planes back from it.
+    wrapped, container_image = _container_wrap(
+        SPEC_PATH, payload, progress=progress,
+        spool_max_bytes=stage_a_spool_window_bytes(campaign))
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
     spool = produced_spool_row_environment(sealed_spec)
     if not spool:

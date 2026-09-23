@@ -82,7 +82,7 @@ def _owner(tmp_path, monkeypatch, *, n_batches=chain.GROUP_SIZE):
     owner._published = True
     backend = ControlledExport(tmp_path / "local")
     owner._local_output_spool = ProducedOutputSpool(
-        backend, capacity_deferred=CapacityDeferred, timeout_s=2)
+        backend, capacity_deferred=CapacityDeferred)
     return owner, publication, backend
 
 
@@ -127,10 +127,9 @@ def test_local_write_does_not_publish_or_advance_before_durable_ack(tmp_path, mo
     assert all(not Path(ref.path).exists() for ref in refs)
     assert group["published"] is None and progress == []
     assert len(list((tmp_path / "local").rglob("*.pt"))) == chain.GROUP_SIZE
-    with pytest.raises(TimeoutError, match="export has not landed"):
-        with owner._produced_lock.held():
-            owner._produced_publish(next(iter(owner._produced_groups)), group,
-                                    deadline=time.monotonic() + 0.05)
+    # One look, and nothing advances on it: no progress, no publication.
+    assert owner._local_output_spool.landed(batch_id) is False
+    owner._commit_local_output_progress()
     assert group["published"] is None and progress == []
     backend.acknowledge(batch_id)
     owner.settle_local_output()
@@ -179,7 +178,7 @@ def test_incomplete_group_retains_reservation_on_failure(tmp_path, monkeypatch):
 
 def test_full_spool_waits_only_until_prior_export_is_released(tmp_path):
     backend = ControlledExport(tmp_path / "local", capacity=65536)
-    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred, timeout_s=2)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
     adapter.reserve("one", 65536)
     # A real tiny writer reference is enough to exercise reservation ownership.
     ref = write_exact_activation_cache_entry(
@@ -228,7 +227,7 @@ def test_local_atomic_publication_never_overwrites_or_deletes_foreign_file(tmp_p
 
 def test_a_checkpoint_entry_declares_its_class_and_a_payload_entry_stays_unchanged(tmp_path):
     backend = ControlledExport(tmp_path / "local")
-    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred, timeout_s=2)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
     adapter.reserve("g", 1 << 20)
     references = []
     for name in ("payload-entry", "checkpoint-entry"):
@@ -253,3 +252,56 @@ def test_the_former_stage_a_import_names_the_same_client():
     from prismaquant import stage_a_local_spool as former
     assert former.BoundaryOutputSpool is ProducedOutputSpool
     assert former.BoundarySpoolRefused is ProducedOutputSpoolRefused
+
+
+def _landed_read_back_group(adapter, backend, batch_id, tmp_path):
+    """One acknowledged group whose entry a read on this box may follow."""
+    adapter.reserve(batch_id, 65536)
+    ref = write_exact_activation_cache_entry(
+        adapter.directory(batch_id), f"{batch_id}-entry", torch.arange(8),
+        identity={"session": "fixture"}, max_tensor_bytes=64, max_file_bytes=65536)
+    canonical = adapter.record(batch_id, ref, tmp_path / "canonical", read_back=True)
+    adapter.submit(batch_id)
+    backend.acknowledge(batch_id)
+    adapter.await_group(batch_id)
+    return canonical
+
+
+def test_a_full_window_releases_the_oldest_unread_landed_group_with_a_record(tmp_path):
+    """PQ #1110: a landed copy kept for a later read goes when the window
+    needs its room, oldest first, and the release is recorded."""
+    backend = ControlledExport(tmp_path / "local", capacity=2 * 65536)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    first = _landed_read_back_group(adapter, backend, "one", tmp_path)
+    _landed_read_back_group(adapter, backend, "two", tmp_path)
+    assert adapter.holds("one") and adapter.holds("two")
+    adapter.reserve("three", 65536)
+    assert not adapter.holds("one") and adapter.holds("two")
+    assert [(e["batch_id"], e["where"]) for e in adapter.report()["evictions"]] == [
+        ("one", "reserve three")]
+    # Its entry is read through PrismaBuild now: the spool names no copy.
+    with adapter.local_reads([first]) as local:
+        assert local == {}
+
+
+def test_a_window_nothing_can_free_refuses_at_once_with_a_record(tmp_path):
+    """Every held copy is being read and no export is live: nothing will
+    free room, so the writer's reservation refuses at once and says why; a
+    claim ahead of the writer is declined and counted, not refused."""
+    from prismaquant.produced_output_spool import ProducedWindowRefused
+    backend = ControlledExport(tmp_path / "local", capacity=65536)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    held = _landed_read_back_group(adapter, backend, "one", tmp_path)
+    with adapter.local_reads([held]) as local:
+        assert list(local) == [held]
+        with pytest.raises(ProducedWindowRefused, match="the caller does not wait|no export is live"):
+            adapter.reserve("ahead", 65536, wait=False)
+        assert adapter.report()["refusals"] == []
+        assert adapter.report()["window_declines"] == 1
+        started = time.monotonic()
+        with pytest.raises(ProducedWindowRefused, match="no export is live"):
+            adapter.reserve("two", 65536)
+        assert time.monotonic() - started < 1.0
+    (record,) = adapter.report()["refusals"]
+    assert (record["batch_id"], record["state"]) == ("two", "window-full-no-live-export")
+    assert adapter.holds("one")

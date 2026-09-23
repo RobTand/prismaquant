@@ -23,7 +23,7 @@ import sys
 import zipfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as _dataclass_replace
 from pathlib import Path
 from typing import Iterator, Mapping
 
@@ -1584,7 +1584,8 @@ def _read_exact_entry(ref, *, path, signature, source, source_before, lease_fd,
 def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                                             expected_session, residency_check=None,
                                             release_file_pages=True, scratch=None,
-                                            resolver=None, session_for_reference=None):
+                                            resolver=None, session_for_reference=None,
+                                            local_paths=None):
     """Read/verify the entire bounded window before exposing any tensor.
 
     This is the existing activation artifact owner's exact-input read seam.
@@ -1608,6 +1609,16 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     unstaged entry refuses (``staged-not-serving``) before any entry of the
     window is read, where the per-entry reader had already read the ones
     before it. The refusal and its kind are unchanged.
+
+    ``local_paths`` maps a reference the calling owner wrote on THIS box to
+    the local file its produced-output spool still holds (PQ #1110). That
+    entry is read from the local file, never through a staged tier and
+    never from the pool, so the strict policy's pool refusal does not apply
+    to it; every other fence is the same, run on the local file: the
+    session identity, the size, the sha256 of every byte read, and the
+    name, metadata, shape, dtype and storage size of the loaded tensor
+    against the reference the owner recorded. The window keys the tensor
+    by that reference, so the caller cannot tell which copy served it.
     """
     references = tuple(references)
     if any(not isinstance(ref, ExactActivationReference) for ref in references):
@@ -1625,6 +1636,18 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     strict = policy_is_active()
     prechecks = dict(expected_session=expected_session,
                      session_for_reference=session_for_reference)
+    local_paths = dict(local_paths or {})
+    if any(ref not in references for ref in local_paths):
+        raise ValueError("a local exact entry is not in the window it is read for")
+
+    def read_local(ref):
+        """The owner's own copy on this box: the same fences, on that file."""
+        local = _dataclass_replace(ref, path=str(local_paths[ref]))
+        path, prefetched_stat, signature = _exact_entry_prechecks(local, **prechecks)
+        window._tensors[ref] = _read_exact_entry(
+            local, path=path, signature=signature, source=path,
+            source_before=prefetched_stat, lease_fd=None, owned=owned,
+            release_file_pages=release_file_pages)
 
     def read_single(ref, lease_resolver=None):
         """The single-entry read: its own window, released after verifying."""
@@ -1712,11 +1735,15 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         # buffer holds one entry, not the window; a caller that owns an
         # EntryReadScratch keeps it across windows.
         owned = EntryReadScratch() if scratch is None else scratch
+        for ref in references:
+            if ref in local_paths:
+                read_local(ref)
+        staged = tuple(ref for ref in references if ref not in local_paths)
         if strict:
-            for entry_resolver, members in _strict_lease_groups(references, resolver):
+            for entry_resolver, members in _strict_lease_groups(staged, resolver):
                 read_group(entry_resolver, members)
         else:
-            for ref in references:
+            for ref in staged:
                 read_single(ref)
         if scratch is None:
             owned.release()
