@@ -436,8 +436,19 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-sa/chain-resume-997`.
+As of: 2026-09-23 · `ws-br/chain-parity-1008`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-br/chain-parity-1008`) for **the chain-mode
+readset check** (PQ #1008): a chain-mode layer quantum now refuses, with exit
+3 and nothing written, a `--data-manifest-sha256` that is missing or is not
+the manifest its sealed record names (`require_chain_readset`), as the
+band-serial branch already did; see "Band-serial Stage B quanta (#996)". The
+dispatcher always passes that digest, so no dispatched row changes. Test
+infrastructure only: modules marked `own_process` (the Stage A produced-output
+harness and the ten modules that import it) run in a child pytest of their own
+when a session collects other modules too (`tests/conftest.py`), instead of
+skipping. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-sa/chain-resume-997`) for **Stage A chain
 resume** (PQ #1001, part of #997): the sealed chain state a fresh run writes
@@ -20935,7 +20946,11 @@ the checkpoint plane's probes and samples (read from each entry's sealed
 coordinates) with equal shapes and dtypes. The chain then walks no layers.
 The staged manifest must be the band-serial readset
 (`require_band_serial_readset`): `band_serial_manifest` derives it from the
-record's sealed executable readset and the handoff. The `checkpoint-load`
+record's sealed executable readset and the handoff. Chain mode checks the
+same flag against the record itself (`require_chain_readset`, PQ #1008): the
+digest must be `executable_readset.manifest_sha256` on an executable row and
+`read_set.manifest_sha256` on any other, the rule the dispatcher stages by
+(`_row_manifest_sha256`). A missing digest refuses in both modes. The `checkpoint-load`
 phase and every `chain-NNN-source` and `chain-NNN-bound` phase give way to
 one `handoff-load` phase after `head`, which stages exactly what
 `load_handoff_inputs` reads, in order: the plane entries, the owner-state
