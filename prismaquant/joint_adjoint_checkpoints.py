@@ -570,6 +570,12 @@ def write_adjoint_checkpoint(
     commits the receipt's actual bytes/digests, returns unused envelope, and
     retains (never silently releases) on failure. See the owner's
     reserve-before-write contract.
+
+    This writer reads a plane that already exists back through the owner.
+    Stage A does not: it opens its checkpoint before the pass that produces
+    the plane and writes each cotangent as it is rolled
+    (``open_adjoint_checkpoint``, RobTand/prismaquant#1002). Both share
+    ``AdjointCheckpointAttempt``, so they publish the same bytes.
     """
     checkpoint_dir = checkpoint_directory(space, boundary)
     if owner is None:
@@ -606,93 +612,28 @@ def write_adjoint_checkpoint(
             checkpoint_dir / "checkpoint.json", checkpoint_manifest_bytes(record))
         return record
 
-    if type(boundary) is not int or boundary < 0:
-        raise RuntimeError("exact boundary checkpoint boundary must be a nonnegative integer")
+    _checkpoint_boundary(boundary)
     _checkpoint_coordinate_keys(cotangents, arity=2, where="cotangents")
-    _checkpoint_coordinate_keys(shared_adjoint, arity=2, where="shared_adjoint")
-    if not isinstance(shared_pass, dict) or any(
-            type(part) is not int or part < 0 for part in shared_pass):
-        raise RuntimeError(
-            "exact boundary checkpoint shared_pass keys must be nonnegative integers")
+    _checkpoint_shared_keys(shared_adjoint, shared_pass)
     for value in cotangents.values():
         _checkpoint_tensor_spec(value, owner)
     owner.check_transient_buffer("checkpoint shared-state serialization")
-    estimates = {}
-    for name, state in _iter_shared_states(shared_adjoint, shared_pass):
-        try:
-            estimates[name] = _shared_state_envelope_estimate(state)
-        except TypeError as exc:
-            raise RuntimeError(
-                "exact boundary checkpoint refuses unaccountable shared state "
-                f"for {name}: {exc}") from exc
-    from .perturbed_x_cache import activation_cache_filename
-
-    activation_plan = []
-    for (probe_index, batch_index) in sorted(cotangents):
-        value = cotangents[(probe_index, batch_index)]
-        nbytes, shape, dtype = _checkpoint_tensor_spec(value, owner)
-        name = f"cotangent-{probe_index}-{batch_index}"
-        activation_plan.append({
-            "probe_index": probe_index, "batch_index": batch_index,
-            "slot": name,
-            "name": name,
-            "path": str(checkpoint_dir / "entries" / activation_cache_filename(name)),
-            "tensor_bytes": nbytes, "file_envelope": nbytes + 65536,
-            "shape": [int(dim) for dim in shape],
-            "dtype": str(dtype),
-        })
-    shared_plan = [{"name": name,
-                    "path": str(checkpoint_dir / "entries" / f"{name}.pkl"),
-                    "file_envelope": estimates[name]} for name in sorted(estimates)]
-    manifest_envelope = _checkpoint_manifest_envelope_bytes(
-        boundary=boundary, session=session,
-        activation_plan=activation_plan, shared_plan=shared_plan)
-    file_envelopes = ([plan["file_envelope"] for plan in activation_plan]
-                      + [plan["file_envelope"] for plan in shared_plan])
-    temp_overlap = max(file_envelopes + [manifest_envelope])
-    envelope = sum(file_envelopes) + manifest_envelope + temp_overlap
-    file_plan = {
-        "files": [{"name": plan["name"], "path": plan["path"],
-                   "envelope_bytes": plan["file_envelope"]}
-                  for plan in activation_plan]
-        + [{"name": plan["name"], "path": plan["path"],
-            "envelope_bytes": plan["file_envelope"]}
-           for plan in shared_plan],
-        "manifest_bytes": manifest_envelope,
-        "temp_overlap_bytes": temp_overlap,
-        "envelope_bytes": envelope,
-    }
-    reservation = owner.reserve_checkpoint_artifact(
-        label=f"adjoint checkpoint boundary {boundary}",
-        envelope_bytes=envelope, file_plan=file_plan,
-        checkpoint_dir=checkpoint_dir)
-    created = False
-    try:
-        checkpoint_dir.mkdir(parents=True, exist_ok=False)
-        created = True
-    except BaseException:
-        owner.cancel_checkpoint_artifact(reservation)
-        raise
+    estimates = _shared_state_estimates(shared_adjoint, shared_pass)
+    specs = {key: _checkpoint_tensor_spec(value, owner)
+             for key, value in cotangents.items()}
+    shared_plan = _shared_state_plan(checkpoint_dir, estimates)
+    attempt = _reserve_checkpoint_attempt(
+        owner, checkpoint_dir, boundary=boundary, session=session,
+        activation_plan=_checkpoint_activation_plan(checkpoint_dir, specs),
+        shared_plan=shared_plan, manifest_shared_plan=shared_plan)
     try:
         # Shared states stream, write, and release one entry at a time: no
         # aggregate payload object ever exists, so the transient peak is the
         # largest single entry's serialization, never the whole checkpoint.
-        # An empty shared set simply skips the loop. Holds count live
-        # auxiliary usage plus transient bytes against the one auxiliary
-        # ceiling.
-        shared_state_entries = []
-        for plan in shared_plan:
-            state = _shared_state_by_name(
-                shared_adjoint, shared_pass, plan["name"])
-            with owner.hold_transient_metadata(
-                    estimates[plan["name"]],
-                    f"checkpoint shared state {plan['name']}"):
-                shared_state_entries.append(_write_shared_state_streaming(
-                    checkpoint_dir, plan["name"], state,
-                    max_file_bytes=plan["file_envelope"]))
+        attempt.write_shared_states(shared_adjoint, shared_pass)
         from .perturbed_x_cache import ExactActivationReference
 
-        activation_entries = []
+        activation_plan = attempt.activation_plan
         windows = list(_checkpoint_plan_windows(
             activation_plan, int(owner.config["prefetch_batches"])))
         # Staging only: each open window asks for the next one's groups, so
@@ -710,51 +651,341 @@ def write_adjoint_checkpoint(
                     tensor = (owner.get(window, value)
                               if isinstance(value, ExactActivationReference) else value)
                     try:
-                        with owner.hold_transient_serialization(
-                                plan["tensor_bytes"],
-                                f"checkpoint tensor {plan['name']}"):
-                            entry = write_checkpoint_cotangent_entry(
-                                checkpoint_dir, probe_index=plan["probe_index"],
-                                batch_index=plan["batch_index"], tensor=tensor,
-                                session=session, max_file_bytes=plan["file_envelope"])
+                        attempt.write_activation(
+                            plan["probe_index"], plan["batch_index"], tensor)
                     finally:
                         # Release before the window closes/reuses its scratch.
                         tensor = None
-                    if entry["file_bytes"] > plan["file_envelope"]:
-                        raise RuntimeError(
-                            "exact boundary checkpoint tensor file exceeds its "
-                            f"admitted envelope for {plan['name']}")
-                    activation_entries.append(entry)
+        return attempt.seal()
+    except BaseException:
+        attempt.abandon()
+        raise
+
+
+class AdjointCheckpointAttempt:
+    """One reserved checkpoint attempt, written in parts and sealed once.
+
+    Two writers share it (RobTand/prismaquant#1002):
+
+    - ``write_adjoint_checkpoint`` plans from a finished plane, writes the
+      shared states, reads each cotangent back through the owner, and seals.
+    - Stage A opens the attempt (``open_adjoint_checkpoint``) before the pass
+      that produces the plane, writes each cotangent as the roll hands it
+      over (``write_activation``), then writes the shared states and seals
+      after the roll. The checkpoint never reads its plane back, so it asks
+      the owner to stage nothing, and the read-ahead the roll asked for its
+      next pass survives the checkpoint.
+
+    Each tensor file is ``write_checkpoint_cotangent_entry`` of the same
+    tensor, session and slot either way, and the manifest is built from the
+    same sorted rows, so both writers publish the same bytes.
+
+    Every write happens inside the one active reservation. A failure leaves
+    the reservation for the caller to ``abandon`` (retain): files may exist.
+    """
+
+    def __init__(self, *, owner, checkpoint_dir, boundary, session,
+                 activation_plan, shared_plan, shared_names,
+                 manifest_envelope, temp_overlap, reservation):
+        self.owner = owner
+        self.checkpoint_dir = checkpoint_dir
+        self.boundary = int(boundary)
+        self.session = session
+        self.activation_plan = activation_plan
+        self._plans = {(plan["probe_index"], plan["batch_index"]): plan
+                       for plan in activation_plan}
+        self._shared_plan = shared_plan
+        self._shared_names = shared_names
+        self.manifest_envelope = manifest_envelope
+        self._temp_overlap = temp_overlap
+        self.reservation = reservation
+        self._activation_entries = {}
+        self._shared_state_entries = None
+        self._record = None
+        #: Seconds spent in ``write_activation``: the checkpoint's share of
+        #: the pass that feeds it.
+        self.write_seconds = 0.0
+
+    @property
+    def written_activations(self) -> int:
+        return len(self._activation_entries)
+
+    def _require_open(self):
+        if self._record is not None:
+            raise RuntimeError(
+                f"exact boundary checkpoint {self.boundary} is already sealed")
+
+    def write_activation(self, probe_index, batch_index, tensor) -> dict:
+        """Publish one planned cotangent from the tensor in hand."""
+        self._require_open()
+        key = (probe_index, batch_index)
+        plan = self._plans.get(key)
+        if plan is None:
+            raise RuntimeError(
+                f"exact boundary checkpoint {self.boundary} planned no "
+                f"cotangent at probe {probe_index}, batch {batch_index}")
+        if key in self._activation_entries:
+            raise RuntimeError(
+                f"exact boundary checkpoint {self.boundary} already wrote "
+                f"{plan['name']}")
+        spec = _checkpoint_tensor_spec(tensor, None)
+        if spec != (plan["tensor_bytes"], plan["shape"], plan["dtype"]):
+            raise RuntimeError(
+                f"exact boundary checkpoint {self.boundary} cotangent "
+                f"{plan['name']} is {spec[1]} {spec[2]}, planned "
+                f"{plan['shape']} {plan['dtype']}")
+        started = time.monotonic()
+        try:
+            with self.owner.hold_transient_serialization(
+                    plan["tensor_bytes"], f"checkpoint tensor {plan['name']}"):
+                entry = write_checkpoint_cotangent_entry(
+                    self.checkpoint_dir, probe_index=probe_index,
+                    batch_index=batch_index, tensor=tensor, session=self.session,
+                    max_file_bytes=plan["file_envelope"])
+        finally:
+            self.write_seconds += time.monotonic() - started
+        if entry["file_bytes"] > plan["file_envelope"]:
+            raise RuntimeError(
+                "exact boundary checkpoint tensor file exceeds its "
+                f"admitted envelope for {plan['name']}")
+        self._activation_entries[key] = entry
+        return entry
+
+    def write_shared_states(self, shared_adjoint, shared_pass) -> None:
+        """Write every shared state, admitting a deferred plan first."""
+        self._require_open()
+        if self._shared_state_entries is not None:
+            raise RuntimeError(
+                f"exact boundary checkpoint {self.boundary} already wrote its "
+                "shared states")
+        if self._shared_plan is None:
+            _checkpoint_shared_keys(shared_adjoint, shared_pass)
+            names = sorted(name for name, _ in
+                           _iter_shared_states(shared_adjoint, shared_pass))
+            if names != self._shared_names:
+                raise RuntimeError(
+                    f"exact boundary checkpoint {self.boundary} shared states "
+                    "differ from the set it planned")
+            self.owner.check_transient_buffer("checkpoint shared-state serialization")
+            estimates = _shared_state_estimates(shared_adjoint, shared_pass)
+            ceiling = int(self.owner.config["max_artifact_bytes"])
+            for name, estimate in estimates.items():
+                if estimate > ceiling:
+                    raise RuntimeError(
+                        "exact boundary checkpoint artifact budget exceeded: "
+                        f"shared state {name} needs {estimate} bytes, the "
+                        f"ceiling is {ceiling}")
+            shared_plan = _shared_state_plan(self.checkpoint_dir, estimates)
+            if shared_plan:
+                temp_overlap = max([self._temp_overlap]
+                                   + [plan["file_envelope"] for plan in shared_plan])
+                self.owner.extend_checkpoint_artifact(
+                    self.reservation,
+                    files=[{"name": plan["name"], "path": plan["path"],
+                            "envelope_bytes": plan["file_envelope"]}
+                           for plan in shared_plan],
+                    temp_overlap_bytes=temp_overlap)
+                self._temp_overlap = temp_overlap
+            self._shared_plan = shared_plan
+        # Holds count live auxiliary usage plus transient bytes against the
+        # one auxiliary ceiling. An empty shared set skips the loop.
+        entries = []
+        for plan in self._shared_plan:
+            state = _shared_state_by_name(shared_adjoint, shared_pass, plan["name"])
+            with self.owner.hold_transient_metadata(
+                    plan["file_envelope"], f"checkpoint shared state {plan['name']}"):
+                entries.append(_write_shared_state_streaming(
+                    self.checkpoint_dir, plan["name"], state,
+                    max_file_bytes=plan["file_envelope"]))
+        self._shared_state_entries = entries
+
+    def seal(self) -> dict:
+        """Write the manifest and commit the receipt; returns the record."""
+        self._require_open()
+        missing = sorted(set(self._plans) - set(self._activation_entries))
+        if missing:
+            raise RuntimeError(
+                f"exact boundary checkpoint {self.boundary} is missing "
+                f"{len(missing)} planned cotangents, first {missing[:4]}")
+        if self._shared_state_entries is None:
+            raise RuntimeError(
+                f"exact boundary checkpoint {self.boundary} has not written "
+                "its shared states")
         record = {
             "schema": ADJOINT_CHECKPOINT_SCHEMA,
-            "boundary": int(boundary),
-            "session": canonical_json(dict(session), where="adjoint checkpoint session"),
-            "activation_entries": sorted(activation_entries, key=lambda e: e["name"]),
-            "shared_state_entries": sorted(shared_state_entries, key=lambda e: e["name"]),
+            "boundary": self.boundary,
+            "session": canonical_json(dict(self.session),
+                                      where="adjoint checkpoint session"),
+            "activation_entries": sorted(self._activation_entries.values(),
+                                         key=lambda e: e["name"]),
+            "shared_state_entries": sorted(self._shared_state_entries,
+                                           key=lambda e: e["name"]),
         }
         record["cotangent_sha256"] = canonical_json_sha256(
             {key: record[key] for key in
-             ("schema", "boundary", "session", "activation_entries", "shared_state_entries")},
+             ("schema", "boundary", "session", "activation_entries",
+              "shared_state_entries")},
             where="adjoint checkpoint",
         )
-        with owner.hold_transient_metadata(
-                manifest_envelope, "checkpoint manifest"):
+        with self.owner.hold_transient_metadata(
+                self.manifest_envelope, "checkpoint manifest"):
             manifest_payload = checkpoint_manifest_bytes(record)
-            if len(manifest_payload) > manifest_envelope:
+            if len(manifest_payload) > self.manifest_envelope:
                 raise RuntimeError(
                     "exact boundary checkpoint manifest exceeds its admitted envelope")
-            atomic_write_bytes(checkpoint_dir / "checkpoint.json", manifest_payload)
-        owner.commit_checkpoint_artifact(reservation, record)
+            atomic_write_bytes(self.checkpoint_dir / "checkpoint.json",
+                               manifest_payload)
+        self.owner.commit_checkpoint_artifact(self.reservation, record)
+        self._record = record
+        return record
+
+    def abandon(self) -> None:
+        """Retain a failed attempt; a committed or retained one is left as is.
+
+        Abandon only what is still active. A commit that already recorded
+        the receipt (even one whose trailing memory hook then failed) is
+        truthful committed state, and abandoning it would mask the original
+        error; a retained attempt is already retained.
+        """
+        if self.owner.checkpoint_reservation_state(self.reservation) == "active":
+            self.owner.abandon_checkpoint_artifact(self.reservation)
+
+
+def open_adjoint_checkpoint(
+    space: str | os.PathLike, *, boundary: int, session: dict, specs: dict,
+    shared_adjoint_keys, shared_pass_keys, owner,
+) -> AdjointCheckpointAttempt:
+    """Reserve checkpoint ``boundary`` before the pass that produces its plane.
+
+    ``specs`` maps ``(probe, batch)`` to the ``(tensor_bytes, shape, dtype)``
+    each cotangent will have; ``write_activation`` refuses a tensor that
+    differs. The shared states exist only after the pass, so their names
+    are planned now and their sizes later: the manifest envelope is sized
+    with each shared file at ``max_artifact_bytes``, the widest envelope
+    the owner could ever admit, and ``write_shared_states`` adds the files
+    to the reservation (``extend_checkpoint_artifact``) before writing them.
+    Returns the open attempt; the directory exists from here on.
+    """
+    _checkpoint_boundary(boundary)
+    _checkpoint_coordinate_keys(specs, arity=2, where="cotangents")
+    if not specs:
+        raise RuntimeError("exact boundary checkpoint plans no cotangent")
+    for spec in specs.values():
+        if (not isinstance(spec, tuple) or len(spec) != 3
+                or type(spec[0]) is not int or spec[0] <= 0
+                or not isinstance(spec[1], list)
+                or any(type(dim) is not int or dim < 0 for dim in spec[1])
+                or type(spec[2]) is not str):
+            raise RuntimeError(
+                "exact boundary checkpoint cotangent spec must be "
+                "(tensor bytes, shape list, dtype string)")
+    shared_adjoint = dict.fromkeys(shared_adjoint_keys)
+    shared_pass = dict.fromkeys(shared_pass_keys)
+    _checkpoint_shared_keys(shared_adjoint, shared_pass)
+    checkpoint_dir = checkpoint_directory(space, boundary)
+    names = sorted(name for name, _ in _iter_shared_states(shared_adjoint, shared_pass))
+    widest = int(owner.config["max_artifact_bytes"])
+    return _reserve_checkpoint_attempt(
+        owner, checkpoint_dir, boundary=boundary, session=session,
+        activation_plan=_checkpoint_activation_plan(checkpoint_dir, specs),
+        shared_plan=None, shared_names=names,
+        manifest_shared_plan=_shared_state_plan(
+            checkpoint_dir, dict.fromkeys(names, widest)))
+
+
+def _checkpoint_boundary(boundary) -> None:
+    if type(boundary) is not int or boundary < 0:
+        raise RuntimeError("exact boundary checkpoint boundary must be a nonnegative integer")
+
+
+def _checkpoint_shared_keys(shared_adjoint, shared_pass) -> None:
+    _checkpoint_coordinate_keys(shared_adjoint, arity=2, where="shared_adjoint")
+    if not isinstance(shared_pass, dict) or any(
+            type(part) is not int or part < 0 for part in shared_pass):
+        raise RuntimeError(
+            "exact boundary checkpoint shared_pass keys must be nonnegative integers")
+
+
+def _shared_state_estimates(shared_adjoint, shared_pass) -> dict:
+    estimates = {}
+    for name, state in _iter_shared_states(shared_adjoint, shared_pass):
+        try:
+            estimates[name] = _shared_state_envelope_estimate(state)
+        except TypeError as exc:
+            raise RuntimeError(
+                "exact boundary checkpoint refuses unaccountable shared state "
+                f"for {name}: {exc}") from exc
+    return estimates
+
+
+def _checkpoint_activation_plan(checkpoint_dir: Path, specs) -> list:
+    from .perturbed_x_cache import activation_cache_filename
+
+    activation_plan = []
+    for (probe_index, batch_index) in sorted(specs):
+        nbytes, shape, dtype = specs[(probe_index, batch_index)]
+        name = f"cotangent-{probe_index}-{batch_index}"
+        activation_plan.append({
+            "probe_index": probe_index, "batch_index": batch_index,
+            "slot": name,
+            "name": name,
+            "path": str(checkpoint_dir / "entries" / activation_cache_filename(name)),
+            "tensor_bytes": nbytes, "file_envelope": nbytes + 65536,
+            "shape": [int(dim) for dim in shape],
+            "dtype": str(dtype),
+        })
+    return activation_plan
+
+
+def _shared_state_plan(checkpoint_dir: Path, estimates) -> list:
+    return [{"name": name,
+             "path": str(checkpoint_dir / "entries" / f"{name}.pkl"),
+             "file_envelope": estimates[name]} for name in sorted(estimates)]
+
+
+def _reserve_checkpoint_attempt(owner, checkpoint_dir: Path, *, boundary, session,
+                                activation_plan, shared_plan,
+                                manifest_shared_plan, shared_names=None):
+    """Admit the whole planned envelope, then create the attempt directory.
+
+    ``shared_plan`` is ``None`` when the shared states are admitted later
+    (``manifest_shared_plan`` still sizes their manifest rows).
+    """
+    manifest_envelope = _checkpoint_manifest_envelope_bytes(
+        boundary=boundary, session=session,
+        activation_plan=activation_plan, shared_plan=manifest_shared_plan)
+    planned_shared = shared_plan or []
+    file_envelopes = ([plan["file_envelope"] for plan in activation_plan]
+                      + [plan["file_envelope"] for plan in planned_shared])
+    temp_overlap = max(file_envelopes + [manifest_envelope])
+    envelope = sum(file_envelopes) + manifest_envelope + temp_overlap
+    file_plan = {
+        "files": [{"name": plan["name"], "path": plan["path"],
+                   "envelope_bytes": plan["file_envelope"]}
+                  for plan in activation_plan]
+        + [{"name": plan["name"], "path": plan["path"],
+            "envelope_bytes": plan["file_envelope"]}
+           for plan in planned_shared],
+        "manifest_bytes": manifest_envelope,
+        "temp_overlap_bytes": temp_overlap,
+        "envelope_bytes": envelope,
+    }
+    reservation = owner.reserve_checkpoint_artifact(
+        label=f"adjoint checkpoint boundary {boundary}",
+        envelope_bytes=envelope, file_plan=file_plan,
+        checkpoint_dir=checkpoint_dir)
+    try:
+        checkpoint_dir.mkdir(parents=True, exist_ok=False)
     except BaseException:
-        # Abandon only what is still active. A commit that already recorded
-        # the receipt (even one whose trailing memory hook then failed) is
-        # truthful committed state, and abandoning it would mask the
-        # original error; a retained attempt is already retained
-        # (abandon is idempotent there, so this simply skips it).
-        if owner.checkpoint_reservation_state(reservation) == "active":
-            owner.abandon_checkpoint_artifact(reservation)
+        owner.cancel_checkpoint_artifact(reservation)
         raise
-    return record
+    return AdjointCheckpointAttempt(
+        owner=owner, checkpoint_dir=checkpoint_dir, boundary=boundary,
+        session=session, activation_plan=activation_plan,
+        shared_plan=shared_plan,
+        shared_names=(None if shared_plan is not None else list(shared_names)),
+        manifest_envelope=manifest_envelope, temp_overlap=temp_overlap,
+        reservation=reservation)
 
 
 def _iter_shared_states(shared_adjoint, shared_pass):
