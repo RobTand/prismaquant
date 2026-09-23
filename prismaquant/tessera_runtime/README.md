@@ -77,6 +77,65 @@ cp -a /home/rob/venvs/pq881-pb461728e4 "$V"
   'git+https://github.com/RobTand/tessera.git@07bfcc0e9b7da13276938cb722bc7dcd893e6c63'
 ```
 
+**The GLM test modules need transformers 5.16 (PQ #1090).** The interpreter
+above takes transformers 5.6.0 from `pq-cu130`, and
+`tests/test_glm5_next_streamed_forward_parity.py` skips at collection below
+5.16 (`importorskip("transformers.models.glm5_next")`). Five modules import
+from it and skip with it: `test_glm_campaign_streaming`,
+`test_tessera_stack_group_cli`, `test_selected_snapshot_scope`,
+`test_collector_source_release` and `test_streamed_capture_admission`. Until
+2026-09-23 none of the six had run in a PrismaBuild test run.
+
+The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e-tf516`
+is the interpreter above with transformers 5.16.1, tokenizers 0.23.1 and
+safetensors 0.8.0, the versions in the campaign's `prismaquant-tf516` venv.
+Tessera, PrismaBuild, torch and every other package are the same, so
+`pbtest`'s pin check passes unchanged. It exists on **sparky only**, from
+PrismaBuild action `fa510fbf5a02`. sparklina has none yet, and dl380g10's
+interpreter of the base name is a different base (`pq881`, Python 3.14, CPU
+torch). Pin a run that uses it with `--tag sparky`. It is built the same way
+as its base, so a Tessera pin move re-provisions it too:
+
+```bash
+SRC=/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e
+V=/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e-tf516
+cp -a "$SRC" "$V"
+echo "$V/base-shadow" > "$V/lib/python3.12/site-packages/pq846-base-shadow.pth"
+# Unlink the base's copies from the new base-shadow first, so pip never
+# uninstalls through a link into pq-cu130.
+for n in transformers transformers-5.6.0.dist-info tokenizers \
+         tokenizers-0.22.2.dist-info safetensors safetensors-0.7.0.dist-info; do
+  test -L "$V/base-shadow/$n" && rm "$V/base-shadow/$n"
+done
+"$V/bin/python" -m pip install --no-deps --no-cache-dir \
+  'transformers==5.16.1' 'tokenizers==0.23.1' 'safetensors==0.8.0'
+```
+
+A PR that touches those six modules, or what they test, runs them there:
+
+```bash
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
+  --checkout <this worktree> --tag sparky --priority -10 \
+  --python /home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e-tf516/bin/python \
+  --threads-per-shard 2 --mem-gb 8 --shards 6 \
+  tests/test_glm5_next_streamed_forward_parity.py \
+  tests/test_glm_campaign_streaming.py tests/test_tessera_stack_group_cli.py \
+  tests/test_selected_snapshot_scope.py tests/test_collector_source_release.py \
+  tests/test_streamed_capture_admission.py
+```
+
+Every session prints a `pq-test-environment:` line with the interpreter and
+its torch, transformers, tessera-quant and prismabuild versions
+(`tests/conftest.py`), so each shard's receipt names the transformers it ran
+under.
+
+The whole suite passes on this interpreter too. At `26683550bdbf`, 40 shards
+on sparky collected and ran 12,040 tests: 11,821 passed, 216 skipped and 3
+xfailed, and no skip names transformers (PrismaBuild keys in PQ #1090's pull
+request). So no test needs transformers 5.6.0. Whether this interpreter
+replaces its base as the PrismaQuant test interpreter is a separate decision;
+until then the base keeps running everything else.
+
 The previous interpreter, `pq-pb461728e4-tessera-acf9eafa`, stays on sparky
 and sparklina for work sealed against that pin.
 

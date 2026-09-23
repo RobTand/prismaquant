@@ -27,7 +27,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 
 from test_glm_campaign_streaming import (  # noqa: E402,F401
-    glm_checkpoint, write_original_layout_checkpoint,
+    _torch_only_causal_conv1d, glm_checkpoint, write_original_layout_checkpoint,
 )
 from test_tessera_stack_sample_cost import _packed_probe_row  # noqa: E402
 

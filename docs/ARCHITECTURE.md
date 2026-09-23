@@ -1,5 +1,39 @@
 # PrismaQuant Architecture
 
+The GLM test modules run on a transformers 5.16 interpreter (2026-09-23,
+`ws-rm/1090-glm-tf516-lane`, PQ #1090). The PrismaBuild test interpreter
+takes transformers 5.6.0 from `pq-cu130`, and
+`tests/test_glm5_next_streamed_forward_parity.py` skips at collection below
+5.16. Five modules import from it and skip with it, so none of the six had
+run in a PrismaBuild test run. PrismaBuild #941's reconciliation named them:
+they were the six outcomes by which a full-suite summary exceeded its
+collection.
+
+The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e-tf516`
+carries transformers 5.16.1 and is otherwise the same interpreter. It exists
+on sparky only. `prismaquant/tessera_runtime/README.md` has the recipe and the
+`pbtest` command for a PR that touches these modules. The full suite also
+passes on it (12,040 tests), and no skip names transformers.
+
+Running the six exposed two failing tests. Under transformers 5.16,
+`glm5_next` binds `causal_conv1d`'s CUDA entry points whenever that package
+imports, and they raise on CPU tensors. The parity
+module's autouse fixture `_torch_only_causal_conv1d` swaps in the torch
+functions, and `test_glm_campaign_streaming` imports it.
+`test_tessera_stack_group_cli` and `test_collector_source_release` forward
+the same tiny GLM on CPU without it; both now import it.
+
+`tests/conftest.py` prints one `pq-test-environment:` line in every session's
+terminal summary: the interpreter and its torch, transformers, tessera-quant
+and prismabuild versions. `pbtest` runs with `--no-header`, so a receipt now
+names the transformers it ran under.
+
+Gates:
+- `tests/test_conftest_names_the_test_environment.py`;
+- the six modules on the new interpreter.
+
+No format, pipeline default, stage or ship gate changes.
+
 The Stage B preparation reads its declared inputs off the stage (2026-09-23,
 `ws-tq/1082-prep-reads-staged`, PQ #1092, part of #1082). Since #1070 the
 preparation submits with `--residency stage`, so PrismaBuild stages its
@@ -790,7 +824,8 @@ contract is byte-identical (v34, digest `d37c9448…03472`, lane schema v10), so
 no admission answer moves; `export.py` and `grammar.py` did not move either, so
 the legal domain is a re-transcription. The PrismaBuild test interpreter is
 `/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e` on sparky, sparklina and
-dl380g10. No format, default, stage or ship gate changes.
+dl380g10. (PQ #1090 adds a sparky sibling with transformers
+5.16.1 for the GLM modules; see the 2026-09-23 entry.) No format, default, stage or ship gate changes.
 
 Stage A startup and timeout hygiene (2026-09-22, PQ #978): Stage A now
 refuses at startup, before any GPU work, when a checkpoint path it would write
@@ -1045,8 +1080,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-tq/1082-prep-reads-staged`.
+As of: 2026-09-23 · `ws-rm/1090-glm-tf516-lane`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-rm/1090-glm-tf516-lane`) for **the GLM test
+modules' transformers 5.16 interpreter** (PQ #1090): six GLM modules that
+skip below transformers 5.16 now run on a sparky sibling interpreter, two of
+them take the torch-only convolution fixture, and every test session names
+its environment. See the entry at the top. No format, pipeline default,
+stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-tq/1082-prep-reads-staged`) for **the Stage B
 preparation's staged reads** (PQ #1092): with `--data-manifest-sha256` every
