@@ -653,8 +653,9 @@ def test_batch_eight_is_as_close_to_float64_as_batch_one():
 
     Per-sample relative L2 of every rolled cotangent, over the tokens whose
     route all three runs agree on (a flipped route is a different function,
-    counted separately). B = 8's mean may exceed B = 1's by at most one
-    bfloat16 unit roundoff, 2**-8. A rerun at each batch size is bitwise
+    counted separately). B = 8's mean and max may exceed B = 1's by at most
+    one bfloat16 unit roundoff, relative: e8 <= e1 * (1 + 2**-8). A rerun at
+    each batch size is bitwise
     equal, and so is the fused roll at B = 8. Runs on the GPU when there is
     one, where batching changes the GEMM shapes the kernels see.
     """
@@ -715,4 +716,6 @@ def test_batch_eight_is_as_close_to_float64_as_batch_one():
     warnings.warn("chain-regime precision: " + json.dumps(report, sort_keys=True),
                   UserWarning)
     assert int(agree.sum()) > samples * tokens // 2, report
-    assert float(e8.mean()) <= float(e1.mean()) + 2.0 ** -8, report
+    slack = 1.0 + 2.0 ** -8
+    assert float(e8.mean()) <= float(e1.mean()) * slack, report
+    assert float(e8.max()) <= float(e1.max()) * slack, report
