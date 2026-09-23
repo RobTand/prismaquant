@@ -96,6 +96,8 @@ def chain_arithmetic_stamp(runner, extra=None) -> dict:
     """
     import torch
 
+    from .matmul_arithmetic import bf16_reduction_stamp
+
     device = torch.device(runner.device)
     stamp = {
         "schema": CHAIN_ARITHMETIC_SCHEMA,
@@ -104,6 +106,9 @@ def chain_arithmetic_stamp(runner, extra=None) -> dict:
         "matmul_precision": torch.get_float32_matmul_precision(),
         "allow_tf32": bool(torch.backends.cuda.matmul.allow_tf32),
         "cudnn_allow_tf32": bool(torch.backends.cudnn.allow_tf32),
+        # Absent unless the bf16 reduced-precision reduction flag is off
+        # (PQ #1028), so a chain state written before it still compares equal.
+        **bf16_reduction_stamp(),
         "torch": str(torch.__version__),
         "cuda": torch.version.cuda,
     }

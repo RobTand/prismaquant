@@ -168,6 +168,7 @@ def source_execution_identity(model) -> dict:
 
 def arithmetic_identity(measurement_dtype, projection_backend=None) -> dict:
     from .joint_projection_backend import REFERENCE_IDENTITY, validate_projection_backend_identity
+    from .matmul_arithmetic import bf16_reduction_stamp
 
     backend_identity = (dict(REFERENCE_IDENTITY) if projection_backend is None
                         else projection_backend.identity)
@@ -178,6 +179,9 @@ def arithmetic_identity(measurement_dtype, projection_backend=None) -> dict:
         "measurement_dtype": str(measurement_dtype),
         "matmul_precision": torch.get_float32_matmul_precision(),
         "allow_tf32": bool(torch.backends.cuda.matmul.allow_tf32),
+        # Absent unless the bf16 reduced-precision reduction flag is off
+        # (PQ #1028), so the default identity keeps its bytes.
+        **bf16_reduction_stamp(),
         "weight_projection": "output_cotangent_fp32_gemm",
         "residual": "X_dW_T+dX_W_T+dX_dW_T",
         "aggregation": "sum_signed_invocations_then_square",
@@ -933,6 +937,8 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
             raise ValueError("invalid projection arithmetic")
         from .joint_replay_regime import replay_regime_of
         replay_regime_of(arithmetic)
+        from .matmul_arithmetic import bf16_reduction_of
+        bf16_reduction_of(arithmetic)
     except (KeyError, TypeError, RuntimeError) as exc:
         raise ValueError(f"joint AURA incomplete identity: {exc}") from exc
     ids = entry.get("probe_ids")
