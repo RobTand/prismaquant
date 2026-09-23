@@ -7,11 +7,13 @@ multi-file session they used to skip silently: 25 tests in one #996 shard.
 same node id; one child pytest per module runs exactly the chosen node ids,
 and each proxy reports its own test's outcome.
 
-These tests drive real pytest sessions over two samples in
-``tests/own_process_samples``: ``sample_isolated`` (marked) and
+These tests drive real pytest sessions over the samples in
+``tests/own_process_samples``: ``sample_isolated`` (marked),
 ``sample_shared``, whose import plants a module that stands in for a second
-``prismabuild``. The samples write their process ids, so the tests check
-where each test ran, not only what it reported.
+``prismabuild``, and ``sample_hangs`` (marked), whose one hanging test must
+fail alone under the per-test bound (PQ #1027). The samples write their
+process ids, so the tests check where each test ran, not only what it
+reported.
 """
 from __future__ import annotations
 
@@ -29,7 +31,7 @@ SAMPLES = Path(__file__).resolve().parent / "own_process_samples"
 ISOLATED = "tests/own_process_samples/sample_isolated.py"
 
 
-def _session(tmp_path, *files, extra=()):
+def _session(tmp_path, *files, extra=(), environ=None):
     """Run one pytest session over ``files``; return what it reported."""
     out = tmp_path / "out"
     out.mkdir()
@@ -37,6 +39,7 @@ def _session(tmp_path, *files, extra=()):
     env = {name: value for name, value in os.environ.items()
            if not name.startswith("PYTEST_") and name != "PQ_OWN_PROCESS_REPORT"}
     env["OWN_PROCESS_SAMPLE_OUT"] = str(out)
+    env.update(environ or {})
     argv = [sys.executable, "-m", "pytest", "-q", "--no-header",
             "-p", "no:cacheprovider", "-c", str(ROOT / "pytest.ini"),
             "--rootdir", str(ROOT), "--basetemp", str(tmp_path / "base"),
@@ -143,3 +146,55 @@ def test_a_test_that_never_reached_its_call_phase_is_not_a_pass(tmp_path):
         log=tmp_path / "child.log")
     assert outcomes[nodeid]["outcome"] == "failed"
     assert "never reported its call phase" in outcomes[nodeid]["message"]
+
+
+#: The per-test bound the hanging sample runs under. pytest-timeout bounds a
+#: test's setup and call together, and the first test in the child pays the
+#: conftest's first imports in its setup, so the bound leaves room for them.
+BOUND_S = 10
+
+#: Each per-test bound a session can run under: the module that must be
+#: importable, the parent session's arguments and environment, and the words
+#: its failure must carry.
+BOUNDS = {
+    # PrismaBuild's bound, which pbtest exports to every shard.
+    "prismabuild": (
+        "prismabuild.pytest_test_bound",
+        ("-p", "prismabuild.pytest_test_bound"),
+        {"PRISMABUILD_TEST_TIMEOUT_S": str(BOUND_S)},
+        (f"per-test bound of {BOUND_S}s", "PRISMABUILD_TEST_TIMEOUT_S")),
+    # pytest-timeout, which CI runs under ``--timeout=300``.
+    "pytest-timeout": (
+        "pytest_timeout",
+        (f"--timeout={BOUND_S}",),
+        {"PRISMABUILD_TEST_TIMEOUT_S": ""},
+        (f"Timeout (>{float(BOUND_S)}s)", "pytest-timeout")),
+}
+
+
+@pytest.mark.parametrize("bound", sorted(BOUNDS))
+def test_a_hanging_test_fails_alone_under_the_per_test_bound(tmp_path, bound):
+    """The bound applies to each test in the child, not to the module (#1027).
+
+    The hang outlasts one bound by itself, so ``test_after`` passes only if
+    the module is not bounded as a whole. Each environment runs the bound it
+    has: the PrismaBuild venv has no pytest-timeout, and CI does not install
+    ``prismabuild``.
+    """
+    module, args, environ, words = BOUNDS[bound]
+    pytest.importorskip(module)
+    proc, output, outcomes, out = _session(
+        tmp_path, "sample_hangs.py", "sample_shared.py", extra=args,
+        environ=environ)
+    assert proc.returncode == 1, output
+    assert set(outcomes) == {"test_before", "test_hangs", "test_after",
+                             "test_shared"}, output
+    state, message = outcomes["test_hangs"]
+    assert state == "failed", output
+    for word in words:
+        assert word in message, message
+    for name in ("test_before", "test_after", "test_shared"):
+        assert outcomes[name] == ("passed", ""), output
+    # One child ran all three, and it lived through the hang.
+    child = {_pid(out, "before"), _pid(out, "hangs"), _pid(out, "after")}
+    assert len(child) == 1 and proc.pid not in child, output
