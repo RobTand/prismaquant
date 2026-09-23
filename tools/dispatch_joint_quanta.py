@@ -41,13 +41,14 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 if __package__:
     from tools.tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
         local_scratch_environment,
+        produced_spool_environment,
         stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
@@ -60,6 +61,7 @@ else:
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
         local_scratch_environment,
+        produced_spool_environment,
         stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
@@ -113,8 +115,20 @@ DATA_MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
 #: pbrun ingests (compressed when compressed); parsing decompresses.
 _GZIP_MAGIC = b"\x1f\x8b"
 _HEX64 = frozenset("0123456789abcdef")
-SPEC_PATH = Path("/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913"
-                "/allocation/joint-panel/spec-hostcap32-ram-dev.json")
+#: The campaign container spec every row seals unless ``--spec`` names
+#: another. It declares the produced output spool (PQ #1012), which the
+#: Stage A row requires; the spec it replaced, ``spec-hostcap32-ram-dev.json``
+#: beside it, declared none and is left unchanged.
+DEFAULT_SPEC_PATH = Path(
+    "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913"
+    "/allocation/joint-panel/spec-hostcap32-ram-dev-spool.json")
+SPEC_PATH = DEFAULT_SPEC_PATH
+#: The produced output spool's root and byte bound (``produced_output_spool``).
+PRODUCED_SPOOL_ROOT_ENV = "PRISMABUILD_PRODUCED_SPOOL_ROOT"
+#: Opt-ins PrismaBuild reads from the producer's sealed environment, each "0"
+#: or "1": the paced export (PB #891) and the host spool window (PB #910).
+PRODUCED_SPOOL_OPT_IN_ENV = ("PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT",
+                             "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW")
 STATE_FILENAME = "campaign-state.json"
 
 #: Refusal exits: 3 = the stage-A precondition (or the campaign binding)
@@ -803,6 +817,47 @@ def _require_replay_regime(spec: dict, *, emits_handoff: bool = False) -> None:
         raise RuntimeError(handoff_regime_refusal(regime))
 
 
+def produced_spool_row_environment(spec: Mapping) -> dict:
+    """The produced output spool a row seals, from its sealed spec.
+
+    The spool's root and byte bound, and each opt-in the spec declares, go
+    into the pbrun request as ``--env``. PrismaBuild reads them from the
+    producer's sealed environment, and the campaign container refuses to
+    launch a spec that declares the spool without them
+    (``tessera_campaign_container.produced_spool_environment``). The
+    container check runs here too, so a spec whose root has no writable
+    identity bind refuses before anything is published. The root must be
+    local to the executing box: a root under ``/mnt/shared`` would write
+    every entry into the pool the spool exists to keep writes out of
+    (PQ #1012). Returns ``{}`` for a spec that declares no spool.
+    """
+
+    declared = spec.get("env", {})
+    try:
+        forwarded = produced_spool_environment(spec, declared)
+    except RuntimeError as exc:
+        raise DispatchRefused(str(exc)) from exc
+    if not forwarded:
+        stray = [name for name in PRODUCED_SPOOL_OPT_IN_ENV if name in declared]
+        if stray:
+            raise DispatchRefused(
+                f"spec env declares {', '.join(stray)} without "
+                f"{PRODUCED_SPOOL_ROOT_ENV}")
+        return {}
+    root = PurePosixPath(forwarded[PRODUCED_SPOOL_ROOT_ENV])
+    if PurePosixPath("/mnt/shared") in root.parents:
+        raise DispatchRefused(
+            f"produced spool root {root} is under /mnt/shared; it must be a "
+            "directory on the executing box's own disk")
+    for name in PRODUCED_SPOOL_OPT_IN_ENV:
+        if name in declared:
+            if declared[name] not in ("0", "1"):
+                raise DispatchRefused(
+                    f"spec env {name} must be \"0\" or \"1\", not {declared[name]!r}")
+            forwarded[name] = declared[name]
+    return forwarded
+
+
 def _container_wrap(spec_path: Path, payload: list[str], *,
                     progress: Sequence[tuple[str, int]],
                     resource_policy=None) -> tuple[list[str], str | None]:
@@ -1036,6 +1091,11 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     for name, value in local_scratch_environment(
             sealed_spec, sealed_spec.get("env", {})).items():
         argv += ["--env", f"{name}={value}"]
+    # A spec that declares the produced spool seals it into the request too:
+    # the container refuses a declared spool the action does not carry, and
+    # a band-serial producer writes its handoff group through it (#1015).
+    for name, value in produced_spool_row_environment(sealed_spec).items():
+        argv += ["--env", f"{name}={value}"]
     argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
     return argv
 
@@ -1087,6 +1147,14 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     ``binding`` (optional) is a precomputed :func:`_stage_manifest_binding`
     for this manifest and campaign, so a caller that also records the
     digests does not read the manifest twice.
+
+    The spec must declare the produced output spool (PQ #1012): its root on
+    the executing box's own disk and its byte bound, sealed into the request
+    with the opt-ins the spec declares (:func:`produced_spool_row_environment`).
+    A spec without it refuses, because the owner would otherwise write every
+    boundary entry synchronously into the pool. The row also seals the
+    storage box's RAM tier (``--residency-ram auto``), as the quantum row
+    does.
     """
     if produced_output_template is not None:
         if not Path(produced_output_template).is_file():
@@ -1150,10 +1218,19 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                  else CHUNK_PROGRESS_GRACE_S) for phase in binding["phases"]]
     wrapped, container_image = _container_wrap(SPEC_PATH, payload,
                                                progress=progress)
+    sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
+    spool = produced_spool_row_environment(sealed_spec)
+    if not spool:
+        raise DispatchRefused(
+            f"stage-A spec {SPEC_PATH} declares no {PRODUCED_SPOOL_ROOT_ENV}: "
+            "without the produced output spool every boundary entry is "
+            "written synchronously into the pool (PQ #1012)")
+    # The ram leg promotes landed stage ranges into the RAM tier the storage
+    # box announces, as the Stage B row does (#640, PQ #1012).
     argv = [sys.executable, str(PBRUN),
             "--tag", tag,
             "--data-manifest", str(adjoint_manifest),
-            "--residency", "stage"]
+            "--residency", "stage", "--residency-ram", "auto"]
     for phase, grace in progress:
         argv += ["--progress-phase", f"{phase}={grace}"]
     argv += ["--demand", "gpu=1,mem_gb=104", "--gpu-memory-gb", "80",
@@ -1169,6 +1246,8 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         # Before the separator, like every other pbrun option; see the
         # quantum row above and RobTand/prismabuild#714.
         argv += [CONTAINER_IMAGE_FLAG, container_image]
+    for name, value in spool.items():
+        argv += ["--env", f"{name}={value}"]
     argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
     return argv
 
