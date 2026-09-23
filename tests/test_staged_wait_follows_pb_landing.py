@@ -300,3 +300,17 @@ def test_a_landing_record_for_another_manifest_is_not_followed(
     assert resolver.landing_record() is None
     assert reader.landing_verdict(
         resolver, [("/pool/a", 120, 130, 200)])[0] == "absent"
+
+
+@pytest.mark.parametrize("state", ["evicted", "done-not-resident"])
+def test_a_finished_or_evicted_range_is_waited_on_by_the_real_resolver(
+        tmp_path, monkeypatch, state):
+    """PB #1009 review: a copy that finished but is not resident waits on
+    adoption, and an evicted range on the window.  Neither is a refusal."""
+    resolver = _real_resolver(tmp_path, monkeypatch, state=state)
+
+    assert resolver.landing_record() is not None
+    kind, why, movers = reader.landing_verdict(
+        resolver, [("/pool/a", 120, 130, 200)])
+    assert (kind, movers) == ("wait", (MOVER,))
+    assert state in why
