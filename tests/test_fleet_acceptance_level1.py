@@ -137,14 +137,10 @@ def campaign(tmp_path_factory):
         raw = json.dumps(payload, sort_keys=True).encode()
         (tmp / name).write_bytes(raw)
         sealed[name] = hashlib.sha256(raw).hexdigest()
-    receipt = {
-        "schema": "prismaquant.joint_adjoint_capture.v1",
-        "plan_sha256": sealed["plan.json"],
-        "prepared_sha256": sealed["prepared.json"],
-        "campaign_scope": parent["annotations"]["campaign_scope"],
-        "checkpoints": [{"boundary": mark} for mark in (1, 2)],
-        "status": "complete",
-    }
+    from tests.test_stage_b_band_binding import synthetic_receipt
+    receipt = synthetic_receipt(
+        plan_sha256=sealed["plan.json"], prepared_sha256=sealed["prepared.json"],
+        scope=parent["annotations"]["campaign_scope"], num_layers=2, stride=1)
     return {"tmp": tmp, "plan": plan, "prepared": prepared, "parent": parent,
             "units": units, "plan_sha": sealed["plan.json"],
             "prepared_sha": sealed["prepared.json"],
@@ -271,7 +267,9 @@ def test_produced_records_carry_boundary_derivation_inputs(produced):
         # answer for this camera-ready tiny fixture, not a gap.
         assert isinstance(adjoint["chain_layers"], list)
         assert isinstance(adjoint["checkpoint_boundary"], int)
-        assert isinstance(adjoint["receipt_sha256"], str)
+        # PQ #993: each record binds its own stage-A slice, never a receipt.
+        assert isinstance(adjoint["slice_sha256"], str)
+        assert "receipt_sha256" not in adjoint
         assert isinstance(record["windows"], list), record["quantum_id"]
         campaign = record["campaign"]
         for key in ("plan_sha256", "prepared_sha256",
@@ -626,7 +624,10 @@ def test_join_accepts_and_gapped_refuses_downstream(
             (space / "results.json").write_text(
                 json.dumps({"quantum_id": quantum_id}))
 
-    def argv(root, out, binding, receipt_sha):
+    def argv(root, out, binding):
+        receipt_path = root / "adjoint-capture.json"
+        receipt_path.write_text(json.dumps(campaign["receipt"]))
+        receipt_sha = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
         return ["--input-root", str(root), "--output-dir", str(out),
                 "--plan", str(root / "plan.json"),
                 "--plan-sha256", binding["plan_sha256"],
@@ -637,19 +638,19 @@ def test_join_accepts_and_gapped_refuses_downstream(
                 "--scope", str(root / "scope.json"),
                 "--roster", str(root / "roster.txt"),
                 "--formats-by-qname", str(root / "formats.json"),
+                "--adjoint-receipt", str(receipt_path),
                 "--adjoint-receipt-sha256", receipt_sha]
 
-    receipt_sha = produced["records"][0]["adjoint"]["receipt_sha256"]
     root = tmp_path / "join-in"
     binding = seal(root)
     write_payloads(root, binding)
     out = tmp_path / "join-out"
-    assert join_main(argv(root, out, binding, receipt_sha)) == 0
+    assert join_main(argv(root, out, binding)) == 0
     allocated = load_joint_cost_for_allocation(out / "joint-cost.pkl")
     assert sorted(allocated["costs"]) == sorted(binding["roster"])
     (root / "layer-quanta" / "records" / "layer-001.json").unlink()
     out2 = tmp_path / "join-out-2"
-    assert join_main(argv(root, out2, binding, receipt_sha)) == 0
+    assert join_main(argv(root, out2, binding)) == 0
     results = json.loads((out2 / "results.json").read_text())
     assert results["status"] == "gapped"
     with pytest.raises(GappedPayloadRefused):

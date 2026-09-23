@@ -23,11 +23,17 @@ D2. ``windows`` seals the ordered window-index slice of the plan's retained
     the producer's declared inputs do not carry. Sealing an invented packing
     would assert false facts; sealing the count and order is what the
     coverage proof checks.
-D3. ``adjoint.receipt_sha256`` is ``None`` until stage A seals
-    ``adjoint-capture.json``. The dispatcher seals unbound records (nothing
-    submits on them), then re-seals bound records once the receipt validates;
-    binding is a new identity, never an edit. ``check_quantum_for_campaign``
-    refuses an unbound record for a bound campaign.
+D3. A record binds its layer's Stage A *slice*, never a whole receipt
+    (PQ #993, ``joint_adjoint_slices``). Before Stage A seals anything a
+    record is unbound and keeps the historical spelling
+    ``adjoint.receipt_sha256: None``. Once the checkpoint its layer reads is
+    sealed -- as a checkpoint band or inside the complete receipt -- the
+    producer re-seals it with ``adjoint.slice_sha256`` (the slice's canonical
+    digest) and ``adjoint.slice_path`` (the control-metadata file holding the
+    slice), and no receipt digest. A band and the complete receipt give the
+    same slice, so they give the same record. Binding is a new identity,
+    never an edit. ``check_quantum_for_campaign`` refuses an unbound record
+    for a bound campaign and any record that still binds a whole receipt.
 D4. Slice ``argv`` annotations carry the §5.2 inner argv without
     ``--quantum-sha256``: that digest is a submission-time binding (like
     ``--data-manifest-sha256`` on the run manifest), since the identity it
@@ -59,8 +65,8 @@ from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 PLAN_BLOCK_SCHEMA = "prismaquant.joint_layer_quanta.plan.v1"
 COVERAGE_SCHEMA = "prismaquant.joint_layer_quanta.coverage.v1"
-#: The stage-A capture schema, named here so ``bind_adjoint_receipt`` and
-#: the records it digests cite one spelling.
+#: The stage-A capture schema, named here so the slice binder and the
+#: dispatcher cite one spelling.
 ADJOINT_CAPTURE_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 MANIFEST_SCHEMA_V1 = "prismaquant.prismabuild.data_manifest.v1"
 MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
@@ -483,6 +489,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                  max_resident_consumers: int | None = None,
                  window_partition: Mapping | None = None,
                  adjoint_receipt: Mapping | None = None,
+                 adjoint_receipts: Sequence[Mapping] | None = None,
                  catalog_extension: Mapping | None = None,
                  layer_source_spans: Mapping[int, Sequence] | None = None) -> dict:
     """Cut the sealed campaign into per-layer quantum records (§4.1).
@@ -511,6 +518,13 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
     against it. The per-layer slices and the records that seal them are not
     completed here: they tile the parent byte for byte (§3.1), so a parent
     that dropped a layer's tail is carried into that layer's slice unchanged.
+
+    ``adjoint_receipt`` / ``adjoint_receipts`` (PQ #993) are sealed Stage A
+    proofs: the complete receipt or checkpoint bands. With any given, only the
+    layers whose checkpoint one of them carries get a record, each bound to
+    its slice digest; a re-run with more bands adds layers and leaves every
+    earlier record byte-identical. The coverage proof still tiles every
+    parent layer. With none, every layer gets an unbound record.
     """
     if not isinstance(plan, dict) or not isinstance(prepared, dict):
         raise ValueError("layer_quanta needs the plan and prepared mappings")
@@ -580,14 +594,18 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
 
     derived_stride = derive_stride(len(layers), stride)
     checkpoints = derived_stride["checkpoints"]
-    receipt_sha = None
-    if catalog_extension is not None and adjoint_receipt is None:
-        raise ValueError("catalog extension requires the actual completed Stage A capture")
-    if adjoint_receipt is not None:
-        receipt_sha = bind_adjoint_receipt(adjoint_receipt, plan_sha256=plan_sha256,
-                                           prepared_sha256=prepared_sha256,
-                                           scope=scope, checkpoints=checkpoints,
-                                           catalog_extension=catalog_extension)
+    proofs = [*([adjoint_receipt] if adjoint_receipt is not None else []),
+              *(adjoint_receipts or [])]
+    if catalog_extension is not None and not proofs:
+        raise ValueError("catalog extension requires sealed Stage A proof: the "
+                         "completed capture or a checkpoint band")
+    bound_slices = None
+    if proofs:
+        bound_slices = covered_slices(
+            proofs, layers, plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
+            scope=scope, checkpoints=checkpoints, catalog_extension=catalog_extension)
+        if not bound_slices:
+            raise ValueError("no sealed Stage A proof covers any campaign layer: refusing")
     quanta_root = output_root.rstrip("/") + "/layer-quanta"
     adjoint_dir = quanta_root + "/adjoint"
     # PQ #884: control metadata (slice manifests, record paths) may live in
@@ -598,6 +616,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                     if metadata_root is not None else quanta_root)
     control_manifest_dir = control_root + "/manifests"
     control_record_dir = control_root + "/records"
+    control_slice_dir = control_root + "/adjoint-slices"
 
     records = []
     slices = {}
@@ -691,7 +710,9 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                 "checkpoint_boundary": checkpoint,
                 "chain_layers": chain,
                 "boundary_artifacts": adjoint_dir,
-                "receipt_sha256": receipt_sha,
+                **adjoint_binding_fields(
+                    None if bound_slices is None else bound_slices.get(layer),
+                    slice_path=f"{control_slice_dir}/{qid}.json"),
             },
             "output_space": {
                 "root": space,
@@ -715,7 +736,16 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         output_root=output_root, layer_source_spans=layer_source_spans)
     coverage = verify_quanta_coverage(records, parent_manifest, plan=plan,
                                       window_partition=window_partition)
+    adjoint_slices = {}
+    if bound_slices is not None:
+        # The coverage proof tiles every parent layer; only the layers a
+        # sealed proof covers publish records (PQ #993 band granularity).
+        records = [record for record in records if record["layer"] in bound_slices]
+        slices = {record["quantum_id"]: slices[record["quantum_id"]] for record in records}
+        adjoint_slices = {record["quantum_id"]: bound_slices[record["layer"]]
+                          for record in records}
     return {"records": records, "slice_manifests": slices,
+            "adjoint_slices": adjoint_slices,
             "adjoint_manifest": adjoint_manifest, "coverage": coverage,
             "derivation": {
                 "schema": "prismaquant.joint_layer_quanta.derivation.v2",
@@ -1251,45 +1281,153 @@ def check_quantum_for_campaign(record: Mapping, campaign: Mapping) -> None:
         raise ValueError(
             f"quantum {record.get('quantum_id')!r} was sealed for another scope: "
             f"refusing")
-    expected_receipt = campaign.get("adjoint_receipt_sha256")
-    if expected_receipt is not None:
-        actual = record.get("adjoint", {}).get("receipt_sha256")
+    adjoint = record.get("adjoint", {})
+    if "receipt_sha256" in adjoint and adjoint["receipt_sha256"] is not None:
+        raise ValueError(
+            f"quantum {record.get('quantum_id')!r} binds a whole stage-A receipt; "
+            f"records bind their slice (PQ #993): re-seal, refusing")
+    if campaign.get("adjoint_receipt_sha256") is not None:
+        # A caller still naming the whole receipt would otherwise be silently
+        # ignored and admit an unbound record: fail closed.
+        raise ValueError("a campaign binding names a whole stage-A receipt; records "
+                         "bind their slice (PQ #993): pass adjoint_slice_sha256, refusing")
+    expected_slice = campaign.get("adjoint_slice_sha256")
+    if expected_slice is not None:
+        actual = adjoint.get("slice_sha256")
         if actual is None:
             raise ValueError(
                 f"quantum {record.get('quantum_id')!r} is unbound (pre-A): re-seal "
-                f"against the stage-A receipt before publishing, refusing")
-        if actual != _hex(expected_receipt, "adjoint_receipt_sha256"):
+                f"against its stage-A slice before publishing, refusing")
+        if actual != _hex(expected_slice, "adjoint_slice_sha256"):
             raise ValueError(
                 f"quantum {record.get('quantum_id')!r} binds another stage-A "
-                f"receipt: refusing")
+                f"slice: refusing")
 
 
-def bind_adjoint_receipt(receipt: Mapping, *, plan_sha256: str, prepared_sha256: str,
-                         scope: Mapping, checkpoints: Sequence[int],
-                         catalog_extension: Mapping | None = None) -> str:
-    """Digest a stage-A receipt after checking it answers for this campaign."""
-    if not isinstance(receipt, dict):
-        raise ValueError("a stage-A receipt must be an object")
-    if receipt.get("schema") != ADJOINT_CAPTURE_SCHEMA:
-        raise ValueError("a stage-A receipt has a foreign schema: refusing")
-    identity = receipt.get("run_identity", receipt)
+def adjoint_binding_fields(adjoint_slice: Mapping | None, *, slice_path: str) -> dict:
+    """The record's stage-A binding: its slice digest and file, or unbound.
+
+    An unbound record keeps the historical ``receipt_sha256: None`` spelling,
+    so every pre-A record reproduces byte for byte (Gate 1a). A bound record
+    names only its slice: nothing else of stage A enters its identity.
+    """
+    if adjoint_slice is None:
+        return {"receipt_sha256": None}
+    from .joint_adjoint_slices import adjoint_slice_sha256
+    return {"slice_sha256": adjoint_slice_sha256(adjoint_slice),
+            "slice_path": slice_path}
+
+
+def check_adjoint_run_header(header: Mapping, *, plan_sha256: str, prepared_sha256: str,
+                             scope: Mapping, checkpoints: Sequence[int],
+                             catalog_extension: Mapping | None = None) -> str:
+    """Digest a stage-A run header after checking it answers for this campaign.
+
+    The header is the run-level part of every slice (``run_identity``,
+    ``stride``, ``boundary_storage``). It must name this campaign's plan and
+    prepared digests (or, for a catalog extension, the original capture the
+    extension binds), its scope, and exactly the stride checkpoints this
+    campaign derives.
+    """
+    from .joint_adjoint_slices import stage_a_run_header_sha256
+    if not isinstance(header, dict) or not isinstance(header.get("run_identity"), dict):
+        raise ValueError("a stage-A run header must carry a run identity: refusing")
+    identity = header["run_identity"]
     if catalog_extension is not None:
         from .joint_catalog_extension import require_extension
-        require_extension(catalog_extension, receipt=receipt,
+        require_extension(catalog_extension, run_header=header,
                           plan_sha256=plan_sha256, prepared_sha256=prepared_sha256)
     else:
         for field, expected in (("plan_sha256", plan_sha256),
                                 ("prepared_sha256", prepared_sha256)):
             if identity.get(field) != expected:
-                raise ValueError(f"the stage-A receipt answers for another {field}: refusing")
+                raise ValueError(f"the stage-A run answers for another {field}: refusing")
     if canonical_bytes(identity.get("campaign_scope")) != canonical_bytes(scope):
-        raise ValueError("the stage-A receipt answers for another scope: refusing")
-    sealed = receipt.get("checkpoints", [])
-    marks = sorted(item["boundary"] for item in sealed) if sealed else []
-    if marks != sorted(checkpoints):
-        raise ValueError("the stage-A receipt checkpoints differ from the stride "
+        raise ValueError("the stage-A run answers for another scope: refusing")
+    stride = header.get("stride")
+    marks = stride.get("boundaries") if isinstance(stride, dict) else None
+    if not isinstance(marks, list) or sorted(marks) != sorted(checkpoints):
+        raise ValueError("the stage-A run checkpoints differ from the stride "
                          "derivation: refusing")
-    return canonical_sha256(receipt, where="stage-A receipt")
+    return stage_a_run_header_sha256(header)
+
+
+def _proof_slices(proof: Mapping, layers: Sequence[int]) -> dict[int, dict]:
+    """Every slice one sealed stage-A proof carries for the campaign layers."""
+    from .joint_adjoint_slices import (
+        stage_a_receipt_kind, stage_a_run_header, stage_a_slice, validate_band_receipt)
+    if stage_a_receipt_kind(proof) == "band":
+        validate_band_receipt(proof)
+        served = proof["band"]["layers"]
+        foreign = sorted(set(served) - set(layers))
+        if foreign:
+            raise ValueError(f"a band serves layers {foreign} outside the campaign: refusing")
+    else:
+        marks = sorted(record.get("boundary") for record in proof.get("checkpoints", [])
+                       if isinstance(record, dict))
+        if marks != sorted(stage_a_run_header(proof)["stride"]["boundaries"]):
+            raise ValueError("the completed stage-A receipt does not carry every "
+                             "stride checkpoint: refusing")
+        served = layers
+    return {layer: stage_a_slice(proof, layer) for layer in served}
+
+
+def covered_slices(proofs: Sequence[Mapping], layers: Sequence[int], *,
+                   plan_sha256: str, prepared_sha256: str, scope: Mapping,
+                   checkpoints: Sequence[int],
+                   catalog_extension: Mapping | None = None) -> dict[int, dict]:
+    """The slice of every layer the given sealed stage-A proofs cover.
+
+    Proofs are completed receipts or checkpoint bands. All share one run
+    header, which must answer for this campaign; two proofs covering one
+    layer must agree on its slice byte for byte (a band and the receipt of
+    the same run always do).
+    """
+    from .joint_adjoint_slices import stage_a_run_header
+    header_sha = None
+    slices: dict[int, dict] = {}
+    for proof in proofs:
+        digest = check_adjoint_run_header(
+            stage_a_run_header(proof), plan_sha256=plan_sha256,
+            prepared_sha256=prepared_sha256, scope=scope, checkpoints=checkpoints,
+            catalog_extension=catalog_extension)
+        if header_sha is None:
+            header_sha = digest
+        elif digest != header_sha:
+            raise ValueError("stage-A proofs carry different run headers: mixed "
+                             "runs, refusing")
+        for layer, adjoint_slice in _proof_slices(proof, layers).items():
+            prior = slices.get(layer)
+            if prior is not None and canonical_bytes(prior) != canonical_bytes(adjoint_slice):
+                raise ValueError(f"two stage-A proofs disagree on layer {layer}'s "
+                                 "slice: refusing")
+            slices[layer] = adjoint_slice
+    return slices
+
+
+def bind_adjoint_slice(adjoint: Mapping, layer: int, *, plan_sha256: str,
+                       prepared_sha256: str, scope: Mapping, checkpoints: Sequence[int],
+                       catalog_extension: Mapping | None = None) -> tuple[dict, str]:
+    """The slice ``layer`` reads, checked against this campaign, and its digest.
+
+    ``adjoint`` is a slice, a completed receipt or the checkpoint band of
+    ``layer``'s nearest checkpoint; a receipt or band is reduced to the slice
+    first, so every caller binds the same value however stage A was handed
+    over.
+    """
+    from .joint_adjoint_slices import (
+        STAGE_A_SLICE_FIELDS, adjoint_slice_sha256, slice_run_header, stage_a_slice,
+        verify_adjoint_slice)
+    if isinstance(adjoint, dict) and set(adjoint) == set(STAGE_A_SLICE_FIELDS):
+        verify_adjoint_slice(adjoint, layer=layer)
+        adjoint_slice = adjoint
+    else:
+        adjoint_slice = stage_a_slice(adjoint, layer)
+    check_adjoint_run_header(
+        slice_run_header(adjoint_slice), plan_sha256=plan_sha256,
+        prepared_sha256=prepared_sha256, scope=scope, checkpoints=checkpoints,
+        catalog_extension=catalog_extension)
+    return adjoint_slice, adjoint_slice_sha256(adjoint_slice)
 
 
 #: The quantum entry point consuming a boundary readset manifest.
@@ -1361,7 +1499,7 @@ def _manifest_entry_from_exact(exact: Mapping, *, where: str) -> dict:
     return {"path": path, "offset": 0, "bytes": size, "sha256": digest}
 
 
-def _collect_quantum_bulk_entries(*, receipt: Mapping,
+def _collect_quantum_bulk_entries(*, adjoint_slice: Mapping,
                                   checkpoint_boundary: int,
                                   needed: Sequence[int]) -> dict:
     """The staged produced triples shared by the quantum readset builders.
@@ -1373,18 +1511,19 @@ def _collect_quantum_bulk_entries(*, receipt: Mapping,
     then needed boundaries ascending, batches ascending. A path that
     resolves twice, a boundary without entries, or uneven batch counts
     refuses; only callers decide the phase table laid over these indices.
+    Reads only the quantum's stage-A slice (PQ #993).
     """
-    boundary_table = receipt.get("boundary_entries", {})
+    boundary_table = adjoint_slice.get("boundary_entries", {})
     if not isinstance(boundary_table, dict):
-        raise ValueError("the adjoint receipt carries no boundary entries: "
+        raise ValueError("the stage-A slice carries no boundary entries: "
                          "refusing")
-    storage_block = receipt.get("boundary_storage")
+    storage_block = adjoint_slice.get("boundary_storage")
     policy = storage_block.get("policy", {}) \
         if isinstance(storage_block, dict) else {}
     prefetch_batches = policy.get("prefetch_batches")
     if type(prefetch_batches) is not int or isinstance(
             prefetch_batches, bool) or prefetch_batches < 1:
-        raise ValueError("the receipt seals no prefetch batch window: refusing")
+        raise ValueError("the stage-A slice seals no prefetch batch window: refusing")
     manifest_entries: list[dict] = []
     seen_paths: set[str] = set()
 
@@ -1396,15 +1535,11 @@ def _collect_quantum_bulk_entries(*, receipt: Mapping,
         manifest_entries.append(entry)
         return len(manifest_entries) - 1
 
-    checkpoint_record = None
-    for entry in receipt.get("checkpoints", []):
-        if isinstance(entry, dict) and int(entry.get("boundary", -1)) \
-                == checkpoint_boundary:
-            checkpoint_record = entry
-            break
-    if checkpoint_record is None:
+    checkpoint_record = adjoint_slice.get("checkpoint")
+    if not isinstance(checkpoint_record, dict) or checkpoint_record.get(
+            "boundary") != checkpoint_boundary:
         raise ValueError(
-            "the adjoint receipt does not carry the checkpoint boundary "
+            "the stage-A slice does not carry the checkpoint boundary "
             f"{checkpoint_boundary}: refusing")
     checkpoint_indices: list[int] = []
     for exact in list(checkpoint_record.get("activation_entries", [])) \
@@ -1418,7 +1553,7 @@ def _collect_quantum_bulk_entries(*, receipt: Mapping,
     for boundary in needed:
         rows = boundary_table.get(str(boundary))
         if not isinstance(rows, list) or not rows:
-            raise ValueError(f"the receipt carries no boundary {boundary} "
+            raise ValueError(f"the stage-A slice carries no boundary {boundary} "
                              "entries: refusing")
         run = [_take(exact, where=f"boundary {boundary} entry {index}")
                for index, exact in enumerate(rows)]
@@ -1455,12 +1590,28 @@ def _collect_quantum_bulk_entries(*, receipt: Mapping,
     return {"path": path, "offset": 0, "bytes": size, "sha256": digest}
 
 
+def _require_stage_a_input(adjoint: Mapping) -> None:
+    """Refuse anything but a slice, a completed receipt or a sealed band."""
+    from .joint_adjoint_slices import (
+        STAGE_A_SLICE_FIELDS, AdjointSliceRefused, stage_a_receipt_kind)
+    if isinstance(adjoint, dict) and set(adjoint) == set(STAGE_A_SLICE_FIELDS):
+        return
+    try:
+        stage_a_receipt_kind(adjoint)
+    except AdjointSliceRefused as exc:
+        raise ValueError("the adjoint receipt is not a completed capture: "
+                         "this post-capture path derives nothing from a "
+                         f"missing, running or failed capture, refusing ({exc})") from exc
+
+
 def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
                                    strided_boundaries: Sequence[int],
                                    n_probes: int) -> dict:
     """The quantum's real bulk readset as a NEW immutable v2 manifest.
 
-    Derived post-capture from the completed adjoint receipt, the record's
+    Derived post-capture from the quantum's stage-A slice (``receipt`` is the
+    slice itself, a completed receipt or the band of the record's
+    checkpoint; either is reduced to the slice first, PQ #993), the record's
     sealed ``chain_layers``/``layer``/``checkpoint_boundary``/``windows``,
     and ``n_probes`` -- which is caller-responsible: the post-capture regen
     passes the sealed plan value, never a knob, and the binder requires
@@ -1471,26 +1622,23 @@ def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     action), then each chain layer's boundary entries once per probe in
     batch windows (prefetch-lease per probe pass), then the quantum's own
     boundary entries once per (replay window, probe) in batch windows.
-    Only a receipt whose status is ``complete`` derives anything here; a
+    Only a completed receipt or a sealed band derives anything here; a
     missing, running or failed capture refuses before any derivation.
     Every entry carries the sealed path/length/digest triple, so a staging
     contract admits and verifies the corpus with no payload rehash and no
     new cache. Repeats across phases are the v2 repeated-read mechanism;
     resume only ever reads a subset (completed windows are skipped).
 
-    The receipt is validated through :func:`bind_adjoint_receipt` (campaign
-    scope, plan/prepared digests, stride marks) and its canonical digest is
-    sealed into the annotations; the record's chain is checked against the
+    The slice is validated through :func:`bind_adjoint_slice` (campaign
+    scope, plan/prepared digests, stride marks) and its digest is sealed
+    into the annotations; the record's chain is checked against the
     single ``chain_layers_for`` owner. Old unbound records, slices and the
     parent identity are untouched -- this manifest is a new generation with
     a fresh digest, never a mutation of a sealed action.
     """
-    from .joint_adjoint_checkpoints import chain_layers_for
+    from .joint_adjoint_slices import chain_layers_for
 
-    if not isinstance(receipt, dict) or receipt.get("status") != "complete":
-        raise ValueError("the adjoint receipt is not a completed capture: "
-                         "this post-capture path derives nothing from a "
-                         "missing, running or failed capture, refusing")
+    _require_stage_a_input(receipt)
     if not isinstance(record, dict):
         raise ValueError("a quantum record must be an object: refusing")
     layer = record.get("layer")
@@ -1520,8 +1668,8 @@ def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
         if not campaign.get(key):
             raise ValueError(f"a quantum record seals no campaign {key}: "
                              "refusing")
-    receipt_sha256 = bind_adjoint_receipt(
-        receipt, plan_sha256=campaign["plan_sha256"],
+    adjoint_slice, slice_sha256 = bind_adjoint_slice(
+        receipt, layer, plan_sha256=campaign["plan_sha256"],
         prepared_sha256=campaign["prepared_sha256"],
         scope=campaign["campaign_scope"], checkpoints=strided_boundaries,
         catalog_extension=record.get("catalog_extension"))
@@ -1534,7 +1682,7 @@ def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
         raise ValueError("a quantum record seals no replay windows: refusing")
     needed = sorted(set(chain) | {layer})
     bulk = _collect_quantum_bulk_entries(
-        receipt=receipt, checkpoint_boundary=checkpoint_boundary,
+        adjoint_slice=adjoint_slice, checkpoint_boundary=checkpoint_boundary,
         needed=needed)
     manifest_entries = bulk["entries"]
     checkpoint_indices = bulk["checkpoint_indices"]
@@ -1594,7 +1742,7 @@ def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
             "n_probes": n_probes,
             "batch_windows": batch_windows,
             "replay_windows": len(replay_windows),
-            "receipt_sha256": receipt_sha256,
+            "slice_sha256": slice_sha256,
             "plan_sha256": campaign["plan_sha256"],
             "prepared_sha256": campaign["prepared_sha256"],
             "parent_manifest_sha256": campaign["read_manifest_sha256"],
@@ -1643,14 +1791,15 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     ``verify_quantum_identity`` enforce, so a bound record passes both);
     the input record is never mutated.
 
-    Refuses unless every identity binds exactly: the completed-capture
-    receipt; the input record itself, reverified through the existing
-    ``check_quantum_for_campaign`` owner against its own sealed campaign
-    and bound receipt BEFORE any mutation (a tampered field with a stale
+    Refuses unless every identity binds exactly: the record's stage-A slice
+    (``receipt`` may be the slice, a completed receipt or the record's
+    checkpoint band; PQ #993); the input record itself, reverified through
+    the existing ``check_quantum_for_campaign`` owner against its own sealed
+    campaign and bound slice BEFORE any mutation (a tampered field with a stale
     identity refuses -- binding never blesses edits by recomputing); the
     record's schema, layer, producer-constrained quantum id, campaign
-    digests/scope, and its already bound adjoint receipt (another receipt
-    for the same layer refuses); the manifest path is exactly the
+    digests/scope, and its already bound slice (another slice for the same
+    layer refuses); the manifest path is exactly the
     producer-named bound path under the output root (the quantum id enters
     no free-form pathname). ``n_probes`` is an explicit trusted input --
     the regen passes the sealed plan value, and the manifest must attest
@@ -1678,12 +1827,12 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     adjoint = record.get("adjoint")
     if not isinstance(adjoint, dict):
         raise ValueError("a quantum record carries no adjoint block: refusing")
-    bound_receipt = adjoint.get("receipt_sha256")
-    if type(bound_receipt) is not str or not re.fullmatch(
-            r"[0-9a-f]{64}", bound_receipt):
+    bound_slice = adjoint.get("slice_sha256")
+    if type(bound_slice) is not str or not re.fullmatch(
+            r"[0-9a-f]{64}", bound_slice):
         raise ValueError(
             f"quantum {record.get('quantum_id')!r} is unbound (pre-A): "
-            "re-seal against the stage-A receipt before binding a readset, "
+            "re-seal against its stage-A slice before binding a readset, "
             "refusing")
     campaign = record.get("campaign")
     if not isinstance(campaign, dict):
@@ -1711,7 +1860,7 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     # mutation: a tampered field with a stale identity refuses here, and
     # binding never blesses edits by recomputing.
     check_quantum_for_campaign(
-        record, {**campaign, "adjoint_receipt_sha256": bound_receipt})
+        record, {**campaign, "adjoint_slice_sha256": bound_slice})
     if not isinstance(manifest, dict):
         raise ValueError("a boundary readset manifest must be an object: "
                          "refusing")
@@ -1722,10 +1871,10 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     if not isinstance(annotations, dict):
         raise ValueError("a boundary readset manifest has no annotations: "
                          "refusing")
-    if annotations.get("receipt_sha256") != bound_receipt:
+    if annotations.get("slice_sha256") != bound_slice:
         raise ValueError(
             f"quantum {record.get('quantum_id')!r} binds another stage-A "
-            "receipt: refusing")
+            "slice: refusing")
     if annotations.get("n_probes") != n_probes:
         raise ValueError(
             f"the boundary readset attests another probe count "
@@ -1740,7 +1889,7 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     if manifest != expected:
         raise ValueError(
             "the boundary readset entries, phases or counts do not "
-            "originate from the bound receipt: refusing")
+            "originate from the bound slice: refusing")
     wire = seal_manifest_bytes(manifest)
     if hashlib.sha256(wire).hexdigest() != manifest_sha256:
         raise ValueError("the boundary readset digest does not reproduce "
@@ -1754,7 +1903,7 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
         "read_bytes": manifest["read_plan"]["read_bytes"],
         "phases": [phase["name"]
                    for phase in manifest["read_plan"]["phases"]],
-        "receipt_sha256": bound_receipt,
+        "slice_sha256": bound_slice,
     }
     body = {key: value for key, value in fresh.items()
             if key != "identity_sha256"}
@@ -2092,7 +2241,9 @@ def build_quantum_executable_manifest(
         prepared_inputs: Mapping | None = None) -> dict:
     """ONE executable v2 read manifest for a quantum row (PQ #862).
 
-    Derived post-capture from the completed adjoint receipt, the record's
+    Derived post-capture from the quantum's stage-A slice (``receipt`` is the
+    slice itself, a completed receipt or the band of the record's
+    checkpoint; either is reduced to the slice first, PQ #993), the record's
     sealed chain/layer/checkpoint/windows, the sealed probe count
     (caller-responsible: the regen passes the sealed plan value), the
     parent manifest's source extents for the chain and own layers, one
@@ -2145,12 +2296,9 @@ def build_quantum_executable_manifest(
     carries the bound membership. Production dispatch accepts only that
     complete contract; legacy sequencing-only records keep refusing.
     """
-    from .joint_adjoint_checkpoints import chain_layers_for
+    from .joint_adjoint_slices import chain_layers_for
 
-    if not isinstance(receipt, dict) or receipt.get("status") != "complete":
-        raise ValueError("the adjoint receipt is not a completed capture: "
-                         "this post-capture path derives nothing from a "
-                         "missing, running or failed capture, refusing")
+    _require_stage_a_input(receipt)
     if not isinstance(record, dict):
         raise ValueError("a quantum record must be an object: refusing")
     layer = record.get("layer")
@@ -2221,8 +2369,8 @@ def build_quantum_executable_manifest(
         "unit_roster_sha256": render_prerequisite["unit_roster_sha256"],
         "binding": None,
     }
-    receipt_sha256 = bind_adjoint_receipt(
-        receipt, plan_sha256=campaign["plan_sha256"],
+    adjoint_slice, slice_sha256 = bind_adjoint_slice(
+        receipt, layer, plan_sha256=campaign["plan_sha256"],
         prepared_sha256=campaign["prepared_sha256"],
         scope=campaign["campaign_scope"], checkpoints=strided_boundaries,
         catalog_extension=record.get("catalog_extension"))
@@ -2250,7 +2398,7 @@ def build_quantum_executable_manifest(
             where="prepared inputs")
     needed = sorted(set(chain) | {layer})
     bulk = _collect_quantum_bulk_entries(
-        receipt=receipt, checkpoint_boundary=checkpoint_boundary,
+        adjoint_slice=adjoint_slice, checkpoint_boundary=checkpoint_boundary,
         needed=needed)
     source_raw = _source_extent_entries(parent_manifest, layers=needed,
                                         source_model_root=source_model_root)
@@ -2409,7 +2557,7 @@ def build_quantum_executable_manifest(
             "chain_layers": list(chain),
             "n_probes": n_probes,
             "replay_windows": len(replay_windows),
-            "receipt_sha256": receipt_sha256,
+            "slice_sha256": slice_sha256,
             "plan_sha256": campaign["plan_sha256"],
             "prepared_sha256": campaign["prepared_sha256"],
             "parent_manifest_sha256": campaign["read_manifest_sha256"],
@@ -2531,12 +2679,12 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     adjoint = record.get("adjoint")
     if not isinstance(adjoint, dict):
         raise ValueError("a quantum record carries no adjoint block: refusing")
-    bound_receipt = adjoint.get("receipt_sha256")
-    if type(bound_receipt) is not str or not re.fullmatch(
-            r"[0-9a-f]{64}", bound_receipt):
+    bound_slice = adjoint.get("slice_sha256")
+    if type(bound_slice) is not str or not re.fullmatch(
+            r"[0-9a-f]{64}", bound_slice):
         raise ValueError(
             f"quantum {record.get('quantum_id')!r} is unbound (pre-A): "
-            "re-seal against the stage-A receipt before binding a readset, "
+            "re-seal against its stage-A slice before binding a readset, "
             "refusing")
     campaign = record.get("campaign")
     if not isinstance(campaign, dict):
@@ -2561,7 +2709,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
             f"an executable readset path must be exactly {expected_path}: "
             "refusing")
     check_quantum_for_campaign(
-        record, {**campaign, "adjoint_receipt_sha256": bound_receipt})
+        record, {**campaign, "adjoint_slice_sha256": bound_slice})
     if not isinstance(manifest, dict):
         raise ValueError("an executable read manifest must be an object: "
                          "refusing")
@@ -2572,10 +2720,10 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     if not isinstance(annotations, dict):
         raise ValueError("an executable read manifest has no annotations: "
                          "refusing")
-    if annotations.get("receipt_sha256") != bound_receipt:
+    if annotations.get("slice_sha256") != bound_slice:
         raise ValueError(
             f"quantum {record.get('quantum_id')!r} binds another stage-A "
-            "receipt: refusing")
+            "slice: refusing")
     if annotations.get("n_probes") != n_probes:
         raise ValueError(
             f"the executable readset attests another probe count "
@@ -2608,7 +2756,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
         "read_bytes": manifest["read_plan"]["read_bytes"],
         "phases": [phase["name"]
                    for phase in manifest["read_plan"]["phases"]],
-        "receipt_sha256": bound_receipt,
+        "slice_sha256": bound_slice,
     }
     prepared_sealed = manifest.get("annotations", {}).get("prepared_input")
     if prepared_sealed is not None:

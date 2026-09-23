@@ -17,7 +17,12 @@ from pathlib import Path
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
 from .tessera_joint_allocation import _read_bound, _bound_stat_fence
 
-SCHEMA = "prismaquant.joint_catalog_extension.v1"
+SCHEMA = "prismaquant.joint_catalog_extension.v2"
+#: v1 bound one whole completed receipt; v2 (PQ #993) binds the Stage A run
+#: header, which every band and the complete receipt of one run share, so an
+#: extension can be created from the first sealed band. v1 documents still
+#: verify: their receipt's header must equal the header a slice carries.
+SCHEMA_V1 = "prismaquant.joint_catalog_extension.v1"
 INPUTS = ("original_plan", "original_prepared", "extended_plan", "extended_prepared")
 # These select candidate artifacts or their output namespace; every other
 # plan field, including the entire execution/derivative policy, stays exact.
@@ -387,50 +392,102 @@ def verify_catalog_pair(inputs):
     return dict(evidence)
 
 
-def _check_capture(receipt, inputs, original):
-    _require(receipt.get("schema") == "prismaquant.joint_adjoint_capture.v1"
-             and receipt.get("status") == "complete", "actual completed Stage A capture required")
-    identity = receipt.get("run_identity", {})
+def _run_header(capture):
+    """The Stage A run header of a completed receipt or a sealed band."""
+    from .joint_adjoint_slices import AdjointSliceRefused, stage_a_run_header
+    try:
+        return stage_a_run_header(capture)
+    except AdjointSliceRefused as exc:
+        raise ValueError("joint catalog extension: actual completed Stage A capture "
+                         f"or sealed checkpoint band required ({exc})") from exc
+
+
+def _check_capture(header, inputs, original):
+    """Check a Stage A run header answers for the original campaign."""
+    _require(isinstance(header, dict) and isinstance(header.get("run_identity"), dict),
+             "a Stage A run header is required")
+    identity = header["run_identity"]
     _same(identity.get("plan_sha256"), inputs["original_plan"]["sha256"], "capture original plan")
     _same(identity.get("prepared_sha256"), inputs["original_prepared"]["sha256"], "capture original prepared")
     calibration = original["calibration_input"]
     _same(identity.get("calibration_sha256"), calibration["calibration_sha256"], "capture calibration")
     _same(identity.get("calibration_shape"), calibration["shape"], "capture calibration shape")
-    # Stage A's roster spelling includes one terminating newline per qname;
-    # the quantum roster uses another spelling. Never compare unlike hashes.
-    roster = "".join(name + "\n" for name in sorted(original["formats_by_qname"]))
-    _same(identity.get("unit_roster_sha256"), hashlib.sha256(roster.encode()).hexdigest(), "capture qname roster")
+    # Stage A seals one of two roster spellings, and the run header says
+    # which. A fresh run hashes one terminating newline per qname. A run
+    # resumed from a forward-recovery capsule seals the campaign's canonical
+    # spelling, the quantum roster (``resolve_forward_campaign``). Never
+    # compare unlike hashes.
+    names = sorted(original["formats_by_qname"])
+    if (header.get("boundary_storage") or {}).get("forward_recovery") is not None:
+        from .joint_layer_quanta import roster_digest
+        expected = roster_digest(names)
+    else:
+        expected = hashlib.sha256("".join(name + "\n" for name in names).encode()).hexdigest()
+    _same(identity.get("unit_roster_sha256"), expected, "capture qname roster")
     plan = _json(inputs["original_plan"], "original plan")
     for key in ("n_probes", "seed_base"):
         _same(identity.get(key), plan["execution"][key], "capture " + key)
 
 
 def create_extension(*, inputs, adjoint_capture, output):
+    """Publish an extension binding the original Stage A run header.
+
+    ``adjoint_capture`` names the completed receipt or any sealed checkpoint
+    band of the original run; only its run header enters the document, so
+    the extension is the same bytes whichever of them created it.
+    """
     evidence = verify_catalog_pair(inputs)
-    capture = _json(adjoint_capture, "original adjoint capture")
-    _check_capture(capture, inputs, _json(inputs["original_prepared"], "original prepared"))
-    document = {"schema": SCHEMA, "inputs": inputs, "adjoint_capture": adjoint_capture,
-        "adjoint_receipt_sha256": canonical_json_sha256(capture, where="original adjoint receipt"),
+    header = _run_header(_json(adjoint_capture, "original adjoint capture"))
+    _check_capture(header, inputs, _json(inputs["original_prepared"], "original prepared"))
+    document = {"schema": SCHEMA, "inputs": inputs, "adjoint_run_header": header,
+        "adjoint_run_header_sha256": canonical_json_sha256(header, where="original Stage A run header"),
         "evidence": evidence}
     raw = (json.dumps(document, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
     _require(publish_new_bytes(Path(output), raw), "extension output already exists; refusing overwrite")
     return {"path": str(Path(output).resolve()), "sha256": hashlib.sha256(raw).hexdigest()}
 
 
-def require_extension(bound, *, receipt, plan_sha256, prepared_sha256):
-    """Independently check the pair and return the original receipt identity."""
+def extension_run_header(bound):
+    """The Stage A run header an extension binds (embedded in v2, derived in v1).
+
+    For callers that check an extension against itself, such as export and
+    allocation, where no slice is in hand; :func:`require_extension` still
+    verifies it independently.
+    """
     document = _json(bound, "catalog extension")
-    _same(document.get("schema"), SCHEMA, "extension schema")
+    if document.get("schema") == SCHEMA:
+        return document["adjoint_run_header"]
+    _same(document.get("schema"), SCHEMA_V1, "extension schema")
+    return _run_header(_json(document["adjoint_capture"], "original adjoint capture"))
+
+
+def require_extension(bound, *, run_header, plan_sha256, prepared_sha256):
+    """Independently check the pair and return the original run identity.
+
+    ``run_header`` is the Stage A run header a slice, band or receipt
+    carries; the extension must bind exactly it.
+    """
+    document = _json(bound, "catalog extension")
+    _require(document.get("schema") in (SCHEMA, SCHEMA_V1), "extension schema differs")
     inputs = document["inputs"]
     _same(inputs["extended_plan"]["sha256"], plan_sha256, "extended plan binding")
     _same(inputs["extended_prepared"]["sha256"], prepared_sha256, "extended prepared binding")
-    capture = _json(document["adjoint_capture"], "original adjoint capture")
-    _same(capture, receipt, "original capture bytes")
-    _same(document["adjoint_receipt_sha256"], canonical_json_sha256(receipt, where="original capture"),
-          "original capture digest")
-    _check_capture(capture, inputs, _json(inputs["original_prepared"], "original prepared"))
+    if document["schema"] == SCHEMA:
+        header = document["adjoint_run_header"]
+        _same(document["adjoint_run_header_sha256"],
+              canonical_json_sha256(header, where="original Stage A run header"),
+              "original Stage A run header digest")
+    else:
+        capture = _json(document["adjoint_capture"], "original adjoint capture")
+        _same(document["adjoint_receipt_sha256"], canonical_json_sha256(capture, where="original capture"),
+              "original capture digest")
+        header = _run_header(capture)
+    _same(canonical_json_sha256(header, where="original Stage A run header"),
+          canonical_json_sha256(run_header, where="Stage A run header"),
+          "original Stage A run header")
+    _check_capture(header, inputs, _json(inputs["original_prepared"], "original prepared"))
     _same(document["evidence"], verify_catalog_pair(inputs), "independently recomputed extension evidence")
-    return capture["run_identity"]
+    return header["run_identity"]
 
 
 def _hessian_reference_commitments(hessian, where):
@@ -643,7 +700,8 @@ def selected_cache_read_paths(manifest):
         documents.add(key)
         document = _json(bound, 'selected ' + kind + ' dependencies')
         if kind == 'extension':
-            add(document['adjoint_capture'])
+            if document.get('schema') == SCHEMA_V1:
+                add(document['adjoint_capture'])
             for name, value in document['inputs'].items():
                 control(value, 'plan' if name.endswith('_plan') else 'prepared')
         elif kind == 'plan':

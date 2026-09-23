@@ -37,7 +37,7 @@ def test_recovered_capture_to_scratch_quantum_matches_single_run(tmp_path, monke
         payload, record, _ = runtime._run_quantum(
             tmp_path, monkeypatch, single=single, layer=layer,
             receipt=captured['receipt'], output_root=captured['output_root'],
-            plan_sha='b' * 64, prepared_sha='c' * 64, adjoint_sha='f' * 64)
+            plan_sha='b' * 64, prepared_sha='c' * 64)
         for name, formats in payload['costs'].items():
             for fmt, actual in formats.items():
                 expected = single[0]['costs'][name][fmt]

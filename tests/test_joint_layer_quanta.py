@@ -477,9 +477,14 @@ def test_check_quantum_for_campaign_real_plan():
         jl.check_quantum_for_campaign(built["records"][13], bad)
     # An unbound (pre-A) record refuses a bound campaign: stage A must be
     # sealed and the record rebound before any quantum publishes.
-    bound = dict(campaign, adjoint_receipt_sha256="a" * 64)
-    with pytest.raises(ValueError):
+    bound = dict(campaign, adjoint_slice_sha256="a" * 64)
+    with pytest.raises(ValueError, match="unbound"):
         jl.check_quantum_for_campaign(built["records"][13], bound)
+    # A campaign still naming a whole receipt is refused, never ignored
+    # (PQ #993: records bind their slice).
+    legacy = dict(campaign, adjoint_receipt_sha256="a" * 64)
+    with pytest.raises(ValueError, match="whole stage-A receipt"):
+        jl.check_quantum_for_campaign(built["records"][13], legacy)
     edited = copy.deepcopy(built["records"][13])
     edited["chunks"] = edited["chunks"][:1]
     with pytest.raises(ValueError):

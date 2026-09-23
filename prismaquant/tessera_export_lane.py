@@ -811,7 +811,7 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
         raise TesseraExportLaneError("selected cache expert receipts are missing")
     from contextlib import nullcontext
     from .joint_catalog_extension import (EncoderAdoptionValidation,
-        require_selected_catalog_cell, require_extension, _json)
+        require_selected_catalog_cell, require_extension, extension_run_header, _json)
     rooted = schema == "tessera.cached_units.v2"
     if rooted:
         if (research_proposal is not None or not catalog_extension
@@ -820,7 +820,7 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
         extension = _json(catalog_extension, "selected catalog extension")
         allocation = provenance["tessera_joint_allocation"]
         require_extension(catalog_extension,
-            receipt=_json(extension["adjoint_capture"], "selected original capture"),
+            run_header=extension_run_header(catalog_extension),
             plan_sha256=allocation["plan_sha256"],
             prepared_sha256=allocation["prepared"]["sha256"])
         extended_plan = _json(extension["inputs"]["extended_plan"], "selected extended plan")

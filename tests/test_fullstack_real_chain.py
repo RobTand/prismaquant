@@ -215,14 +215,10 @@ def campaign(tmp_path_factory):
         raw = json.dumps(payload, sort_keys=True).encode()
         (tmp / name).write_bytes(raw)
         sealed[name] = hashlib.sha256(raw).hexdigest()
-    receipt = {
-        "schema": "prismaquant.joint_adjoint_capture.v1",
-        "plan_sha256": sealed["plan.json"],
-        "prepared_sha256": sealed["prepared.json"],
-        "campaign_scope": parent["annotations"]["campaign_scope"],
-        "checkpoints": [{"boundary": mark} for mark in (1, 2)],
-        "status": "complete",
-    }
+    from tests.test_stage_b_band_binding import synthetic_receipt
+    receipt = synthetic_receipt(
+        plan_sha256=sealed["plan.json"], prepared_sha256=sealed["prepared.json"],
+        scope=parent["annotations"]["campaign_scope"], num_layers=2, stride=1)
     return {"tmp": tmp, "plan": plan, "prepared": prepared,
             "parent": parent, "units": units,
             "plan_sha": sealed["plan.json"],
@@ -682,6 +678,7 @@ def _seal_join_inputs(root: Path, campaign) -> dict:
         "\n".join(sorted(campaign["prepared"]["formats_by_qname"])) + "\n")
     (root / "formats.json").write_text(json.dumps(
         campaign["prepared"]["formats_by_qname"]))
+    (root / "adjoint-capture.json").write_text(json.dumps(campaign["receipt"]))
     binding = {
         "plan_sha256": campaign["plan_sha"],
         "prepared_sha256": campaign["prepared_sha"],
@@ -780,7 +777,9 @@ def _write_payloads(root: Path, binding, produced, probe, fmt_list,
             for r in produced["records"]}
 
 
-def _join_argv(root: Path, out: Path, binding, receipt_sha: str) -> list[str]:
+def _join_argv(root: Path, out: Path, binding) -> list[str]:
+    """Join CLI argv: mode (a), the completed stage-A receipt (PQ #993)."""
+    receipt_sha = hashlib.sha256((root / "adjoint-capture.json").read_bytes()).hexdigest()
     return ["--input-root", str(root), "--output-dir", str(out),
             "--plan", str(root / "plan.json"),
             "--plan-sha256", binding["plan_sha256"],
@@ -791,6 +790,7 @@ def _join_argv(root: Path, out: Path, binding, receipt_sha: str) -> list[str]:
             "--scope", str(root / "scope.json"),
             "--roster", str(root / "roster.txt"),
             "--formats-by-qname", str(root / "formats.json"),
+            "--adjoint-receipt", str(root / "adjoint-capture.json"),
             "--adjoint-receipt-sha256", receipt_sha]
 
 
@@ -824,8 +824,7 @@ def test_join_accepts_producer_records_with_coverage(
     _write_payloads(root, binding, produced, probe, FORMATS, sign=sign,
                     activation_max_abs=measured_max_abs)
     out = tmp_path / "join-out"
-    receipt_sha = produced["records"][0]["adjoint"]["receipt_sha256"]
-    assert join_main(_join_argv(root, out, binding, receipt_sha)) == 0
+    assert join_main(_join_argv(root, out, binding)) == 0
     joined = pickle.loads((out / "joint-cost.pkl").read_bytes())
     assert sorted(joined["costs"]) == sorted(binding["roster"])
     allocated = load_joint_cost_for_allocation(out / "joint-cost.pkl")
@@ -841,8 +840,7 @@ def test_join_missing_quantum_is_named_gap(
     _write_payloads(root, binding, produced, probe, FORMATS)
     (root / "layer-quanta" / "records" / "layer-001.json").unlink()
     out = tmp_path / "join-out"
-    receipt_sha = produced["records"][0]["adjoint"]["receipt_sha256"]
-    assert join_main(_join_argv(root, out, binding, receipt_sha)) == 0
+    assert join_main(_join_argv(root, out, binding)) == 0
     results = json.loads((out / "results.json").read_text())
     assert results["status"] == "gapped"
     assert [g["quantum_id"] for g in
@@ -861,11 +859,10 @@ def test_join_duplicate_and_mismatched_payloads_refuse(
     binding = _seal_join_inputs(root, campaign)
     _write_payloads(root, binding, produced, probe, FORMATS)
     out = tmp_path / "join-out"
-    receipt_sha = produced["records"][0]["adjoint"]["receipt_sha256"]
     dup_space = Path(produced["records"][0]["output_space"]["root"])
     dup_space.joinpath("cost.pkl").write_bytes(
         pickle.dumps({"costs": {}, "provenance": {}}, protocol=2))
-    assert join_main(_join_argv(root, out, binding, receipt_sha)) == 1
+    assert join_main(_join_argv(root, out, binding)) == 1
     assert not (out / "joint-cost.pkl").exists()
     _write_payloads(root, binding, produced, probe, FORMATS)
     other = [q for q in binding["roster"] if ".layers.0." in q][0]
@@ -876,5 +873,5 @@ def test_join_duplicate_and_mismatched_payloads_refuse(
     victim.joinpath("cost.pkl").write_bytes(
         pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
     out2 = tmp_path / "join-out-2"
-    assert join_main(_join_argv(root, out2, binding, receipt_sha)) == 1
+    assert join_main(_join_argv(root, out2, binding)) == 1
     assert not (out2 / "joint-cost.pkl").exists()

@@ -13,6 +13,7 @@ from prismaquant.joint_layer_quanta import derive_stride, layer_quanta
 from prismaquant.joint_quanta_join import join_joint_quanta, JoinRefused, main as join_main
 from prismaquant.layer_config import load_assignment
 from tests.test_joint_quanta_join import campaign, probe, STATUS_SCHEMA
+from tests.test_stage_b_band_binding import band_from_receipt, synthetic_receipt
 from tests.test_allocator_measured_runtime_cli import _main_fixture, admit_synthetic_table
 
 
@@ -42,11 +43,15 @@ def _generated_outputs(tmp_path, campaign):
     write_json('formats.json', formats)
     (root / 'roster.txt').write_text('\n'.join(names) + '\n')
     stride = derive_stride(3, 8)
-    receipt = {"schema": "prismaquant.joint_adjoint_capture.v1",
-        "run_identity": {"plan_sha256": campaign["plan_sha256"],
-                         "prepared_sha256": campaign["prepared_sha256"],
-                         "campaign_scope": campaign["scope"]},
-        "checkpoints": [{"boundary": boundary} for boundary in stride["checkpoints"]]}
+    receipt = synthetic_receipt(
+        plan_sha256=campaign["plan_sha256"], prepared_sha256=campaign["prepared_sha256"],
+        scope=campaign["scope"], num_layers=3, stride=8)
+    assert receipt["stride"]["boundaries"] == list(stride["checkpoints"])
+    campaign.pop("adjoint_bands", None)
+    campaign["adjoint_receipt"] = receipt
+    (root / "adjoint-capture.json").write_text(json.dumps(receipt))
+    # The stage-A tail band (the whole run at stride 8) for the mode (b) join.
+    (root / "band-003.json").write_text(json.dumps(band_from_receipt(receipt, 3)))
     produced = layer_quanta(plan, prepared, campaign["parent_manifest"],
         parent_manifest_sha256=campaign["manifest_sha256"], output_root=str(root),
         plan_path=str(root / 'plan.json'), plan_sha256=campaign["plan_sha256"],
@@ -68,12 +73,12 @@ def _generated_outputs(tmp_path, campaign):
                  "campaign_scope", "unit_roster_sha256")},
             "distributed_quantum": {
                 "quantum_id": qid, "identity_sha256": record["identity_sha256"],
-                "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
+                "adjoint_slice_sha256": record["adjoint"]["slice_sha256"],
                 "checkpoint_boundary": record["adjoint"]["checkpoint_boundary"],
                 "chain_layers": record["adjoint"]["chain_layers"],
                 "windows": len(record["windows"]),
                 "chunks": [chunk["name"] for chunk in record["chunks"]]},
-            "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"]})
+            "adjoint_slice_sha256": record["adjoint"]["slice_sha256"]})
         space = root / "layer-quanta" / qid
         space.mkdir(parents=True)
         (space / "cost.pkl").write_bytes(pickle.dumps(payload))
@@ -84,11 +89,19 @@ def _generated_outputs(tmp_path, campaign):
     return root, campaign, argv, measured, stats
 
 
+def _proof_argv(root, runtime):
+    """Mode (a) the completed receipt, or mode (b) its bands (PQ #993)."""
+    name, flag = ("band-003.json", "--adjoint-band") if runtime else (
+        "adjoint-capture.json", "--adjoint-receipt")
+    path = root / name
+    return [flag, str(path), flag + "-sha256", hashlib.sha256(path.read_bytes()).hexdigest()]
+
+
 @pytest.mark.parametrize("runtime", [False, True])
 def test_generated_quanta_reach_real_allocator_with_measured_stats(tmp_path, campaign, monkeypatch, runtime):
     root, campaign, argv, measured, stats = _generated_outputs(tmp_path, campaign)
     joined_dir = tmp_path / "joined"
-    assert join_main([
+    assert join_main([*_proof_argv(root, runtime),
         '--records', str(root / 'layer-quanta' / 'records'), '--output-dir', str(joined_dir),
         '--plan', str(root / 'plan.json'), '--plan-sha256', campaign['plan_sha256'],
         '--prepared', str(root / 'prepared.json'), '--prepared-sha256', campaign['prepared_sha256'],

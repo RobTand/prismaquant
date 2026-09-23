@@ -26,6 +26,11 @@ from prismaquant.joint_adjoint_checkpoints import (
     load_adjoint_checkpoint,
     write_adjoint_receipt,
 )
+from prismaquant.joint_adjoint_slices import (
+    adjoint_slice_sha256,
+    stage_a_slice,
+    write_adjoint_slice,
+)
 from prismaquant.joint_cost_quantum import (
     EXIT_IDENTITY_REFUSED,
     IDENTITY_REFUSED_MARKER,
@@ -179,14 +184,20 @@ def _stage_a(tmp_path, monkeypatch, runner_seed=85):
 
 
 def _quantum_record(*, output_root, layer, checkpoint_boundary, chain, windows,
-                    total_bytes, plan_sha, prepared_sha, adjoint_sha):
+                    total_bytes, plan_sha, prepared_sha, adjoint_sha, slice_path=None):
     """A producer-shaped record: ``windows`` seals ordered indices only (D2).
 
     Pass ``windows`` as a list of ``{"window_index": i}`` dicts (what the
     producer seals); advisory ``names`` may be attached per window to
     exercise the runtime's cross-check, but the replay never trusts them.
+    ``adjoint_sha`` is the stage-A slice digest the record binds (PQ #993);
+    ``None`` seals an unbound (pre-A) record.
     """
     root = Path(output_root) / "layer-quanta" / f"layer-{layer:03d}"
+    if slice_path is None:
+        slice_path = Path(output_root) / "layer-quanta" / "adjoint-slices" / f"layer-{layer:03d}.json"
+    binding = ({"receipt_sha256": None} if adjoint_sha is None else
+               {"slice_sha256": adjoint_sha, "slice_path": str(slice_path)})
     record = {
         "schema": QUANTUM_SCHEMA,
         "quantum_id": f"layer-{layer:03d}",
@@ -210,7 +221,7 @@ def _quantum_record(*, output_root, layer, checkpoint_boundary, chain, windows,
         "adjoint": {"checkpoint_boundary": checkpoint_boundary,
                     "chain_layers": chain,
                     "boundary_artifacts": "…/layer-quanta/adjoint",
-                    "receipt_sha256": adjoint_sha},
+                    **binding},
         "output_space": {
             "root": str(root),
             "cost_payload": str(root / "cost.pkl"),
@@ -230,15 +241,15 @@ def _write(path, payload: bytes) -> tuple[Path, str]:
 
 @pytest.fixture
 def identity_files(tmp_path):
+    """Plan, prepared and the layer-1 stage-A slice file a quantum reads."""
+    from test_stage_b_band_binding import synthetic_receipt
     plan = _write(tmp_path / "plan.json", b"plan-fixture")
     prepared = _write(tmp_path / "prepared.json", b"prepared-fixture")
-    receipt_payload = json.dumps({
-        "schema": "prismaquant.joint_adjoint_capture.v1",
-        "status": "complete",
-        "boundary_storage": {"session": {"generation": "g" * 32, "run_identity_sha256": _hex("c")}},
-        "checkpoints": [], "boundary_entries": {},
-    }).encode()
-    adjoint = _write(tmp_path / "adjoint-capture.json", receipt_payload)
+    receipt = synthetic_receipt(
+        plan_sha256=plan[1], prepared_sha256=prepared[1], scope={"fixture": True},
+        num_layers=2, stride=1)
+    path = tmp_path / "adjoint-slice-layer-001.json"
+    adjoint = (path, write_adjoint_slice(path, stage_a_slice(receipt, 1), layer=1))
     return {"plan": plan, "prepared": prepared, "adjoint": adjoint,
             "output_root": tmp_path / "campaign"}
 
@@ -251,7 +262,8 @@ def _valid_record(identity_files, *, layer=1, checkpoint_boundary=2, chain=(),
         checkpoint_boundary=checkpoint_boundary, chain=chain, windows=windows,
         total_bytes=total_bytes, plan_sha=identity_files["plan"][1],
         prepared_sha=identity_files["prepared"][1],
-        adjoint_sha=identity_files["adjoint"][1])
+        adjoint_sha=identity_files["adjoint"][1],
+        slice_path=identity_files["adjoint"][0])
 
 
 @pytest.mark.parametrize("tamper", [
@@ -312,8 +324,8 @@ def test_cli_identity_refusal_is_exit_3(identity_files, monkeypatch, capsys):
         "--plan-sha256", identity_files["plan"][1],
         "--prepared", str(identity_files["prepared"][0]),
         "--prepared-sha256", identity_files["prepared"][1],
-        "--adjoint", str(identity_files["adjoint"][0]),
-        "--adjoint-sha256", identity_files["adjoint"][1],
+        "--adjoint-slice", str(identity_files["adjoint"][0]),
+        "--adjoint-slice-sha256", identity_files["adjoint"][1],
         "--output-root", str(identity_files["output_root"]),
     ])
     assert code == EXIT_IDENTITY_REFUSED
@@ -855,8 +867,12 @@ def _windows_records(windows):
 
 
 def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
-                 progress_env=None, plan_sha="p", prepared_sha="r", adjoint_sha="a"):
+                 progress_env=None, plan_sha="p", prepared_sha="r", adjoint_slice=None):
+    """One layer quantum on its stage-A slice (the receipt's, unless given)."""
     payload_single, runner_single, cache, proofs = single
+    if adjoint_slice is None:
+        # The slice a quantum reads is sliced from the sealed JSON receipt.
+        adjoint_slice = stage_a_slice(json.loads(json.dumps(receipt)), layer)
     del payload_single
     torch.manual_seed(85)
     model, context, runner, _ = fixture()
@@ -883,15 +899,13 @@ def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
     total = sum(w["render_file_upper_bound_bytes"] for w in windows)
     record = _quantum_record(
         output_root=output_root, layer=layer,
-        checkpoint_boundary=max(
-            b for b in [c["boundary"] for c in receipt["checkpoints"]]
-            if b >= layer + 1),
+        checkpoint_boundary=adjoint_slice["checkpoint"]["boundary"],
         chain=[],
         # Producer-shaped: indices only (D2). Membership and footprints are
         # recomputed below, never read from the record.
         windows=[{"window_index": index} for index in range(len(windows))],
         total_bytes=total, plan_sha=plan_sha,
-        prepared_sha=prepared_sha, adjoint_sha=adjoint_sha)
+        prepared_sha=prepared_sha, adjoint_sha=adjoint_slice_sha256(adjoint_slice))
     # chain_layers must match the record's checkpoint boundary exactly
     boundary = record["adjoint"]["checkpoint_boundary"]
     record["adjoint"]["chain_layers"] = list(chain_layers_for(boundary, layer))
@@ -925,7 +939,7 @@ def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
         runner, fresh_cache, draw(),
         {name: list(FORMATS) for name in
          [f"model.layers.{i}.proj" for i in range(runner.num_layers)]},
-        record=record, receipt=receipt, execution=execution,
+        record=record, adjoint_slice=adjoint_slice, execution=execution,
         output_root=output_root, projection_backend=None, resume=False,
         resolved_windows=resolved,
         counters=counters, progress=progress)
@@ -969,8 +983,7 @@ def test_quantum_matches_single_run_bitwise(tmp_path, monkeypatch):
     for layer in (1, 0):
         payload, record, _counters = _run_quantum(
             tmp_path, monkeypatch, single=single, layer=layer, receipt=receipt,
-            output_root=output_root, plan_sha=_hex("d"), prepared_sha=_hex("e"),
-            adjoint_sha=_hex("f"))
+            output_root=output_root, plan_sha=_hex("d"), prepared_sha=_hex("e"))
         for name, rows in payload["costs"].items():
             for fmt, row in rows.items():
                 single_row = payload_single["costs"][name][fmt]
@@ -1006,14 +1019,85 @@ def test_quantum_writes_only_inside_its_output_space(tmp_path, monkeypatch):
     before = tree(output_root)
     _payload, record, _counters = _run_quantum(
         tmp_path, monkeypatch, single=single, layer=0, receipt=receipt,
-        output_root=output_root, plan_sha=_hex("d"), prepared_sha=_hex("e"),
-        adjoint_sha=_hex("f"))
+        output_root=output_root, plan_sha=_hex("d"), prepared_sha=_hex("e"))
     after = tree(output_root)
     allowed = str(Path("layer-quanta") / "layer-000")
     outside = {path for path in after - before if not path.startswith(allowed)}
     assert not outside, outside
     space = Path(record["output_space"]["root"])
     assert (space / "checkpoints" / "manifest.json").is_file()
+
+
+def test_band_and_receipt_slices_give_byte_identical_payloads(tmp_path, monkeypatch):
+    """Stream vs batch (PQ #993): the band's slice prices like the receipt's.
+
+    A real Stage A run seals checkpoint 2 and its receipt; the band tool
+    rebuilds band 2 from the sealed sources alone. For every layer the band
+    serves, compared byte for byte: the slice (canonical JSON: run
+    identity, stride, boundary storage, checkpoint record, boundary
+    entries), the bound record (canonical JSON, so its ``identity_sha256``
+    and ``adjoint.slice_sha256``), and the whole pickled cost payload --
+    ``costs`` rows, ``stats``, the journal identity and the
+    ``distributed_quantum`` block naming the slice digest.
+    """
+    import copy
+    import pickle
+    import shutil
+    from prismaquant.cost_stage_checkpoint import canonical_json_bytes
+    from prismaquant.joint_adjoint_band import build_band_receipt
+    from prismaquant.joint_adjoint_slices import validate_band_receipt
+
+    single_root = tmp_path / "single"
+    single = _single_run(single_root, monkeypatch,
+                         checkpoint=single_root / "checkpoints")
+    output_root = tmp_path / "campaign"
+    runner_a, _ = _stage_a(tmp_path, monkeypatch)
+    runner_a.context.settle_prefetch_layers = lambda layers: None
+    identities = []
+    bind = StreamedBoundaryArtifacts.bind
+
+    def recorded(self, identity, **kw):
+        identities.append(copy.deepcopy(identity))
+        return bind(self, identity, **kw)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(StreamedBoundaryArtifacts, "bind", recorded)
+        receipt = run_adjoint_capture_core(
+            runner_a, draw(), execution=_execution(tmp_path),
+            output_root=output_root, stride=2,
+            source_model_identity=_model_identity("joint-source"),
+            unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
+            prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
+            implementation_sha256=aura._aura_source_sha256())
+    receipt = json.loads(json.dumps(receipt))
+    band = build_band_receipt(
+        output_root=output_root, boundary=2, plan_sha256=_hex("d"),
+        prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
+        stride_value=2, stride_source=None, unit_roster_sha256=_hex("a"),
+        bind_identity=identities[-1])
+    validate_band_receipt(band)
+    assert band["band"]["layers"] == [1, 0]
+    for layer in band["band"]["layers"]:
+        from_receipt = stage_a_slice(receipt, layer)
+        from_band = stage_a_slice(band, layer)
+        assert canonical_json_bytes(from_band, where="band slice") == \
+            canonical_json_bytes(from_receipt, where="receipt slice")
+        runs = {}
+        for name, adjoint_slice in (("receipt", from_receipt), ("band", from_band)):
+            payload, record, _counters = _run_quantum(
+                tmp_path, monkeypatch, single=single, layer=layer, receipt=None,
+                output_root=output_root, plan_sha=_hex("d"), prepared_sha=_hex("e"),
+                adjoint_slice=adjoint_slice)
+            runs[name] = (payload, record)
+            # The next run starts from an empty output space, not a resume.
+            shutil.rmtree(record["output_space"]["root"])
+        (payload_r, record_r), (payload_b, record_b) = runs["receipt"], runs["band"]
+        assert payload_r["costs"], "the quantum priced nothing"
+        assert canonical_json_bytes(record_b, where="record") == \
+            canonical_json_bytes(record_r, where="record")
+        assert record_b["adjoint"]["slice_sha256"] == adjoint_slice_sha256(from_band)
+        assert pickle.dumps(payload_b) == pickle.dumps(payload_r), layer
+        assert adjoint_slice_sha256(from_band).encode() in pickle.dumps(payload_b)
 
 
 def test_progress_cadence_at_chunk_granularity(tmp_path, monkeypatch):
@@ -1234,8 +1318,8 @@ def test_quantum_requires_dev_mode(identity_files, monkeypatch):
               "--plan-sha256", identity_files["plan"][1],
               "--prepared", str(identity_files["prepared"][0]),
               "--prepared-sha256", identity_files["prepared"][1],
-              "--adjoint", str(identity_files["adjoint"][0]),
-              "--adjoint-sha256", identity_files["adjoint"][1],
+              "--adjoint-slice", str(identity_files["adjoint"][0]),
+              "--adjoint-slice-sha256", identity_files["adjoint"][1],
               "--output-root", str(identity_files["output_root"])])
 
 
@@ -1300,17 +1384,23 @@ def test_window_index_order_is_the_handshake(identity_files):
             record_window_indices(broken)
 
 
-def test_unbound_record_names_the_reseal(identity_files):
-    """D3: a pre-stage-A record (receipt_sha256 None) refuses with the fix."""
+@pytest.mark.parametrize("binding, match", [
+    # D3: a pre-stage-A record (receipt_sha256 None) refuses with the fix.
+    ({"receipt_sha256": None}, "bind_adjoint_slice"),
+    # PQ #993: a record binding a whole receipt refuses; it reads a slice.
+    ({"receipt_sha256": "a" * 64}, "whole stage-A receipt"),
+])
+def test_unbound_record_names_the_reseal(identity_files, binding, match):
     record = _valid_record(identity_files)
-    record["adjoint"] = dict(record["adjoint"], receipt_sha256=None)
+    record["adjoint"] = {**{k: v for k, v in record["adjoint"].items()
+                            if k not in ("slice_sha256", "slice_path")}, **binding}
     record["identity_sha256"] = canonical_json_sha256(
         {k: v for k, v in record.items() if k != "identity_sha256"},
         where="record")
     record_path = identity_files["output_root"].parent / "unbound.json"
     record_path.parent.mkdir(parents=True, exist_ok=True)
     record_path.write_text(json.dumps(record))
-    with pytest.raises(QuantumIdentityRefused, match="bind_adjoint_receipt"):
+    with pytest.raises(QuantumIdentityRefused, match=match):
         verify_quantum_identity(
             quantum_path=record_path,
             quantum_sha256=hashlib.sha256(record_path.read_bytes()).hexdigest(),
@@ -1320,6 +1410,34 @@ def test_unbound_record_names_the_reseal(identity_files):
             prepared_sha256=identity_files["prepared"][1],
             adjoint_path=identity_files["adjoint"][0],
             adjoint_sha256=identity_files["adjoint"][1],
+            output_root=identity_files["output_root"])
+
+
+def test_quantum_refuses_a_slice_of_another_campaign(identity_files, tmp_path):
+    """The slice's run header must answer for the argv plan (PQ #993)."""
+    from test_stage_b_band_binding import synthetic_receipt
+    foreign = synthetic_receipt(
+        plan_sha256=_hex("0"), prepared_sha256=identity_files["prepared"][1],
+        scope={"fixture": True}, num_layers=2, stride=1)
+    path = tmp_path / "foreign-slice.json"
+    digest = write_adjoint_slice(path, stage_a_slice(foreign, 1), layer=1)
+    record = _quantum_record(
+        output_root=identity_files["output_root"], layer=1, checkpoint_boundary=2,
+        chain=[], windows=[{"window_index": 0}], total_bytes=100,
+        plan_sha=identity_files["plan"][1], prepared_sha=identity_files["prepared"][1],
+        adjoint_sha=digest, slice_path=path)
+    record_path = identity_files["output_root"].parent / "foreign.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_text(json.dumps(record))
+    with pytest.raises(QuantumIdentityRefused, match="another plan_sha256"):
+        verify_quantum_identity(
+            quantum_path=record_path,
+            quantum_sha256=hashlib.sha256(record_path.read_bytes()).hexdigest(),
+            plan_path=identity_files["plan"][0],
+            plan_sha256=identity_files["plan"][1],
+            prepared_path=identity_files["prepared"][0],
+            prepared_sha256=identity_files["prepared"][1],
+            adjoint_path=path, adjoint_sha256=digest,
             output_root=identity_files["output_root"])
 
 

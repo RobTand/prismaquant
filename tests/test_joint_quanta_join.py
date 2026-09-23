@@ -8,8 +8,10 @@ issue #787: phase rows ``{name, bytes, cumulative_bytes}`` with unpadded
 ``layer-N`` names and no ``quantum_id`` field, index-only record windows
 (D2), the #768 roster digest (sorted, one per line, no trailing newline),
 and payload provenance as ``campaign_binding`` + ``distributed_quantum`` +
-``adjoint_receipt_sha256``. The final test bridges the real producer into
-the joiner end to end with synthetic runtime outputs.
+``adjoint_slice_sha256``. Every record binds its layer's stage-A slice and
+the join recomputes it from one stage-A proof: the completed receipt (mode
+a) or the checkpoint bands (mode b, PQ #993). The final test bridges the
+real producer into the joiner end to end with synthetic runtime outputs.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import pytest
 import torch
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+from prismaquant.joint_adjoint_slices import adjoint_slice_sha256, stage_a_slice
 from prismaquant.joint_aura import (
     arithmetic_identity,
     identity_sha256,
@@ -36,6 +39,7 @@ from prismaquant.joint_quanta_join import (
     main,
 )
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity
+from tests.test_stage_b_band_binding import band_from_receipt, synthetic_receipt
 from tests.test_streamed_cost_checkpoints import _model_identity
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
@@ -43,7 +47,28 @@ STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
 N_LAYERS = 3
 UNITS_PER_LAYER = 2
 FORMATS = ["TESSERA_BF16_K1_R1792", "TESSERA_E4M3_K1_R896"]
-ADJOINT_RECEIPT_SHA256 = "e" * 64
+
+
+def _stage_a_receipt(campaign, **overrides):
+    """The completed stage-A receipt of the campaign's current digests.
+
+    Stride 1: layer L reads checkpoint L + 1 and chains nothing, the shape
+    the records below seal. Deterministic, so recomputing it after the
+    digests are sealed gives the same bytes every record binds.
+    """
+    return synthetic_receipt(
+        plan_sha256=campaign["plan_sha256"], prepared_sha256=campaign["prepared_sha256"],
+        scope=campaign["scope"], num_layers=N_LAYERS, stride=1, **overrides)
+
+
+def _bind_stage_a(campaign):
+    """Hand the joiner the completed receipt (mode a) for the current digests."""
+    campaign.pop("adjoint_bands", None)
+    campaign["adjoint_receipt"] = _stage_a_receipt(campaign)
+
+
+def _slice_sha(campaign, layer):
+    return adjoint_slice_sha256(stage_a_slice(_stage_a_receipt(campaign), layer))
 
 
 def _row(qname, fmt, probe, sign=0.1):
@@ -133,10 +158,12 @@ def campaign(probe):
             "phases": phases,
         },
     }
-    return {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
-            "manifest_sha256": "c" * 64, "scope": scope,
-            "roster": roster, "formats_by_qname": formats,
-            "parent_manifest": parent_manifest}
+    bound = {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
+             "manifest_sha256": "c" * 64, "scope": scope,
+             "roster": roster, "formats_by_qname": formats,
+             "parent_manifest": parent_manifest}
+    _bind_stage_a(bound)
+    return bound
 
 
 def _phase_row(campaign, layer):
@@ -175,9 +202,10 @@ def _record(campaign, layer, root, *, roster_digest=None):
         "chunks": [{"name": f"{quantum_id}-chunk-000", "start_bytes": 0,
                     "end_bytes": phase["bytes"]}],
         "windows": [{"window_index": 0}, {"window_index": 1}],
-        "adjoint": {"checkpoint_boundary": N_LAYERS, "chain_layers": [],
+        "adjoint": {"checkpoint_boundary": layer + 1, "chain_layers": [],
                     "boundary_artifacts": "/mnt/shared/adjoint",
-                    "receipt_sha256": ADJOINT_RECEIPT_SHA256},
+                    "slice_sha256": _slice_sha(campaign, layer),
+                    "slice_path": f"/mnt/shared/adjoint-slices/{quantum_id}.json"},
         "output_space": {"root": str(space),
                          "cost_payload": str(space / "cost.pkl"),
                          "results": str(space / "results.json"),
@@ -202,13 +230,13 @@ def _payload_provenance(campaign, record):
         "distributed_quantum": {
             "quantum_id": record["quantum_id"],
             "identity_sha256": record["identity_sha256"],
-            "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
+            "adjoint_slice_sha256": record["adjoint"].get("slice_sha256"),
             "checkpoint_boundary": record["adjoint"]["checkpoint_boundary"],
             "chain_layers": list(record["adjoint"]["chain_layers"]),
             "windows": len(record["windows"]),
             "chunks": [chunk["name"] for chunk in record["chunks"]],
         },
-        "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
+        "adjoint_slice_sha256": record["adjoint"].get("slice_sha256"),
     }
 
 
@@ -265,6 +293,13 @@ def _seal_inputs(root, campaign, *, gzip_manifest=False):
                       ("manifest_sha256", manifest_name)):
         campaign[key] = hashlib.sha256(
             (root / name).read_bytes()).hexdigest()
+    _bind_stage_a(campaign)
+
+
+def _proof_file(root, name, document):
+    path = root / name
+    path.write_text(json.dumps(document, sort_keys=True))
+    return str(path), hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _argv(root, out, campaign):
@@ -278,7 +313,19 @@ def _argv(root, out, campaign):
             "--scope", str(root / "scope.json"),
             "--roster", str(root / "roster.txt"),
             "--formats-by-qname", str(root / "formats.json"),
-            "--adjoint-receipt-sha256", ADJOINT_RECEIPT_SHA256]
+            *_proof_argv(root, campaign)]
+
+
+def _proof_argv(root, campaign):
+    """The stage-A proof files the CLI reads, written from the campaign."""
+    if "adjoint_bands" in campaign:
+        argv = []
+        for band in campaign["adjoint_bands"]:
+            path, sha = _proof_file(root, f"band-{band['band']['boundary']:03d}.json", band)
+            argv += ["--adjoint-band", path, "--adjoint-band-sha256", sha]
+        return argv
+    path, sha = _proof_file(root, "adjoint-capture.json", campaign["adjoint_receipt"])
+    return ["--adjoint-receipt", path, "--adjoint-receipt-sha256", sha]
 
 
 def _run_cli(root, out, campaign):
@@ -456,17 +503,19 @@ def test_foreign_provenance_refuses(tmp_path, campaign, probe):
                           output_dir=tmp_path / "joined", input_root=root)
 
 
-def test_adjoint_receipt_digest_is_checked(tmp_path, campaign, probe):
-    """B4: the §6.4 adjoint-receipt digest is pinned and checked both ways --
-    the payload must answer for the record's bound receipt, and an unbound
-    (pre-A) record never joins."""
+def test_adjoint_slice_digest_is_checked(tmp_path, campaign, probe):
+    """B4 after PQ #993: the §6.4 adjoint digest is the slice digest, pinned
+    and checked every way -- the payload must answer for the record's bound
+    slice, an unbound (pre-A) record never joins, a record binding a whole
+    receipt never joins, and every record must bind exactly the slice the
+    stage-A proof gives its layer."""
     root = tmp_path / "campaign"
     _seal_inputs(root, campaign)
-    # (a) the payload claims a receipt the record does not bind.
+    # (a) the payload claims a slice the record does not bind.
     record = _record(campaign, 0, root)
     lying = _payload_provenance(campaign, record)
-    lying["adjoint_receipt_sha256"] = "f" * 64
-    lying["distributed_quantum"]["adjoint_receipt_sha256"] = "f" * 64
+    lying["adjoint_slice_sha256"] = "f" * 64
+    lying["distributed_quantum"]["adjoint_slice_sha256"] = "f" * 64
     _write_quantum(root, campaign, probe, 0, provenance=lying)
     _write_quantum(root, campaign, probe, 1)
     with pytest.raises(JoinRefused, match="adjoint"):
@@ -474,32 +523,122 @@ def test_adjoint_receipt_digest_is_checked(tmp_path, campaign, probe):
                           output_dir=tmp_path / "refused-a", input_root=root)
 
     # (b) an unbound (pre-A) record refuses even with a matching payload.
-    root_b = tmp_path / "pre-a"
-    _seal_inputs(root_b, campaign)
-    unbound = _record(campaign, 0, root_b)
-    unbound["adjoint"]["receipt_sha256"] = None
-    unbound["identity_sha256"] = canonical_json_sha256(
-        {k: v for k, v in unbound.items() if k != "identity_sha256"},
-        where="unbound fixture record")
-    provenance = _payload_provenance(campaign, unbound)
-    _write_quantum(root_b, campaign, probe, 0, provenance=provenance,
-                   record=unbound)
-    _write_quantum(root_b, campaign, probe, 1)
-    campaign_b = copy.deepcopy(campaign)
-    campaign_b["adjoint_receipt_sha256"] = None
-    with pytest.raises(JoinRefused, match="unbound"):
-        join_joint_quanta(receipts=None, campaign=campaign_b,
-                          output_dir=tmp_path / "refused-b", input_root=root_b)
+    # (d) so does a record that binds a whole receipt instead of its slice.
+    for label, binding, match in (("pre-a", {"receipt_sha256": None}, "unbound"),
+                                  ("whole", {"receipt_sha256": "e" * 64},
+                                   "whole stage-A receipt")):
+        root_b = tmp_path / label
+        _seal_inputs(root_b, campaign)
+        unbound = _record(campaign, 0, root_b)
+        unbound["adjoint"] = {**{k: v for k, v in unbound["adjoint"].items()
+                                 if k not in ("slice_sha256", "slice_path")}, **binding}
+        unbound["identity_sha256"] = canonical_json_sha256(
+            {k: v for k, v in unbound.items() if k != "identity_sha256"},
+            where="unbound fixture record")
+        provenance = _payload_provenance(campaign, unbound)
+        _write_quantum(root_b, campaign, probe, 0, provenance=provenance,
+                       record=unbound)
+        _write_quantum(root_b, campaign, probe, 1)
+        with pytest.raises(JoinRefused, match=match):
+            join_joint_quanta(receipts=None, campaign=campaign,
+                              output_dir=tmp_path / f"refused-{label}", input_root=root_b)
 
-    # (c) the caller-pinned receipt must be the one every record binds.
+    # (c) mode (a): the join recomputes every record's slice from the
+    # completed receipt; a receipt of another Stage A generation gives other
+    # slices, so each record fails closed.
     root_c = tmp_path / "pinned"
     _seal_inputs(root_c, campaign)
     _write_all(root_c, campaign, probe)
     pinned = copy.deepcopy(campaign)
-    pinned["adjoint_receipt_sha256"] = "9" * 64
-    with pytest.raises(JoinRefused, match="another stage-A receipt"):
+    pinned["adjoint_receipt"] = _stage_a_receipt(campaign, generation="another-generation")
+    with pytest.raises(JoinRefused, match="another stage-A slice than the completed receipt"):
         join_joint_quanta(receipts=None, campaign=pinned,
                           output_dir=tmp_path / "refused-c", input_root=root_c)
+    # A receipt answering for another plan refuses at the header check.
+    foreign = copy.deepcopy(campaign)
+    foreign["adjoint_receipt"] = synthetic_receipt(
+        plan_sha256="f" * 64, prepared_sha256=campaign["prepared_sha256"],
+        scope=campaign["scope"], num_layers=N_LAYERS, stride=1)
+    with pytest.raises(JoinRefused):
+        join_joint_quanta(receipts=None, campaign=foreign,
+                          output_dir=tmp_path / "refused-foreign", input_root=root_c)
+
+
+# -- mode (b): checkpoint bands ------------------------------------------------
+
+
+def _band_campaign(campaign, boundaries=None, **overrides):
+    receipt = _stage_a_receipt(campaign, **overrides)
+    boundaries = boundaries or receipt["stride"]["boundaries"]
+    bound = copy.deepcopy(campaign)
+    bound.pop("adjoint_receipt")
+    bound["adjoint_bands"] = [band_from_receipt(receipt, b) for b in boundaries]
+    return bound
+
+
+def test_bands_join_like_the_completed_receipt(tmp_path, campaign, probe):
+    """Mode (b): one header, every stride checkpoint has a band, every layer
+    has a matching record -- the join is byte-identical to mode (a)'s."""
+    root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
+    _write_all(root, campaign, probe)
+    receipt_out = tmp_path / "joined-receipt"
+    assert main(_argv(root, receipt_out, campaign)) == 0
+    bands = _band_campaign(campaign)
+    bands_out = tmp_path / "joined-bands"
+    assert main(_argv(root, bands_out, bands)) == 0
+    assert (bands_out / "joint-cost.pkl").read_bytes() == \
+        (receipt_out / "joint-cost.pkl").read_bytes()
+    by_bands = json.loads((bands_out / "results.json").read_text())
+    by_receipt = json.loads((receipt_out / "results.json").read_text())
+    assert by_bands["status"] == "complete"
+    assert by_bands["stage_a"]["mode"] == "checkpoint bands"
+    assert by_receipt["stage_a"]["mode"] == "completed receipt"
+    assert by_bands["stage_a"]["run_header_sha256"] == by_receipt["stage_a"]["run_header_sha256"]
+    # A layer without a record is a named gap, as in mode (a).
+    (root / "layer-quanta" / "records" / "layer-001.json").unlink()
+    gapped = join_joint_quanta(receipts=None, campaign=bands,
+                               output_dir=tmp_path / "joined-gapped", input_root=root)
+    assert gapped["status"] == "gapped"
+    assert [gap["quantum_id"] for gap in gapped["gaps"]] == ["layer-001"]
+
+
+def test_band_join_refusals(tmp_path, campaign, probe):
+    root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
+    _write_all(root, campaign, probe)
+    # A missing stride checkpoint: bands 3 and 2 but not 1.
+    with pytest.raises(JoinRefused, match=r"stride checkpoints \[1\] have no band"):
+        join_joint_quanta(receipts=None, campaign=_band_campaign(campaign, [3, 2]),
+                          output_dir=tmp_path / "refused-missing", input_root=root)
+    # Bands with a different run header: another generation sealed one band.
+    mixed = _band_campaign(campaign, [3, 2])
+    mixed["adjoint_bands"].append(band_from_receipt(
+        _stage_a_receipt(campaign, generation="another-generation"), 1))
+    with pytest.raises(JoinRefused, match="run header"):
+        join_joint_quanta(receipts=None, campaign=mixed,
+                          output_dir=tmp_path / "refused-mixed", input_root=root)
+    # A slice mismatch at the join: every band of another generation gives
+    # every layer another slice than the one its record binds.
+    other = _band_campaign(campaign, generation="another-generation")
+    with pytest.raises(JoinRefused, match="another stage-A slice than the checkpoint bands"):
+        join_joint_quanta(receipts=None, campaign=other,
+                          output_dir=tmp_path / "refused-slice", input_root=root)
+    # A band for the wrong boundary never enters the set.
+    wrong = _band_campaign(campaign)
+    wrong["adjoint_bands"][0]["band"] = {"boundary": 2, "layers": [1]}
+    with pytest.raises(JoinRefused):
+        join_joint_quanta(receipts=None, campaign=wrong,
+                          output_dir=tmp_path / "refused-wrong", input_root=root)
+    # Exactly one proof: both or neither refuses.
+    both = _band_campaign(campaign)
+    both["adjoint_receipt"] = campaign["adjoint_receipt"]
+    neither = copy.deepcopy(campaign)
+    neither.pop("adjoint_receipt")
+    for bad in (both, neither):
+        with pytest.raises(JoinRefused, match="exactly one stage-A proof"):
+            join_joint_quanta(receipts=None, campaign=bad,
+                              output_dir=tmp_path / "refused-proof", input_root=root)
 
 
 # -- rows: a defective row fails the join and names the qname ------------------
@@ -584,14 +723,10 @@ def test_producer_records_join_synthetic_runtime_outputs(tmp_path, campaign,
     manifest_sha256 = hashlib.sha256(
         (root / "manifest.json").read_bytes()).hexdigest()
     stride = derive_stride(2, 8)
-    receipt = {
-        "schema": "prismaquant.joint_adjoint_capture.v1",
-        "run_identity": {"plan_sha256": campaign["plan_sha256"],
-                         "prepared_sha256": campaign["prepared_sha256"],
-                         "campaign_scope": campaign["scope"]},
-        "checkpoints": [{"boundary": boundary}
-                        for boundary in stride["checkpoints"]],
-    }
+    receipt = synthetic_receipt(
+        plan_sha256=campaign["plan_sha256"], prepared_sha256=campaign["prepared_sha256"],
+        scope=campaign["scope"], num_layers=2, stride=8)
+    assert receipt["stride"]["boundaries"] == list(stride["checkpoints"])
     built = layer_quanta(
         plan, prepared, parent, parent_manifest_sha256=manifest_sha256,
         output_root=str(root), plan_path="/mnt/shared/plan.json",
@@ -632,15 +767,15 @@ def test_producer_records_join_synthetic_runtime_outputs(tmp_path, campaign,
                 "distributed_quantum": {
                     "quantum_id": record["quantum_id"],
                     "identity_sha256": record["identity_sha256"],
-                    "adjoint_receipt_sha256":
-                        record["adjoint"]["receipt_sha256"],
+                    "adjoint_slice_sha256":
+                        record["adjoint"]["slice_sha256"],
                     "checkpoint_boundary":
                         record["adjoint"]["checkpoint_boundary"],
                     "chain_layers": list(record["adjoint"]["chain_layers"]),
                     "windows": len(record["windows"]),
                     "chunks": [chunk["name"] for chunk in record["chunks"]],
                 },
-                "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
+                "adjoint_slice_sha256": record["adjoint"]["slice_sha256"],
             },
         }
         (space / "cost.pkl").write_bytes(
@@ -659,6 +794,7 @@ def test_producer_records_join_synthetic_runtime_outputs(tmp_path, campaign,
         "roster": roster,
         "formats_by_qname": formats,
         "parent_manifest": parent,
+        "adjoint_receipt": receipt,
     }
     out = tmp_path / "joined"
     result = join_joint_quanta(receipts=None, campaign=join_campaign,

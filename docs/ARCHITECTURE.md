@@ -1,5 +1,36 @@
 # PrismaQuant Architecture
 
+Stage B reads Stage A by slice and by checkpoint band (2026-09-22,
+`ws-br/stageb-band-receipts-993`, PQ #993). A layer quantum reads one
+checkpoint and the forward boundary entries of its own chain, and Stage A
+seals those hours before it writes its receipt. Stage B now binds exactly
+that input, so a quantum can be prepared and dispatched once its checkpoint
+band is sealed. See "Stage B reads Stage A by slice" under the candidate
+extension sections for the contract. In short:
+
+- `joint_adjoint_slices.stage_a_slice(receipt_like, layer)` is the only
+  Stage A input a quantum reads, from a completed receipt or a band alike.
+  Records bind its digest (`adjoint.slice_sha256`) and file
+  (`adjoint.slice_path`), never the receipt.
+- A band (`prismaquant.joint_adjoint_capture.band.v1`) is written by
+  `python3 -m prismaquant.joint_adjoint_band`, a read-only CPU PB action over
+  one durable checkpoint, and gives every layer it serves the same slice,
+  byte for byte, as the completed receipt.
+- The catalog extension is `joint_catalog_extension.v2`: it binds the
+  original run header, so the first band can create it. v1 still verifies.
+  A recovered run's roster digest is checked in the canonical spelling it
+  seals.
+- Prepare, regenerate and dispatch take `--adjoint-band` (repeatable) and act
+  on the layers whose checkpoint has a band; more bands add records and
+  change none. The joiner takes the completed receipt or a complete band set.
+
+Stage A's reverse chain below the lowest checkpoint is not an input to
+anything. Gates: `tests/test_stage_b_band_binding.py`,
+`tests/test_stage_a_bands.py`, `tests/test_joint_cost_quantum_runtime.py`,
+`tests/test_dispatch_joint_quanta.py`, `tests/test_joint_quanta_join.py`,
+`tests/test_joint_catalog_extension.py`. No format, pipeline default or ship
+gate changes.
+
 Stage A keeps the GPU fed (2026-09-22, PQ #989): R12 left the GPU idle about
 20 s of every 60 s window, for two staging reasons. First, an optional
 write-time publication held the owner's one stager lane while it
@@ -310,8 +341,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `fix/989-stagea-staging-overlap`.
+As of: 2026-09-22 · `ws-br/stageb-band-receipts-993`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-22, `ws-br/stageb-band-receipts-993`) for **Stage B
+reading Stage A by slice and by checkpoint band** (PQ #993). Records, the
+quantum argv, the consumer, the catalog extension (now v2), the dispatcher
+and the joiner bind each quantum's Stage A slice instead of the completed
+receipt, and a sealed checkpoint band is a Stage A proof; see "Stage B reads
+Stage A by slice". This supersedes the receipt-digest binding described in
+the #838 stamp below. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-22, `fix/989-stagea-staging-overlap`) for **the Stage A
 read path's lookahead and the stager's `Requeue`** (PQ #989). An optional
@@ -20419,13 +20458,102 @@ The dispatcher enforces the same Docker/PB limits and runtime applies the Torch
 allocator ceiling before GPU preparation. These controls preserve existing
 runtime reserve limitations; they do not claim to cap driver allocations.
 
-The original adjoint receipt remains immutable. An extended cost output root
-reads boundary storage and checkpoint manifests from the receipt's original
-capture namespace. `prepare_extended_joint_quanta` requires completed Stage A,
-fully qualified old/new PWC records and the catalog authority before generating
-fresh metadata. Historical parent layer extents remain identifiable; actual
+The original Stage A artifacts remain immutable. An extended cost output root
+reads boundary storage and checkpoint manifests from the original capture
+namespace its slice names (`boundary_storage.directory`).
+`prepare_extended_joint_quanta` requires sealed Stage A proof (the completed
+receipt or checkpoint bands, PQ #993), fully qualified old/new PWC records and
+the catalog authority before generating fresh metadata. Historical parent layer extents remain identifiable; actual
 new candidate reads must be completed by the executable prepared-input producer.
 It emits a coordinator launch recipe without submitting nested PB work.
 A spec may explicitly bind `container_admission_reference` to PB's portable
 content identity while keeping the distinct scientifically inspected Docker
 content identity; both checks must succeed before execution.
+
+### Stage B reads Stage A by slice (#993)
+
+A layer quantum for layer `L` reads the checkpoint
+`b = nearest_checkpoint_boundary(L)` (the lowest stride boundary above `L`)
+and the forward boundary entries of its chain `b-1 .. L+1` and of `L` itself.
+That is its whole Stage A input, and `joint_adjoint_slices.stage_a_slice`
+returns exactly it from a completed receipt or from the band of `b`:
+
+- the run header: `run_identity`, `stride`, and `boundary_storage` `session`,
+  `policy`, `directory` and, on a run resumed from a forward-recovery capsule,
+  `forward_recovery`;
+- the checkpoint record of `b`, which seals its own manifest under the run's
+  boundary session;
+- `boundary_entries[k]` for `k` in the chain and `L`.
+
+The slice digest is the SHA-256 of its canonical JSON. A slice file carries
+those canonical bytes, so its file digest and the slice digest are one value.
+Nothing else of a receipt (retention, telemetry, other checkpoints, other
+layers' entries) reaches a quantum or its identity.
+
+**Bands.** A band (`prismaquant.joint_adjoint_capture.band.v1`, status `band`)
+carries the run header, one checkpoint record and the boundary entries of the
+layers that checkpoint serves: from the next lower stride boundary (or 0) up
+to `b-1`. `python3 -m prismaquant.joint_adjoint_band` builds one from a Stage A
+request and the sealed checkpoint directory, as a read-only CPU PB action, and
+refuses a checkpoint that does not seal its manifest. Its output equals the
+band that the completed receipt implies, field for field; the gate runs real
+fixture Stage A captures, uninterrupted and resumed from a recovery capsule.
+A band file is written once and never overwritten.
+
+**Binding.** A bound record carries `adjoint.slice_sha256` and
+`adjoint.slice_path` (`{control_root}/adjoint-slices/{qid}.json`). An unbound
+(pre-A) record keeps `receipt_sha256: null`, so pre-A generations reproduce
+byte for byte. The slice, not the receipt, is checked at every gate: the
+producer (`layer_quanta`, `bind_adjoint_slice`), the boundary and executable
+readset binders, the catalog extension, the dispatcher (`check_stage_a_proofs`
+before a row publishes, then the slice file's digest in `quantum_argv`), the
+quantum argv (`--adjoint-slice`, `--adjoint-slice-sha256`), the consumer
+(`verify_quantum_identity` also checks the slice's run header against the
+campaign), and the joiner. A record or campaign binding that names a whole
+receipt refuses. Records derived from a band and from the completed receipt
+are identical, and so are the cost payloads their quanta write.
+
+**Granularity.** `tools/regenerate_joint_quanta.py` and
+`tools/prepare_extended_joint_quanta.py` take the completed receipt or any set
+of bands (`--adjoint-band`, repeatable) and emit records only for layers whose
+checkpoint has a proof; slice files are written before records. Running again
+with more bands is additive: earlier records, slices and readsets republish
+byte for byte, and each band set gets its own records index and launch
+recipe. The extended parent manifest no longer lists the receipt or the
+checkpoint manifests, so it is one set of bytes for every band set.
+`tools/dispatch_joint_quanta.py --adjoint-band` publishes exactly the quanta a
+band proves and reports the rest as pending (`stage_a_pending` in
+`--dry-run`); a named band that does not prove the sealed records refuses.
+
+**Catalog extension v2.** `joint_catalog_extension.v2` binds the original run
+header (`adjoint_run_header`, `adjoint_run_header_sha256`) instead of the
+receipt, so the first band of a run creates the extension, and a receipt or
+any band of that run verifies against the same bytes. v1 extensions, which
+bind the completed receipt, still verify. The roster check reads the spelling
+the header implies: a fresh run seals one newline per qname; a recovered run
+seals the canonical `roster_digest`.
+
+**Joining.** `joint_quanta_join` takes exactly one Stage A proof:
+
+- (a) the completed receipt: every record's slice is recomputed from it, and
+  a mismatch refuses that quantum;
+- (b) a band set: all bands share one run header, every stride checkpoint
+  from the tail down to the lowest has a band, and every layer has a record
+  whose slice matches its band. A layer without a record is a gap.
+
+Stage A's reverse chain below the lowest checkpoint is not an input to
+anything. After the lowest checkpoint is serialized, the remaining reverse
+steps roll a plane that is retired when the loop ends; every layer below that
+checkpoint reads the checkpoint and forward boundary entries, all of which the
+lowest band carries. Mode (b) therefore joins a campaign whose Stage A never
+wrote its receipt.
+
+Limits: each Stage A launch binds its own boundary-session generation
+(`StreamedBoundaryArtifacts.bind`), so bands whose checkpoints two launches
+sealed carry two run headers, and every gate refuses them as mixed runs. The
+checkpoint manifest a quantum reads (`checkpoint.json`) is checked against its
+slice but is not a declared entry of its readset. The pinned Tessera reader accepts only a v1
+extension as rooted cached-unit authority (`tessera.cached_unit`), so a
+campaign whose extension a band created cannot export selected cached units
+until Tessera reads v2 (`tests/test_tessera_selected_cache.py` records the
+refusal).

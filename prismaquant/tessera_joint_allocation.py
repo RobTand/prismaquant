@@ -112,14 +112,14 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
     policy = None
     if policy_binding is not None:
         from .joint_served_activation import verify_policy, require_priced_activation
-        from .joint_catalog_extension import require_extension
+        from .joint_catalog_extension import extension_run_header, require_extension
         extension = joint['provenance'].get('catalog_extension')
         _require(isinstance(extension, dict), 'served policy requires an authenticated catalog extension')
         # The full extension independently binds the old capture and new plan.
         extension_doc = json.loads(_read_bound(extension, 'served policy catalog extension'))
         _same(extension_doc['inputs']['extended_prepared'], prepared_binding, 'served policy extended preparation')
         _same(extension_doc['inputs']['extended_plan']['sha256'], plan_sha256, 'served policy extended plan')
-        require_extension(extension, receipt=json.loads(_read_bound(extension_doc['adjoint_capture'], 'original completed capture')),
+        require_extension(extension, run_header=extension_run_header(extension),
                           plan_sha256=plan_sha256, prepared_sha256=prepared_binding['sha256'])
         policy = verify_policy(policy_binding, original_prepared=extension_doc['inputs']['original_prepared'])
     for name, formats in roster.items():

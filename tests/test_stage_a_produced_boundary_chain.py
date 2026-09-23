@@ -1245,8 +1245,12 @@ def test_the_dispatcher_seals_the_template_the_client_supports(
     monkeypatch.setattr(djq, "_stage_manifest_binding", lambda *a, **k: {
         "data_manifest_sha256": "a" * 64, "read_manifest_sha256": "b" * 64,
         "phases": ["head"]})
+    # The stub keeps the real wrapper's keyword surface: the dispatcher
+    # passes the declared progress phases (and, after #991, the Stage B
+    # resource policy). A narrower stub fails on the call, not on the seal.
     monkeypatch.setattr(djq, "_container_wrap",
-                        lambda spec, payload: (list(payload), None))
+                        lambda spec, payload, *, progress, resource_policy=None:
+                        (list(payload), None))
     monkeypatch.setattr(djq, "_plan_output_root", lambda campaign: "/tmp/out")
     argv = stage_a_argv(Path("/nonexistent/manifest.json"),
                         {"plan_path": "/p", "plan_sha256": "c" * 64,

@@ -51,12 +51,19 @@ from .joint_adjoint_checkpoints import (
     chain_layers_for,
     dev_mode_stamp,
     load_adjoint_checkpoint,
-    load_adjoint_receipt,
     require_dev_mode,
+)
+from .joint_adjoint_slices import (
+    AdjointSliceRefused,
+    adjoint_slice_sha256,
+    load_adjoint_slice,
+    slice_run_header,
+    verify_adjoint_slice,
 )
 from .joint_layer_quanta import (
     CHECKPOINT_LOAD_PHASE,
     PREPARED_INPUT_SCHEMA,
+    check_adjoint_run_header,
     check_prepared_windows_against_resolved,
     executable_bound_phase_name,
     executable_own_source_phase_name,
@@ -107,7 +114,11 @@ def verify_quantum_identity(
 ) -> tuple[dict, dict]:
     """Verify the four digests and the record's campaign binding.
 
-    Returns ``(record, adjoint_receipt)``; raises :class:`QuantumIdentityRefused`
+    ``adjoint_path`` is the quantum's stage-A slice (PQ #993), never a whole
+    receipt: the file is the slice's canonical JSON, so its digest is the
+    ``slice_sha256`` the record binds.
+
+    Returns ``(record, adjoint_slice)``; raises :class:`QuantumIdentityRefused`
     (the caller exits 3) with nothing written. The producer's
     ``check_quantum_for_campaign`` runs too when the producer module has
     landed; until then the same checks run here from the record's own fields,
@@ -147,34 +158,40 @@ def verify_quantum_identity(
         _require_hex(campaign.get("read_manifest_sha256"),
                      "record read_manifest_sha256")
         adjoint = record["adjoint"]
-        if adjoint.get("receipt_sha256") is None:
+        if adjoint.get("receipt_sha256") is not None:
+            raise QuantumIdentityRefused(
+                "quantum record binds a whole stage-A receipt; a quantum reads "
+                "only its slice (PQ #993): re-seal the record")
+        if adjoint.get("slice_sha256") is None:
             raise QuantumIdentityRefused(
                 "quantum record is unbound (pre-stage-A): re-seal it against "
-                "the stage-A receipt with bind_adjoint_receipt -- a new "
+                "its stage-A slice with bind_adjoint_slice -- a new "
                 "identity, never an edit (producer D3) -- before publishing")
-        _require_hex(adjoint.get("receipt_sha256"), "record adjoint receipt_sha256")
-        _require_hex(adjoint_sha256, "--adjoint-sha256")
-        if _digest_of(adjoint_path) != adjoint_sha256:
+        _require_hex(adjoint.get("slice_sha256"), "record adjoint slice_sha256")
+        _require_hex(adjoint_sha256, "--adjoint-slice-sha256")
+        if adjoint_sha256 != adjoint["slice_sha256"]:
             raise QuantumIdentityRefused(
-                f"adjoint receipt digest mismatch at {adjoint_path}")
-        receipt = load_adjoint_receipt(adjoint_path, adjoint_sha256)
-        # Wire and document identity are different bindings: the CLI carries
-        # the wire bytes the writer wrote (checked above and inside the
-        # loader), while the record carries the canonical digest the
-        # producer sealed. Each is compared against its matching
-        # representation -- never wire against canonical.
-        if (adjoint["receipt_sha256"] != canonical_json_sha256(
-                receipt, where="adjoint receipt identity")):
+                "quantum record binds another stage-A slice: "
+                f"record={adjoint['slice_sha256']!r} argv={adjoint_sha256}")
+        try:
+            adjoint_slice = load_adjoint_slice(
+                adjoint_path, adjoint_sha256, layer=layer,
+                checkpoint_boundary=int(adjoint["checkpoint_boundary"]))
+        except AdjointSliceRefused as exc:
+            raise QuantumIdentityRefused(f"stage-A slice refused: {exc}") from exc
+        # The slice's run header must answer for this campaign: its plan,
+        # prepared and scope, or -- for a catalog extension -- the original
+        # run the extension binds (checked by the extension owner).
+        header = slice_run_header(adjoint_slice)
+        try:
+            check_adjoint_run_header(
+                header, plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
+                scope=campaign["campaign_scope"],
+                checkpoints=header["stride"]["boundaries"],
+                catalog_extension=record.get("catalog_extension"))
+        except ValueError as exc:
             raise QuantumIdentityRefused(
-                "quantum record binds another adjoint receipt: "
-                f"record={adjoint['receipt_sha256']!r}")
-        if receipt.get("status") != "complete":
-            raise QuantumIdentityRefused(
-                f"adjoint receipt status is {receipt.get('status')!r}, not complete")
-        if record.get("catalog_extension") is not None:
-            from .joint_catalog_extension import require_extension
-            require_extension(record["catalog_extension"], receipt=receipt,
-                              plan_sha256=plan_sha256, prepared_sha256=prepared_sha256)
+                f"stage-A slice does not answer for this campaign: {exc}") from exc
         chunks = record["chunks"]
         total = int(record["read_set"]["total_bytes"])
         cursor = 0
@@ -230,8 +247,7 @@ def verify_quantum_identity(
                     "read_manifest_sha256": campaign["read_manifest_sha256"],
                     "unit_roster_sha256": campaign["unit_roster_sha256"],
                     "campaign_scope": campaign["campaign_scope"],
-                    "adjoint_receipt_sha256": canonical_json_sha256(
-                        receipt, where="adjoint receipt identity"),
+                    "adjoint_slice_sha256": adjoint_slice_sha256(adjoint_slice),
                 })
             except ValueError as exc:
                 raise QuantumIdentityRefused(
@@ -241,7 +257,7 @@ def verify_quantum_identity(
     except (KeyError, TypeError, ValueError, OSError) as exc:
         raise QuantumIdentityRefused(
             f"quantum record is not a valid {QUANTUM_RECORD_SCHEMA} document: {exc}") from exc
-    return record, receipt
+    return record, adjoint_slice
 
 
 # --------------------------------------------------------------------------
@@ -568,12 +584,12 @@ def _rebuild_batches(runner, *, partitions, shared_pass):
     return batches
 
 
-def _boundary_entry_record(receipt: dict, batch_index: int, boundary: int) -> dict:
-    for entry in receipt["boundary_entries"][str(boundary)]:
+def _boundary_entry_record(adjoint_slice: dict, batch_index: int, boundary: int) -> dict:
+    for entry in adjoint_slice["boundary_entries"][str(boundary)]:
         if entry["name"] == f"boundary-{batch_index}-{boundary}-at-{boundary}":
             return entry
     raise RuntimeError(
-        f"adjoint receipt has no boundary entry for batch {batch_index} "
+        f"stage-A slice has no boundary entry for batch {batch_index} "
         f"boundary {boundary}")
 
 
@@ -1014,26 +1030,26 @@ def build_quantum_source_runner(config, *, offload_folder):
         **_source_prefetch(config))
 
 
-def quantum_adjoint_space(record, receipt, output_root):
+def quantum_adjoint_space(record, adjoint_slice, output_root):
     """Read the original capture namespace when only the candidate catalog moved."""
     if record.get("catalog_extension") is None:
         return adjusted_space(output_root)
-    directory = Path(receipt["boundary_storage"]["directory"])
+    directory = Path(adjoint_slice["boundary_storage"]["directory"])
     if (not directory.is_absolute() or directory.name != "exact-boundaries"
             or ".." in directory.parts):
         raise RuntimeError("catalog extension capture has no canonical original adjoint namespace")
     space = directory.parent
-    for checkpoint in receipt["checkpoints"]:
-        expected = space / "checkpoints" / f"boundary-{int(checkpoint['boundary']):03d}" / "entries"
-        for entry in checkpoint.get("activation_entries", []) + checkpoint.get("shared_state_entries", []):
-            if Path(entry["path"]).parent != expected:
-                raise RuntimeError("catalog extension checkpoint escaped the original capture namespace")
+    checkpoint = adjoint_slice["checkpoint"]
+    expected = space / "checkpoints" / f"boundary-{int(checkpoint['boundary']):03d}" / "entries"
+    for entry in checkpoint.get("activation_entries", []) + checkpoint.get("shared_state_entries", []):
+        if Path(entry["path"]).parent != expected:
+            raise RuntimeError("catalog extension checkpoint escaped the original capture namespace")
     return space
 
 
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
-    record, receipt, execution, output_root,
+    record, adjoint_slice, execution, output_root,
     projection_backend=None, resume=False,
     resolved_windows,
     counters: QuantumCounters, progress: QuantumProgress,
@@ -1087,6 +1103,13 @@ def run_layer_quantum_core(
 
     layer = int(record["layer"])
     quantum_id = str(record["quantum_id"])
+    # The quantum reads its stage-A slice and nothing else (PQ #993): a whole
+    # receipt or band, or a slice the record does not bind, refuses here.
+    verify_adjoint_slice(adjoint_slice, layer=layer,
+                         checkpoint_boundary=int(record["adjoint"]["checkpoint_boundary"]))
+    if adjoint_slice_sha256(adjoint_slice) != record["adjoint"].get("slice_sha256"):
+        raise RuntimeError(f"quantum {quantum_id} is handed a stage-A slice its record "
+                           "does not bind")
     checkpoint_dir = Path(record["output_space"]["checkpoint_dir"])
     n_probes = int(execution["n_probes"])
     seed_base = int(execution["seed_base"])
@@ -1225,7 +1248,7 @@ def run_layer_quantum_core(
         "distributed_quantum": {
             "quantum_id": quantum_id,
             "identity_sha256": record["identity_sha256"],
-            "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
+            "adjoint_slice_sha256": record["adjoint"]["slice_sha256"],
             "checkpoint_boundary": int(record["adjoint"]["checkpoint_boundary"]),
             "chain_layers": [int(c) for c in record["adjoint"]["chain_layers"]],
             "windows": len(record["windows"]),
@@ -1234,12 +1257,12 @@ def run_layer_quantum_core(
     }
 
     # ---- boundary storage: read-attached to the adjoint capture ----------
-    source_adjoint_space = quantum_adjoint_space(record, receipt, output_root)
+    source_adjoint_space = quantum_adjoint_space(record, adjoint_slice, output_root)
     storage_policy = normalize_boundary_storage(execution["boundary_storage"])
     storage_policy["directory"] = str(boundary_entry_directory(source_adjoint_space))
     storage = StreamedBoundaryArtifacts(storage_policy)
-    storage.attach(receipt["boundary_storage"]["session"], n_probes=n_probes,
-                   forward_recovery=receipt["boundary_storage"].get("forward_recovery"))
+    storage.attach(adjoint_slice["boundary_storage"]["session"], n_probes=n_probes,
+                   forward_recovery=adjoint_slice["boundary_storage"].get("forward_recovery"))
     extra["streamed_boundary_storage"] = storage.identity
 
     identity = _build_aura_checkpoint_identity(
@@ -1307,13 +1330,10 @@ def run_layer_quantum_core(
     # legacy slice rows keep byte-identical progress (head/chunks), while
     # bound rows report each staged phase as its bytes are consumed.
     executable = isinstance(record.get("executable_readset"), dict)
-    checkpoint_record = next(
-        (entry for entry in receipt["checkpoints"]
-         if int(entry["boundary"]) == int(record["adjoint"]["checkpoint_boundary"])),
-        None)
-    if checkpoint_record is None:
+    checkpoint_record = adjoint_slice["checkpoint"]
+    if int(checkpoint_record["boundary"]) != int(record["adjoint"]["checkpoint_boundary"]):
         raise RuntimeError(
-            "adjoint receipt does not carry the record's checkpoint boundary "
+            "stage-A slice does not carry the record's checkpoint boundary "
             f"{record['adjoint']['checkpoint_boundary']}")
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
@@ -1337,7 +1357,7 @@ def run_layer_quantum_core(
         for batch_index, batch in enumerate(batches):
             batch.activations_cpu = [
                 (_boundary_entry_record_to_reference(
-                    _boundary_entry_record(receipt, batch_index, boundary))
+                    _boundary_entry_record(adjoint_slice, batch_index, boundary))
                  if boundary in needed else None)
                 for boundary in range(runner.num_layers + 1)]
         storage.watch_auxiliary(batches, cotangent_owners)
@@ -1747,7 +1767,7 @@ def run_layer_quantum_core(
             "campaign_scope": record["campaign"].get("campaign_scope"),
             "unit_roster_sha256": record["campaign"].get("unit_roster_sha256"),
         },
-        "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
+        "adjoint_slice_sha256": record["adjoint"]["slice_sha256"],
         "checkpoint_identity_sha256": checkpoint_identity_sha256,
         **({"catalog_extension": record["catalog_extension"]}
            if record.get("catalog_extension") is not None else {}),
@@ -1831,7 +1851,7 @@ def publish_quantum_outputs(record, *, payload, result, counters,
 
 
 def run_layer_quantum(
-    config, *, record, receipt, plan_sha256, prepared, output_root,
+    config, *, record, adjoint_slice, plan_sha256, prepared, output_root,
     data_manifest_sha256=None, resume=False,
 ) -> dict:
     """Load the head phase and execute one quantum (§6.2 steps 2-6)."""
@@ -1885,7 +1905,7 @@ def run_layer_quantum(
         "quantum_id": record["quantum_id"],
         "identity_sha256": record["identity_sha256"],
         "plan_sha256": plan_sha256,
-        "adjoint_receipt_sha256": record["adjoint"]["receipt_sha256"],
+        "adjoint_slice_sha256": record["adjoint"]["slice_sha256"],
         "env": {"host": socket.gethostname(), "started_epoch": time.time(),
                 "torch": str(torch.__version__), "cuda": torch.version.cuda,
                 "affinity": sorted(os.sched_getaffinity(0))},
@@ -2022,7 +2042,7 @@ def run_layer_quantum(
                                    base_units=data.progress_committed)
         payload = run_layer_quantum_core(
             runner, cache, ids.to(runner.device), data.formats_by_qname,
-            record=record, receipt=receipt, execution=execution_runtime,
+            record=record, adjoint_slice=adjoint_slice, execution=execution_runtime,
             output_root=output_root, projection_backend=projection_backend,
             resume=resume, resolved_windows=resolved_windows,
             counters=counters, progress=progress)
@@ -2069,9 +2089,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plan-sha256", required=True)
     parser.add_argument("--prepared", type=Path, required=True)
     parser.add_argument("--prepared-sha256", required=True)
-    parser.add_argument("--adjoint", type=Path, required=True,
-                        help="the stage-A adjoint-capture receipt")
-    parser.add_argument("--adjoint-sha256", required=True)
+    parser.add_argument("--adjoint-slice", type=Path, required=True,
+                        help="the quantum's stage-A slice (PQ #993); never a "
+                             "whole receipt")
+    parser.add_argument("--adjoint-slice-sha256", required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--profile-tool", default=None,
@@ -2096,11 +2117,11 @@ def main(argv=None) -> int:
         parser.error("layer quanta are a GPU hot path; --device must be cuda")
     try:
         require_dev_mode("joint_cost_quantum")
-        record, receipt = verify_quantum_identity(
+        record, adjoint_slice = verify_quantum_identity(
             quantum_path=args.quantum, quantum_sha256=args.quantum_sha256,
             plan_path=args.plan, plan_sha256=args.plan_sha256,
             prepared_path=args.prepared, prepared_sha256=args.prepared_sha256,
-            adjoint_path=args.adjoint, adjoint_sha256=args.adjoint_sha256,
+            adjoint_path=args.adjoint_slice, adjoint_sha256=args.adjoint_slice_sha256,
             output_root=args.output_root)
     except QuantumIdentityRefused as exc:
         print(f"{IDENTITY_REFUSED_MARKER}: {exc}", flush=True)
@@ -2128,7 +2149,7 @@ def main(argv=None) -> int:
         profiler.enable()
     try:
         result = run_layer_quantum(
-            config, record=record, receipt=receipt, plan_sha256=args.plan_sha256,
+            config, record=record, adjoint_slice=adjoint_slice, plan_sha256=args.plan_sha256,
             prepared={"path": str(args.prepared), "sha256": args.prepared_sha256},
             output_root=args.output_root,
             data_manifest_sha256=args.data_manifest_sha256, resume=args.resume)

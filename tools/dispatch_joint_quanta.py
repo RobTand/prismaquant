@@ -10,9 +10,11 @@ policy starves a box, that is a PB placement capability gap to file, not a
 knob to turn here.
 
 Order (§5.2): stage A first; then quanta, published descending by layer id
-as the stage-A receipt lands. A quantum is publishable once stage A's
-terminal record says executed AND ``adjoint-capture.json`` validates
-(digests match the sealed records). Re-run it (cron, a shell loop, or a
+as stage A seals them. A quantum is publishable once a sealed stage-A proof
+covers its checkpoint -- the completed ``adjoint-capture.json`` or, before
+it lands, the checkpoint band of the quantum's checkpoint (PQ #993) -- and
+its record's slice validates against that proof (the per-record slice
+gate). A validated proof also stops stage-A republication. Re-run it (cron, a shell loop, or a
 human) as stage A completes; within a run every publishable row is
 published — the tool never waits on a worker.
 
@@ -232,8 +234,9 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
     """Load the sealed layer records, highest layer first (§5.2 order).
 
     Every record must share one campaign block (plan, prepared, manifest,
-    scope, roster digests) and one stage-A receipt digest; anything else is
-    a mixed campaign and refuses."""
+    scope, roster digests), and all are unbound (pre-A) or all bound to
+    their stage-A slices (PQ #993); anything else is a mixed campaign and
+    refuses."""
     paths = sorted(records_dir.glob("layer-*.json"))
     if not paths:
         raise DispatchRefused(f"no layer records at {records_dir}")
@@ -250,14 +253,19 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
         if record.get("campaign") != first:
             raise DispatchRefused(
                 f"{path}: campaign block differs (mixed campaign)")
-    receipts = {record.get("adjoint", {}).get("receipt_sha256")
+    for path, record in loaded:
+        if record.get("adjoint", {}).get("receipt_sha256") is not None:
+            raise DispatchRefused(
+                f"{path}: record binds a whole stage-A receipt, not its slice "
+                "(PQ #993): regenerate")
+    bindings = {record.get("adjoint", {}).get("slice_sha256") is not None
                 for _, record in loaded}
-    if len(receipts) != 1:
+    if len(bindings) != 1:
         raise DispatchRefused(
-            "layer records do not share one stage-A receipt digest")
-    # Before stage A publishes, the sealed records bind a null receipt
-    # digest (§5.2 seals records first); after, they uniformly bind the
-    # receipt file's digest. Mixed bindings are a mixed campaign.
+            "layer records mix unbound and slice-bound stage-A bindings")
+    # Before stage A publishes, the sealed records are unbound (§5.2 seals
+    # records first); after, each binds its own slice. Mixed bindings are a
+    # mixed campaign.
     ordered = sorted(loaded,
                      key=lambda item: item[1].get("layer", -1),
                      reverse=True)
@@ -568,14 +576,14 @@ def _executable_prepared_input(record: dict, *,
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} prepared contract names another "
             "prepared payload, not the sealed campaign: refusing")
-    bound_receipt = block.get("receipt_sha256")
+    bound_slice = block.get("slice_sha256")
     adjoint = record.get("adjoint")
-    if annotations.get("receipt_sha256") != bound_receipt or \
+    if bound_slice is None or annotations.get("slice_sha256") != bound_slice or \
             not isinstance(adjoint, dict) or \
-            adjoint.get("receipt_sha256") != bound_receipt:
+            adjoint.get("slice_sha256") != bound_slice:
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} prepared contract binds another "
-            "stage-A receipt, not this row's sealed capture: refusing")
+            "stage-A slice, not this row's sealed capture: refusing")
     windows = record.get("windows")
     if not isinstance(windows, list) or not windows:
         raise ExecutableBindingUnsupported(
@@ -821,8 +829,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S,
-                 consumer_tags: Sequence[str] = CONSUMER_TAGS,
-                 adjoint_path: Path) -> list[str]:
+                 consumer_tags: Sequence[str] = CONSUMER_TAGS) -> list[str]:
     """The exact §5.2 submission argv for one quantum. Pinned by tests: a
     drift here breaks placement.  ``consumer_tags`` is the effective §5.1
     placement policy, a conjunction PB matches against a worker's offered
@@ -831,8 +838,10 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     Every binding the consumer CLI requires is threaded from sealed sources:
     plan/prepared paths+digests from the record's campaign block, the record
     file's own wire digest as ``--quantum-sha256`` (the consumer checks raw
-    bytes first; the canonical body check inside stays), the receipt file's
-    wire digest as ``--adjoint-sha256``, the verified staged-manifest
+    bytes first; the canonical body check inside stays), the record's
+    stage-A slice file and its digest as ``--adjoint-slice`` /
+    ``--adjoint-slice-sha256`` (PQ #993: a quantum reads its slice, never a
+    whole receipt), the verified staged-manifest
     digest, and ``--resume``. Files are read where the row reads them; an
     unreadable or drifting file refuses before anything publishes (#838).
     A record carrying ``executable_readset`` without the sealed
@@ -901,12 +910,21 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         raise DispatchRefused(
             f"quantum {quantum_id!r} record unreadable at {record_path}: "
             f"{exc}") from exc
+    adjoint = record.get("adjoint", {})
+    slice_path, slice_sha256 = adjoint.get("slice_path"), adjoint.get("slice_sha256")
+    if not isinstance(slice_path, str) or not _is_hex64(slice_sha256):
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} is unbound (pre-A): regenerate it against "
+            "its stage-A slice before publishing")
     try:
-        receipt_sha256 = _sha_bytes(Path(adjoint_path).read_bytes())
+        if _sha_bytes(Path(slice_path).read_bytes()) != slice_sha256:
+            raise DispatchRefused(
+                f"quantum {quantum_id!r} stage-A slice at {slice_path} does not "
+                "hash to the sealed digest")
     except OSError as exc:
         raise DispatchRefused(
-            f"quantum {quantum_id!r} adjoint receipt unreadable at "
-            f"{adjoint_path}: {exc}") from exc
+            f"quantum {quantum_id!r} stage-A slice unreadable at "
+            f"{slice_path}: {exc}") from exc
     wrapped, container_image = _container_wrap(SPEC_PATH, [
         "python3", "-m", "prismaquant.joint_cost_quantum",
         "--quantum", str(record_path),
@@ -915,8 +933,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--plan-sha256", str(campaign["plan_sha256"]),
         "--prepared", str(campaign["prepared_path"]),
         "--prepared-sha256", str(campaign["prepared_sha256"]),
-        "--adjoint", str(adjoint_path),
-        "--adjoint-sha256", receipt_sha256,
+        "--adjoint-slice", str(slice_path),
+        "--adjoint-slice-sha256", slice_sha256,
         "--data-manifest-sha256", staged_sha256,
         "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
@@ -1085,46 +1103,108 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     return argv
 
 
-def check_adjoint_receipt(receipt_path: Path, records: list[tuple[Path, dict]]) -> dict:
-    """Validate the stage-A receipt against the sealed records: schema, the
-    shared campaign digests, and the receipt digest every record binds.
+def check_stage_a_proofs(proofs: Sequence[tuple[Path, dict]],
+                         records: list[tuple[Path, dict]]) -> dict[str, str]:
+    """The per-record slice gate (PQ #993): which quanta a sealed proof covers.
 
-    Wire and document identity are compared as matching representations:
-    the records bind the canonical digest the producer sealed
-    (``bind_adjoint_receipt``), so the file's decoded bytes are canonicalized
-    with the same function before comparing -- never raw file bytes against
-    the canonical seal, which valid writer output (pretty JSON + newline)
-    would fail."""
-    receipt = _load_json(receipt_path, where="stage-A receipt")
-    if receipt.get("schema") != ADJOINT_SCHEMA:
-        raise DispatchRefused(
-            f"{receipt_path}: receipt schema is not {ADJOINT_SCHEMA!r}")
+    ``proofs`` are the completed receipt and/or checkpoint bands, as
+    ``(path, document)``. They must share one run header, and that header
+    must answer for the records' campaign (or, for a catalog extension, the
+    original capture the extension binds). Then each record is publishable
+    exactly when a proof carries its checkpoint AND the slice that proof
+    gives the record's layer is the slice the record binds, byte for byte,
+    AND the slice file at ``adjoint.slice_path`` hashes to it. A record with
+    no covering proof is pending, never refused; a covered record binding
+    any other slice refuses the run. Returns ``{quantum_id: slice_sha256}``.
+    """
+    from prismaquant.joint_adjoint_slices import (
+        AdjointSliceRefused, adjoint_slice_sha256, band_set,
+        load_adjoint_slice, stage_a_receipt_kind, stage_a_run_header,
+        stage_a_run_header_sha256, stage_a_slice)
+    from prismaquant.joint_layer_quanta import check_adjoint_run_header
+    if not proofs:
+        return {}
     campaign = records[0][1]["campaign"]
     extensions = [record.get("catalog_extension") for _, record in records]
-    if any(extension is not None for extension in extensions):
-        if any(extension != extensions[0] for extension in extensions):
-            raise DispatchRefused("quantum catalog extension bindings differ")
-        from prismaquant.joint_catalog_extension import require_extension
-        try:
-            require_extension(extensions[0], receipt=receipt,
-                plan_sha256=campaign["plan_sha256"], prepared_sha256=campaign["prepared_sha256"])
-        except (ValueError, OSError, KeyError) as exc:
-            raise DispatchRefused(f"catalog extension refused: {exc}") from exc
-    else:
-        for key in ("plan_sha256", "prepared_sha256"):
-            if receipt.get(key) != campaign[key]:
-                raise DispatchRefused(
-                    f"{receipt_path}: receipt {key} is not this campaign's "
-                    "(stale receipt)")
-    digest = _canonical_receipt_sha256(receipt, where="stage-A receipt")
-    expected = records[0][1]["adjoint"]["receipt_sha256"]
-    if extensions[0] is not None and any(record["adjoint"]["receipt_sha256"] != digest for _, record in records):
-        raise DispatchRefused("catalog extension records must all seal the original completed capture")
-    if expected is not None and digest != expected:
+    if any(extension != extensions[0] for extension in extensions):
+        raise DispatchRefused("quantum catalog extension bindings differ")
+    if any(record.get("adjoint", {}).get("slice_sha256") is None for _, record in records):
         raise DispatchRefused(
-            f"{receipt_path}: canonical digest {digest} does not match the "
-            f"sealed receipt digest {expected} (moved or mismatched receipt)")
-    return receipt
+            "the layer records are unbound (pre-A): regenerate them against the "
+            "stage-A proof before publishing quanta")
+    try:
+        complete = None
+        bands = []
+        for path, document in proofs:
+            if stage_a_receipt_kind(document) == "complete":
+                if complete is not None:
+                    raise DispatchRefused("two completed stage-A receipts named")
+                complete = document
+            else:
+                bands.append(document)
+        indexed = band_set(bands) if bands else {}
+        headers = {stage_a_run_header_sha256(stage_a_run_header(document))
+                   for _, document in proofs}
+        if len(headers) != 1:
+            raise DispatchRefused("stage-A proofs carry different run headers: mixed runs")
+        header = stage_a_run_header(proofs[0][1])
+        try:
+            check_adjoint_run_header(
+                header, plan_sha256=campaign["plan_sha256"],
+                prepared_sha256=campaign["prepared_sha256"],
+                scope=campaign["campaign_scope"],
+                checkpoints=header["stride"]["boundaries"],
+                catalog_extension=extensions[0])
+        except (ValueError, OSError, KeyError) as exc:
+            raise DispatchRefused(f"stage-A proof does not answer for this campaign: {exc}") from exc
+        publishable: dict[str, str] = {}
+        for path, record in records:
+            adjoint = record["adjoint"]
+            layer, boundary = int(record["layer"]), int(adjoint["checkpoint_boundary"])
+            proof = complete if complete is not None else indexed.get(boundary)
+            if proof is None:
+                continue
+            expected = adjoint_slice_sha256(stage_a_slice(proof, layer))
+            if adjoint["slice_sha256"] != expected:
+                raise DispatchRefused(
+                    f"{path}: record binds another stage-A slice than the sealed "
+                    f"proof gives layer {layer}")
+            load_adjoint_slice(adjoint["slice_path"], expected, layer=layer,
+                               checkpoint_boundary=boundary)
+            publishable[record["quantum_id"]] = expected
+    except AdjointSliceRefused as exc:
+        raise DispatchRefused(f"stage-A slice gate refused: {exc}") from exc
+    except OSError as exc:
+        raise DispatchRefused(f"stage-A slice unreadable: {exc}") from exc
+    return publishable
+
+
+def load_stage_a_proofs(receipt_path: Path | None,
+                        band_paths: Sequence[Path], *,
+                        receipt_named: bool = True) -> list[tuple[Path, dict]]:
+    """Read the stage-A proofs.
+
+    A named receipt or band that is missing, or is not a completed receipt
+    or sealed band, refuses. The implicit default receipt path
+    (``receipt_named=False``) is only a place a receipt may have landed: a
+    missing or still-running document there is no proof yet, never a
+    refusal, so bands publish while stage A runs.
+    """
+    from prismaquant.joint_adjoint_slices import load_stage_a_receipt_like
+    proofs = []
+    if receipt_path is not None:
+        try:
+            proofs.append((Path(receipt_path), load_stage_a_receipt_like(receipt_path)))
+        except (OSError, ValueError, RuntimeError) as exc:
+            if receipt_named:
+                raise DispatchRefused(
+                    f"{receipt_path}: not a completed stage-A receipt: {exc}") from exc
+    for path in band_paths:
+        try:
+            proofs.append((Path(path), load_stage_a_receipt_like(path)))
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise DispatchRefused(f"{path}: not a sealed stage-A band: {exc}") from exc
+    return proofs
 
 
 class Gateway:
@@ -1241,6 +1321,10 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                         help="campaign output root (state + quantum spaces)")
     parser.add_argument("--adjoint-receipt", default=None,
                         help="stage-A adjoint-capture.json, when published")
+    parser.add_argument("--adjoint-band", action="append", default=[],
+                        help="a sealed stage-A checkpoint band (repeatable; PQ "
+                             "#993): publishes the quanta of that band's layers "
+                             "before the receipt lands")
     parser.add_argument("--adjoint-manifest", default=None,
                         help="stage-A read manifest (defaults beside records)")
     parser.add_argument("--plan", default=None,
@@ -1303,19 +1387,21 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
     receipt_path = (Path(args.adjoint_receipt) if args.adjoint_receipt
                     else _plan_output_root(records[0][1]["campaign"])
                     / "layer-quanta" / "adjoint" / "adjoint-capture.json")
-    receipt_ok = False
-    if receipt_path is not None:
-        try:
-            check_adjoint_receipt(receipt_path, records)
-            receipt_ok = True
-        except DispatchRefused as exc:
-            # A receipt is named but stale: fail closed only once stage A is
-            # terminally done (otherwise the receipt simply has not landed
-            # yet and the run reports pending).
-            if stage_a_keys and gateway.is_terminal_executed(stage_a_keys[-1]):
-                print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
-                return EXIT_PRECONDITION_REFUSED
-            receipt_ok = False
+    publishable: dict[str, str] = {}
+    try:
+        publishable = check_stage_a_proofs(
+            load_stage_a_proofs(receipt_path, [Path(p) for p in args.adjoint_band],
+                                receipt_named=args.adjoint_receipt is not None),
+            records)
+    except DispatchRefused as exc:
+        # A named band that fails its gate always refuses. A stale receipt
+        # fails closed only once stage A is terminally done (otherwise the
+        # receipt simply has not landed yet and the run reports pending).
+        if args.adjoint_band or (
+                stage_a_keys and gateway.is_terminal_executed(stage_a_keys[-1])):
+            print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
+            return EXIT_PRECONDITION_REFUSED
+    receipt_ok = bool(publishable)
 
     rows: list[dict] = []
     # A stage A that was submitted but did not terminally execute (failed,
@@ -1341,6 +1427,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
         if receipt_ok:
             for record_path, record in records:
                 quantum_id = record["quantum_id"]
+                if quantum_id not in publishable:
+                    continue
                 key = submitted_keys.get(quantum_id)
                 if key is not None and gateway.is_terminal_executed(key):
                     continue
@@ -1351,21 +1439,26 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                                  record, record_path=record_path,
                                  output_root=output_root, priority=priority,
                                  head_grace_s=args.head_grace_s,
-                                 consumer_tags=tags,
-                                 adjoint_path=receipt_path)})
+                                 consumer_tags=tags)})
     except DispatchRefused as exc:
         print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
         return EXIT_PRECONDITION_REFUSED
 
     if args.dry_run:
+        by_id = {record["quantum_id"]: record for _, record in records}
         print(json.dumps({"consumer_tags": list(tags), "priority": priority,
                           "stage_a_terminal": bool(stage_a_keys) and bool(
                               receipt_ok),
+                          "stage_a_pending": [record["quantum_id"] for _, record in records
+                                              if record["quantum_id"] not in publishable],
                           "rows": [{"kind": row["kind"],
                                     "quantum_id": row.get("quantum_id"),
                                     "identity_sha256": row.get("identity_sha256"),
                                     "manifest_sha256": row.get("manifest_sha256"),
-                                    "receipt_sha256": records[0][1]["adjoint"]["receipt_sha256"],
+                                    **({"slice_sha256": publishable[row["quantum_id"]],
+                                        **{key: by_id[row["quantum_id"]]["adjoint"][key]
+                                           for key in ("checkpoint_boundary", "chain_layers")}}
+                                       if row["kind"] == "quantum" else {}),
                                     "argv": row["argv"]}
                                    for row in rows]},
                          indent=2, sort_keys=True))

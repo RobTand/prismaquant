@@ -153,14 +153,19 @@ def test_handoff_keeps_qualified_activation_but_exports_priced_group_value(polic
     # capture/extension authenticator, and verifies that gate is still called.
     checked = []
     monkeypatch.setattr(joint_catalog_extension, 'require_extension', lambda *a, **k: checked.append(k))
-    extension = {'inputs': {'original_prepared': policy['original_prepared'],
-                           'extended_prepared': kwargs['prepared_binding'],
-                           'extended_plan': {'sha256': kwargs['plan_sha256']}},
-                 'adjoint_capture': write(tmp_path/'capture.json', {'synthetic': True})}
+    # A v2 extension embeds the original Stage A run header (PQ #993); the
+    # gate receives exactly that header.
+    header = {'synthetic': True}
+    extension = {'schema': joint_catalog_extension.SCHEMA,
+                 'inputs': {'original_prepared': policy['original_prepared'],
+                            'extended_prepared': kwargs['prepared_binding'],
+                            'extended_plan': {'sha256': kwargs['plan_sha256']}},
+                 'adjoint_run_header': header}
     joint['provenance']['catalog_extension'] = write(tmp_path/'extension.json', extension)
     original = copy.deepcopy(metadata['verified_cells'])
     result = bind_allocation_payload(joint, data, prepared, metadata, **kwargs)
     assert checked and metadata['verified_cells'] == original
+    assert checked[0]['run_header'] == header
     for name in names:
         expected = policy_group(policy, name, FORMAT)[1]['input_global_scale']
         assert result['costs'][name][FORMAT]['input_global_scale'] == expected

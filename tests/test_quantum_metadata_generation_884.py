@@ -725,9 +725,12 @@ def _tiny_receipt(campaign: dict, space: Path) -> Path:
             "plan_sha256": campaign["plan_sha"],
             "prepared_sha256": campaign["prepared_sha"],
             "campaign_scope": {"campaign": "metadata-seam-884"}},
+        "stride": {"value": 1, "source": None, "boundaries": [2, 1],
+                   "max_chain_layers": 0},
         "boundary_storage": {
             "session": dict(session),
-            "policy": {"prefetch_batches": 2}},
+            "policy": {"prefetch_batches": 2},
+            "directory": str(entries_dir)},
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
         "status": "complete",
@@ -739,9 +742,7 @@ def _tiny_receipt(campaign: dict, space: Path) -> Path:
 def test_receipt_and_readsets_bind_under_metadata_namespace(tmp_path):
     pytest.importorskip("torch")
     from prismaquant import joint_cost_quantum as quantum
-    from prismaquant.joint_layer_quanta import (
-        emit_quantum_boundary_readsets,
-    )
+    from prismaquant.joint_adjoint_slices import stage_a_slice
     campaign = _tiny_campaign(tmp_path)
     prior = tmp_path / "prior-records"
     _publish_default_generation(campaign, prior)
@@ -784,6 +785,11 @@ def test_receipt_and_readsets_bind_under_metadata_namespace(tmp_path):
             .read_bytes()).decode("utf-8"))
         assert manifest["annotations"]["render_prerequisite"][
             "binding"] is None
+        # The record's stage-A slice is control metadata too: it lives in
+        # the metadata namespace, and its bytes hash to the bound digest.
+        slice_path = Path(record["adjoint"]["slice_path"])
+        assert slice_path == meta / "adjoint-slices" / f"{record['quantum_id']}.json"
+        assert _sha(slice_path) == record["adjoint"]["slice_sha256"]
         # The consumer's identity gate passes with the DATA output root.
         record_path = meta / "records" / f"{record['quantum_id']}.json"
         found, loaded = quantum.verify_quantum_identity(
@@ -792,10 +798,11 @@ def test_receipt_and_readsets_bind_under_metadata_namespace(tmp_path):
             plan_path=campaign["plan_path"], plan_sha256=campaign["plan_sha"],
             prepared_path=campaign["prepared_path"],
             prepared_sha256=campaign["prepared_sha"],
-            adjoint_path=receipt_path, adjoint_sha256=_sha(receipt_path),
+            adjoint_path=slice_path, adjoint_sha256=_sha(slice_path),
             output_root=Path(str(campaign["root"])))
         assert found["quantum_id"] == record["quantum_id"]
-        assert loaded["status"] == "complete"
+        assert loaded == stage_a_slice(json.loads(receipt_path.read_text()),
+                                       record["layer"])
     # The prior generation is untouched and no control metadata landed in
     # the data tree: every prior file is byte-identical, and the only new
     # files under the data root are the receipt's own stage-A artifacts
@@ -840,8 +847,7 @@ def test_dispatcher_accepts_prepared_executable_rows(tmp_path, monkeypatch):
     record = json.loads(record_path.read_text())
     argv = dispatch.quantum_argv(
         record, record_path=record_path,
-        output_root=Path(str(campaign["root"])),
-        adjoint_path=receipt_path)
+        output_root=Path(str(campaign["root"])))
     assert "--data-manifest" in argv
     assert "prepared_input" in record["executable_readset"]
 
