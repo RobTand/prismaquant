@@ -20,8 +20,8 @@ import json
 from pathlib import Path
 
 from prismaquant.joint_catalog_extension import create_extension, require_extension
-from prismaquant.joint_stageb_resources import verify_policy
-from tools.regenerate_joint_quanta import _load_json, _publish, _pretty, main as regenerate
+from tools.regenerate_joint_quanta import (_load_json, _publish, _pretty, _retained_budget_provenance,
+    main as regenerate)
 
 
 def bind(path):
@@ -103,6 +103,25 @@ def metadata_entries(inputs, plan, prepared, extension):
     return entries
 
 
+def require_derived_budget(plan, *, plan_sha256):
+    """The extended plan's retained budget must be its resource policy's (PQ #1022).
+
+    Stage B metadata is only ever produced for a plan whose retained budget
+    was derived from the roster it must admit. A plan that binds no policy
+    carries an operator-declared budget -- the base GLM plan's declared a
+    4 MiB candidate delta no matrix in the roster fits -- and refuses here,
+    naming the fix, before any head intake or record is produced.
+    """
+    if (plan.get('execution') or {}).get('retained_operator_windows') is None:
+        raise ValueError(f'extended plan {plan_sha256} seals no retained operator windows: refusing')
+    if plan.get('stage_b_resource_policy') is None:
+        raise ValueError(
+            f'extended plan {plan_sha256} binds no stage_b_resource_policy, so its retained budget '
+            'was not derived from the roster; derive it with '
+            'prismaquant.joint_stageb_resources.derive_policy and bind it as stage_b_resource_policy')
+    return _retained_budget_provenance(plan, plan_sha256=plan_sha256)
+
+
 def check_stage_b_spec(spec_path, spec, policy):
     """Refuse a container spec every Stage B quantum row would refuse.
 
@@ -143,7 +162,7 @@ def prepare(args):
     parent = _load_json(args.parent_manifest, digest=args.parent_manifest_sha256, where='original parent manifest')
     derivation = _load_json(args.derivation, digest=args.derivation_sha256, where='original quantum derivation')
     spec = _load_json(args.spec, digest=args.spec_sha256, where='reviewed Stage B container spec')
-    policy = verify_policy(plan['stage_b_resource_policy'])
+    policy = require_derived_budget(plan, plan_sha256=inputs['extended_plan']['sha256'])
     check_stage_b_spec(args.spec, spec, policy)
     root = args.metadata_root.resolve()
     root.mkdir(parents=True, exist_ok=True)

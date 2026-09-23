@@ -28,6 +28,7 @@ import hashlib
 import json
 from pathlib import Path
 import pickle
+import shutil
 from types import SimpleNamespace
 import uuid
 
@@ -181,11 +182,21 @@ def _run(root, monkeypatch, *, model="dense", stride=2, implementation=ONE,
             identities.append(json.loads(json.dumps(identity)))
         return bind(self, identity, **kw)
 
+    at_death = []
+
     def partial(storage, space, *, boundary, **kw):
         if boundary == partial_at:
-            entries = checkpoint_directory(space, boundary) / "entries"
-            entries.mkdir(parents=True)
-            (entries / "cotangent-0-0.pt").write_bytes(b"half written")
+            # The roll has written the cotangents into the open checkpoint
+            # (PQ #1002); the action is killed sealing it, with one file half
+            # written. A kill runs no close, and the owner's close is what
+            # disposes a failed attempt's directory, so the directory as it
+            # is now is what a relaunch finds: kept aside and put back below.
+            directory = checkpoint_directory(space, boundary)
+            (directory / "entries").mkdir(parents=True, exist_ok=True)
+            (directory / "entries" / "cotangent-0-0.pt").write_bytes(b"half written")
+            kept = root.parent / f"{root.name}-boundary-{boundary}-at-death"
+            shutil.copytree(directory, kept)
+            at_death.append((kept, directory))
             raise _Interrupted(f"died writing checkpoint {boundary}")
         return checkpoint(storage, space, boundary=boundary, **kw)
 
@@ -194,12 +205,17 @@ def _run(root, monkeypatch, *, model="dense", stride=2, implementation=ONE,
         patch.setattr(StreamedBoundaryArtifacts, "bind", bound)
         patch.setattr(stage_a, "write_checkpoint_with_snapshot", partial)
         patch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=generation))
-        receipt = stage_a.run_adjoint_capture_core(
-            runner, draw() if calib is None else calib, execution=execution,
-            output_root=root, stride=stride,
-            source_model_identity=_model_identity("joint-source"),
-            implementation_sha256=implementation, chain_resume=chain_resume,
-            **{**CAMPAIGN, **(campaign or {})}, **core)
+        try:
+            receipt = stage_a.run_adjoint_capture_core(
+                runner, draw() if calib is None else calib, execution=execution,
+                output_root=root, stride=stride,
+                source_model_identity=_model_identity("joint-source"),
+                implementation_sha256=implementation, chain_resume=chain_resume,
+                **{**CAMPAIGN, **(campaign or {})}, **core)
+        finally:
+            for kept, directory in at_death:
+                assert not directory.exists(), "the owner's close kept a failed attempt"
+                kept.rename(directory)
     return json.loads(json.dumps(receipt))
 
 
@@ -305,6 +321,10 @@ SHAPES = {
     "after-last-checkpoint": dict(interrupt=_at(0, 2, 1), resumes_from=2),
     # Killed while writing checkpoint 2: its directory is left half written.
     "partial-checkpoint": dict(partial_at=2, resumes_from=4),
+    # Failed mid-roll of layer 2, whose checkpoint is open and holds the
+    # cotangents rolled so far (PQ #1002): the attempt is retained, and the
+    # owner's close disposes its directory, so nothing is left to set aside.
+    "mid-checkpoint-roll": dict(interrupt=_at(2, 1, 2), resumes_from=4),
     # SIGKILL: no exception handler ran, the generation still says running.
     "killed": dict(interrupt=_at(1, 0, 4), resumes_from=2, killed=True),
     # Stride 1: the resume point is checkpoint 1, so the only roll left is
@@ -380,10 +400,12 @@ def test_a_resumed_run_writes_what_the_uninterrupted_run_writes(tmp_path, monkey
     assert record["partial_checkpoints_set_aside"] == set_aside
     assert resumed["telemetry"]["chain_resume"]["switch_checkpoint"] == resumes_from
 
-    extra = {"layer-quanta/adjoint/resumes/resume-001.json"} | {
-        f"layer-quanta/adjoint/checkpoints/{name}/entries/cotangent-0-0.pt"
-        for name in set_aside}
     ours, theirs = _tree(root), _tree(aside)
+    partial = {key for key in ours for name in set_aside
+               if key.startswith(f"layer-quanta/adjoint/checkpoints/{name}/")}
+    assert bool(partial) == bool(set_aside)
+    assert not any(key.endswith("/checkpoint.json") for key in partial)
+    extra = {"layer-quanta/adjoint/resumes/resume-001.json"} | partial
     names = {str(generation.relative_to(root))}
     assert set(ours) - set(theirs) == extra and set(theirs) <= set(ours)
     assert {k: v for k, v in ours.items() if k not in extra | names} == \
