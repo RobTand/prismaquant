@@ -328,14 +328,14 @@ def _proof_header_sha256(campaign: dict) -> str:
 def _check_stage_a_header(campaign: dict, records: dict[str, dict]) -> None:
     """The stage-A proof's run header answers for the campaign being joined.
 
-    The same owner the producer binds with (``check_adjoint_run_header``):
+    The identity half of the producer's check (``check_adjoint_run_identity``):
     the run's plan, prepared and scope, or, for a catalog extension, the
     original run the extension binds. Every record must carry one extension
     binding. With no record present there is nothing the header could admit.
     """
     from prismaquant.joint_adjoint_slices import (
         AdjointSliceRefused, stage_a_run_header)
-    from prismaquant.joint_layer_quanta import canonical_bytes, check_adjoint_run_header
+    from prismaquant.joint_layer_quanta import canonical_bytes, check_adjoint_run_identity
     if not records:
         return
     extensions = {canonical_bytes(record.get("catalog_extension"))
@@ -345,10 +345,12 @@ def _check_stage_a_header(campaign: dict, records: dict[str, dict]) -> None:
     proof = campaign.get("adjoint_receipt") or campaign["adjoint_bands"][0]
     try:
         header = stage_a_run_header(proof)
-        check_adjoint_run_header(
+        # Each record binds the slice this header gives its layer
+        # (stage_a_expected_slices), so the header's stride is the one the
+        # producer bound; the joiner derives no stride of its own.
+        check_adjoint_run_identity(
             header, plan_sha256=campaign["plan_sha256"],
             prepared_sha256=campaign["prepared_sha256"], scope=campaign["scope"],
-            checkpoints=header["stride"]["boundaries"],
             catalog_extension=next(iter(records.values())).get("catalog_extension"))
     except (AdjointSliceRefused, ValueError, OSError) as exc:
         raise JoinRefused(

@@ -30,8 +30,8 @@ def owner(path, **kwargs):
     return value
 
 
-def fixture():
-    model, context, runner, cache = _fixture()
+def fixture(layers=2):
+    model, context, runner, cache = _fixture(layers=layers)
     install = context.install
     context.install = lambda layer, *, require_prefetched=False, prefetch_following=True: install(
         layer, require_prefetched=require_prefetched)

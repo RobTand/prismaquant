@@ -237,6 +237,25 @@ def test_build_covers_whole_consumption_corpus(tmp_path):
     assert manifest["annotations"]["render_prerequisite"]["scope"] == "pb732"
 
 
+def test_checkpoint_manifest_is_the_first_declared_checkpoint_read(tmp_path):
+    """``load_adjoint_checkpoint`` opens ``checkpoint.json`` before any
+    entry, so the executable readset declares it first in the
+    checkpoint-load phase, with the bytes the writer published."""
+    record, receipt, parent = _layer2(tmp_path)
+    manifest = build_quantum_executable_manifest(
+        record, receipt, parent, strided_boundaries=STRIDED,
+        n_probes=N_PROBES, calib=dict(CALIB),
+        render_prerequisite=dict(RENDER_PREREQ))
+    on_disk = tmp_path / "adjoint" / "checkpoints" / "boundary-004" / "checkpoint.json"
+    payload = on_disk.read_bytes()
+    phase = next(p for p in manifest["read_plan"]["phases"]
+                 if p["name"] == CHECKPOINT_LOAD_PHASE)
+    first = manifest["entries"][phase["entry_indices"][0]]
+    assert first == {"path": str(on_disk), "offset": 0,
+                     "bytes": len(payload),
+                     "sha256": hashlib.sha256(payload).hexdigest()}
+
+
 def test_build_refuses_contradictory_triples(tmp_path):
     record, receipt, parent = _layer2(tmp_path)
     parent = json.loads(json.dumps(parent))

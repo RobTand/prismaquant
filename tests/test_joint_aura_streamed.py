@@ -17,9 +17,9 @@ from test_streamed_cost_checkpoints import (
 )
 
 
-def _fixture(seed=85):
+def _fixture(seed=85, layers=2):
     torch.manual_seed(seed)
-    state = _DenseTinyLM().eval().state_dict()
+    state = _DenseTinyLM(layers=layers).eval().state_dict()
     model, context, runner = _dense_runner(state)
     weights = {
         (name, fmt): module.weight.detach().clone() + 0.03125
