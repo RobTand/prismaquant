@@ -100,6 +100,92 @@ class AdjointSliceRefused(ValueError):
     """A receipt-like, slice or band that cannot serve the requested layer."""
 
 
+# --------------------------------------------------------------------------
+# The chain regime (RobTand/prismaquant#997)
+# --------------------------------------------------------------------------
+
+#: The ``run_identity`` key that carries a non-default chain regime.
+CHAIN_REGIME_KEY = "chain_regime"
+CHAIN_REGIME_SCHEMA = "prismaquant.stage_a.chain_regime.v1"
+#: The regime every run before #997 used, and the one that stamps nothing:
+#: one sample per backward, one forward per probe.
+DEFAULT_CHAIN_REGIME = {"batch_size": 1, "probe_fusion": False}
+
+
+class ChainRegimeRefused(AdjointSliceRefused):
+    """A chain regime that is malformed, or differs from the one required."""
+
+
+def normalize_chain_regime(batch_size=1, probe_fusion=False) -> dict:
+    """``{"batch_size", "probe_fusion"}``, validated.
+
+    ``batch_size`` is how many calibration samples one layer forward and
+    backward carries. It changes the GEMM shapes, so it changes rounding:
+    two runs at different batch sizes are statistically equivalent, never
+    bitwise equal. ``probe_fusion`` runs one forward per sample group and
+    one backward per probe; at a fixed batch size it is bitwise-neutral.
+    """
+    if type(batch_size) is not int or batch_size < 1:
+        raise ChainRegimeRefused(
+            f"chain batch size must be a positive integer, got {batch_size!r}")
+    if type(probe_fusion) is not bool:
+        raise ChainRegimeRefused(
+            f"chain probe fusion must be a boolean, got {probe_fusion!r}")
+    return {"batch_size": batch_size, "probe_fusion": probe_fusion}
+
+
+def chain_regime_identity(regime) -> dict | None:
+    """The ``run_identity`` value for ``regime``; ``None`` for the default.
+
+    The default regime stamps nothing, so every receipt, band and slice
+    written before #997 keeps its bytes and its digest.
+    """
+    regime = normalize_chain_regime(**regime)
+    if regime == DEFAULT_CHAIN_REGIME:
+        return None
+    return {"schema": CHAIN_REGIME_SCHEMA, **regime}
+
+
+def chain_regime_of(run_identity) -> dict:
+    """The chain regime a Stage A ``run_identity`` answers for.
+
+    An absent key is the default regime. A present key must be a complete,
+    non-default stamp: a stamped default would give one regime two spellings
+    and two digests.
+    """
+    if not isinstance(run_identity, dict):
+        raise ChainRegimeRefused("a Stage A run identity must be a JSON object")
+    stamp = run_identity.get(CHAIN_REGIME_KEY)
+    if stamp is None:
+        if CHAIN_REGIME_KEY in run_identity:
+            raise ChainRegimeRefused("a Stage A chain regime may not be null")
+        return dict(DEFAULT_CHAIN_REGIME)
+    if (not isinstance(stamp, dict)
+            or set(stamp) != {"schema", "batch_size", "probe_fusion"}
+            or stamp["schema"] != CHAIN_REGIME_SCHEMA):
+        raise ChainRegimeRefused(f"a Stage A chain regime is malformed: {stamp!r}")
+    regime = normalize_chain_regime(stamp["batch_size"], stamp["probe_fusion"])
+    if regime == DEFAULT_CHAIN_REGIME:
+        raise ChainRegimeRefused(
+            "a Stage A run identity stamps the default chain regime; the "
+            "default is spelled by the key's absence")
+    return regime
+
+
+def require_chain_regime(run_identity, regime, *, where: str) -> dict:
+    """Refuse unless ``run_identity`` answers for ``regime``."""
+    expected = normalize_chain_regime(**regime)
+    found = chain_regime_of(run_identity)
+    if found != expected:
+        raise ChainRegimeRefused(
+            f"{where}: the chain regime differs: the run answers for "
+            f"batch size {found['batch_size']}, probe fusion "
+            f"{'on' if found['probe_fusion'] else 'off'}; this launch runs batch "
+            f"size {expected['batch_size']}, probe fusion "
+            f"{'on' if expected['probe_fusion'] else 'off'}")
+    return found
+
+
 def checkpoint_seal_sha256(record) -> str:
     """The digest a checkpoint manifest seals over its own fields."""
     return canonical_json_sha256(

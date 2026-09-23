@@ -50,18 +50,22 @@ from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .joint_adjoint_checkpoints import (
     ADJOINT_CAPTURE_ENTRY_POINT,
     ADJOINT_RECEIPT_SCHEMA,
+    CHAIN_REGIME_KEY,
     DEFAULT_STRIDE,
     QUANTUM_COUNTERS_SCHEMA,
+    ChainRegimeRefused,
     GpuPowerSampler,
     KernelTimeProfiler,
     adjoint_space,
     boundary_entry_directory,
     chain_layers_for,
+    chain_regime_identity,
     derive_checkpoint_boundaries,
     dev_mode_stamp,
     exact_entry_record,
     occupied_checkpoint_directories,
     render_free_layer_roll,
+    normalize_chain_regime,
     require_dev_mode,
     write_adjoint_checkpoint,
     write_adjoint_receipt,
@@ -497,6 +501,31 @@ def estimate_stage_a_artifact_demand(
     }
 
 
+def _require_chain_regime_fits(regime, storage_policy, *, n_probes, entry_bytes):
+    """Refuse a chain regime the sealed boundary policy cannot run.
+
+    A batch group never spans two read windows, so the batch size divides
+    ``prefetch_batches``; a fused window holds each batch's boundary entry
+    and every probe's incoming entry inside ``max_resident_bytes``
+    (``fused_window_size``). ``render_free_layer_roll`` refuses the same
+    things; this asks before the capture instead of after it.
+    ``entry_bytes`` is called only for a fused regime.
+    """
+    from .cost_streaming import fused_window_size
+
+    window = int(storage_policy["prefetch_batches"])
+    if window % int(regime["batch_size"]):
+        raise ChainRegimeRefused(
+            f"chain batch size {regime['batch_size']} does not divide the "
+            f"sealed read window of {window} batches")
+    if regime["probe_fusion"]:
+        fused_window_size(
+            prefetch_batches=window,
+            max_resident_bytes=storage_policy["max_resident_bytes"],
+            per_batch_bytes=(1 + int(n_probes)) * int(entry_bytes()),
+            batch_size=regime["batch_size"], write_bytes=int(entry_bytes()))
+
+
 def _stage_a_per_tensor_nbytes(runner, *, batch_rows: int, seqlen: int) -> int:
     """Per-boundary tensor bytes from live geometry; allocates no bulk bytes.
 
@@ -745,6 +774,7 @@ def run_adjoint_capture_core(
     read_manifest_sha256, implementation_sha256, campaign_scope=None,
     boundary_artifact_bytes=None, artifact_budget_stamp=None,
     min_free_gib=0.0, progress=None, produced_output=None, forward_recovery=None,
+    chain_batch_size=1, chain_probe_fusion=False,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -778,6 +808,12 @@ def run_adjoint_capture_core(
     tensor this panel produces, and the durable origin class maximum is
     the EFFECTIVE ``max_artifact_bytes`` -- the plan's sealed value or
     this run's override, whichever is in force.
+
+    ``chain_batch_size`` and ``chain_probe_fusion`` are the chain regime
+    (RobTand/prismaquant#997, ``render_free_layer_roll``). A non-default
+    regime is stamped into the receipt's ``run_identity`` under
+    ``chain_regime``, so every band and slice carries it and a quantum
+    rebuilds its chain with the same batch size. The default stamps nothing.
     """
     from .cost_streaming import (
         StreamedBoundaryArtifacts,
@@ -788,6 +824,8 @@ def run_adjoint_capture_core(
     from .kl_fisher import ROW_PROBE_LAYOUT, fisher_probe_scalar
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
+    chain_regime = normalize_chain_regime(chain_batch_size, chain_probe_fusion)
+    regime_identity = chain_regime_identity(chain_regime)
     n_probes = int(execution["n_probes"])
     seed_base = int(execution["seed_base"])
     token_scope = "all"
@@ -815,6 +853,13 @@ def run_adjoint_capture_core(
 
     batch_rows = min(probe_microbatch or len(calib_ids), len(calib_ids))
     row_offsets = list(range(0, len(calib_ids), batch_rows))
+    # The regime must fit the sealed read window before anything is
+    # captured: a refusal at the first chain layer would come after the
+    # whole forward capture (RobTand/prismaquant#997).
+    _require_chain_regime_fits(
+        chain_regime, storage_policy, n_probes=n_probes,
+        entry_bytes=lambda: _stage_a_per_tensor_nbytes(
+            runner, batch_rows=batch_rows, seqlen=int(calib_ids.shape[1])))
     probe_layout = None
     execution_partition = None
     if probe_microbatch:
@@ -879,7 +924,11 @@ def run_adjoint_capture_core(
                 n_batches=len(calib_ids),
                 max_entry_tensor_bytes=_stage_a_per_tensor_nbytes(
                     runner, batch_rows=batch_rows,
-                    seqlen=int(calib_ids.shape[1])))
+                    seqlen=int(calib_ids.shape[1])),
+                # The fused roll reads every probe's incoming group beside
+                # the boundary group (RobTand/prismaquant#997).
+                **({"read_order": "sample_major"}
+                   if chain_regime["probe_fusion"] else {}))
             log("boundary capture: produced-output binding "
                 f"{produced_output.instance['owner_action_key']} "
                 f"prefix={produced_output.output_prefix} "
@@ -1039,7 +1088,11 @@ def run_adjoint_capture_core(
                     roll=roll, min_free_gib=min_free_gib,
                     # The next layer's first window reads probe 0's rolled
                     # entries; ``grad_outs`` holds them once probe 0 ran.
-                    then=((layer - 1, grad_outs[0]) if layer > 0 else None))
+                    # A fused next window reads every probe's.
+                    then=((layer - 1, grad_outs if chain_regime["probe_fusion"]
+                           else grad_outs[0]) if layer > 0 else None),
+                    batch_size=chain_regime["batch_size"],
+                    probe_fusion=chain_regime["probe_fusion"])
                 if layer in boundaries:
                     serialize_checkpoint(layer)
                 chain_telemetry.append({
@@ -1085,6 +1138,8 @@ def run_adjoint_capture_core(
             "seed_base": seed_base,
             "calibration_shape": list(calib_ids.shape),
             "calibration_sha256": bind_identity["calibration_sha256"],
+            **({CHAIN_REGIME_KEY: regime_identity}
+               if regime_identity is not None else {}),
         },
         "stride": {"value": int(stride), "source": None,  # filled by caller
                    "boundaries": [int(b) for b in boundaries],
@@ -1272,6 +1327,7 @@ def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
     prefetch_override=None, artifact_budget_bytes=None, forward_recovery=None,
+    chain_batch_size=1, chain_probe_fusion=False,
 ) -> dict:
     """Load the head phase and run the adjoint capture (one PB action)."""
     from .aura_cost import _aura_source_sha256
@@ -1309,6 +1365,11 @@ def run_adjoint_capture(
         raise AdjointIdentityRefused(
             f"plan output_root {config['output_root']} is not --output-root "
             f"{output_root}")
+    try:
+        regime_stamp = chain_regime_identity(
+            normalize_chain_regime(chain_batch_size, chain_probe_fusion))
+    except ChainRegimeRefused as exc:
+        raise AdjointIdentityRefused(str(exc)) from exc
     occupied = occupied_checkpoint_directories(adjoint_space(output_root))
     if occupied:
         # write_adjoint_checkpoint creates each boundary with exist_ok=False,
@@ -1337,6 +1398,7 @@ def run_adjoint_capture(
         "stride": {"value": stride_value, "source": stride_source},
         "prefetch_override": prefetch["override"],
         "artifact_budget_override": artifact["override"],
+        **({"chain_regime": regime_stamp} if regime_stamp is not None else {}),
         "env": {"host": socket.gethostname(), "started_epoch": time.time(),
                 "torch": str(torch.__version__), "cuda": torch.version.cuda,
                 "affinity": sorted(os.sched_getaffinity(0))},
@@ -1463,7 +1525,8 @@ def run_adjoint_capture(
             boundary_artifact_bytes=int(artifact["run_used"]),
             artifact_budget_stamp=artifact["override"],
             min_free_gib=config.get("min_free_gib", 0.0), progress=progress,
-            produced_output=publication, forward_recovery=forward_recovery)
+            produced_output=publication, forward_recovery=forward_recovery,
+            chain_batch_size=chain_batch_size, chain_probe_fusion=chain_probe_fusion)
         receipt["stride"]["source"] = stride_source
         receipt["device_envelope"] = result["device_envelope"]
         torch.cuda.synchronize()
@@ -1580,6 +1643,16 @@ def main(argv=None) -> int:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--forward-recovery", type=Path)
     parser.add_argument("--forward-recovery-sha256")
+    parser.add_argument("--chain-batch-size", type=int, default=1,
+                        help="calibration samples per render-free chain "
+                             "forward and backward (default %(default)s). "
+                             "B > 1 changes rounding and is stamped into the "
+                             "receipt's run identity (RobTand/prismaquant#997)")
+    parser.add_argument("--chain-probe-fusion", choices=("on", "off"), default="off",
+                        help="one chain forward per sample group and one "
+                             "backward per probe (default %(default)s); "
+                             "bitwise-neutral at a fixed batch size, stamped "
+                             "into the run identity")
     args = parser.parse_args(argv)
     if bool(args.forward_recovery) != bool(args.forward_recovery_sha256):
         parser.error("--forward-recovery and --forward-recovery-sha256 must be paired")
@@ -1605,7 +1678,9 @@ def main(argv=None) -> int:
             artifact_budget_bytes=args.artifact_budget_bytes,
             forward_recovery=({"path": str(args.forward_recovery),
                                "sha256": args.forward_recovery_sha256}
-                              if args.forward_recovery else None))
+                              if args.forward_recovery else None),
+            chain_batch_size=args.chain_batch_size,
+            chain_probe_fusion=args.chain_probe_fusion == "on")
     except AdjointIdentityRefused as exc:
         print(f"adjoint_identity_refused: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED

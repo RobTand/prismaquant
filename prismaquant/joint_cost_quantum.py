@@ -55,7 +55,9 @@ from .joint_adjoint_checkpoints import (
 )
 from .joint_adjoint_slices import (
     AdjointSliceRefused,
+    ChainRegimeRefused,
     adjoint_slice_sha256,
+    chain_regime_of,
     load_adjoint_slice,
     slice_run_header,
     verify_adjoint_slice,
@@ -1110,6 +1112,14 @@ def run_layer_quantum_core(
     if adjoint_slice_sha256(adjoint_slice) != record["adjoint"].get("slice_sha256"):
         raise RuntimeError(f"quantum {quantum_id} is handed a stage-A slice its record "
                            "does not bind")
+    # The chain a quantum rebuilds from its checkpoint runs Stage A's own
+    # regime (RobTand/prismaquant#997): the batch size sets the rounding,
+    # so a chain at another batch size would not be Stage A's chain.
+    try:
+        chain_regime = chain_regime_of(adjoint_slice["run_identity"])
+    except ChainRegimeRefused as exc:
+        raise QuantumIdentityRefused(
+            f"quantum {quantum_id}: the stage-A slice's chain regime: {exc}") from exc
     checkpoint_dir = Path(record["output_space"]["checkpoint_dir"])
     n_probes = int(execution["n_probes"])
     seed_base = int(execution["seed_base"])
@@ -1386,7 +1396,9 @@ def run_layer_quantum_core(
                         incoming_tensor=lambda probe, batch: grad_plane[(probe, batch)],
                         roll=lambda tensor, batch, probe: grad_plane.__setitem__(
                             (probe, batch), tensor),
-                        min_free_gib=min_free_gib)
+                        min_free_gib=min_free_gib,
+                        batch_size=chain_regime["batch_size"],
+                        probe_fusion=chain_regime["probe_fusion"])
                     chain_backwards += backwards
                 finally:
                     runner.context.unload(chain_layer)
