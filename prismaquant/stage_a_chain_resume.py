@@ -303,6 +303,9 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
     from .joint_adjoint_checkpoints import adjoint_receipt_path, require_dev_mode
 
     space = Path(space)
+    from .stage_a_retirement import refuse_retired_space
+    refuse_retired_space(space, ChainResumeRefused,
+                         what="a retired run has no checkpoints to resume from")
     if adjoint_receipt_path(space).exists():
         raise ChainResumeRefused(
             f"{adjoint_receipt_path(space)} exists: the run completed and has no "

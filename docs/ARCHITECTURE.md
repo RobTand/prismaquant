@@ -1,5 +1,39 @@
 # PrismaQuant Architecture
 
+A superseded Stage A run's checkpoints and the entries they pin can be
+retired (2026-09-23, `ws-tq/1073-retire-superseded-pins`, PQ #1073). Since
+#1036 a checkpoint names the owner's own cotangent entries instead of copying
+them, so each run attempt left about 206 GB pinned on the pool, charged by
+PrismaBuild, with nothing to retire it after a fresh restart.
+`tools/retire_stage_a_run.py` (`prismaquant.stage_a_retirement`), run as a
+PrismaBuild action, checks everything before it removes anything:
+- a successor run is named under a pinned digest, and its run identity
+  differs from the target's; the same identity is a resume;
+- every owner in the chain state and the resume records passes
+  `require_producer_contained`;
+- no JSON document under the declared `--binding-root`s names a path in the
+  run's adjoint space, or the digest of its chain state, receipt or any
+  checkpoint. At least one root is required.
+
+It then sorts every unreclaimed batch in PrismaBuild's records for those
+owners. A batch wholly inside the checkpoints' files and referenced entries
+is retired; each of its files must still match the commit's
+`origin_identity`. A batch with none of those files is left alone, and a
+batch with some of them refuses. The tool seals `stage-a-retired.json`
+first, which makes chain resume, seed and band refuse the space. It then
+removes `checkpoints/` and the referenced entries, and calls
+`reclaim_origin` for each retired batch. A rerun finishes from the sealed
+record. The queue root comes from the producer records, so no
+produced-output binding is needed. The tool reads PrismaBuild's private
+`_load_batch_record` and `_read_commitments`, because PrismaBuild publishes
+no reader for a staged batch. Gates:
+- `tests/test_stage_a_retirement_1073.py`;
+- `tests/test_stage_a_retirement_pb_1073.py`: on a real owner, the durable
+  charge drops by exactly the pinned batch's bytes.
+
+This adds a new operator tool and three refusals. It changes no format,
+pipeline default, stage or ship gate.
+
 The Stage B preparation runs as a PrismaBuild action that declares what it
 reads and commits what it writes (2026-09-23, `ws-tq/1070-stage-b-prep-on-pb`,
 PQ #1070). `tools/prepare_extended_joint_quanta.py` and the generator it runs,
@@ -936,8 +970,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-br/handoff-origin-batch-1075`.
+As of: 2026-09-23 · `ws-tq/1073-retire-superseded-pins`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-tq/1073-retire-superseded-pins`) for **retiring
+a superseded Stage A run's pinned checkpoint entries** (PQ #1073): an operator
+tool proves supersession, containment and that no declared binding names the
+run, removes its checkpoints and referenced entries, and reclaims their
+PrismaBuild batches; a retired space refuses resume, seed and band. See the
+entry at the top. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-br/handoff-origin-batch-1075`) for **the
 band-serial handoff committed as consumed origin batches** (PQ #1075, part

@@ -321,6 +321,8 @@ def build_band_receipt(*, output_root, boundary: int, plan_sha256: str, prepared
     output_root = Path(output_root)
     space = adjoint_space(output_root)
     refuse_seed_space(space)
+    from .stage_a_retirement import refuse_retired_space
+    refuse_retired_space(space, BandRefused, what="its checkpoints feed no band")
     checkpoint, checkpoint_binding = read_sealed_checkpoint(space, boundary)
     marker = checkpoint["session"]
     session, policy = read_generation(space, {
