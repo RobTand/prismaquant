@@ -541,8 +541,8 @@ def resolve_sealed_readset(*, env=None):
     return cas_root, digest, size
 
 
-def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int, int]]]:
-    """PB's sealed readset as ``{declared path: merged [start, end) spans}``.
+def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
+    """PB's sealed data manifest for this action, decoded by PB's own reader.
 
     The declared-range authority, read from PrismaBuild's own request
     context and decoded by PrismaBuild's own validator:
@@ -629,11 +629,46 @@ def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int,
     entries = payload.get("entries")
     if not isinstance(entries, list):
         raise ReadsetUnbound("sealed manifest declares no entries")
+    return payload
+
+
+def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int, int]]]:
+    """PB's sealed readset as ``{declared path: merged [start, end) spans}``.
+
+    Read through :func:`_load_sealed_payload`, whose docstring states every
+    hop and bound.
+    """
+    payload = _load_sealed_payload(bound_manifest_sha256)
+    entries = payload["entries"]
     spans: dict[str, list[tuple[int, int]]] = {}
     for row in entries:
         path, offset, count = row["path"], row["offset"], row["bytes"]
         spans.setdefault(str(path), []).append((int(offset), int(offset) + int(count)))
     return spans
+
+
+def load_sealed_read_order(bound_manifest_sha256: str) -> list[tuple[str, int, int]]:
+    """The sealed manifest's entries in the order the action reads them.
+
+    ``[(path, file offset, bytes), ...]``, in read order: the order whose
+    running byte sum PrismaBuild's movers, plans and landing records name
+    ranges in (PB ``core.residency_descriptor``). Cut by PB's own
+    ``storage_tiers.manifest_read_entries`` -- list order for a v1 manifest,
+    the ``read_plan`` expansion for v2, revisits included -- so this reader
+    and the plan agree about one order by construction rather than by a
+    second parser. Raises :class:`ReadsetUnbound` when PB's helper is not
+    importable or the manifest describes no read order.
+    """
+    payload = _load_sealed_payload(bound_manifest_sha256)
+    try:
+        from prismabuild.storage_tiers import manifest_read_entries
+    except ImportError as error:
+        raise ReadsetUnbound(f"PB read-order helper unavailable: {error}") from None
+    entries = manifest_read_entries(payload)
+    if not entries:
+        raise ReadsetUnbound("PB's read order does not describe the sealed manifest")
+    return [(str(row["path"]), int(row["offset"]), int(row["bytes"]))
+            for row in entries]
 
 
 def _material_consumer(identity, ctx) -> str:

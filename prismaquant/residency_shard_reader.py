@@ -83,12 +83,21 @@ from .staged_tier_policy import (
 from .staged_lease import LeaseRefused, acquire_entry_window
 
 
-#: How long a strict read waits for a range the sealed manifest declares and
-#: PrismaBuild has published a mover for, but has not moved yet.
+#: How long a strict read waits for a declared range when PrismaBuild
+#: publishes no landing record for it.
 #:
-#: A policy bound, not a derived threshold: the consumer cannot see
-#: PrismaBuild's mover queue, so nothing in this process can compute when a
-#: published range will land. It is set from what movers on this fleet
+#: Since PB #989 the tier loop writes ``<consumer>.landing.json`` beside the
+#: map: every pending in-horizon range with its mover, the mover's state and
+#: the tier's expectation of when it lands. Where that record covers the
+#: range, the reader waits on the mover's state instead of this bound (see
+#: :func:`landing_verdict`), and this constant does not apply. It remains the
+#: bound for a generation that writes no landing record, for a span the
+#: record does not cover, and for a read whose sealed read order is not
+#: bound here.
+#:
+#: A policy bound, not a derived threshold: without the landing record the
+#: consumer cannot see PrismaBuild's mover queue, so nothing in this process
+#: can compute when a published range will land. It is set from what movers on this fleet
 #: measurably take. On the Stage A run behind PQ #874 the stage mover for one
 #: 14.8 GB forward phase ran 16:55:57 -> 16:56:41 (44 s), another finished its
 #: RAM leg 96 s after its stage leg, and the phase the consumer refused was
@@ -97,7 +106,8 @@ from .staged_lease import LeaseRefused, acquire_entry_window
 #: arrives refuses exactly as it did before.
 #:
 #: ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` overrides it; ``0`` restores the
-#: pre-#874 behaviour of refusing on the first uncovered span.
+#: pre-#874 behaviour of refusing on the first uncovered span that no landing
+#: record covers. It does not shorten a wait the landing record governs.
 STAGED_RANGE_WAIT_ENV = "PRISMAQUANT_STAGED_RANGE_WAIT_S"
 STAGED_RANGE_WAIT_S = 300.0
 #: Between polls. ``ResidencyResolver._read_map`` is identity-gated, so a poll
@@ -105,9 +115,147 @@ STAGED_RANGE_WAIT_S = 300.0
 STAGED_RANGE_POLL_S = 1.0
 
 
+#: One process can have several reads blocked at once (the layer gather's
+#: reader threads). PrismaBuild reads one staged-wait record per action, so
+#: the declaration is the union of every live wait's movers.
+_STAGED_WAITS_LOCK = threading.Lock()
+_STAGED_WAITS: dict[int, tuple[float, frozenset]] = {}
+
+
+def _declare_staged_waits() -> None:
+    """Write the union of live waits to PrismaBuild, or clear it. Lock held."""
+    from . import prismabuild_progress
+
+    movers = set()
+    for _since, names in _STAGED_WAITS.values():
+        movers.update(names)
+    if movers:
+        since = min(since for since, _names in _STAGED_WAITS.values())
+        prismabuild_progress.declare_staged_wait(movers, since_unix=since)
+    else:
+        prismabuild_progress.clear_staged_wait()
+
+
+def _staged_wait(token: int, since_unix: float | None, movers) -> None:
+    """Record (or, with no movers, end) one call's staged wait."""
+    with _STAGED_WAITS_LOCK:
+        before = _STAGED_WAITS.get(token)
+        if movers:
+            now = (since_unix, frozenset(movers))
+            if before == now:
+                return
+            _STAGED_WAITS[token] = now
+        elif before is None:
+            return
+        else:
+            del _STAGED_WAITS[token]
+        _declare_staged_waits()
+
+
+def _landing_rows(record, positions):
+    """The landing ranges overlapping any of ``positions``."""
+    rows = []
+    for low, high in positions:
+        for row in record["ranges"]:
+            if row["range_start_bytes"] < high and low < row["range_end_bytes"]:
+                rows.append(row)
+    return rows
+
+
+def _describe_landing(row, now_unix) -> str:
+    """One range's state, expectation and the numbers behind it, for a log."""
+    text = f"mover {row['mover_action_key'][:12]} is {row['state']}"
+    expected = row.get("expected_landing_unix")
+    if type(expected) in (int, float):
+        delta = expected - now_unix
+        text += (f", expected to land in {delta:.0f} s" if delta >= 0 else
+                 f", expected to land {-delta:.0f} s ago")
+        if row.get("queue_position") is not None:
+            text += f" (queue position {row['queue_position']}"
+            if row.get("bytes_ahead") is not None:
+                text += f", {row['bytes_ahead'] / 1e9:.1f} GB ahead"
+            text += ")"
+    else:
+        text += ", no expected landing time"
+    if row.get("waiting_for"):
+        text += f", waiting for {row['waiting_for']}"
+    return text
+
+
+def landing_verdict(resolver, rows):
+    """What PrismaBuild's landing record says about ``rows``.
+
+    Returns ``(kind, detail, movers)``:
+
+    * ``"wait"``: every row is covered by a range whose mover is ``ready``
+      or ``claimed``, or that is ``unpublished``, and the tier loop that
+      publishes and prices it is alive. ``movers`` names the ranges' movers,
+      which the caller declares to PrismaBuild so the wait is not counted as
+      quiet (PB #989). The expectation is logged, never enforced: a copy
+      slower than every earlier receipt is still a copy.
+    * ``"refuse"``: evidence that the bytes will not come. A row whose every
+      covering range is ``terminal-no-receipt``, or a tier loop that has not
+      announced its tier within the bound the record names
+      (``tier_loop_liveness_s``, PrismaBuild's own offer freshness bound,
+      the judgment ``PoolQueue._tier_loop_alive`` makes).
+    * ``"absent"``: nothing published to wait on. No landing record, a span
+      outside the bound read order, or a range the record does not list.
+      The caller keeps its bounded wait.
+
+    Each check is one ``lstat`` of the record (identity-cached) and one
+    small read of the tier record.
+    """
+    fetch = getattr(resolver, "landing_record", None)
+    record = fetch() if callable(fetch) else None
+    if record is None:
+        return "absent", "PrismaBuild published no landing record", ()
+    locate = getattr(resolver, "read_order_positions", None)
+    age_of = getattr(resolver, "tier_record_age", None)
+    if not callable(locate) or not callable(age_of):
+        return "absent", "this resolver cannot read a landing record", ()
+    now_unix = time.time()
+    covering = []
+    for declared, start, end, _size in rows:
+        positions = locate(declared, start, end)
+        if not positions:
+            return ("absent", f"{declared} [{start}, {end}) is not in the bound "
+                    "read order", ())
+        found = _landing_rows(record, positions)
+        if not found:
+            return ("absent", f"the landing record lists no pending range for "
+                    f"{declared} [{start}, {end})", ())
+        if all(row["state"] == "terminal-no-receipt" for row in found):
+            return ("refuse", f"{declared} [{start}, {end}): "
+                    + "; ".join(_describe_landing(row, now_unix) for row in found),
+                    ())
+        covering.extend(row for row in found
+                        if row["state"] != "terminal-no-receipt")
+    liveness = float(record["tier_loop_liveness_s"])
+    age = age_of(record["tier_id"])
+    head = _describe_landing(covering[0], now_unix)
+    if age is None or age > liveness:
+        silent = ("the tier loop's record is unreadable" if age is None else
+                  f"the tier loop last announced {record['tier_id']} {age:.0f} s ago")
+        return ("refuse", f"{head}; {silent}, beyond PrismaBuild's "
+                f"{liveness:g} s liveness bound, so nothing will land it", ())
+    return "wait", head, tuple(sorted({row["mover_action_key"] for row in covering}))
+
+
 def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=None,
                        published_batch=None) -> str:
-    """Give PrismaBuild's movers until ``deadline`` to land ``wanted``.
+    """Wait for PrismaBuild's movers to land ``wanted``.
+
+    **What bounds the wait (PB #989, PQ #1107).** While PrismaBuild's
+    landing record covers every pending span, the wait follows the record
+    (:func:`landing_verdict`): it continues while the span's mover is queued
+    or copying, or while its range is unpublished and the tier loop is
+    alive, and it refuses at once on a ``terminal-no-receipt`` range or a
+    silent tier loop, naming the state. ``deadline`` does not apply then;
+    a wait of a mover still coming is declared to PrismaBuild so its
+    ``no_progress`` rung does not count it as quiet. Where no landing record
+    covers the pending spans (an older generation, a produced-output map),
+    ``deadline`` bounds the wait exactly as before, and the refusal says so.
+    The bounded clock runs only while nothing is published to wait on.
 
     ``wanted`` is ``[(declared path, start, end, declared size), ...]`` --
     every span one read is about to need, across every shard it touches,
@@ -161,10 +309,36 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
     sleep promptly.
     """
     started = time.monotonic()
-    polls = 0
-    pending = list(wanted)
-    verdict = RANGE_HIT
+    bound = max(0.0, deadline - started)
+    token = object()
+    try:
+        verdict, polls, pending, detail = _await_loop(
+            resolver, list(wanted), published=published, cancel=cancel,
+            published_batch=published_batch, token=id(token),
+            started=started, bound=bound)
+    finally:
+        _staged_wait(id(token), None, ())
+    if polls or detail:
+        resolver.record_range_wait(
+            pending[0][0] if pending else wanted[0][0], polls=polls,
+            seconds=time.monotonic() - started, served=verdict == RANGE_HIT,
+            **({"detail": detail} if detail else {}))
+    return verdict
+
+
+def _await_loop(resolver, pending, *, published, cancel, published_batch,
+                token, started, bound):
+    """The poll loop of :func:`await_staged_spans`.
+
+    Returns ``(verdict, polls, pending, refusal detail or None)``.
+    """
     proven = set()
+    polls = 0
+    verdict = RANGE_HIT
+    detail = None
+    absent_since = started
+    waiting_since = None
+    said = None
     while pending:
         if cancel is not None and cancel.is_set():
             raise CancelledError("staged-range wait cancelled")
@@ -209,24 +383,51 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
             pending = still
             if not pending:
                 break
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            now = time.monotonic()
+            kind, why, movers = landing_verdict(resolver, pending)
+            if kind == "refuse":
                 verdict = RANGE_UNCOVERED
+                detail = f"PrismaBuild's landing record refuses the wait: {why}"
                 break
-            if cancel is None:
-                time.sleep(min(STAGED_RANGE_POLL_S, remaining))
+            if kind == "wait":
+                absent_since = None
+                if waiting_since is None:
+                    waiting_since = time.time()
+                _staged_wait(token, waiting_since, movers)
+                pause = STAGED_RANGE_POLL_S
             else:
-                cancel.wait(min(STAGED_RANGE_POLL_S, remaining))
+                waiting_since = None
+                _staged_wait(token, None, ())
+                if absent_since is None:
+                    absent_since = now
+                remaining = absent_since + bound - now
+                if remaining <= 0:
+                    verdict = RANGE_UNCOVERED
+                    # With no poll there was no wait to describe: a zero
+                    # bound refuses on the first miss and records nothing,
+                    # as it always has.
+                    detail = None if not polls else (
+                        f"no landing record covers the wait ({why}); the "
+                        f"bounded wait of {bound:g} s applies "
+                        f"({STAGED_RANGE_WAIT_ENV}) and ran out")
+                    break
+                pause = min(STAGED_RANGE_POLL_S, remaining)
+            if (kind, why.split(",")[0]) != said:
+                said = (kind, why.split(",")[0])
+                print(f"[residency] staged-range wait: "
+                      + (f"following PrismaBuild's landing record: {why}"
+                         if kind == "wait" else
+                         f"{why}; bounded wait of {bound:g} s"), flush=True)
+            if cancel is None:
+                time.sleep(pause)
+            else:
+                cancel.wait(pause)
                 if cancel.is_set():
                     raise CancelledError("staged-range wait cancelled")
             polls += 1
             continue
         break
-    if polls:
-        resolver.record_range_wait(
-            pending[0][0] if pending else wanted[0][0], polls=polls,
-            seconds=time.monotonic() - started, served=verdict == RANGE_HIT)
-    return verdict
+    return verdict, polls, pending, detail
 
 
 def staged_range_wait_s() -> float:

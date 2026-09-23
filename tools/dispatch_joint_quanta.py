@@ -821,17 +821,22 @@ def _plan_output_root(campaign: Mapping) -> Path:
 
 def require_staged_wait_below_grace(spec: Mapping,
                                     progress: Sequence[tuple[str, int]]) -> None:
-    """Refuse a row whose staged-range wait could outlast a phase grace.
+    """Refuse a row whose fallback staged-range wait could outlast a phase grace.
 
-    The reader inside the container waits up to
-    ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` for a published range to land and
-    then refuses with the staging error. PrismaBuild kills a phase that
-    commits no progress for its grace. A wait at or above the smallest grace
-    turns a staging stall into a no-progress kill, which names no range
-    (R10: 900 s wait against a 900 s chain grace). The wait is read from the
-    spec's ``env`` block with the reader's own rules, so the value compared
-    here is the value the reader will use; the admissible bound is derived
-    from the grace this row declares.
+    Where PrismaBuild publishes a landing record for the reader's ranges
+    (PB #989), the landing record bounds the wait, not this setting: the
+    reader waits while the range's mover is queued or copying, refuses at
+    once on a mover that ends without a receipt, and declares the wait so
+    PrismaBuild's ``no_progress`` rung does not count it. Only where no
+    landing record covers the range (an older PrismaBuild generation) does
+    the reader wait up to ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` and then
+    refuse with the staging error. PrismaBuild kills a phase that commits no
+    progress for its grace, so that fallback wait at or above the smallest
+    grace turns a staging stall into a no-progress kill, which names no
+    range (R10: 900 s wait against a 900 s chain grace). The wait is read
+    from the spec's ``env`` block with the reader's own rules, so the value
+    compared here is the value the reader will use; the admissible bound is
+    derived from the grace this row declares.
     """
     from prismaquant.residency_shard_reader import (
         STAGED_RANGE_WAIT_ENV, staged_range_wait_from_env)
@@ -845,9 +850,11 @@ def require_staged_wait_below_grace(spec: Mapping,
     if not wait < grace:
         raise DispatchRefused(
             f"campaign spec {STAGED_RANGE_WAIT_ENV}={wait:g} s is not below "
-            f"the {grace} s progress grace of phase {name!r}: a staging stall "
-            "would end as a no-progress kill instead of the reader's staging "
-            f"refusal. Set it below {grace} s")
+            f"the {grace} s progress grace of phase {name!r}. This is the "
+            "reader's fallback wait, used where no PrismaBuild landing record "
+            "covers a range (the landing record bounds every other wait); at "
+            "or above the grace a staging stall would end as a no-progress "
+            f"kill instead of the reader's staging refusal. Set it below {grace} s")
 
 
 def _require_replay_regime(spec: dict, *, emits_handoff: bool = False) -> None:
