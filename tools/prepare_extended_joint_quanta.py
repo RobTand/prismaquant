@@ -141,6 +141,23 @@ def check_stage_b_spec(spec_path, spec, policy):
         raise ValueError(f'Stage B spec refused by the quantum dispatcher: {exc}') from exc
     if str(spec.get('env', {}).get('PRISMAQUANT_PROD_ACT_SCALES')) != '0':
         raise ValueError('Stage B spec must explicitly seal native static activation semantics')
+    stage_b_replay_mode(spec)
+
+
+def stage_b_replay_mode(spec):
+    """The replay mode the reviewed spec launches every quantum in (PQ #1011).
+
+    ``spill`` when the spec declares the one-pass replay spill, else
+    ``windowed``. The read plan is sealed for this mode, and the quantum
+    refuses a launch in the other one.
+    """
+    from prismaquant.joint_replay_spill import stage_b_spill_config
+    env = {key: str(value) for key, value in (spec.get('env') or {}).items()}
+    try:
+        declared = stage_b_spill_config(env)
+    except ValueError as exc:
+        raise ValueError(f'Stage B spec declares an incomplete spill: {exc}') from exc
+    return 'windowed' if declared is None else 'spill'
 
 
 def prepare(args):
@@ -164,6 +181,7 @@ def prepare(args):
     spec = _load_json(args.spec, digest=args.spec_sha256, where='reviewed Stage B container spec')
     policy = require_derived_budget(plan, plan_sha256=inputs['extended_plan']['sha256'])
     check_stage_b_spec(args.spec, spec, policy)
+    replay_mode = stage_b_replay_mode(spec)
     root = args.metadata_root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     proof_path = root/'catalog-extension.json'
@@ -200,7 +218,9 @@ def prepare(args):
         '--source-layers-prefix', 'model.language_model.layers.',
         # PQ #1010: the head intake runs once, here; each quantum's head
         # phase declares its layer's sealed slice instead of re-walking.
-        '--head-slices']
+        '--head-slices',
+        # PQ #1011: the read plan is sealed for the spec's replay mode.
+        '--replay-mode', replay_mode]
     if regenerate(generator) != 0:
         raise ValueError('generator refused; no launch package published')
     launch = ['python3', 'tools/dispatch_joint_quanta.py', '--records', str(root/'records'),

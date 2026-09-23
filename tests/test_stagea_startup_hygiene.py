@@ -98,7 +98,9 @@ def test_an_empty_space_passes_the_check(tmp_path, monkeypatch):
 
 def _spec(monkeypatch, tmp_path, env):
     spec = tmp_path / "spec.json"
-    spec.write_text(json.dumps({"container": {"image": "sha256:" + "0" * 64}, "env": env}))
+    from stage_a_spool_spec import with_spool
+    spec.write_text(json.dumps(with_spool(
+        {"container": {"image": "sha256:" + "0" * 64}, "env": dict(env)})))
     monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
 
 
