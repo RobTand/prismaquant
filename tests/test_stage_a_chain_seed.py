@@ -34,7 +34,9 @@ from prismaquant.joint_adjoint_band import BandRefused, build_band_receipt, stag
 from prismaquant.joint_adjoint_checkpoints import (
     adjoint_receipt_path,
     adjoint_space,
+    checkpoint_cotangent_plane,
     checkpoint_directory,
+    checkpoint_entry_session,
     read_exact_entry_tensors,
 )
 from prismaquant.joint_cost_stage_a import AdjointIdentityRefused
@@ -148,10 +150,10 @@ def _seed(root, monkeypatch, spec, *, implementation=THREE, writes=None,
 def _plane(record):
     """``{(probe, batch): payload sha256}`` of a sealed checkpoint's cotangents."""
     plane = {}
-    for row in record["activation_entries"]:
-        _, probe, batch = row["name"].split("-")
-        tensors = read_exact_entry_tensors([row], expected_session=record["session"])
-        plane[int(probe), int(batch)] = tensor_payload_sha256(tensors.pop(row["name"]))
+    for key, row in checkpoint_cotangent_plane(record).items():
+        tensors = read_exact_entry_tensors(
+            [row], expected_session=checkpoint_entry_session(record))
+        plane[key] = tensor_payload_sha256(tensors.pop(row["name"]))
     return plane
 
 
@@ -284,7 +286,8 @@ def test_the_plane_distance_of_two_seeds(tmp_path, monkeypatch):
     assert {entry["relative_l2"] for entry in twice["entries"]} == {1.0}
     record = json.loads(Path(reference["path"]).read_text())
     largest = max(float(tensor.abs().max()) for tensor in (
-        read_exact_entry_tensors([row], expected_session=record["session"]).popitem()[1]
+        read_exact_entry_tensors(
+            [row], expected_session=checkpoint_entry_session(record)).popitem()[1]
         for row in record["activation_entries"]))
     assert twice["max_abs"] == largest
 

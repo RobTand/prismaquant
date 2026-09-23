@@ -246,7 +246,8 @@ def _serving(paths) -> dict:
 def producer_role(root: Path, data_manifest_sha256: str) -> int:
     import torch
 
-    from prismaquant.joint_adjoint_checkpoints import read_exact_entry_tensors
+    from prismaquant.joint_adjoint_checkpoints import (
+        checkpoint_entry_session, read_exact_entry_tensors)
     from prismaquant.joint_quantum_handoff import (
         HANDOFF_OWNER_STATES_NAME, HANDOFF_RECORD_BATCH_KIND, HANDOFF_RECORD_NAME,
         HandoffEmitter, bind_handoff_publication)
@@ -269,7 +270,7 @@ def producer_role(root: Path, data_manifest_sha256: str) -> int:
     for entry in checkpoint["activation_entries"]:
         probe, batch = _probe_batch(entry)
         tensor = read_exact_entry_tensors(
-            [entry], expected_session=checkpoint["session"])[entry["name"]]
+            [entry], expected_session=checkpoint_entry_session(checkpoint))[entry["name"]]
         plane[(probe, batch)] = tensor + (10.0 * probe + batch)
     progress(PRODUCER_PHASE, len(plane), unit="entries")
     out["checkpoint_read"] = _serving([e["path"] for e in checkpoint["activation_entries"]])

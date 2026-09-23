@@ -1,5 +1,46 @@
 # PrismaQuant Architecture
 
+Stage A checkpoints reference the chain's own cotangent entries instead of
+copying them (2026-09-23, `ws-tq/1036-referenced-checkpoints`, PQ #1036).
+A checkpoint copied its whole plane into `checkpoints/boundary-NNN/entries/`.
+On R12 that was a 34.4 GB NFS copy per checkpoint, about 206 GB of
+synchronous pool writes per run, of files the owner had just written.
+Stage A now seals `prismaquant.joint_adjoint_checkpoint.v2`: each cotangent
+row is the owner's committed entry at that boundary. The owner pins those
+entries at commit, so the roll past them and the owner's close keep the
+files. The checkpoint directory holds only the shared states and the
+manifest. Every reader parses both schemas through one helper,
+`joint_adjoint_slices.checkpoint_cotangent_plane`, so the v1 checkpoints R12
+sealed still read. See "Referenced checkpoints (#1036)". Gates:
+`tests/test_referenced_adjoint_checkpoint.py`,
+`tests/test_stage_a_seed_package.py`,
+`tests/test_stage_a_produced_boundary_chain.py`. No format, pipeline
+default, stage or ship gate changes. A Stage B band slice built from a v2 checkpoint names
+other rows than one built from v1, so its slice digests differ. The tensor
+payloads are identical.
+
+The Stage B spill checks its inputs on the GPU, not with SHA-256 on the host
+(2026-09-23, `ws-1a/spill-digest-1030`, PQ #1030). Every probe's forward is
+the same, so every later probe's inputs must equal probe 0's, the ones the
+spill writes and the replay reads. The spill writer checked this by hashing
+every staged input with SHA-256 on its thread, and copied each later probe's
+input to the host only to hash it. On the GLM-shaped proxy of #994 the hash
+was 57% of the writer's py-spy samples (PB `028b76eef2fa`), and the capture
+waited 14 to 22 s per quantum for free arenas. Now
+`joint_replay_spill._InputDigest` digests each input on its own device when
+the hook fires: two independent multilinear digests of the input's 16-bit
+words mod 2^31 - 1, in exact int64 arithmetic, so the value does not depend
+on reduction order or device. Probe 0's digests stay on the device beside
+its entries. A later probe's input is digested and never staged, and its
+digests are compared with probe 0's when that probe's capture ends, in one
+stacked comparison per window; the first input that differs fails the
+capture, as before. For inputs that differ, both digests agree with
+probability below 2^-59. Records and identities do not change: the digest
+lived only in memory. `x_digest_checks` in the spill telemetry is now
+counted when a capture ends. Gates: `tests/test_stageb_spill_input_digest.py`,
+`tests/test_stageb_one_pass_spill.py`. No format, default, stage or ship
+gate changes.
+
 Stage B holds no kernel-time profiler session unless asked (2026-09-23,
 `ws-1a/stageb-profiler-optin-1029`, PQ #1029). `run_layer_quantum_core` opened
 a `torch.profiler` CUDA session (`KernelTimeProfiler`) around the render-free
@@ -296,7 +337,11 @@ order, and a replayed operand keeps the live shape, strides and, on CUDA, the
 address residue modulo 512. The file is laid out per Linear: one input stream
 per Linear that first read a tensor (an expert's up projection reads its gate
 projection's stream) and one gradient stream per Linear and probe. Inputs are
-written once, at probe 0, and every later probe's inputs must hash-equal them.
+written once, at probe 0, and every later probe's inputs must equal them bit
+for bit: each input is digested on its own device when the hook fires
+(`joint_replay_spill._InputDigest`, two exact multilinear digests mod
+2^31 - 1, PQ #1030), the capture fails at the end of the first probe whose
+input differs, and a later probe's input is never copied to the host.
 The spill refuses a non-dense input, a measurement dtype that is not 16-bit,
 and non-contiguous shared-state cotangent accumulators.
 `joint_replay_spill.spill_geometry` bounds the layer's bytes from shapes and
@@ -731,6 +776,18 @@ files its own template instead of being refused, a re-dispatch files the same
 one, and the live pair drops its root-named override; see "Band-serial Stage
 B quanta (#996)". No format, default, stage or ship gate changes. Gate:
 `tests/test_band_serial_handoff_produced.py`.
+
+Re-stamped (2026-09-23, `ws-tq/1036-referenced-checkpoints`) for
+**referenced Stage A checkpoints** (PQ #1036): a v2 checkpoint's cotangent
+rows are the owner's pinned entries, not copies, and every checkpoint reader
+parses v1 and v2 through `checkpoint_cotangent_plane`; see "Referenced
+checkpoints (#1036)". No format, default, stage or ship gate changes.
+
+Re-stamped (2026-09-23, `ws-1a/spill-digest-1030`) for **the Stage B
+spill's input check** (PQ #1030): each input is digested on its device
+(`joint_replay_spill._InputDigest`) and a later probe's input is never
+copied to the host; the writer no longer hashes. See the entry at the top.
+No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-1a/stageb-profiler-optin-1029`) for **Stage B's
 kernel-time profiler** (PQ #1029): the chain and per-window
@@ -21283,6 +21340,14 @@ PQ #997 record, not here; this section states only the contract.
 
 ### Stage A checkpoints written as the chain rolls (#1002)
 
+Since PQ #1036, Stage A no longer tees the plane into a copy. It opens each
+checkpoint with `referenced=True` and calls `reference_activation` where
+this section says `write_activation` (see "Referenced checkpoints
+(#1036)"). Open, seal, failure and profile below still apply. The copying
+tee (`referenced=False`), its byte-identity with the read-back writer and
+its gate describe the copied (v1) checkpoint only, which every reader
+still accepts.
+
 A Stage A checkpoint at boundary `b` is a copy of the cotangent plane the
 walk wrote at `b`: one file per (probe, sample), plus the shared-state
 cotangents and a manifest. Until PQ #1002 Stage A wrote it after the pass
@@ -21349,6 +21414,120 @@ the pass, and `checkpoint_seal_s`, the seal's wall time.
 Gate: `tests/test_stage_a_checkpoint_tee.py`. On origin/main at
 `fc718b35048` its read-back test fails: sealing checkpoint 5 reads the
 plane back. No format, pipeline default or ship gate changes.
+
+### Referenced checkpoints (#1036)
+
+A copied checkpoint wrote every cotangent twice: the owner's entry at
+`exact-boundaries/<generation>/entries/cotangent-{p}-{b}-at-{B}`, then a
+copy under `checkpoints/boundary-NNN/entries/`. The copy existed only
+because the roll unlinks each entry as it replaces it. On R12 each copy was
+34.4 GB, about 206 GB of synchronous pool writes per run by the issue's
+count. A referenced checkpoint keeps the owner's entries instead.
+
+**Record.** `prismaquant.joint_adjoint_checkpoint.v2`
+(`ADJOINT_CHECKPOINT_REFERENCED_SCHEMA`). Each `activation_entries` row is the
+owner's `exact_entry_record` of its entry, unchanged. A reader accepts a
+row only if all of the following hold:
+- its name is `cotangent-{p}-{b}-at-{B}`, with `B` the record's boundary;
+- its path sits in `<space>/exact-boundaries/<record generation>/entries`;
+- its identity is exactly `{session: {generation, run_identity_sha256},
+  slot: cotangent-{p}-{b}, kind: cotangent, coordinates: {batch, boundary: B,
+  probe}}`, where the session is the checkpoint's session without its
+  `kind`;
+- no other row has the same (probe, batch).
+
+The shared states and `checkpoint.json` stay in the checkpoint directory,
+and the "beside its entries" rule applies to those rows only. The v1
+record, whose rows are copies with kind `adjoint_checkpoint_cotangent`, is
+unchanged and still read.
+
+**One parser.** `joint_adjoint_slices.checkpoint_cotangent_plane(record)`
+returns `{(probe, batch): row}` for either schema and refuses any other
+shape. Every checkpoint reader goes through it:
+- `verify_adjoint_slice`;
+- `load_adjoint_checkpoint`;
+- the Stage A resume (`joint_cost_stage_a`, `stage_a_chain_resume`);
+- the band reader `joint_adjoint_band.read_sealed_checkpoint` /
+  `checkpoint_batches`;
+- the Stage B catalog-extension namespace check
+  (`joint_cost_quantum.quantum_adjoint_space`);
+- the seed readers (`stage_a_chain_seed._whole_plane`, `_cotangent_plane`),
+  whose entry reads take the owner session from `checkpoint_entry_session`.
+
+Readsets need no change: `joint_layer_quanta` builds them from the rows'
+own path, digest and size, so the staged plane is the owner's files. The
+seed package builder (`tools/build_stagea_seed_package.py`) stages them the
+same way.
+
+**Writer.** Stage A opens each checkpoint with `referenced=True`. The
+reservation's envelope and file plan cover only the shared states and the
+manifest. The tail loop and the roll call
+`AdjointCheckpointAttempt.reference_activation(probe, batch, reference)`
+where they used to call `write_activation`. The attempt refuses a reference
+that:
+- is not the owner's live entry;
+- has an identity other than the one planned for that (probe, batch) at
+  this boundary;
+- has another name, path, shape or dtype than planned.
+
+A referenced checkpoint names only its own owner's generation
+(`_owner_entries`). `write_adjoint_checkpoint(referenced=True)` is the same
+path for callers that hold a finished plane.
+
+**Seal.** Before it writes the manifest, `seal` calls
+`StreamedBoundaryArtifacts.await_checkpoint_references`. With a local output
+spool, this waits for each referenced group's export to land, so a sealed
+checkpoint names only durable files. The wait is recorded as
+`checkpoint_reference_wait_s` on the checkpoint layer's `chain_layers[]` row,
+next to `checkpoint_seal_s`, and with a spool it also accumulates in the
+owner's telemetry. If it approaches the read-back #1002 removed (about
+289 s on R12), the remedy is an asynchronous manifest seal, not built.
+`commit_checkpoint_artifact(references=...)`
+re-checks each row against the live reference and its size on disk, refuses
+a row that is already pinned or is a borrowed checkpoint input, and pins the
+rows.
+
+**Pinning.** `_retire` of a pinned entry drops it from the live set without
+unlinking it. Its bytes move from `live_artifact_bytes` to
+`live_checkpoint_bytes`, and the move is counted in
+`pinned_checkpoint_entries_retired`. Its produced group keeps a live
+reference, so the group's durable origin charge is never reclaimed while
+the file exists. That is the truth: the bytes are still on the pool, inside
+the same `max_artifact_bytes` the payload class is sized from
+(`build_boundary_template`). A close retires with the same rule. The
+leftover sweep of a chain resume skips every path a sealed v2 checkpoint
+names. PrismaBuild never unlinks these files, so the pin lives in PQ.
+Stage A commits produced groups as staged batches (`publish_prepaid_batch`).
+On PB origin/main `f91ac81a5faf`, `src/prismabuild/produced_output.py`
+unlinks an origin file only in `_retire_consumed_batch` (:5419, the unlink
+at :5598). `origin_retirement_tick` (:5643) runs it only for batches
+committed `origin_only` with lifetime `consumed` (:5683-5686), which only
+`commit_origin_batch` (#912/#914) files. `reclaim_origin` (:5061) releases
+the durable charge and unlinks nothing. The seal fails closed if that
+changes: `await_checkpoint_references` refuses when a referenced group's
+batch is filed origin-only with lifetime `consumed`
+(`BoundaryProducedPublication.origin_only_lifetimes`, read from PB's own
+`commitments.json`). Whoever moves Stage A to origin batches must commit
+them `retain`.
+
+**Budget.** The envelope drops the plane, and the pinned plane counts as
+checkpoint bytes from its rollover on, so the ceiling sees each plane once
+where a copy counted it twice across the overlap. The preflight demand is
+unchanged and now over-covers by one plane per checkpoint.
+
+**Stage B.** A band slice built from a v2 checkpoint differs from one built
+from v1 in these fields: `checkpoint.schema`, the activation rows' name,
+path and identity, `cotangent_sha256`, and the digests that cover them.
+Tensor shape, dtype, byte count and payload are the same, as
+`test_referenced_and_copied_planes_hold_the_same_tensors` checks.
+
+Gates: `tests/test_referenced_adjoint_checkpoint.py` (no copy, pin through
+rollover and close, a control rollover that still unlinks, each identity
+refusal, and v1/v2 payload equality), `tests/test_stage_a_seed_package.py`
+(the seed stages the owner's plane) and
+`tests/test_stage_a_produced_boundary_chain.py` (the consumed-lifetime
+refusal on a real bound instance). The Stage A chain, resume, seed and
+band suites run on v2 checkpoints end to end.
 
 ### Stage A chain resume (#1001)
 

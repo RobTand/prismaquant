@@ -113,6 +113,15 @@ def test_the_seed_stages_its_borrowed_checkpoint_where_it_reads_it(tmp_path, mon
                                    str(_manifest(source.root, 2)),
                                    *(row["path"] for row in two["activation_entries"])]
     assert len(four["activation_entries"]) == N_PROBES * len(draw())
+    # PQ #1036: the source run's checkpoints reference its own cotangent
+    # entries, so the staged plane is the owner's files, not a copy.
+    for record, boundary in ((four, 4), (two, 2)):
+        assert record["schema"] == "prismaquant.joint_adjoint_checkpoint.v2"
+        for row in record["activation_entries"]:
+            path = Path(row["path"])
+            assert path.parent.parent.parent.name == "exact-boundaries"
+            assert path.parent.parent.name == record["session"]["generation"]
+            assert row["name"].endswith(f"-at-{boundary}")
 
     # Every added entry carries its exact size and digest.
     for entry in manifest["entries"]:

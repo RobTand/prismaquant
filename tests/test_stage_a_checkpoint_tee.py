@@ -305,7 +305,8 @@ def test_a_run_that_dies_mid_roll_retains_its_open_checkpoint(tmp_path, monkeypa
     def disposing(self, reservation, entry):
         entries = Path(entry["dir"]) / "entries"
         calls.append(("dispose", entry["dir"],
-                      sorted(path.name for path in entries.iterdir())))
+                      sorted(path.name for path in entries.iterdir())
+                      if entries.is_dir() else []))
         return dispose(self, reservation, entry)
 
     monkeypatch.setattr(StreamedBoundaryArtifacts, "abandon_checkpoint_artifact", abandoning)
@@ -315,11 +316,10 @@ def test_a_run_that_dies_mid_roll_retains_its_open_checkpoint(tmp_path, monkeypa
     with pytest.raises(_Interrupted):
         _run(root, monkeypatch, stride=2, interrupt=_at(2, 1, 2))
     directory = str(checkpoint_directory(root / "layer-quanta" / "adjoint", 2))
-    # Probe 0's five cotangents and probe 1's batches 0 and 1: the owner
-    # wrote (1, 2) and the run died before the checkpoint got it.
-    written = sorted([f"cotangent-0-{b}.pt" for b in range(5)]
-                     + ["cotangent-1-0.pt", "cotangent-1-1.pt"])
-    assert calls == [("abandon", directory), ("dispose", directory, written)]
+    # A referenced checkpoint (PQ #1036) copies no cotangent, and the run
+    # died before the pass ended, so its shared states were never written:
+    # the retained attempt holds no file.
+    assert calls == [("abandon", directory), ("dispose", directory, [])]
     assert not Path(directory).exists()
     sealed = root / "layer-quanta" / "adjoint" / "checkpoints"
     assert sorted(path.name for path in sealed.iterdir()) == ["boundary-004", "boundary-005"]
