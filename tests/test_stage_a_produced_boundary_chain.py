@@ -1286,8 +1286,11 @@ def test_the_dispatcher_seals_the_template_the_client_supports(
                         (["python3", "-m", "tools.tessera_campaign_container",
                           "--spec", sealed, "--", *payload], None))
     monkeypatch.setattr(djq, "_plan_output_root", lambda campaign: "/tmp/out")
+    # The row reserves the plan's own memory bound (#997), so the plan is read.
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"aggregate_memory_bytes": 108447924224}))
     argv = stage_a_argv(Path("/nonexistent/manifest.json"),
-                        {"plan_path": "/p", "plan_sha256": "c" * 64,
+                        {"plan_path": str(plan), "plan_sha256": "c" * 64,
                          "prepared_path": "/q", "prepared_sha256": "d" * 64},
                         produced_output_template=document)
     assert "--produced-output-template" in argv, argv
