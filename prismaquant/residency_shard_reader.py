@@ -105,7 +105,8 @@ STAGED_RANGE_WAIT_S = 300.0
 STAGED_RANGE_POLL_S = 1.0
 
 
-def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=None) -> str:
+def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=None,
+                       published_batch=None) -> str:
     """Give PrismaBuild's movers until ``deadline`` to land ``wanted``.
 
     ``wanted`` is ``[(declared path, start, end, declared size), ...]`` --
@@ -143,6 +144,15 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
     uncovered one (PQ #905). Asked once per staged entry per poll, never per
     tensor, and an entry that answered yes is not asked again.
 
+    ``published_batch(resolver, [(declared, entry), ...]) -> True | None``
+    asks the same question for every entry a poll still needs, at once
+    (PQ #997: one PrismaBuild cover lookup instead of one per entry, which
+    was 5.5% of Stage A R12's main thread). ``True`` proves them all;
+    ``None`` means the batched answer cannot say which entry is missing,
+    and that poll asks ``published`` one entry at a time instead. The
+    proof lives for this call only, as before: nothing is carried to the
+    next read, and the lease that follows re-verifies every key.
+
     ``cancel`` is the owning context's ``threading.Event`` (PQ #907), or
     ``None`` for the historical bounded wait. A set event aborts the wait
     by raising ``CancelledError``: a cancelled wait never resolves as a
@@ -160,6 +170,8 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
             raise CancelledError("staged-range wait cancelled")
         still = []
         unproven = set()
+        asked = {}
+        hits = []
         for row in pending:
             declared, start, end, size = row
             entry, outcome = resolver.staged_range_outcome(
@@ -169,6 +181,10 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
                     continue
                 key = (declared, entry["offset"], entry["bytes"])
                 if key in proven:
+                    continue
+                if published_batch is not None:
+                    asked.setdefault(key, (declared, entry))
+                    hits.append((row, key))
                     continue
                 if key not in unproven and published(resolver, declared, entry):
                     proven.add(key)
@@ -182,6 +198,14 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
                 break
             still.append(row)
         else:
+            if asked:
+                if published_batch(resolver, list(asked.values())) is True:
+                    proven.update(asked)
+                else:
+                    for key, (declared, entry) in asked.items():
+                        if published(resolver, declared, entry):
+                            proven.add(key)
+                still.extend(row for row, key in hits if key not in proven)
             pending = still
             if not pending:
                 break

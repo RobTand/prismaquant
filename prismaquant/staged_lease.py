@@ -14,10 +14,13 @@ nothing here re-implements, shadows, or diverges from it:
   entry refuses as divergent BEFORE any pin is created. No vendoring.
 - Identity comes only from the SDK's ``injected_context`` (PB-owned
   env + live claim row); anything missing refuses, nothing guessed.
-- One :class:`LeaseWindow` per bounded read window — one composed-map
-  entry, never per tensor. Acquire once, read through ``open_pinned``
-  descriptors, join all async work, close every descriptor, then release
-  exactly the acquired ref, on success, error, and cancellation alike.
+- One :class:`LeaseWindow` per bounded read window, never per tensor: one
+  composed-map entry (:func:`acquire_entry_window`), or every entry of a
+  window that resolves through one material namespace on one tier
+  (:func:`acquire_entries_window`, PQ #997). Acquire once, read through
+  ``open_pinned`` descriptors, join all async work, close every
+  descriptor, then release exactly the acquired ref, on success, error,
+  and cancellation alike.
 - The serving record is the SDK's own return at the successful actual
   open — never a path candidate that merely passed an ``lstat``.
 - Material integrity failure fails clear with no alternate-copy
@@ -823,6 +826,140 @@ def _select_ram_window(resolver, declared, entry):
         **_namespace_spec(identity),
     })
     return window, key
+
+
+def _resolve_window_covers(resolver, items, *, tier_id: str, epoch: str,
+                           label: str):
+    """Covers and map keys for several entries, in one PB cover lookup.
+
+    The per-entry lookups above (:func:`resolve_ram_covers`,
+    :func:`resolve_stage_covers`) each scan the consumer's material
+    directory and read every mover's documents, so a 64-entry window paid
+    that scan 64 times (PQ #997: 11% of Stage A R12's main thread).
+    ``covers_for_keys`` takes the window's whole key list, which is the
+    granularity PrismaBuild batches at. Every key's expected bytes and
+    digest are still cross-checked against its own sealed map entry, and
+    the context stays per call (PQ #905).
+
+    ``items`` is ``[(declared, entry), ...]`` from one resolver. Returns
+    ``(covers, keys)`` with ``keys[i]`` the map key of ``items[i]``.
+    """
+    from .residency_map import residency_map_key
+    sdk, ctx = resolve_context()
+    identity = resolver.lease_identity()
+    if not tier_id:
+        raise _refuse(f"{label}-not-announced", kind="availability")
+    if not hasattr(sdk, "covers_for_keys"):
+        raise _refuse(f"{label}-covers-unresolved: no cover lookup",
+                      kind="availability")
+    keys = [residency_map_key(str(declared), entry["offset"])
+            for declared, entry in items]
+    if len(set(keys)) != len(keys):
+        raise _refuse(f"{label}-window-repeats-a-key", kind="integrity")
+    try:
+        answer = sdk.covers_for_keys(
+            identity["residency_root"], _material_consumer(identity, ctx),
+            list(keys), tier_id=tier_id,
+            manifest_sha256=identity["manifest_sha256"], epoch=epoch,
+            context=_call_context())
+    except Exception as exc:
+        raise _refuse(f"{label}-cover-lookup-error: {exc}",
+                      kind="integrity") from None
+    if not isinstance(answer, dict) or not answer.get("ok"):
+        refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
+        raise _refuse(str(refusal), kind=_classify(refusal))
+    expected = answer.get("expected")
+    for key, (_declared, entry) in zip(keys, items):
+        got = expected.get(key) if isinstance(expected, dict) else None
+        if (not isinstance(got, dict) or got.get("bytes") != entry["bytes"]
+                or str(got.get("sha256") or "") != str(entry["sha256"] or "")):
+            raise _refuse(f"{label}-cover-proof-divergent", kind="integrity")
+    covers = answer.get("covers")
+    if (not isinstance(covers, list) or not covers
+            or any(not isinstance(cover, dict)
+                   or len(str(cover.get("mover_action_key") or "")) != 64
+                   for cover in covers)):
+        raise _refuse(f"{label}-cover-proof-divergent", kind="integrity")
+    return covers, keys
+
+
+def acquire_entries_window(resolver, items, *, tier: str):
+    """Build (but do not enter) ONE lifetime window for several entries.
+
+    The multi-entry form of :func:`acquire_entry_window`, for a read window
+    whose entries all resolve through one resolver (one material
+    namespace) on one tier. PrismaBuild's ``acquire`` pins a window's whole
+    key set under one ownership-lock hold and ``release`` drops it under
+    one more, so a 64-entry window takes the stage-root lock twice instead
+    of 128 times (PQ #997: lock waits were 10.5% of Stage A R12's main
+    thread, and six other actions contend for the same NFS lock).
+
+    ``tier`` is ``"ram"`` (every entry offers a RAM copy; pins at the
+    announced RAM epoch) or ``"ssd"``. Refusals carry their kind exactly as
+    the single-entry legs do. The caller owns fallback: this never tries
+    another tier, so a caller that must keep the per-entry RAM-first
+    semantics retries refused entries one at a time.
+
+    Returns ``(window, keys)``; the caller opens each key once, closes each
+    descriptor, and exits the window once on every path. The pin records
+    the first entry's span, since a multi-entry window carries each key's
+    range through its map key and never one cumulative source offset (the
+    SDK's own range contract).
+    """
+    from .staged_tier_policy import tier_is_allowed
+    items = list(items)
+    if not items:
+        raise ValueError("a lease window needs at least one entry")
+    identity = resolver.lease_identity()
+    if tier == "ram":
+        if not tier_is_allowed("ram"):
+            raise _refuse("ram-not-allowed", kind="availability")
+        if any(entry.get("ram_path") is None for _declared, entry in items):
+            raise _refuse("ram-not-offered", kind="availability")
+        tier_id, epoch = identity["ram_tier_id"], identity["ram_epoch"]
+        if not tier_id or not epoch:
+            raise _refuse("ram-not-announced", kind="availability")
+        covers, keys = _resolve_window_covers(
+            resolver, items, tier_id=tier_id, epoch=epoch, label="ram")
+    elif tier == "ssd":
+        if not tier_is_allowed("ssd"):
+            raise _refuse("ssd-not-allowed", kind="availability")
+        tier_id, epoch = identity["tier_id"], ""
+        covers, keys = _resolve_window_covers(
+            resolver, items, tier_id=tier_id, epoch=epoch, label="stage")
+    else:
+        raise ValueError(f"unknown lease tier {tier!r}")
+    first = items[0][1]
+    window = LeaseWindow({
+        "tier_id": tier_id,
+        "epoch": epoch,
+        "covers": covers,
+        "expected": {key: {"bytes": entry["bytes"], "sha256": entry["sha256"]}
+                     for key, (_declared, entry) in zip(keys, items)},
+        "span": {"start_bytes": first["offset"],
+                 "end_bytes": first["offset"] + first["bytes"]},
+        **_namespace_spec(identity),
+    })
+    return window, keys
+
+
+def stage_covers_are_published(resolver, items) -> bool | None:
+    """Whether PrismaBuild published the proof for every staged entry, at once.
+
+    The batched form of :func:`stage_cover_is_published`: one cover lookup
+    for the whole list. ``True`` when every key is proven; ``None`` when
+    the batched answer cannot say which key is missing, and then the caller
+    asks :func:`stage_cover_is_published` one entry at a time. Selection
+    only, like the single form: nothing is pinned, and the lease that
+    follows re-verifies every key under the ownership lock.
+    """
+    identity = resolver.lease_identity()
+    try:
+        _resolve_window_covers(resolver, items, tier_id=identity["tier_id"],
+                               epoch="", label="stage")
+    except LeaseRefused:
+        return None
+    return True
 
 
 def ram_covers(map_entry: dict) -> list[dict[str, str]]:
