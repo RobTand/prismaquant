@@ -4,8 +4,10 @@ With ``PRISMABUILD_PRODUCED_SPOOL_ROOT`` in its launch environment, a
 produced-output owner writes each group to a PB-reserved directory on its
 own host, and PB exports the group to its canonical paths as an ordinary
 action. The handoff emitter uses the same writer as Stage A, so its groups
-take that route too, and the handoff record is written only after every
-export is acknowledged. The export actions run on a real private fleet
+take that route too. ``owner-states.pkl`` and ``handoff.json`` are one
+more group (PQ #1015), submitted only after every entry group's export is
+acknowledged, so the record never names an entry that has not landed. The
+export actions run on a real private fleet
 (claim, execute, finish), pinned to the qualified bundle
 ``test_produced_output_spool_real_pb`` uses.
 
@@ -20,7 +22,8 @@ from pathlib import Path
 
 import test_stage_a_produced_boundary_chain as chain
 from test_band_serial_handoff_produced import (
-    band_campaign, check_consumer_binds, emit_handoff, producer_owner)
+    band_campaign, check_consumer_binds, check_record_group, emit_handoff,
+    producer_owner)
 from test_stage_a_produced_boundary_chain import _isolated_launch_context  # noqa: F401
 
 
@@ -51,8 +54,12 @@ def test_the_handoff_exports_through_the_spool_before_its_record(
         published, plane = emit_handoff(producer, storage, publication)
     outcomes = [json.loads(line) for line in fleet.stdout.splitlines()
                 if line.startswith("{")]
-    # One export per group: each probe's three batches in groups of two.
-    assert len(outcomes) == 4 and all(row["rc"] == 0 for row in outcomes), (
+    # One export per group: each probe's three batches in groups of two,
+    # then the record group (owner states and handoff.json, PQ #1015).
+    assert len(outcomes) == 5 and all(row["rc"] == 0 for row in outcomes), (
         outcomes, fleet.stderr[-2000:])
-    assert not list(spool.rglob("*.pt")), "the spool still holds a group"
+    assert not [path for path in spool.rglob("*")
+                if path.is_file() and path.parent.name == "payload"], (
+        "the spool still holds a group's payload")
     check_consumer_binds(published, plane, consumer, publication)
+    check_record_group(publication, producer, published)
