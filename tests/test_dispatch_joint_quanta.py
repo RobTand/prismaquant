@@ -636,7 +636,7 @@ def test_stage_a_seals_the_paced_spool_and_the_ram_tier(tmp_path, campaign):
     # launcher's own check (the sealed launch equals the spec) holds.
     tail = argv[argv.index("--") + 1:]
     sealed = json.loads(tail[tail.index("--spec") + 1])
-    assert {name: sealed["env"][name] for name in SPOOL_ENV} == STAGE_A_SPOOL_ENV
+    assert {name: sealed["env"][name] for name in STAGE_A_SPOOL_ENV} == STAGE_A_SPOOL_ENV
     assert SPOOL_MOUNT in sealed["container"]["mounts"]
 
 
@@ -670,6 +670,94 @@ def test_the_two_plane_window_at_the_glm_shape(tmp_path):
         "probe_microbatch": 1, "boundary_storage": {"prefetch_batches": 64}}}))
     window = stage_a_spool_window_bytes({"plan_path": str(plan)})
     assert window == 2 * 4 * 512 * (512 * 4096 * 4 * 2 + 65536) == 68_987_912_192
+
+
+def test_stage_a_seals_the_host_window_beside_its_two_plane_bound(tmp_path, campaign):
+    """PQ #1120: the Stage A row opts into PrismaBuild's host spool window
+    (PB #910), so placement charges its two-plane window to the executing
+    box. The opt-in is sealed in the request environment, where PrismaBuild
+    reads it, and in the launched spec, which the container checks against
+    it. The spec on disk is unchanged."""
+    import dispatch_joint_quanta
+    before = dispatch_joint_quanta.SPEC_PATH.read_text()
+    argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
+    envs = dict(env.split("=", 1) for env in _envelope_envs(argv))
+    assert envs["PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"] == "1"
+    assert envs["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"] == str(SPOOL_WINDOW_BYTES)
+    tail = argv[argv.index("--") + 1:]
+    sealed = json.loads(tail[tail.index("--spec") + 1])
+    assert sealed["env"]["PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"] == "1"
+    assert dispatch_joint_quanta.SPEC_PATH.read_text() == before
+
+
+def test_stage_a_refuses_a_spec_that_opts_out_of_the_host_window(tmp_path, campaign):
+    """A spec that declares the host window off would leave the row's
+    two-plane window uncharged at placement; the row refuses it rather than
+    overriding what the spec says."""
+    import dispatch_joint_quanta
+    spec = json.loads(dispatch_joint_quanta.SPEC_PATH.read_text())
+    spec["env"]["PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"] = "0"
+    dispatch_joint_quanta.SPEC_PATH.write_text(json.dumps(spec))
+    with pytest.raises(DispatchRefused, match="HOST_WINDOW"):
+        stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
+
+
+#: Run in a child process: it imports the published PrismaBuild tree, which
+#: this process may already have imported from another generation.
+_PLACEMENT_PROBE = r"""
+import importlib.util, json, sys
+from pathlib import Path
+published, variables, queue_root = Path(sys.argv[1]), json.loads(sys.argv[2]), Path(sys.argv[3])
+spec = importlib.util.spec_from_file_location("published_pbrun", published / "tools" / "pbrun.py")
+pbrun = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(pbrun)
+from prismabuild import pool
+terms = pbrun.local_disk_terms(variables, transport="pool")
+queue = pool.PoolQueue(queue_root)
+queue.ensure_layout()
+resources = {"cpu": 1, "mem_gb": 1, **terms}
+for key in ("a" * 64, "b" * 64):
+    queue.publish(action_key=key, cas_root="/cas",
+                  worker_script=str(published / "tools" / "prismabuild_worker.py"),
+                  checkout_root=str(queue_root.parent / "checkout"), resources=resources)
+capacity = {"cpu": 4, "mem_gb": 8, "spool_gb": max(2 * terms.get("spool_gb", 0) - 1, 0)}
+first = queue.claim(owner="first", capacity=capacity)
+second = queue.claim(owner="second", capacity=capacity)
+print(json.dumps({"pbrun": pbrun.__file__, "pool": pool.__file__, "terms": terms,
+                  "first": None if first is None else first["resources"],
+                  "second": None if second is None else second["resources"],
+                  "available": queue.ledger().available()}))
+"""
+
+
+def test_two_stage_a_rows_whose_windows_exceed_a_box_are_not_both_placed(
+        tmp_path, campaign):
+    """PQ #1120 acceptance, on PrismaBuild's own published code: the sealed
+    environment of a Stage A row derives a ``spool_gb`` demand of its window
+    in whole GiB (pbrun ``local_disk_terms``), and a box whose spool budget
+    holds one such window but not two claims one row and refuses the other.
+    """
+    import subprocess
+    published = Path("/mnt/shared/prismabuild-fleet/repo")
+    if not (published / "tools" / "pbrun.py").is_file():
+        pytest.skip(f"published PrismaBuild not visible at {published}")
+    argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
+    variables = dict(env.split("=", 1) for env in _envelope_envs(argv))
+    run = subprocess.run(
+        [sys.executable, "-c", _PLACEMENT_PROBE, str(published),
+         json.dumps(variables), str(tmp_path / "pb-queue")],
+        capture_output=True, text=True, timeout=300,
+        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(published / "src"),
+             "HOME": str(tmp_path)})
+    assert run.returncode == 0, run.stderr
+    result = json.loads(run.stdout.strip().splitlines()[-1])
+    for module in ("pbrun", "pool"):
+        assert Path(result[module]).resolve().is_relative_to(
+            published.resolve()), result
+    need = -(-SPOOL_WINDOW_BYTES // (1 << 30))
+    assert result["terms"] == {"spool_gb": need}
+    assert result["first"]["spool_gb"] == need
+    assert result["second"] is None, result
 
 
 @pytest.mark.parametrize("defect, reason", [
@@ -820,7 +908,9 @@ def test_a_quantum_row_seals_the_spool_its_spec_declares(tmp_path, campaign):
 def test_the_default_spec_declares_the_paced_spool():
     """The campaign's default spec (PQ #1012) carries the spool root on the
     executing box's disk, a 32 GiB bound and the paced export, and no host
-    window until PB #910 is published. It lives on the shared mount."""
+    window: the Stage A row seals that opt-in itself (PQ #1120), and a
+    quantum row seals the spec's spool as it is. It lives on the shared
+    mount."""
     import dispatch_joint_quanta
     path = dispatch_joint_quanta.DEFAULT_SPEC_PATH
     if not path.is_file():

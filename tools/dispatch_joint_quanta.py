@@ -131,10 +131,12 @@ PRODUCED_SPOOL_ROOT_ENV = "PRISMABUILD_PRODUCED_SPOOL_ROOT"
 PRODUCED_SPOOL_MAX_ENV = "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"
 #: Bytes per element of the execution dtypes a model config may name.
 _CONFIG_DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "float32": 4}
+#: The host spool window opt-in (PB #910), which the Stage A row seals.
+PRODUCED_SPOOL_HOST_WINDOW_ENV = "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"
 #: Opt-ins PrismaBuild reads from the producer's sealed environment, each "0"
 #: or "1": the paced export (PB #891) and the host spool window (PB #910).
 PRODUCED_SPOOL_OPT_IN_ENV = ("PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT",
-                             "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW")
+                             PRODUCED_SPOOL_HOST_WINDOW_ENV)
 STATE_FILENAME = "campaign-state.json"
 
 #: Refusal exits: 3 = the stage-A precondition (or the campaign binding)
@@ -820,15 +822,20 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
     from the producing box's own spool, so the spool holds one live plane
     and one more for the writes and exports turning over
     (``produced_output_spool.two_plane_window_bytes``). A plane is the
-    plan's ``n_probes`` x ``n_calib_samples`` entries (the count the capture
-    binds), each reserved at the writer's bound: one
-    ``probe_microbatch``-row batch's boundary tensor bytes plus the per-entry
-    file envelope. The
+    plan's ``n_probes`` x one entry per batch of ``probe_microbatch`` rows
+    of its ``n_calib_samples`` (``produced_output_spool.plane_partitions``,
+    the partition the capture writes and binds, PQ #1121). Each entry is
+    reserved at the writer's bound: one full batch's boundary tensor bytes
+    plus the per-entry file envelope, a partial last batch included,
+    because PrismaBuild reserves every entry of a group at the bound entry
+    size (``boundary_group_ceiling_bytes``). The
     tensor is ``rows x calib_seqlen x hidden_size x hc_mult`` elements of the
     model config's dtype; ``hc_mult`` is the residual-stream count the GLM
     profile expands to, read off the same config key it reads, and 1 for a
     config that declares none. At R12's shape (4 probes, 512 one-row
-    batches, 512 tokens, 4096 x 4 bf16) that is 68,987,912,192 B (64.25 GiB).
+    batches, 512 tokens, 4096 x 4 bf16) that is 68,987,912,192 B (64.25 GiB);
+    at ``probe_microbatch`` 4 it is 128 four-row entries a plane,
+    68,786,585,600 B.
 
     This is the planning derivation the row seals. The capture recomputes it
     from the live model at bind and refuses a sealed window below it
@@ -836,7 +843,8 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
     reads differently from the runner fails before any forward work.
     """
 
-    from prismaquant.produced_output_spool import two_plane_window_bytes
+    from prismaquant.produced_output_spool import (plane_partitions,
+                                                   two_plane_window_bytes)
 
     plan = json.loads(Path(campaign["plan_path"]).read_text())
     try:
@@ -847,6 +855,8 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
         microbatch = int(execution.get("probe_microbatch", 0))
         group_size = int(execution["boundary_storage"]["prefetch_batches"])
         model = Path(plan["model"])
+        rows, row_offsets = plane_partitions(n_rows=n_rows,
+                                             probe_microbatch=microbatch)
     except (KeyError, TypeError, ValueError) as exc:
         raise DispatchRefused(
             f"plan {campaign['plan_path']} does not state the Stage A plane "
@@ -861,15 +871,13 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
             f"model config {model / 'config.json'} does not state a hidden "
             f"size and a known dtype (dtype {dtype!r}); the Stage A spool "
             "window cannot be derived")
-    rows = min(microbatch or n_rows, n_rows)
-    # The capture binds n_batches=len(calib_ids), the row count
-    # (joint_cost_stage_a.py bind_produced_output), and derives its need from
-    # it; sealing from the same count keeps the seal at or above that need.
-    n_batches = n_rows
     tensor_bytes = (rows * seqlen * int(text["hidden_size"])
                     * int(text.get("hc_mult") or 1) * _CONFIG_DTYPE_BYTES[dtype])
+    # The capture binds n_batches=len(row_offsets) from the same partition
+    # (joint_cost_stage_a.py bind_produced_output) and derives its need from
+    # it, so the seal and the bind's need are one number.
     return two_plane_window_bytes(
-        n_probes=n_probes, n_batches=n_batches, group_size=group_size,
+        n_probes=n_probes, n_batches=len(row_offsets), group_size=group_size,
         max_entry_tensor_bytes=tensor_bytes)
 
 
@@ -1036,6 +1044,13 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     spec that declares a spool root with no bound, or with one that is not a
     positive decimal byte count, is left as it is, so the row's spool check
     (:func:`produced_spool_row_environment`) refuses it as before.
+
+    With the bound it seals the host window opt-in
+    (``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1``, PB #910), so PrismaBuild
+    charges that window to the executing box's ``spool_gb`` at placement
+    and two rows cannot together overrun one box's spool disk (PQ #1120). A
+    spec that declares the opt-in off refuses: the row reads its planes
+    back from the spool, and an uncharged window is refused only at bind.
     """
     spec = json.loads(Path(spec_path).read_text())
     declared = spec.get("env", {}).get(PRODUCED_SPOOL_MAX_ENV)
@@ -1043,8 +1058,18 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
             and PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})
             and isinstance(declared, str) and declared.isascii()
             and declared.isdigit() and int(declared) > 0):
+        window = spec["env"].get(PRODUCED_SPOOL_HOST_WINDOW_ENV)
+        if window == "0":
+            raise DispatchRefused(
+                f"spec {spec_path} declares {PRODUCED_SPOOL_HOST_WINDOW_ENV}=0, "
+                "but this row reads its cotangent planes back from its spool: "
+                "its window must be charged to the box at placement (PQ #1120)")
         spec["env"] = {**spec["env"],
                        PRODUCED_SPOOL_MAX_ENV: str(int(spool_max_bytes))}
+        # A value other than "0" or "1" is left for the row's spool check,
+        # which refuses it.
+        if window in (None, "1"):
+            spec["env"][PRODUCED_SPOOL_HOST_WINDOW_ENV] = "1"
     require_staged_wait_below_grace(spec, progress)
     # Validate a declared workspace before publishing the row. These same
     # inlined spec bytes supply its outer PB environment below; no ambient
@@ -1387,7 +1412,9 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     progress = [(phase, HEAD_PROGRESS_GRACE_S if phase == "head"
                  else CHUNK_PROGRESS_GRACE_S) for phase in binding["phases"]]
     # The spool's window is the plan's two cotangent planes, not the spec's
-    # bound (PQ #1110): the chain reads its own planes back from it.
+    # bound (PQ #1110): the chain reads its own planes back from it. The
+    # wrapper also seals the host window opt-in, so placement charges that
+    # window to the box (PQ #1120).
     wrapped, container_image = _container_wrap(
         SPEC_PATH, payload, progress=progress,
         spool_max_bytes=stage_a_spool_window_bytes(campaign))
