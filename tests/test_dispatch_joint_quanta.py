@@ -25,6 +25,7 @@ from prismaquant.joint_adjoint_slices import stage_a_slice, write_adjoint_slice
 from prismaquant.joint_layer_quanta import adjoint_binding_fields
 
 from test_stage_b_band_binding import band_from_receipt, synthetic_receipt
+from stage_a_spool_spec import SPOOL_ENV, SPOOL_MOUNT, SPOOL_ROOT, with_spool
 
 from dispatch_joint_quanta import (  # noqa: E402
     ADJOINT_SCHEMA,
@@ -50,8 +51,8 @@ def _portable_spec(tmp_path, monkeypatch):
     inlines the spec content, so the content -- not the path -- is the
     contract under test."""
     spec = tmp_path / "spec-hostcap32-ram-dev.json"
-    spec.write_text(json.dumps(
-        {"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
+    spec.write_text(json.dumps(with_spool(
+        {"container": {"image": "sha256:" + "0" * 64}, "env": {}})))
     import dispatch_joint_quanta
     monkeypatch.setattr(dispatch_joint_quanta, "SPEC_PATH", spec)
 
@@ -215,7 +216,12 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     # (require_cuda_hot_path refused the c94602e9d63c run whose rows
     # demanded no device).
     assert argv[argv.index("--demand") + 1] == "gpu=1,mem_gb=104"
-    assert argv[argv.index("--env") + 1] == "PRISMAQUANT_DEV_MODE=1"
+    envelope = argv[:argv.index("--")]
+    envs = [envelope[i + 1] for i, word in enumerate(envelope) if word == "--env"]
+    assert envs[-1] == "PRISMAQUANT_DEV_MODE=1"
+    # The fixture spec declares the produced spool, so the quantum row seals
+    # it too; the container refuses a declared spool the action lacks (#1012).
+    assert envs[:-1] == [f"{name}={value}" for name, value in SPOOL_ENV.items()]
     assert "--detach" in argv
     assert "--" in argv
     tail = argv[argv.index("--") + 1:]
@@ -600,6 +606,146 @@ def _payload_inner(argv):
     inner = tail[tail.index("--", tail.index("--spec")) + 1:]
     assert inner[:3] == ["python3", "-m", "prismaquant.joint_adjoint_capture"]
     return inner
+
+
+def _envelope_envs(argv):
+    envelope = argv[:argv.index("--")]
+    return [envelope[i + 1] for i, word in enumerate(envelope) if word == "--env"]
+
+
+def _write_fixture_spec(spec):
+    import dispatch_joint_quanta
+    dispatch_joint_quanta.SPEC_PATH.write_text(json.dumps(spec))
+
+
+def test_stage_a_seals_the_paced_spool_and_the_ram_tier(tmp_path, campaign):
+    """PQ #1012: the Stage A request carries the spool root, its byte bound
+    and the paced-export opt-in as sealed environment, which PrismaBuild
+    reads from the producer's request, and it seals the storage box's RAM
+    tier as the quantum row does. Both are pbrun envelope options."""
+    manifest = _adjoint_manifest(tmp_path, campaign)
+    argv = stage_a_argv(manifest, campaign)
+    envelope = argv[:argv.index("--")]
+    assert envelope[envelope.index("--residency") + 1] == "stage"
+    assert envelope[envelope.index("--residency-ram") + 1] == "auto"
+    assert _envelope_envs(argv) == [
+        *(f"{name}={value}" for name, value in SPOOL_ENV.items()),
+        "PRISMAQUANT_DEV_MODE=1"]
+    # The spec the container launches from declares the same spool, so the
+    # launcher's own check (the sealed launch equals the spec) holds.
+    tail = argv[argv.index("--") + 1:]
+    sealed = json.loads(tail[tail.index("--spec") + 1])
+    assert {name: sealed["env"][name] for name in SPOOL_ENV} == SPOOL_ENV
+    assert SPOOL_MOUNT in sealed["container"]["mounts"]
+
+
+def test_stage_a_refuses_a_spec_without_the_spool(tmp_path, campaign):
+    """A spec with no spool root would let the owner write every boundary
+    entry synchronously into the pool: the Stage A dispatch refuses it."""
+    _write_fixture_spec({"container": {"image": "sha256:" + "0" * 64}, "env": {}})
+    manifest = _adjoint_manifest(tmp_path, campaign)
+    with pytest.raises(DispatchRefused,
+                       match="declares no PRISMABUILD_PRODUCED_SPOOL_ROOT"):
+        stage_a_argv(manifest, campaign)
+
+
+def _spool_variant(**env):
+    spec = with_spool({"container": {"image": "sha256:" + "0" * 64}, "env": {}})
+    for name, value in env.items():
+        if value is None:
+            spec["env"].pop(name, None)
+        else:
+            spec["env"][name] = value
+    return spec
+
+
+def _shared_root_spec():
+    root = "/mnt/shared/pb-spool/fixture"
+    spec = _spool_variant(PRISMABUILD_PRODUCED_SPOOL_ROOT=root)
+    spec["container"]["mounts"] = [{"source": root, "target": root, "readonly": False}]
+    return spec
+
+
+def _readonly_bind_spec():
+    spec = _spool_variant()
+    spec["container"]["mounts"] = [{**SPOOL_MOUNT, "readonly": True}]
+    return spec
+
+
+def _unbound_spec():
+    spec = _spool_variant()
+    spec["container"]["mounts"] = []
+    return spec
+
+
+SPOOL_REFUSALS = {
+    "root under /mnt/shared": (_shared_root_spec, "under /mnt/shared"),
+    "no byte bound": (lambda: _spool_variant(
+        PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES=None), "positive byte ceiling"),
+    "zero byte bound": (lambda: _spool_variant(
+        PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES="0"), "positive byte ceiling"),
+    "relative root": (lambda: _spool_variant(
+        PRISMABUILD_PRODUCED_SPOOL_ROOT="pb-spool"), "canonical absolute root"),
+    "read-only bind": (_readonly_bind_spec, "writable identity bind"),
+    "no bind": (_unbound_spec, "writable identity bind"),
+    "malformed paced opt-in": (lambda: _spool_variant(
+        PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT="yes"), "must be \"0\" or \"1\""),
+    "opt-in without a root": (lambda: _spool_variant(
+        PRISMABUILD_PRODUCED_SPOOL_ROOT=None,
+        PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES=None),
+        "PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT without"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(SPOOL_REFUSALS))
+def test_stage_a_refuses_a_malformed_spool(tmp_path, campaign, case):
+    """The container's spool check runs at dispatch, and the root must be on
+    the executing box's own disk; each defect refuses before anything is
+    published, for its own reason."""
+    build, reason = SPOOL_REFUSALS[case]
+    _write_fixture_spec(build())
+    manifest = _adjoint_manifest(tmp_path, campaign)
+    with pytest.raises(DispatchRefused, match=reason):
+        stage_a_argv(manifest, campaign)
+
+
+def test_a_quantum_row_seals_the_spool_its_spec_declares(tmp_path, campaign):
+    """The quantum row shares the spec. When the spec declares the spool the
+    row seals it (the container refuses a declared spool the action lacks);
+    when it declares none the row carries nothing new, and a quantum never
+    refuses for it."""
+    slices = tmp_path / "slices"
+    slices.mkdir()
+    record = _bind(_record(campaign, 1, slice_dir=slices), _receipt(campaign),
+                   tmp_path / "adjoint-slices")
+    record_path = tmp_path / "layer-001.json"
+    record_path.write_text(json.dumps(record))
+    argv = quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
+    assert _envelope_envs(argv) == [
+        *(f"{name}={value}" for name, value in SPOOL_ENV.items()),
+        "PRISMAQUANT_DEV_MODE=1"]
+    _write_fixture_spec({"container": {"image": "sha256:" + "0" * 64}, "env": {}})
+    argv = quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
+    assert _envelope_envs(argv) == ["PRISMAQUANT_DEV_MODE=1"]
+    _write_fixture_spec(_shared_root_spec())
+    with pytest.raises(DispatchRefused, match="under /mnt/shared"):
+        quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
+
+
+def test_the_default_spec_declares_the_paced_spool():
+    """The campaign's default spec (PQ #1012) carries the spool root on the
+    executing box's disk, a 32 GiB bound and the paced export, and no host
+    window until PB #910 is published. It lives on the shared mount."""
+    import dispatch_joint_quanta
+    path = dispatch_joint_quanta.DEFAULT_SPEC_PATH
+    if not path.is_file():
+        pytest.skip(f"the campaign spec is not mounted here: {path}")
+    spec = json.loads(path.read_text())
+    forwarded = dispatch_joint_quanta.produced_spool_row_environment(spec)
+    assert forwarded == {
+        "PRISMABUILD_PRODUCED_SPOOL_ROOT": "/home/rob/pb-spool/glm-campaign",
+        "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": str(32 << 30),
+        "PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT": "1"}
 
 
 def test_stage_a_argv_binds_manifest_digests_into_payload(tmp_path, campaign):

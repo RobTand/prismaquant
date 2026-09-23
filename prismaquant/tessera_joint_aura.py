@@ -2162,12 +2162,29 @@ def _admit_candidate_phase(command, config, data, layer_bytes):
     return policy
 
 
-def _load_plan(path, digest, *, projection_runtime=True):
+def _load_plan(path, digest, *, projection_runtime=True, defer_pool_reads=False):
+    """Load and admit a joint anchor plan.
+
+    ``defer_pool_reads`` is for a caller whose readset is not bound yet (a
+    Stage B layer quantum, PQ #1024): the plan's other inputs are admitted by
+    shape only, and nothing but the plan itself is read. The source identity
+    cache is then digest-checked where the caller reads it -- the head
+    slice's declared entry, or ``_seed_source_identity_cache`` on the legacy
+    walk. The boundary directory is never resolved here in either mode: the
+    admission discards it, and its owner resolves it when it opens storage.
+    """
     path = _bound({"path": str(path), "sha256": digest}, "joint anchor plan")
     config = json.loads(path.read_text())
     _same(config.get("schema"), SCHEMA, "joint anchor plan schema")
     if config.get("source_identity_cache") is not None:
-        _bound(config["source_identity_cache"], "source identity cache")
+        binding = config["source_identity_cache"]
+        if defer_pool_reads:
+            _require(isinstance(binding, dict) and set(binding) == {"path", "sha256"}
+                     and isinstance(binding["path"], str)
+                     and isinstance(binding["sha256"], str),
+                     "source identity cache: independently bound path/SHA256 required")
+        else:
+            _bound(binding, "source identity cache")
     # A plan that names a historical encoder seal is the only place one may be
     # admitted; the strict default is the same as before this field existed.
     normalize_historical_encoder_reuse(config.get("historical_encoder_reuse"))
@@ -2192,8 +2209,8 @@ def _load_plan(path, digest, *, projection_runtime=True):
         # is present here and is otherwise refused by the first gate in
         # ``execute`` -- seconds into the pass, before any render is written.
         require_qualified_environment()
-    from .cost_streaming import normalize_boundary_storage
-    normalize_boundary_storage(execution.get("boundary_storage"))
+    from .cost_streaming import check_boundary_storage
+    check_boundary_storage(execution.get("boundary_storage"))
     _operator_window_policy(config)
     if config.get('joint_eval') is not None:
         from .tessera_joint_eval_panel import validate_panel_descriptor
