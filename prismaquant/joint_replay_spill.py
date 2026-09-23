@@ -29,6 +29,12 @@ The spill is laid out per Linear (``_Window``): one input stream per Linear
 that first read a tensor, and one gradient stream per Linear and probe, so a
 per-operator GEMM over a Linear's rows reads two ordered streams.
 
+Only probe 0's inputs are written: every probe's forward is the same, so
+every probe's ``x`` must equal probe 0's, and the replay reads probe 0's.
+Each input is digested on its own device when the hook fires
+(``_InputDigest``), and a later probe's input that differs from probe 0's
+fails the capture. A later probe's input is never copied to the host.
+
 At the default replay regime the arithmetic identity and the resource
 policy are unchanged; the replay mode is recorded only in the quantum
 counters. Without the spill environment the windowed path runs unchanged and
@@ -48,7 +54,6 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 import bisect
-import hashlib
 import os
 import queue
 import threading
@@ -328,6 +333,67 @@ def _placed(cursor, residue):
     return cursor + (residue - cursor) % ADDRESS_ALIGNMENT
 
 
+#: The input digest's modulus, the Mersenne prime 2^31 - 1.
+_DIGEST_PRIME = (1 << 31) - 1
+#: 16-bit words per segment. A segment sums 2^16 products of a word below 2^16
+#: and a key below 2^31, so it stays below 2^63 in int64.
+_DIGEST_SEGMENT_WORDS = 1 << 16
+#: Segments per block: one block's int64 words and products are 24 MiB.
+_DIGEST_BLOCK_SEGMENTS = 16
+#: Segment keys held; an input of more than 2^32 words is refused.
+_DIGEST_MAX_SEGMENTS = 1 << 16
+_DIGEST_SEED = 1030
+
+
+class _InputDigest:
+    """Two independent digests of a tensor's bytes, computed on its device (#1030).
+
+    The spill compares each later probe's input with probe 0's. The tensor's
+    bytes in storage order are read as 16-bit words ``w``; word ``i`` of
+    segment ``s`` is weighted by ``k[i] * r[s]``, both drawn once from a fixed
+    seed below ``p = 2^31 - 1``, and the digest is the weighted sum mod
+    ``p``, twice with independent keys. Every step is exact int64 arithmetic
+    (see the bounds on the constants above), so the digest does not depend on
+    reduction order or device. For inputs that differ, each digest is equal
+    with probability at most ``2/p`` over the keys, so both are equal with
+    probability below ``2^-59``. The spill's inputs are not adversarial; the
+    check exists to catch a forward that is not deterministic.
+    """
+
+    def __init__(self, device):
+        generator = torch.Generator().manual_seed(_DIGEST_SEED)
+        self.word_keys = torch.randint(
+            1, _DIGEST_PRIME, (2, _DIGEST_SEGMENT_WORDS), generator=generator,
+            dtype=torch.int64).to(device)
+        self.segment_keys = torch.randint(
+            1, _DIGEST_PRIME, (2, _DIGEST_MAX_SEGMENTS), generator=generator,
+            dtype=torch.int64).to(device)
+
+    def __call__(self, tensor):
+        """The ``(2,)`` int64 digest of ``tensor``'s bytes, on its device."""
+        words = _storage_order(tensor.detach()).view(torch.int16)
+        count = words.numel()
+        full, tail = divmod(count, _DIGEST_SEGMENT_WORDS)
+        if full + (1 if tail else 0) > _DIGEST_MAX_SEGMENTS:
+            raise RuntimeError("Stage B spill input exceeds the digest's segment keys")
+        total = torch.zeros(2, dtype=torch.int64, device=words.device)
+        for start in range(0, full, _DIGEST_BLOCK_SEGMENTS):
+            stop = min(full, start + _DIGEST_BLOCK_SEGMENTS)
+            block = words[start * _DIGEST_SEGMENT_WORDS:stop * _DIGEST_SEGMENT_WORDS]
+            block = block.view(stop - start, _DIGEST_SEGMENT_WORDS).to(torch.int64)
+            block.bitwise_and_(0xFFFF)
+            sums = (block.unsqueeze(0) * self.word_keys.unsqueeze(1)).sum(dim=2)
+            sums.remainder_(_DIGEST_PRIME)
+            sums.mul_(self.segment_keys[:, start:stop]).remainder_(_DIGEST_PRIME)
+            total.add_(sums.sum(dim=1))
+        if tail:
+            block = words[full * _DIGEST_SEGMENT_WORDS:].to(torch.int64).bitwise_and_(0xFFFF)
+            sums = (block.unsqueeze(0) * self.word_keys[:, :tail]).sum(dim=1)
+            sums.remainder_(_DIGEST_PRIME)
+            total.add_(sums.mul_(self.segment_keys[:, full]).remainder_(_DIGEST_PRIME))
+        return total.remainder_(_DIGEST_PRIME)
+
+
 class _Entry:
     __slots__ = ("logical", "nbytes", "layout", "digest")
 
@@ -368,6 +434,9 @@ class _Window:
         self.entry_cursor: dict[str, int] = {}
         self.record_cursor = 0
         self.dedupe: dict = {}
+        # A later probe's (owner, entry, digest) per input, in first-use order;
+        # compared with probe 0's once the capture ends.
+        self.x_checks: list[tuple[str, int, torch.Tensor]] = []
         # operator_gemm: Linear -> (rows per probe, input width, output width)
         self.rows: dict[str, list[int]] = {}
 
@@ -494,6 +563,7 @@ class StageBReplaySpill:
         if self.element_size != geometry.element_size:
             raise ValueError("Stage B spill geometry element size differs")
         self._cuda = self.device.type == "cuda"
+        self._digest = None
         self._threads = DEFAULT_THREADS if threads is None else bool(threads)
         self._windows = [_Window(names) for names in window_names]
         self._window_of = {}
@@ -668,7 +738,13 @@ class StageBReplaySpill:
             # The held reference keeps this storage from being reused inside
             # the sample, so an address key cannot name two tensors.
             window.dedupe[key] = (owner, entry, x)
-            self._stage(index, ("x", owner), entry, entries[entry].logical, x)
+            digest = self._input_digest(x)
+            if self._probe == 0:
+                entries[entry].digest = digest
+                self._stage(index, ("x", owner), entry, entries[entry].logical, x)
+            else:
+                # Compared once the capture ends; never copied to the host.
+                window.x_checks.append((owner, entry, digest))
         else:
             owner, entry = held[0], held[1]
         if window.x_source.setdefault(name, owner) != owner:
@@ -693,6 +769,12 @@ class StageBReplaySpill:
         window.g_logical[name] = logical + g_bytes
         self._records_seen += 1
         self._stage(index, ("g", name), window.record_cursor - 1, logical, selected)
+
+    def _input_digest(self, x):
+        """``x``'s digest, queued on its device behind the op that made it."""
+        if self._digest is None:
+            self._digest = _InputDigest(self.device)
+        return self._digest(x)
 
     def _same_layout(self, recorded, observed):
         """Probe 0's layout is the one every probe is replayed at.
@@ -796,20 +878,10 @@ class StageBReplaySpill:
                 logical += part[4]
             total = logical - parts[0][3]
             if kind == "x":
-                for _, _, entry, _, nbytes, offset in parts:
-                    digest = hashlib.sha256(view[offset:offset + nbytes]).digest()
-                    record = window.entries[stream][entry]
-                    if probe == 0:
-                        record.digest = digest
-                    elif digest != record.digest:
-                        raise RuntimeError(
-                            f"Stage B spill probe {probe} input differs from probe 0 "
-                            f"in window {window_index} ({stream}, entry {entry}); "
-                            "the replay would not be the windowed arithmetic")
-                    else:
-                        self.telemetry["x_digest_checks"] += 1
                 if probe != 0:
-                    continue
+                    raise RuntimeError(
+                        f"Stage B spill staged a probe {probe} input; only probe 0's "
+                        "inputs are written")
                 runs = window.x_runs.setdefault(stream, [])
             else:
                 runs = window.g_runs.setdefault((stream, probe), [])
@@ -851,6 +923,8 @@ class StageBReplaySpill:
                 raise RuntimeError(
                     f"Stage B spill probe {probe} observed a different invocation "
                     f"count than probe 0 in window {index}")
+            else:
+                self._check_inputs(index, window, probe)
             for name in {record[0] for record in window.records}:
                 runs = window.g_runs.get((name, probe), [])
                 window.g_starts[(name, probe)] = [run[0] for run in runs]
@@ -866,6 +940,27 @@ class StageBReplaySpill:
                 writer.join()
             self._arenas.clear()
             self._arena = None
+
+    def _check_inputs(self, index, window, probe):
+        """Fail unless every input of ``probe`` equals probe 0's, bit for bit.
+
+        One device-to-host read per window: the per-input digests are
+        stacked and compared on the device, and only the flags come back.
+        """
+        checks, window.x_checks = window.x_checks, []
+        if not checks:
+            return
+        observed = torch.stack([digest for _owner, _entry, digest in checks])
+        expected = torch.stack([window.entries[owner][entry].digest
+                                for owner, entry, _digest in checks])
+        differs = (observed != expected).any(dim=1).tolist()
+        if any(differs):
+            owner, entry, _digest = checks[differs.index(True)]
+            raise RuntimeError(
+                f"Stage B spill probe {probe} input differs from probe 0 "
+                f"in window {index} ({owner}, entry {entry}); "
+                "the replay would not be the windowed arithmetic")
+        self.telemetry["x_digest_checks"] += len(checks)
 
     # -- replay ---------------------------------------------------------------
     def _row_bounds(self, window):
