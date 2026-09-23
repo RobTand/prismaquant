@@ -48,6 +48,7 @@ if __package__:
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
         local_scratch_environment,
+        stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
@@ -59,6 +60,7 @@ else:
         CONTAINER_IMAGE_FLAG,
         admission_image_reference,
         local_scratch_environment,
+        stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
@@ -781,6 +783,26 @@ def require_staged_wait_below_grace(spec: Mapping,
             f"refusal. Set it below {grace} s")
 
 
+def _require_replay_regime(spec: dict, *, emits_handoff: bool = False) -> None:
+    """Validate the Stage B replay regime the sealed spec declares (#994).
+
+    One spec wraps every quantum of a dispatch, so the regime is uniform by
+    construction. It changes the statistics arithmetic, and it replays only
+    from the spill, so the spec must declare the spill beside it. A
+    band-serial producer (#996) runs only a batch-1 capture.
+    """
+    from prismaquant.joint_replay_regime import (
+        handoff_regime_refusal, replay_regime_from_environment)
+
+    env = spec.get("env", {})
+    regime = replay_regime_from_environment(env)
+    if regime is not None and not stage_b_spill_environment(spec, env):
+        raise RuntimeError("a non-default Stage B replay regime replays from the "
+                           "spill; declare the spill in the same spec")
+    if emits_handoff and handoff_regime_refusal(regime):
+        raise RuntimeError(handoff_regime_refusal(regime))
+
+
 def _container_wrap(spec_path: Path, payload: list[str], *,
                     progress: Sequence[tuple[str, int]],
                     resource_policy=None) -> tuple[list[str], str | None]:
@@ -809,6 +831,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     # coordinator environment or second spec read participates.
     try:
         local_scratch_environment(spec, spec.get("env", {}))
+        _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload)
     except (ValueError, RuntimeError) as exc:
         raise DispatchRefused(str(exc)) from exc
     if resource_policy is not None:

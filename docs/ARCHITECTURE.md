@@ -1,5 +1,95 @@
 # PrismaQuant Architecture
 
+A Stage A seed receipt records the bf16 reduced-precision-reduction flag
+(2026-09-23, `ws-sa/seed-bf16-flag-1038`, PQ #1038, part of #1028).
+`seed-receipt.json` gains `matmul_reduction`, the value of
+`torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction` the seed's
+chain ran under, so a seed's bitwise comparison names the flag. Stage A reads
+the flag and sets nothing. See "Stage A seed mode (#1016)". Gate:
+`tests/test_stage_a_chain_seed.py`. No format, default, stage or ship gate
+changes; a run without `--chain-seed` is unchanged.
+
+Stage A writes each checkpoint as the chain rolls (2026-09-23,
+`ws-sa/checkpoint-overlap-1002`, PQ #1002, part of #997). The read-back
+writer read each checkpoint's plane back through the owner after the pass
+that produced it; on R12 checkpoint 040 took 327.8 s, 288.7 s of it waiting
+for produced groups to be staged again, and the read-back replaced the
+chain's read-ahead, so the next layer's first window opened cold. Stage A
+now reserves the checkpoint before the pass
+(`joint_adjoint_checkpoints.open_adjoint_checkpoint`), writes each
+cotangent into it as the pass writes it, and admits and writes the shared
+states after the pass (`extend_checkpoint_artifact`) before it seals. The
+files and record are byte-identical to the read-back writer's. See "Stage A
+checkpoints written as the chain rolls (#1002)". Gate:
+`tests/test_stage_a_checkpoint_tee.py`. No format, pipeline default or ship
+gate changes.
+
+Stage B metadata refuses a retained budget its roster does not fit
+(2026-09-23, `ws-tq/1022-retained-window-admission`, PQ #1022). The base GLM
+plan (`0b2cc006`) sealed an operator-declared retained budget whose
+`candidate_delta_bytes` was 4 MiB, while every matrix in the roster needs an
+fp32 delta of 32 to 192 MiB, so every Stage B quantum built on it would have
+refused at its preflight. The resource policy
+(`joint_stageb_resources.derive_policy`) derives that budget from the roster,
+and every one of the 45 layers is admitted under it. `prepare_extended_joint_quanta`
+now refuses an extended plan that binds no `stage_b_resource_policy`, or seals
+a budget other than the policy's, with a named refusal instead of a
+`KeyError`. `regenerate_joint_quanta --executable-readsets` settles every
+layer's retained admission before the head intake. A plan that binds a policy
+must seal the policy's budget. A plan that binds none keeps its declared
+budget only while the roster fits it; otherwise it refuses in seconds, naming
+the plan digest and `derive_policy`. See "GLM Stage B runs from main".
+Gate: `tests/test_retained_budget_provenance_1022.py`. No format, pipeline
+default or ship gate changes.
+
+Stage B replay regimes are stamped in the statistics identity (2026-09-23,
+`ws-1a/stageb-spill-batched-994`, PQ #994). `PRISMAQUANT_STAGE_B_REPLAY_REGIME`
+names the capture batch and the statistics accumulation of a quantum that
+replays from the #994 spill, for example
+`capture_batch=4,accumulation=operator_gemm,chunk_rows=65536`
+(`joint_replay_regime`). Unset is the default: batch 1 and one FP32 GEMM per
+backward invocation, the bitwise regime. The default stamps nothing, so every
+existing quantum keeps its identity, and the default spelled out is refused.
+Any other regime changes the arithmetic, so `statistics_arithmetic_identity`
+stamps a `stage_b_replay_regime` block into the probe identity every cost row
+carries; `operator_gemm` also replaces `operator_accumulation`. The campaign
+join then refuses quanta whose regimes differ ("probe or measurement identity
+differs"), and every joint row's validation refuses a stamped default. The
+regime is a launch setting, not a plan field: the prepared completion records
+the plan's digest and certified mode refuses a mismatch, so a plan field would
+need a fresh prepare per regime. The one campaign container spec that wraps
+every quantum of a dispatch carries it instead. The dispatcher refuses a
+malformed regime and one declared without the spill. The quantum refuses a
+regime in the plan's execution block, and a non-default regime without the
+spill, before any GPU work. `capture_batch` B > 1 carries B consecutive stored
+batches through each capture pass, one forward and one backward, as the
+batched render-free chain (#997) does: no graft or harvest, the group's ids
+re-prepared so positions and masks are the group's own, and the input
+cotangent split back per stored batch. The last group is short when the batch
+count is not a multiple of B. Before the checkpoint load the quantum refuses a
+B that does not divide the sealed read window (a window's tensors are released
+when it closes) and any activation QDQ in the roster that is not row-local
+(`joint_replay_spill.require_row_local_activation_qdq` compares, bit for bit on
+the run's device, the QDQ of a block of rows with the rows' own QDQs, through
+the lease's own QDQ function). Before the chain it refuses any profile shared
+pass state or shared-state cotangent, and it checks again per group. The
+workspace reserve the capture pass charges scales with B.
+`accumulation=operator_gemm` replays each Linear's spilled rows, in capture
+order, through one FP32 GEMM per operator per `chunk_rows` rows
+(`JointOperatorStatisticsLease.observe_row_chunk`), instead of one per
+backward invocation. It shares the upcasts, QDQ and accumulation with the
+invocation path (`_observe_rows`), and it counts the same observed tokens and
+calls. The `contraction_order` field is unchanged: operators are still summed
+before each signed component is projected. A band-serial producer (#996)
+hands off the plane its capture pass wrote, which must equal the batch-1
+plane of the consumer's chain rebuild, so it refuses a capture batch above 1
+(`joint_replay_regime.handoff_regime_refusal`): the dispatcher refuses the
+producer row, and the quantum refuses before any GPU work. It admits
+`operator_gemm` at batch 1, which changes only the statistics. Gates:
+`tests/test_stageb_replay_regime.py`, `tests/test_stageb_one_pass_spill.py`,
+`tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
+changes.
+
 Stage B reads its head from a sealed per-layer slice (2026-09-23,
 `ws-tq/1010-stage-b-head-slice`, PQ #1010). Every layer quantum used to
 repeat the whole campaign's metadata intake before its first GPU allocation:
@@ -212,7 +302,10 @@ against its writable identity mount and seals both scratch variables into the
 outer PB request from the same inlined spec bytes. `prepare_extended_joint_quanta`
 runs the dispatcher's own spec check with the quantum row's grace set, so a
 spec whose `PRISMAQUANT_STAGED_RANGE_WAIT_S` is not below 900 s refuses before
-any metadata is published. `tools/prepare_stageb_after_capture.sh` is the
+any metadata is published. It also refuses a plan whose retained budget is not
+its resource policy's (PQ #1022), and the generator settles every layer's
+retained admission before the head intake, naming `derive_policy` when an
+operator-declared budget does not fit the roster. `tools/prepare_stageb_after_capture.sh` is the
 repository launcher for that step; it resolves the interpreter from the Tessera
 dev pin. Gates: `tests/test_joint_catalog_extension.py`,
 `tests/test_prepare_extended_joint_quanta.py`,
@@ -489,8 +582,36 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-br/scratch-pairs-1019`.
+As of: 2026-09-23 · `ws-sa/seed-bf16-flag-1038`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-sa/seed-bf16-flag-1038`) for **the seed
+receipt's bf16 flag** (PQ #1038): `seed-receipt.json` records
+`matmul_reduction`, the bf16 reduced-precision-reduction flag the seed ran
+under, read and never set; see "Stage A seed mode (#1016)". No format,
+default, stage or ship gate changes.
+
+Re-stamped (2026-09-23, `ws-sa/checkpoint-overlap-1002`) for **Stage A
+checkpoints written as the chain rolls** (PQ #1002): Stage A reserves each
+checkpoint before the pass that produces its plane, writes every cotangent
+into it as the pass writes it, and seals after the pass, instead of reading
+the plane back; see "Stage A checkpoints written as the chain rolls
+(#1002)". The checkpoint bytes are unchanged. No format, default, stage or
+ship gate changes. Gate: `tests/test_stage_a_checkpoint_tee.py`.
+
+Re-stamped (2026-09-23, `ws-tq/1022-retained-window-admission`) for **the
+derived retained budget** (PQ #1022): the Stage B metadata producers refuse a
+plan whose retained budget is not its resource policy's, or an
+operator-declared budget the roster does not fit, before the head intake; see
+"GLM Stage B runs from main". No format, default or stage changes.
+
+Re-stamped (2026-09-23, `ws-1a/stageb-spill-batched-994`) for **Stage B
+replay regimes** (PQ #994): `PRISMAQUANT_STAGE_B_REPLAY_REGIME` names a
+capture batch and a statistics accumulation for the spill replay, and any
+non-default regime is stamped into `statistics_arithmetic_identity`, so the
+join refuses mixed regimes; see the entry of that name at the top. The
+default stamps nothing. A band-serial producer (#996, merged here) refuses a
+capture batch above 1. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-br/scratch-pairs-1019`) for **bounded local
 scratch declared to PrismaBuild** (PQ #1019): a Stage B quantum row seals
@@ -2195,15 +2316,17 @@ says exactly that.
   walk reads later; none of them stages what the next window reads. At R12's
   geometry (a 24-group window, a 22-group share, 32 cotangent groups a layer)
   write-time publication filled the share with groups read a layer later,
-  and a plane read again after its retirement (the checkpoint serializer
-  retires every group of the plane the next layer reads) was staged again
-  window by window at its read, with the GPU waiting on each mover. Now each
+  and a plane read again after its retirement (until PQ #1002 the
+  checkpoint serializer read back, and retired, every group of the plane
+  the next layer reads) was staged again window by window at its read, with
+  the GPU waiting on each mover. Now each
   open window of `prefetched_boundary_batches` asks for the next window's
   groups (`stage_produced_reads_ahead`), and the last window of a pass asks
   for the first window of the pass after it (`then=`: the next probe pass of
   `render_free_layer_roll`, or the next layer's first pass, which the chain
-  names). The checkpoint serializer asks the same way between its own
-  windows. The request is optional work on the stager. It publishes, or
+  names). The read-back checkpoint writer (`write_adjoint_checkpoint`,
+  which Stage A no longer calls) asks the same way between its own windows.
+  The request is optional work on the stager. It publishes, or
   stages again, each of the owner's own groups it names that holds no credit
   yet, and requeues itself (below) while a group waits for its local export
   or for a retirement still in flight. It draws on the same share as rules
@@ -2223,12 +2346,16 @@ says exactly that.
   `produced_read_ahead_deferrals`, `produced_read_ahead_missed`, and
   `produced_group_ahead_no_room` for an opportunistic step that found no
   room. Staging only: the kernel order and the bytes written are unchanged.
-  One limit remains. The chain's `then=` request fires in the roll's last
-  window, before `serialize_checkpoint(layer)` reads and retires the plane
-  the next layer reads, and the serializer's own requests replace it. The
-  first window after each checkpoint layer, including chain layer N-1 after
-  the tail checkpoint, therefore still opens cold: one cold window per
-  checkpoint, where before every window past the share was cold.
+  Until PQ #1002 one limit remained: the chain's `then=` request fired in
+  the roll's last window, and the checkpoint serializer that ran next read
+  back and retired the plane the next layer reads, its own requests
+  replacing `then=`. The first window after each checkpoint layer therefore
+  opened cold. Stage A now writes each checkpoint as the chain rolls (see
+  "Stage A checkpoints written as the chain rolls (#1002)"), so nothing
+  reads or asks between one roll's last window and the next layer's first,
+  and the `then=` request stands through the checkpoint's seal. Whether the
+  request lands before the read is a measurement; the counters above report
+  it.
   **The stager thread (PQ #895).** At a window wider than two groups the
   owner runs those rules on one background thread, because on the compute
   thread they cost more than the compute: in the first production run the GPU
@@ -20937,6 +21064,75 @@ read-ahead gives up groups by the layer that reads them next
 Measured claims about the regime's speed and energy live in the PR and the
 PQ #997 record, not here; this section states only the contract.
 
+### Stage A checkpoints written as the chain rolls (#1002)
+
+A Stage A checkpoint at boundary `b` is a copy of the cotangent plane the
+walk wrote at `b`: one file per (probe, sample), plus the shared-state
+cotangents and a manifest. Until PQ #1002 Stage A wrote it after the pass
+that produced the plane, with the read-back writer
+(`joint_adjoint_checkpoints.write_adjoint_checkpoint`): it read each entry
+back through the owner, window by window, and copied it into
+`boundary-NNN/`. On R12 (GLM-5.3, 2,048 entries of 16.8 MB, a 34.4 GB
+plane) checkpoint 040 took 327.8 s by file times. 288.7 s of that was 31
+waits of 9 to 18 s at every 64th entry, the read-back waiting for produced
+groups to be staged again; the writes took 39.1 s, about 930 MB/s. The
+read-back also retired the groups the next layer reads, and its read-ahead
+replaced the chain's `then=` request, so that layer's first window opened
+cold (see "The read path's lookahead (PQ #989)").
+
+Stage A now writes the checkpoint as the pass produces the plane. No
+option selects the old path; the read-back writer remains for its direct
+callers and as the reference the gate compares against.
+
+1. **Open.** `open_adjoint_checkpoint` reserves the attempt before the
+   pass: before the tail loop for boundary `N`, and for a chain layer in
+   the checkpoint boundaries after its sources settle and before its roll.
+   The plan holds one file per (probe, sample) with the byte count, shape
+   and dtype the cotangent will have, and the shared-state files by name.
+   The reservation is `reserve_checkpoint_artifact`, the same admission the
+   read-back writer uses; the shared rows are absent from it, and the
+   manifest envelope sizes them at `max_artifact_bytes`, the widest row the
+   owner could admit. The directory is created with `exist_ok=False`.
+2. **Tee.** `roll`, and the tail loop, write each cotangent to the owner
+   and then the same tensor to the attempt
+   (`AdjointCheckpointAttempt.write_activation`). The attempt refuses a
+   (probe, sample) it did not plan, a second write of one entry, a shape or
+   dtype other than the planned one, and a write after the seal.
+3. **Seal.** After the pass, `write_checkpoint_with_snapshot(attempt=...)`
+   takes the shared-state snapshot, which only exists now because
+   `SharedStateCotangents` accumulates during the pass. The attempt admits
+   the measured shared-state sizes with `extend_checkpoint_artifact`
+   before it writes them: the extension is refused, and counted as a
+   checkpoint refusal, exactly when a reservation of that size would be,
+   and a shared state above `max_artifact_bytes` is refused outright.
+   `seal` refuses a plan with a missing cotangent or unwritten shared
+   states, then writes the manifest within its envelope and commits.
+
+**Bytes.** Each file is `write_checkpoint_cotangent_entry` of the same
+tensor, session and slot as the read-back writer's, and the manifest is
+built from the same sorted rows, so the checkpoint is byte-identical to the
+read-back writer's; the gate compares every file's sha256 and the record.
+
+**Budget.** The envelope is reserved one pass earlier than before. The pass
+replaces the plane entry by entry (`storage.write(..., previous=...)`), so
+the reservation overlaps the same one live plane it overlapped after the
+pass, and the preflight demand (one live plane set plus one set per
+checkpoint) is unchanged.
+
+**Failure.** A failure abandons the attempt, which retains its envelope.
+The owner's close disposes a retained attempt's directory, so a run that
+fails cleanly leaves none; a killed run leaves a partial `boundary-NNN/`
+without a `checkpoint.json` below its lowest sealed checkpoint, which a
+chain resume sets aside (#1001).
+
+**Profile.** Each checkpoint layer's `chain_layers[]` row carries
+`checkpoint_write_s`, the seconds spent writing into the attempt during
+the pass, and `checkpoint_seal_s`, the seal's wall time.
+
+Gate: `tests/test_stage_a_checkpoint_tee.py`. On origin/main at
+`fc718b35048` its read-back test fails: sealing checkpoint 5 reads the
+plane back. No format, pipeline default or ship gate changes.
+
 ### Stage A chain resume (#1001)
 
 A Stage A run that dies in its reverse chain has done everything above its
@@ -21099,7 +21295,11 @@ checkpoints, retention and telemetry. With a compare checkpoint, the seed
 hashes each rolled `(probe, batch)` payload at `through` as it writes it,
 then reads the reference's entries one at a time. `plane_comparison`
 (`prismaquant.stage_a.seed_plane_comparison.v1`) lists both digests per entry
-with `equal`, `different` and `bitwise_equal`.
+with `equal`, `different` and `bitwise_equal`. `matmul_reduction` records
+`torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction` as the
+core read it before the chain (PQ #1038). Stage A reads the flag and never
+sets it, and the flag is outside the run identity; the shared setter and its
+identity stamp are PQ #1028's.
 
 **The band tool refuses a seed.** `build_band_receipt` refuses a space that
 holds a seed marker or seed receipt, and `stage_a_argv` refuses a sealed
@@ -21139,7 +21339,10 @@ capture is the same `replay_backward(final=True)` pass that writes it. A
 spill producer and a windowed producer emit the same plane, and a
 band-serial consumer under either replay mode matches its chain-mode bytes
 (`tests/test_band_serial_spill.py`, on the spill suite's bf16
-packed-expert fixture).
+packed-expert fixture). A spill capture batch above 1 (#994's replay
+regimes) would change the plane, so a producer refuses one; one GEMM per
+operator at batch 1 hands off the same plane
+(`test_a_band_serial_producer_runs_only_a_batch_one_capture`).
 
 **The handoff.** `joint_quantum_handoff.HandoffEmitter` writes one
 generation under `{output_space.root}/handoff/{generation}/`: the plane as

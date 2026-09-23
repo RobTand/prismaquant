@@ -64,6 +64,7 @@ from .joint_adjoint_checkpoints import (
     dev_mode_stamp,
     exact_entry_record,
     occupied_checkpoint_directories,
+    open_adjoint_checkpoint,
     render_free_layer_roll,
     normalize_chain_regime,
     require_dev_mode,
@@ -155,7 +156,7 @@ def shared_adjoint_snapshot(cotangents) -> dict:
     BEFORE copying -- the caller must take the owner-budgeted fallback
     (:func:`shared_adjoint_copy_plan` + hold, then ``state_dict`` copies
     inside that hold). The caller must drop the snapshot before the next
-    harvest and must not mutate owners while ``write_adjoint_checkpoint``
+    harvest and must not mutate owners while the checkpoint writer
     serializes it. This is the actual Stage-A checkpoint snapshot boundary.
     """
     return {(probe, batch): cotangents[probe][batch].borrowed_state_dict()
@@ -184,30 +185,52 @@ def shared_adjoint_copy_plan(cotangents) -> tuple[bool, int]:
     return (bool(needs), int(total))
 
 
-def write_checkpoint_with_snapshot(storage, space, *, boundary, session, plane,
-                                   cotangents, shared_pass) -> dict:
+def write_checkpoint_with_snapshot(storage, space, *, boundary, session, cotangents,
+                                   shared_pass, plane=None, attempt=None) -> dict:
     """Snapshot + hold + writer lifetime the actual Stage-A caller uses.
 
     Zero-copy borrowed snapshot when every accumulator is already CPU
     contiguous; otherwise hold the precomputed exceptional-owner copy bytes
     BEFORE any ``state_dict`` materialization, copy only exceptional owners
     inside that hold while borrowing contiguous owners, keep the hold
-    across the synchronous ``write_adjoint_checkpoint``, and release copies
-    before releasing the hold (snapshot cleared inside the hold). Returns
-    the checkpoint record. Meta/non-strided/quiescence fail closed before
-    any hold or copy. ``serialize_checkpoint`` and the budget regressions
-    call this one operation -- no test-only execution path.
+    across the synchronous write, and release copies before releasing the
+    hold (snapshot cleared inside the hold). Returns the checkpoint record.
+    Meta/non-strided/quiescence fail closed before any hold or copy.
+    ``seal_checkpoint`` and the budget regressions call this one
+    operation -- no test-only execution path.
+
+    Exactly one of ``plane`` and ``attempt``. With ``attempt`` (Stage A,
+    RobTand/prismaquant#1002) the cotangents are already written, as the
+    roll produced them, and this writes the shared states and seals; a
+    failure retains the attempt. With ``plane`` it is
+    ``write_adjoint_checkpoint``'s read-back writer.
     """
     from .joint_adjoint_checkpoints import write_adjoint_checkpoint
+
+    if (plane is None) == (attempt is None):
+        raise RuntimeError("a checkpoint write takes exactly one of a plane and an attempt")
+
+    def write(snapshot):
+        if attempt is None:
+            return write_adjoint_checkpoint(
+                space, boundary=boundary, session=session,
+                cotangents=plane, shared_adjoint=snapshot,
+                shared_pass=shared_pass, owner=storage)
+        if attempt.boundary != int(boundary):
+            raise RuntimeError(
+                f"checkpoint attempt {attempt.boundary} cannot seal boundary {boundary}")
+        try:
+            attempt.write_shared_states(snapshot, shared_pass)
+            return attempt.seal()
+        except BaseException:
+            attempt.abandon()
+            raise
 
     needs_copy, copy_bytes = shared_adjoint_copy_plan(cotangents)
     if not needs_copy:
         snapshot = shared_adjoint_snapshot(cotangents)
         try:
-            return write_adjoint_checkpoint(
-                space, boundary=boundary, session=session,
-                cotangents=plane, shared_adjoint=snapshot,
-                shared_pass=shared_pass, owner=storage)
+            return write(snapshot)
         finally:
             snapshot.clear()
     with storage.hold_transient_metadata(copy_bytes, "shared-adjoint CPU snapshot"):
@@ -219,10 +242,7 @@ def write_checkpoint_with_snapshot(storage, space, *, boundary, session, plane,
                     owner_needs, _ = owner.snapshot_copy_plan()
                     snapshot[(probe, batch)] = (
                         owner.state_dict() if owner_needs else owner.borrowed_state_dict())
-            return write_adjoint_checkpoint(
-                space, boundary=boundary, session=session,
-                cotangents=plane, shared_adjoint=snapshot,
-                shared_pass=shared_pass, owner=storage)
+            return write(snapshot)
         finally:
             snapshot.clear()
 
@@ -1165,6 +1185,10 @@ def run_adjoint_capture_core(
     checkpoints: list[dict] = []
     chain_telemetry: list[dict] = []
     started = time.time()
+    # Read, never set, here: the shared setter and its identity stamp are
+    # PQ #1028's. A seed records the value its chain ran under (PQ #1038).
+    bf16_reduction = bool(
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction)
     capture_started = None
     tail_started = None
     chain_started = None
@@ -1228,24 +1252,46 @@ def run_adjoint_capture_core(
                 "chain resume refused: the relaunch binds another forward-recovery "
                 "capsule than the run its chain state seals")
 
-        def serialize_checkpoint(boundary: int) -> None:
-            # The rolling entries already own durable, digest-bound bytes.
-            # Keep only descriptors: a full probe/batch plane can exceed
-            # host memory even when each existing resident window fits.
-            plane = {(probe, batch): reference
-                     for probe, entries in enumerate(grad_outs)
-                     for batch, reference in enumerate(entries)}
+        def open_checkpoint(boundary: int):
+            # Reserved before the pass that produces the plane, which writes
+            # each cotangent into the checkpoint as it rolls
+            # (RobTand/prismaquant#1002). Nothing is read back, so the
+            # checkpoint stages no reads and the read-ahead the pass asked
+            # for its successor survives it. Each cotangent is the gradient
+            # of its batch's input boundary cast to the runner dtype, so the
+            # boundary entry's shape and that dtype are its exact spec.
+            itemsize = torch.empty((), dtype=runner.dtype).element_size()
+            specs = {}
+            for batch in range(len(batches)):
+                shape = [int(dim) for dim in batches[batch].activations_cpu[boundary].shape]
+                nbytes = itemsize
+                for dim in shape:
+                    nbytes *= dim
+                for probe in range(n_probes):
+                    specs[probe, batch] = (nbytes, shape, str(runner.dtype))
+            return open_adjoint_checkpoint(
+                space, boundary=boundary, session=checkpoint_session(),
+                specs=specs,
+                shared_adjoint_keys=[(probe, batch)
+                                     for probe in range(len(cotangents))
+                                     for batch in range(len(cotangents[probe]))],
+                shared_pass_keys=range(len(batches)), owner=storage)
+
+        def checkpoint_session():
+            return {"generation": storage.session["generation"],
+                    "kind": "adjoint_checkpoint",
+                    "run_identity_sha256": storage.session["run_identity_sha256"]}
+
+        def seal_checkpoint(attempt) -> None:
             shared_pass = {batch: batches[batch].shared_pass_state
                            for batch in range(len(batches))}
             record = write_checkpoint_with_snapshot(
-                storage, space, boundary=boundary,
-                session={"generation": storage.session["generation"],
-                         "kind": "adjoint_checkpoint",
-                         "run_identity_sha256": storage.session["run_identity_sha256"]},
-                plane=plane, cotangents=cotangents, shared_pass=shared_pass)
+                storage, space, boundary=attempt.boundary,
+                session=checkpoint_session(), attempt=attempt,
+                cotangents=cotangents, shared_pass=shared_pass)
             checkpoints.append(record)
-            log(f"checkpoint published at boundary {boundary} "
-                f"({len(plane)} cotangent entries)")
+            log(f"checkpoint published at boundary {attempt.boundary} "
+                f"({attempt.written_activations} cotangent entries)")
 
         if resume_plan is not None:
             # Every check first; the interrupted attempt's working entries
@@ -1303,43 +1349,49 @@ def run_adjoint_capture_core(
             storage.watch_auxiliary(batches, cotangents)
             storage.check_auxiliary(batches, cotangents=cotangents)
             tail_started = time.time()
-            with prefetched_boundary_batches(storage, batches, num_layers) as tail_batches:
-                for batch_index, batch, tail_cpu, _unused in tail_batches:
-                    try:
-                        for probe_index in range(n_probes):
-                            tail = tail_cpu.to(device=device, dtype=dtype).detach().requires_grad_(True)
-                            logits = runner.tail_logits(batch, tail)
-                            if probe_layout is not None and list(logits.shape) != [
-                                    len(batch.input_ids), int(calib_ids.shape[1]),
-                                    probe_layout["vocab_size"]]:
-                                raise RuntimeError(
-                                    "adjoint capture tail differs from bound probe geometry")
-                            probe = fisher_probe_scalar(
-                                logits, seed=seed_base + probe_index,
-                                token_scope=token_scope, temperature=temperature,
-                                distribution="rademacher",
-                                **({"token_count_override": probe_layout["global_token_count"],
-                                    "global_row_offset": row_offsets[batch_index]}
-                                   if probe_layout is not None else {}),
-                            )
-                            probe.backward()
-                            if tail.grad is None:
-                                raise RuntimeError(
-                                    "adjoint capture tail produced no cotangent")
-                            grad_outs[probe_index].append(storage.write(
-                                tail.grad, batch_index=batch_index,
-                                boundary_index=num_layers, probe_index=probe_index))
-                            del logits, probe, tail
-                        storage.retire(batch.activations_cpu[-1])
-                        batch.activations_cpu[-1] = torch.empty(0)
-                    finally:
-                        tail_cpu = logits = probe = tail = None
-            log(f"tail cotangents done in {(time.time() - tail_started) / 60:.1f} min; "
-                f"publishing the tail checkpoint at boundary {num_layers}")
-
             # The tail set is the first checkpoint: layer num_layers-1's quantum
-            # chains nothing (§3.1).
-            serialize_checkpoint(num_layers)
+            # chains nothing (§3.1). It is written as the tail produces it.
+            tail_checkpoint = open_checkpoint(num_layers)
+            try:
+                with prefetched_boundary_batches(storage, batches, num_layers) as tail_batches:
+                    for batch_index, batch, tail_cpu, _unused in tail_batches:
+                        try:
+                            for probe_index in range(n_probes):
+                                tail = tail_cpu.to(device=device, dtype=dtype).detach().requires_grad_(True)
+                                logits = runner.tail_logits(batch, tail)
+                                if probe_layout is not None and list(logits.shape) != [
+                                        len(batch.input_ids), int(calib_ids.shape[1]),
+                                        probe_layout["vocab_size"]]:
+                                    raise RuntimeError(
+                                        "adjoint capture tail differs from bound probe geometry")
+                                probe = fisher_probe_scalar(
+                                    logits, seed=seed_base + probe_index,
+                                    token_scope=token_scope, temperature=temperature,
+                                    distribution="rademacher",
+                                    **({"token_count_override": probe_layout["global_token_count"],
+                                        "global_row_offset": row_offsets[batch_index]}
+                                       if probe_layout is not None else {}),
+                                )
+                                probe.backward()
+                                if tail.grad is None:
+                                    raise RuntimeError(
+                                        "adjoint capture tail produced no cotangent")
+                                grad_outs[probe_index].append(storage.write(
+                                    tail.grad, batch_index=batch_index,
+                                    boundary_index=num_layers, probe_index=probe_index))
+                                tail_checkpoint.write_activation(
+                                    probe_index, batch_index, tail.grad)
+                                del logits, probe, tail
+                            storage.retire(batch.activations_cpu[-1])
+                            batch.activations_cpu[-1] = torch.empty(0)
+                        finally:
+                            tail_cpu = logits = probe = tail = None
+                log(f"tail cotangents done in {(time.time() - tail_started) / 60:.1f} min; "
+                    f"sealing the tail checkpoint at boundary {num_layers}")
+                seal_checkpoint(tail_checkpoint)
+            except BaseException:
+                tail_checkpoint.abandon()
+                raise
             if progress is not None:
                 # The tail checkpoint is durable work landed while the read plan
                 # stays on forward-last: count it without leaving the phase the
@@ -1380,6 +1432,7 @@ def run_adjoint_capture_core(
                 progress.enter(adjoint_chain_phase_name(layer))
                 progress.flush(force=True)
             layer_started = time.time()
+            attempt = None
             try:
                 runner.context.install(
                     layer,
@@ -1402,6 +1455,11 @@ def run_adjoint_capture_core(
                     elif torch.device(runner.device).type == "cuda":
                         raise RuntimeError(
                             "render-free chain requires source prefetch settlement")
+                # A checkpoint layer writes its plane into the checkpoint as
+                # it rolls (RobTand/prismaquant#1002): opened here, after the
+                # layer's sources settled and before any cotangent exists.
+                attempt = open_checkpoint(layer) if layer in boundaries else None
+
                 def roll(tensor, batch_index, probe_index):
                     if plane_digests is not None and layer == chain_bottom:
                         plane_digests[probe_index, batch_index] = (
@@ -1413,6 +1471,8 @@ def run_adjoint_capture_core(
                         probe_index=probe_index,
                         previous=grad_outs[probe_index][batch_index],
                         **({} if layer > 0 else {"read_back": False}))
+                    if attempt is not None:
+                        attempt.write_activation(probe_index, batch_index, tensor)
 
                 chain_backwards += render_free_layer_roll(
                     runner, storage=storage, batches=batches, layer=layer,
@@ -1426,12 +1486,26 @@ def run_adjoint_capture_core(
                            else grad_outs[0]) if layer > chain_bottom else None),
                     batch_size=chain_regime["batch_size"],
                     probe_fusion=chain_regime["probe_fusion"])
-                if layer in boundaries:
-                    serialize_checkpoint(layer)
+                seal_s = None
+                if attempt is not None:
+                    sealed = time.time()
+                    seal_checkpoint(attempt)
+                    seal_s = time.time() - sealed
                 chain_telemetry.append({
                     "layer": layer, "wall_s": time.time() - layer_started,
                     "checkpoint": layer in boundaries,
+                    "checkpoint_write_s": (None if attempt is None
+                                           else attempt.write_seconds),
+                    "checkpoint_seal_s": seal_s,
                 })
+                attempt = None
+            except BaseException:
+                # Files may exist: retain the attempt's envelope, never
+                # release it. The owner's close disposes the directory; only
+                # a killed run leaves it, for a chain resume to set aside.
+                if attempt is not None:
+                    attempt.abandon()
+                raise
             finally:
                 runner.context.unload(layer)
         log(f"render-free chain done in {(time.time() - chain_started) / 60:.1f} min "
@@ -1473,6 +1547,10 @@ def run_adjoint_capture_core(
             "stride": receipt_stride,
             "boundary_storage": boundary_storage_block(None),
             "seed": seed_plan.binding,
+            # Outside run_identity: the flag is not part of the seed's bind
+            # identity until PQ #1028 stamps it for every run.
+            "matmul_reduction": {
+                "allow_bf16_reduced_precision_reduction": bf16_reduction},
             "checkpoints": checkpoints,
             "plane_comparison": compare_seed_plane(seed_plan, plane_digests),
             "retention": retention,
@@ -1758,7 +1836,7 @@ def run_adjoint_capture(
         raise AdjointIdentityRefused(str(exc)) from exc
     occupied = occupied_checkpoint_directories(adjoint_space(output_root))
     if occupied and chain_resume is None:
-        # write_adjoint_checkpoint creates each boundary with exist_ok=False,
+        # A checkpoint attempt creates its boundary with exist_ok=False,
         # so an occupied path fails the run only when the adjoint sweep
         # reaches it -- after the head intake and the forward pass. Refuse
         # here instead, before any GPU work.

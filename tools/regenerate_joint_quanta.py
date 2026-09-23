@@ -663,6 +663,51 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
             "receipts_newly_bound": receipt_moves}
 
 
+def _retained_budget_provenance(plan: dict, *, plan_sha256: str):
+    """Where the plan's retained budget comes from (PQ #1022).
+
+    A plan that binds ``stage_b_resource_policy`` must seal exactly the
+    budget that policy derived from the roster: the policy is re-derived
+    (``verify_policy``; cached in-process, so the head intake does not repeat
+    it) and a plan carrying any other budget refuses. A plan that binds no
+    policy seals an operator-declared budget; the caller then refuses it with
+    :func:`_undelivered_budget_refusal` when the roster does not fit it.
+    Returns the verified policy, or ``None`` for a declared budget.
+    """
+    retained = (plan.get("execution") or {}).get("retained_operator_windows")
+    binding = plan.get("stage_b_resource_policy")
+    if binding is None or retained is None:
+        return None
+    from prismaquant.joint_stageb_resources import verify_policy
+
+    policy = verify_policy(binding)
+    if retained.get("budget") != policy["budget"]:
+        raise ValueError(
+            f"plan {plan_sha256} binds Stage B resource policy "
+            f"{binding.get('sha256')} but seals a different retained budget: "
+            "refusing")
+    return policy
+
+
+def _undelivered_budget_refusal(plan: dict, *, plan_sha256: str,
+                                layer: int, exc: Exception):
+    """Name the fix when a declared retained budget refuses its roster.
+
+    Only an admission refusal (the planners' ``RuntimeError``, which
+    ``derive_layer_prepared_inputs`` chains) is a budget question; any other
+    refusal, and any refusal under a derived policy, passes through as is.
+    """
+    if (plan.get("stage_b_resource_policy") is not None
+            or not isinstance(exc.__cause__, RuntimeError)):
+        return exc if isinstance(exc, ValueError) else ValueError(str(exc))
+    return ValueError(
+        f"plan {plan_sha256} seals an operator-declared retained budget "
+        f"that does not admit layer {layer}'s roster ({exc}); derive the "
+        "budget from the roster with "
+        "prismaquant.joint_stageb_resources.derive_policy and bind it as "
+        "the plan's stage_b_resource_policy")
+
+
 def _load_production_cache(prepared: dict):
     """Load the prepared completion's production weight cache, once (PQ #917).
 
@@ -1103,6 +1148,31 @@ def main(argv=None) -> int:
                 for record in produced["records"]:
                     by_layer.setdefault(record.get("layer"), []).append(
                         record)
+                # PQ #1022: every layer's retained admission is settled
+                # before the head intake, so a budget the roster does not
+                # fit refuses in seconds, naming its fix.
+                _retained_budget_provenance(plan,
+                                            plan_sha256=args.plan_sha256)
+                prepared_by_layer = {}
+                for layer in sorted(by_layer):
+                    layer_records = by_layer[layer]
+                    try:
+                        prepared_by_layer[layer] = derive_layer_prepared_inputs(
+                            layer_records[0],
+                            execution=plan.get("execution", {}),
+                            formats_by_qname=formats_by_qname,
+                            production_cache=production_cache,
+                            prepared_sha256=args.prepared_sha256,
+                            production_pkl_sha256=production_sha,
+                            unit_roster_sha256=layer_records[0][
+                                "campaign"].get("unit_roster_sha256"))
+                    except ValueError as exc:
+                        refusal = _undelivered_budget_refusal(
+                            plan, plan_sha256=args.plan_sha256,
+                            layer=layer, exc=exc)
+                        if refusal is None:
+                            raise
+                        raise refusal from exc
                 if args.head_slices:
                     head_slices = _build_head_slices(
                         plan, plan_sha256=args.plan_sha256,
@@ -1115,15 +1185,7 @@ def main(argv=None) -> int:
                 emitted = []
                 for layer in sorted(by_layer):
                     layer_records = by_layer[layer]
-                    layer_prepared = derive_layer_prepared_inputs(
-                        layer_records[0],
-                        execution=plan.get("execution", {}),
-                        formats_by_qname=formats_by_qname,
-                        production_cache=production_cache,
-                        prepared_sha256=args.prepared_sha256,
-                        production_pkl_sha256=production_sha,
-                        unit_roster_sha256=layer_records[0][
-                            "campaign"].get("unit_roster_sha256"))
+                    layer_prepared = prepared_by_layer[layer]
                     print(f"prepared-input bridge: layer {layer} seals "
                           f"{len(layer_prepared['windows'])} retained "
                           f"windows over "
