@@ -33,6 +33,8 @@ import types
 
 import pytest
 
+from stage_a_spool_spec import with_spool
+
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):
     if str(_entry) not in sys.path:
@@ -53,7 +55,8 @@ IMAGE_FLAG = "--container-image"
 
 
 def _write_spec(path: Path, container: dict) -> Path:
-    path.write_text(json.dumps({"container": container, "env": {}}))
+    # The Stage A row refuses a spec without the produced spool (PQ #1012).
+    path.write_text(json.dumps(with_spool({"container": container, "env": {}})))
     return path
 
 
@@ -169,8 +172,8 @@ def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
     the other.  One parse means one read and one image.
     """
 
-    first = {"container": {"image": IMAGE}, "env": {}}
-    second = {"container": {"image": OTHER_IMAGE}, "env": {}}
+    first = with_spool({"container": {"image": IMAGE}, "env": {}})
+    second = with_spool({"container": {"image": OTHER_IMAGE}, "env": {}})
     reads = {"spec": 0}
     real_read_text = Path.read_text
 
