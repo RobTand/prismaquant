@@ -178,6 +178,11 @@ Two quanta `layer-L` and `layer-M` (L ≠ M) share **no mutable state**:
 A builder implements stage B as N independent PB actions with the CLI of §6
 and no inter-quantum edges; stage C as a pure function of receipts.
 
+Band-serial dispatch (§15, PQ #996) is the one opt-in exception: inside a
+checkpoint band, quantum `L - 1` reads a handoff file quantum `L` writes, so
+it publishes after `L`. The handoff is sha256-equal to what `L - 1` would
+compute itself, so the merged bytes are still independent of order.
+
 ## 3. The layer-quantum record (contract)
 
 Owned by the producer module `prismaquant/joint_layer_quanta.py` (pure data,
@@ -531,8 +536,10 @@ repartition, the same freeze semantics `residency_stage_rows` already keeps):
    by the submitter, and a pass told nothing binds nothing and gets no
    redirect (PQ #835).
 3. **Then quanta, when their inputs exist:** a layer-L quantum is publishable
-   once stage A's terminal record says `executed` AND
-   `adjoint-capture.json` validates (digests match the state file). The tool
+   once a sealed Stage A proof covers its checkpoint: the completed
+   `adjoint-capture.json` or the checkpoint band of its boundary, which
+   Stage A seals hours earlier (PQ #993). The proof must give the layer
+   exactly the slice the record binds. The tool
    publishes every publishable quantum not yet submitted, then exits. Re-run
    it (cron, a shell loop, or a human) as stage A completes; publication
    order is descending layer id — deterministic, and the order that fronts
@@ -557,7 +564,7 @@ pbrun --tag gb10 \
         --quantum-sha256 <record file wire digest> \
         --plan <plan> --plan-sha256 <plan digest> \
         --prepared <prepared> --prepared-sha256 <prepared digest> \
-        --adjoint <adjoint-capture.json> --adjoint-sha256 <receipt wire digest> \
+        --adjoint-slice <slice file> --adjoint-slice-sha256 <slice digest> \
         --data-manifest-sha256 <slice manifest bytes digest> \
         --resume \
         --output-root …/complete-512-seed237….encoder-reuse-02
@@ -567,17 +574,18 @@ The slice digest is the row's own read-set digest (`read_set.manifest_sha256`),
 verified against the slice file at dispatch: the quantum binds the bytes pbrun
 stages for it, never the campaign parent it also carries (PQ #835). The
 record digest is the record file's wire bytes (the consumer checks raw bytes
-first; its canonical body check inside stays), and the receipt digest is the
-receipt file's wire bytes (PQ #838: earlier rows bound the canonical digests
-and died in argparse or at the first gate).
+first; its canonical body check inside stays; PQ #838: earlier rows bound the
+canonical digests and died in argparse or at the first gate).
 
-Wire and document identity stay distinct end to end. The producer seals the
-canonical digest of the decoded receipt (`bind_adjoint_receipt`); the writer
-persists pretty JSON plus a newline (`write_adjoint_receipt`). The dispatcher
-receipt gate and the consumer's record-vs-argv check therefore compare the
-record's canonical digest against the canonical digest of the decoded file --
-never raw bytes against the seal, which valid writer output fails. The CLI
-flags bind wire on both files, and the wire checks stay where they were.
+A quantum binds its Stage A *slice*, never the whole receipt (PQ #993). The
+slice is the run header plus the one checkpoint and the boundary entries
+the layer reads. The producer seals its digest into the record
+(`bind_adjoint_slice`) and writes the slice file as its canonical bytes
+(`write_adjoint_slice`), so the file's wire digest is the sealed digest. The
+dispatcher recomputes the slice from each proof and requires the record's
+digest and the file's bytes to match it; the quantum checks the file against
+`--adjoint-slice-sha256` and the record. A record built from a checkpoint
+band and one built from the completed receipt are the same record.
 
 Quantum records are produced, never edited (producer D3). The reviewed
 regeneration path is `tools/regenerate_joint_quanta.py`: it replays the
@@ -718,7 +726,7 @@ artifacts through the existing `StreamedBoundaryArtifacts` reader.
 
 `--quantum PATH --quantum-sha256 HEX` (the record; digest re-verified),
 `--plan PATH --plan-sha256 HEX`, `--prepared PATH --prepared-sha256 HEX`,
-`--adjoint PATH --adjoint-sha256 HEX` (stage-A receipt),
+`--adjoint-slice PATH --adjoint-slice-sha256 HEX` (the record's Stage A slice),
 `--output-root PATH` (the campaign output root; the quantum writes only
 under its `output_space`), `--device cuda`, `--profile-tool cprofile`
 (optional, default off — the single run's profile tool applies to the
@@ -767,8 +775,8 @@ state: the process ends with the layer.
 Under `<output_root>/layer-quanta/layer-NNN/`:
 
 - `cost.pkl` — the layer's payload: `{"costs": {qname: {fmt: row}}},
-  "provenance": {…the campaign binding, the quantum identity, the adjoint
-  receipt digest, per-window telemetry…}`, rows validated by
+  "provenance": {…the campaign binding, the quantum identity, the Stage A
+  slice digest, per-window telemetry…}`, rows validated by
   `validate_joint_aura_entry` before write; pickled with the run's pinned
   protocol; atomic.
 - `results.json` — the per-quantum report (the single run's `results.json`
@@ -813,9 +821,9 @@ takeover records and the §6 runtime's writer before landing:
   units — a complete quantum that drops rows refuses.
 - The payload provenance grammar (§6.4) is what the runtime seals:
   `campaign_binding` (plan/prepared/read-manifest digests, scope, roster
-  digest), `distributed_quantum` (quantum id, record identity, adjoint
-  receipt digest, checkpoint boundary, chain layers, window count, chunk
-  names), and the top-level `adjoint_receipt_sha256`. The joiner checks
+  digest), `distributed_quantum` (quantum id, record identity, Stage A
+  slice digest, checkpoint boundary, chain layers, window count, chunk
+  names), and the top-level `adjoint_slice_sha256`. The joiner checks
   both blocks and refuses unbound (pre-A) records; no implementation digest
   is promised in the payload — it is bound through `prepared_sha256`.
 
@@ -829,7 +837,7 @@ shrinking the layer set to fit (the #768 rule). Checks, in order:
 
 1. **Custody:** every receipt's `identity_sha256` matches its record; every
    payload's provenance equals the campaign binding and answers for its
-   record (the §7 wire pins above — including the adjoint receipt digest);
+   record (the §7 wire pins above — including the Stage A slice digest);
    only per-layer content may differ.
 2. **Coverage:** replay `verify_quanta_coverage` over the receipt set against
    the parent manifest; then check the *unit* tiling — the union of payload
@@ -1160,3 +1168,24 @@ dispatcher, launcher and image-content suites. The red run on
 omission; the green runs (PB `afe712fb79b5…`, 20 passed; caller-regression
 batch `cec95d11c972…` 5/5 shards, submission-path batch `5d5b9f3e189a…` 7/7
 shards) are the corrected direct and manifest paths.
+
+## 15. Addendum (2026-09-23): band-serial quanta (#996)
+
+Inside one checkpoint band, quantum `L - 1` rebuilds the boundary-`L`
+cotangent plane from the checkpoint before its own work. Quantum `L` has
+that plane already: its final replay pass writes it. With
+`tools/dispatch_joint_quanta.py --band-serial --handoff-tier <tier>`,
+quantum `L` writes the plane as a handoff (`--emit-adjoint-handoff`) through
+a produced-output template its row declares, and quantum `L - 1` reads it
+(`--adjoint-handoff`) and stages a readset derived from its sealed one, with
+a `handoff-load` phase in place of the checkpoint and chain phases. PB has no
+dependency between actions, so the dispatcher publishes `L - 1` only after
+`L` executed and published a handoff that hashes. Bands stay parallel. A
+submitted row keeps its mode on every resubmission.
+
+Records, cost payloads and journals equal chain mode byte for byte, and each
+handoff plane is sha256-equal to the plane the chain rebuild ends on, at a
+Stage A chain batch size of one. `docs/ARCHITECTURE.md`, "Band-serial Stage B
+quanta (#996)", is the contract; this addendum records only why the design
+changed. The GPU-hour saving is derived from per-pass cost, not measured.
+

@@ -53,6 +53,7 @@ if __package__:
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
     )
+    from prismaquant.joint_quantum_handoff import HANDOFF_LOAD_PHASE
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
@@ -64,6 +65,7 @@ else:
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
     )
+    from prismaquant.joint_quantum_handoff import HANDOFF_LOAD_PHASE
 
 PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
 PBWAIT = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbwait.py")
@@ -832,7 +834,8 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S,
-                 consumer_tags: Sequence[str] = CONSUMER_TAGS) -> list[str]:
+                 consumer_tags: Sequence[str] = CONSUMER_TAGS,
+                 band: Mapping | None = None) -> list[str]:
     """The exact §5.2 submission argv for one quantum. Pinned by tests: a
     drift here breaks placement.  ``consumer_tags`` is the effective §5.1
     placement policy, a conjunction PB matches against a worker's offered
@@ -860,8 +863,30 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     the block the row keeps the legacy slice manifest with head/chunk
     progress. Tier flags, tags, demand and environment are identical in
     all lanes.
+
+    ``band`` (PQ #996) is this row's band-serial role, from
+    :func:`fresh_band_role` or :func:`recorded_band_role`. Its
+    ``handoff`` makes the row a consumer: the payload gains
+    ``--adjoint-handoff`` and its digest, and the row stages the derived
+    band-serial readset, with its phases as the progress declaration,
+    instead of the sealed chain manifest. Its ``emit_template`` makes the
+    row a producer: the payload gains ``--emit-adjoint-handoff`` and the
+    envelope declares the handoff's produced-output template. Without a
+    band the argv is the chain-mode one, byte for byte.
     """
     quantum_id = record["quantum_id"]
+    handoff = (band or {}).get("handoff")
+    emit_template = (band or {}).get("emit_template")
+    if (handoff is not None or emit_template is not None) and \
+            record.get("executable_readset") is None:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} is not an executable row: band-serial "
+            "quanta stage their reads through an executable readset")
+    if emit_template is not None and not _pbrun_seals_produced_output():
+        raise ProducedOutputDeclarationUnsupported(
+            f"quantum {quantum_id!r} must declare its handoff template "
+            f"({emit_template}), but the client at {PBRUN} carries no "
+            "--produced-output-template")
     resource_policy = None
     executable = record.get("executable_readset")
     if record.get("catalog_extension") is not None and executable is None:
@@ -877,6 +902,15 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         _executable_prepared_input(record, output_root=output_root)
         manifest, staged_sha256, progress = _executable_row_parts(
             record, output_root=output_root, head_grace_s=head_grace_s)
+        if handoff is not None:
+            # The sealed chain manifest passed its gate above; the row stages
+            # the readset derived from it and this handoff.
+            manifest = Path(handoff["manifest_path"])
+            staged_sha256 = handoff["manifest_sha256"]
+            progress = [("head", head_grace_s)] + [
+                (name, HEAD_PROGRESS_GRACE_S if name == HANDOFF_LOAD_PHASE
+                 else CHUNK_PROGRESS_GRACE_S)
+                for name in handoff["phases"] if name != "head"]
     else:
         manifest = Path(record["read_set"]["manifest_path"])
         if not manifest.is_absolute():
@@ -928,6 +962,12 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         raise DispatchRefused(
             f"quantum {quantum_id!r} stage-A slice unreadable at "
             f"{slice_path}: {exc}") from exc
+    band_payload: list[str] = []
+    if handoff is not None:
+        band_payload += ["--adjoint-handoff", str(handoff["path"]),
+                         "--adjoint-handoff-sha256", str(handoff["sha256"])]
+    if emit_template is not None:
+        band_payload.append("--emit-adjoint-handoff")
     wrapped, container_image = _container_wrap(SPEC_PATH, [
         "python3", "-m", "prismaquant.joint_cost_quantum",
         "--quantum", str(record_path),
@@ -941,7 +981,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--data-manifest-sha256", staged_sha256,
         "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
-        "--output-root", str(output_root)], progress=progress,
+        "--output-root", str(output_root), *band_payload], progress=progress,
         resource_policy=resource_policy)
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
@@ -961,6 +1001,10 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     argv += ["--priority", str(priority),
              "--demand", f"gpu=1,mem_gb={mem_gib}", "--gpu-memory-gb", gpu_gib,
              "--cpus", str(cpus)]
+    if emit_template is not None:
+        # An envelope option, as for stage A: pbrun seals the declaration
+        # into the request and derives the window's tier demand from it.
+        argv += ["--produced-output-template", str(emit_template)]
     if container_image is not None:
         # A pbrun option, so it precedes the separator like the manifest: PB
         # must admit the row only where this image is already present, or
@@ -1127,7 +1171,7 @@ def check_stage_a_proofs(proofs: Sequence[tuple[Path, dict]],
         AdjointSliceRefused, adjoint_slice_sha256, band_set,
         load_adjoint_slice, stage_a_receipt_kind, stage_a_run_header,
         stage_a_run_header_sha256, stage_a_slice)
-    from prismaquant.joint_layer_quanta import check_adjoint_run_header
+    from prismaquant.joint_layer_quanta import check_adjoint_run_identity
     if not proofs:
         return {}
     campaign = records[0][1]["campaign"]
@@ -1155,11 +1199,13 @@ def check_stage_a_proofs(proofs: Sequence[tuple[Path, dict]],
             raise DispatchRefused("stage-A proofs carry different run headers: mixed runs")
         header = stage_a_run_header(proofs[0][1])
         try:
-            check_adjoint_run_header(
+            # The stride is not checked here: the dispatcher derives none.
+            # load_adjoint_slice below checks that the header's stride
+            # places each record at its checkpoint.
+            check_adjoint_run_identity(
                 header, plan_sha256=campaign["plan_sha256"],
                 prepared_sha256=campaign["prepared_sha256"],
                 scope=campaign["campaign_scope"],
-                checkpoints=header["stride"]["boundaries"],
                 catalog_extension=extensions[0])
         except (ValueError, OSError, KeyError) as exc:
             raise DispatchRefused(f"stage-A proof does not answer for this campaign: {exc}") from exc
@@ -1211,6 +1257,272 @@ def load_stage_a_proofs(receipt_path: Path | None,
         except (OSError, ValueError, RuntimeError) as exc:
             raise DispatchRefused(f"{path}: not a sealed stage-A band: {exc}") from exc
     return proofs
+
+
+# --------------------------------------------------------------------------
+# Band-serial Stage B (PQ #996)
+# --------------------------------------------------------------------------
+#
+# Inside a checkpoint band, quantum L-1 can take quantum L's final input
+# cotangent (its handoff) instead of rebuilding the chain from the band's
+# checkpoint. PrismaBuild has no dependency between actions, so the edge is
+# expressed here, as publication order: L carries a declared produced output
+# (its handoff), and L-1 is published only once L has executed, reported
+# complete and published a handoff that binds L-1. L-1 then declares the
+# handoff's bytes as ordinary staged inputs of its own data manifest. Nothing
+# here places, schedules or moves bytes; bands stay independent.
+
+#: The dispatcher's own control files for band-serial rows: the per-producer
+#: produced-output templates and the per-consumer derived readsets.
+BAND_SERIAL_DIRECTORY = "band-serial"
+
+
+def _band_serial_root(output_root: Path) -> Path:
+    return Path(output_root) / "layer-quanta" / BAND_SERIAL_DIRECTORY
+
+
+def _publish_control_bytes(path: Path, payload: bytes, *, what: str) -> Path:
+    """Publish a derived control file once; other bytes at its name refuse."""
+    from prismaquant.cost_stage_checkpoint import publish_new_bytes
+
+    if not publish_new_bytes(Path(path), payload):
+        try:
+            existing = Path(path).read_bytes()
+        except OSError as exc:
+            raise DispatchRefused(f"{what} at {path} is unreadable: {exc}") from exc
+        if existing != payload:
+            raise DispatchRefused(
+                f"{what} at {path} holds other bytes: refusing to replace it")
+    return Path(path)
+
+
+def _read_bound_slice(record: Mapping) -> dict:
+    """The record's Stage A slice, read where the row reads it and hashed."""
+    adjoint = record.get("adjoint", {})
+    path, digest = adjoint.get("slice_path"), adjoint.get("slice_sha256")
+    try:
+        raw = Path(path).read_bytes()
+    except (OSError, TypeError) as exc:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} stage-A slice unreadable at "
+            f"{path}: {exc}") from exc
+    if _sha_bytes(raw) != digest:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} stage-A slice at {path} does "
+            "not hash to the sealed digest")
+    return json.loads(raw)
+
+
+def band_serial_roles(records: Sequence[tuple[Path, dict]]) -> dict[str, dict]:
+    """Which quantum hands its cotangent to which, per checkpoint band.
+
+    ``hands_to`` names quantum ``L - 1`` when it shares ``L``'s checkpoint
+    boundary; ``takes_from`` is the inverse. A band's top (the layer just
+    below its checkpoint) takes from nobody: its incoming cotangent is the
+    checkpoint itself.
+    """
+    by_layer = {record["layer"]: record for _, record in records}
+
+    def boundary(record):
+        return record.get("adjoint", {}).get("checkpoint_boundary")
+
+    roles = {}
+    for _, record in records:
+        below = by_layer.get(record["layer"] - 1)
+        above = by_layer.get(record["layer"] + 1)
+        roles[record["quantum_id"]] = {
+            "hands_to": (below["quantum_id"] if below is not None
+                         and boundary(below) == boundary(record) else None),
+            "takes_from": (above["quantum_id"] if above is not None
+                           and boundary(above) == boundary(record) else None),
+        }
+    return roles
+
+
+def handoff_template_path(record: Mapping, *, plan: Mapping,
+                          adjoint_slice: Mapping, tier: str,
+                          output_root: Path) -> Path:
+    """Write and return a producer row's handoff produced-output template.
+
+    Derived from the numbers the producer's emitter binds with: the plan's
+    ``execution.boundary_storage`` normalized onto the producer's handoff
+    directory (artifact maximum and prefetch group), and the largest
+    checkpoint-plane tensor in the producer's slice. ``tier`` is the stage
+    tier the declaration permits, a fleet fact the submitter names. The file
+    is named by its content digest, so a changed tier or plan writes a new
+    template and never rewrites one a submitted row already declared.
+    """
+    from prismaquant.cost_streaming import normalize_boundary_storage
+    from prismaquant.joint_quantum_handoff import handoff_root
+    from prismaquant.stage_a_produced_output import build_boundary_template
+
+    quantum_id = record["quantum_id"]
+    storage = plan.get("execution", {}).get("boundary_storage")
+    if not isinstance(storage, dict):
+        raise DispatchRefused(
+            f"quantum {quantum_id!r}: the plan seals no boundary storage for a "
+            "handoff")
+    try:
+        policy = normalize_boundary_storage({
+            **storage,
+            "directory": str(handoff_root(record["output_space"]["root"]))})
+        tensors = [int(entry["tensor_bytes"]) for entry in
+                   adjoint_slice["checkpoint"]["activation_entries"]]
+        template = build_boundary_template(
+            output_prefix=policy["directory"], tier=str(tier),
+            artifact_max_bytes=int(policy["max_artifact_bytes"]),
+            group_size=int(policy["prefetch_batches"]),
+            max_entry_tensor_bytes=max(tensors),
+            template_id=f"pq-stageb-handoff-{quantum_id}")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r}: no handoff template derives from the "
+            f"plan and slice: {exc}") from exc
+    payload = (json.dumps(template, sort_keys=True, indent=2) + "\n").encode()
+    path = (_band_serial_root(output_root)
+            / f"{quantum_id}.handoff-template.{_sha_bytes(payload)[:16]}.json")
+    return _publish_control_bytes(path, payload, what="handoff template")
+
+
+def bind_consumer_handoff(record: Mapping, *, path: str, sha256: str,
+                          producer: str, output_root: Path) -> dict:
+    """Bind a published handoff to its consumer row, or refuse.
+
+    Runs the consumer's own checks (:func:`load_quantum_handoff`) and
+    derives, then writes, the band-serial readset the row stages. A handoff
+    the consumer would refuse is refused here: publishing it would only exit
+    3 on a GPU box.
+    """
+    from prismaquant.joint_quantum_handoff import (
+        QuantumHandoffRefused, band_serial_manifest_bytes, load_quantum_handoff)
+
+    quantum_id = record["quantum_id"]
+    adjoint_slice = _read_bound_slice(record)
+    try:
+        handoff = load_quantum_handoff(path, sha256, record=record,
+                                       adjoint_slice=adjoint_slice)
+        wire = band_serial_manifest_bytes(record, handoff,
+                                          adjoint_slice["checkpoint"],
+                                          output_root=output_root)
+    except QuantumHandoffRefused as exc:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} refuses the handoff {producer!r} "
+            f"published: {exc}") from exc
+    manifest_path = _publish_control_bytes(
+        _band_serial_root(output_root)
+        / f"{quantum_id}.{handoff['handoff_sha256'][:16]}.executable.json.gz",
+        wire, what="band-serial readset")
+    phases = [phase["name"] for phase in
+              json.loads(gzip.decompress(wire))["read_plan"]["phases"]]
+    return {"path": str(path), "sha256": str(sha256), "producer": str(producer),
+            "handoff_sha256": handoff["handoff_sha256"],
+            "manifest_path": str(manifest_path),
+            "manifest_sha256": _sha_bytes(wire), "phases": phases}
+
+
+def _producer_handoff(producer: Mapping, *, key: str | None,
+                      gateway: "Gateway") -> tuple[dict | None, str]:
+    """What an executed producer published: ``(handoff, "")``, ``(None, "chain")``
+    or ``(None, reason)`` while its consumer must wait."""
+    quantum_id = producer["quantum_id"]
+    if key is None or not gateway.is_terminal_executed(key):
+        return None, f"waits on {quantum_id}, which has not executed"
+    space = producer["output_space"]
+    status_path = Path(space.get("status", str(Path(space["root"]) / "status.json")))
+    try:
+        status = json.loads(status_path.read_bytes())
+        results = json.loads(Path(space["results"]).read_bytes())
+    except (OSError, ValueError) as exc:
+        return None, f"waits on {quantum_id}, whose outputs are unreadable: {exc}"
+    if not isinstance(status, dict) or status.get("status") != "complete" or \
+            status.get("identity_sha256") != producer["identity_sha256"]:
+        return None, f"waits on {quantum_id}, which has not reported complete"
+    published = results.get("handoff") if isinstance(results, dict) else None
+    if published is None:
+        return None, "chain"
+    try:
+        digest = _sha_bytes(Path(published["path"]).read_bytes())
+    except (OSError, KeyError, TypeError) as exc:
+        return None, f"waits on {quantum_id}, whose handoff is unreadable: {exc}"
+    if digest != published.get("sha256"):
+        return None, (f"waits on {quantum_id}, whose handoff does not hash to "
+                      "the digest its results name")
+    return dict(published), ""
+
+
+def fresh_band_role(record: Mapping, *, roles: Mapping, by_id: Mapping,
+                    last_submission: Mapping, submitted_keys: Mapping,
+                    gateway: "Gateway", tier: str | None,
+                    output_root: Path) -> tuple[dict | None, str | None]:
+    """The band-serial role of a row never submitted before.
+
+    Returns ``(band, None)`` to publish or ``(None, reason)`` while the row
+    waits for its producer. A consumer takes its producer's handoff; a
+    producer emits one only for a successor never yet submitted, since a
+    submitted row keeps the mode it was submitted in.
+    """
+    from prismaquant.joint_quantum_handoff import handoff_chain_regime_refusal
+
+    quantum_id = record["quantum_id"]
+    role = roles[quantum_id]
+    adjoint_slice = _read_bound_slice(record)
+    refusal = handoff_chain_regime_refusal(adjoint_slice.get("run_identity"))
+    if refusal is not None:
+        raise DispatchRefused(f"quantum {quantum_id!r} cannot run band-serial: {refusal}")
+    band: dict = {}
+    source = role["takes_from"]
+    if source is not None:
+        published, reason = _producer_handoff(
+            by_id[source], key=submitted_keys.get(source), gateway=gateway)
+        if published is None and reason != "chain":
+            return None, reason
+        if published is not None:
+            band["handoff"] = bind_consumer_handoff(
+                record, path=published["path"], sha256=published["sha256"],
+                producer=source, output_root=output_root)
+    successor = role["hands_to"]
+    if successor is not None and successor not in last_submission:
+        if tier is None:
+            raise DispatchRefused("--band-serial needs --handoff-tier")
+        plan = _load_json(Path(record["campaign"]["plan_path"]), where="plan")
+        band["emit_template"] = handoff_template_path(
+            record, plan=plan, adjoint_slice=adjoint_slice, tier=tier,
+            output_root=output_root)
+    return band, None
+
+
+def recorded_band_role(record: Mapping, event: Mapping, *,
+                       output_root: Path) -> dict:
+    """Rebuild the role a row was submitted with, from its state event.
+
+    A resubmission must be the same sealed action: a row republished in
+    another mode would be a second action for the same output space. So a
+    row keeps its recorded handoff and template whether or not this run
+    passes ``--band-serial``; events written before PQ #996 are chain rows.
+    """
+    band: dict = {}
+    template = event.get("handoff_template")
+    if template is not None:
+        if not Path(template).is_file():
+            raise DispatchRefused(
+                f"quantum {record['quantum_id']!r} was submitted with the "
+                f"handoff template {template}, which is gone")
+        band["emit_template"] = Path(template)
+    source = event.get("cotangent_source") or {"mode": "chain"}
+    if source.get("mode") == "handoff":
+        band["handoff"] = bind_consumer_handoff(
+            record, path=source["path"], sha256=source["sha256"],
+            producer=source["producer"], output_root=output_root)
+    return band
+
+
+def _cotangent_source(band: Mapping | None) -> dict:
+    handoff = (band or {}).get("handoff")
+    if handoff is None:
+        return {"mode": "chain"}
+    return {"mode": "handoff", "path": handoff["path"],
+            "sha256": handoff["sha256"], "producer": handoff["producer"],
+            "handoff_sha256": handoff["handoff_sha256"]}
 
 
 class Gateway:
@@ -1359,6 +1671,19 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                              "read its OWN entries back; its window demand is "
                              "derived by pbrun from the template. Without it "
                              "the capture writes entries it cannot read.")
+    parser.add_argument("--band-serial", action="store_true",
+                        help="PQ #996: inside a checkpoint band, quantum L-1 "
+                             "takes quantum L's final input cotangent (its "
+                             "handoff) instead of rebuilding the chain. "
+                             "Producer rows declare the handoff as a produced "
+                             "output; a consumer row is published once its "
+                             "producer executed and published a handoff. "
+                             "Executable rows only")
+    parser.add_argument("--handoff-tier", default=None,
+                        help="the stage tier a producer row's handoff "
+                             "template permits (for example "
+                             "prismabuild-stage:dl380g10); required with "
+                             "--band-serial")
     parser.add_argument("--spec", default=None,
                         help="campaign spec for the container wrapper (default: the joint-panel dev spec)")
     parser.add_argument("--state", default=None)
@@ -1387,6 +1712,21 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
     events = _read_state(state_path)
     submitted_keys = {event.get("quantum_id"): event.get("action_key")
                       for event in events if event.get("event") == "quantum-submitted"}
+    last_submission = {event.get("quantum_id"): event for event in events
+                       if event.get("event") == "quantum-submitted"}
+    if args.band_serial and args.handoff_tier is None:
+        print("dispatch_joint_quanta: refused: --band-serial needs --handoff-tier",
+              file=sys.stderr)
+        return EXIT_PRECONDITION_REFUSED
+    if args.band_serial and any(record.get("executable_readset") is None
+                                for _, record in records):
+        print("dispatch_joint_quanta: refused: --band-serial runs executable "
+              "rows only, and these records carry no executable readset",
+              file=sys.stderr)
+        return EXIT_PRECONDITION_REFUSED
+    roles = band_serial_roles(records)
+    by_id = {record["quantum_id"]: record for _, record in records}
+    band_pending: list[dict] = []
     stage_a_keys = [event.get("action_key") for event in events
                     if event.get("event") == "stage-a-submitted"]
 
@@ -1438,14 +1778,36 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                 key = submitted_keys.get(quantum_id)
                 if key is not None and gateway.is_terminal_executed(key):
                     continue
+                band = None
+                if quantum_id in last_submission:
+                    band = recorded_band_role(
+                        record, last_submission[quantum_id],
+                        output_root=output_root)
+                elif args.band_serial:
+                    band, waiting = fresh_band_role(
+                        record, roles=roles, by_id=by_id,
+                        last_submission=last_submission,
+                        submitted_keys=submitted_keys, gateway=gateway,
+                        tier=args.handoff_tier, output_root=output_root)
+                    if waiting is not None:
+                        band_pending.append({"quantum_id": quantum_id,
+                                             "reason": waiting})
+                        continue
+                handoff = (band or {}).get("handoff")
+                template = (band or {}).get("emit_template")
                 rows.append({"kind": "quantum", "quantum_id": quantum_id,
                              "identity_sha256": record["identity_sha256"],
-                             "manifest_sha256": _row_manifest_sha256(record),
+                             "manifest_sha256": (
+                                 handoff["manifest_sha256"] if handoff
+                                 else _row_manifest_sha256(record)),
+                             "cotangent_source": _cotangent_source(band),
+                             "handoff_template": (
+                                 None if template is None else str(template)),
                              "argv": quantum_argv(
                                  record, record_path=record_path,
                                  output_root=output_root, priority=priority,
                                  head_grace_s=args.head_grace_s,
-                                 consumer_tags=tags)})
+                                 consumer_tags=tags, band=band)})
     except DispatchRefused as exc:
         print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
         return EXIT_PRECONDITION_REFUSED
@@ -1457,10 +1819,14 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                               receipt_ok),
                           "stage_a_pending": [record["quantum_id"] for _, record in records
                                               if record["quantum_id"] not in publishable],
+                          "band_serial_pending": band_pending,
                           "rows": [{"kind": row["kind"],
                                     "quantum_id": row.get("quantum_id"),
                                     "identity_sha256": row.get("identity_sha256"),
                                     "manifest_sha256": row.get("manifest_sha256"),
+                                    **({"cotangent_source": row["cotangent_source"],
+                                        "handoff_template": row["handoff_template"]}
+                                       if row["kind"] == "quantum" else {}),
                                     **({"slice_sha256": publishable[row["quantum_id"]],
                                         **{key: by_id[row["quantum_id"]]["adjoint"][key]
                                            for key in ("checkpoint_boundary", "chain_layers")}}
@@ -1497,6 +1863,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                                "quantum_id": row["quantum_id"],
                                "identity_sha256": row["identity_sha256"],
                                "data_manifest_sha256": row.get("manifest_sha256"),
+                               "cotangent_source": row["cotangent_source"],
+                               "handoff_template": row["handoff_template"],
                                "action_key": answer["action_key"]})
             print(json.dumps({"published": row.get("quantum_id", "stage-a"),
                               "action_key": answer["action_key"],
@@ -1505,6 +1873,9 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
     except (RuntimeError, OSError) as exc:
         print(f"dispatch_joint_quanta: submission failed: {exc}", file=sys.stderr)
         return EXIT_SUBMIT_FAILED
+    for waiting in band_pending:
+        print(json.dumps({"band_serial_pending": waiting["quantum_id"],
+                          "reason": waiting["reason"]}, sort_keys=True))
     if not rows:
         print(json.dumps({"published": [], "note": "nothing publishable"},
                          sort_keys=True))

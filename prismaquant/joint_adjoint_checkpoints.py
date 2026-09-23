@@ -48,8 +48,11 @@ from .joint_adjoint_slices import (  # noqa: F401 -- re-exported: one spelling
     band_layers,
     band_set,
     chain_layers_for,
+    CHECKPOINT_MANIFEST_NAME,
     chain_regime_identity,
     chain_regime_of,
+    checkpoint_manifest_bytes,
+    checkpoint_manifest_entry,
     normalize_chain_regime,
     require_chain_regime,
     checkpoint_seal_sha256,
@@ -600,9 +603,7 @@ def write_adjoint_checkpoint(
             where="adjoint checkpoint",
         )
         atomic_write_bytes(
-            checkpoint_dir / "checkpoint.json",
-            (json.dumps(record, sort_keys=True, indent=2, allow_nan=False) + "\n").encode(),
-        )
+            checkpoint_dir / "checkpoint.json", checkpoint_manifest_bytes(record))
         return record
 
     if type(boundary) is not int or boundary < 0:
@@ -738,8 +739,7 @@ def write_adjoint_checkpoint(
         )
         with owner.hold_transient_metadata(
                 manifest_envelope, "checkpoint manifest"):
-            manifest_payload = (json.dumps(
-                record, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+            manifest_payload = checkpoint_manifest_bytes(record)
             if len(manifest_payload) > manifest_envelope:
                 raise RuntimeError(
                     "exact boundary checkpoint manifest exceeds its admitted envelope")
@@ -776,7 +776,10 @@ def _shared_state_by_name(shared_adjoint, shared_pass, name: str):
 
 
 def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
-    """One shared-state pickle payload, staged-pinned under policy.
+    """One small checkpoint file, staged-pinned under policy.
+
+    Serves the shared-state pickles and ``checkpoint.json``; refusal
+    reasons name which of the two diverged.
 
     Under the active allowed-tier policy the bytes come from a
     lifetime-pinned window (RAM leg refused fast for want of RAM-mover
@@ -791,6 +794,8 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
     from .staged_tier_policy import policy_is_active
     if not policy_is_active():
         return Path(path).read_bytes()
+    label = ("checkpoint-manifest" if entry.get("name") == CHECKPOINT_MANIFEST_NAME
+             else "shared-state")
     from .residency_map import residency_resolver
     from .staged_lease import LeaseRefused, acquire_entry_window
     size = entry.get("file_bytes")
@@ -824,11 +829,11 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
         # the staged entry's, and the held descriptor's size must match
         # both — no unbounded allocation, no read-then-check.
         if size != staged["bytes"]:
-            raise LeaseRefused("shared-state-size-divergent",
+            raise LeaseRefused(f"{label}-size-divergent",
                                kind="integrity")
         first = os.fstat(fd)
         if first.st_size != size:
-            raise LeaseRefused("shared-state-changed-under-pin",
+            raise LeaseRefused(f"{label}-changed-under-pin",
                                kind="integrity")
         # One owned buffer, filled in place: no parts list, no joined
         # copy, no second pass. The caller's digest hashes these bytes.
@@ -841,7 +846,7 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
                 moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
             except OSError as exc:
                 raise LeaseRefused(
-                    f"shared-state-unreadable: {exc.strerror}",
+                    f"{label}-unreadable: {exc.strerror}",
                     kind="availability") from None
             if moved <= 0:
                 break
@@ -849,14 +854,14 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
             remaining -= moved
         view.release()
         if remaining:
-            raise LeaseRefused("shared-state-truncated", kind="integrity")
+            raise LeaseRefused(f"{label}-truncated", kind="integrity")
         if os.pread(fd, 1, size):
-            raise LeaseRefused("shared-state-grew-during-read",
+            raise LeaseRefused(f"{label}-grew-during-read",
                                kind="integrity")
         last = os.fstat(fd)
         if (last.st_ino, last.st_size, last.st_mtime_ns) != (
                 first.st_ino, first.st_size, first.st_mtime_ns):
-            raise LeaseRefused("shared-state-changed-under-pin",
+            raise LeaseRefused(f"{label}-changed-under-pin",
                                kind="integrity")
     if tier == "ram":
         resolver.record_ram_read(path, len(raw))
@@ -882,28 +887,39 @@ def _await_checkpoint_entry(entry, *, deadline):
         published=stage_cover_is_published)
 
 
-def _verified_checkpoint_manifest(space, record: dict, *,
+def _verified_checkpoint_manifest(space, record: dict, *, deadline,
                                   shared_state_max_bytes=None) -> dict:
-    """The on-disk manifest of ``record``'s checkpoint, equal to the record."""
+    """``record``, once the checkpoint's ``checkpoint.json`` is its exact bytes."""
     checkpoint_dir = checkpoint_directory(space, int(record["boundary"]))
     manifest_path = checkpoint_dir / "checkpoint.json"
+    # The receipt's record is the trust anchor, and it determines the
+    # manifest's bytes. The manifest is a declared read (its readset entry
+    # comes from the same record), staged under an active policy like the
+    # shared states. A manifest whose bytes differ from the record -- any
+    # entry name, digest or size -- refuses whole rather than reading
+    # whichever side happens to be present.
     try:
-        stored = json.loads(manifest_path.read_text())
-    except (OSError, ValueError) as exc:
+        manifest_entry = checkpoint_manifest_entry(record)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"adjoint checkpoint record is malformed (boundary "
+            f"{record.get('boundary')}): {exc}") from exc
+    if Path(manifest_entry["path"]) != manifest_path:
+        raise RuntimeError(
+            "adjoint checkpoint entries are not under the checkpoint "
+            f"directory the loader reads ({manifest_path})")
+    _await_checkpoint_entry(manifest_entry, deadline=deadline)
+    try:
+        payload = _read_shared_state_payload(manifest_path, manifest_entry)
+    except OSError as exc:
         raise RuntimeError(
             f"adjoint checkpoint manifest unreadable at {manifest_path}") from exc
-    if stored.get("cotangent_sha256") != record.get("cotangent_sha256"):
+    if bytes(payload) != checkpoint_manifest_bytes(record):
         raise RuntimeError(
-            "adjoint checkpoint identity differs from its receipt entry "
+            "adjoint checkpoint manifest differs from its receipt entry "
             f"(boundary {record.get('boundary')})")
-    # The receipt's entry lists are the trust anchor: a record whose entries
-    # differ from the manifest on disk -- by name, digest or size -- refuses
-    # whole rather than reading whichever side happens to be present.
-    for field in ("activation_entries", "shared_state_entries"):
-        if stored.get(field) != record.get(field):
-            raise RuntimeError(
-                f"adjoint checkpoint {field} differ from its receipt entry "
-                f"(boundary {record.get('boundary')})")
+    del payload
+    stored = record
     if shared_state_max_bytes is not None:
         if type(shared_state_max_bytes) is not int or shared_state_max_bytes <= 0:
             raise ValueError("adjoint shared-state ceiling must be positive")
@@ -951,11 +967,11 @@ def load_checkpoint_shared_states(
     reference, one bounded window at a time, and needs only these.
     """
     from .residency_shard_reader import staged_range_wait_s
+    deadline = time.monotonic() + staged_range_wait_s()
     stored = _verified_checkpoint_manifest(
-        space, record, shared_state_max_bytes=shared_state_max_bytes)
+        space, record, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
     return _load_checkpoint_shared_states(
-        stored, deadline=time.monotonic() + staged_range_wait_s(),
-        shared_state_max_bytes=shared_state_max_bytes)
+        stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
 
 
 def load_adjoint_checkpoint(
@@ -970,10 +986,10 @@ def load_adjoint_checkpoint(
     Refuses on any digest or shape mismatch: a checkpoint
     whose bytes moved is a new identity, never a silent partial read.
     """
-    stored = _verified_checkpoint_manifest(
-        space, record, shared_state_max_bytes=shared_state_max_bytes)
     from .residency_shard_reader import staged_range_wait_s
     deadline = time.monotonic() + staged_range_wait_s()
+    stored = _verified_checkpoint_manifest(
+        space, record, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
     session = stored["session"]
     entries = stored["activation_entries"]
     cotangents = {} if cotangent_factory is None else cotangent_factory(entries)

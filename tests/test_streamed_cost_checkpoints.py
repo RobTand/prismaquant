@@ -70,12 +70,18 @@ class _DenseLayer(nn.Module):
 
 
 class _DenseTinyLM(nn.Module):
-    def __init__(self, state=None, vocab=23, width=16):
+    def __init__(self, state=None, vocab=23, width=16, layers=None):
         super().__init__()
+        if layers is None:
+            # Two layers unless a state says otherwise, so a state from a
+            # deeper fixture (the band-serial tests) rebuilds its own depth.
+            layers = 2 if state is None else 1 + max(
+                int(key.split(".")[2]) for key in state
+                if key.startswith("model.layers."))
         self.model = nn.Module()
         self.model.config = SimpleNamespace(layer_types=())
         self.model.embed_tokens = nn.Embedding(vocab, width)
-        self.model.layers = nn.ModuleList([_DenseLayer(width), _DenseLayer(width)])
+        self.model.layers = nn.ModuleList([_DenseLayer(width) for _ in range(layers)])
         self.model.norm = nn.Identity()
         self.lm_head = nn.Linear(width, vocab, bias=False)
         if state is not None:

@@ -447,6 +447,36 @@ the relaxed per-launch limit on band sets; see "Stage A chain resume
 (#1001)". A default run's receipt, bands and slices keep their bytes. No
 format, default, stage or ship gate changes.
 
+Re-stamped (2026-09-23, `ws-br/band-serial-996`) for **band-serial Stage B
+quanta** (PQ #996): inside a checkpoint band, quantum `L - 1` reads quantum
+`L`'s handoff instead of rebuilding its chain, off by default behind
+`tools/dispatch_joint_quanta.py --band-serial`; see "Band-serial Stage B
+quanta (#996)". Chain mode and every default are unchanged. No format,
+stage or ship gate changes. Gates: `tests/test_quantum_band_serial.py`,
+`tests/test_band_serial_dispatch.py`,
+`tests/test_band_serial_handoff_produced.py`,
+`tests/test_band_serial_handoff_spool_real_pb.py`.
+
+Re-stamped (2026-09-23, `ws-br/band-serial-996`) for **the checkpoint
+manifest as a declared read** and the consumers' Stage A header check
+(PQ #996). `load_adjoint_checkpoint` opens a
+checkpoint's `checkpoint.json` before any entry, and until now no readset
+declared it, so a staged quantum read it from the pool. Its bytes follow
+from the checkpoint record (`joint_adjoint_slices.checkpoint_manifest_bytes`,
+the one serialization the writer publishes), so both quantum readsets now
+declare it first in the checkpoint phase
+(`checkpoint_manifest_entry`), and the loader reads it through the staged
+path under an active tier policy and refuses unless its bytes equal the
+record's. Consumers of bound records (dispatcher, quantum, joiner) check the
+Stage A run identity only (`check_adjoint_run_identity`): their stride
+check compared the header's stride with itself. The producer still checks
+the stride against its derivation when it binds a slice, and
+`verify_adjoint_slice` checks where the header's stride places each
+record's layer. Gates: `tests/test_quantum_executable_readset.py`,
+`tests/test_quantum_boundary_readset.py`,
+`tests/test_strict_reader_tier_enforcement.py`,
+`tests/test_dispatch_joint_quanta.py`.
+
 Re-stamped (2026-09-23, `ws-1a/stageb-one-pass-spill-994`) for **the Stage B
 one-pass replay spill** (PQ #994): with the spill declared, a layer quantum
 runs one forward and backward per probe and replays every retained window
@@ -20684,9 +20714,10 @@ Limits: each fresh Stage A launch binds its own boundary-session generation
 (`StreamedBoundaryArtifacts.bind`), so bands whose checkpoints two fresh
 launches sealed carry two run headers, and every gate refuses them as mixed
 runs. A chain resume (#1001) is not a fresh launch: it adopts the run's own
-session, so its bands and the original's form one set. The
-checkpoint manifest a quantum reads (`checkpoint.json`) is checked against its
-slice but is not a declared entry of its readset. The pinned Tessera reader accepts only a v1
+session, so its bands and the original's form one set.
+The checkpoint manifest a quantum reads (`checkpoint.json`) is a declared
+entry of both quantum readsets, first in the checkpoint phase, with the
+bytes its slice's checkpoint record determines (PQ #996). The pinned Tessera reader accepts only a v1
 extension as rooted cached-unit authority (`tessera.cached_unit`), so a
 campaign whose extension a band created cannot export selected cached units
 until Tessera reads v2 (`tests/test_tessera_selected_cache.py` records the
@@ -20839,3 +20870,118 @@ state as inputs, contain the original owner first, and give it an output
 prefix that holds the run's generation directory (`bind_produced_output`
 refuses an own-generation path outside it). The fixture tests do not exercise
 that dispatcher contract.
+
+### Band-serial Stage B quanta (#996)
+
+Inside one checkpoint band, quantum `L - 1` starts from the boundary-`L`
+cotangent plane. In chain mode (the default) it rebuilds that plane from the
+band's checkpoint through `render_free_layer_roll`, one layer per step. In
+band-serial mode, quantum `L` hands over the plane its own final replay pass
+already wrote (`x_in.grad` per probe and sample), and quantum `L - 1` reads it
+instead of rebuilding the chain.
+
+**Equality.** A band-serial record, cost payload and unit journal are the
+chain-mode bytes, and each handoff plane (and every shared-state cotangent
+owner state) is sha256-equal, entry by entry, to the plane the consumer's
+chain rebuild ends on. The gate runs a real two-band fixture Stage A, with a
+handoff built from a handoff, with Stage A probe fusion off and on
+(`tests/test_quantum_band_serial.py`). That fixture shares no KV state, so
+its owner states are all empty. A separate round trip gives every
+`(probe, sample)` its own accumulator and checks that the consumer reads
+each one back at its own coordinate. No end-to-end fixture with shared KV
+state exists yet; among the model profiles only Gemma4 carries it
+(`model_profiles/gemma4.py`). The rebuild matches only at a chain
+batch size of one: another batch size changes the GEMM shapes, so a Stage A
+run stamped with it refuses a handoff (`joint_quantum_handoff.
+handoff_chain_regime_refusal`, which reads the stamp through
+`chain_regime_of`). Probe fusion at a batch size of one is admitted. The
+one-pass replay spill (#994) does not change the plane: its per-probe
+capture is the same `replay_backward(final=True)` pass that writes it. A
+spill producer and a windowed producer emit the same plane, and a
+band-serial consumer under either replay mode matches its chain-mode bytes
+(`tests/test_band_serial_spill.py`, on the spill suite's bf16
+packed-expert fixture).
+
+**The handoff.** `joint_quantum_handoff.HandoffEmitter` writes one
+generation under `{output_space.root}/handoff/{generation}/`: the plane as
+exact entries, `owner-states.pkl` (the per-probe, per-sample shared-state
+cotangent owners), and last `handoff.json`
+(`prismaquant.joint_quantum_handoff.v1`). The record names the producer
+(quantum, layer, identity, slice digest, chain), the source both quanta share
+(campaign digests, Stage A run-header digest, checkpoint boundary and
+checkpoint cotangent digest), the entries, the owner-state file, and its own
+seal (`handoff_sha256`). Every entry is durable before the record exists
+(`settle_local_output`), so a failed emission leaves no `handoff.json`.
+
+**Producer.** `joint_cost_quantum --emit-adjoint-handoff` emits after the
+retained-window driver returns. Inside an admitted PrismaBuild action the
+entries go through the row's produced-output template
+(`bind_handoff_publication`, the same binding Stage A uses for its own
+entries). It refuses when the action declared no template, or when the
+template's payload maximum is not the plan's `max_artifact_bytes`. With
+PrismaBuild's local output spool the groups export before the record is
+written. The entries are written with `read_back=False`, as Stage A writes
+its last roll: nothing in the producer reads them, so no stage copy is
+published. Gates: `tests/test_band_serial_handoff_produced.py` and
+`tests/test_band_serial_handoff_spool_real_pb.py` (each in its own pytest
+process).
+
+**Consumer.** `joint_cost_quantum --adjoint-handoff PATH
+--adjoint-handoff-sha256 HEX` loads the handoff at the quantum head
+(`load_quantum_handoff`). It refuses unless the file hashes to the digest,
+matches its seal, sits in quantum `L + 1`'s output space, names boundary
+`L + 1`, the same band walk, campaign, Stage A run and checkpoint, and covers
+the checkpoint plane's probes and samples (read from each entry's sealed
+coordinates) with equal shapes and dtypes. The chain then walks no layers.
+The staged manifest must be the band-serial readset
+(`require_band_serial_readset`): `band_serial_manifest` derives it from the
+record's sealed executable readset and the handoff. The `checkpoint-load`
+phase and every `chain-NNN-source` and `chain-NNN-bound` phase give way to
+one `handoff-load` phase after `head`, which stages exactly what
+`load_handoff_inputs` reads, in order: the plane entries, the owner-state
+file, and the checkpoint's forward shared-pass pickles. Every other phase
+keeps its entries; the prepared-input windows are re-indexed. The record is
+not re-sealed: its `executable_readset` still names the chain manifest, and
+`annotations.band_serial` names what the derived manifest came from.
+
+**Dispatch.** `tools/dispatch_joint_quanta.py --band-serial --handoff-tier
+TIER` (off by default; executable rows only). PrismaBuild has no dependency
+between actions, so the edge is publication order, through the existing
+fanout:
+
+1. A band's top row publishes at once. A row whose successor in the band has
+   never been submitted also declares a handoff template as
+   `--produced-output-template` (`handoff_template_path`: the plan's boundary
+   storage on the producer's handoff directory, the slice's largest
+   checkpoint tensor, and `TIER`) and passes `--emit-adjoint-handoff`.
+2. Quantum `L - 1` publishes only after `L`'s action executed, its
+   `status.json` reports complete for its identity, and the handoff its
+   `results.json` names hashes to the digest named there. Until then it is
+   reported as `band_serial_pending`. The dispatcher runs the consumer's own
+   handoff checks before it publishes, and writes the derived readset under
+   `{output_root}/layer-quanta/band-serial/`.
+3. A producer that completed without a handoff (a row submitted in chain
+   mode) leaves its consumer in chain mode, which gives the same bytes.
+
+Bands stay parallel: only the rows inside one band wait on each other.
+
+**Resubmission.** A submitted row keeps its mode. The state event records
+`cotangent_source` and `handoff_template`, and every resubmission rebuilds the
+same argv, so it is the same PrismaBuild action whether or not the run passes
+`--band-serial`; events written before #996 are chain rows. If `L` fails,
+the next dispatcher run republishes it as the same action and `L - 1` keeps
+waiting; a retried producer writes a new generation (a resumed quantum still
+runs its final pass, so the plane is whole) and its `results.json` names
+that one. If `L - 1` fails, it is republished with its recorded handoff. A handoff the consumer would
+refuse refuses at dispatch (exit 3); there is no fallback to chain mode for a
+row that was submitted band-serial.
+
+Limits: nothing deletes a handoff generation, so a campaign keeps one plane
+per producer, and a failed producer attempt leaves its partial generation
+directory. `handoff.json` and `owner-states.pkl` are written directly
+(`atomic_write_bytes`), not through the spool. The producer's template
+reserves a stage window it never reads, because PrismaBuild has no
+write-only produced-output declaration. No executed PrismaBuild action has
+yet staged handoff entries as a consumer's declared inputs; the derived
+manifest is checked against PrismaBuild's phase planner
+(`tests/test_band_serial_dispatch.py`).
