@@ -14,9 +14,11 @@ This tool is a read-only CPU action. It reads:
   entry files' sizes (the check ``load_adjoint_checkpoint`` makes against a
   receipt record);
 * the run header from sealed sources only: the run's sealed PB request
-  (plan, prepared and read-manifest digests, output root, stride), the plan
-  and prepared documents under those digests, the boundary generation's
-  ``generation.json`` and the forward-recovery capsule the request binds;
+  (plan, prepared and read-manifest digests, output root, stride, chain
+  regime and the environment its Stage A process runs under), the plan and
+  prepared documents under those digests, the boundary generation's
+  ``generation.json``, and either the forward-recovery capsule the request
+  binds or the run's sealed chain state (``chain-state.json``, PQ #1122);
 * the band's forward boundary entries from the sources the receipt itself
   uses: the capsule chain for recovered boundaries, the generation's own
   entry files for boundaries the run wrote;
@@ -64,9 +66,16 @@ from .joint_adjoint_checkpoints import (
     validate_band_receipt,
     write_band_receipt,
 )
+from .matmul_arithmetic import (
+    BF16_REDUCTION_FIELD,
+    MatmulArithmeticRefused,
+    bf16_reduction_from_environment,
+)
 from .stage_a_chain_resume import (
     RESUME_COMPATIBILITY_KEY,
     ChainResumeRefused,
+    chain_state_path,
+    load_chain_state,
     resume_declarations,
 )
 from .stage_a_chain_seed import seed_marker_path, seed_receipt_path
@@ -75,6 +84,7 @@ BAND_TOOL_ENTRY_POINT = "prismaquant.joint_adjoint_band"
 BAND_RESULT_SCHEMA = "prismaquant.joint_adjoint_band.result.v1"
 STAGE_A_MODULES = ("prismaquant.joint_adjoint_capture", "prismaquant.joint_cost_stage_a")
 _ZERO_DIGEST = "0" * 64
+_ABSENT = object()
 
 
 class BandRefused(RuntimeError):
@@ -299,19 +309,29 @@ def build_band_receipt(*, output_root, boundary: int, plan_sha256: str, prepared
                        campaign_scope=None, bind_identity: dict | None = None,
                        forward_recovery: dict | None = None,
                        sources: dict | None = None,
-                       chain_regime: dict | None = None) -> dict:
+                       chain_regime: dict | None = None,
+                       bf16_reduction: bool = True,
+                       sealed_run_identity: dict | None = None) -> dict:
     """Reconstruct the band of checkpoint ``boundary`` from sealed sources.
 
     Without a forward-recovery capsule the caller supplies the run's bind
-    identity (``stage_a_bind_identity`` derives it from the sealed plan,
-    prepared completion and calibration input) with the unit roster and
-    scope. With a capsule, all three come from it. Either way the bind
-    identity must hash to the generation's ``run_identity_sha256``: a header
-    that does not answer for the run that sealed the checkpoint refuses.
+    identity with the unit roster and scope: from the run's sealed chain
+    state when it has one (``sealed_chain_state``), else rebuilt by
+    ``stage_a_bind_identity`` from the sealed plan, prepared completion and
+    calibration input. With a capsule, all three come from it. Either way
+    the bind identity must hash to the generation's ``run_identity_sha256``:
+    a header that does not answer for the run that sealed the checkpoint
+    refuses.
 
     ``chain_regime`` is the run's sealed ``--chain-batch-size`` and
     ``--chain-probe-fusion`` (RobTand/prismaquant#997); ``None`` is the
-    default regime, which stamps nothing.
+    default regime, which stamps nothing. ``bf16_reduction`` is the bf16
+    reduced-precision reduction flag the run's environment pinned
+    (PQ #1028): ``False`` stamps it, as Stage A's own run identity does.
+
+    ``sealed_run_identity`` is the run header the run's chain state sealed
+    (PQ #1122). The band's header must equal it field for field; a field
+    that differs refuses, named.
     """
     boundary = int(boundary)
     try:
@@ -372,24 +392,36 @@ def build_band_receipt(*, output_root, boundary: int, plan_sha256: str, prepared
             entries[str(k)] = [own_boundary_entry(directory, session, batch=batch, boundary=k)
                                for batch in range(n_batches)]
 
+    run_identity = {
+        "plan_sha256": str(plan_sha256),
+        "prepared_sha256": str(prepared_sha256),
+        "read_manifest_sha256": str(read_manifest),
+        "implementation_sha256": str(bind_identity["producer_source_sha256"]),
+        "unit_roster_sha256": str(unit_roster_sha256),
+        "campaign_scope": campaign_scope,
+        "n_probes": int(bind_identity["n_probes"]),
+        "seed_base": int(bind_identity["seed_base"]),
+        "calibration_shape": list(bind_identity["calibration_shape"]),
+        "calibration_sha256": bind_identity["calibration_sha256"],
+        **({CHAIN_REGIME_KEY: regime_identity} if regime_identity is not None else {}),
+        # Absent at PyTorch's default, as in Stage A's run identity (PQ #1028).
+        **({} if bf16_reduction else {BF16_REDUCTION_FIELD: False}),
+    }
+    if sealed_run_identity is not None:
+        differing = sorted(
+            key for key in set(run_identity) | set(sealed_run_identity)
+            if run_identity.get(key, _ABSENT) != sealed_run_identity.get(key, _ABSENT))
+        if differing:
+            raise BandRefused(
+                "the band's run identity differs from the one the run's chain state "
+                f"sealed in {', '.join(differing)}")
+
     band = {
         "schema": ADJOINT_BAND_SCHEMA,
         "entry_point": ADJOINT_CAPTURE_ENTRY_POINT,
         "status": "band",
         "band": {"boundary": boundary, "layers": list(layers)},
-        "run_identity": {
-            "plan_sha256": str(plan_sha256),
-            "prepared_sha256": str(prepared_sha256),
-            "read_manifest_sha256": str(read_manifest),
-            "implementation_sha256": str(bind_identity["producer_source_sha256"]),
-            "unit_roster_sha256": str(unit_roster_sha256),
-            "campaign_scope": campaign_scope,
-            "n_probes": int(bind_identity["n_probes"]),
-            "seed_base": int(bind_identity["seed_base"]),
-            "calibration_shape": list(bind_identity["calibration_shape"]),
-            "calibration_sha256": bind_identity["calibration_sha256"],
-            **({CHAIN_REGIME_KEY: regime_identity} if regime_identity is not None else {}),
-        },
+        "run_identity": run_identity,
         "stride": {"value": int(stride_value), "source": stride_source,
                    "boundaries": [int(b) for b in boundaries],
                    "max_chain_layers": int(stride_value) - 1},
@@ -509,6 +541,69 @@ def request_chain_regime(flags) -> dict:
         raise BandRefused(str(exc)) from exc
 
 
+def request_environment(request) -> dict:
+    """The environment a sealed request's Stage A process runs under.
+
+    Behind the campaign container wrapper that is the container spec's
+    ``env``: the wrapper forwards it into the container and never sets the
+    Stage A settings itself (``tools/tessera_campaign_container.py``). A bare
+    Stage A command runs under the request's own environment.
+    """
+    command = request["params"]["command"]
+    start = next(index for index in range(len(command) - 1)
+                 if command[index] == "-m" and command[index + 1] in STAGE_A_MODULES)
+    wrapper = list(command[:start])
+    if "--spec" in wrapper:
+        try:
+            spec = json.loads(wrapper[wrapper.index("--spec") + 1])
+        except (IndexError, ValueError) as exc:
+            raise BandRefused("the sealed request's container spec is not JSON") from exc
+        env = spec.get("env") if isinstance(spec, dict) else None
+        return dict(env) if isinstance(env, dict) else {}
+    variables = (request.get("environment") or {}).get("variables") or {}
+    return {**variables, **(request["params"].get("env") or {})}
+
+
+def request_bf16_reduction(request) -> bool:
+    """The bf16 reduction flag a sealed request pins (PQ #1028)."""
+    try:
+        return bf16_reduction_from_environment(request_environment(request))
+    except MatmulArithmeticRefused as exc:
+        raise BandRefused(f"the sealed request's environment: {exc}") from exc
+
+
+def sealed_chain_state(space, *, plan_sha256: str, prepared_sha256: str,
+                       read_manifest_sha256: str) -> tuple[dict | None, dict | None]:
+    """The run's sealed chain state and its source, or ``(None, None)``.
+
+    Stage A writes ``chain-state.json`` once, after its tail checkpoint, with
+    the run identity and the bind identity it bound (PQ #1001): for a dev-mode
+    run that is the *running* producer, which may differ from the prepared
+    completion's (PQ #1122). The state must seal itself and name the plan,
+    preparation and read manifest the request names; the caller then checks
+    its bind identity against the boundary generation.
+    """
+    path = chain_state_path(space)
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return None, None
+    digest = hashlib.sha256(raw).hexdigest()
+    try:
+        state = load_chain_state(space, digest)
+    except ChainResumeRefused as exc:
+        raise BandRefused(str(exc)) from exc
+    header = state["run_identity"]
+    for field, requested in (("plan_sha256", plan_sha256),
+                             ("prepared_sha256", prepared_sha256),
+                             ("read_manifest_sha256", read_manifest_sha256)):
+        if header.get(field) != requested:
+            raise BandRefused(
+                f"the run's chain state {path} seals {field} {header.get(field)}, "
+                f"not the request's {requested}")
+    return state, {"path": str(path), "sha256": digest}
+
+
 def band_from_request(request_path, *, boundary: int, request_sha256: str | None = None) -> dict:
     """The band of ``boundary`` for the Stage A run a sealed PB request names."""
     from .joint_cost_stage_a import resolve_stride
@@ -527,28 +622,49 @@ def band_from_request(request_path, *, boundary: int, request_sha256: str | None
         raise BandRefused("the plan output_root is not the request's --output-root")
     stride_value, stride_source = resolve_stride(
         config, int(flags["--stride"]) if "--stride" in flags else None)
+    output_root = Path(flags["--output-root"])
+    read_manifest = flags.get("--read-manifest-sha256")
     forward_recovery = None
-    bind_identity = roster = None
+    bind_identity = roster = state = state_source = None
     scope = config.get("campaign_scope")
     if "--forward-recovery" in flags:
         forward_recovery = {"path": flags["--forward-recovery"],
                             "sha256": flags["--forward-recovery-sha256"]}
         scope = None
     else:
+        # The run's own sealed record of what it bound comes first (PQ #1122).
+        # A seed or retired space refuses before anything in it is read.
+        space = adjoint_space(output_root)
+        refuse_seed_space(space)
+        from .stage_a_retirement import refuse_retired_space
+        refuse_retired_space(space, BandRefused, what="its checkpoints feed no band")
+        state, state_source = sealed_chain_state(
+            space, plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
+            read_manifest_sha256=read_manifest or _ZERO_DIGEST)
+    if state is not None:
+        bind_identity = state["bind_identity"]
+        roster = state["run_identity"]["unit_roster_sha256"]
+        scope = state["run_identity"]["campaign_scope"]
+    elif forward_recovery is None:
+        # A run that sealed no chain state: rebuild the bind identity from the
+        # plan and the prepared completion, as before.
         bind_identity = stage_a_bind_identity(config, prepared)
         roster = hashlib.sha256("".join(
             f"{name}\n" for name in sorted(prepared["formats_by_qname"])).encode()).hexdigest()
     return build_band_receipt(
-        output_root=Path(flags["--output-root"]), boundary=boundary,
+        output_root=output_root, boundary=boundary,
         plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
-        read_manifest_sha256=flags.get("--read-manifest-sha256"),
+        read_manifest_sha256=read_manifest,
         stride_value=stride_value, stride_source=stride_source,
         unit_roster_sha256=roster, campaign_scope=scope, bind_identity=bind_identity,
         forward_recovery=forward_recovery, chain_regime=request_chain_regime(flags),
+        bf16_reduction=request_bf16_reduction(request),
+        sealed_run_identity=None if state is None else state["run_identity"],
         sources={"request": {"path": str(request_path), "sha256": digest,
                              "action_key": request.get("action_key")},
                  "plan": {"path": flags["--plan"], "sha256": plan_sha256},
-                 "prepared": {"path": flags["--prepared"], "sha256": prepared_sha256}})
+                 "prepared": {"path": flags["--prepared"], "sha256": prepared_sha256},
+                 **({"chain_state": state_source} if state_source is not None else {})})
 
 
 def band_summary(band: dict, *, path: Path, file_sha256: str) -> dict:
