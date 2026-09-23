@@ -384,3 +384,29 @@ def test_failed_reverse_releases_windows_shared_state_and_hooks(tmp_path, monkey
     record = json.loads(next(tmp_path.rglob("generation.json")).read_text())
     assert record["status"] == "failed"
     assert record["telemetry"]["resident_tensor_bytes"] == 0
+
+
+def test_produced_files_share_the_artifact_budget(tmp_path):
+    """PQ #1015: small produced files are charged to ``max_artifact_bytes``.
+
+    An owner bound to a produced-output template charges them to the
+    template's payload maximum, which is the same number, so the owner's
+    ledger and PrismaBuild's agree. Over budget, nothing is written.
+    """
+    with _bound(tmp_path, disk=100) as owner:
+        directory = owner.directory
+        with pytest.raises(RuntimeError, match="artifact budget exceeded"):
+            owner.write_produced_files([("a.pkl", b"x" * 60), ("b.json", b"y" * 41)],
+                                       kind="handoff-record", boundary_index=1)
+        assert sorted(path.name for path in directory.iterdir()) == ["generation.json"]
+        for bad in ([], [("a.pkl", b"x"), ("a.pkl", b"y")], [("../a", b"x")],
+                    [("a.tmp", b"x")], [("generation.json", b"x")], [("a", b"")]):
+            with pytest.raises(ValueError):
+                owner.write_produced_files(bad, kind="handoff-record", boundary_index=1)
+        refs = owner.write_produced_files([("a.pkl", b"x" * 60), ("b.json", b"y" * 40)],
+                                          kind="handoff-record", boundary_index=1)
+        assert [(ref.name, ref.file_bytes) for ref in refs] == [("a.pkl", 60), ("b.json", 40)]
+        assert (directory / "a.pkl").read_bytes() == b"x" * 60
+        assert refs[1].path == str(directory / "b.json")
+        assert owner.telemetry["live_artifact_bytes"] == 100
+        assert owner.checkpoint_remaining_bytes() == 0
