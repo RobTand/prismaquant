@@ -1444,7 +1444,7 @@ def run_layer_quantum_core(
                 executable_own_source_phase_name(layer))
         _install_with_settlement(runner, layer, operator_windows=operator_windows)
         if packed_members:
-            from .production_weight_cache import PackedExpertProjection
+            from .routed_experts import PackedExpertProjection
 
             members = [linears[name] for name in names
                        if isinstance(linears[name], PackedExpertProjection)]
