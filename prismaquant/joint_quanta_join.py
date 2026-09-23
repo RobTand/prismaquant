@@ -773,7 +773,7 @@ def _preserve_allocation_payload(joined, payloads, records):
     if not all(present):
         raise JoinRefused("allocation: mixed measured and parser-only quantum payloads")
     from prismaquant.schemas import validate_probe_payload, validate_cost_payload
-    from prismaquant.cost_currency import require_run_currency
+    from prismaquant.cost_currency import CostCurrencyError, require_run_currency
 
     stats, provenance = {}, {}
     shared = None
@@ -782,7 +782,7 @@ def _preserve_allocation_payload(joined, payloads, records):
             validate_probe_payload(payload)
             validate_cost_payload(payload)
             currency = require_run_currency(payload)
-        except ValueError as exc:
+        except (ValueError, CostCurrencyError) as exc:
             raise JoinRefused(f"allocation {quantum}: {exc}") from exc
         if payload.get("schema") != "prismaquant.aura_cost.v1":
             raise JoinRefused(f"allocation {quantum}: unsupported measured payload schema")
@@ -824,7 +824,7 @@ def _preserve_allocation_payload(joined, payloads, records):
     # This also verifies the rows share one full probe/calibration identity.
     try:
         require_run_currency(joined)
-    except ValueError as exc:
+    except (ValueError, CostCurrencyError) as exc:
         raise JoinRefused(f"allocation joined currency: {exc}") from exc
 
 

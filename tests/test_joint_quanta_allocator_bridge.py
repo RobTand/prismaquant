@@ -10,7 +10,8 @@ import pytest
 
 from prismaquant import allocator
 from prismaquant.joint_layer_quanta import derive_stride, layer_quanta
-from prismaquant.joint_quanta_join import join_joint_quanta, JoinRefused, main as join_main
+from prismaquant.joint_quanta_join import (
+    EXIT_REFUSED, JoinRefused, join_joint_quanta, main as join_main)
 from prismaquant.layer_config import load_assignment
 from tests.test_joint_quanta_join import campaign, probe, STATUS_SCHEMA
 from tests.test_stage_b_band_binding import band_from_receipt, synthetic_receipt
@@ -140,3 +141,29 @@ def test_missing_quantum_statistics_cannot_be_filled_from_another_unit(tmp_path,
     with pytest.raises(JoinRefused, match="statistics do not cover"):
         join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
                           output_dir=tmp_path / "refused")
+
+
+def test_a_currency_mismatch_is_refused_by_the_join(tmp_path, campaign, capsys):
+    """PQ #1031: a quantum whose cost currency cannot be ranked is the join's refusal.
+
+    ``require_run_currency`` raises ``CostCurrencyError``, a ``RuntimeError``,
+    so the join must name it as a refusal rather than let it escape.
+    """
+    root, campaign, _, _, _ = _generated_outputs(tmp_path, campaign)
+    path = root / "layer-quanta" / "layer-001" / "cost.pkl"
+    payload = pickle.loads(path.read_bytes())
+    payload["provenance"]["cost_currency"] = "aura_predicted_dloss"
+    path.write_bytes(pickle.dumps(payload))
+    joined_dir = tmp_path / "joined"
+    code = join_main([*_proof_argv(root, False),
+        '--records', str(root / 'layer-quanta' / 'records'), '--output-dir', str(joined_dir),
+        '--plan', str(root / 'plan.json'), '--plan-sha256', campaign['plan_sha256'],
+        '--prepared', str(root / 'prepared.json'), '--prepared-sha256', campaign['prepared_sha256'],
+        '--manifest', str(root / 'manifest.json'), '--manifest-sha256', campaign['manifest_sha256'],
+        '--scope', str(root / 'scope.json'), '--roster', str(root / 'roster.txt'),
+        '--formats-by-qname', str(root / 'formats.json')])
+    assert code == EXIT_REFUSED
+    assert capsys.readouterr().err == (
+        "joint_quanta_join: refused: allocation layer-001: "
+        "joint AURA requires matching aura/joint provenance\n")
+    assert not (joined_dir / "joint-cost.pkl").exists()

@@ -12,7 +12,6 @@ import pickle
 import pytest
 import torch
 
-from prismaquant.cost_currency import CostCurrencyError
 from prismaquant.joint_aura import identity_sha256
 from prismaquant.joint_projection_backend import REFERENCE_IDENTITY
 from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta
@@ -218,9 +217,7 @@ def test_a_stamped_default_row_fails_its_currency_check(tmp_path, campaign):
     block = {"schema": REPLAY_REGIME_SCHEMA, **DEFAULT_REPLAY_REGIME}
     _restamp(root, _quanta(root)[0],
              lambda arithmetic: {**arithmetic, REPLAY_REGIME_FIELD: block})
-    # The join wraps only ValueError around the currency check, and
-    # CostCurrencyError is a RuntimeError, so it arrives unwrapped.
-    with pytest.raises((JoinRefused, CostCurrencyError), match="stamped default"):
+    with pytest.raises(JoinRefused, match="stamped default"):
         join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
                           output_dir=tmp_path / "refused")
 
