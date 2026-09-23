@@ -157,6 +157,23 @@ def replay_regime_of(arithmetic: Mapping) -> dict:
     return regime
 
 
+def handoff_regime_refusal(regime) -> str | None:
+    """Why a band-serial producer (PQ #996) cannot run ``regime``, or ``None``.
+
+    A producer hands off the boundary plane its capture pass wrote, and the
+    handoff must equal the plane the consumer's chain rebuild ends on, which
+    a batch-1 backward writes. A capture batch above 1 writes the plane
+    through a batched backward. The accumulation mode is admitted: it changes
+    only the statistics, never the plane.
+    """
+    batch = normalize_replay_regime(regime)["capture_batch"]
+    if batch == 1:
+        return None
+    return (f"capture_batch={batch} writes the boundary plane through a batched "
+            "backward, and a band-serial handoff must equal the batch-1 plane the "
+            "consumer's chain rebuild ends on; emit no handoff, or capture at batch 1")
+
+
 def replay_regime_from_environment(environ: Mapping) -> dict | None:
     """The regime a launch declares, or ``None`` (the default) when unset."""
     text = environ.get(REPLAY_REGIME_ENV)

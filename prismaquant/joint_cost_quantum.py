@@ -1163,6 +1163,7 @@ def run_layer_quantum_core(
     from .joint_replay_regime import (
         DEFAULT_REPLAY_REGIME,
         ReplayRegimeRefused,
+        handoff_regime_refusal,
         normalize_replay_regime,
         replay_regime_identity,
     )
@@ -1178,6 +1179,9 @@ def run_layer_quantum_core(
                 "the spill; declare PRISMAQUANT_STAGE_B_SPILL_ROOT and "
                 "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
         counters.replay["regime"] = replay_regime_identity(replay_regime)
+    if handoff_emitter is not None and handoff_regime_refusal(replay_regime):
+        raise QuantumIdentityRefused(
+            f"quantum {quantum_id}: {handoff_regime_refusal(replay_regime)}")
     capture_batch = replay_regime["capture_batch"]
 
     retained = quantum_retained_state(execution)
@@ -2198,7 +2202,8 @@ def run_layer_quantum(
     execution = config["execution"]
     # The replay regime is a launch setting sealed in the campaign container
     # spec, never a plan field: the plan is bound to the prepared inputs.
-    from .joint_replay_regime import ReplayRegimeRefused, replay_regime_from_environment
+    from .joint_replay_regime import (
+        ReplayRegimeRefused, handoff_regime_refusal, replay_regime_from_environment)
     if "replay_regime" in execution:
         raise QuantumIdentityRefused(
             "the Stage B replay regime is a launch setting "
@@ -2207,6 +2212,8 @@ def run_layer_quantum(
         replay_regime = replay_regime_from_environment(os.environ)
     except ReplayRegimeRefused as exc:
         raise QuantumIdentityRefused(str(exc)) from exc
+    if emit_handoff and handoff_regime_refusal(replay_regime):
+        raise QuantumIdentityRefused(handoff_regime_refusal(replay_regime))
     from .joint_stageb_resources import enforce_device_policy
     device_envelope = enforce_device_policy(config)
     if (config.get("qualification_window") is not None

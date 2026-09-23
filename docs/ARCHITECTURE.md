@@ -38,7 +38,12 @@ order, through one FP32 GEMM per operator per `chunk_rows` rows
 backward invocation. It shares the upcasts, QDQ and accumulation with the
 invocation path (`_observe_rows`), and it counts the same observed tokens and
 calls. The `contraction_order` field is unchanged: operators are still summed
-before each signed component is projected. Gates:
+before each signed component is projected. A band-serial producer (#996)
+hands off the plane its capture pass wrote, which must equal the batch-1
+plane of the consumer's chain rebuild, so it refuses a capture batch above 1
+(`joint_replay_regime.handoff_regime_refusal`): the dispatcher refuses the
+producer row, and the quantum refuses before any GPU work. It admits
+`operator_gemm` at batch 1, which changes only the statistics. Gates:
 `tests/test_stageb_replay_regime.py`, `tests/test_stageb_one_pass_spill.py`,
 `tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
 changes.
@@ -466,7 +471,8 @@ replay regimes** (PQ #994): `PRISMAQUANT_STAGE_B_REPLAY_REGIME` names a
 capture batch and a statistics accumulation for the spill replay, and any
 non-default regime is stamped into `statistics_arithmetic_identity`, so the
 join refuses mixed regimes; see the entry of that name at the top. The
-default stamps nothing. No format, default, stage or ship gate changes.
+default stamps nothing. A band-serial producer (#996, merged here) refuses a
+capture batch above 1. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-br/band-serial-996`) for **band-serial Stage B
 quanta** (PQ #996): inside a checkpoint band, quantum `L - 1` reads quantum
@@ -20828,7 +20834,10 @@ capture is the same `replay_backward(final=True)` pass that writes it. A
 spill producer and a windowed producer emit the same plane, and a
 band-serial consumer under either replay mode matches its chain-mode bytes
 (`tests/test_band_serial_spill.py`, on the spill suite's bf16
-packed-expert fixture).
+packed-expert fixture). A spill capture batch above 1 (#994's replay
+regimes) would change the plane, so a producer refuses one; one GEMM per
+operator at batch 1 hands off the same plane
+(`test_a_band_serial_producer_runs_only_a_batch_one_capture`).
 
 **The handoff.** `joint_quantum_handoff.HandoffEmitter` writes one
 generation under `{output_space.root}/handoff/{generation}/`: the plane as

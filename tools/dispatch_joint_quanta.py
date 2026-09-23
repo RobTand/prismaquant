@@ -783,20 +783,24 @@ def require_staged_wait_below_grace(spec: Mapping,
             f"refusal. Set it below {grace} s")
 
 
-def _require_replay_regime(spec: dict) -> None:
+def _require_replay_regime(spec: dict, *, emits_handoff: bool = False) -> None:
     """Validate the Stage B replay regime the sealed spec declares (#994).
 
     One spec wraps every quantum of a dispatch, so the regime is uniform by
     construction. It changes the statistics arithmetic, and it replays only
-    from the spill, so the spec must declare the spill beside it.
+    from the spill, so the spec must declare the spill beside it. A
+    band-serial producer (#996) runs only a batch-1 capture.
     """
-    from prismaquant.joint_replay_regime import replay_regime_from_environment
+    from prismaquant.joint_replay_regime import (
+        handoff_regime_refusal, replay_regime_from_environment)
 
     env = spec.get("env", {})
-    if (replay_regime_from_environment(env) is not None
-            and not stage_b_spill_environment(spec, env)):
+    regime = replay_regime_from_environment(env)
+    if regime is not None and not stage_b_spill_environment(spec, env):
         raise RuntimeError("a non-default Stage B replay regime replays from the "
                            "spill; declare the spill in the same spec")
+    if emits_handoff and handoff_regime_refusal(regime):
+        raise RuntimeError(handoff_regime_refusal(regime))
 
 
 def _container_wrap(spec_path: Path, payload: list[str], *,
@@ -828,7 +832,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     try:
         cotangent_scratch_environment(spec, spec.get("env", {}))
         stage_b_spill_environment(spec, spec.get("env", {}))
-        _require_replay_regime(spec)
+        _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload)
     except (ValueError, RuntimeError) as exc:
         raise DispatchRefused(str(exc)) from exc
     if resource_policy is not None:

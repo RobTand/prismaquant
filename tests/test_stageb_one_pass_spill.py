@@ -245,7 +245,7 @@ def campaign(tmp_path_factory):
 
 
 def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
-             resume=False, label=None, regime=None):
+             resume=False, label=None, regime=None, emit_handoff=False):
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress, quantum_layer_roster,
         quantum_retained_state, resolve_quantum_windows, run_layer_quantum_core)
@@ -282,19 +282,31 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
                                identity_sha256=record["identity_sha256"],
                                chunks=record["chunks"], frontier=frontier)
     progress = QuantumProgress(frontier=frontier, base_units=0)
-    state = SimpleNamespace(context=context, counters=counters, resolved=resolved)
+    state = SimpleNamespace(context=context, counters=counters, resolved=resolved,
+                            handoff=None)
+    # A band-serial producer (PQ #996), built as ``main`` builds it. The
+    # keyword is passed only when asked, so a wrapper that adds its own
+    # emitter (tests/test_band_serial_spill.py) sees the call unchanged.
+    band = {}
+    if emit_handoff:
+        from prismaquant.joint_quantum_handoff import HandoffEmitter
+        band["handoff_emitter"] = HandoffEmitter(
+            record=record, adjoint_slice=campaign.slices[layer],
+            boundary_storage=execution["boundary_storage"])
     try:
         payload = run_layer_quantum_core(
             runner, cache, _calibration(), campaign.formats_by_qname,
             record=record, adjoint_slice=campaign.slices[layer], execution=execution,
             output_root=campaign.output_root, projection_backend=None, resume=resume,
-            resolved_windows=resolved, counters=counters, progress=progress)
+            resolved_windows=resolved, counters=counters, progress=progress, **band)
     except BaseException as exc:
         state.error = exc
         return None, state
     state.counters_block = counters.finish(
         units_done=len(payload["costs"]),
         units_total=sum(len(w["names"]) for w in resolved))
+    if emit_handoff:
+        state.handoff = band["handoff_emitter"].published
     return payload, state
 
 
@@ -859,6 +871,54 @@ def test_batched_capture_refuses_shared_pass_state_before_the_chain(
     assert "carries shared pass state" in _chain(state.error)
     assert state.context.install_calls == 0
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+
+
+def _published_plane(handoff):
+    from test_quantum_band_serial import _handoff_plane, _state_digest, _tensor_digest
+
+    document, plane, states = _handoff_plane(handoff)
+    return (document["boundary"],
+            {key: _tensor_digest(tensor) for key, tensor in sorted(plane.items())},
+            {key: _state_digest(state) for key, state in sorted(states.items())})
+
+
+@pytest.mark.parametrize("regime", [
+    "capture_batch=2",
+    "capture_batch=2,accumulation=operator_gemm,chunk_rows=7",
+    "accumulation=operator_gemm,chunk_rows=5",
+])
+def test_a_band_serial_producer_runs_only_a_batch_one_capture(campaign, monkeypatch,
+                                                            tmp_path, regime):
+    """A band-serial producer (PQ #996) hands off the plane its capture wrote.
+
+    The handoff must equal the plane the consumer's chain rebuild ends on, a
+    batch-1 backward, so a capture batch above 1 refuses before any GPU work.
+    One GEMM per operator changes only the statistics: its producer hands off
+    the default spill's plane, sha256-equal entry by entry.
+    """
+    from prismaquant.joint_replay_regime import normalize_replay_regime
+
+    spill_root = _spill_root(tmp_path)
+    if normalize_replay_regime(regime)["capture_batch"] > 1:
+        _clear_output(campaign, 1)
+        payload, state = _quantum(campaign, monkeypatch, layer=1, spill_root=spill_root,
+                                  ceiling=1 << 30, regime=regime, emit_handoff=True)
+        assert payload is None
+        assert "band-serial handoff must equal the batch-1 plane" in _chain(state.error)
+        assert state.context.install_calls == 0
+        assert state.counters.replay["layer_passes"] == 0
+        return
+    planes = []
+    for label, run_regime in (("default", None), ("gemm", regime)):
+        _clear_output(campaign, 1)
+        payload, state = _quantum(campaign, monkeypatch, layer=1,
+                                  spill_root=_spill_root(tmp_path / label), ceiling=1 << 30,
+                                  regime=run_regime, emit_handoff=True)
+        assert payload is not None, _chain(state.error)
+        assert state.handoff is not None
+        planes.append(_published_plane(state.handoff))
+    assert planes[0][0] == 1 and planes[0][1]
+    assert planes[0] == planes[1]
 
 
 def test_row_local_qdq_admission_refuses_a_tensor_wide_scale(monkeypatch):

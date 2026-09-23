@@ -247,6 +247,11 @@ def test_launcher_reads_the_regime_from_the_environment_only(monkeypatch):
     monkeypatch.setenv(REPLAY_REGIME_ENV, "capture_batch=x")
     with pytest.raises(QuantumIdentityRefused, match="canonical integer"):
         run_layer_quantum({"execution": {}}, **arguments)
+    # A band-serial producer (#996) refuses a batched capture before it binds
+    # its handoff publication.
+    monkeypatch.setenv(REPLAY_REGIME_ENV, "capture_batch=2")
+    with pytest.raises(QuantumIdentityRefused, match="batch-1 plane"):
+        run_layer_quantum({"execution": {}}, emit_handoff=True, **arguments)
 
 
 def test_the_container_forwards_the_sealed_regime_verbatim():
@@ -262,3 +267,18 @@ def test_the_container_forwards_the_sealed_regime_verbatim():
     argv = docker_command(spec, ["python3"], cwd="/snapshot", uid=1, gid=1,
                           image_id="sha256:x", environ={})
     assert f"{REPLAY_REGIME_ENV}={regime}" in argv
+
+
+@pytest.mark.parametrize("regime,refused", [
+    (None, False),
+    ("accumulation=operator_gemm,chunk_rows=65536", False),
+    ("capture_batch=2", True),
+    ({"capture_batch": 16, "accumulation": "operator_gemm", "chunk_rows": 7}, True),
+])
+def test_a_band_serial_producer_admits_only_a_batch_one_capture(regime, refused):
+    from prismaquant.joint_replay_regime import handoff_regime_refusal
+
+    reason = handoff_regime_refusal(regime)
+    assert (reason is not None) is refused
+    if refused:
+        assert "batch-1 plane" in reason
