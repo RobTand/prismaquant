@@ -897,3 +897,32 @@ def test_cotangent_scratch_is_validated_and_sealed_in_outer_request(
     assert all(sealed.get(name) == value for name, value in env.items())
     actual = json.loads(argv[argv.index('--spec') + 1])
     assert cotangent_scratch_environment(actual, sealed) == env
+
+
+@pytest.mark.parametrize('readonly', [False, True])
+def test_stage_b_spill_is_validated_and_sealed_in_outer_request(
+        tmp_path, campaign, readonly):
+    """The #994 replay spill is declared and sealed like the cotangent scratch."""
+    import dispatch_joint_quanta as dispatch
+    from tools.tessera_campaign_container import stage_b_spill_environment
+    root = '/home/rob/pb-scratch/glm-stageb-spill'
+    env = {'PRISMAQUANT_STAGE_B_SPILL_ROOT': root,
+           'PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES': str(200 << 30)}
+    spec = {'container': {'image': 'sha256:' + '0' * 64,
+             'mounts': [{'source': root, 'target': root, 'readonly': readonly}]}, 'env': env}
+    dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+                   tmp_path / 'adjoint-slices')
+    path = tmp_path / 'record.json'; path.write_text(json.dumps(record))
+    args = dict(record_path=path, output_root=tmp_path / 'out')
+    if readonly:
+        with pytest.raises(dispatch.DispatchRefused, match='writable identity bind'):
+            quantum_argv(record, **args)
+        return
+    argv = quantum_argv(record, **args)
+    outer = argv[:argv.index('--')]
+    sealed = dict(outer[i + 1].split('=', 1) for i, value in enumerate(outer[:-1])
+                  if value == '--env' and '=' in outer[i + 1])
+    assert all(sealed.get(name) == value for name, value in env.items())
+    actual = json.loads(argv[argv.index('--spec') + 1])
+    assert stage_b_spill_environment(actual, sealed) == env
