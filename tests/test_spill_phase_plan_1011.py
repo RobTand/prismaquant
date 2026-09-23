@@ -159,7 +159,10 @@ def test_dispatch_main_accepts_a_spill_sealed_row(tmp_path, monkeypatch, capsys)
     gateway = dispatch.FakeGateway()
     code = dispatch.main(
         ["--records", str(records), "--output-root", str(out),
-         "--adjoint-receipt", str(receipt_path)], _gateway=gateway)
+         "--adjoint-receipt", str(receipt_path)], _gateway=gateway,
+        # No checkpoint behind the fixture; coverage is tested on its own
+        # (test_readset_coverage_1095).
+        _coverage=lambda rows: [])
     assert code == 0, capsys.readouterr().err
     argv = gateway.submitted[0]["argv"]
     declared = [argv[i + 1].split("=", 1)[0]
