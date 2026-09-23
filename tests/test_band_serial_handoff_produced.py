@@ -151,6 +151,41 @@ def check_consumer_binds(published, plane, consumer, publication):
     return handoff
 
 
+def check_record_group(publication, producer, published):
+    """``owner-states.pkl`` and ``handoff.json`` are one produced group (PQ #1015).
+
+    They are prewritten like the entries, under the handoff's own template,
+    and land at their canonical names with no temporary left. Nothing commits
+    a group that no read in the producer's action follows, so its prewrite
+    stays retained with the files present: that is PrismaBuild #912, not a
+    defect of this writer.
+    """
+    from prismabuild import produced_output as po
+    from prismaquant.joint_quantum_handoff import (
+        HANDOFF_OWNER_STATES_NAME, HANDOFF_RECORD_BATCH_KIND,
+        HANDOFF_RECORD_NAME)
+
+    batch_id = publication.batch_id_for(
+        kind=HANDOFF_RECORD_BATCH_KIND, boundary_index=int(producer["layer"]),
+        group_index=0)
+    directory = Path(published["path"]).parent
+    finals = [directory / HANDOFF_OWNER_STATES_NAME, directory / HANDOFF_RECORD_NAME]
+    assert finals[1] == Path(published["path"])
+    prewrite = po._read_prewrite(
+        po._prewrites_dir(publication.queue.root, publication.instance)
+        / f"{batch_id}.prewrite.json")
+    assert prewrite is not None, "the handoff record group was never prewritten"
+    assert sorted(prewrite["paths"]) == sorted(
+        str(path) for final in finals
+        for path in (final, Path(str(final) + ".tmp")))
+    assert prewrite["class_bytes"]["payload"] == sum(
+        final.stat().st_size for final in finals)
+    assert not any(Path(str(final) + ".tmp").exists() for final in finals)
+    out = publication.abort_prewrite(batch_id=batch_id)
+    assert not out["ok"] and out["refusal"] == "abort-files-present-retain", out
+    return batch_id
+
+
 def test_a_producer_writes_its_handoff_inside_its_declared_output(
         tmp_path, monkeypatch):
     _src, pb_repo = chain._pb_source()
@@ -184,3 +219,4 @@ def test_a_producer_writes_its_handoff_inside_its_declared_output(
 
     published, plane = emit_handoff(producer, storage, publication)
     check_consumer_binds(published, plane, consumer, publication)
+    check_record_group(publication, producer, published)

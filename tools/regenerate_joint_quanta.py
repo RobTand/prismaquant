@@ -88,6 +88,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 import zlib
 from pathlib import Path
 
@@ -699,6 +700,50 @@ def _load_production_cache(prepared: dict):
     return cache
 
 
+def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
+                       prepared_binding: dict, production_cache, layers,
+                       output_root: str, metadata_root) -> dict:
+    """Run the Stage B head intake ONCE and seal one slice per layer (PQ #1010).
+
+    The walk is the one every quantum used to repeat -- the plan's inputs,
+    existing renders required, payloads unverified, the plan's historical
+    encoder allowance -- with no head journal: it runs here, in the metadata
+    producer, and nothing it reads is re-read by a quantum. Returns
+    ``{layer: {"bytes", "binding"}}``; nothing is written.
+    """
+    from prismaquant.aura_cost import _aura_source_sha256
+    from prismaquant.joint_layer_quanta import qname_layer
+    from prismaquant.joint_stage_b_head import (
+        HEAD_SLICE_SCHEMA, build_head_slices, head_slice_bytes, head_slice_path)
+    from prismaquant.tessera_joint_aura import load_measured_anchor_input
+    from prismaquant.tessera_reader import load_declared_reader
+
+    started = time.monotonic()
+    data = load_measured_anchor_input(
+        plan["inputs"], reader=load_declared_reader(plan.get("reader")),
+        synthesis_device="cpu", progress_phase=None,
+        require_existing_renders=True, verify_payloads=False,
+        historical_encoder_reuse=plan.get("historical_encoder_reuse"),
+        file_hash_workers=plan.get("file_hash_workers", 1))
+    slices = build_head_slices(
+        config=plan, plan_sha256=plan_sha256, prepared=prepared_binding,
+        completion=prepared, production_cache=production_cache, data=data,
+        layers=layers, layer_of=qname_layer,
+        implementation_sha256=_aura_source_sha256())
+    sealed = {}
+    for layer, head_slice in slices.items():
+        raw = head_slice_bytes(head_slice)
+        sealed[layer] = {"bytes": raw, "binding": {
+            "path": head_slice_path(output_root, layer, metadata_root=metadata_root),
+            "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+            "schema": HEAD_SLICE_SCHEMA,
+            "head_files": [dict(row) for row in head_slice["head_files"]]}}
+    print(f"Stage B head slices: {len(sealed)} layers from one head intake of "
+          f"{len(data.formats_by_qname)} units / {len(data.cells)} cells in "
+          f"{time.monotonic() - started:.1f}s")
+    return sealed
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--plan", type=Path, required=True)
@@ -769,6 +814,11 @@ def main(argv=None) -> int:
                          "boundary/probe/replay reads) into bound-readsets/; "
                          "derives retained rosters from the bound production "
                          "cache; needs --adjoint-receipt")
+    ap.add_argument("--head-slices", action="store_true",
+                    help="with --executable-readsets: run the campaign head "
+                         "intake once and seal one Stage B head slice per "
+                         "layer, declared in each quantum's head phase "
+                         "(PQ #1010)")
     ap.add_argument("--source-layers-prefix", default=None,
                     help="with --executable-readsets: complete each chain/own "
                          "source phase from the actual checkpoint tensor "
@@ -779,6 +829,8 @@ def main(argv=None) -> int:
     ap.add_argument("--check-only", action="store_true",
                     help="Gate 1 alone; write nothing")
     args = ap.parse_args(argv)
+    if args.head_slices and not args.executable_readsets:
+        return _fail("--head-slices needs --executable-readsets")
     if args.source_layers_prefix is not None and (
             not args.executable_readsets or not args.source_layers_prefix):
         return _fail("--source-layers-prefix needs --executable-readsets "
@@ -958,6 +1010,7 @@ def main(argv=None) -> int:
         return _fail("--boundary-readsets needs --adjoint-receipt or --adjoint-band")
     if args.executable_readsets and receipt is None:
         return _fail("--executable-readsets needs --adjoint-receipt or --adjoint-band")
+    head_slices: dict = {}
     adjoint_slices = produced.get("adjoint_slices", {})
     if receipt is not None and (
             args.boundary_readsets or args.executable_readsets):
@@ -1050,6 +1103,15 @@ def main(argv=None) -> int:
                 for record in produced["records"]:
                     by_layer.setdefault(record.get("layer"), []).append(
                         record)
+                if args.head_slices:
+                    head_slices = _build_head_slices(
+                        plan, plan_sha256=args.plan_sha256,
+                        prepared=prepared,
+                        prepared_binding={"path": str(args.prepared),
+                                          "sha256": args.prepared_sha256},
+                        production_cache=production_cache,
+                        layers=sorted(by_layer), output_root=output_root,
+                        metadata_root=metadata_root)
                 emitted = []
                 for layer in sorted(by_layer):
                     layer_records = by_layer[layer]
@@ -1083,7 +1145,9 @@ def main(argv=None) -> int:
                             metadata_root=metadata_root,
                             layer_source_spans=source_spans,
                             source_model_root=source_model_root,
-                            prepared_inputs=layer_prepared):
+                            prepared_inputs=layer_prepared,
+                            head_slice=(head_slices[layer]["binding"]
+                                        if head_slices else None)):
                         emitted.append(row)
                 produced["records"] = [row["record"] for row in emitted]
                 bound_manifests.extend(
@@ -1142,6 +1206,17 @@ def main(argv=None) -> int:
         for manifest_path, manifest, _ in bound_manifests:
             _publish(Path(manifest_path), seal_manifest_bytes(manifest),
                      where="bound readset")
+        # Each layer's Stage B head slice (PQ #1010) lands at the path its
+        # record's executable readset names, digest re-verified, before the
+        # record exists.
+        for layer, sealed in sorted(head_slices.items()):
+            binding = sealed["binding"]
+            _publish(Path(binding["path"]), sealed["bytes"],
+                     where="Stage B head slice")
+            if hashlib.sha256(Path(binding["path"]).read_bytes()).hexdigest() \
+                    != binding["sha256"]:
+                return _fail(f"head slice at {binding['path']} does not hash "
+                             "to the sealed digest")
         # Each bound record's stage-A slice (PQ #993) lands at the path the
         # record names, as its canonical bytes, before the record exists.
         for record in produced["records"]:

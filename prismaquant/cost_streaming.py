@@ -7,6 +7,7 @@ unload all go through the existing streaming-model machinery.
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
+import dataclasses
 from dataclasses import dataclass
 import hashlib
 import json
@@ -53,6 +54,48 @@ class StreamedForwardBoundaries:
     # all legacy callers continue to receive their original CPU tensors.
     activations_cpu: list[Any]
     shared_pass_state: object
+
+
+@dataclass(frozen=True)
+class ProducedFileReference:
+    """One small file an owner wrote as a produced-output group member.
+
+    The fields the produced-output spool reads from a writer reference
+    (``path``, ``name``, ``file_bytes``, ``sha256``). It is not an exact
+    entry: it has no tensor identity and no durable-progress coordinate.
+    """
+
+    path: str
+    name: str
+    file_bytes: int
+    sha256: str
+
+
+def _write_new_file(path: Path, payload: bytes) -> None:
+    """Write ``payload`` to a file that must not exist yet, then fsync it."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        view = memoryview(payload)
+        while view:
+            view = view[os.write(fd, view):]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _link_new_file(path: Path, payload: bytes) -> None:
+    """Publish a new file through its planned ``.tmp`` name; never replace one."""
+    temporary = Path(str(path) + ".tmp")
+    _write_new_file(temporary, payload)
+    try:
+        os.link(temporary, path)
+    finally:
+        temporary.unlink()
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 BOUNDARY_STORAGE_SCHEMA = "prismaquant.aura.boundary_storage.v1"
@@ -309,6 +352,7 @@ class StreamedBoundaryArtifacts:
             "written_entries": 0, "retired_entries": 0, "prefetch_windows": 0,
             "hot_read_misses": 0,
             "produced_groups_prewritten": 0, "produced_groups_published": 0,
+            "produced_file_groups": 0,
             "produced_groups_materialized": 0, "produced_groups_retired": 0,
             "produced_groups_rematerialized": 0,
             "produced_group_release_failures": 0,
@@ -878,6 +922,10 @@ class StreamedBoundaryArtifacts:
         if self._local_output_spool is None:
             return
         for reference in self._local_output_spool.durable_entries():
+            if isinstance(reference, ProducedFileReference):
+                # A small file of a record group (write_produced_files):
+                # durable, but not an entry the progress contract counts.
+                continue
             if self._progress is not None:
                 identity = json.loads(reference.metadata_json)["identity"]
                 coordinates = identity["coordinates"]
@@ -889,6 +937,100 @@ class StreamedBoundaryArtifacts:
         if self._local_output_spool is not None:
             self._local_output_spool.drain()
             self._commit_local_output_progress()
+
+    def write_produced_files(self, files, *, kind, boundary_index):
+        """Write small files into the generation directory as one group.
+
+        ``files`` is an ordered list of ``(name, bytes)`` pairs. An owner
+        bound to a produced-output publication writes them as one
+        produced-output group (PQ #1015). It claims the group's exact
+        payload before the first byte, with the final and ``.tmp`` names as
+        its planned paths. Through the local spool the files land in the
+        group's PB reservation and PrismaBuild exports them in list order.
+        This method returns only after the export is acknowledged, so a
+        caller that puts its record last can rely on the record's presence.
+        Without the spool each file is written through its ``.tmp`` name
+        and linked into place, in the same order.
+
+        The group is prewritten and never committed: no read follows in
+        this action, as for the entries a handoff writes with
+        ``read_back=False``. It stays a retained prewrite until PrismaBuild
+        can commit a write-only group for another action (PB #912).
+
+        An unbound owner writes each file with ``atomic_write_bytes``.
+        Returns one :class:`ProducedFileReference` per file, in order.
+        """
+
+        from .cost_stage_checkpoint import atomic_write_bytes
+        if self._status != "running":
+            raise RuntimeError("exact boundary generation is not running")
+        files = [(str(name), bytes(payload)) for name, payload in files]
+        names = [name for name, _ in files]
+        if not files or len(set(names)) != len(names) or any(
+                not name or "/" in name or name.startswith(".")
+                or name.endswith(".tmp") or name == "generation.json"
+                for name in names):
+            raise ValueError("produced files need distinct bare names")
+        if any(not payload for _, payload in files):
+            raise ValueError("a produced file cannot be empty")
+        references = [
+            ProducedFileReference(
+                path=str(self.directory / name), name=name,
+                file_bytes=len(payload),
+                sha256=hashlib.sha256(payload).hexdigest())
+            for name, payload in files]
+        total = sum(ref.file_bytes for ref in references)
+        # The files share max_artifact_bytes with the entries, as the
+        # template's payload maximum does on the PrismaBuild side.
+        remaining = self.checkpoint_remaining_bytes()
+        if total > remaining:
+            raise RuntimeError(
+                "exact boundary artifact budget exceeded: produced files need "
+                f"{total} bytes, {remaining} remain of "
+                f"{self.config['max_artifact_bytes']}")
+        if self._produced is None:
+            for (name, payload) in files:
+                atomic_write_bytes(self.directory / name, payload)
+            self._count_produced_files(total)
+            return references
+        self._produced_raise_stager_failure()
+        batch_id = self._produced.batch_id_for(
+            kind=kind, boundary_index=boundary_index, group_index=0)
+        planned = []
+        for name in names:
+            planned += [str(self.directory / name),
+                        str(self.directory / name) + ".tmp"]
+        self._produced.require_prewrite(
+            batch_id=batch_id, payload_ceiling_bytes=total, paths=planned)
+        spool = self._local_output_spool
+        try:
+            if spool is None:
+                for (name, payload) in files:
+                    _link_new_file(self.directory / name, payload)
+            else:
+                local = spool.reserve(batch_id, total)
+                for (name, payload), reference in zip(files, references):
+                    path = Path(local) / name
+                    _write_new_file(path, payload)
+                    spool.record(batch_id, dataclasses.replace(
+                        reference, path=str(path)), self.directory)
+                spool.submit(batch_id)
+                spool.await_group(batch_id)
+        except BaseException:
+            if spool is None or not spool.pending(batch_id):
+                # PB proves every planned path absent before it releases
+                # the claim, and retains it otherwise.
+                self._produced.abort_prewrite(batch_id=batch_id)
+            raise
+        self.telemetry["produced_file_groups"] += 1
+        self._count_produced_files(total)
+        return references
+
+    def _count_produced_files(self, nbytes):
+        self.telemetry["live_artifact_bytes"] += nbytes
+        self.telemetry["peak_artifact_bytes"] = max(
+            self.telemetry["live_artifact_bytes"],
+            self.telemetry["peak_artifact_bytes"])
 
     def _retire(self, reference, *, missing_ok=False):
         if self._references.get(reference.name) != reference:
@@ -5225,9 +5367,11 @@ def _read_streamed_model_identity_cache(
     cache_path: Path,
     *,
     source_model: str,
+    raw: bytes | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     try:
-        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        cached = json.loads(cache_path.read_text(encoding="utf-8")
+                            if raw is None else raw.decode("utf-8"))
     except Exception as exc:
         raise RuntimeError(
             f"streamed model identity cache {cache_path} is corrupt; "
@@ -5253,6 +5397,7 @@ def build_streamed_model_identity(
     source_model: str,
     *,
     identity_cache_path: str | Path | None = None,
+    identity_cache_bytes: bytes | None = None,
 ) -> dict[str, object]:
     """Hash the complete checkpoint backing a streamed cost run.
 
@@ -5262,11 +5407,19 @@ def build_streamed_model_identity(
     checkpoint-key map and resolved config.  It is an initialization integrity
     pass, not a residency mechanism; decoder execution still uses the existing
     streaming cache.
+
+    ``identity_cache_bytes`` is a read-only cache the caller already read
+    and bound by digest (the Stage B head slice, PQ #1010): it is parsed and
+    reused exactly like a cache file, and nothing is ever written back.
     """
     from prismaquant.cost_stage_checkpoint import (
         canonical_json,
         canonical_json_sha256,
     )
+
+    if identity_cache_bytes is not None and identity_cache_path is not None:
+        raise ValueError("a streamed identity cache is either a path or "
+                         "declared bytes, never both")
 
     config = getattr(runner.model, "config", None)
     config_dict = config.to_dict() if hasattr(config, "to_dict") else {}
@@ -5302,9 +5455,13 @@ def build_streamed_model_identity(
     cache_path = Path(identity_cache_path) if identity_cache_path else None
     cached: dict[str, object] | None = None
     cached_identity: dict[str, object] | None = None
-    if cache_path is not None and cache_path.is_file():
+    have_cache = identity_cache_bytes is not None or (
+        cache_path is not None and cache_path.is_file())
+    if have_cache:
         cached, cached_identity = _read_streamed_model_identity_cache(
-            cache_path, source_model=str(source_model)
+            cache_path if cache_path is not None
+            else Path("<declared identity cache>"),
+            source_model=str(source_model), raw=identity_cache_bytes,
         )
         stored = cached.get("fingerprints")
         reusable = (
@@ -5386,7 +5543,7 @@ def build_streamed_model_identity(
             "client device-number difference (dev-only portable reuse; "
             "certified mode would rehash): uncertified")
     if dev_mode_enabled():
-        if cache_path is None or not cache_path.is_file():
+        if not have_cache:
             total_live = sum(
                 int(fingerprint["size"]) for fingerprint in fingerprints)
             where = (f"at the declared {cache_path}" if cache_path is not None

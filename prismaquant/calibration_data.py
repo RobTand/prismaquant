@@ -14,82 +14,12 @@ import torch
 def _read_calibration_payload(path: Path, expected_sha256: str) -> bytes:
     """One calibration artifact, staged-pinned under the active tier policy.
 
-    The whole-file counterpart to the checkpoint shared-state staged read:
-    the bound map entry (whole file at offset 0, digest-bound to the
-    caller's independently pinned ``expected_sha256``) is opened through a
-    lifetime-pinned window — RAM first where offered and allowed, honest
-    SSD re-acquire otherwise, never the pool — and read once into an owned
-    buffer with the same sealed size/change fences. The descriptor closes
-    and the exact ref releases before the caller decodes: no raw fd or
-    mapping escapes, and the returned bytes outlive the lease.
+    The generic reader (``staged_whole_file.read_staged_whole_file``) under
+    the ``calibration`` label, so every refusal keeps its historical name.
     """
-    from .residency_map import residency_resolver
-    from .staged_lease import LeaseRefused, acquire_entry_window
-    from .staged_tier_policy import refuse_pool_bulk_read
+    from .staged_whole_file import read_staged_whole_file
 
-    label = str(path)
-    resolver = residency_resolver()
-    if resolver is None:
-        raise refuse_pool_bulk_read(label, "readset-not-staged")
-    staged = resolver.staged_read(path, expected_sha256=expected_sha256)
-    if staged is None:
-        raise refuse_pool_bulk_read(label, "readset-not-staged")
-    size = staged.get("bytes")
-    if type(size) is not int or isinstance(size, bool) or size <= 0:
-        raise refuse_pool_bulk_read(label, "readset-not-staged")
-    window, key = acquire_entry_window(resolver, path, staged)
-    with window:
-        try:
-            fd, serving = window.open(key)
-        except LeaseRefused as refusal:
-            resolver.record_fallback(path, str(refusal))
-            raise
-        tier = window.serving_tier or "stage"
-        resolver.record_serving_tier(
-            path, tier, pin_id=str(serving.get("pin_id") or ""),
-            range_ref=str(serving.get("range_ref") or ""))
-        # Sealed bounds before allocation: the held descriptor's size must
-        # match the staged entry's, or no buffer is built.
-        first = os.fstat(fd)
-        if first.st_size != size:
-            raise LeaseRefused("calibration-changed-under-pin",
-                               kind="integrity")
-        # One owned buffer, filled in place: the caller's digest hashes
-        # these same bytes and the tensor below decodes from them, so one
-        # staged read serves verification and decode alike.
-        raw = bytearray(size)
-        view = memoryview(raw)
-        try:
-            remaining = size
-            offset = 0
-            while remaining > 0:
-                try:
-                    moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
-                except OSError as exc:
-                    raise LeaseRefused(
-                        f"calibration-unreadable: {exc.strerror}",
-                        kind="availability") from None
-                if moved <= 0:
-                    break
-                offset += moved
-                remaining -= moved
-            if remaining:
-                raise LeaseRefused("calibration-truncated", kind="integrity")
-            if os.pread(fd, 1, size):
-                raise LeaseRefused("calibration-grew-during-read",
-                                   kind="integrity")
-            last = os.fstat(fd)
-            if (last.st_ino, last.st_size, last.st_mtime_ns) != (
-                    first.st_ino, first.st_size, first.st_mtime_ns):
-                raise LeaseRefused("calibration-changed-under-pin",
-                                   kind="integrity")
-        finally:
-            view.release()
-    if tier == "ram":
-        resolver.record_ram_read(path, len(raw))
-    else:
-        resolver.record_stage_read(path, len(raw))
-    return bytes(raw)
+    return read_staged_whole_file(path, expected_sha256, label="calibration")
 
 
 def _decode_calibration_buffer(raw: bytes) -> tuple[torch.Tensor, dict]:
