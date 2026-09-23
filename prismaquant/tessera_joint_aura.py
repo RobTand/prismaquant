@@ -2342,6 +2342,20 @@ def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
     """
     _require(prepared is not None, "cost execution requires independently bound prepared inputs")
     completion = json.loads(_bound(prepared, "prepared anchors").read_text())
+    return check_prepared_completion(completion, plan_sha256=plan_sha256,
+                                     implementation_sha256=implementation_sha256,
+                                     reader_identity=reader_identity,
+                                     projection_backend=projection_backend)
+
+
+def check_prepared_completion(completion, *, plan_sha256, implementation_sha256,
+                              reader_identity, projection_backend):
+    """The startup gates of :func:`_preflight_run_prepared` on parsed bytes.
+
+    The Stage B head slice (PQ #1010) reads the prepared completion once,
+    as a declared head entry, and checks those bytes here instead of
+    re-reading the pool path.
+    """
     _same(completion.get("schema"), PREPARED_SCHEMA,
           "prepared v3 schema required; legacy preparation requires fresh prepare and recompute")
     _same(completion.get("status"), "complete", "prepared completion")

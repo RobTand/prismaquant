@@ -178,7 +178,10 @@ def prepare(args):
         '--output-root', plan['output_root'], '--metadata-root', str(root),
         *proof_argv, '--catalog-extension', extension['path'],
         '--catalog-extension-sha256', extension['sha256'], '--executable-readsets',
-        '--source-layers-prefix', 'model.language_model.layers.']
+        '--source-layers-prefix', 'model.language_model.layers.',
+        # PQ #1010: the head intake runs once, here; each quantum's head
+        # phase declares its layer's sealed slice instead of re-walking.
+        '--head-slices']
     if regenerate(generator) != 0:
         raise ValueError('generator refused; no launch package published')
     launch = ['python3', 'tools/dispatch_joint_quanta.py', '--records', str(root/'records'),

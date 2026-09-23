@@ -174,16 +174,24 @@ def require_plan_resources(old_plan, new_plan, old_plan_binding, old_prepared_bi
     return policy
 
 
-def enforce_device_policy(config):
-    """Apply the policy's actual Torch ceiling before GPU preparation."""
+def enforce_device_policy(config, *, verified_limits=None):
+    """Apply the policy's actual Torch ceiling before GPU preparation.
+
+    ``verified_limits`` are the limits a Stage B head slice carries (PQ
+    #1010): the metadata producer re-derived the policy once and the slice
+    is bound to the record by digest, so the quantum applies them without
+    re-reading the policy's campaign inputs.
+    """
     bound = config.get("stage_b_resource_policy")
     if bound is None:
+        _require(verified_limits is None, "verified limits without a resource policy")
         return None
     from .memory_management import enforce_device_envelope
-    policy = verify_policy(bound)
-    _require(config["max_gpu_bytes"] == policy["limits"]["gpu_bytes"], "device limit differs from policy")
-    observed = enforce_device_envelope("cuda", policy["limits"]["gpu_bytes"], where="Stage B device envelope")
-    return {**observed, "policy": dict(bound), "limits": dict(policy["limits"])}
+    limits = (verify_policy(bound)["limits"] if verified_limits is None
+              else verified_limits)
+    _require(config["max_gpu_bytes"] == limits["gpu_bytes"], "device limit differs from policy")
+    observed = enforce_device_envelope("cuda", limits["gpu_bytes"], where="Stage B device envelope")
+    return {**observed, "policy": dict(bound), "limits": dict(limits)}
 
 
 def main(argv=None):
