@@ -55,6 +55,7 @@ from pathlib import Path
 import re
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
+from .joint_adjoint_slices import checkpoint_cotangent_plane, checkpoint_is_referenced
 
 CHAIN_STATE_SCHEMA = "prismaquant.stage_a.chain_state.v1"
 CHAIN_ARITHMETIC_SCHEMA = "prismaquant.stage_a.chain_arithmetic.v1"
@@ -388,8 +389,20 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
             require_producer_contained(producer)
 
     entries = generation / "entries"
+    # A referenced checkpoint (PQ #1036) names some of these rolling
+    # entries: they are the checkpoint's plane now, and the resume reads them.
+    pinned = set()
+    for mark in sealed:
+        record = sealed[mark][0]
+        if checkpoint_is_referenced(record):
+            try:
+                plane = checkpoint_cotangent_plane(record)
+            except ValueError as exc:
+                raise ChainResumeRefused(
+                    f"checkpoint {mark} names a plane the resume cannot hold: {exc}") from exc
+            pinned.update(Path(row["path"]) for row in plane.values())
     leftovers = sorted(path for path in entries.iterdir()
-                       if _ROLLING_ENTRY.fullmatch(path.name))
+                       if _ROLLING_ENTRY.fullmatch(path.name) and path not in pinned)
     order = sorted(sealed, key=lambda mark: (mark != tail["boundary"], -mark))
     return ChainResume(
         document=document, boundary=boundary,

@@ -176,13 +176,17 @@ def _sealed_checkpoint(binding, where) -> tuple[dict, Path]:
     return record, root
 
 
+def _plane(record, where) -> dict:
+    """``{(probe, batch): row}`` of a copied (v1) or referenced (v2) checkpoint."""
+    from .joint_adjoint_slices import checkpoint_cotangent_plane
+    try:
+        return checkpoint_cotangent_plane(record)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ChainSeedRefused(f"the {where} lists a non-cotangent entry: {exc}") from exc
+
+
 def _whole_plane(record, *, n_probes, n_batches, where) -> dict:
-    plane = {}
-    for row in record["activation_entries"]:
-        match = re.fullmatch(r"cotangent-(\d+)-(\d+)", row["name"])
-        if match is None:
-            raise ChainSeedRefused(f"the seed's {where} lists a non-cotangent entry")
-        plane[int(match[1]), int(match[2])] = row
+    plane = _plane(record, f"seed's {where}")
     if set(plane) != {(probe, batch) for probe in range(n_probes)
                       for batch in range(n_batches)}:
         raise ChainSeedRefused(
@@ -417,6 +421,7 @@ def compare_seed_plane(plan: ChainSeed, digests: dict) -> dict:
     from .joint_adjoint_checkpoints import (
         _await_checkpoint_entry,
         _verified_checkpoint_manifest,
+        checkpoint_entry_session,
         read_exact_entry_tensors,
     )
     from .residency_shard_reader import staged_range_wait_s
@@ -434,7 +439,8 @@ def compare_seed_plane(plan: ChainSeed, digests: dict) -> dict:
     for (probe, batch) in sorted(plan.compare["plane"]):
         row = plan.compare["plane"][probe, batch]
         _await_checkpoint_entry(row, deadline=deadline)
-        tensors = read_exact_entry_tensors([row], expected_session=reference["session"])
+        tensors = read_exact_entry_tensors(
+            [row], expected_session=checkpoint_entry_session(reference))
         theirs = tensor_payload_sha256(tensors.pop(row["name"]))
         del tensors
         entries.append({"probe": probe, "batch": batch,
@@ -464,12 +470,7 @@ def load_pinned_checkpoint(binding, where="checkpoint") -> dict:
 
 
 def _cotangent_plane(record, where) -> dict:
-    plane = {}
-    for row in record["activation_entries"]:
-        match = re.fullmatch(r"cotangent-(\d+)-(\d+)", row["name"])
-        if match is None:
-            raise ChainSeedRefused(f"the {where} lists a non-cotangent entry")
-        plane[int(match[1]), int(match[2])] = row
+    plane = _plane(record, where)
     if not plane:
         raise ChainSeedRefused(f"the {where} holds no cotangent entry")
     return plane
@@ -500,7 +501,7 @@ def checkpoint_plane_distance(reference, candidate, *, device="cpu",
     from concurrent.futures import ThreadPoolExecutor
     import torch
 
-    from .joint_adjoint_checkpoints import read_exact_entry_tensors
+    from .joint_adjoint_checkpoints import checkpoint_entry_session, read_exact_entry_tensors
 
     records = {"reference": load_pinned_checkpoint(reference, "reference checkpoint"),
                "candidate": load_pinned_checkpoint(candidate, "candidate checkpoint")}
@@ -529,7 +530,8 @@ def checkpoint_plane_distance(reference, candidate, *, device="cpu",
     def read(key):
         return tuple(
             read_exact_entry_tensors([planes[name][key]],
-                                     expected_session=records[name]["session"]).popitem()[1]
+                                     expected_session=checkpoint_entry_session(
+                                         records[name])).popitem()[1]
             for name in ("reference", "candidate"))
 
     keys = sorted(planes["reference"])
