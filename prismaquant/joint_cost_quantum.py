@@ -1557,6 +1557,18 @@ def run_layer_quantum_core(
 
         def replay_backward(*, final, lease, probe):
             active_probe = int(probe)
+            # One phase admission per pass, as check_operator_allocation's
+            # contract states: it synchronizes, empties the allocator cache
+            # and charges the guard, which is too much work per sample. The
+            # lease is fresh, so its whole statistics capacity is still to
+            # come; the per-sample floors below stay.
+            if guard is not None:
+                check_operator_allocation(
+                    guard, "before_joint_window_backward", reserve_bytes=(
+                        operator_windows["workspace_reserve_bytes"]
+                        + (0 if lease is None
+                           else lease.statistics_capacity_bytes
+                           - lease.resident_statistics_bytes)))
             with prefetched_boundary_batches(storage, batches, layer) as reverse_batches:
                 for batch_index, batch, boundary_cpu, _unused in reverse_batches:
                     owner = cotangent_owners[active_probe][batch_index]
@@ -1570,13 +1582,6 @@ def run_layer_quantum_core(
                         storage.check_auxiliary(
                             batches, cotangents=cotangent_owners,
                             extra=() if final else owner.resident_tensors())
-                        if guard is not None:
-                            check_operator_allocation(
-                                guard, "before_joint_window_backward", reserve_bytes=(
-                                    operator_windows["workspace_reserve_bytes"]
-                                    + (0 if lease is None
-                                       else lease.statistics_capacity_bytes
-                                       - lease.resident_statistics_bytes)))
                         if _free_gib() < min_free_gib:
                             raise RuntimeError(
                                 "joint window replay crossed free UMA floor")
