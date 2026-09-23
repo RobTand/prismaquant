@@ -1076,6 +1076,28 @@ def test_stage_b_replay_regime_is_validated_and_sealed_in_the_spec(
     assert actual['env'][REPLAY_REGIME_ENV] == regime
 
 
+@pytest.mark.parametrize('value,message', [
+    (None, None), ('off', None), ('on', 'spells the default'), ('0', 'the only value')])
+def test_the_bf16_reduction_setting_is_validated_and_sealed_in_the_spec(
+        tmp_path, value, message):
+    """The PQ #1028 flag rides the one spec every row shares, like the regime."""
+    import dispatch_joint_quanta as dispatch
+    from prismaquant.matmul_arithmetic import BF16_REDUCTION_ENV
+    spec = {'container': {'image': 'sha256:' + '0' * 64, 'mounts': []},
+            'env': {} if value is None else {BF16_REDUCTION_ENV: value}}
+    path = tmp_path / 'spec.json'
+    path.write_text(json.dumps(spec))
+    payload = ['python3', '-m', 'prismaquant.joint_cost_quantum', '--quantum', 'q.json']
+    head_only = [('head', dispatch.HEAD_PROGRESS_GRACE_S)]
+    if message is not None:
+        with pytest.raises(dispatch.DispatchRefused, match=message):
+            dispatch._container_wrap(path, payload, progress=head_only)
+        return
+    argv, _image = dispatch._container_wrap(path, payload, progress=head_only)
+    sealed = json.loads(argv[argv.index('--spec') + 1])
+    assert sealed['env'].get(BF16_REDUCTION_ENV) == value
+
+
 @pytest.mark.parametrize('regime,refused', [
     ('capture_batch=2', True),
     ('capture_batch=2,accumulation=operator_gemm,chunk_rows=65536', True),
