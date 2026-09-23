@@ -606,6 +606,12 @@ def _executable_prepared_input(record: dict, *,
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} executable manifest has no read plan: "
             "refusing")
+    replay_mode = block.get("replay_mode")
+    if replay_mode != (manifest_doc.get("annotations") or {}).get("replay_mode") \
+            or replay_mode not in (None, "spill"):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} bound replay mode {replay_mode!r} is not "
+            "the sealed manifest's: refusing")
     by_name = {phase.get("name"): phase for phase in phases
                if isinstance(phase, dict)}
     order = [phase.get("name") for phase in phases
@@ -632,7 +638,16 @@ def _executable_prepared_input(record: dict, *,
                 f"quantum {quantum_id!r} prepared window {window_index!r} "
                 "seals no render entries: refusing")
         render_name = f"render-{window_index:02d}"
-        replay_name = f"replay-{window_index:02d}-p0"
+        # The render phase sits immediately before the phase that consumes
+        # its window next: the window's first replay (windowed), or under
+        # the one-pass spill the first probe capture for window 0 and the
+        # next window's render after it (PQ #1011).
+        if replay_mode == "spill":
+            replay_name = ("spill-p0" if window_index == 0 else
+                           f"render-{window_index + 1:02d}"
+                           if window_index + 1 < len(sealed_windows) else None)
+        else:
+            replay_name = f"replay-{window_index:02d}-p0"
         render_phase = by_name.get(render_name)
         if not isinstance(render_phase, dict) or \
                 list(render_phase.get("entry_indices", None)
@@ -641,8 +656,14 @@ def _executable_prepared_input(record: dict, *,
                 f"quantum {quantum_id!r} prepared window {window_index!r} "
                 f"stages no {render_name} phase with exactly its render "
                 "entries: refusing")
-        if render_name not in order or replay_name not in order or \
-                order.index(render_name) + 1 != order.index(replay_name):
+        if render_name not in order:
+            follows = False
+        elif replay_name is None:
+            follows = order.index(render_name) + 1 == len(order)
+        else:
+            follows = (replay_name in order and
+                       order.index(render_name) + 1 == order.index(replay_name))
+        if not follows:
             raise ExecutableBindingUnsupported(
                 f"quantum {quantum_id!r} prepared window {window_index!r} "
                 f"does not stage {render_name} immediately before its "

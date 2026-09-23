@@ -74,6 +74,7 @@ from .joint_layer_quanta import (
     executable_own_source_phase_name,
     executable_render_phase_name,
     executable_replay_phase_name,
+    executable_spill_phase_name,
     executable_source_phase_name,
     qname_layer,
 )
@@ -1232,6 +1233,24 @@ def run_layer_quantum_core(
         raise QuantumIdentityRefused(
             f"quantum {quantum_id}: {handoff_regime_refusal(replay_regime)}")
     capture_batch = replay_regime["capture_batch"]
+    # PQ #1011: an executable read plan is sealed for one replay mode, and a
+    # launch in the other mode would stage reads this quantum never makes.
+    sealed_spill = False
+    sealed_block = record.get("executable_readset")
+    if isinstance(sealed_block, dict):
+        from .joint_layer_quanta import normalize_replay_mode
+        try:
+            sealed_mode = normalize_replay_mode(sealed_block.get("replay_mode"))
+        except ValueError as exc:
+            raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
+        launched_mode = "windowed" if stage_b_spill_config() is None else "spill"
+        if sealed_mode != launched_mode:
+            raise QuantumIdentityRefused(
+                f"quantum {quantum_id}: its read plan is sealed for the "
+                f"{sealed_mode} replay, but this launch runs the {launched_mode} "
+                "replay (PRISMAQUANT_STAGE_B_SPILL_ROOT); regenerate the "
+                f"executable readsets with --replay-mode {launched_mode}")
+        sealed_spill = sealed_mode == "spill"
 
     retained = quantum_retained_state(execution)
     operator_windows = retained.operator_windows
@@ -2000,8 +2019,11 @@ def run_layer_quantum_core(
             # is entered here and the boundary prefetch inside
             # replay_backward runs under the already-reported phase.
             if executable:
+                # A spill-sealed plan has no window replay phases: the
+                # zero-pending resume reads under the probe's spill phase.
                 progress.enter_read_phase(
-                    executable_replay_phase_name(replay_window, probe_index))
+                    executable_spill_phase_name(probe_index) if sealed_spill
+                    else executable_replay_phase_name(replay_window, probe_index))
             return replay_backward(
                 final=final, lease=lease, probe=probe_index)
 
@@ -2033,13 +2055,13 @@ def run_layer_quantum_core(
                            for name in spill_modules}
 
             def spill_capture(probe_index):
-                # The probe's one pass reads its boundaries under the first
-                # active window's replay phase, where the sealed read schedule
-                # stages them. No statistics lease exists yet, so no
-                # statistics hook fires during it.
+                # The probe's one pass reads its boundaries under its spill
+                # phase, where the spill-sealed read plan stages them (PQ
+                # #1011). No statistics lease exists yet, so no statistics
+                # hook fires during it.
                 if executable:
                     progress.enter_read_phase(
-                        executable_replay_phase_name(replay_window, probe_index))
+                        executable_spill_phase_name(probe_index))
                 with spill.capture(
                         probe_index, spill_modules, spill_specs,
                         activation_max_abs=joint_activation_maxima(production_cache),
@@ -2048,9 +2070,7 @@ def run_layer_quantum_core(
                                     observer=observer)
 
             def spill_replay(*, window_index, probe_index, lease):
-                if executable:
-                    progress.enter_read_phase(
-                        executable_replay_phase_name(replay_window, probe_index))
+                # Reads nothing: the window's render phase stays current.
                 if guard is not None:
                     check_operator_allocation(
                         guard, "before_joint_spill_window_replay", reserve_bytes=(
