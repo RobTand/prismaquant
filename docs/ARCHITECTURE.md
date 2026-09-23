@@ -800,8 +800,23 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-tq/1037-packed-shared-states`.
+As of: 2026-09-23 · `ws-tq/1014-real-data-tests`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-tq/1014-real-data-tests`) for **fleet-data tests
+skipped by default** (PQ #1014). Test infrastructure only. A test that reads
+fleet-local campaign data or live PrismaBuild state that no PB action declares
+is marked `fleet_data`. `tests/conftest.py` skips it unless `-m` names the mark
+or `PQ_FLEET_DATA_TESTS=1` is set, and the skip reason names that opt-in. It is
+a skip rather than a deselection because under xdist only the workers see a
+deselection: a shard holding nothing but these tests would exit 5 and read as
+a failure. Three tests are marked:
+- the GLM-5.3 census expansion, which reads about 1.45 GB;
+- the real joint-pass read set, which walks about 36k shards;
+- the live-queue placement check.
+
+Declaring their reads to PB is PB #915. No format, default, stage or ship
+gate changes. Gate: `tests/test_fleet_data_selection.py`.
 
 Re-stamped (2026-09-23, `ws-tq/1037-packed-shared-states`) for **packed
 Stage A shared states** (PQ #1037): a v3 checkpoint's shared states are one
