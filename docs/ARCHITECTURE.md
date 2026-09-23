@@ -39,7 +39,32 @@ whole number of 4 KiB blocks and one at residue 0 needs no padding. Records,
 identity and the resource policy are unchanged. The
 spill telemetry gains the grid, the reservation, the call bounds, the call
 counts and the file bytes each way. A short or unaligned direct transfer
-fails; there is no buffered fallback. Gates:
+fails; there is no buffered fallback.
+
+Measured on the GLM-shaped proxy of #994 in one PB measurement action on
+sparky (`0955c9d43f49`, its Corsair MP700 MICRO NVMe; py-spy `cbb841032475`),
+with the windowed replay, origin/main's buffered spill and this one
+interleaved twice: all six quanta wrote one evidence digest. Per spill
+quantum (11.56 GB written, 17.25 GB read), before and after:
+
+| | Before | After |
+|---|---|---|
+| Disk queue, mean / 1 s max (aqu-sz) | 14.2-15.8 / 80-109 | 1.4 / 3.9-4.1 |
+| Write await (ms) | 5.9-7.3 | 0.08-0.09 |
+| Backlog (weighted ms per s of quantum) | 14,167-15,835 | 1,359-1,407 |
+| Writer busy / capture waiting on it (s) | 8.6-8.9 / 1.7-2.2 | 3.1-3.4 / 0.15 |
+| Capture pass (s per probe) | 2.2-3.4 | 1.64-1.74 |
+| Replay wall / waiting on reads (s) | 11.0-15.1 / 8.5-10.1 | 10.3 / 4.8 |
+| Quantum wall (s), energy (J) | 38.9-42.9, 1352-1437 | 36.0, 1310-1335 |
+
+The windowed quanta took 38.2-39.1 s. Mean GPU power was 24-28% of the
+140 W envelope throughout. In py-spy, the after arm's spill threads wait
+mostly in `Event.synchronize`, on the device work ahead of their copies, not
+on the disk. Netdata's `10min_disk_backlog` did not warn. On a GLM-5.3-Flash
+sparse layer the spill writes 185.76 GB and reads about 279 GB. At the
+after arm's backlog per byte, that is about 1,200 ms per second over ten
+minutes even if all of it fell inside one ten-minute window, against the
+alarm's 5,000. Gates:
 `tests/test_stageb_one_pass_spill.py`. No format, default, stage or ship gate
 changes.
 
