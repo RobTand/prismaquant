@@ -152,10 +152,10 @@ def _execution(tmp_path, *, n_probes=4, seed_base=7000):
     }
 
 
-def _single_run(tmp_path, monkeypatch, *, checkpoint):
+def _single_run(tmp_path, monkeypatch, *, checkpoint, layers=2):
     """The campaign of record: one consumer, retained windows, exact boundaries."""
     monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
-    model, context, runner, cache = fixture()
+    model, context, runner, cache = fixture(layers)
     context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         "owners": [], "unique_storage_bytes": sum(
@@ -176,9 +176,9 @@ def _single_run(tmp_path, monkeypatch, *, checkpoint):
     return result, runner, cache, proofs
 
 
-def _stage_a(tmp_path, monkeypatch, runner_seed=85):
+def _stage_a(tmp_path, monkeypatch, runner_seed=85, layers=2):
     torch.manual_seed(runner_seed)
-    model, context, runner, cache = fixture()
+    model, context, runner, cache = fixture(layers)
     context.settle_prefetch_layers = lambda layers: None
     return runner, cache
 
@@ -867,15 +867,22 @@ def _windows_records(windows):
 
 
 def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
-                 progress_env=None, plan_sha="p", prepared_sha="r", adjoint_slice=None):
-    """One layer quantum on its stage-A slice (the receipt's, unless given)."""
+                 progress_env=None, plan_sha="p", prepared_sha="r", adjoint_slice=None,
+                 adjoint_handoff=None, handoff_emitter=None):
+    """One layer quantum on its stage-A slice (the receipt's, unless given).
+
+    ``adjoint_handoff``/``handoff_emitter`` run it band-serial (PQ #996); an
+    emitter is a callable ``(record, adjoint_slice, execution) -> emitter``
+    because the record is built here.
+    """
     payload_single, runner_single, cache, proofs = single
     if adjoint_slice is None:
         # The slice a quantum reads is sliced from the sealed JSON receipt.
         adjoint_slice = stage_a_slice(json.loads(json.dumps(receipt)), layer)
     del payload_single
+    layers = runner_single.num_layers
     torch.manual_seed(85)
-    model, context, runner, _ = fixture()
+    model, context, runner, _ = fixture(layers)
     context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
         "owners": [], "unique_storage_bytes": sum(
@@ -935,6 +942,10 @@ def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
                                identity_sha256=record["identity_sha256"],
                                chunks=record["chunks"], frontier=frontier)
     progress = QuantumProgress(frontier=frontier, base_units=0)
+    if callable(adjoint_handoff):
+        adjoint_handoff = adjoint_handoff(record, adjoint_slice)
+    if handoff_emitter is not None:
+        handoff_emitter = handoff_emitter(record, adjoint_slice, execution)
     payload = run_layer_quantum_core(
         runner, fresh_cache, draw(),
         {name: list(FORMATS) for name in
@@ -942,7 +953,8 @@ def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
         record=record, adjoint_slice=adjoint_slice, execution=execution,
         output_root=output_root, projection_backend=None, resume=False,
         resolved_windows=resolved,
-        counters=counters, progress=progress)
+        counters=counters, progress=progress,
+        adjoint_handoff=adjoint_handoff, handoff_emitter=handoff_emitter)
     resolved_names = [name for window in resolved for name in window["names"]]
     return payload, record, counters.finish(
         units_done=len(payload["costs"]), units_total=len(resolved_names))

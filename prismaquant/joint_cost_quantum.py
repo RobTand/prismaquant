@@ -74,6 +74,15 @@ from .joint_layer_quanta import (
     executable_source_phase_name,
     qname_layer,
 )
+from .joint_quantum_handoff import (
+    HANDOFF_LOAD_PHASE,
+    HandoffEmitter,
+    QuantumHandoffRefused,
+    bind_handoff_publication,
+    load_handoff_inputs,
+    load_quantum_handoff,
+    require_band_serial_readset,
+)
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
 #: the clean gap (status.json says gapped; PB retries the sealed action key).
@@ -1062,8 +1071,18 @@ def run_layer_quantum_core(
     projection_backend=None, resume=False,
     resolved_windows,
     counters: QuantumCounters, progress: QuantumProgress,
+    adjoint_handoff=None, handoff_emitter=None,
 ) -> dict:
-    """Execute one layer quantum and return its payload (§6.4 ``cost.pkl``)."""
+    """Execute one layer quantum and return its payload (§6.4 ``cost.pkl``).
+
+    ``adjoint_handoff`` (band-serial, PQ #996) is quantum ``layer + 1``'s
+    handoff, already bound by :func:`~prismaquant.joint_quantum_handoff.
+    load_quantum_handoff`: its boundary-``layer + 1`` plane and owner states
+    replace the checkpoint load and the render-free chain. ``handoff_emitter``
+    publishes this quantum's own final plane and owner states for
+    ``layer - 1`` once the retained windows finish. Neither enters the
+    record, the journal identity or the payload.
+    """
     from . import format_registry as fr
     from .aura_cost import (
         _assemble_streamed_aura_payload,
@@ -1389,13 +1408,25 @@ def run_layer_quantum_core(
             device=runner.device)
         counters.replay.update(mode=REPLAY_SPILL, spill_geometry=spill_bound.as_dict())
 
+    # Band-serial (PQ #996): the handoff is the plane this quantum's chain
+    # would end on, so the chain below walks no layers.
+    chain_layers = ([] if adjoint_handoff is not None else
+                    [int(c) for c in record["adjoint"]["chain_layers"]])
     if executable:
-        progress.enter_read_phase(CHECKPOINT_LOAD_PHASE)
+        progress.enter_read_phase(CHECKPOINT_LOAD_PHASE if adjoint_handoff is None
+                                  else HANDOFF_LOAD_PHASE)
     with storage, (spill if spill is not None else nullcontext()):
-        grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-            source_adjoint_space, checkpoint_record,
-            cotangent_factory=storage.checkpoint_cotangent_sink,
-            shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+        if adjoint_handoff is None:
+            grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+                source_adjoint_space, checkpoint_record,
+                cotangent_factory=storage.checkpoint_cotangent_sink,
+                shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+        else:
+            grad_plane, shared_adjoint, shared_pass = load_handoff_inputs(
+                adjoint_handoff, checkpoint_record, n_probes=n_probes,
+                n_batches=len(row_offsets),
+                cotangent_factory=storage.checkpoint_cotangent_sink,
+                shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
         cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
                              for _ in row_offsets] for _ in range(n_probes)]
         for (probe, batch), state in shared_adjoint.items():
@@ -1407,7 +1438,7 @@ def run_layer_quantum_core(
         batches = _rebuild_batches(runner, partitions=partitions,
                                    shared_pass=shared_pass)
         del shared_pass
-        needed = sorted({int(c) for c in record["adjoint"]["chain_layers"]} | {layer})
+        needed = sorted(set(chain_layers) | {layer})
         for batch_index, batch in enumerate(batches):
             batch.activations_cpu = [
                 (_boundary_entry_record_to_reference(
@@ -1423,7 +1454,7 @@ def run_layer_quantum_core(
         chain_kernel = KernelTimeProfiler()
         chain_kernel.__enter__()
         try:
-            for chain_layer in (int(c) for c in record["adjoint"]["chain_layers"]):
+            for chain_layer in chain_layers:
                 try:
                     if executable:
                         progress.enter_read_phase(
@@ -1449,7 +1480,7 @@ def run_layer_quantum_core(
         finally:
             chain_kernel.__exit__(None, None, None)
         counters.kernel_block(chain_kernel)
-        counters.chain_step(layers=len(record["adjoint"]["chain_layers"]),
+        counters.chain_step(layers=len(chain_layers),
                             backwards=chain_backwards,
                             wall_s=time.time() - chain_started,
                             kernel_active_s=chain_kernel.kernel_active_s)
@@ -1865,6 +1896,15 @@ def run_layer_quantum_core(
                 window_kernel = None
             runner.context.unload(layer)
 
+        # ---- band-serial handoff for layer - 1 (PQ #996) ------------------
+        # The final pass above wrote the boundary-``layer`` plane and
+        # harvested every owner; both stay readable until ``storage`` closes
+        # (the plane may live in its cotangent scratch).
+        if handoff_emitter is not None:
+            handoff_emitter.emit(grad_plane=grad_plane,
+                                 cotangent_owners=cotangent_owners,
+                                 n_probes=n_probes, n_batches=len(row_offsets))
+
     # ---- payload (§6.4 cost.pkl) -----------------------------------------
     payload = _assemble_streamed_aura_payload(
         linears=linears, names=names, formats=fmts, formats_by_qname=unit_formats,
@@ -1979,9 +2019,15 @@ def publish_quantum_outputs(record, *, payload, result, counters,
 
 def run_layer_quantum(
     config, *, record, adjoint_slice, plan_sha256, prepared, output_root,
-    data_manifest_sha256=None, resume=False,
+    data_manifest_sha256=None, resume=False, adjoint_handoff=None,
+    emit_handoff=False,
 ) -> dict:
-    """Load the head phase and execute one quantum (§6.2 steps 2-6)."""
+    """Load the head phase and execute one quantum (§6.2 steps 2-6).
+
+    ``adjoint_handoff`` is a bound handoff from quantum ``layer + 1``
+    (band-serial, PQ #996); ``emit_handoff`` publishes this quantum's own for
+    ``layer - 1``. Both are chosen by the dispatcher; neither falls back.
+    """
     import torch
 
     from .aura_cost import _aura_source_sha256
@@ -2041,6 +2087,24 @@ def run_layer_quantum(
     }
     result["env"]["container_content_sha256"] = executing_image()
     result["device_envelope"] = device_envelope
+    # Band-serial mode is a fact about this execution, never about the
+    # record or the payload: both are the chain-mode bytes (PQ #996).
+    result["adjoint_cotangent_source"] = (
+        {"mode": "chain"} if adjoint_handoff is None else
+        {"mode": "handoff", "handoff_sha256": adjoint_handoff["handoff_sha256"],
+         "producer": dict(adjoint_handoff["producer"])})
+    handoff_emitter = None
+    if emit_handoff:
+        # Before any GPU work: an admitted action without the produced-output
+        # binding its handoff needs refuses here, like a digest mismatch.
+        try:
+            handoff_emitter = HandoffEmitter(
+                record=record, adjoint_slice=adjoint_slice,
+                boundary_storage=execution["boundary_storage"],
+                publication=bind_handoff_publication(
+                    boundary_storage=execution["boundary_storage"]))
+        except QuantumHandoffRefused as exc:
+            raise QuantumIdentityRefused(str(exc)) from exc
 
     started, before_io = time.time(), _io_counters()
     runner = None
@@ -2172,7 +2236,10 @@ def run_layer_quantum(
             record=record, adjoint_slice=adjoint_slice, execution=execution_runtime,
             output_root=output_root, projection_backend=projection_backend,
             resume=resume, resolved_windows=resolved_windows,
-            counters=counters, progress=progress)
+            counters=counters, progress=progress,
+            adjoint_handoff=adjoint_handoff, handoff_emitter=handoff_emitter)
+        if handoff_emitter is not None:
+            result["handoff"] = dict(handoff_emitter.published)
         torch.cuda.synchronize()
         result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
         result["peak_gpu_reserved_bytes"] = torch.cuda.max_memory_reserved()
@@ -2228,6 +2295,15 @@ def build_parser() -> argparse.ArgumentParser:
                              "of record, not every quantum)")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--data-manifest-sha256")
+    parser.add_argument("--adjoint-handoff", type=Path, default=None,
+                        help="band-serial (PQ #996): quantum layer+1's "
+                             "handoff.json; replaces the checkpoint load and "
+                             "the render-free chain")
+    parser.add_argument("--adjoint-handoff-sha256", default=None)
+    parser.add_argument("--emit-adjoint-handoff", action="store_true",
+                        help="band-serial (PQ #996): publish this quantum's "
+                             "final input cotangent and owner states for "
+                             "layer-1")
     from .staged_tier_policy import DEFAULT_ALLOWED_TIERS
     parser.add_argument("--allowed-tiers", default=DEFAULT_ALLOWED_TIERS,
                         help="sealed staged-tier declaration for GPU-consumed "
@@ -2250,6 +2326,21 @@ def main(argv=None) -> int:
             prepared_path=args.prepared, prepared_sha256=args.prepared_sha256,
             adjoint_path=args.adjoint_slice, adjoint_sha256=args.adjoint_slice_sha256,
             output_root=args.output_root)
+        adjoint_handoff = None
+        if (args.adjoint_handoff is None) != (args.adjoint_handoff_sha256 is None):
+            raise QuantumIdentityRefused(
+                "--adjoint-handoff and --adjoint-handoff-sha256 go together")
+        if args.adjoint_handoff is not None:
+            try:
+                adjoint_handoff = load_quantum_handoff(
+                    args.adjoint_handoff, args.adjoint_handoff_sha256,
+                    record=record, adjoint_slice=adjoint_slice)
+                require_band_serial_readset(
+                    record, adjoint_handoff, adjoint_slice["checkpoint"],
+                    output_root=args.output_root,
+                    data_manifest_sha256=args.data_manifest_sha256)
+            except QuantumHandoffRefused as exc:
+                raise QuantumIdentityRefused(f"adjoint handoff: {exc}") from exc
     except QuantumIdentityRefused as exc:
         print(f"{IDENTITY_REFUSED_MARKER}: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED
@@ -2279,7 +2370,9 @@ def main(argv=None) -> int:
             config, record=record, adjoint_slice=adjoint_slice, plan_sha256=args.plan_sha256,
             prepared={"path": str(args.prepared), "sha256": args.prepared_sha256},
             output_root=args.output_root,
-            data_manifest_sha256=args.data_manifest_sha256, resume=args.resume)
+            data_manifest_sha256=args.data_manifest_sha256, resume=args.resume,
+            adjoint_handoff=adjoint_handoff,
+            emit_handoff=args.emit_adjoint_handoff)
     except QuantumIdentityRefused as exc:
         # The D2 window handshake or the producer campaign check refused a
         # stale record after the digest gate passed: same exit 3, nothing

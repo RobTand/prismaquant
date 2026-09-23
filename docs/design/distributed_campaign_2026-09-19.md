@@ -178,6 +178,11 @@ Two quanta `layer-L` and `layer-M` (L ≠ M) share **no mutable state**:
 A builder implements stage B as N independent PB actions with the CLI of §6
 and no inter-quantum edges; stage C as a pure function of receipts.
 
+Band-serial dispatch (§15, PQ #996) is the one opt-in exception: inside a
+checkpoint band, quantum `L - 1` reads a handoff file quantum `L` writes, so
+it publishes after `L`. The handoff is sha256-equal to what `L - 1` would
+compute itself, so the merged bytes are still independent of order.
+
 ## 3. The layer-quantum record (contract)
 
 Owned by the producer module `prismaquant/joint_layer_quanta.py` (pure data,
@@ -1163,3 +1168,24 @@ dispatcher, launcher and image-content suites. The red run on
 omission; the green runs (PB `afe712fb79b5…`, 20 passed; caller-regression
 batch `cec95d11c972…` 5/5 shards, submission-path batch `5d5b9f3e189a…` 7/7
 shards) are the corrected direct and manifest paths.
+
+## 15. Addendum (2026-09-23): band-serial quanta (#996)
+
+Inside one checkpoint band, quantum `L - 1` rebuilds the boundary-`L`
+cotangent plane from the checkpoint before its own work. Quantum `L` has
+that plane already: its final replay pass writes it. With
+`tools/dispatch_joint_quanta.py --band-serial --handoff-tier <tier>`,
+quantum `L` writes the plane as a handoff (`--emit-adjoint-handoff`) through
+a produced-output template its row declares, and quantum `L - 1` reads it
+(`--adjoint-handoff`) and stages a readset derived from its sealed one, with
+a `handoff-load` phase in place of the checkpoint and chain phases. PB has no
+dependency between actions, so the dispatcher publishes `L - 1` only after
+`L` executed and published a handoff that hashes. Bands stay parallel. A
+submitted row keeps its mode on every resubmission.
+
+Records, cost payloads and journals equal chain mode byte for byte, and each
+handoff plane is sha256-equal to the plane the chain rebuild ends on, at a
+Stage A chain batch size of one. `docs/ARCHITECTURE.md`, "Band-serial Stage B
+quanta (#996)", is the contract; this addendum records only why the design
+changed. The GPU-hour saving is derived from per-pass cost, not measured.
+
