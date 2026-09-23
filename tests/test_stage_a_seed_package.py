@@ -4,7 +4,9 @@ A seed's PrismaBuild action stages every byte it reads. The builder derives
 its manifest from the source run's own: the head and the chain phases the
 seed enters, plus the checkpoint files it borrows at the phases that read
 them. The source run is the seed tests' fixture (stride 2, checkpoints 5, 4
-and 2); its submitted manifest is synthesized with one entry per phase.
+and 2); its submitted manifest is synthesized with one entry per phase, and
+its head also holds two of the head walk's reads, which a seed never opens
+(PQ #1051).
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from prismaquant.stage_a_chain_seed import load_seed_spec
+from prismaquant.tessera_joint_aura import HEAD_WALK_INPUT_KEYS
 
 from test_layer_major_boundary_capture import draw
 from test_stage_a_chain_seed import N_PROBES, THREE, TWO, _manifest, _pin, _source
@@ -40,18 +43,41 @@ def _offline_tier_policy():
     deactivate_staged_tier_policy_for_tests()
 
 
-def _original(root, capsule, *, forward_recovery=True):
-    """The source run's submitted manifest: one entry per phase, sized by index."""
+def _plan(root):
+    """The source run's plan: its inputs name the head walk's reads."""
+    inputs = {key: {"path": f"{root}/walk/{key}.json", "sha256": "0" * 64}
+              for key in HEAD_WALK_INPUT_KEYS}
+    path = root / "plan.json"
+    path.write_text(json.dumps({"inputs": inputs}, sort_keys=True))
+    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+#: The head walk's reads in the source head: a bound input and a merged
+#: checkpoint part.
+WALK_READS = ("walk/census.json", "walk/merged_checkpoint.json.parts/units/0.pkl")
+
+
+def _original(root, capsule, *, forward_recovery=True, plan_sha256=None):
+    """The source run's submitted manifest: one entry per phase, sized by index,
+    and the head walk's reads in the head."""
     names = ["head", *(f"forward-{layer:03d}" for layer in range(3, LAYERS)),
              *(f"chain-{layer:03d}" for layer in range(LAYERS - 1, -1, -1))]
     entries = [{"path": f"{root}/source/{name}", "offset": 0, "bytes": 10 + index,
                 "sha256": None} for index, name in enumerate(names)]
+    walk = [{"path": f"{root}/{name}", "offset": 0, "bytes": 1000, "sha256": None}
+            for name in WALK_READS]
     phases, cumulative = [], 0
     for index, name in enumerate(names):
-        cumulative += entries[index]["bytes"]
-        phases.append({"name": name, "entry_indices": [index],
-                       "bytes": entries[index]["bytes"], "cumulative_bytes": cumulative})
-    annotations = {"parent_manifest_sha256": PARENT, "plan_sha256": "b" * 64,
+        indices = [index] + (list(range(len(names), len(names) + len(walk)))
+                             if name == "head" else [])
+        size = entries[index]["bytes"] + (sum(e["bytes"] for e in walk)
+                                          if name == "head" else 0)
+        cumulative += size
+        phases.append({"name": name, "entry_indices": indices,
+                       "bytes": size, "cumulative_bytes": cumulative})
+    entries += walk
+    annotations = {"parent_manifest_sha256": PARENT,
+                   "plan_sha256": plan_sha256 or _plan(root)["sha256"],
                    "prepared_sha256": "c" * 64}
     if forward_recovery:
         annotations["forward_recovery"] = dict(capsule)
@@ -74,7 +100,7 @@ def _build(tmp_path, source, *, original=None, through=2, compare=2, output="pac
     path = tmp_path / "source-manifest.json.gz"
     digest = _write(path, original or _original(tmp_path, source.capsule))
     kwargs = dict(
-        original_manifest=path, original_manifest_sha256=digest,
+        original_manifest=path, original_manifest_sha256=digest, plan=_plan(tmp_path),
         checkpoint=_pin(_manifest(source.root, 4)), capsule=dict(source.capsule),
         through=through, implementation_from=TWO, implementation_to=THREE,
         compare=None if compare is None else _pin(_manifest(source.root, compare)),
@@ -100,8 +126,11 @@ def test_the_seed_stages_its_borrowed_checkpoint_where_it_reads_it(tmp_path, mon
     assert package["data_manifest"]["sha256"] == hashlib.sha256(wire).hexdigest()
     assert json.loads((root / PACKAGE_NAME).read_text()) == package
 
-    # The seed enters the head and the chain from 3 down to 2; nothing forward.
+    # The seed enters the head and the chain from 3 down to 2; nothing
+    # forward, and none of the head walk's reads.
     assert list(phases) == ["head", "chain-003", "chain-002"]
+    assert package["head_walk_reads_dropped"] == {"entries": 2, "bytes": 2000}
+    assert not any("/walk/" in entry["path"] for entry in manifest["entries"])
     four = json.loads(_manifest(source.root, 4).read_text())
     two = json.loads(_manifest(source.root, 2).read_text())
     shared = [row["path"] for row in four["shared_state_entries"]]
@@ -193,6 +222,12 @@ REFUSALS = {
     "a source run with no forward recovery": (
         lambda tmp, s: {"original": _original(tmp, s.capsule, forward_recovery=False)},
         "names no forward-recovery capsule"),
+    "a plan other than the source manifest's": (
+        lambda tmp, s: {"original": _original(tmp, s.capsule, plan_sha256="e" * 64)},
+        "built for another plan"),
+    "a plan that is not its digest": (
+        lambda tmp, s: {"plan": {**_plan(tmp), "sha256": "e" * 64}},
+        "does not have the pinned digest"),
     "a phase the source never staged": (
         lambda tmp, s: {"original": {**_original(tmp, s.capsule), "read_plan": {
             **_original(tmp, s.capsule)["read_plan"],
