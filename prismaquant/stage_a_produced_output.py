@@ -189,7 +189,8 @@ def build_boundary_template(*, output_prefix, tier: str,
                             group_size: int, max_entry_tensor_bytes: int,
                             checkpoint_max_bytes: int | None = None,
                             concurrent_groups: int = 2,
-                            template_id: str = BOUNDARY_TEMPLATE_ID) -> dict:
+                            template_id: str = BOUNDARY_TEMPLATE_ID,
+                            write_only: bool = False) -> dict:
     """The pre-submit produced-output template for a Stage A capture.
 
     Sealed BEFORE submission (it is an input of the owner's own action) and
@@ -206,6 +207,13 @@ def build_boundary_template(*, output_prefix, tier: str,
     The temp class matches the payload class because every final passes
     through a staging file of its own size before the rename; stating the
     relationship beats leaving it a coincidence of defaults.
+
+    ``write_only`` declares outputs the owner's own action never reads
+    again (PrismaBuild #912): the band-serial handoff (PQ #1075). Such a
+    template reserves no stage window, so every tier's minimum and window
+    are zero and ``concurrent_groups`` does not apply. Its owner commits
+    each group at its origin (``commit_origin_batch``), and a later action
+    stages the group as an ordinary input.
     """
 
     po = _produced_output_module()
@@ -216,11 +224,24 @@ def build_boundary_template(*, output_prefix, tier: str,
             "a default this module supplies")
     checkpoint = (artifact_max_bytes if checkpoint_max_bytes is None
                   else int(checkpoint_max_bytes))
-    window = boundary_window_gib(
-        group_size=group_size,
-        max_entry_tensor_bytes=max_entry_tensor_bytes,
-        concurrent_groups=concurrent_groups)
-    return dict(po.validate_template({
+    if type(write_only) is not bool:
+        raise ValueError("the boundary template's write_only is True or False")
+    if write_only:
+        # Nothing is staged for the owner to read back, so it borrows no
+        # stage space at all (PrismaBuild refuses anything but zero here).
+        demands = {"minimum_gib": 0, "window_gib": 0}
+    else:
+        window = boundary_window_gib(
+            group_size=group_size,
+            max_entry_tensor_bytes=max_entry_tensor_bytes,
+            concurrent_groups=concurrent_groups)
+        # The working MINIMUM is one group, the window is
+        # ``concurrent_groups`` of them: an owner that cannot hold a single
+        # publication group cannot make progress at all, while the window is
+        # what it wants in order to keep the next group ahead of the reader.
+        demands = {"minimum_gib": max(window // max(concurrent_groups, 1), 1),
+                   "window_gib": window}
+    body = {
         "schema": po.TEMPLATE_SCHEMA_V1,
         "version": 1,
         "template_id": str(template_id),
@@ -229,14 +250,13 @@ def build_boundary_template(*, output_prefix, tier: str,
         "durable_maxima": {"payload_max_bytes": int(artifact_max_bytes),
                            "checkpoint_max_bytes": int(checkpoint),
                            "temp_max_bytes": int(artifact_max_bytes)},
-        # The working MINIMUM is one group, the window is
-        # ``concurrent_groups`` of them: an owner that cannot hold a single
-        # publication group cannot make progress at all, while the window is
-        # what it wants in order to keep the next group ahead of the reader.
-        "working_demands": {tier: {"minimum_gib": max(
-                                       window // max(concurrent_groups, 1), 1),
-                                   "window_gib": window}},
-        "permitted_tiers": [str(tier)]}))
+        "working_demands": {tier: demands},
+        "permitted_tiers": [str(tier)]}
+    if write_only:
+        # Only when true: a read-back template keeps the exact bytes, and so
+        # the template id, it had before PrismaBuild #912.
+        body["write_only"] = True
+    return dict(po.validate_template(body))
 
 
 class BoundaryStagingTimeout(TimeoutError):
@@ -672,6 +692,12 @@ class BoundaryProducedPublication:
         # where no ZFS pacer exists); production stays empty.
         self.command_extra = tuple(command_extra)
         self._po = _produced_output_module()
+        if self.write_only and not callable(
+                getattr(self._po, "commit_origin_batch", None)):
+            raise BoundaryProducedBindingError(
+                "the declared template is write-only, and the loaded "
+                "prismabuild.produced_output has no commit_origin_batch "
+                "(PrismaBuild #912): its groups could never be committed")
         self._generation: str | None = None
         # batch_id -> the manifest digest its descriptors sealed. Needed to
         # re-derive the batch namespace for the reader context and for
@@ -806,6 +832,17 @@ class BoundaryProducedPublication:
         """The bound prefix every own-generation path must sit inside."""
 
         return str(self.template["output_prefix"])
+
+    @property
+    def write_only(self) -> bool:
+        """Whether the declared template is write-only (PrismaBuild #912).
+
+        A write-only owner never reads its groups back in its own action.
+        It commits each one at its origin (:meth:`commit_origin`), and a
+        later action declares the committed batch as an input.
+        """
+
+        return self.template.get("write_only") is True
 
     def contains(self, path: str | Path) -> bool:
         """Is ``path`` inside the bound output prefix, symlinks resolved?
@@ -1159,6 +1196,41 @@ class BoundaryProducedPublication:
                 batch_id=batch_id, refusal=out)
         self._manifest_digests[str(batch_id)] = self.manifest_digest_for(
             descriptors)
+        return out
+
+    def commit_origin(self, *, batch_id: str, descriptors: list,
+                      lifetime: str) -> dict:
+        """Commit one finished group of a write-only owner at its origin.
+
+        PrismaBuild's ``commit_origin_batch`` (#912): no stage copy, no
+        mover and no window. It consumes the group's prewrite, records each
+        origin's identity and returns the batch ``ref`` a consumer declares.
+        ``lifetime`` (#914) is ``retain`` (PrismaBuild never deletes it) or
+        ``consumed`` (its retirement tick deletes it once every declared
+        consumer has succeeded, or once the producer attempt is dead and no
+        consumer declared it). Every descriptor carries its sha256, which is
+        what binds the bytes a consumer's mover copies to these.
+
+        This is the direct path, for files the owner wrote at their
+        canonical paths itself. A group exported through the local spool
+        commits through the spool instead, against the identities its
+        export receipt recorded (``ProducedOutputSpool.commit_origin``).
+        A refusal raises: the entries are durable, and a retry of the same
+        descriptors answers PrismaBuild's typed duplicate.
+        """
+
+        if not self.write_only:
+            raise BoundaryProducedBindingError(
+                "only a write-only template commits a group at its origin: a "
+                "read-back template's groups are staged by publish()")
+        descriptors = list(descriptors)
+        out = dict(self._po.commit_origin_batch(
+            self.queue, self.instance, self.template, descriptors,
+            batch_id=batch_id, lifetime=str(lifetime)))
+        if not out.get("ok"):
+            raise BoundaryProducedPublicationFailed(
+                batch_id=batch_id, refusal=out)
+        self._manifest_digests[str(batch_id)] = str(out["manifest_digest"])
         return out
 
     # -- reading this producer's own output --------------------------------

@@ -712,7 +712,9 @@ PB charges to the checkpoint prewrite budget instead of the payload one. Stage
 A boundary entries are its only caller today; routing adjoint checkpoints and
 renders through it is owed work. No format, default, stage or ship gate
 changes. (Since PQ #1015 the band-serial handoff record also writes through
-it; checkpoints and renders still do not. Since PQ #1012 the Stage A dispatch
+it, and since PQ #1075 each handoff group it exports is committed at its
+origin through `ProducedOutputSpool.commit_origin`; checkpoints and renders
+still do not write through it. Since PQ #1012 the Stage A dispatch
 refuses a spec without a spool; see "Stage A dispatch requires the paced
 spool (#1012)".)
 
@@ -934,8 +936,24 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-tq/1070-stage-b-prep-on-pb`.
+As of: 2026-09-23 · `ws-br/handoff-origin-batch-1075`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-br/handoff-origin-batch-1075`) for **the
+band-serial handoff committed as consumed origin batches** (PQ #1075, part
+of #1007): the handoff's produced-output template is write-only (PrismaBuild
+#912) and reserves no stage window, and the producer commits each entry
+group and then the record group at its origin with the `consumed` lifetime
+(PrismaBuild #914), directly or through the spool once the export is
+acknowledged. The emitter records the batch refs as `origin_batches`, a
+read-back handoff template refuses, and PrismaBuild's retirement tick
+deletes the batches once a declared consumer succeeds or sweeps them once
+the producer attempt is dead. The consumer's `--after` declaration waits on
+PrismaBuild #946. See "Band-serial Stage B quanta (#996)". A changed Stage B
+produced-output contract; no format, pipeline default or ship gate changes.
+Gates: `tests/test_band_serial_handoff_produced.py`,
+`tests/test_band_serial_handoff_spool_real_pb.py`,
+`tests/test_band_serial_dispatch.py`.
 
 Re-stamped (2026-09-23, `ws-tq/1070-stage-b-prep-on-pb`) for **the Stage B
 preparation as a declared PrismaBuild action** (PQ #1070): a data manifest of
@@ -22295,10 +22313,35 @@ PrismaBuild's local output spool it is submitted only after every entry
 group's export is acknowledged, and the emitter returns only after its own
 export is acknowledged, so `handoff.json` lands last. Without the spool
 each file is written through its `.tmp` name and linked into place. The
-entries are written with `read_back=False`, as Stage A writes its last
-roll: nothing in the producer reads them, so no stage copy is published. Gates: `tests/test_band_serial_handoff_produced.py` and
-`tests/test_band_serial_handoff_spool_real_pb.py` (each in its own pytest
-process).
+entries are written with `read_back=False`: nothing in the producer reads
+them, so no stage copy is published.
+
+The handoff template is **write-only** (PrismaBuild #912, PQ #1075):
+`handoff_template_path` builds it with `build_boundary_template(...,
+write_only=True)`, so it reserves no stage window (every tier's minimum and
+window are 0, and admission charges the producer no stage token). Every
+group is committed at its origin as its own batch, first each entry group
+and then the record group, with the `consumed` lifetime (PrismaBuild #914,
+`HANDOFF_ORIGIN_LIFETIME`). Without the spool a group commits when its last
+file lands (`BoundaryProducedPublication.commit_origin`, PrismaBuild's
+`commit_origin_batch`). Through the spool it commits once PrismaBuild
+acknowledged its export, against the identities the export receipt recorded
+(`ProducedOutputSpool.commit_origin`, PrismaBuild's
+`ProducedSpool.commit_origin_group`): entry groups in
+`settle_local_output`, the record group right after its export. The commit
+consumes the group's prewrite, and the batch keeps its durable charge and
+path ownership until PrismaBuild reclaims it. The emitter's `results.json`
+record carries the batch refs in commit order (`origin_batches`: owner
+action, attempt nonce, template, batch id and manifest digest).
+`bind_handoff_publication` and `HandoffEmitter` refuse a template that is
+not write-only, and a write-only owner refuses a `read_back=True` write, a
+bind without a lifetime and a window request; an owner bound to a read-back
+template refuses `write_produced_files`. A row recorded before #1075 carries
+a read-back handoff template, so its resubmission refuses at the quantum's
+head, before any GPU work. Gates: `tests/test_band_serial_handoff_produced.py`
+and `tests/test_band_serial_handoff_spool_real_pb.py` (each in its own
+pytest process), against the published PrismaBuild generation
+`tests/band_serial_origin_pb_pin.json` names.
 
 **Consumer.** `joint_cost_quantum --adjoint-handoff PATH
 --adjoint-handoff-sha256 HEX` loads the handoff at the quantum head
@@ -22354,22 +22397,34 @@ that one. If `L - 1` fails, it is republished with its recorded handoff. A hando
 refuse refuses at dispatch (exit 3); there is no fallback to chain mode for a
 row that was submitted band-serial.
 
-Limits: nothing deletes a handoff generation, so a campaign keeps one plane
-per producer, and a failed producer attempt leaves its partial generation
-directory. The entry groups and the record group are prewritten and never
-committed: PrismaBuild commits a group only for a stage copy that the same
-action reads, so each ends as a retained prewrite until a write-only
-commit for another action's read exists (PB #912, PQ #1007). Retirement and
-the orphan sweep wait on PB #914, and the edge between the two actions on
-PB #913. The record group is charged to the template's payload maximum, and
+**Retirement.** PrismaBuild's tier loop runs `origin_retirement_tick`
+once per cycle. It deletes a consumed batch's files, each checked against
+the identity its commit recorded, and frees its durable charge once every
+consumer that declared the batch (`declare_origin_consumer`) has succeeded.
+A batch no consumer declared waits while its producer attempt succeeded,
+and is swept once that attempt is dead (failed, withdrawn or superseded by a
+retry). Today's consumer stages the handoff through its static derived
+readset and declares no batch, so a succeeded producer's handoff stays until
+the consumer declares it. That declaration is the consumer's
+`pbrun --after PRODUCER:TEMPLATE_ID` edge, which waits on PrismaBuild #946
+(a v2 read plan that places a produced batch at the phase that reads it);
+the consumer will find each row by path under the producer's handoff prefix
+and check its bytes and sha256 against the batch ref before reading it.
+`tests/test_band_serial_handoff_produced.py` drives both halves on a private
+queue: a declared consumer that executed retires every batch, and a failed
+producer's undeclared batches are swept.
+
+Limits: a succeeded producer's handoff is kept until a consumer declares it
+(above), and a failed producer attempt leaves its partial generation
+directory unless its groups were committed. The edge between the two
+actions is still publication order (PB #913 for the producer side, PB #946
+for the consumer). The record group is charged to the template's payload maximum, and
 the owner charges the same bytes to `max_artifact_bytes`; its claim follows
 the entries, so a template sized only for the entry groups refuses after
 they are written. `handoff.json` itself is read from the pool, by the
 dispatcher (`_producer_handoff`) and by the consumer's head check
 (`load_quantum_handoff`); it is a sealed control file, not a staged input.
-The producer's template
-reserves a stage window it never reads, because PrismaBuild has no
-write-only produced-output declaration. One executed pair shows the
+One executed pair shows the
 consumer side on PrismaBuild's tiers: `tools/band_serial_handoff_live_pair.py`
 ran a producer (PB `0e748c47c927`) and then its `L - 1` consumer (PB
 `074394f797b8`) with `--residency stage` on a two-row qualification slice.

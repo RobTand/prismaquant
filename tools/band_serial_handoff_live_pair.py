@@ -249,7 +249,8 @@ def producer_role(root: Path, data_manifest_sha256: str) -> int:
     from prismaquant.joint_adjoint_checkpoints import (
         checkpoint_entry_session, read_exact_entry_tensors)
     from prismaquant.joint_quantum_handoff import (
-        HANDOFF_OWNER_STATES_NAME, HANDOFF_RECORD_BATCH_KIND, HANDOFF_RECORD_NAME,
+        HANDOFF_ORIGIN_LIFETIME, HANDOFF_OWNER_STATES_NAME, HANDOFF_RECORD_BATCH_KIND,
+        HANDOFF_RECORD_NAME,
         HandoffEmitter, bind_handoff_publication)
     from prismaquant.prismabuild_progress import report as progress
     from prismaquant.produced_output_spool import MAX_ENV, ROOT_ENV
@@ -293,36 +294,40 @@ def producer_role(root: Path, data_manifest_sha256: str) -> int:
                              n_probes=n_probes, n_batches=n_batches)
     out["published"] = published
 
-    # The record group: its prewrite, its files, and why it stays retained.
+    # The record group: its files, and its commit at the origin (PQ #1075).
     po = sdk_submodule("produced_output")
     directory = Path(published["path"]).parent
     batch_id = publication.batch_id_for(
         kind=HANDOFF_RECORD_BATCH_KIND, boundary_index=int(producer["layer"]),
         group_index=0)
-    prewrite = po._read_prewrite(
-        po._prewrites_dir(publication.queue.root, publication.instance)
-        / f"{batch_id}.prewrite.json")
     files = [directory / HANDOFF_OWNER_STATES_NAME, directory / HANDOFF_RECORD_NAME]
     planned = sorted(p for f in files for p in (str(f), str(f) + ".tmp"))
+    commitments = json.loads((Path(po.instance_dir(
+        publication.queue.root, publication.instance)) / "commitments.json"
+        ).read_text())["batches"]
+    entry = commitments.get(batch_id) or {}
+    refs = published.get("origin_batches") or []
     out["record_group"] = {
         "batch_id": batch_id,
-        "prewrite_paths": sorted(prewrite["paths"]) if prewrite else None,
-        "prewrite_class_bytes": dict(prewrite["class_bytes"]) if prewrite else None,
+        "commitment": entry,
         "file_bytes": {f.name: f.stat().st_size for f in files},
     }
-    checks["record_prewrite_planned"] = (
-        prewrite is not None and sorted(prewrite["paths"]) == planned)
-    checks["record_prewrite_exact"] = (
-        prewrite is not None and prewrite["class_bytes"]["payload"]
-        == sum(f.stat().st_size for f in files))
+    checks["record_committed_at_origin"] = (
+        entry.get("origin_only") is True
+        and entry.get("lifetime") == HANDOFF_ORIGIN_LIFETIME
+        and sorted(entry.get("paths") or []) == sorted(str(f) for f in files))
+    checks["record_prewrite_consumed"] = po._read_prewrite(
+        po._prewrites_dir(publication.queue.root, publication.instance)
+        / f"{batch_id}.prewrite.json") is None
+    checks["record_ref_last"] = bool(refs) and refs[-1]["batch_id"] == batch_id
+    checks["every_group_committed"] = all(
+        (commitments.get(ref["batch_id"]) or {}).get("origin_only") is True
+        and commitments[ref["batch_id"]].get("manifest_digest")
+        == ref["manifest_digest"] for ref in refs)
     checks["record_digest"] = (
         _sha(files[1].read_bytes()) == published["sha256"])
     checks["no_temporaries"] = not any(Path(p).exists() for p in planned
                                        if p.endswith(".tmp"))
-    aborted = publication.abort_prewrite(batch_id=batch_id)
-    out["record_group"]["abort"] = aborted
-    checks["record_retained"] = (not aborted.get("ok")
-                                 and "abort-files-present-retain" in str(aborted))
     out["checks"] = checks
     ok = all(checks.values())
     out["ok"] = ok
