@@ -882,18 +882,9 @@ def _await_checkpoint_entry(entry, *, deadline):
         published=stage_cover_is_published)
 
 
-def load_adjoint_checkpoint(
-    space: str | os.PathLike, record: dict, *, cotangent_factory=None,
-    shared_state_max_bytes=None,
-) -> tuple[dict, dict, dict]:
-    """Read one checkpoint back, verifying every digest it claims.
-
-    Returns ``(cotangents, shared_adjoint, shared_pass)`` with CPU tensors and
-    deserialized state. A caller-owned cotangent factory may provide bounded
-    working storage; verified entry windows are released before the next load.
-    Refuses on any digest or shape mismatch: a checkpoint
-    whose bytes moved is a new identity, never a silent partial read.
-    """
+def _verified_checkpoint_manifest(space, record: dict, *,
+                                  shared_state_max_bytes=None) -> dict:
+    """The on-disk manifest of ``record``'s checkpoint, equal to the record."""
     checkpoint_dir = checkpoint_directory(space, int(record["boundary"]))
     manifest_path = checkpoint_dir / "checkpoint.json"
     try:
@@ -920,18 +911,11 @@ def load_adjoint_checkpoint(
         if (any(type(size) is not int or size <= 0 for size in sizes)
                 or sum(sizes) > shared_state_max_bytes):
             raise RuntimeError("adjoint shared-state payloads exceed auxiliary byte ceiling")
-    from .residency_shard_reader import staged_range_wait_s
-    deadline = time.monotonic() + staged_range_wait_s()
-    session = stored["session"]
-    entries = stored["activation_entries"]
-    cotangents = {} if cotangent_factory is None else cotangent_factory(entries)
-    for entry in entries:
-        _await_checkpoint_entry(entry, deadline=deadline)
-        tensors = read_exact_entry_tensors([entry], expected_session=session)
-        probe, batch = (int(part) for part in
-                        entry["name"].removeprefix("cotangent-").split("-"))
-        cotangents[(probe, batch)] = tensors.pop(entry["name"])
-        del tensors
+    return stored
+
+
+def _load_checkpoint_shared_states(stored: dict, *, deadline,
+                                   shared_state_max_bytes=None) -> tuple[dict, dict]:
     shared_adjoint, shared_pass = {}, {}
     shared_tensor_bytes = 0
     for entry in stored["shared_state_entries"]:
@@ -954,6 +938,54 @@ def load_adjoint_checkpoint(
             shared_tensor_bytes += _state_storage_bytes(state)
             if shared_tensor_bytes > shared_state_max_bytes:
                 raise RuntimeError("adjoint shared-state tensors exceed auxiliary byte ceiling")
+    return shared_adjoint, shared_pass
+
+
+def load_checkpoint_shared_states(
+    space: str | os.PathLike, record: dict, *, shared_state_max_bytes=None,
+) -> tuple[dict, dict]:
+    """``(shared_adjoint, shared_pass)`` of one checkpoint, digest-verified.
+
+    The shared-state leg of :func:`load_adjoint_checkpoint` alone. A resumed
+    Stage A chain (PQ #1001) reads the checkpoint's activation cotangents by
+    reference, one bounded window at a time, and needs only these.
+    """
+    from .residency_shard_reader import staged_range_wait_s
+    stored = _verified_checkpoint_manifest(
+        space, record, shared_state_max_bytes=shared_state_max_bytes)
+    return _load_checkpoint_shared_states(
+        stored, deadline=time.monotonic() + staged_range_wait_s(),
+        shared_state_max_bytes=shared_state_max_bytes)
+
+
+def load_adjoint_checkpoint(
+    space: str | os.PathLike, record: dict, *, cotangent_factory=None,
+    shared_state_max_bytes=None,
+) -> tuple[dict, dict, dict]:
+    """Read one checkpoint back, verifying every digest it claims.
+
+    Returns ``(cotangents, shared_adjoint, shared_pass)`` with CPU tensors and
+    deserialized state. A caller-owned cotangent factory may provide bounded
+    working storage; verified entry windows are released before the next load.
+    Refuses on any digest or shape mismatch: a checkpoint
+    whose bytes moved is a new identity, never a silent partial read.
+    """
+    stored = _verified_checkpoint_manifest(
+        space, record, shared_state_max_bytes=shared_state_max_bytes)
+    from .residency_shard_reader import staged_range_wait_s
+    deadline = time.monotonic() + staged_range_wait_s()
+    session = stored["session"]
+    entries = stored["activation_entries"]
+    cotangents = {} if cotangent_factory is None else cotangent_factory(entries)
+    for entry in entries:
+        _await_checkpoint_entry(entry, deadline=deadline)
+        tensors = read_exact_entry_tensors([entry], expected_session=session)
+        probe, batch = (int(part) for part in
+                        entry["name"].removeprefix("cotangent-").split("-"))
+        cotangents[(probe, batch)] = tensors.pop(entry["name"])
+        del tensors
+    shared_adjoint, shared_pass = _load_checkpoint_shared_states(
+        stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
     return cotangents, shared_adjoint, shared_pass
 
 

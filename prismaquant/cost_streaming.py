@@ -208,6 +208,13 @@ class StreamedBoundaryArtifacts:
         self._references = {}
         self._slots = {}
         self._forward_inputs = {}
+        # Chain resume (RobTand/prismaquant#1001): the sealed checkpoint
+        # cotangents a resumed chain starts from, each mapped to the
+        # checkpoint boundary it was sealed at. They are borrowed inputs
+        # like ``_forward_inputs`` (and are in it), but they hold no
+        # boundary slot: a checkpoint entry is not a rolling cotangent.
+        self._checkpoint_inputs = {}
+        self._resumed = False
         self._attached_forward_inputs = frozenset()
         self._active_window = None
         self._check_memory = None
@@ -380,6 +387,150 @@ class StreamedBoundaryArtifacts:
         self.directory.mkdir(parents=True, exist_ok=False)
         self._status = "running"
         self._publish_status()
+
+    def rebind(self, session, *, identity, n_probes, check_memory=None):
+        """Adopt this run's own published generation again (PQ #1001).
+
+        A chain resume is the same run relaunched: it keeps the original
+        session byte for byte, so the checkpoints it seals after the resume
+        carry the generation every checkpoint before it carries, and bands
+        from both sides form one set. ``bind`` would mint a new generation;
+        this reopens the one ``session`` names instead, and refuses unless
+        that generation's own status file names the same session and says
+        the run did not finish (``running`` after a kill, ``failed`` after
+        an exception). A ``complete`` generation has a receipt, an
+        ``attached`` one is read-only, and a ``retained`` one is still owned
+        by a stager that never joined.
+
+        ``identity`` is the bind identity the relaunch recomputed; it must
+        hash to the session's ``run_identity_sha256``, as it did at ``bind``.
+
+        The rebound owner holds no entries yet. What the resumed chain reads
+        is borrowed through :meth:`authorize_resume_inputs`.
+        """
+        from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
+        if self.session is not None:
+            raise RuntimeError("exact boundary generation is already bound")
+        if (not isinstance(session, dict)
+                or set(session) != {"generation", "run_identity_sha256"}):
+            raise RuntimeError("a chain resume names no exact boundary session")
+        session = canonical_json(dict(session), where="resumed exact boundary session")
+        if canonical_json_sha256(identity, where="exact boundary source") != session[
+                "run_identity_sha256"]:
+            raise RuntimeError(
+                "the relaunch's bind identity is not the one the resumed session sealed")
+        directory = Path(self.config["directory"]) / str(session["generation"])
+        status_path = directory / "generation.json"
+        try:
+            status = json.loads(status_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(
+                f"the resumed generation has no readable status file at {status_path}"
+            ) from exc
+        if status.get("session") != session:
+            raise RuntimeError(
+                f"{status_path} names another session than the chain resume")
+        if status.get("policy") != self.identity:
+            raise RuntimeError(
+                f"{status_path} was written under another boundary storage policy")
+        if status.get("status") not in ("running", "failed"):
+            raise RuntimeError(
+                f"the resumed generation's status is {status.get('status')!r}; "
+                "only an interrupted run (running or failed) resumes")
+        if not (directory / "entries").is_dir():
+            raise RuntimeError(f"the resumed generation has no entries at {directory}")
+        self._n_probes = n_probes
+        self._check_memory = check_memory
+        self._published = True
+        self._resumed = True
+        self.session = session
+        self.directory = directory
+        self._status = "running"
+        self._publish_status()
+
+    def authorize_resume_inputs(self, boundaries, checkpoint, *, boundary):
+        """Borrow the sealed inputs a resumed chain reads (PQ #1001).
+
+        ``boundaries`` are this generation's own forward boundary entries,
+        recorded in the run's sealed chain state. ``checkpoint`` are the
+        activation cotangents of the sealed checkpoint at ``boundary`` the
+        chain resumes from. Both are read the way forward-recovery inputs
+        are: through the process input map, never through this owner's
+        produced output, because a relaunch is a new PrismaBuild owner and
+        the original's groups are not its own. Neither is ever unlinked by
+        this owner. A boundary entry keeps its slot, so a second writer of
+        it refuses; a checkpoint entry holds none, and the first roll below
+        ``boundary`` replaces it (``write(previous=...)``) without retiring
+        its file.
+
+        Forward-recovered boundaries are not passed here: the capsule
+        installs them through :meth:`authorize_forward_inputs` first.
+        """
+        if not self._resumed or self._readonly or self._status != "running":
+            raise RuntimeError("resume inputs require a rebound writable owner")
+        if self._checkpoint_inputs:
+            raise RuntimeError("resume inputs are authorized once")
+        if type(boundary) is not int or boundary < 1:
+            raise RuntimeError("a resumed chain starts at a positive checkpoint boundary")
+        marker = {"generation": self.session["generation"], "kind": "adjoint_checkpoint",
+                  "run_identity_sha256": self.session["run_identity_sha256"]}
+        for reference in boundaries:
+            identity = json.loads(reference.metadata_json)["identity"]
+            if identity["kind"] != "boundary" or identity["session"] != self.session:
+                raise RuntimeError("a resumed boundary entry is not this generation's")
+            if (identity["slot"] in self._slots
+                    or reference.name in self._references):
+                raise RuntimeError("a resumed boundary entry repeats an occupied slot")
+            self._forward_inputs[reference] = identity
+            self._references[reference.name] = reference
+            self._slots[identity["slot"]] = reference
+            self.telemetry["live_artifact_bytes"] += reference.file_bytes
+        for reference in checkpoint:
+            identity = json.loads(reference.metadata_json)["identity"]
+            if (identity["kind"] != "adjoint_checkpoint_cotangent"
+                    or identity["session"] != marker
+                    or identity["slot"] != reference.name):
+                raise RuntimeError(
+                    "a resumed checkpoint entry is not this generation's checkpoint")
+            if reference.name in self._references:
+                raise RuntimeError("a resumed checkpoint entry repeats a name")
+            self._forward_inputs[reference] = identity
+            self._references[reference.name] = reference
+            self._checkpoint_inputs[reference] = boundary
+        if self._checkpoint_accounted_bytes() > self.config["max_artifact_bytes"]:
+            raise RuntimeError("resumed inputs exceed the artifact budget")
+        self.telemetry["peak_artifact_bytes"] = max(
+            self.telemetry["peak_artifact_bytes"], self.telemetry["live_artifact_bytes"])
+
+    def adopt_committed_checkpoints(self, records, directories):
+        """Count the checkpoints sealed before a resume against the budget.
+
+        The interrupted run committed them; their bytes are still on disk
+        and still share ``max_artifact_bytes`` with everything this owner
+        writes. Each file must be present at its sealed size.
+        """
+        if not self._resumed:
+            raise RuntimeError("only a rebound owner adopts committed checkpoints")
+        for record, directory in zip(records, directories, strict=True):
+            actual = 0
+            for row in record["activation_entries"] + record["shared_state_entries"]:
+                size = Path(row["path"]).stat().st_size
+                if size != row["file_bytes"]:
+                    raise RuntimeError(
+                        f"sealed checkpoint entry {row['path']} changed size")
+                actual += size
+            actual += (Path(directory) / "checkpoint.json").stat().st_size
+            self.telemetry["live_checkpoint_bytes"] += actual
+        self.telemetry["peak_checkpoint_bytes"] = max(
+            self.telemetry["live_checkpoint_bytes"], self.telemetry["peak_checkpoint_bytes"])
+        if self._checkpoint_accounted_bytes() > self.config["max_artifact_bytes"]:
+            raise RuntimeError("sealed checkpoints exceed the artifact budget")
+
+    def _forget_checkpoint_input(self, reference):
+        """A resumed chain rolled past this checkpoint entry; its file stays."""
+        del self._checkpoint_inputs[reference]
+        del self._forward_inputs[reference]
+        del self._references[reference.name]
 
     def attach(self, session, *, n_probes, forward_recovery=None):
         """Read-only bind to a published generation's exact entries.
@@ -570,7 +721,8 @@ class StreamedBoundaryArtifacts:
         foreign = self._forward_inputs.get(reference) == identity or (
             self._readonly and reference in self._attached_forward_inputs)
         if (identity["session"] != self.session and not foreign) or (
-                not self._readonly and self._slots.get(identity["slot"]) != reference):
+                not self._readonly and reference not in self._checkpoint_inputs
+                and self._slots.get(identity["slot"]) != reference):
             raise RuntimeError("exact boundary reference has a stale generation")
         return identity
 
@@ -587,7 +739,15 @@ class StreamedBoundaryArtifacts:
         if probe_index is not None and (type(probe_index) is not int or not 0 <= probe_index < self._n_probes):
             raise ValueError("exact cotangent probe coordinate is outside the run")
         slot = f"boundary-{batch_index}-{boundary_index}" if probe_index is None else f"cotangent-{probe_index}-{batch_index}"
-        if previous is not None:
+        if previous is not None and previous in self._checkpoint_inputs:
+            # A resumed chain's first roll replaces a sealed checkpoint
+            # cotangent (PQ #1001): same probe and batch, one boundary down.
+            old = self._entry_identity(previous)
+            if (kind != "cotangent" or slot in self._slots
+                    or old["slot"] != slot
+                    or self._checkpoint_inputs[previous] != boundary_index + 1):
+                raise RuntimeError("exact cotangent rollover changed its original coordinates")
+        elif previous is not None:
             old = self._entry_identity(previous)
             if (kind != "cotangent" or old["slot"] != slot
                     or old["coordinates"]["boundary"] != boundary_index + 1):
@@ -669,7 +829,9 @@ class StreamedBoundaryArtifacts:
         self.telemetry["live_artifact_bytes"] += reference.file_bytes
         self.telemetry["peak_artifact_bytes"] = max(
             self.telemetry["live_artifact_bytes"], self.telemetry["peak_artifact_bytes"])
-        if previous is not None:
+        if previous is not None and previous in self._checkpoint_inputs:
+            self._forget_checkpoint_input(previous)
+        elif previous is not None:
             self._retire(previous)
         if self._local_output_spool is not None:
             self._commit_local_output_progress()
@@ -698,6 +860,9 @@ class StreamedBoundaryArtifacts:
     def _retire(self, reference, *, missing_ok=False):
         if self._references.get(reference.name) != reference:
             raise RuntimeError("exact boundary retirement has a stale reference")
+        if reference in self._checkpoint_inputs:
+            raise RuntimeError(
+                "a sealed checkpoint entry is never retired by the chain that resumed from it")
         if reference in self._forward_inputs:
             # Borrowed files and original ACKs remain owned by the old attempt.
             del self._references[reference.name]

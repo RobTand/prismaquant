@@ -19,7 +19,11 @@ This tool is a read-only CPU action. It reads:
   ``generation.json`` and the forward-recovery capsule the request binds;
 * the band's forward boundary entries from the sources the receipt itself
   uses: the capsule chain for recovered boundaries, the generation's own
-  entry files for boundaries the run wrote.
+  entry files for boundaries the run wrote;
+* the run's sealed chain resume records (``stage_a_chain_resume``): a band
+  of a checkpoint sealed below a resume that switched implementations
+  carries that declaration under ``resume_compatibility``, as the receipt
+  does.
 
 It never writes under the run's output root: the band goes to a path the
 caller names outside it.
@@ -57,6 +61,11 @@ from .joint_adjoint_checkpoints import (
     stage_a_slice,
     validate_band_receipt,
     write_band_receipt,
+)
+from .stage_a_chain_resume import (
+    RESUME_COMPATIBILITY_KEY,
+    ChainResumeRefused,
+    resume_declarations,
 )
 
 BAND_TOOL_ENTRY_POINT = "prismaquant.joint_adjoint_band"
@@ -365,6 +374,15 @@ def build_band_receipt(*, output_root, boundary: int, plan_sha256: str, prepared
                     "generation": str(directory / session["generation"] / "generation.json"),
                     **(sources or {})},
     }
+    # A checkpoint sealed below a chain resume that switched implementations
+    # carries that declaration, outside the run header and every slice
+    # (RobTand/prismaquant#1001). A band of any other checkpoint is unchanged.
+    try:
+        declarations = resume_declarations(space, session, below=boundary)
+    except ChainResumeRefused as exc:
+        raise BandRefused(str(exc)) from exc
+    if declarations:
+        band[RESUME_COMPATIBILITY_KEY] = declarations
     validate_band_receipt(band)
     return band
 

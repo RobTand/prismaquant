@@ -1,5 +1,26 @@
 # PrismaQuant Architecture
 
+Stage A chain resume (2026-09-23, `ws-sa/chain-resume-997`, PQ #1001, part
+of #997). A Stage A run that dies in its reverse chain can be relaunched
+from its lowest sealed checkpoint instead of from the start
+(`--resume-chain-state-sha256`). A fresh run now writes one sealed file,
+`layer-quanta/adjoint/chain-state.json`, right after its tail checkpoint: the
+run header, the bind identity, an arithmetic stamp and every forward boundary
+entry record. The relaunch reads that file under its pinned digest, adopts
+the run's boundary session byte for byte (`StreamedBoundaryArtifacts.rebind`),
+and refuses on any difference in the chain regime, arithmetic, plan,
+preparation, read manifest, calibration, stride, storage policy or capsule.
+Under the same implementation it is a bitwise continuation: planes, files,
+receipt, bands and slices equal the uninterrupted run's, and bands from both
+sides of a resume form one set. A different implementation needs dev mode and
+an explicit `--resume-implementation-compatibility FROM:TO`. The header keeps
+the original implementation, and the declaration is recorded under
+`resume_compatibility` in the receipt and in every band sealed below the
+switch. See "Stage A chain resume (#1001)". Gate:
+`tests/test_stage_a_chain_resume.py`. No format, pipeline default or ship
+gate changes. A fresh run's tree gains `chain-state.json`; its receipt is
+unchanged.
+
 One reader lease per read window (2026-09-23, `ws-sa/window-leases-997`,
 PQ #1000, part of #997). The strict exact-entry reader
 (`perturbed_x_cache.prefetch_exact_activation_cache_entries`) now pins a
@@ -373,8 +394,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-sa/window-leases-997`.
+As of: 2026-09-23 · `ws-sa/chain-resume-997`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-sa/chain-resume-997`) for **Stage A chain
+resume** (PQ #1001, part of #997): the sealed chain state a fresh run writes
+after its tail checkpoint, the resume flags, the rebind of the run's own
+generation, the `resume_compatibility` declaration in receipts and bands, and
+the relaxed per-launch limit on band sets; see "Stage A chain resume
+(#1001)". A default run's receipt, bands and slices keep their bytes. No
+format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-sa/window-leases-997`) for **one reader lease
 per read window** (PQ #1000, part of #997). This supersedes the "one window
@@ -20599,9 +20628,11 @@ checkpoint reads the checkpoint and forward boundary entries, all of which the
 lowest band carries. Mode (b) therefore joins a campaign whose Stage A never
 wrote its receipt.
 
-Limits: each Stage A launch binds its own boundary-session generation
-(`StreamedBoundaryArtifacts.bind`), so bands whose checkpoints two launches
-sealed carry two run headers, and every gate refuses them as mixed runs. The
+Limits: each fresh Stage A launch binds its own boundary-session generation
+(`StreamedBoundaryArtifacts.bind`), so bands whose checkpoints two fresh
+launches sealed carry two run headers, and every gate refuses them as mixed
+runs. A chain resume (#1001) is not a fresh launch: it adopts the run's own
+session, so its bands and the original's form one set. The
 checkpoint manifest a quantum reads (`checkpoint.json`) is checked against its
 slice but is not a declared entry of its readset. The pinned Tessera reader accepts only a v1
 extension as rooted cached-unit authority (`tessera.cached_unit`), so a
@@ -20665,3 +20696,94 @@ read-ahead gives up groups by the layer that reads them next
 
 Measured claims about the regime's speed and energy live in the PR and the
 PQ #997 record, not here; this section states only the contract.
+
+### Stage A chain resume (#1001)
+
+A Stage A run that dies in its reverse chain has done everything above its
+lowest sealed checkpoint `b`. A chain resume relaunches **the same run** from
+`b` (`prismaquant/stage_a_chain_resume.py`). It is not forward recovery
+(`joint_forward_resume`), which covers the forward pass and binds a new
+generation.
+
+**The chain state.** A fresh run writes `layer-quanta/adjoint/chain-state.json`
+(`prismaquant.stage_a.chain_state.v1`) once, right after it seals the tail
+checkpoint, so the file's existence implies the tail's. It carries the run
+header (`run_identity`, `stride`, `boundary_storage` with the session and any
+forward-recovery binding), the bind identity, the arithmetic stamp, every
+forward boundary entry record, the batch and layer counts, the artifact budget
+override, the tail checkpoint's digest and the PrismaBuild owner of the attempt
+(`producer`, or `null` outside PrismaBuild). It seals itself
+(`chain_state_sha256`) and is never rewritten. A fresh run refuses, before its
+forward pass, an output root that already holds a chain state or resume
+records. A run started before #1001 has no chain state and cannot resume its
+chain.
+
+**The arithmetic stamp** (`prismaquant.stage_a.chain_arithmetic.v1`) records
+what decides the chain's rounding beyond the code and the regime: the
+measurement dtype, the device type, name and capability, the float32 matmul
+precision and TF32 flags, the Torch and CUDA versions, the executing container
+digest and the projection backend identity.
+
+**The relaunch.** The Stage A CLI takes `--resume-chain-state-sha256` (the
+digest of `chain-state.json`), optionally `--resume-from-checkpoint b` and, in
+dev mode only, `--resume-implementation-compatibility FROM:TO`. A chain resume
+implies the head walk's `--resume`. Before anything is removed,
+`plan_chain_resume` checks, and refuses on any failure:
+
+- the run has no receipt, and its generation status is `running` (killed) or
+  `failed`;
+- what the relaunch recomputes from its own inputs equals the chain state:
+  the run identity (plan, preparation, read manifest, roster, scope,
+  calibration, probes, seed and the chain regime), the stride, the bind
+  identity, the arithmetic stamp, the batch and layer counts, the artifact
+  budget override, and the boundary storage policy and directory;
+- the sealed checkpoints are every stride checkpoint from `b` up, all sealed
+  under the run's session, with the tail matching the chain state's digest,
+  and no unsealed checkpoint directory sits at or above `b`;
+- `--resume-from-checkpoint`, when given, is `b`;
+- every PrismaBuild owner recorded for the run is contained
+  (`require_contained`, as forward recovery asks).
+
+After the rebind, the forward-recovery capsule the relaunch binds must be the
+one the chain state records.
+
+**What a resume changes.** Only after every check passed: the attempt's
+rolling cotangent entries (`cotangent-*-at-*` in the run's generation) are
+unlinked, because no receipt names them and the resumed chain rewrites the
+same names; partial checkpoint directories below `b` are renamed to
+`boundary-NNN.partial-resume-III`, never deleted; and a sealed record
+`resumes/resume-III.json` names the resume index, the session, the switch
+checkpoint `b`, the running implementation, any declaration, the owner and
+what was removed or set aside. Forward boundary entries and sealed
+checkpoints are never touched.
+
+**The restore.** `StreamedBoundaryArtifacts.rebind` reopens the run's own
+generation under its original session. The generation's forward boundary
+entries and checkpoint `b`'s activation cotangents are borrowed inputs
+(`authorize_resume_inputs`), read the way forward-recovery inputs are; the
+first roll below `b` replaces each checkpoint cotangent without retiring its
+file. The committed checkpoints count against `max_artifact_bytes`
+(`adopt_committed_checkpoints`). The shared states come from checkpoint `b`
+(`load_checkpoint_shared_states`), and the batches are rebuilt as a layer
+quantum rebuilds them (`joint_cost_quantum._rebuild_batches`).
+
+**Implementations.** The implementation that sealed `b` is the last resume's,
+or the header's if the run was never resumed. A relaunch under that
+implementation is a plain bitwise continuation, and a declaration there
+refuses because it names no switch. A relaunch under another implementation
+refuses unless dev mode is on and the operator declares exactly that switch;
+the declaration is never inferred. The header keeps the original
+`implementation_sha256`. The declaration
+(`prismaquant.stage_a.resume_compatibility.v1`: scope
+`stage-a-chain-continuation`, both implementations and `switch_checkpoint`)
+is recorded outside the header digest: in the receipt's top-level
+`resume_compatibility` list, and, through the band tool, in every band whose
+checkpoint lies below the switch. Slices and band-set headers are unchanged
+by it. The receipt's telemetry carries `chain_resume`.
+
+**Limits.** A relaunch under PrismaBuild is a new owner. Its dispatcher must
+declare the original's boundary entries, the checkpoint entries and the chain
+state as inputs, contain the original owner first, and give it an output
+prefix that holds the run's generation directory (`bind_produced_output`
+refuses an own-generation path outside it). The fixture tests do not exercise
+that dispatcher contract.
