@@ -1041,3 +1041,72 @@ def test_two_scratch_kinds_cannot_share_a_root(tmp_path, campaign):
     build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
     with pytest.raises(dispatch.DispatchRefused, match='same root'):
         build()
+
+
+@pytest.mark.parametrize('regime,spill,message', [
+    ('capture_batch=2', True, None),
+    ('capture_batch=2,accumulation=operator_gemm,chunk_rows=65536', True, None),
+    ('capture_batch=2', False, 'declare the spill'),
+    ('capture_batch=1', True, 'spells the default'),
+    ('capture_batch=two', True, 'canonical integer'),
+])
+def test_stage_b_replay_regime_is_validated_and_sealed_in_the_spec(
+        tmp_path, campaign, regime, spill, message):
+    """The #994 replay regime rides the one spec every quantum shares."""
+    import dispatch_joint_quanta as dispatch
+    from prismaquant.joint_replay_regime import REPLAY_REGIME_ENV
+    root = '/home/rob/pb-scratch/glm-stageb-spill'
+    env = {REPLAY_REGIME_ENV: regime}
+    if spill:
+        env.update({'PRISMAQUANT_STAGE_B_SPILL_ROOT': root,
+                    'PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES': str(200 << 30)})
+    spec = {'container': {'image': 'sha256:' + '0' * 64,
+             'mounts': [{'source': root, 'target': root, 'readonly': False}]}, 'env': env}
+    dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+                   tmp_path / 'adjoint-slices')
+    path = tmp_path / 'record.json'; path.write_text(json.dumps(record))
+    args = dict(record_path=path, output_root=tmp_path / 'out')
+    if message is not None:
+        with pytest.raises(dispatch.DispatchRefused, match=message):
+            quantum_argv(record, **args)
+        return
+    argv = quantum_argv(record, **args)
+    actual = json.loads(argv[argv.index('--spec') + 1])
+    assert actual['env'][REPLAY_REGIME_ENV] == regime
+
+
+@pytest.mark.parametrize('regime,refused', [
+    ('capture_batch=2', True),
+    ('capture_batch=2,accumulation=operator_gemm,chunk_rows=65536', True),
+    ('accumulation=operator_gemm,chunk_rows=65536', False),
+])
+def test_a_band_serial_producer_refuses_a_batched_capture_at_dispatch(
+        tmp_path, regime, refused):
+    """A #996 producer row runs only a batch-1 capture (#994).
+
+    The row's payload carries ``--emit-adjoint-handoff``; the one spec every
+    row shares carries the regime. The same spec wraps a row that emits no
+    handoff.
+    """
+    import dispatch_joint_quanta as dispatch
+    from prismaquant.joint_replay_regime import REPLAY_REGIME_ENV
+    root = '/home/rob/pb-scratch/glm-stageb-spill'
+    spec = {'container': {'image': 'sha256:' + '0' * 64,
+                          'mounts': [{'source': root, 'target': root, 'readonly': False}]},
+            'env': {REPLAY_REGIME_ENV: regime, 'PRISMAQUANT_STAGE_B_SPILL_ROOT': root,
+                    'PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES': str(200 << 30)}}
+    path = tmp_path / 'spec.json'
+    path.write_text(json.dumps(spec))
+    payload = ['python3', '-m', 'prismaquant.joint_cost_quantum', '--quantum', 'q.json']
+    head_only = [('head', dispatch.HEAD_PROGRESS_GRACE_S)]
+    argv, _image = dispatch._container_wrap(path, payload, progress=head_only)
+    assert argv[-len(payload):] == payload
+    producer = [*payload, '--emit-adjoint-handoff']
+    if refused:
+        with pytest.raises(dispatch.DispatchRefused,
+                           match='band-serial handoff must equal the batch-1 plane'):
+            dispatch._container_wrap(path, producer, progress=head_only)
+    else:
+        argv, _image = dispatch._container_wrap(path, producer, progress=head_only)
+        assert argv[-len(producer):] == producer
