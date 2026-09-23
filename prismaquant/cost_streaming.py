@@ -274,6 +274,10 @@ class StreamedBoundaryArtifacts:
         # like ``_forward_inputs`` (and are in it), but they hold no
         # boundary slot: a checkpoint entry is not a rolling cotangent.
         self._checkpoint_inputs = {}
+        #: Own entries a committed referenced checkpoint names (PQ #1036),
+        #: keyed to its boundary. Retiring one drops it from the live set
+        #: and moves its bytes to the checkpoint ledger; its file stays.
+        self._pinned_checkpoint_entries = {}
         self._resumed = False
         self._attached_forward_inputs = frozenset()
         self._active_window = None
@@ -576,12 +580,31 @@ class StreamedBoundaryArtifacts:
                                       what="seed")
 
     def _borrow_checkpoint_plane(self, checkpoint, *, boundary, marker, what):
-        """Hold a sealed checkpoint's cotangents as inputs the first roll replaces."""
+        """Hold a sealed checkpoint's cotangents as inputs the first roll replaces.
+
+        A copied (v1) row carries the checkpoint's own identity. A referenced
+        (v2, PQ #1036) row is the checkpoint owner's cotangent entry at
+        ``boundary``: kind ``cotangent``, the checkpoint session without its
+        ``kind``, slot ``cotangent-{p}-{b}`` and name ``{slot}-at-{boundary}``.
+        """
+        owner_marker = {key: value for key, value in marker.items() if key != "kind"}
         for reference in checkpoint:
             identity = json.loads(reference.metadata_json)["identity"]
-            if (identity["kind"] != "adjoint_checkpoint_cotangent"
-                    or identity["session"] != marker
-                    or identity["slot"] != reference.name):
+            coordinates = identity.get("coordinates") or {}
+            referenced = identity["kind"] == "cotangent"
+            if referenced:
+                slot = (f"cotangent-{coordinates.get('probe')}-"
+                        f"{coordinates.get('batch')}")
+                valid = (identity["session"] == owner_marker
+                         and set(coordinates) == {"batch", "boundary", "probe"}
+                         and coordinates["boundary"] == boundary
+                         and identity["slot"] == slot
+                         and reference.name == f"{slot}-at-{boundary}")
+            else:
+                valid = (identity["kind"] == "adjoint_checkpoint_cotangent"
+                         and identity["session"] == marker
+                         and identity["slot"] == reference.name)
+            if not valid:
                 raise RuntimeError(
                     f"a {what} checkpoint entry is not "
                     + ("this generation's checkpoint" if what == "resumed"
@@ -1055,6 +1078,22 @@ class StreamedBoundaryArtifacts:
         if reference in self._checkpoint_inputs:
             raise RuntimeError(
                 "a sealed checkpoint entry is never retired by the chain that resumed from it")
+        if reference in self._pinned_checkpoint_entries:
+            # PQ #1036: a committed checkpoint names this entry. The roll is
+            # done with it, but the file is the checkpoint's now: it leaves
+            # the live set, its bytes move to the checkpoint ledger, and its
+            # produced group keeps it live, so the group's origin charge is
+            # never reclaimed under it.
+            del self._references[reference.name]
+            self.telemetry["live_artifact_bytes"] -= reference.file_bytes
+            self.telemetry["live_checkpoint_bytes"] += reference.file_bytes
+            self.telemetry["peak_checkpoint_bytes"] = max(
+                self.telemetry["live_checkpoint_bytes"],
+                self.telemetry["peak_checkpoint_bytes"])
+            self.telemetry["retired_entries"] += 1
+            self.telemetry["pinned_checkpoint_entries_retired"] = (
+                self.telemetry.get("pinned_checkpoint_entries_retired", 0) + 1)
+            return
         if reference in self._forward_inputs:
             # Borrowed files and original ACKs remain owned by the old attempt.
             del self._references[reference.name]
@@ -1342,7 +1381,10 @@ class StreamedBoundaryArtifacts:
         manifest_bytes = file_plan.get("manifest_bytes")
         temp_overlap_bytes = file_plan.get("temp_overlap_bytes")
         envelope_bytes = file_plan.get("envelope_bytes")
-        if (not isinstance(files, list) or not files
+        # A referenced checkpoint (PQ #1036) plans no cotangent file and,
+        # when opened before its roll, no shared state yet: its first plan
+        # is the manifest alone.
+        if (not isinstance(files, list)
                 or type(manifest_bytes) is not int or manifest_bytes <= 0
                 or type(temp_overlap_bytes) is not int or temp_overlap_bytes < 0
                 or type(envelope_bytes) is not int or envelope_bytes <= 0):
@@ -1494,7 +1536,62 @@ class StreamedBoundaryArtifacts:
         entry["temp_overlap_bytes"] = temp_overlap_bytes
         return entry["envelope_bytes"]
 
-    def commit_checkpoint_artifact(self, reservation_id, record):
+    def await_checkpoint_references(self, references):
+        """Wait until every referenced own entry is durable at its origin.
+
+        A referenced checkpoint (PQ #1036) names the owner's canonical entry
+        paths. Through a local output spool those land when PrismaBuild's
+        export of their group is acknowledged; the checkpoint's manifest is
+        written only after that, so a checkpoint that exists names only
+        durable files. Without a spool the entries were written in place.
+        Returns the seconds waited; with a spool they also accumulate in
+        ``checkpoint_reference_wait_s``.
+        """
+        import time
+
+        started = time.monotonic()
+        batches = []
+        for reference in references:
+            self._entry_identity(reference)
+            if self._local_output_spool is None and self._produced is None:
+                continue
+            _key, group = self._produced_group_for(reference)
+            if group is None and self._local_output_spool is None:
+                continue  # Filed in no PB batch, so no PB lifetime governs it.
+            if group is None:
+                raise RuntimeError(
+                    f"referenced checkpoint entry {reference.name} is in no "
+                    "produced group")
+            if group["batch_id"] not in batches:
+                batches.append(group["batch_id"])
+        if self._local_output_spool is not None:
+            for batch_id in batches:
+                self._local_output_spool.await_group(batch_id)
+            if batches:
+                self._commit_local_output_progress()
+        waited = time.monotonic() - started
+        if self._local_output_spool is not None:
+            # Only a spool has anything to wait for; without one the owner's
+            # status stays free of wall-clock fields it did not have before.
+            self.telemetry["checkpoint_reference_wait_s"] = (
+                self.telemetry.get("checkpoint_reference_wait_s", 0.0) + waited)
+        if self._produced is not None and batches:
+            # Fail closed (PQ #1036): the pin lives in PQ, and PrismaBuild's
+            # retirement tick unlinks a ``consumed`` origin-only batch once
+            # its consumers succeed. Stage A commits staged batches today;
+            # a move to origin batches must file them ``retain``.
+            lifetimes = self._produced.origin_only_lifetimes()
+            consumed = sorted(batch_id for batch_id in batches
+                              if lifetimes.get(batch_id) == "consumed")
+            if consumed:
+                raise RuntimeError(
+                    "a referenced checkpoint cannot name entries of an "
+                    "origin-only batch committed with lifetime consumed: "
+                    "PrismaBuild retires those origins; commit them with "
+                    f"lifetime retain ({', '.join(consumed)})")
+        return waited
+
+    def commit_checkpoint_artifact(self, reservation_id, record, *, references=None):
         """Commit a writer receipt's ACTUAL bytes/digests against its reservation.
 
         Verifies every receipt-listed file exists at its receipted size plus
@@ -1541,6 +1638,38 @@ class StreamedBoundaryArtifacts:
                 _fail("exact boundary checkpoint record has no entry list "
                       f"{field!r}")
             rows.extend(entries)
+        pins = {}
+        if references is not None:
+            # PQ #1036: the activation rows are this owner's own live
+            # entries, verbatim; they are pinned, never counted as files
+            # the attempt wrote.
+            from .joint_adjoint_checkpoints import exact_entry_record
+
+            activation = record["activation_entries"]
+            if len(activation) != len(references):
+                _fail("referenced checkpoint rows differ from its references")
+            by_name = {}
+            for reference in references:
+                live = self._references.get(reference.name)
+                if (live != reference
+                        or reference in self._pinned_checkpoint_entries
+                        or reference in self._checkpoint_inputs):
+                    _fail("referenced checkpoint entry is not a live own entry: "
+                          f"{reference.name}")
+                by_name[reference.name] = reference
+            for row in activation:
+                reference = by_name.get(row.get("name")) if isinstance(row, dict) else None
+                if reference is None or row != exact_entry_record(reference):
+                    _fail("referenced checkpoint row is not its entry's record: "
+                          f"{row.get('name') if isinstance(row, dict) else row}")
+                try:
+                    observed = Path(row["path"]).stat().st_size
+                except OSError:
+                    _fail(f"referenced checkpoint entry is not durable: {row['name']}")
+                if observed != row["file_bytes"]:
+                    _fail(f"referenced checkpoint entry size drifted: {row['name']}")
+                pins[reference] = int(record["boundary"])
+            rows = list(record["shared_state_entries"])
         names = [row["name"] for row in rows
                  if isinstance(row, dict) and type(row.get("name")) is str]
         if (len(names) != len(rows) or sorted(names) != sorted(planned)
@@ -1593,6 +1722,7 @@ class StreamedBoundaryArtifacts:
         unused = entry["envelope_bytes"] - actual
         entry["state"] = "committed"
         entry["receipt_digest"] = digest
+        self._pinned_checkpoint_entries.update(pins)
         if self._checkpoint_active == reservation_id:
             self._checkpoint_active = None
         self.telemetry["live_checkpoint_bytes"] += actual

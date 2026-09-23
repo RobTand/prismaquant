@@ -1355,6 +1355,27 @@ class BoundaryProducedPublication:
                 sums[name] += int(classes.get(name) or 0)
         return sums
 
+    def origin_only_lifetimes(self) -> dict:
+        """``{batch_id: lifetime}`` of every origin-only batch PB filed.
+
+        Read from the instance's ``commitments.json``, like
+        :meth:`durable_charge`. A staged batch (``publish_prepaid_batch``)
+        is absent. An origin-only entry without a lifetime retains (PB #914
+        writes ``consumed`` only). A referenced checkpoint (PQ #1036) refuses
+        to seal over a ``consumed`` batch, because PB's retirement tick
+        unlinks those origins once their consumers succeed.
+        """
+
+        path = Path(self._po.instance_dir(
+            self.queue.root, self.instance)) / "commitments.json"
+        try:
+            batches = json.loads(path.read_text()).get("batches") or {}
+        except FileNotFoundError:
+            batches = {}
+        return {str(batch_id): str(record.get("lifetime") or "retain")
+                for batch_id, record in batches.items()
+                if isinstance(record, Mapping) and record.get("origin_only") is True}
+
     def recover_batch_states(self) -> dict:
         """What PrismaBuild's own records say about this owner's groups."""
 

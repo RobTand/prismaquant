@@ -60,6 +60,7 @@ from .joint_adjoint_checkpoints import (
     boundary_entry_directory,
     chain_layers_for,
     chain_regime_identity,
+    checkpoint_cotangent_plane,
     derive_checkpoint_boundaries,
     dev_mode_stamp,
     exact_entry_record,
@@ -821,11 +822,11 @@ def _resumed_chain_inputs(plan, *, recovery, n_batches, n_probes):
     if record["boundary"] != plan.boundary:
         raise AdjointIdentityRefused(
             "chain resume refused: the resume checkpoint is not the lowest sealed one")
-    plane = {}
-    for row in record["activation_entries"]:
-        probe, batch = (int(part) for part in
-                        row["name"].removeprefix("cotangent-").split("-"))
-        plane[(probe, batch)] = reference_from_record(row)
+    try:
+        rows_by_key = checkpoint_cotangent_plane(record)
+    except ValueError as exc:
+        raise AdjointIdentityRefused(f"chain resume refused: {exc}") from exc
+    plane = {key: reference_from_record(row) for key, row in rows_by_key.items()}
     if set(plane) != {(probe, batch) for probe in range(n_probes)
                       for batch in range(n_batches)}:
         raise AdjointIdentityRefused(
@@ -1281,7 +1282,10 @@ def run_adjoint_capture_core(
                 shared_adjoint_keys=[(probe, batch)
                                      for probe in range(len(cotangents))
                                      for batch in range(len(cotangents[probe]))],
-                shared_pass_keys=range(len(batches)), owner=storage)
+                shared_pass_keys=range(len(batches)), owner=storage,
+                # PQ #1036: the checkpoint names the owner's entries at this
+                # boundary instead of writing a second copy of the plane.
+                referenced=True)
 
         def checkpoint_session():
             return {"generation": storage.session["generation"],
@@ -1391,8 +1395,9 @@ def run_adjoint_capture_core(
                                 grad_outs[probe_index].append(storage.write(
                                     tail.grad, batch_index=batch_index,
                                     boundary_index=num_layers, probe_index=probe_index))
-                                tail_checkpoint.write_activation(
-                                    probe_index, batch_index, tail.grad)
+                                tail_checkpoint.reference_activation(
+                                    probe_index, batch_index,
+                                    grad_outs[probe_index][-1])
                                 del logits, probe, tail
                             storage.retire(batch.activations_cpu[-1])
                             batch.activations_cpu[-1] = torch.empty(0)
@@ -1485,7 +1490,9 @@ def run_adjoint_capture_core(
                         previous=grad_outs[probe_index][batch_index],
                         **({} if layer > 0 else {"read_back": False}))
                     if attempt is not None:
-                        attempt.write_activation(probe_index, batch_index, tensor)
+                        attempt.reference_activation(
+                            probe_index, batch_index,
+                            grad_outs[probe_index][batch_index])
 
                 chain_backwards += render_free_layer_roll(
                     runner, storage=storage, batches=batches, layer=layer,
@@ -1510,6 +1517,8 @@ def run_adjoint_capture_core(
                     "checkpoint_write_s": (None if attempt is None
                                            else attempt.write_seconds),
                     "checkpoint_seal_s": seal_s,
+                    "checkpoint_reference_wait_s": (
+                        None if attempt is None else attempt.reference_wait_seconds),
                 })
                 attempt = None
             except BaseException:

@@ -1112,8 +1112,27 @@ def quantum_adjoint_space(record, adjoint_slice, output_root):
     space = directory.parent
     checkpoint = adjoint_slice["checkpoint"]
     expected = space / "checkpoints" / f"boundary-{int(checkpoint['boundary']):03d}" / "entries"
-    for entry in checkpoint.get("activation_entries", []) + checkpoint.get("shared_state_entries", []):
+    from .joint_adjoint_slices import (
+        ADJOINT_CHECKPOINT_REFERENCED_SCHEMA, checkpoint_cotangent_plane)
+    # The slice was verified upstream (``verify_adjoint_slice``); a copied
+    # checkpoint keeps the one-directory rule unchanged.
+    referenced = checkpoint.get("schema") == ADJOINT_CHECKPOINT_REFERENCED_SCHEMA
+    plane = {}
+    if referenced:
+        try:
+            plane = checkpoint_cotangent_plane(checkpoint)
+        except ValueError as exc:
+            raise RuntimeError(f"catalog extension checkpoint refused: {exc}") from exc
+    own = (checkpoint.get("shared_state_entries", []) if referenced
+           else checkpoint.get("activation_entries", [])
+           + checkpoint.get("shared_state_entries", []))
+    for entry in own:
         if Path(entry["path"]).parent != expected:
+            raise RuntimeError("catalog extension checkpoint escaped the original capture namespace")
+    # PQ #1036: a referenced plane lives in the same capture's generation.
+    for row in plane.values():
+        if Path(row["path"]).parent != (
+                directory / str(checkpoint["session"]["generation"]) / "entries"):
             raise RuntimeError("catalog extension checkpoint escaped the original capture namespace")
     return space
 
