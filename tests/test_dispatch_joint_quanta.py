@@ -1005,13 +1005,14 @@ def test_a_band_serial_producer_refuses_a_batched_capture_at_dispatch(
     path = tmp_path / 'spec.json'
     path.write_text(json.dumps(spec))
     payload = ['python3', '-m', 'prismaquant.joint_cost_quantum', '--quantum', 'q.json']
-    argv, _image = dispatch._container_wrap(path, payload, progress=[])
+    head_only = [('head', dispatch.HEAD_PROGRESS_GRACE_S)]
+    argv, _image = dispatch._container_wrap(path, payload, progress=head_only)
     assert argv[-len(payload):] == payload
     producer = [*payload, '--emit-adjoint-handoff']
     if refused:
         with pytest.raises(dispatch.DispatchRefused,
                            match='band-serial handoff must equal the batch-1 plane'):
-            dispatch._container_wrap(path, producer, progress=[])
+            dispatch._container_wrap(path, producer, progress=head_only)
     else:
-        argv, _image = dispatch._container_wrap(path, producer, progress=[])
+        argv, _image = dispatch._container_wrap(path, producer, progress=head_only)
         assert argv[-len(producer):] == producer
