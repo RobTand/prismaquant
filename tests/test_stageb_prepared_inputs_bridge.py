@@ -25,7 +25,6 @@ campaign claim. PB suite budget: priority -10, portable gb10.
 """
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import pickle
@@ -254,20 +253,28 @@ def test_regen_cli_derives_prepared_contracts(tmp_path):
                 "sha256"]
 
 
-def test_regen_refuses_unadmittable_budget(tmp_path, capsys):
+def test_regen_refuses_unadmittable_budget(tmp_path, capsys, monkeypatch):
     import regenerate_joint_quanta as regen
+
+    # PQ #1049: the Stage A receipt and its run header bind the plan they
+    # were captured under, so tightening a copy of the plan after the fact
+    # refuses on the header's plan digest before the budget is ever
+    # checked. Build the whole campaign under the tight plan instead.
+    base_execution = _execution
+
+    def tight_execution():
+        execution = base_execution()
+        execution["retained_operator_windows"]["budget"][
+            "statistics_cap_bytes"] = 2048
+        return execution
+
+    monkeypatch.setattr(sys.modules[__name__], "_execution", tight_execution)
     layout = _campaign_files(tmp_path)
-    plan = dict(layout["plan"])
-    execution = copy.deepcopy(plan["execution"])
-    execution["retained_operator_windows"]["budget"][
-        "statistics_cap_bytes"] = 2048
-    plan["execution"] = execution
-    plan_path = tmp_path / "plan-tight.json"
-    plan_path.write_text(json.dumps(plan))
-    plan_sha = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+    plan_sha = layout["campaign"]["plan_sha256"]
     records_out = tmp_path / "regen-tight" / "records"
+    capsys.readouterr()
     code = regen.main([
-        "--plan", str(plan_path), "--plan-sha256", plan_sha,
+        "--plan", str(layout["plan_path"]), "--plan-sha256", plan_sha,
         "--prepared", str(layout["prepared_path"]),
         "--prepared-sha256", layout["campaign"]["prepared_sha256"],
         "--parent-manifest", str(layout["parent_path"]),
@@ -279,7 +286,11 @@ def test_regen_refuses_unadmittable_budget(tmp_path, capsys):
         "--adjoint-receipt", str(layout["receipt_path"]),
         "--executable-readsets",
     ])
+    err = capsys.readouterr().err
     assert code != 0
+    assert (f"plan {plan_sha} seals an operator-declared retained budget "
+            "that does not admit layer") in err, err
+    assert "derive_policy" in err, err
     assert list(records_out.glob("layer-*.json")) == []
 
 
