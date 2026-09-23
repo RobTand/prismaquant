@@ -32,6 +32,74 @@ under the metadata root is in a committed batch with its digest, and a replay
 commits nothing). A new submission contract for one tool; no format, pipeline
 default, stage or ship gate changes.
 
+The Stage B spill writes and reads with direct I/O (2026-09-23,
+`ws-1a/spill-io-1060`, PQ #1060). The spill wrote each 256 MiB arena with
+buffered `pwritev`, then `fdatasync` and `POSIX_FADV_DONTNEED`, and read with
+buffered `preadv` on one thread. Both directions queued on lina's NVMe, which
+takes at most 128 KiB per request, so its throughput is queue depth times
+128 KiB over the latency. The kernel copied out of the CUDA-pinned arena at
+3.7 GB/s, a fifth of its rate from pageable memory. Each `fdatasync` forced a
+journal commit and a cache flush, and writeback then put a whole arena on the
+device at once: queues of 150 to 900 requests, write await up to 930 ms, and
+Netdata's `10min_disk_backlog` alarm at 10,974 and 21,931 ms (PB
+`e64c2cf30bc8`). The buffered reads ran at a queue depth of 1 to 5, 0.4 to
+2.5 GB/s (PB `317c718bc0cc`, `b55e4305076c`).
+
+`perturbed_x_cache.StageBSpillScratch` now opens the file `O_DIRECT` and
+takes its grid from `statx(STATX_DIOALIGN)`, raised to the filesystem block
+(ext4 serializes a direct write whose ends are off a filesystem block) and to
+the replay's 512-byte address alignment. The arena, the file and the read
+buffer lay tensors out by one rule, `joint_replay_spill._slot`: a slot starts
+on a grid boundary, holds its tensor at the tensor's replay address residue,
+and ends on the next boundary. So a tensor writes from the pinned arena and
+reads back into the pinned read buffer as one aligned envelope, with no copy
+and no page cache. A read chunk holds its inputs first and then each Linear's
+gradients together, in file order, so tensors that abut in the file land as
+one read. A buffer position never changes the arithmetic, only the residue
+does, and the residue is kept. Writes go out `WRITE_CALL_BYTES` (1 MiB) per
+call from the writer thread. Reads go out `READ_CALL_BYTES` (1 MiB) per call
+over `READ_WORKERS` (4) threads. On lina, from pinned memory, one 1 MiB write
+in flight ran 4.8 GB/s at an average queue of 4 and 0.11 ms await, against
+5.9 GB/s at a queue of 811 and 18 ms for a whole arena at once; four 1 MiB
+reads ran 6.9 GB/s (PB `f6733604db33`, `b55e4305076c`). An empty tensor takes
+no slot and no run. The file reserves slot padding for at most
+`SpillGeometry.max_parts` tensors, (probes + 1) x targets x samples, each at
+most 512 bytes plus one grid block; the ceiling covers the reservation, and a
+payload over the ceiling refuses before the file is opened. On GLM-5.3-Flash
+every Stage B target is 2048, 4096 or 12288 wide, so every spilled tensor is a
+whole number of 4 KiB blocks and one at residue 0 needs no padding. Records,
+identity and the resource policy are unchanged. The
+spill telemetry gains the grid, the reservation, the call bounds, the call
+counts and the file bytes each way. A short or unaligned direct transfer
+fails; there is no buffered fallback.
+
+Measured on the GLM-shaped proxy of #994 in one PB measurement action on
+sparky (`0955c9d43f49`, its Corsair MP700 MICRO NVMe; py-spy `cbb841032475`),
+with the windowed replay, origin/main's buffered spill and this one
+interleaved twice: all six quanta wrote one evidence digest. Per spill
+quantum (11.56 GB written, 17.25 GB read), before and after:
+
+| | Before | After |
+|---|---|---|
+| Disk queue, mean / 1 s max (aqu-sz) | 14.2-15.8 / 80-109 | 1.4 / 3.9-4.1 |
+| Write await (ms) | 5.9-7.3 | 0.08-0.09 |
+| Backlog (weighted ms per s of quantum) | 14,167-15,835 | 1,359-1,407 |
+| Writer busy / capture waiting on it (s) | 8.6-8.9 / 1.7-2.2 | 3.1-3.4 / 0.15 |
+| Capture pass (s per probe) | 2.2-3.4 | 1.64-1.74 |
+| Replay wall / waiting on reads (s) | 11.0-15.1 / 8.5-10.1 | 10.3 / 4.8 |
+| Quantum wall (s), energy (J) | 38.9-42.9, 1352-1437 | 36.0, 1310-1335 |
+
+The windowed quanta took 38.2-39.1 s. Mean GPU power was 24-28% of the
+140 W envelope throughout. In py-spy, the after arm's spill threads wait
+mostly in `Event.synchronize`, on the device work ahead of their copies, not
+on the disk. Netdata's `10min_disk_backlog` did not warn. On a GLM-5.3-Flash
+sparse layer the spill writes 185.76 GB and reads about 279 GB. At the
+after arm's backlog per byte, that is about 1,200 ms per second over ten
+minutes even if all of it fell inside one ten-minute window, against the
+alarm's 5,000. Gates:
+`tests/test_stageb_one_pass_spill.py`. No format, default, stage or ship gate
+changes.
+
 A Stage B quantum refuses a bf16 reduction setting its Stage A slice does
 not record (2026-09-23, `ws-tq/1065-bf16-slice-stamp`, PQ #1065, part of
 #1028). A quantum rebuilds Stage A's chain from its checkpoint, and
@@ -862,6 +930,13 @@ its reads, a write-only produced-output template over the metadata root, and
 `--produced-output`, under which every metadata file is committed at its
 origin. See the entry at the top. No format, default, stage or ship gate
 changes.
+
+Re-stamped (2026-09-23, `ws-1a/spill-io-1060`) for **the Stage B spill's
+direct I/O** (PQ #1060): the spill scratch is `O_DIRECT` on a grid of the
+direct-I/O alignment, the filesystem block and 512 bytes, and the arena, the
+file and the read buffer share one slot layout (`joint_replay_spill._slot`);
+writes and reads go out in bounded calls. See the entry at the top. No format,
+default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-tq/1065-bf16-slice-stamp`) for **the Stage B
 quantum's bf16 slice check** (PQ #1065): a quantum refuses, before any head

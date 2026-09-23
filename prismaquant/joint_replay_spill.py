@@ -46,7 +46,11 @@ The scratch is declared like the #956 cotangent sink: an environment root and
 a byte ceiling, forwarded by the campaign container launcher through an
 identity bind. The layer's spill bytes are bounded from geometry before any
 GPU work and the whole bound is allocated up front; see
-``perturbed_x_cache.StageBSpillScratch``.
+``perturbed_x_cache.StageBSpillScratch``. All spill I/O is direct
+(``O_DIRECT``, PQ #1060): the arena, the file and the read buffer share one
+slot layout on the file's direct-I/O grid (``_slot``), so each tensor
+writes from the pinned arena and reads back into the pinned read buffer
+with no page cache in between, in calls that bound what is in flight.
 """
 from __future__ import annotations
 
@@ -83,6 +87,19 @@ ARENA_BYTES = 256 << 20
 READ_BYTES = 64 << 20
 ARENA_COUNT = 3
 READ_BUFFER_COUNT = 2
+#: Direct I/O (PQ #1060): the most bytes one write call and one read call
+#: put in flight, and the threads that issue a read chunk's calls. The
+#: NVMe takes at most 128 KiB per request, so throughput is queue depth
+#: times 128 KiB over the latency, and Netdata's disk backlog integrates
+#: that queue. These are the smallest bounds that keep the spill's I/O well
+#: ahead of its compute, measured on lina from pinned memory (PB
+#: f6733604db33, b55e4305076c): one 1 MiB write in flight ran 4.8 GB/s at
+#: an average queue of 4 and 0.11 ms await, against 5.9 GB/s at a queue of
+#: 811 and 18 ms for a whole 256 MiB arena at once; four 1 MiB reads ran
+#: 6.9 GB/s. See docs/ARCHITECTURE.md.
+WRITE_CALL_BYTES = 1 << 20
+READ_CALL_BYTES = 1 << 20
+READ_WORKERS = 4
 #: Writer and read-ahead threads by default; tests run the same I/O inline.
 DEFAULT_THREADS = True
 _TOP_K_KEYS = ("num_experts_per_tok", "num_experts_per_token", "moe_top_k",
@@ -178,6 +195,7 @@ class SpillGeometry:
     batch_x_bytes: int
     batch_bytes: int
     largest_tensor_bytes: int
+    max_parts: int
 
     def as_dict(self):
         return {
@@ -189,6 +207,7 @@ class SpillGeometry:
             "total_bytes": self.total_bytes, "batch_x_bytes": self.batch_x_bytes,
             "batch_bytes": self.batch_bytes,
             "largest_tensor_bytes": self.largest_tensor_bytes,
+            "max_parts": self.max_parts,
             "windows": len(self.window_x_bytes),
         }
 
@@ -216,6 +235,11 @@ def spill_geometry(linears, window_names, *, pending, batch_tokens, n_probes,
 
     ``window_x_bytes`` and ``window_g_bytes`` bound each window alone; the
     totals bound the layer and are what the scratch reserves.
+
+    ``max_parts`` bounds the tensors written, which the scratch pads to its
+    direct-I/O grid: per sample, one gradient per pending target and probe,
+    and for probe 0 at most one input per pending target (an input is
+    written once per window by the Linear that first reads it).
     """
     if type(n_probes) is not int or n_probes <= 0:
         raise ValueError("Stage B spill geometry requires a positive probe count")
@@ -230,7 +254,7 @@ def spill_geometry(linears, window_names, *, pending, batch_tokens, n_probes,
         ordered = sorted(counts, reverse=True)
         return sum(ordered if experts_per_token is None else ordered[:experts_per_token])
 
-    per_token_x, per_token_g, widest = [], [], 0
+    per_token_x, per_token_g, widest, targets = [], [], 0, 0
     dense_x = dense_g = 0
     layer_in, layer_out = {}, {}
     for names in window_names:
@@ -239,6 +263,7 @@ def spill_geometry(linears, window_names, *, pending, batch_tokens, n_probes,
         for name in names:
             if name not in pending:
                 continue
+            targets += 1
             module = linears[name]
             out_features, in_features = (int(size) for size in module.weight.shape)
             widest = max(widest, out_features, in_features)
@@ -291,7 +316,8 @@ def spill_geometry(linears, window_names, *, pending, batch_tokens, n_probes,
         total_bytes=x_bytes + n_probes * g_bytes,
         batch_x_bytes=layer_x * widest_batch * element_size,
         batch_bytes=(layer_x + layer_g) * widest_batch * element_size,
-        largest_tensor_bytes=widest * widest_batch * element_size)
+        largest_tensor_bytes=widest * widest_batch * element_size,
+        max_parts=(n_probes + 1) * targets * len(batch_tokens))
 
 
 def _is_dense(tensor):
@@ -331,6 +357,33 @@ def _storage_order(tensor):
 
 def _placed(cursor, residue):
     return cursor + (residue - cursor) % ADDRESS_ALIGNMENT
+
+
+def _ceil(value, block):
+    return value + (-value) % block
+
+
+def _slot(cursor, residue, nbytes, block):
+    """``(start, offset, end)`` of a slot on the direct-I/O grid.
+
+    The slot starts on the first ``block`` boundary at or after ``cursor``;
+    the tensor sits ``residue`` bytes in (its address residue modulo
+    ``ADDRESS_ALIGNMENT``) and the slot ends on the next boundary. An empty
+    tensor takes no slot. The arena, the file and the read buffer lay every
+    tensor out by this one rule, so a slot's block-aligned envelope reads
+    straight from the file into the buffer.
+    """
+    start = _ceil(cursor, block)
+    if not nbytes:
+        return start, start, start
+    offset = start + residue
+    return start, offset, _ceil(offset + nbytes, block)
+
+
+def _aligned_buffer(nbytes, block, pinned):
+    """A uint8 tensor of ``nbytes`` whose address is a multiple of ``block``."""
+    raw = torch.empty(nbytes + block, dtype=torch.uint8, pin_memory=pinned)
+    return raw.narrow(0, (-raw.data_ptr()) % block, nbytes)
 
 
 #: The input digest's modulus, the Mersenne prime 2^31 - 1.
@@ -444,8 +497,8 @@ class _Window:
 class _Arena:
     __slots__ = ("buffer", "view", "used", "parts", "event", "probe")
 
-    def __init__(self, nbytes, pinned):
-        self.buffer = torch.empty(nbytes, dtype=torch.uint8, pin_memory=pinned)
+    def __init__(self, nbytes, pinned, block):
+        self.buffer = _aligned_buffer(nbytes, block, pinned)
         self.view = memoryview(self.buffer.numpy())
         self.used, self.parts, self.event, self.probe = 0, [], None, None
 
@@ -572,10 +625,21 @@ class StageBReplaySpill:
                 if name in self._window_of:
                     raise ValueError(f"Stage B spill window membership repeats {name}")
                 self._window_of[name] = index
-        pair = 2 * (geometry.largest_tensor_bytes + ADDRESS_ALIGNMENT)
+        # The file first: its direct-I/O grid, never finer than
+        # ADDRESS_ALIGNMENT so a slot keeps its replay residue, sizes every
+        # buffer below.
+        self._scratch = StageBSpillScratch(
+            directory=root, max_bytes=max_bytes, nbytes=geometry.total_bytes,
+            parts=geometry.max_parts, part_padding=ADDRESS_ALIGNMENT,
+            alignment=ADDRESS_ALIGNMENT)
+        self._block = block = self._scratch.block
+        # A tensor's slot: its residue ahead of it, the grid's tail after it.
+        pair = 2 * (geometry.largest_tensor_bytes + ADDRESS_ALIGNMENT + block)
+        pair += -pair % block
         per_probe = geometry.x_bytes + geometry.g_bytes_per_probe
-        self.arena_bytes = max(pair, min(ARENA_BYTES, per_probe + pair))
-        self.read_bytes = max(pair, min(READ_BYTES, per_probe + pair))
+        self.arena_bytes = _ceil(max(pair, min(ARENA_BYTES, per_probe + pair)), block)
+        self.read_bytes = _ceil(max(pair, min(READ_BYTES, per_probe + pair)), block)
+        self._read_pool = None
         self._arenas: list[_Arena] = []
         self._free: queue.Queue | None = None
         self._pending: queue.Queue | None = None
@@ -598,18 +662,25 @@ class StageBReplaySpill:
             "read_buffer_bytes": self.read_bytes,
             "read_buffers": READ_BUFFER_COUNT if self._threads else 1,
             "threads": self._threads,
+            "direct_io_block": block, "reserved_bytes": self._scratch.capacity,
+            "write_call_bytes": WRITE_CALL_BYTES, "read_call_bytes": READ_CALL_BYTES,
+            "read_workers": READ_WORKERS if self._threads else 1,
+            "write_calls": 0, "file_bytes_written": 0, "read_calls": 0,
+            "file_bytes_read": 0,
         }
         if self.accumulation == OPERATOR_GEMM:
             self.telemetry.update(accumulation=self.accumulation,
                                   chunk_rows=self.chunk_rows, row_chunks=0)
-        self._scratch = StageBSpillScratch(directory=root, max_bytes=max_bytes,
-                                           nbytes=geometry.total_bytes)
 
     # -- reservations the caller charges to its capture guard ---------------
     @property
     def capture_reserve_bytes(self):
-        """Pinned arenas plus every target input held until its backward."""
-        arenas = 0 if self._arenas else self.arena_bytes * self.telemetry["arenas"]
+        """Pinned arenas plus every target input held until its backward.
+
+        Each arena is allocated one grid block over, to align its start.
+        """
+        arenas = 0 if self._arenas else (
+            (self.arena_bytes + self._block) * self.telemetry["arenas"])
         return arenas + self.geometry.batch_x_bytes
 
     @property
@@ -619,7 +690,8 @@ class StageBReplaySpill:
         Under ``operator_gemm`` also one input stream's row blocks and one
         chunk's FP32 GEMM operands (bounded at the probe-0 capture).
         """
-        buffers = 0 if self._read_buffers else self.read_bytes * self.telemetry["read_buffers"]
+        buffers = 0 if self._read_buffers else (
+            (self.read_bytes + self._block) * self.telemetry["read_buffers"])
         return buffers + 2 * (self.read_bytes + ADDRESS_ALIGNMENT) + self._gemm_reserve
 
     # -- lifetime -------------------------------------------------------------
@@ -636,6 +708,9 @@ class StageBReplaySpill:
             writer.join()
         self._arenas.clear()
         self._arena = None
+        pool, self._read_pool = self._read_pool, None
+        if pool is not None:
+            pool.shutdown(wait=True)
         self._read_buffers.clear()
         for window in self._windows:
             window.dedupe.clear()
@@ -689,7 +764,8 @@ class StageBReplaySpill:
         if self._arenas:
             return
         count = ARENA_COUNT if self._threads else 1
-        self._arenas = [_Arena(self.arena_bytes, self._cuda) for _ in range(count)]
+        self._arenas = [_Arena(self.arena_bytes, self._cuda, self._block)
+                        for _ in range(count)]
         self._free = queue.Queue()
         for arena in self._arenas[1:]:
             self._free.put(arena)
@@ -741,7 +817,8 @@ class StageBReplaySpill:
             digest = self._input_digest(x)
             if self._probe == 0:
                 entries[entry].digest = digest
-                self._stage(index, ("x", owner), entry, entries[entry].logical, x)
+                self._stage(index, ("x", owner), entry, entries[entry].logical, x,
+                            entries[entry].layout[2])
             else:
                 # Compared once the capture ends; never copied to the host.
                 window.x_checks.append((owner, entry, digest))
@@ -756,6 +833,7 @@ class StageBReplaySpill:
         logical = window.g_logical.get(name, 0)
         if self._probe == 0:
             window.records.append((name, owner, entry, logical, g_bytes, g_layout))
+            g_residue = g_layout[2]
         else:
             cursor = window.record_cursor
             if (cursor >= len(window.records)
@@ -765,10 +843,13 @@ class StageBReplaySpill:
                 raise RuntimeError(
                     f"Stage B spill probe {self._probe} invocation order or gradient "
                     f"layout differs from probe 0 at {name}")
+            # The replay places every probe's gradient at probe 0's residue.
+            g_residue = window.records[cursor][5][2]
         window.record_cursor += 1
         window.g_logical[name] = logical + g_bytes
         self._records_seen += 1
-        self._stage(index, ("g", name), window.record_cursor - 1, logical, selected)
+        self._stage(index, ("g", name), window.record_cursor - 1, logical, selected,
+                    g_residue)
 
     def _input_digest(self, x):
         """``x``'s digest, queued on its device behind the op that made it."""
@@ -789,21 +870,27 @@ class StageBReplaySpill:
         """
         return recorded[:2] == observed[:2] and (not self._cuda or recorded[2] == observed[2])
 
-    def _stage(self, window_index, stream, index, logical, tensor):
-        """Copy ``tensor`` into the arena as part of ``stream`` at ``logical``."""
+    def _stage(self, window_index, stream, index, logical, tensor, residue):
+        """Copy ``tensor`` into an arena slot as part of ``stream`` at ``logical``.
+
+        The slot (``_slot``) puts the tensor at the address residue the
+        replay will rebuild it at, so the slot writes to the file and later
+        reads back into the read buffer as one block-aligned envelope.
+        """
         nbytes = tensor.numel() * self.element_size
         arena = self._arena
-        offset = (arena.used + 255) & ~255
-        if offset + nbytes > len(arena.view):
+        start, offset, end = _slot(arena.used, residue, nbytes, self._block)
+        if end > len(arena.view):
             self._flush()
-            arena, offset = self._arena, 0
-            if nbytes > len(arena.view):
+            arena = self._arena
+            start, offset, end = _slot(0, residue, nbytes, self._block)
+            if end > len(arena.view):
                 raise RuntimeError("Stage B spill tensor exceeds its arena bound")
         if nbytes:
             destination = arena.buffer.narrow(0, offset, nbytes).view(self.dtype)
             destination.copy_(_storage_order(tensor), non_blocking=self._cuda)
-        arena.parts.append((window_index, stream, index, logical, nbytes, offset))
-        arena.used = offset + nbytes
+        arena.parts.append((window_index, stream, index, logical, nbytes, offset, start, end))
+        arena.used = end
         arena.probe = self._probe
 
     def _end_batch(self):
@@ -860,7 +947,14 @@ class StageBReplaySpill:
                 self._free.put(arena)
 
     def _write_arena(self, arena):
-        """Write one arena: one file run per (window, stream) it holds."""
+        """Write one arena: its (window, stream) groups back to back, slot by slot.
+
+        The groups take one contiguous stretch of the file, written with
+        direct I/O straight from the pinned arena in calls of at most
+        ``WRITE_CALL_BYTES``. Each slot keeps its place in the grid, so a
+        tensor's file offset has the residue it is replayed at. A stream's
+        consecutive tensors that abut in the file share one run.
+        """
         started = time.time()
         if arena.event is not None:
             arena.event.synchronize()
@@ -868,7 +962,7 @@ class StageBReplaySpill:
         groups: dict[tuple, list] = {}
         for part in arena.parts:
             groups.setdefault((part[0], part[1]), []).append(part)
-        spans = []
+        placed, slots, size = [], [], 0
         for (window_index, (kind, stream)), parts in groups.items():
             window = self._windows[window_index]
             logical = parts[0][3]
@@ -876,7 +970,6 @@ class StageBReplaySpill:
                 if part[3] != logical:
                     raise RuntimeError("Stage B spill stream is not contiguous")
                 logical += part[4]
-            total = logical - parts[0][3]
             if kind == "x":
                 if probe != 0:
                     raise RuntimeError(
@@ -889,18 +982,28 @@ class StageBReplaySpill:
                 raise RuntimeError("Stage B spill runs are out of stream order")
             if not runs and parts[0][3] != 0:
                 raise RuntimeError("Stage B spill stream does not start at zero")
-            file_offset = self._scratch.allocate(total)
-            self._scratch.write(file_offset, [view[offset:offset + nbytes]
-                                              for *_, nbytes, offset in parts])
-            runs.append((parts[0][3], file_offset, total))
-            spans.append((file_offset, total))
+            for part in parts:
+                placed.append((runs, part, size + part[5] - part[6]))
+                size += part[7] - part[6]
+                if part[7] > part[6]:
+                    slots.append(view[part[6]:part[7]])
             key = "x_bytes_written" if kind == "x" else "g_bytes_written"
-            self.telemetry[key] += total
-            self.telemetry["runs_written"] += 1
-        if spans:
-            start = min(offset for offset, _ in spans)
-            end = max(offset + size for offset, size in spans)
-            self._scratch.sync_and_release(start, end - start)
+            self.telemetry[key] += logical - parts[0][3]
+        base = self._scratch.allocate(size)
+        for runs, part, relative in placed:
+            logical, nbytes, file_offset = part[3], part[4], base + relative
+            if not nbytes:
+                continue  # An empty tensor has no slot and needs no run.
+            if runs and runs[-1][1] + runs[-1][2] == file_offset:
+                # Abuts the stream's last run in the file: extend it.
+                runs[-1] = (runs[-1][0], runs[-1][1], runs[-1][2] + nbytes)
+            else:
+                runs.append((logical, file_offset, nbytes))
+                self.telemetry["runs_written"] += 1
+        if slots:
+            self.telemetry["write_calls"] += self._scratch.write(
+                base, slots, call_bytes=WRITE_CALL_BYTES)
+        self.telemetry["file_bytes_written"] += size
         self.telemetry["writer_busy_s"] += time.time() - started
 
     def _end_capture(self):
@@ -994,42 +1097,60 @@ class StageBReplaySpill:
         Each input stream's records (its owner's and those of any Linear that
         shares it) replay in firing order; every Linear belongs to exactly one
         stream, so every statistics key keeps its own order. A chunk fits one
-        read buffer.
+        read buffer, where each tensor takes a slot by the arena's rule
+        (``_slot``): the same residue, on the same direct-I/O grid. The
+        buffer holds the chunk's inputs first, then each Linear's gradients
+        together, in the order the file holds them, so a run of tensors that
+        abut in the file lands as one read. Where a tensor sits in the buffer
+        does not change what the replay computes: only its residue does.
         """
+        block = self._block
         streams: dict[str, list[int]] = {}
         for position, record in enumerate(window.records):
             streams.setdefault(record[1], []).append(position)
         order = [name for name in window.names if name in streams]
         plan = []
+
+        def close(owner, records, inputs, gradients):
+            cursor, new, placed = 0, [], []
+            for entry, nbytes, residue in inputs:
+                _start, offset, cursor = _slot(cursor, residue, nbytes, block)
+                new.append((entry, offset))
+            by_name: dict[str, list] = {}
+            for position, name, nbytes, residue in gradients:
+                by_name.setdefault(name, []).append((position, nbytes, residue))
+            for items in by_name.values():
+                for position, nbytes, residue in items:
+                    _start, offset, cursor = _slot(cursor, residue, nbytes, block)
+                    placed.append((position, offset))
+            plan.append((owner, (tuple(records), tuple(new), tuple(placed), cursor)))
+
         for owner in order:
-            records, new, gradients, cursor, next_entry = [], [], [], 0, 0
+            records, inputs, gradients, used, next_entry = [], [], [], 0, 0
             entries = window.entries[owner]
             for position in streams[owner]:
-                _, _, entry, _, g_bytes, g_layout = window.records[position]
-                need = []
+                name, _, entry, _, g_bytes, g_layout = window.records[position]
+                need = 0
                 if entry == next_entry:
-                    need.append(("x", entry, entries[entry].nbytes, entries[entry].layout[2]))
+                    x = (entry, entries[entry].nbytes, entries[entry].layout[2])
+                    need += _slot(0, x[2], x[1], block)[2]
                 elif entry > next_entry:
                     raise RuntimeError("Stage B spill entries are not in first-use order")
-                need.append(("g", position, g_bytes, g_layout[2]))
-                end = cursor
-                for _, _, nbytes, residue in need:
-                    end = _placed(end, residue) + nbytes
-                if records and end > self.read_bytes:
-                    plan.append((owner, (tuple(records), tuple(new), tuple(gradients), cursor)))
-                    records, new, gradients, cursor = [], [], [], 0
-                for kind, item, nbytes, residue in need:
-                    offset = _placed(cursor, residue)
-                    (new if kind == "x" else gradients).append((item, offset))
-                    cursor = offset + nbytes
+                need += _slot(0, g_layout[2], g_bytes, block)[2]
+                if records and used + need > self.read_bytes:
+                    close(owner, records, inputs, gradients)
+                    records, inputs, gradients, used = [], [], [], 0
                 if entry == next_entry:
+                    inputs.append(x)
                     next_entry += 1
+                gradients.append((position, name, g_bytes, g_layout[2]))
+                used += need
                 window.last_ref[(owner, entry)] = position
                 records.append(position)
             if next_entry != len(entries):
                 raise RuntimeError("Stage B spill input stream has an unread entry")
             if records:
-                plan.append((owner, (tuple(records), tuple(new), tuple(gradients), cursor)))
+                close(owner, records, inputs, gradients)
         if any(chunk[3] > self.read_bytes for _, chunk in plan):
             raise RuntimeError("Stage B spill record exceeds its read buffer")
         return plan
@@ -1045,44 +1166,80 @@ class StageBReplaySpill:
         return file_offset + (logical - start)
 
     def _fill(self, window, probe, item, buffer):
-        """Read one chunk's tensors into ``buffer`` at their planned offsets."""
+        """Read one chunk's tensors into ``buffer`` at their planned offsets.
+
+        Each tensor's slot envelope is read from the file straight into the
+        buffer (the plan and the file share the slot rule, so the envelopes
+        line up); envelopes that abut in both the file and the buffer are one
+        read. The reads, cut at ``READ_CALL_BYTES``, go to the read workers
+        together, so the device sees them queued at once.
+        """
         owner, (_records, new, gradients, _used) = item
-        view = buffer[1]
+        block = self._block
         pieces = []
         entries, x_runs, x_starts = (window.entries[owner], window.x_runs[owner],
                                      window.x_starts[owner])
         for entry, offset in new:
             record = entries[entry]
-            pieces.append((self._physical(x_runs, x_starts, record.logical, record.nbytes),
-                           view[offset:offset + record.nbytes]))
+            if record.nbytes:
+                pieces.append((self._physical(x_runs, x_starts, record.logical,
+                                              record.nbytes), offset, record.nbytes))
         for position, offset in gradients:
             name, _, _, logical, nbytes, _ = window.records[position]
-            pieces.append((self._physical(window.g_runs[(name, probe)],
-                                          window.g_starts[(name, probe)], logical, nbytes),
-                           view[offset:offset + nbytes]))
-        pieces.sort(key=lambda piece: piece[0])
-        group, start, end = [], None, None
-        for file_offset, target in pieces:
-            if group and file_offset != end:
-                self.telemetry["bytes_read"] += self._scratch.read_into(start, group)
-                self.telemetry["reads"] += 1
-                group = []
-            if not group:
-                start = end = file_offset
-            group.append(target)
-            end += len(target)
-        if group:
-            self.telemetry["bytes_read"] += self._scratch.read_into(start, group)
-            self.telemetry["reads"] += 1
+            if nbytes:
+                pieces.append((self._physical(window.g_runs[(name, probe)],
+                                              window.g_starts[(name, probe)], logical,
+                                              nbytes), offset, nbytes))
+        spans = []
+        for file_offset, offset, nbytes in sorted(pieces):
+            if file_offset % block != offset % block:
+                raise RuntimeError("Stage B spill tensor is off its replay residue")
+            lead = file_offset % block
+            low, high = file_offset - lead, _ceil(file_offset + nbytes, block)
+            at = offset - lead
+            if spans and spans[-1][1] == low and spans[-1][2] + spans[-1][1] - spans[-1][0] == at:
+                spans[-1][1] = max(spans[-1][1], high)
+            elif spans and low < spans[-1][1]:
+                raise RuntimeError("Stage B spill read envelopes overlap")
+            else:
+                spans.append([low, high, at])
+        calls = []
+        for low, high, at in spans:
+            for cut in range(low, high, READ_CALL_BYTES):
+                size = min(READ_CALL_BYTES, high - cut)
+                calls.append((cut, at + (cut - low), size))
+        view = buffer[1]
+        read = self._scratch.read_into
+        if self._read_pool is None:
+            done = [read(cut, [view[at:at + size]]) for cut, at, size in calls]
+        else:
+            futures = [self._read_pool.submit(read, cut, [view[at:at + size]])
+                       for cut, at, size in calls]
+            done, failure = [], None
+            for future in futures:
+                try:
+                    done.append(future.result())
+                except BaseException as exc:  # noqa: BLE001 - raised after the join
+                    failure = failure or exc
+            if failure is not None:
+                raise failure
+        self.telemetry["bytes_read"] += sum(nbytes for _, _, nbytes in pieces)
+        self.telemetry["file_bytes_read"] += sum(done)
+        self.telemetry["reads"] += len(spans)
+        self.telemetry["read_calls"] += len(calls)
 
     def _start_read_buffers(self):
         if self._read_buffers:
             return
         count = READ_BUFFER_COUNT if self._threads else 1
         for _ in range(count):
-            tensor = torch.empty(self.read_bytes, dtype=torch.uint8, pin_memory=self._cuda)
+            tensor = _aligned_buffer(self.read_bytes, self._block, self._cuda)
             # [tensor, memoryview, event of the H2D copy that last read it]
             self._read_buffers.append([tensor, memoryview(tensor.numpy()), None])
+        if self._threads and self._read_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            self._read_pool = ThreadPoolExecutor(max_workers=READ_WORKERS,
+                                                 thread_name_prefix="stage-b-spill-read")
 
     def _chunks(self, window, probe, plan):
         """Yield ``(chunk, buffer)`` with bounded read-ahead on another thread."""
