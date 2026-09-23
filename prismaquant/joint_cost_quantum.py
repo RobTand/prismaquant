@@ -2304,6 +2304,13 @@ def run_layer_quantum(
         replay_regime = replay_regime_from_environment(os.environ)
     except ReplayRegimeRefused as exc:
         raise QuantumIdentityRefused(str(exc)) from exc
+    # The bf16 reduction flag is a launch setting of the same kind (PQ #1028).
+    from .matmul_arithmetic import (
+        MatmulArithmeticRefused, bf16_reduction_from_environment, pin_matmul_arithmetic)
+    try:
+        bf16_reduction_from_environment(os.environ)
+    except MatmulArithmeticRefused as exc:
+        raise QuantumIdentityRefused(str(exc)) from exc
     if emit_handoff and handoff_regime_refusal(replay_regime):
         raise QuantumIdentityRefused(handoff_regime_refusal(replay_regime))
     from .joint_stageb_resources import enforce_device_policy
@@ -2333,8 +2340,7 @@ def run_layer_quantum(
 
     os.environ[ACTIVATION_SCALE_ENV] = execution["production_act_scales"]
     torch.set_num_threads(1)
-    torch.set_float32_matmul_precision("highest")
-    torch.backends.cuda.matmul.allow_tf32 = False
+    pin_matmul_arithmetic()
 
     layer = int(record["layer"])
     space = Path(record["output_space"]["root"])
