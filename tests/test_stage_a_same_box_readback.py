@@ -279,7 +279,8 @@ def test_a_failed_export_refuses_at_its_barrier_at_once_with_a_record(
     closing(storage)
     references = _write_cotangent_group(storage)
     assert storage.drain_produced_stager(60.0)
-    (batch_id,) = backend.groups
+    (batch_id,) = [batch for batch, group in backend.groups.items()
+                   if group["entries"]]
     backend.groups[batch_id]["failure"] = "export-failed-without-ack"
     export_key = backend.groups[batch_id]["export_key"]
     started = time.monotonic()
@@ -308,7 +309,8 @@ def test_a_slow_live_export_is_waited_on_without_a_clock(
     closing(storage)
     references = _write_cotangent_group(storage)
     assert storage.drain_produced_stager(60.0)
-    (batch_id,) = backend.groups
+    (batch_id,) = [batch for batch, group in backend.groups.items()
+                   if group["entries"]]
     landed = threading.Event()
 
     def land_later():
