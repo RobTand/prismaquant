@@ -371,24 +371,35 @@ def await_forward_inputs(references):
         raise LeaseRefused('forward-recovery-input-' + verdict, kind='availability')
 
 
+def require_published_campaign(document, *, bind_identity, campaign_identity):
+    """A capsule that publishes its campaign must name the sealed source campaign.
+
+    Also the check a Stage A chain seed makes on the capsule it borrows
+    rows from (``stage_a_chain_seed``, PQ #1016).
+    """
+    if 'published_campaign_identity' not in document:
+        return
+    from .joint_forward_campaign import resolve_forward_campaign
+    source = document['source_campaign_record']
+    record = _read(source['path'], source['sha256'])[0]
+    prepared = _read(record['campaign']['prepared_path'],
+                     campaign_identity['prepared_sha256'])[0]
+    resolved = resolve_forward_campaign(document,
+        plan_sha256=campaign_identity['plan_sha256'],
+        prepared_sha256=campaign_identity['prepared_sha256'],
+        read_manifest_sha256=campaign_identity['read_manifest_sha256'],
+        formats_by_qname=prepared['formats_by_qname'],
+        calibration_shape=bind_identity['calibration_shape'])
+    if resolved != campaign_identity:
+        raise ForwardRecoveryRefused('recovery campaign is not the sealed source campaign')
+
+
 def load_forward_recovery(bound, *, bind_identity, campaign_identity, runner, storage):
     if bound is None:
         return None
     document, digest = _read(bound['path'], bound['sha256'])
-    if 'published_campaign_identity' in document:
-        from .joint_forward_campaign import resolve_forward_campaign
-        source = document['source_campaign_record']
-        record = _read(source['path'], source['sha256'])[0]
-        prepared = _read(record['campaign']['prepared_path'],
-                         campaign_identity['prepared_sha256'])[0]
-        resolved = resolve_forward_campaign(document,
-            plan_sha256=campaign_identity['plan_sha256'],
-            prepared_sha256=campaign_identity['prepared_sha256'],
-            read_manifest_sha256=campaign_identity['read_manifest_sha256'],
-            formats_by_qname=prepared['formats_by_qname'],
-            calibration_shape=bind_identity['calibration_shape'])
-        if resolved != campaign_identity:
-            raise ForwardRecoveryRefused('recovery campaign is not the sealed source campaign')
+    require_published_campaign(document, bind_identity=bind_identity,
+                               campaign_identity=campaign_identity)
     frontier, count = validate_forward_state(document, bind_identity=bind_identity,
                                               campaign_identity=campaign_identity)
     require_stateless_profile(runner)
