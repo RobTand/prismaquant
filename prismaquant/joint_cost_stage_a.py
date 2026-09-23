@@ -828,20 +828,62 @@ def _restore_resumed_chain(runner, storage, space, plan, *, inputs, partitions, 
     holds them right after sealing checkpoint ``plan.boundary``.
     """
     from .joint_adjoint_checkpoints import load_checkpoint_shared_states
-    from .joint_cost_quantum import _rebuild_batches
-    from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
     rows, own, plane = inputs
     num_layers = int(plan.document["num_layers"])
-    n_batches = len(partitions)
     storage.authorize_resume_inputs(own, list(plane.values()), boundary=plan.boundary)
     storage.adopt_committed_checkpoints(plan.checkpoints, plan.checkpoint_directories)
     shared_adjoint, shared_pass = load_checkpoint_shared_states(
         space, plan.checkpoints[-1],
         shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+    return _chain_at_checkpoint(
+        runner, storage, rows=rows, plane=plane, shared_adjoint=shared_adjoint,
+        shared_pass=shared_pass, partitions=partitions, n_probes=n_probes,
+        num_layers=num_layers)
+
+
+def _restore_seeded_chain(runner, storage, plan, *, partitions, n_probes, num_layers):
+    """The chain's state at another run's sealed checkpoint (PQ #1016).
+
+    The seed's fresh owner borrows the capsule rows ``plan.through .. b - 1``
+    (:meth:`authorize_forward_inputs`) and checkpoint ``b``'s cotangent plane
+    under that checkpoint's own session (:meth:`authorize_seed_checkpoint`),
+    then rebuilds the chain exactly as a chain resume does. Boundaries the
+    seed never reads hold ``None``: the chain stops at ``plan.through``.
+    """
+    from .joint_adjoint_checkpoints import load_checkpoint_shared_states, reference_from_record
+
+    rows = {boundary: [reference_from_record(row) for row in column]
+            for boundary, column in plan.rows.items()}
+    plane = {key: reference_from_record(row) for key, row in plan.plane.items()}
+    storage.authorize_forward_inputs(
+        [reference for column in rows.values() for reference in column])
+    storage.authorize_seed_checkpoint(list(plane.values()), boundary=plan.boundary,
+                                      session=plan.record["session"])
+    shared_adjoint, shared_pass = load_checkpoint_shared_states(
+        plan.source_space, plan.record,
+        shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+    return _chain_at_checkpoint(
+        runner, storage, rows=rows, plane=plane, shared_adjoint=shared_adjoint,
+        shared_pass=shared_pass, partitions=partitions, n_probes=n_probes,
+        num_layers=num_layers)
+
+
+def _chain_at_checkpoint(runner, storage, *, rows, plane, shared_adjoint, shared_pass,
+                         partitions, n_probes, num_layers):
+    """``(batches, cotangents, grad_outs)`` right after a checkpoint is sealed.
+
+    ``rows`` maps each forward boundary the chain reads to its references by
+    batch; ``plane`` maps ``(probe, batch)`` to the checkpoint's cotangent
+    reference.
+    """
+    from .joint_cost_quantum import _rebuild_batches
+    from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
+
+    n_batches = len(partitions)
     batches = _rebuild_batches(runner, partitions=partitions, shared_pass=shared_pass)
     for batch_index, batch in enumerate(batches):
-        batch.activations_cpu = [rows[boundary][batch_index]
+        batch.activations_cpu = [rows[boundary][batch_index] if boundary in rows else None
                                  for boundary in range(num_layers)] + [torch.empty(0)]
     cotangents = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
                    for _ in batches] for _ in range(n_probes)]
@@ -861,7 +903,7 @@ def run_adjoint_capture_core(
     boundary_artifact_bytes=None, artifact_budget_stamp=None,
     min_free_gib=0.0, progress=None, produced_output=None, forward_recovery=None,
     chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
-    arithmetic_extra=None,
+    arithmetic_extra=None, chain_seed=None,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -913,6 +955,14 @@ def run_adjoint_capture_core(
     declaration. ``arithmetic_extra`` adds the entry point's fields (the
     container image, the projection backend) to the arithmetic stamp the
     chain state seals.
+
+    ``chain_seed`` (optional, dev mode) is a normalized
+    ``stage_a_chain_seed`` spec (RobTand/prismaquant#1016): a measurement
+    run in a scratch root that borrows another run's sealed checkpoint and
+    its capsule's forward rows under pinned digests, rolls the chain down to
+    the spec's ``through`` boundary and returns a seed receipt instead of an
+    adjoint receipt. It runs no forward pass and no tail, writes no chain
+    state, and refuses beside ``chain_resume`` or ``forward_recovery``.
     """
     from .cost_streaming import (
         StreamedBoundaryArtifacts,
@@ -936,7 +986,27 @@ def run_adjoint_capture_core(
         resume_directory,
         write_chain_state,
     )
+    from .stage_a_chain_seed import (
+        SEED_RECEIPT_SCHEMA,
+        ChainSeedRefused,
+        compare_seed_plane,
+        plan_chain_seed,
+        preflight_seed_root,
+        tensor_payload_sha256,
+        write_seed_marker,
+    )
 
+    if chain_seed is not None:
+        if chain_resume is not None or forward_recovery is not None:
+            raise AdjointIdentityRefused(
+                "chain seed refused: a seed binds a fresh scratch run; it is neither a "
+                "chain resume nor a forward recovery")
+        # Before the first mkdir: a scratch root inside the source run's root
+        # must refuse without creating a directory there (PQ #1016).
+        try:
+            preflight_seed_root(output_root, chain_seed)
+        except ChainSeedRefused as exc:
+            raise AdjointIdentityRefused(f"chain seed refused: {exc}") from exc
     chain_regime = normalize_chain_regime(chain_batch_size, chain_probe_fusion)
     regime_identity = chain_regime_identity(chain_regime)
     n_probes = int(execution["n_probes"])
@@ -1064,6 +1134,20 @@ def run_adjoint_capture_core(
                 resume_from=chain_resume.get("resume_from"))
         except ChainResumeRefused as exc:
             raise AdjointIdentityRefused(f"chain resume refused: {exc}") from exc
+    seed_plan = None
+    if chain_seed is not None:
+        try:
+            seed_plan = plan_chain_seed(
+                space, output_root, chain_seed, bind_identity=bind_identity,
+                campaign_identity={
+                    "plan_sha256": plan_sha256, "prepared_sha256": prepared_sha256,
+                    "read_manifest_sha256": read_manifest_sha256,
+                    "unit_roster_sha256": unit_roster_sha256,
+                    "campaign_scope": campaign_scope},
+                running_implementation_sha256=implementation_sha256,
+                n_batches=len(row_offsets), n_probes=n_probes, num_layers=num_layers)
+        except ChainSeedRefused as exc:
+            raise AdjointIdentityRefused(f"chain seed refused: {exc}") from exc
 
     def boundary_storage_block(recovery):
         return {
@@ -1090,6 +1174,10 @@ def run_adjoint_capture_core(
         print(f"joint_cost_stage_a: {message}", flush=True)
 
     resume_record = None
+    if seed_plan is not None:
+        # Before the bind creates anything: this root is a seed's for good,
+        # and the band tool refuses it (RobTand/prismaquant#1016).
+        write_seed_marker(space, seed_plan, run_identity=run_identity)
     with storage:
         if resume_plan is None:
             storage.bind(bind_identity, n_probes=n_probes, published=True)
@@ -1178,9 +1266,24 @@ def run_adjoint_capture_core(
                 f"{resume_record['removed_rolling_entries']} rolling entries, set aside "
                 f"{len(resume_record['partial_checkpoints_set_aside'])} partial "
                 "checkpoint directories")
+        elif seed_plan is not None:
+            batches, cotangents, grad_outs = _restore_seeded_chain(
+                runner, storage, seed_plan,
+                partitions=[calib_ids[offset:offset + batch_rows]
+                            for offset in row_offsets],
+                n_probes=n_probes, num_layers=num_layers)
+            chain_top = seed_plan.boundary
+            log(f"chain seed: continuing checkpoint {chain_top} of "
+                f"{seed_plan.source_root} down to boundary {seed_plan.through} "
+                f"(sealed by implementation {seed_plan.sealed_by[:12]})")
         else:
             chain_top = num_layers
-        if resume_plan is None:
+        # A seed stops at its ``through`` boundary; every other run rolls to 0.
+        chain_bottom = 0 if seed_plan is None else seed_plan.through
+        # The seed's rolled plane at its compare boundary, hashed as written.
+        plane_digests = ({} if seed_plan is not None and seed_plan.compare is not None
+                         else None)
+        if resume_plan is None and seed_plan is None:
             log(f"boundary capture: calib {tuple(calib_ids.shape)} in "
                 f"{len(row_offsets)} partition(s) across {num_layers} layers ...")
             capture_started = time.time()
@@ -1266,13 +1369,13 @@ def run_adjoint_capture_core(
                 producer=producer_binding(produced_output)))
 
         chain_started = time.time()
-        if chain_top > 0:
+        if chain_top > chain_bottom:
             # The chain's first layer reads a plane the forward pass wrote
             # and retired long ago; every later layer's plane is asked for
             # by the roll before it (``render_free_layer_roll``). Asking
             # here starts its movers before the first window needs them.
             storage.stage_produced_boundary_ahead(chain_top - 1)
-        for layer in reversed(range(chain_top)):
+        for layer in reversed(range(chain_bottom, chain_top)):
             if progress is not None:
                 progress.enter(adjoint_chain_phase_name(layer))
                 progress.flush(force=True)
@@ -1300,6 +1403,9 @@ def run_adjoint_capture_core(
                         raise RuntimeError(
                             "render-free chain requires source prefetch settlement")
                 def roll(tensor, batch_index, probe_index):
+                    if plane_digests is not None and layer == chain_bottom:
+                        plane_digests[probe_index, batch_index] = (
+                            tensor_payload_sha256(tensor))
                     # Layer 0 is the walk's last roll: no read follows it,
                     # and its entries are retired right after the loop.
                     grad_outs[probe_index][batch_index] = storage.write(
@@ -1317,7 +1423,7 @@ def run_adjoint_capture_core(
                     # entries; ``grad_outs`` holds them once probe 0 ran.
                     # A fused next window reads every probe's.
                     then=((layer - 1, grad_outs if chain_regime["probe_fusion"]
-                           else grad_outs[0]) if layer > 0 else None),
+                           else grad_outs[0]) if layer > chain_bottom else None),
                     batch_size=chain_regime["batch_size"],
                     probe_fusion=chain_regime["probe_fusion"])
                 if layer in boundaries:
@@ -1344,11 +1450,45 @@ def run_adjoint_capture_core(
 
         storage.settle_local_output()
         boundary_entries: dict[str, list[dict]] = {}
-        for boundary in range(num_layers):
-            boundary_entries[str(boundary)] = [
-                exact_entry_record(batch.activations_cpu[boundary])
-                for batch in batches]
+        if seed_plan is None:
+            for boundary in range(num_layers):
+                boundary_entries[str(boundary)] = [
+                    exact_entry_record(batch.activations_cpu[boundary])
+                    for batch in batches]
         retention = storage.receipt()
+
+    receipt_stride = {"value": int(stride), "source": None,  # filled by caller
+                      "boundaries": [int(b) for b in boundaries],
+                      "max_chain_layers": int(stride) - 1}
+    if seed_plan is not None:
+        # A seed is a measurement, never a campaign run: its receipt has its
+        # own schema and file, and the band tool refuses its space
+        # (RobTand/prismaquant#1016).
+        receipt = {
+            "schema": SEED_RECEIPT_SCHEMA,
+            "entry_point": ADJOINT_CAPTURE_ENTRY_POINT,
+            "status": "complete",
+            "bandable": False,
+            "run_identity": run_identity,
+            "stride": receipt_stride,
+            "boundary_storage": boundary_storage_block(None),
+            "seed": seed_plan.binding,
+            "checkpoints": checkpoints,
+            "plane_comparison": compare_seed_plane(seed_plan, plane_digests),
+            "retention": retention,
+            "artifact_budget_override": artifact_budget_stamp,
+            "telemetry": {
+                "started_unix": started,
+                "wall_s": time.time() - started,
+                "chain_wall_s": (time.time() - chain_started
+                                 if chain_started else None),
+                "chain_backwards": chain_backwards,
+                "chain_layers": chain_telemetry,
+            },
+            "dev_mode": dev_mode_stamp(),
+        }
+        receipt["telemetry"].update(_produced_output_block(storage))
+        return receipt
 
     # Every implementation declaration of this run's resumes, outside the
     # header digest (PQ #1001). A run never resumed, or resumed only under
@@ -1359,9 +1499,7 @@ def run_adjoint_capture_core(
         "entry_point": ADJOINT_CAPTURE_ENTRY_POINT,
         "status": "complete",
         "run_identity": run_identity,
-        "stride": {"value": int(stride), "source": None,  # filled by caller
-                   "boundaries": [int(b) for b in boundaries],
-                   "max_chain_layers": int(stride) - 1},
+        "stride": receipt_stride,
         "boundary_storage": boundary_storage_block(recovery),
         **({RESUME_COMPATIBILITY_KEY: declarations} if declarations else {}),
         "boundary_entries": boundary_entries,
@@ -1546,12 +1684,19 @@ def run_adjoint_capture(
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
     prefetch_override=None, artifact_budget_bytes=None, forward_recovery=None,
     chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
+    chain_seed=None,
 ) -> dict:
     """Load the head phase and run the adjoint capture (one PB action).
 
     ``chain_resume`` relaunches the run from its lowest sealed checkpoint
     (``run_adjoint_capture_core``, PQ #1001). It implies the head walk's own
     ``--resume``: the relaunch re-verifies the head journal it banked.
+
+    ``chain_seed`` (a normalized ``stage_a_chain_seed`` spec, PQ #1016) runs
+    the plan's own run's sealed checkpoint on into ``output_root``, a scratch
+    root that is not the plan's: the plan's ``output_root`` must be the
+    source run's root instead. The seed receipt is written to
+    ``seed-receipt.json``, never ``adjoint-capture.json``.
     """
     from .aura_cost import _aura_source_sha256
     from .calibration_data import load_calibration_input
@@ -1584,10 +1729,28 @@ def run_adjoint_capture(
     torch.set_float32_matmul_precision("highest")
     torch.backends.cuda.matmul.allow_tf32 = False
 
-    if Path(config["output_root"]).resolve() != Path(output_root).resolve():
+    if chain_seed is None and (
+            Path(config["output_root"]).resolve() != Path(output_root).resolve()):
         raise AdjointIdentityRefused(
             f"plan output_root {config['output_root']} is not --output-root "
             f"{output_root}")
+    if chain_seed is not None:
+        # A seed measures the plan's own run from a scratch root: the plan
+        # names the source run's root, and --output-root is somewhere else
+        # (RobTand/prismaquant#1016). Both are checked before any GPU work.
+        from .stage_a_chain_seed import ChainSeedRefused, preflight_seed_root
+        if chain_resume is not None or forward_recovery is not None:
+            raise AdjointIdentityRefused(
+                "chain seed refused: a seed is neither a chain resume nor a forward "
+                "recovery")
+        try:
+            seed_source = preflight_seed_root(output_root, chain_seed)
+        except ChainSeedRefused as exc:
+            raise AdjointIdentityRefused(f"chain seed refused: {exc}") from exc
+        if Path(config["output_root"]).resolve() != seed_source.resolve():
+            raise AdjointIdentityRefused(
+                f"chain seed refused: the seed checkpoint is not under the plan's "
+                f"output_root {config['output_root']}")
     try:
         regime_stamp = chain_regime_identity(
             normalize_chain_regime(chain_batch_size, chain_probe_fusion))
@@ -1623,6 +1786,7 @@ def run_adjoint_capture(
         "artifact_budget_override": artifact["override"],
         **({"chain_regime": regime_stamp} if regime_stamp is not None else {}),
         **({"chain_resume": dict(chain_resume)} if chain_resume is not None else {}),
+        **({"chain_seed": dict(chain_seed)} if chain_seed is not None else {}),
         "env": {"host": socket.gethostname(), "started_epoch": time.time(),
                 "torch": str(torch.__version__), "cuda": torch.version.cuda,
                 "affinity": sorted(os.sched_getaffinity(0))},
@@ -1717,10 +1881,13 @@ def run_adjoint_capture(
         roster_digest = hashlib.sha256("".join(
             f"{name}\n" for name in sorted(data.formats_by_qname)).encode()).hexdigest()
         capture_scope = config.get("campaign_scope")
-        if forward_recovery is not None:
+        # A seed's capsule names the campaign the way a recovery capsule does.
+        campaign_capsule = (forward_recovery if chain_seed is None
+                            else chain_seed["capsule"])
+        if campaign_capsule is not None:
             from .joint_forward_resume import _read
             from .joint_forward_campaign import resolve_forward_campaign
-            recovery_document, _ = _read(forward_recovery["path"], forward_recovery["sha256"])
+            recovery_document, _ = _read(campaign_capsule["path"], campaign_capsule["sha256"])
             recovered_campaign = resolve_forward_campaign(recovery_document,
                 plan_sha256=plan_sha256, prepared_sha256=prepared["sha256"],
                 read_manifest_sha256=read_manifest_sha256 or "0" * 64,
@@ -1752,7 +1919,7 @@ def run_adjoint_capture(
             min_free_gib=config.get("min_free_gib", 0.0), progress=progress,
             produced_output=publication, forward_recovery=forward_recovery,
             chain_batch_size=chain_batch_size, chain_probe_fusion=chain_probe_fusion,
-            chain_resume=chain_resume,
+            chain_resume=chain_resume, chain_seed=chain_seed,
             arithmetic_extra={
                 "container_content_sha256": result["env"]["container_content_sha256"],
                 "projection_backend": projection_backend.identity})
@@ -1763,12 +1930,20 @@ def run_adjoint_capture(
         result["peak_gpu_reserved_bytes"] = torch.cuda.max_memory_reserved()
         if result["peak_gpu_bytes"] > config["max_gpu_bytes"]:
             raise RuntimeError("observed GPU allocation exceeds declared budget")
-        write_adjoint_receipt(space, receipt)
-        result["adjoint_receipt"] = {
-            "path": str(space / "adjoint-capture.json"),
-            "sha256": hashlib.sha256(
-                (space / "adjoint-capture.json").read_bytes()).hexdigest(),
-        }
+        if chain_seed is not None:
+            from .stage_a_chain_seed import write_seed_receipt
+            result["seed_receipt"] = write_seed_receipt(space, receipt)
+            result["plane_comparison"] = (
+                None if receipt["plane_comparison"] is None
+                else {key: receipt["plane_comparison"][key]
+                      for key in ("boundary", "equal", "different", "bitwise_equal")})
+        else:
+            write_adjoint_receipt(space, receipt)
+            result["adjoint_receipt"] = {
+                "path": str(space / "adjoint-capture.json"),
+                "sha256": hashlib.sha256(
+                    (space / "adjoint-capture.json").read_bytes()).hexdigest(),
+            }
         result["checkpoints"] = [
             {"boundary": entry["boundary"],
              "cotangent_sha256": entry["cotangent_sha256"]}
@@ -1845,6 +2020,17 @@ def _chain_resume_argument(args):
             "declaration": declaration, "resume_from": args.resume_from_checkpoint}
 
 
+def _chain_seed_argument(args):
+    """The core's ``chain_seed`` from ``--chain-seed``, or ``None``."""
+    if args.chain_seed is None:
+        return None
+    from .stage_a_chain_seed import ChainSeedRefused, load_seed_spec
+    try:
+        return load_seed_spec(args.chain_seed, args.chain_seed_sha256)
+    except ChainSeedRefused as exc:
+        raise AdjointIdentityRefused(f"chain seed refused: {exc}") from exc
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Run stage A of the distributed joint-AURA cost campaign: "
@@ -1913,7 +2099,22 @@ def main(argv=None) -> int:
                              "a chain sealed by implementation FROM under "
                              "implementation TO. Recorded in the receipt and in "
                              "every band sealed below the switch; never inferred")
+    parser.add_argument("--chain-seed", type=Path, default=None,
+                        help="dev mode only: a prismaquant.stage_a.chain_seed.v1 "
+                             "spec. Continues the plan's own run's sealed "
+                             "checkpoint, sealed by another implementation, into "
+                             "--output-root, a scratch root, for measurement; "
+                             "writes a seed receipt the band tool refuses "
+                             "(RobTand/prismaquant#1016)")
+    parser.add_argument("--chain-seed-sha256", default=None)
     args = parser.parse_args(argv)
+    if bool(args.chain_seed) != bool(args.chain_seed_sha256):
+        parser.error("--chain-seed and --chain-seed-sha256 must be paired")
+    if args.chain_seed is not None and (
+            args.resume_chain_state_sha256 is not None or args.forward_recovery):
+        parser.error("--chain-seed binds a fresh scratch run: it takes no "
+                     "--resume-chain-state-sha256 or --forward-recovery; with "
+                     "--resume it resumes only the scratch root's own head walk")
     if args.resume_chain_state_sha256 is None and (
             args.resume_from_checkpoint is not None
             or args.resume_implementation_compatibility is not None):
@@ -1946,12 +2147,14 @@ def main(argv=None) -> int:
                               if args.forward_recovery else None),
             chain_batch_size=args.chain_batch_size,
             chain_probe_fusion=args.chain_probe_fusion == "on",
-            chain_resume=_chain_resume_argument(args))
+            chain_resume=_chain_resume_argument(args),
+            chain_seed=_chain_seed_argument(args))
     except AdjointIdentityRefused as exc:
         print(f"adjoint_identity_refused: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED
     print(json.dumps({key: result[key] for key in (
-        "command", "passed", "stride", "checkpoints")}))
+        "command", "passed", "stride", "checkpoints", "plane_comparison")
+        if key in result}))
     return EXIT_OK if result["passed"] else EXIT_FAILURE
 
 
