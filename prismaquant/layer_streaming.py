@@ -2161,6 +2161,20 @@ class LayerCache:
         scheduler so checking doesn't reshuffle eviction order."""
         return layer_idx in self._cache
 
+    def pin_resident(self, layer_idx: int):
+        """Pin a resident entry until its next read; return its tensors.
+
+        A caller that schedules a layer the cache already holds declares the
+        same near-future use a prefetch ``put(pinned_until_read=True)``
+        declares, so the entry takes the same pin: eviction prefers every
+        unpinned entry first (RobTand/prismaquant#1124). Returns None when
+        the layer is not resident. Does not touch LRU order or hit counts.
+        """
+        tensors = self._cache.get(layer_idx)
+        if tensors is not None:
+            self._pinned_until_read.add(layer_idx)
+        return tensors
+
     def put(self, layer_idx: int, tensors: dict[str, torch.Tensor],
             force: bool = True, pinned_until_read: bool = False) -> bool:
         """Insert tensors into the cache. Returns True on success.

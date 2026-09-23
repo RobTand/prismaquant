@@ -5252,13 +5252,14 @@ class StreamedCausalLM:
                     batches, extra=[state[2] for state in states]))
 
         # The runner owns residency; this visitor keeps no residency state of
-        # its own. `schedule_prefetch` is idempotent: it returns None for a hot
-        # layer, the same future for a read it already holds (in flight or
-        # delivered and unclaimed), and submits a fresh read only when nothing
-        # is held. Each layer is speculated once ahead of its turn and
-        # re-asserted once immediately before its install, so a speculation
-        # the runner no longer holds (the layer was hot and then evicted, or
-        # the pressure floor refused the read) gets one bounded retry and the
+        # its own. `schedule_prefetch` is idempotent: it returns the same future
+        # for a read it already holds (in flight or delivered and unclaimed),
+        # owns a hot layer through a completed future until its install
+        # (#1124), and submits a fresh read only when nothing is held. Each
+        # layer is speculated once ahead of its turn and re-asserted once
+        # immediately before its install, so a speculation the runner no
+        # longer holds (the pressure floor refused the read, or a hot layer
+        # left the cache before the schedule owned it) gets one bounded retry and the
         # `require_prefetched` refusal stays fail-closed for anything else (#403).
         # The speculation record is the runner's future, whose result is the
         # layer's tensors; it is released at re-assert, the same moment the

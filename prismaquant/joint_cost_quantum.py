@@ -698,8 +698,8 @@ def _install_with_settlement(runner, layer: int, *, operator_windows,
     The layer is asked for first. ``install(require_prefetched=True)``
     refuses a layer that is neither resident nor in flight, and nothing
     before the walk's first layer prefetches it; for any later layer the
-    call hands back the read already in flight, or nothing when the layer
-    is resident. After the install, the next ``prefetch_lookahead`` layers
+    call hands back the read already in flight, or owns the resident entry
+    until the install claims it (PQ #1124). After the install, the next ``prefetch_lookahead`` layers
     of the order are prefetched, and never a layer the quantum does not
     install. The single run's reverse walk prefetches ``layer - 1`` after
     every layer; here that read would be the next quantum's source, which
