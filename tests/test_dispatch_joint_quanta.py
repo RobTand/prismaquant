@@ -21,6 +21,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+from prismaquant.joint_adjoint_slices import stage_a_slice, write_adjoint_slice
+from prismaquant.joint_layer_quanta import adjoint_binding_fields
+
+from test_stage_b_band_binding import band_from_receipt, synthetic_receipt
 
 from dispatch_joint_quanta import (  # noqa: E402
     ADJOINT_SCHEMA,
@@ -104,7 +108,9 @@ def _record(campaign, layer, receipts_root="adjoint-receipt.json",
         "chunks": [{"name": f"{quantum_id}-chunk-000", "start_bytes": 0,
                     "end_bytes": size}],
         "windows": [{"window_index": 0, "names": []}],
-        "adjoint": {"checkpoint_boundary": N_LAYERS, "chain_layers": [],
+        # Stride-1 geometry: every layer reads checkpoint ``layer + 1`` and
+        # carries no chain. Unbound (pre-A) until ``_bind`` seals its slice.
+        "adjoint": {"checkpoint_boundary": layer + 1, "chain_layers": [],
                     "receipt_sha256": None},
         "output_space": {"root": f"layer-quanta/{quantum_id}"},
     }
@@ -125,12 +131,13 @@ def records_dir(tmp_path, campaign):
     return directory
 
 
-def _receipt(campaign, *, plan_sha256=None):
-    return {"schema": ADJOINT_SCHEMA,
-            "plan_sha256": campaign["plan_sha256"] if plan_sha256 is None else plan_sha256,
-            "prepared_sha256": campaign["prepared_sha256"],
-            "checkpoints": [{"boundary": N_LAYERS, "cotangent_sha256": "9" * 64}],
-            "generation": "gen-fixture"}
+def _receipt(campaign, *, plan_sha256=None, **overrides):
+    """A completed stride-1 stage-A receipt for the fixture campaign."""
+    assert ADJOINT_SCHEMA == "prismaquant.joint_adjoint_capture.v1"
+    return synthetic_receipt(
+        plan_sha256=campaign["plan_sha256"] if plan_sha256 is None else plan_sha256,
+        prepared_sha256=campaign["prepared_sha256"], scope=campaign["scope"],
+        num_layers=N_LAYERS, stride=1, **overrides)
 
 
 def _write_receipt(path, receipt):
@@ -138,15 +145,30 @@ def _write_receipt(path, receipt):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _bind(record, proof, slice_root):
+    """Bind one record to the slice ``proof`` gives its layer, the way the
+    producer does (PQ #993): the slice file first, then the record's adjoint
+    block names that file and its digest, and the identity is resealed."""
+    layer = record["layer"]
+    adjoint_slice = stage_a_slice(proof, layer)
+    path = Path(slice_root) / f"{record['quantum_id']}.json"
+    write_adjoint_slice(path, adjoint_slice, layer=layer)
+    record["adjoint"] = {
+        "checkpoint_boundary": record["adjoint"]["checkpoint_boundary"],
+        "chain_layers": record["adjoint"]["chain_layers"],
+        **adjoint_binding_fields(adjoint_slice, slice_path=str(path))}
+    record.pop("identity_sha256", None)
+    record["identity_sha256"] = canonical_json_sha256(
+        record, where="fixture layer-quantum record")
+    return record
+
+
 def _stamp_receipt(records_dir, receipt_path):
-    """Seal records against the receipt the way the producer does: the
-    canonical digest of the decoded receipt (``bind_adjoint_receipt``), not
-    the receipt file's wire bytes."""
-    canonical = canonical_json_sha256(
-        json.loads(Path(receipt_path).read_text()), where="fixture receipt")
+    """Seal every record against the slice the receipt gives its layer."""
+    proof = json.loads(Path(receipt_path).read_text())
     for record_path in sorted(records_dir.glob("layer-*.json")):
         record = json.loads(record_path.read_text())
-        record["adjoint"]["receipt_sha256"] = canonical
+        _bind(record, proof, records_dir.parent / "adjoint-slices")
         record_path.write_text(json.dumps(record))
 
 
@@ -167,14 +189,12 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     progress phases, dev-mode env, detached. PB owns placement past that."""
     slices = tmp_path / "slices"
     slices.mkdir()
-    record = _record(campaign, 1, slice_dir=slices)
+    record = _bind(_record(campaign, 1, slice_dir=slices), _receipt(campaign),
+                   tmp_path / "adjoint-slices")
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
-    adjoint_path = tmp_path / "adjoint-capture.json"
-    adjoint_path.write_bytes(b'{"receipt": "fixture"}')
     argv = quantum_argv(record, record_path=record_path,
-                        output_root=Path("/out/root"),
-                        adjoint_path=adjoint_path)
+                        output_root=Path("/out/root"))
     tags = [argv[i + 1] for i, word in enumerate(argv[:-1]) if word == "--tag"]
     assert tags == ["gb10"]
     assert CONSUMER_TAGS == ("gb10",)
@@ -215,9 +235,12 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     assert inner[inner.index("--plan-sha256") + 1] == campaign["plan_sha256"]
     assert inner[inner.index("--prepared") + 1] == campaign["prepared_path"]
     assert inner[inner.index("--prepared-sha256") + 1] == campaign["prepared_sha256"]
-    assert inner[inner.index("--adjoint") + 1] == str(adjoint_path)
-    assert inner[inner.index("--adjoint-sha256") + 1] == hashlib.sha256(
-        adjoint_path.read_bytes()).hexdigest()
+    # PQ #993: the quantum reads its own stage-A slice, never a receipt.
+    slice_path = Path(record["adjoint"]["slice_path"])
+    assert inner[inner.index("--adjoint-slice") + 1] == str(slice_path)
+    assert inner[inner.index("--adjoint-slice-sha256") + 1] == hashlib.sha256(
+        slice_path.read_bytes()).hexdigest() == record["adjoint"]["slice_sha256"]
+    assert "--adjoint" not in inner and "--adjoint-sha256" not in inner
     assert "--resume" in inner
     assert inner[inner.index("--data-manifest-sha256") + 1] == record["read_set"]["manifest_sha256"]
     assert inner[inner.index("--output-root") + 1] == "/out/root"
@@ -389,6 +412,71 @@ def test_quanta_publish_once_the_receipt_lands(tmp_path, campaign, records_dir):
     assert kinds == ["quantum", "quantum", "quantum"]
 
 
+# -- checkpoint bands (PQ #993): publish a band's layers before the receipt ------
+
+
+def _write_band(tmp_path, receipt, boundary):
+    path = tmp_path / "bands" / f"band-{boundary:03d}.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(band_from_receipt(receipt, boundary)))
+    return path
+
+
+def test_a_band_publishes_its_own_layers_while_stage_a_runs(
+        tmp_path, campaign, records_dir, capsys):
+    """Stage A seals the tail band hours before its receipt. The dispatcher
+    publishes exactly the quanta that band serves; the rest stay pending, and
+    the running stage A is neither refused nor republished."""
+    receipt = _receipt(campaign)
+    receipt_path = tmp_path / "adjoint-capture.json"
+    _write_receipt(receipt_path, receipt)
+    _stamp_receipt(records_dir, receipt_path)
+    receipt_path.unlink()
+    band = _write_band(tmp_path, receipt, N_LAYERS)
+    gateway = FakeGateway(terminal=False)
+    out = tmp_path / "out"
+    (out / "layer-quanta").mkdir(parents=True)
+    (out / "layer-quanta" / "campaign-state.json").write_text(
+        json.dumps({"event": "stage-a-submitted",
+                    "action_key": "stage-a-action-key"}) + "\n")
+    argv = _argv(records_dir, out, None, ("--adjoint-band", str(band)))
+    assert main(argv + ["--dry-run"], _gateway=gateway) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert [row["quantum_id"] for row in printed["rows"]] == ["layer-002"]
+    assert printed["stage_a_pending"] == ["layer-001", "layer-000"]
+    assert main(argv, _gateway=gateway) == 0
+    assert [call.get("quantum_id") for call in gateway.submitted] == ["layer-002"]
+    # A second band adds its layer and republishes nothing.
+    gateway.mark_terminal(gateway.submitted[0]["action_key"])
+    gateway.submitted.clear()
+    lower = _write_band(tmp_path, receipt, N_LAYERS - 1)
+    assert main(argv + ["--adjoint-band", str(lower)], _gateway=gateway) == 0
+    assert [call.get("quantum_id") for call in gateway.submitted] == ["layer-001"]
+
+
+def test_bands_of_another_run_or_slice_refuse(tmp_path, campaign, records_dir):
+    """A named band that does not prove the sealed records refuses at once
+    (exit 3, nothing published), whether stage A is terminal or not: a band
+    from another stage-A generation mixed with this run's band, or a band
+    whose slice differs from the one each record binds."""
+    receipt = _receipt(campaign)
+    other = _receipt(campaign, generation="another-generation")
+    receipt_path = tmp_path / "adjoint-capture.json"
+    _write_receipt(receipt_path, receipt)
+    _stamp_receipt(records_dir, receipt_path)
+    receipt_path.unlink()
+    out = tmp_path / "out"
+    (tmp_path / "other").mkdir()
+    mixed = ("--adjoint-band", str(_write_band(tmp_path, receipt, N_LAYERS)),
+             "--adjoint-band", str(_write_band(tmp_path / "other", other, N_LAYERS - 1)))
+    gateway = FakeGateway(terminal=False)
+    assert main(_argv(records_dir, out, None, mixed), _gateway=gateway) == 3
+    assert gateway.submitted == []
+    foreign = ("--adjoint-band", str(_write_band(tmp_path / "other", other, N_LAYERS)))
+    assert main(_argv(records_dir, out, None, foreign), _gateway=gateway) == 3
+    assert gateway.submitted == []
+
+
 # -- dry-run: plan with digests, submits nothing ---------------------------------
 
 
@@ -402,11 +490,20 @@ def test_dry_run_prints_plan_with_digests_and_submits_nothing(
     assert main(_argv(records_dir, out, receipt_path, ("--dry-run",)),
                 _gateway=gateway) == 0
     assert gateway.submitted == []
-    plan = capsys.readouterr().out
+    printed = capsys.readouterr().out
     for layer in range(N_LAYERS):
-        assert f"layer-{layer:03d}" in plan
-    assert digest in plan
-    assert "PRISMAQUANT_DEV_MODE=1" in plan
+        assert f"layer-{layer:03d}" in printed
+    assert "PRISMAQUANT_DEV_MODE=1" in printed
+    # Each row names the slice it binds and the chain it reads, never the
+    # receipt's digest.
+    rows = {row["quantum_id"]: row for row in json.loads(printed)["rows"]}
+    for record_path in records_dir.glob("layer-*.json"):
+        record = json.loads(record_path.read_text())
+        row = rows[record["quantum_id"]]
+        assert row["slice_sha256"] == record["adjoint"]["slice_sha256"]
+        assert row["checkpoint_boundary"] == record["layer"] + 1
+        assert row["chain_layers"] == []
+    assert digest not in printed
 
 
 # -- idempotency: re-running publishes nothing already terminal -----------------
@@ -629,15 +726,13 @@ def test_quantum_argv_binds_slice_digest_not_campaign_parent(tmp_path, campaign)
     slice's actual bytes digest, or the map can never match."""
     slices = tmp_path / "slices"
     slices.mkdir()
-    record = _record(campaign, 1, slice_dir=slices)
+    record = _bind(_record(campaign, 1, slice_dir=slices), _receipt(campaign),
+                   tmp_path / "adjoint-slices")
     assert record["campaign"]["read_manifest_sha256"] != record["read_set"]["manifest_sha256"]
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
-    adjoint_path = tmp_path / "adjoint-capture.json"
-    adjoint_path.write_bytes(b'{"receipt": "fixture"}')
     inner = _quantum_payload(quantum_argv(
-        record, record_path=record_path, output_root=Path("/out/root"),
-        adjoint_path=adjoint_path))
+        record, record_path=record_path, output_root=Path("/out/root")))
     bound = inner[inner.index("--data-manifest-sha256") + 1]
     assert bound == record["read_set"]["manifest_sha256"]
     assert bound == hashlib.sha256(
@@ -650,30 +745,43 @@ def test_quantum_argv_refuses_drifted_slice(tmp_path, campaign):
     nothing."""
     slices = tmp_path / "slices"
     slices.mkdir()
-    record = _record(campaign, 1, slice_dir=slices)
+    record = _bind(_record(campaign, 1, slice_dir=slices), _receipt(campaign),
+                   tmp_path / "adjoint-slices")
     Path(record["read_set"]["manifest_path"]).write_bytes(b"tampered")
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
-    adjoint_path = tmp_path / "adjoint-capture.json"
-    adjoint_path.write_bytes(b'{"receipt": "fixture"}')
     with pytest.raises(DispatchRefused, match="do not hash to the sealed"):
         quantum_argv(record, record_path=record_path,
-                     output_root=Path("/out/root"),
-                     adjoint_path=adjoint_path)
+                     output_root=Path("/out/root"))
 
 
 def test_quantum_argv_refuses_absent_slice(tmp_path, campaign):
     """A sealed digest over bytes the dispatcher cannot read is a producer
     defect, refused before publishing -- never a row that binds blind."""
-    record = _record(campaign, 1)
+    record = _bind(_record(campaign, 1), _receipt(campaign), tmp_path / "adjoint-slices")
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
-    adjoint_path = tmp_path / "adjoint-capture.json"
-    adjoint_path.write_bytes(b'{"receipt": "fixture"}')
     with pytest.raises(DispatchRefused, match="unreadable"):
         quantum_argv(record, record_path=record_path,
-                     output_root=Path("/out/root"),
-                     adjoint_path=adjoint_path)
+                     output_root=Path("/out/root"))
+
+
+def test_quantum_argv_refuses_an_unbound_or_drifted_stage_a_slice(tmp_path, campaign):
+    """PQ #993: a row reads the slice its record binds. An unbound (pre-A)
+    record, or a slice file whose bytes no longer hash to the sealed digest,
+    refuses before anything publishes."""
+    slices = tmp_path / "slices"
+    slices.mkdir()
+    record = _record(campaign, 1, slice_dir=slices)
+    record_path = tmp_path / "layer-001.json"
+    record_path.write_text(json.dumps(record))
+    with pytest.raises(DispatchRefused, match="unbound"):
+        quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
+    record = _bind(record, _receipt(campaign), tmp_path / "adjoint-slices")
+    record_path.write_text(json.dumps(record))
+    Path(record["adjoint"]["slice_path"]).write_bytes(b"{}")
+    with pytest.raises(DispatchRefused, match="does not hash to the sealed digest"):
+        quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
 
 
 def test_stage_a_argv_accepts_v2_read_plan(tmp_path, campaign):
@@ -733,10 +841,10 @@ def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, camp
         "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": 28,
         "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10"}}
     dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    record = _record(campaign, 1, slice_dir=tmp_path)
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+                   tmp_path / 'adjoint-slices')
     path = tmp_path/'record.json'; path.write_text(json.dumps(record))
-    receipt = tmp_path/'receipt.json'; receipt.write_text('{}')
-    args = dict(record_path=path, output_root=tmp_path/'out', adjoint_path=receipt)
+    args = dict(record_path=path, output_root=tmp_path/'out')
     argv = quantum_argv(record, **args)
     assert argv[argv.index('--demand')+1] == 'gpu=1,mem_gb=100'
     assert argv[argv.index('--gpu-memory-gb')+1] == '72'
@@ -760,8 +868,7 @@ def test_extended_catalog_cannot_launch_historical_bare_parent_readset(tmp_path,
     record = _record(campaign, 1, slice_dir=tmp_path)
     record['catalog_extension'] = {'path': '/proof', 'sha256': 'e'*64}
     with pytest.raises(DispatchRefused, match='requires executable prepared-input'):
-        quantum_argv(record, record_path=tmp_path/'record', output_root=tmp_path/'out',
-                     adjoint_path=tmp_path/'receipt')
+        quantum_argv(record, record_path=tmp_path/'record', output_root=tmp_path/'out')
 
 
 @pytest.mark.parametrize('readonly', [False, True])
@@ -775,10 +882,10 @@ def test_cotangent_scratch_is_validated_and_sealed_in_outer_request(
     spec = {'container': {'image': 'sha256:' + '0' * 64,
              'mounts': [{'source': root, 'target': root, 'readonly': readonly}]}, 'env': env}
     dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    record = _record(campaign, 1, slice_dir=tmp_path)
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+                   tmp_path / 'adjoint-slices')
     path = tmp_path / 'record.json'; path.write_text(json.dumps(record))
-    receipt = tmp_path / 'receipt.json'; receipt.write_text('{}')
-    args = dict(record_path=path, output_root=tmp_path / 'out', adjoint_path=receipt)
+    args = dict(record_path=path, output_root=tmp_path / 'out')
     if readonly:
         with pytest.raises(dispatch.DispatchRefused, match='writable identity bind'):
             quantum_argv(record, **args)

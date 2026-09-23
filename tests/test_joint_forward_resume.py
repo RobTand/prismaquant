@@ -192,10 +192,18 @@ def test_recovered_tail_and_reverse_checkpoints_equal_uninterrupted(tmp_path, mo
         expected = load_adjoint_checkpoint(adjoint_space(tmp_path / 'baseline'), old)[0]
         assert actual.keys() == expected.keys()
         assert all(torch.equal(actual[key], expected[key]) for key in actual)
-    from prismaquant.joint_layer_quanta import bind_adjoint_receipt
+    from prismaquant.joint_adjoint_slices import stage_a_run_header, stage_a_slice
+    from prismaquant.joint_layer_quanta import check_adjoint_run_header
     from prismaquant.joint_adjoint_checkpoints import reference_from_record
-    assert bind_adjoint_receipt(resumed, plan_sha256='b'*64, prepared_sha256='c'*64,
+    # The resumed run's sealed receipt answers for the campaign and gives
+    # every layer its slice (PQ #993).
+    sealed = json.loads(json.dumps(resumed))
+    assert check_adjoint_run_header(
+        stage_a_run_header(sealed), plan_sha256='b'*64, prepared_sha256='c'*64,
         scope=None, checkpoints=[c['boundary'] for c in resumed['checkpoints']])
+    assert all(stage_a_slice(sealed, layer)['boundary_storage']['forward_recovery']
+               == resumed['boundary_storage']['forward_recovery']
+               for layer in range(max(sealed['stride']['boundaries'])))
     settings = dict(resumed['boundary_storage']['policy'])
     settings['directory'] = resumed['boundary_storage']['directory']
     attached = StreamedBoundaryArtifacts(settings)

@@ -54,9 +54,15 @@ Gates, all fail closed with exit 3:
   entries; control placement (manifest path/digest, slice argv/phase
   tables) and receipt binding are the only drift it admits. Separate from
   Gate 1: refuse to combine the two in one run.
-* Gate 2: ``--adjoint-receipt`` must exist and load; the bound set is
-  regenerated with the receipt mapping (every ``adjoint.receipt_sha256``
-  binds, every ``identity_sha256`` moves). Only with the opt-in
+* Gate 2: ``--adjoint-receipt`` (the completed receipt) and/or one
+  ``--adjoint-band`` per sealed checkpoint band must exist and load; the
+  bound set is regenerated for the layers those proofs cover (PQ #993):
+  every record binds its stage-A slice (``adjoint.slice_sha256`` and
+  ``adjoint.slice_path``), every ``identity_sha256`` moves, and each slice
+  file is published before the record naming it. A later run with more
+  bands adds records and leaves every earlier one byte-identical; bands
+  publish one index each (``records.band-NNN.json``), the completed
+  receipt ``records.json``. Only with the opt-in
   ``--boundary-readsets`` / ``--executable-readsets`` flags does each
   record additionally get new bound generations (bulk readset, PQ #848;
   single executable manifest, PQ #862) whose files land under
@@ -178,8 +184,8 @@ def _pretty(value) -> bytes:
 #: root, with the old prefix swapped for the new one exactly. Everything
 #: else must be byte-stable canonical JSON; ``identity_sha256`` and the
 #: slice digest are consequences (recomputed and re-verified, never
-#: compared across), and ``adjoint.receipt_sha256`` may move only when a
-#: receipt is bound in this run.
+#: compared across), and the stage-A binding (:data:`_STAGE_A_BINDING`) may
+#: move only when a stage-A proof is bound in this run.
 _MOVED_PATH_FIELDS = (
     ("output_space", "root"),
     ("output_space", "cost_payload"),
@@ -189,6 +195,15 @@ _MOVED_PATH_FIELDS = (
     ("read_set", "manifest_path"),
     ("adjoint", "boundary_artifacts"),
 )
+
+
+#: The record's stage-A binding: unbound records carry ``receipt_sha256:
+#: None``; bound ones (PQ #993) carry their slice digest and file.
+_STAGE_A_BINDING = ("receipt_sha256", "slice_sha256", "slice_path")
+
+
+def _pop_stage_a_binding(adjoint: dict) -> tuple:
+    return tuple(adjoint.pop(key, None) for key in _STAGE_A_BINDING)
 
 
 def _moved(record: dict, field: tuple[str, str]) -> str:
@@ -257,14 +272,14 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
     new_adjoint = dict(new_body.pop("adjoint", {}))
     old_adjoint.pop("boundary_artifacts", None)
     new_adjoint.pop("boundary_artifacts", None)
-    old_receipt = old_adjoint.pop("receipt_sha256", None)
-    new_receipt = new_adjoint.pop("receipt_sha256", None)
+    old_receipt = _pop_stage_a_binding(old_adjoint)
+    new_receipt = _pop_stage_a_binding(new_adjoint)
     if old_adjoint != new_adjoint:
         raise ValueError(f"Gate 1 {where}: {qid} adjoint block differs "
-                         f"beyond the receipt seal")
+                         f"beyond the stage-A binding")
     if not bound and old_receipt != new_receipt:
-        raise ValueError(f"Gate 1 {where}: {qid} receipt seal moved with "
-                         f"no receipt bound")
+        raise ValueError(f"Gate 1 {where}: {qid} stage-A binding moved with "
+                         f"no stage-A proof bound")
     if json.dumps(old_body, sort_keys=True) != json.dumps(new_body, sort_keys=True):
         raise ValueError(f"Gate 1 {where}: {qid} differs outside the moved "
                          f"paths")
@@ -453,14 +468,14 @@ def _check_authorized_metadata_diff(old: dict, new: dict, *,
         raise ValueError(f"Gate 1 {where}: {qid} adjoint.boundary_artifacts "
                          "moved under a metadata relocation: the stage-A "
                          "artifact root must be retained")
-    old_receipt = old_adjoint.pop("receipt_sha256", None)
-    new_receipt = new_adjoint.pop("receipt_sha256", None)
+    old_receipt = _pop_stage_a_binding(old_adjoint)
+    new_receipt = _pop_stage_a_binding(new_adjoint)
     if old_adjoint != new_adjoint:
         raise ValueError(f"Gate 1 {where}: {qid} adjoint block differs "
-                         "beyond the receipt seal")
+                         "beyond the stage-A binding")
     if not bound and old_receipt != new_receipt:
-        raise ValueError(f"Gate 1 {where}: {qid} receipt seal moved with no "
-                         "receipt bound")
+        raise ValueError(f"Gate 1 {where}: {qid} stage-A binding moved with no "
+                         "stage-A proof bound")
     old_read = dict(old.get("read_set") or {})
     new_read = dict(new.get("read_set") or {})
     old_read.pop("manifest_path", None)
@@ -511,7 +526,7 @@ _CONTROL_BLOCKS = ("identity_sha256", "read_set", "adjoint",
 
 
 def _compare_existing_generation(prior_dir: Path, produced: dict, *,
-                                 bound: bool) -> dict:
+                                 bound: bool, partial: bool = False) -> dict:
     """The mechanical scientific-binding comparison (``--compare-existing``).
 
     Compares the produced generation against a prior on-disk generation
@@ -529,7 +544,9 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
     boundary/executable readset blocks -- those bind actual reads) is
     refused outright; new bindings made in THIS run through the existing
     binders from the trusted receipt remain allowed. Returns a summary
-    dict; any drift outside the admitted set raises.
+    dict; any drift outside the admitted set raises. With ``partial`` (a
+    band-granular binding, PQ #993) the produced generation may cover a
+    subset of the prior quanta; every produced quantum still compares.
     """
     prior_paths = sorted(prior_dir.glob("layer-*.json"))
     if not prior_paths:
@@ -557,9 +574,9 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
             raise ValueError(f"compare {qid}: the prior record seals no "
                              "campaign block: refusing")
         binding = dict(campaign)
-        bound_receipt = (record.get("adjoint") or {}).get("receipt_sha256")
-        if bound_receipt is not None:
-            binding["adjoint_receipt_sha256"] = bound_receipt
+        bound_slice = (record.get("adjoint") or {}).get("slice_sha256")
+        if bound_slice is not None:
+            binding["adjoint_slice_sha256"] = bound_slice
         try:
             check_quantum_for_campaign(record, binding)
         except ValueError as exc:
@@ -574,7 +591,7 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
                     f"the primary sealed inputs instead: refusing")
         prior[qid] = record
     new_by_id = {record["quantum_id"]: record for record in produced["records"]}
-    if set(prior) != set(new_by_id):
+    if set(prior) != set(new_by_id) and not (partial and set(new_by_id) <= set(prior)):
         missing = sorted(set(prior) - set(new_by_id))
         extra = sorted(set(new_by_id) - set(prior))
         raise ValueError(f"the produced generation does not span the prior "
@@ -611,19 +628,19 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
             moved_placement += 1
         old_adjoint = dict(old_record.get("adjoint") or {})
         new_adjoint = dict(new_record.get("adjoint") or {})
-        old_receipt = old_adjoint.pop("receipt_sha256", None)
-        new_receipt = new_adjoint.pop("receipt_sha256", None)
+        old_receipt = _pop_stage_a_binding(old_adjoint)
+        new_receipt = _pop_stage_a_binding(new_adjoint)
         if old_adjoint != new_adjoint:
             raise ValueError(f"{where}: adjoint block differs beyond the "
-                             "receipt seal: refusing")
-        if old_receipt is None and new_receipt is not None:
+                             "stage-A binding: refusing")
+        if old_receipt == (None, None, None) and new_receipt != old_receipt:
             if not bound:
-                raise ValueError(f"{where}: receipt seal moved with no "
-                                 "receipt bound: refusing")
+                raise ValueError(f"{where}: stage-A binding moved with no "
+                                 "stage-A proof bound: refusing")
             receipt_moves += 1
         elif old_receipt != new_receipt:
-            raise ValueError(f"{where}: prior receipt is neither retained "
-                             "nor newly bound: refusing")
+            raise ValueError(f"{where}: prior stage-A binding is neither "
+                             "retained nor newly bound: refusing")
         prior_manifest = _prior_slice_manifest(old_record, where=where)
         new_manifest = produced["slice_manifests"][qid]
         verdict = _compare_prior_slice(
@@ -730,7 +747,12 @@ def main(argv=None) -> int:
                          "sealed set); separate from Gate 1 -- refuse to "
                          "combine with --expect-existing")
     ap.add_argument("--adjoint-receipt", type=Path, default=None,
-                    help="Gate 2: stage-A adjoint-capture.json to bind")
+                    help="Gate 2: the completed stage-A adjoint-capture.json "
+                         "to bind")
+    ap.add_argument("--adjoint-band", type=Path, action="append", default=[],
+                    help="Gate 2: one sealed checkpoint band to bind "
+                         "(repeatable; PQ #993). Only the layers the bands "
+                         "serve get records")
     ap.add_argument("--catalog-extension", type=Path, default=None,
                     help="immutable additive-catalog proof retaining the original Stage A capture")
     ap.add_argument("--catalog-extension-sha256", default=None)
@@ -811,12 +833,14 @@ def main(argv=None) -> int:
 
         if bool(args.catalog_extension) != bool(args.catalog_extension_sha256):
             raise ValueError("catalog extension path and SHA256 must be supplied together")
-        if args.catalog_extension is not None and (args.adjoint_receipt is None or args.expect_existing is not None):
+        if args.catalog_extension is not None and (
+                (args.adjoint_receipt is None and not args.adjoint_band)
+                or args.expect_existing is not None):
             raise ValueError("catalog extension requires actual Stage A proof and a new metadata generation")
         extension = (None if args.catalog_extension is None else {
             "path": str(args.catalog_extension.resolve()), "sha256": args.catalog_extension_sha256})
 
-        def _produce(root: str, receipt=None, metadata=None):
+        def _produce(root: str, proofs=None, metadata=None):
             return layer_quanta(
                 plan, prepared, parent,
                 chunk_target_bytes=derivation.get("chunk_target_bytes"),
@@ -830,16 +854,25 @@ def main(argv=None) -> int:
                 ram_window_gib=derivation.get("ram_window_gib"),
                 max_resident_consumers=derivation.get("max_resident_consumers"),
                 window_partition=partition,
-                adjoint_receipt=receipt, catalog_extension=extension)
+                adjoint_receipts=proofs, catalog_extension=extension)
     except (ValueError, OSError) as exc:
         return _fail(str(exc))
-    receipt = None
-    if args.adjoint_receipt is not None:
-        try:
-            receipt = _load_json(args.adjoint_receipt, digest=None,
-                                 where="adjoint receipt")
-        except ValueError as exc:
-            return _fail(str(exc))
+    from prismaquant.joint_adjoint_slices import (
+        adjoint_slice_bytes, band_set, load_stage_a_receipt_like)
+    proofs: list = []
+    try:
+        if args.adjoint_receipt is not None:
+            proofs.append(load_stage_a_receipt_like(args.adjoint_receipt))
+            if proofs[0].get("status") != "complete":
+                raise ValueError("--adjoint-receipt is not a completed receipt")
+        bands = [load_stage_a_receipt_like(path) for path in args.adjoint_band]
+        if any(band.get("status") != "band" for band in bands):
+            raise ValueError("--adjoint-band names a document that is not a band")
+        band_index = band_set(bands) if bands else {}
+        proofs.extend(band_index.values())
+    except (ValueError, OSError, RuntimeError) as exc:
+        return _fail(f"stage-A proof: {exc}")
+    receipt = proofs or None
     if args.expect_existing is not None:
         # Step A (input fidelity): the original root must reproduce the
         # on-disk records exactly -- canonical JSON, not raw bytes, so a
@@ -866,7 +899,7 @@ def main(argv=None) -> int:
         # fields (and the receipt seal when binding); everything else is
         # strictly equal, and the new identity must recompute.
         try:
-            moved = _produce(output_root, receipt=receipt,
+            moved = _produce(output_root, proofs=receipt,
                              metadata=metadata_root)
         except (ValueError, OSError) as exc:
             return _fail(f"Gate 1 move: {exc}")
@@ -916,15 +949,16 @@ def main(argv=None) -> int:
         produced = moved
     else:
         try:
-            produced = _produce(output_root, receipt=receipt,
+            produced = _produce(output_root, proofs=receipt,
                                 metadata=metadata_root)
         except (ValueError, OSError) as exc:
             return _fail(str(exc))
     bound_manifests: list = []
     if args.boundary_readsets and receipt is None:
-        return _fail("--boundary-readsets needs --adjoint-receipt")
+        return _fail("--boundary-readsets needs --adjoint-receipt or --adjoint-band")
     if args.executable_readsets and receipt is None:
-        return _fail("--executable-readsets needs --adjoint-receipt")
+        return _fail("--executable-readsets needs --adjoint-receipt or --adjoint-band")
+    adjoint_slices = produced.get("adjoint_slices", {})
     if receipt is not None and (
             args.boundary_readsets or args.executable_readsets):
         # Post-capture readset binding (PQ #848/#862): each record gets a
@@ -943,10 +977,13 @@ def main(argv=None) -> int:
             checkpoints = derive_stride(
                 len(layers), derivation.get("stride"))["checkpoints"]
             if args.boundary_readsets:
-                emitted = emit_quantum_boundary_readsets(
-                    receipt, produced["records"],
-                    strided_boundaries=checkpoints, n_probes=n_probes,
-                    output_root=output_root, metadata_root=metadata_root)
+                # Each record binds its own slice (PQ #993): a band serves
+                # only its layers, so the readset derives per record.
+                emitted = [row for record in produced["records"]
+                           for row in emit_quantum_boundary_readsets(
+                               adjoint_slices[record["quantum_id"]], [record],
+                               strided_boundaries=checkpoints, n_probes=n_probes,
+                               output_root=output_root, metadata_root=metadata_root)]
                 produced["records"] = [row["record"] for row in emitted]
                 bound_manifests = [(row["manifest_path"], row["manifest"],
                                     row["manifest_sha256"]) for row in emitted]
@@ -1031,7 +1068,8 @@ def main(argv=None) -> int:
                           f"{sum(len(window['members']) for window in layer_prepared['windows'])} "
                           f"render members")
                     for row in emit_quantum_executable_readsets(
-                            receipt, layer_records, parent,
+                            adjoint_slices[layer_records[0]["quantum_id"]],
+                            layer_records, parent,
                             strided_boundaries=checkpoints,
                             n_probes=n_probes,
                             calib={"path": calib_path,
@@ -1061,7 +1099,8 @@ def main(argv=None) -> int:
         # semantic comparison.
         try:
             summary = _compare_existing_generation(
-                args.compare_existing, produced, bound=receipt is not None)
+                args.compare_existing, produced, bound=receipt is not None,
+                partial=bool(args.adjoint_band) and args.adjoint_receipt is None)
         except (ValueError, OSError, KeyError) as exc:
             return _fail(f"compare-existing: {exc}")
         print(f"Compare-existing: {summary['quanta']}/{summary['quanta']} "
@@ -1103,6 +1142,19 @@ def main(argv=None) -> int:
         for manifest_path, manifest, _ in bound_manifests:
             _publish(Path(manifest_path), seal_manifest_bytes(manifest),
                      where="bound readset")
+        # Each bound record's stage-A slice (PQ #993) lands at the path the
+        # record names, as its canonical bytes, before the record exists.
+        for record in produced["records"]:
+            slice_path = record["adjoint"].get("slice_path")
+            if slice_path is None:
+                continue
+            _publish(Path(slice_path),
+                     adjoint_slice_bytes(adjoint_slices[record["quantum_id"]]),
+                     where="stage-A slice")
+            if hashlib.sha256(Path(slice_path).read_bytes()).hexdigest() != \
+                    record["adjoint"]["slice_sha256"]:
+                return _fail(f"stage-A slice at {slice_path} does not hash to "
+                             "the sealed digest")
         # Resolution verification: every bound path must name the exact
         # file just published, whose bytes hash to the sealed digest.
         for record in produced["records"]:
@@ -1132,14 +1184,27 @@ def main(argv=None) -> int:
         for record in produced["records"]:
             _publish(out / f"{record['quantum_id']}.json",
                      _pretty(record), where="quantum record")
-        _publish(out / "records.json", _pretty(produced["records"]),
-                 where="records index")
+        if args.adjoint_band and args.adjoint_receipt is None:
+            # Band granularity (PQ #993): one index per band, so a later run
+            # with more bands adds indexes and never rewrites one.
+            for boundary, band in sorted(band_index.items()):
+                layers = set(band["band"]["layers"])
+                _publish(out / f"records.band-{boundary:03d}.json",
+                         _pretty([record for record in produced["records"]
+                                  if record["layer"] in layers]),
+                         where="band records index")
+        else:
+            _publish(out / "records.json", _pretty(produced["records"]),
+                     where="records index")
         _publish(out / "derivation.json", _pretty(produced["derivation"]),
                  where="derivation")
     except (ValueError, OSError) as exc:
         return _fail(str(exc))
     bound = ("unbound (pre-stage-A)" if receipt is None else
-             f"bound to receipt {produced['records'][0]['adjoint']['receipt_sha256'][:16]}…")
+             f"bound to their stage-A slices ({len(proofs)} proof(s): "
+             f"{'completed receipt' if args.adjoint_receipt is not None else ''}"
+             f"{' + ' if args.adjoint_receipt is not None and args.adjoint_band else ''}"
+             f"{'bands ' + ','.join(str(b) for b in sorted(band_index)) if args.adjoint_band else ''})")
     if bound_manifests:
         bound += f" with {len(bound_manifests)} bound readsets"
     placement = (f"; control metadata under {metadata_root}"

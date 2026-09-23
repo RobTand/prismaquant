@@ -14,10 +14,14 @@ from prismaquant.joint_catalog_extension import (
     ADDED_FORMAT, ADDED_RECIPE, ADOPTION_SCHEMA, create_extension,
     require_extension, verify_catalog_pair,
 )
-from prismaquant.joint_layer_quanta import bind_adjoint_receipt, layer_quanta
+from prismaquant.joint_adjoint_slices import (
+    adjoint_slice_sha256, stage_a_run_header, stage_a_run_header_sha256, write_adjoint_slice,
+    write_band_receipt)
+from prismaquant.joint_layer_quanta import check_adjoint_run_header, layer_quanta
 from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant.tessera_joint_aura import PREPARED_SCHEMA
 from tests.test_joint_quanta_join import campaign, probe
+from tests.test_stage_b_band_binding import band_from_receipt, synthetic_receipt
 
 
 def _write(root, name, value, *, binary=False):
@@ -107,14 +111,15 @@ def _pair(tmp_path, campaign, probe):
             'formats_by_qname': {name: [oldfmt] + ([ADDED_FORMAT] if label == 'extended' else []) + ['BF16']
                                  for name in qnames}, 'measured_cells': len(cells)}
         inputs[label+'_prepared'] = _write(tmp_path, label+'-prepared.json', prepared)
-    receipt = {'schema': 'prismaquant.joint_adjoint_capture.v1', 'status': 'complete',
-        'run_identity': {'plan_sha256': inputs['original_plan']['sha256'],
-            'prepared_sha256': inputs['original_prepared']['sha256'], 'campaign_scope': campaign['scope'],
-            'calibration_sha256': common['calibration_input']['calibration_sha256'],
-            'calibration_shape': common['calibration_input']['shape'],
-            'n_probes': probe['n_probes'], 'seed_base': probe['seed_base'],
-            'unit_roster_sha256': hashlib.sha256(''.join(n+'\n' for n in sorted(qnames)).encode()).hexdigest()},
-        'checkpoints': [{'boundary': 3}]}
+    receipt = synthetic_receipt(
+        plan_sha256=inputs['original_plan']['sha256'],
+        prepared_sha256=inputs['original_prepared']['sha256'], scope=campaign['scope'],
+        num_layers=3, stride=8, root=oldplan['output_root'],
+        identity={'calibration_sha256': common['calibration_input']['calibration_sha256'],
+                  'calibration_shape': common['calibration_input']['shape'],
+                  'n_probes': probe['n_probes'], 'seed_base': probe['seed_base'],
+                  'unit_roster_sha256': hashlib.sha256(
+                      ''.join(n+'\n' for n in sorted(qnames)).encode()).hexdigest()})
     capture = _write(tmp_path, 'capture.json', receipt)
     return inputs, receipt, capture
 
@@ -126,41 +131,59 @@ def test_additive_catalog_binds_original_capture_without_relabelling(tmp_path, c
     args = dict(plan_sha256=inputs['extended_plan']['sha256'],
                 prepared_sha256=inputs['extended_prepared']['sha256'],
                 scope=campaign['scope'], checkpoints=[3])
+    header = stage_a_run_header(receipt)
     with pytest.raises(ValueError, match='another plan_sha256'):
-        bind_adjoint_receipt(receipt, **args)
-    result = bind_adjoint_receipt(receipt, **args, catalog_extension=bound)
-    assert result == canonical_json_sha256(receipt, where="synthetic capture")
+        check_adjoint_run_header(header, **args)
+    result = check_adjoint_run_header(header, **args, catalog_extension=bound)
+    assert result == stage_a_run_header_sha256(header)
     assert Path(capture['path']).read_bytes() == original
-    from tools.dispatch_joint_quanta import check_adjoint_receipt, DispatchRefused
-    dispatch_record = {'campaign': {'plan_sha256': inputs['extended_plan']['sha256'],
-        'prepared_sha256': inputs['extended_prepared']['sha256']},
-        'adjoint': {'receipt_sha256': result}, 'catalog_extension': bound}
-    assert check_adjoint_receipt(Path(capture['path']), [(tmp_path/'q.json', dispatch_record)]) == receipt
-    unbound = {**dispatch_record, 'catalog_extension': None}
-    with pytest.raises(DispatchRefused, match='extension bindings differ'):
-        check_adjoint_receipt(Path(capture['path']), [(tmp_path/'q.json', dispatch_record), (tmp_path/'r.json', unbound)])
+    # PQ #993: the extension binds the original run header, so the first
+    # sealed band of the run creates the same extension bytes as the receipt.
+    band = band_from_receipt(receipt, 3)
+    band_path = tmp_path/'band-003.json'
+    band_file = {'path': str(band_path), 'sha256': write_band_receipt(band_path, band)}
+    from_band = create_extension(inputs=inputs, adjoint_capture=band_file,
+                                 output=tmp_path/'extension-from-band.json')
+    assert from_band['sha256'] == bound['sha256']
     plan = json.loads(Path(inputs['extended_plan']['path']).read_bytes())
     prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
-    produced = layer_quanta(plan, prepared, campaign['parent_manifest'],
-        parent_manifest_sha256=campaign['manifest_sha256'],
+    common = dict(parent_manifest_sha256=campaign['manifest_sha256'],
         plan_path=inputs['extended_plan']['path'], prepared_path=inputs['extended_prepared']['path'],
         plan_sha256=args['plan_sha256'], prepared_sha256=args['prepared_sha256'],
-        adjoint_receipt=receipt, catalog_extension=bound, stride=8)
+        catalog_extension=bound, stride=8)
+    produced = layer_quanta(plan, prepared, campaign['parent_manifest'],
+                            adjoint_receipt=receipt, **common)
+    banded = layer_quanta(plan, prepared, campaign['parent_manifest'],
+                          adjoint_receipts=[band], **common)
+    assert json.dumps(banded['records'], sort_keys=True) == json.dumps(produced['records'], sort_keys=True)
     assert len(produced['records']) == 3
     for record in produced['records']:
-        assert record['adjoint']['receipt_sha256'] == result
+        adjoint_slice = produced['adjoint_slices'][record['quantum_id']]
+        assert record['adjoint']['slice_sha256'] == adjoint_slice_sha256(adjoint_slice)
+        assert 'receipt_sha256' not in record['adjoint']
         assert record['campaign']['prepared_sha256'] == args['prepared_sha256']
         assert record['catalog_extension'] == bound
+        write_adjoint_slice(record['adjoint']['slice_path'], adjoint_slice, layer=record['layer'])
+    from tools.dispatch_joint_quanta import check_stage_a_proofs, DispatchRefused
+    rows = [(tmp_path/f"{record['quantum_id']}.json", record) for record in produced['records']]
+    assert check_stage_a_proofs([(Path(capture['path']), receipt)], rows) == {
+        record['quantum_id']: record['adjoint']['slice_sha256'] for record in produced['records']}
+    unbound = {**produced['records'][1], 'catalog_extension': None}
+    with pytest.raises(DispatchRefused, match='extension bindings differ'):
+        check_stage_a_proofs([(Path(capture['path']), receipt)],
+                             [rows[0], (tmp_path/'r.json', unbound)])
     from prismaquant.joint_cost_quantum import verify_quantum_identity
     first = produced['records'][0]
     quantum = _write(tmp_path, 'quantum.json', first)
-    loaded, original_receipt = verify_quantum_identity(
+    loaded, adjoint_slice = verify_quantum_identity(
         quantum_path=Path(quantum['path']), quantum_sha256=quantum['sha256'],
         plan_path=Path(inputs['extended_plan']['path']), plan_sha256=args['plan_sha256'],
         prepared_path=Path(inputs['extended_prepared']['path']), prepared_sha256=args['prepared_sha256'],
-        adjoint_path=Path(capture['path']), adjoint_sha256=capture['sha256'],
+        adjoint_path=Path(first['adjoint']['slice_path']),
+        adjoint_sha256=first['adjoint']['slice_sha256'],
         output_root=Path(plan['output_root']))
-    assert loaded == first and original_receipt == receipt
+    assert loaded == first
+    assert adjoint_slice == produced['adjoint_slices'][first['quantum_id']]
     # The production metadata CLI carries the explicit bridge into immutable
     # records; it does not rewrite or relocate the original adjoint capture.
     from tools.regenerate_joint_quanta import main as regenerate
@@ -220,8 +243,15 @@ def test_incomplete_capture_and_retargeted_proof_never_authorize_extension(tmp_p
     assert not (tmp_path/'refused.json').exists()
     receipt['status'] = 'complete'
     bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json')
+    header = stage_a_run_header(receipt)
     with pytest.raises(ValueError, match='extended plan binding'):
-        require_extension(bound, receipt=receipt, plan_sha256='0'*64,
+        require_extension(bound, run_header=header, plan_sha256='0'*64,
+                          prepared_sha256=inputs['extended_prepared']['sha256'])
+    # A header of another Stage A run never matches the bound one.
+    other = copy.deepcopy(header)
+    other['boundary_storage']['session']['generation'] = 'another-generation'
+    with pytest.raises(ValueError, match='original Stage A run header'):
+        require_extension(bound, run_header=other, plan_sha256=inputs['extended_plan']['sha256'],
                           prepared_sha256=inputs['extended_prepared']['sha256'])
 
 

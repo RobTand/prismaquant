@@ -83,28 +83,23 @@ def _prepared_inputs(record, files):
 
 
 def _rebound_record_receipt(record, receipt):
-    """Rebind onto a production-shaped receipt through the real owners.
+    """A production-shaped receipt binds the same record (PQ #993).
 
     The tiny capture receipt carries campaign digests under run_identity
-    only; production capture files seal them top-level too (the dispatch
-    receipt gate reads them there). Rebind through the real receipt owner
-    so the bound digest covers the production-shaped receipt, then reseal
-    the record identity the same owner enforces.
+    only; production capture files seal them top-level too. Those are
+    receipt-only fields outside every slice, so the record already bound to
+    its slice of the tiny receipt is bound to the production-shaped one:
+    the slice owner gives the same digest and nothing is re-sealed.
     """
     receipt = copy.deepcopy(receipt)
     campaign = record["campaign"]
     receipt["plan_sha256"] = campaign["plan_sha256"]
     receipt["prepared_sha256"] = campaign["prepared_sha256"]
-    digest = jl.bind_adjoint_receipt(
-        receipt, plan_sha256=campaign["plan_sha256"],
+    _slice, digest = jl.bind_adjoint_slice(
+        receipt, record["layer"], plan_sha256=campaign["plan_sha256"],
         prepared_sha256=campaign["prepared_sha256"],
         scope=campaign["campaign_scope"], checkpoints=STRIDED)
-    record = copy.deepcopy(record)
-    record["adjoint"] = dict(record["adjoint"], receipt_sha256=digest)
-    body = {key: value for key, value in record.items()
-            if key != "identity_sha256"}
-    record["identity_sha256"] = jl.canonical_sha256(
-        body, where="fixture")
+    assert digest == record["adjoint"]["slice_sha256"]
     return record, receipt
 
 

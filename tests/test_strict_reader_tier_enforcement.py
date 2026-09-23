@@ -1125,7 +1125,8 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
                                         "--quantum", "q", "--quantum-sha256", "0" * 64,
                                         "--plan", "p", "--plan-sha256", "0" * 64,
                                         "--prepared", "r", "--prepared-sha256", "0" * 64,
-                                        "--adjoint", "a", "--adjoint-sha256", "0" * 64,
+                                        "--adjoint-slice", "a",
+                                        "--adjoint-slice-sha256", "0" * 64,
                                         "--output-root", "o"])
     assert parsed.allowed_tiers == "ram"
     with pytest.raises(ValueError, match="TIER-04"):
@@ -1164,16 +1165,23 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
             "source_phase": {"name": "layer-1", "start_bytes": 0, "end_bytes": 2048}},
         "chunks": [{"name": "layer-001-chunk-000", "start_bytes": 0, "end_bytes": 2048}],
         "windows": [{"window_index": 0, "names": []}],
-        "adjoint": {"checkpoint_boundary": 3, "chain_layers": [], "receipt_sha256": None},
         "output_space": {"root": "layer-quanta/layer-001"}}
+    # PQ #993: the row is bound to its own stage-A slice, written first.
+    from prismaquant.joint_adjoint_slices import stage_a_slice, write_adjoint_slice
+    from prismaquant.joint_layer_quanta import adjoint_binding_fields
+    from test_stage_b_band_binding import synthetic_receipt
+    adjoint_slice = stage_a_slice(synthetic_receipt(
+        plan_sha256=campaign["plan_sha256"], prepared_sha256=campaign["prepared_sha256"],
+        scope=campaign["scope"], num_layers=3, stride=1), 1)
+    slice_path = tmp_path / "adjoint-slices" / "layer-001.json"
+    write_adjoint_slice(slice_path, adjoint_slice, layer=1)
+    record["adjoint"] = {"checkpoint_boundary": 2, "chain_layers": [],
+                         **adjoint_binding_fields(adjoint_slice, slice_path=str(slice_path))}
     record["identity_sha256"] = canonical_json_sha256(record, where="fixture")
     record_path = tmp_path / "layer-001.json"
     record_path.write_text(json.dumps(record))
-    adjoint_path = tmp_path / "adjoint-capture.json"
-    adjoint_path.write_bytes(b'{"receipt": "fixture"}')
     argv = quantum_argv(record, record_path=record_path,
-                        output_root=tmp_path / "campaign-root",
-                        adjoint_path=adjoint_path)
+                        output_root=tmp_path / "campaign-root")
     inner = argv[argv.index("--") + 1:]
     payload = inner[inner.index("prismaquant.joint_cost_quantum") - 2:]
     assert payload[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]

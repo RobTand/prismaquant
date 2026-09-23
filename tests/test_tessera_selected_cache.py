@@ -160,7 +160,8 @@ def test_missing_or_changed_selected_evidence_refuses(tmp_path, change, match):
                                        schema="tessera.cached_units.v1")
 
 
-@pytest.mark.parametrize('change', [None, 'missing_extension', 'missing_proof', 'changed_wire', 'wrong_scale'])
+@pytest.mark.parametrize('change', [None, 'missing_extension', 'missing_proof', 'changed_wire', 'wrong_scale',
+                                    'v2_extension'])
 def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, change):
     # Capture-reuse and full512 policy derivation have independent artifact-level
     # tests. This bridge supplies their accepted boundary, then runs the real
@@ -227,10 +228,26 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     new_pwc = _write(tmp_path, 'accepted-new-pwc.json', {})
     new_prepared = _write(tmp_path, 'accepted-new-prepared.json', {'production_cache': new_pwc,
         'served_activation_policy': policy_bound, 'stage_b_resource_policy': resource})
-    capture = _write(tmp_path, 'accepted-capture.json', {'status': 'complete'})
-    extension = _write(tmp_path, 'accepted-extension.json', {'schema': bridge.SCHEMA, 'adjoint_capture': capture,
-                      'inputs': {'extended_plan': plan, 'original_plan': old_plan, 'original_prepared': old_prepared,
-                                 'extended_prepared': new_prepared}})
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    from prismaquant.joint_adjoint_slices import stage_a_run_header
+    from test_stage_b_band_binding import synthetic_receipt
+    receipt = synthetic_receipt(plan_sha256=old_plan['sha256'], prepared_sha256=old_prepared['sha256'],
+                                scope={'fixture': 'selected-cache'}, num_layers=2, stride=1)
+    header = stage_a_run_header(receipt)
+    capture = _write(tmp_path, 'accepted-capture.json', receipt)
+    inputs = {'extended_plan': plan, 'original_plan': old_plan, 'original_prepared': old_prepared,
+              'extended_prepared': new_prepared}
+    if change == 'v2_extension':
+        # PQ #993's header-bound extension, which the first band can create.
+        # No capture file is a control dependency of it.
+        document = {'schema': bridge.SCHEMA, 'adjoint_run_header': header,
+                    'adjoint_run_header_sha256': canonical_json_sha256(header, where='header'),
+                    'inputs': inputs}
+    else:
+        document = {'schema': bridge.SCHEMA_V1, 'adjoint_capture': capture,
+                    'adjoint_receipt_sha256': canonical_json_sha256(receipt, where='capture'),
+                    'inputs': inputs}
+    extension = _write(tmp_path, 'accepted-extension.json', document)
     handoff['provenance']['catalog_extension'] = extension
     handoff['provenance']['tessera_joint_allocation'].update(plan_sha256=plan['sha256'], prepared={'sha256': '2'*64})
     seen = []
@@ -245,21 +262,30 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     def build():
         return selected_cached_units_manifest(assignment, metadata, handoff, data,
             schema='tessera.cached_units.v2', catalog_extension=extension, producer_packages=packages)
-    if change:
+    if change and change != 'v2_extension':
         with pytest.raises((ValueError, RuntimeError)): build()
         return
     manifest = build()
-    assert len(seen) == 1
+    assert len(seen) == 1 and seen[0][1]['run_header'] == header
     for package in packages.values():
         directory = Path(package['path']); directory.mkdir()
         (directory/'__init__.py').write_text('# source fixture')
     reads = set(bridge.selected_cache_read_paths(manifest))
-    assert {item['path'] for item in (old_plan, plan, old_prepared, new_prepared, old_pwc, new_pwc, resource, capture)} <= reads
+    assert {item['path'] for item in (old_plan, plan, old_prepared, new_prepared, old_pwc, new_pwc, resource)} <= reads
+    assert (capture['path'] in reads) == (change != 'v2_extension')
     assert {row['wire'] for row in rows} <= reads
     assert str(tmp_path/records[DENSE]['file']) in reads
     assert {proof['path'], str(tmp_path/'source-proof-arm.json'), str(tmp_path/'source-fixture.json')} <= reads
     assert {str(Path(package['path'])/'__init__.py') for package in packages.values()} <= reads
     assert {policy_bound['path'], *(policy[key]['path'] for key in ('original_prepared', 'original_cache', 'census'))} <= reads
+    if change == 'v2_extension':
+        # Known gap, recorded rather than asserted away: the pinned Tessera
+        # reader accepts only a v1 extension as rooted cached-unit authority
+        # (tessera/cached_unit.py). A campaign whose extension a band created
+        # cannot export selected cached units until Tessera reads v2.
+        with pytest.raises(ValueError, match='authority schema differs'):
+            CachedUnitBundle(manifest, tmp_path, set(names), source)
+        return
     bundle = CachedUnitBundle(manifest, tmp_path, set(names), source)
     assert len(bundle.roots) == 2 and bundle.producer_packages == packages
     for name in names:

@@ -12,6 +12,10 @@ identity gates. Three live defects broke that contract (PQ #838):
   so valid writer output fails both the dispatcher receipt check and the
   consumer's record-vs-argv check.
 
+Since PQ #993 a record binds its own stage-A slice, never the receipt: the
+slice file is canonical JSON, so its wire digest is the digest the producer
+seals, and the receipt's formatting is not part of any quantum identity.
+
 These tests drive the REAL producer (``layer_quanta``), the REAL writer
 (``write_adjoint_receipt``), the REAL dispatcher argv, and the REAL consumer
 parser + ``verify_quantum_identity`` on a two-layer CPU fixture. Only the
@@ -34,15 +38,20 @@ for _entry in (ROOT, ROOT / "tools"):
 
 import dispatch_joint_quanta as dispatch  # noqa: E402
 from prismaquant import joint_cost_quantum as quantum  # noqa: E402
-from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
-    load_adjoint_receipt,
-    write_adjoint_receipt,
+from prismaquant.joint_adjoint_checkpoints import write_adjoint_receipt  # noqa: E402
+from prismaquant.joint_adjoint_slices import (  # noqa: E402
+    AdjointSliceRefused,
+    adjoint_slice_sha256,
+    load_adjoint_slice,
+    stage_a_slice,
+    write_adjoint_slice,
 )
 from prismaquant.joint_layer_quanta import (  # noqa: E402
-    canonical_sha256,
     layer_quanta,
     seal_manifest_bytes,
 )
+
+from test_stage_b_band_binding import synthetic_receipt  # noqa: E402
 
 
 @pytest.fixture
@@ -130,20 +139,18 @@ def _produce(campaign: dict, *, receipt=None, output_root=None) -> dict:
 
 
 def _receipt(campaign: dict, checkpoints: list[int]) -> dict:
-    return {
-        "schema": "prismaquant.joint_adjoint_capture.v1",
-        "plan_sha256": campaign["plan_sha"],
-        "prepared_sha256": campaign["prepared_sha"],
-        "campaign_scope": {"campaign": "launch-contract-fixture",
-                           "layers": [0, 1]},
-        "checkpoints": [{"boundary": mark} for mark in checkpoints],
-        "status": "complete",
-    }
+    receipt = synthetic_receipt(
+        plan_sha256=campaign["plan_sha"], prepared_sha256=campaign["prepared_sha"],
+        scope={"campaign": "launch-contract-fixture", "layers": [0, 1]},
+        num_layers=2, stride=1)
+    assert sorted(receipt["stride"]["boundaries"]) == sorted(checkpoints)
+    return receipt
 
 
 def _publish_layer_000(tmp_path: Path, out: dict) -> tuple[dict, Path, Path]:
-    """Write the layer-000 record and slice files where the record names
-    them, mirroring the production sealing (pretty record, gzipped slice)."""
+    """Write the layer-000 record, read-set manifest and stage-A slice where
+    the record names them, mirroring the production sealing (pretty record,
+    gzipped read-set manifest, canonical slice)."""
     record = next(r for r in out["records"] if r["quantum_id"] == "layer-000")
     record_path = tmp_path / "records" / "layer-000.json"
     record_path.parent.mkdir(parents=True, exist_ok=True)
@@ -152,6 +159,9 @@ def _publish_layer_000(tmp_path: Path, out: dict) -> tuple[dict, Path, Path]:
     slice_path.parent.mkdir(parents=True, exist_ok=True)
     slice_path.write_bytes(seal_manifest_bytes(out["slice_manifests"]["layer-000"]))
     assert _sha(slice_path) == record["read_set"]["manifest_sha256"]
+    if record["adjoint"].get("slice_path") is not None:
+        write_adjoint_slice(record["adjoint"]["slice_path"],
+                            out["adjoint_slices"]["layer-000"], layer=0)
     return record, record_path, slice_path
 
 
@@ -182,14 +192,16 @@ def test_dispatcher_payload_carries_every_consumer_binding(tmp_path, portable_sp
     quantum, slice-manifest and output-root bindings."""
     campaign, record, record_path, receipt_path = _bound_row(tmp_path, portable_spec)
     inner = _payload(dispatch.quantum_argv(
-        record, record_path=record_path, output_root=campaign["root"],
-        adjoint_path=receipt_path))
+        record, record_path=record_path, output_root=campaign["root"]))
     assert inner[inner.index("--plan") + 1] == str(campaign["plan_path"])
     assert inner[inner.index("--plan-sha256") + 1] == campaign["plan_sha"]
     assert inner[inner.index("--prepared") + 1] == str(campaign["prepared_path"])
     assert inner[inner.index("--prepared-sha256") + 1] == campaign["prepared_sha"]
-    assert inner[inner.index("--adjoint") + 1] == str(receipt_path)
-    assert inner[inner.index("--adjoint-sha256") + 1] == _sha(receipt_path)
+    # PQ #993: the row names the quantum's slice, never the receipt.
+    slice_path = Path(record["adjoint"]["slice_path"])
+    assert inner[inner.index("--adjoint-slice") + 1] == str(slice_path)
+    assert inner[inner.index("--adjoint-slice-sha256") + 1] == _sha(slice_path)
+    assert str(receipt_path) not in inner
     assert "--resume" in inner
 
 
@@ -198,47 +210,50 @@ def test_quantum_sha256_binds_record_wire_bytes(tmp_path, portable_spec):
     must bind that wire digest; the canonical body check inside stays."""
     campaign, record, record_path, receipt_path = _bound_row(tmp_path, portable_spec)
     inner = _payload(dispatch.quantum_argv(
-        record, record_path=record_path, output_root=campaign["root"],
-        adjoint_path=receipt_path))
+        record, record_path=record_path, output_root=campaign["root"]))
     assert inner[inner.index("--quantum-sha256") + 1] == _sha(record_path)
     assert _sha(record_path) != record["identity_sha256"]
 
 
 def test_writer_output_passes_matching_representation_checks(tmp_path, portable_spec):
-    """Defect 3: the writer's pretty bytes and the producer's canonical
-    digest are two representations of one receipt. The dispatcher receipt
-    check passes the writer's actual output, and a re-serialized
-    (differently formatted) receipt passes the same way -- while tampered
-    wire bytes refuse at the wire check."""
+    """Defect 3, under slice binding (PQ #993): the writer's pretty receipt
+    is decoded, never hashed into a record, so its formatting cannot fail a
+    gate. The record binds its slice, whose file is canonical JSON: the wire
+    digest and the canonical digest are one value. Tampered slice bytes
+    refuse; edited receipt content refuses at the dispatcher's proof gate."""
     campaign, record, record_path, receipt_path = _bound_row(tmp_path, portable_spec)
-    assert record["adjoint"]["receipt_sha256"] == canonical_sha256(
-        json.loads(receipt_path.read_text()))
-    assert record["adjoint"]["receipt_sha256"] != _sha(receipt_path)
-    dispatch.check_adjoint_receipt(
-        receipt_path, [(record_path, record)])
+    slice_path = Path(record["adjoint"]["slice_path"])
     parsed = json.loads(receipt_path.read_text())
-    assert load_adjoint_receipt(receipt_path, _sha(receipt_path)) == parsed
-    # Tampered wire bytes refuse at the wire check, against the sealed digest.
-    wire = _sha(receipt_path)
+    expected = adjoint_slice_sha256(stage_a_slice(parsed, 0))
+    assert record["adjoint"]["slice_sha256"] == expected == _sha(slice_path)
+    assert "receipt_sha256" not in record["adjoint"]
+    proofs = dispatch.load_stage_a_proofs(receipt_path, [])
+    assert dispatch.check_stage_a_proofs(proofs, [(record_path, record)]) == {
+        "layer-000": expected}
+    # Trailing whitespace on the receipt is not content: the gate passes.
     receipt_path.write_bytes(receipt_path.read_bytes() + b" ")
-    with pytest.raises(RuntimeError, match="digest mismatch"):
-        load_adjoint_receipt(receipt_path, wire)
-    # ...but trailing whitespace is not content: the canonical gate still
-    # passes the same bytes.
-    dispatch.check_adjoint_receipt(
-        receipt_path, [(record_path, record)])
-    # Edited content refuses at the canonical gate.
+    assert dispatch.check_stage_a_proofs(
+        dispatch.load_stage_a_proofs(receipt_path, []),
+        [(record_path, record)]) == {"layer-000": expected}
+    # Tampered slice wire bytes refuse against the sealed digest.
+    good = slice_path.read_bytes()
+    slice_path.write_bytes(good + b" ")
+    with pytest.raises(AdjointSliceRefused, match="digest mismatch"):
+        load_adjoint_slice(slice_path, expected, layer=0)
+    with pytest.raises(dispatch.DispatchRefused):
+        dispatch.check_stage_a_proofs(proofs, [(record_path, record)])
+    slice_path.write_bytes(good)
+    # Edited receipt content refuses at the proof gate.
     parsed["status"] = "partial"
     receipt_path.write_text(json.dumps(parsed, indent=2, sort_keys=True) + "\n")
-    with pytest.raises(Exception):
-        dispatch.check_adjoint_receipt(
-            receipt_path, [(record_path, record)])
+    with pytest.raises(dispatch.DispatchRefused):
+        dispatch.load_stage_a_proofs(receipt_path, [])
 
 
 def test_consumer_verify_accepts_valid_pretty_receipt(tmp_path):
-    """Defect 3 at the consumer: with correctly bound wire digests, the
-    valid pretty-written receipt passes ``verify_quantum_identity`` --
-    today it fails comparing the record canonical digest to wire bytes."""
+    """Defect 3 at the consumer: a record bound against the valid
+    pretty-written receipt passes ``verify_quantum_identity``, which reads
+    the record's slice file, never the receipt (PQ #993)."""
     campaign = _campaign(tmp_path)
     out = _produce(campaign)
     space = tmp_path / "adjoint-space"
@@ -248,16 +263,26 @@ def test_consumer_verify_accepts_valid_pretty_receipt(tmp_path):
     receipt_path = space / "adjoint-capture.json"
     bound = _produce(campaign, receipt=receipt)
     record, record_path, _ = _publish_layer_000(tmp_path, bound)
+    slice_path = Path(record["adjoint"]["slice_path"])
     found, loaded = quantum.verify_quantum_identity(
         quantum_path=record_path, quantum_sha256=_sha(record_path),
         plan_path=campaign["plan_path"], plan_sha256=campaign["plan_sha"],
         prepared_path=campaign["prepared_path"],
         prepared_sha256=campaign["prepared_sha"],
-        adjoint_path=receipt_path, adjoint_sha256=_sha(receipt_path),
+        adjoint_path=slice_path, adjoint_sha256=_sha(slice_path),
         output_root=campaign["root"])
     assert found["quantum_id"] == "layer-000"
-    assert loaded["status"] == "complete"
-    assert canonical_sha256(loaded) == record["adjoint"]["receipt_sha256"]
+    assert loaded == stage_a_slice(json.loads(receipt_path.read_text()), 0)
+    assert adjoint_slice_sha256(loaded) == record["adjoint"]["slice_sha256"]
+    # The whole receipt is not a slice: naming it refuses.
+    with pytest.raises(quantum.QuantumIdentityRefused):
+        quantum.verify_quantum_identity(
+            quantum_path=record_path, quantum_sha256=_sha(record_path),
+            plan_path=campaign["plan_path"], plan_sha256=campaign["plan_sha"],
+            prepared_path=campaign["prepared_path"],
+            prepared_sha256=campaign["prepared_sha"],
+            adjoint_path=receipt_path, adjoint_sha256=_sha(receipt_path),
+            output_root=campaign["root"])
 
 
 def test_consumer_parser_and_verify_drive_the_dispatched_row(tmp_path, portable_spec,
@@ -267,22 +292,21 @@ def test_consumer_parser_and_verify_drive_the_dispatched_row(tmp_path, portable_
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     campaign, record, record_path, receipt_path = _bound_row(tmp_path, portable_spec)
     inner = _payload(dispatch.quantum_argv(
-        record, record_path=record_path, output_root=campaign["root"],
-        adjoint_path=receipt_path))
+        record, record_path=record_path, output_root=campaign["root"]))
     args = quantum.build_parser().parse_args(inner[3:])
     assert args.data_manifest_sha256 == record["read_set"]["manifest_sha256"]
     found, loaded = quantum.verify_quantum_identity(
         quantum_path=Path(args.quantum), quantum_sha256=args.quantum_sha256,
         plan_path=Path(args.plan), plan_sha256=args.plan_sha256,
         prepared_path=Path(args.prepared), prepared_sha256=args.prepared_sha256,
-        adjoint_path=Path(args.adjoint), adjoint_sha256=args.adjoint_sha256,
+        adjoint_path=args.adjoint_slice, adjoint_sha256=args.adjoint_slice_sha256,
         output_root=Path(args.output_root))
     assert found["quantum_id"] == "layer-000"
     calls = []
     monkeypatch.setattr(quantum, "run_layer_quantum",
                         lambda *a, **k: calls.append((a, k)) or {"passed": True})
     quantum.run_layer_quantum(
-        {"output_root": str(campaign["root"])}, record=found, receipt=loaded,
+        {"output_root": str(campaign["root"])}, record=found, adjoint_slice=loaded,
         plan_sha256=args.plan_sha256,
         prepared={"path": args.prepared, "sha256": args.prepared_sha256},
         output_root=Path(args.output_root),
@@ -309,6 +333,8 @@ def test_here_rooted_records_refuse_against_the_plan_root(tmp_path):
     record_path = tmp_path / "records" / "layer-000.json"
     record_path.parent.mkdir(parents=True)
     record_path.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+    slice_path = Path(record["adjoint"]["slice_path"])
+    write_adjoint_slice(slice_path, wrong["adjoint_slices"]["layer-000"], layer=0)
     with pytest.raises(quantum.QuantumIdentityRefused, match="output_space"):
         quantum.verify_quantum_identity(
             quantum_path=record_path,
@@ -316,7 +342,7 @@ def test_here_rooted_records_refuse_against_the_plan_root(tmp_path):
             plan_path=campaign["plan_path"], plan_sha256=campaign["plan_sha"],
             prepared_path=campaign["prepared_path"],
             prepared_sha256=campaign["prepared_sha"],
-            adjoint_path=receipt_path, adjoint_sha256=_sha(receipt_path),
+            adjoint_path=slice_path, adjoint_sha256=_sha(slice_path),
             output_root=campaign["root"])
 
 
@@ -387,8 +413,13 @@ def test_regenerate_writes_new_roots_and_binds_receipt(tmp_path):
                               str(space / "adjoint-capture.json")]) == 0
     bound = [json.loads(path.read_text())
              for path in sorted(bound_out.glob("layer-*.json"))]
-    assert all(r["adjoint"]["receipt_sha256"] == canonical_sha256(receipt)
-               for r in bound)
+    # Each record binds its own slice, written before the record, whose
+    # file bytes hash to the sealed digest (PQ #993).
+    for r in bound:
+        assert "receipt_sha256" not in r["adjoint"]
+        assert r["adjoint"]["slice_sha256"] == adjoint_slice_sha256(
+            stage_a_slice(receipt, r["layer"]))
+        assert _sha(Path(r["adjoint"]["slice_path"])) == r["adjoint"]["slice_sha256"]
     assert any(r["identity_sha256"] != f["identity_sha256"]
                for r, f in zip(bound, records))
     # Refusal, not overwrite: differing bytes at the destination fail closed.

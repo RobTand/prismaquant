@@ -35,7 +35,8 @@ from prismaquant.joint_layer_quanta import (
     LAYER_QUANTUM_SCHEMA,
     MANIFEST_SCHEMA_V1,
     MANIFEST_SCHEMA_V2,
-    bind_adjoint_receipt,
+    adjoint_binding_fields,
+    bind_adjoint_slice,
     bind_quantum_boundary_readset,
     build_quantum_boundary_readset,
     emit_quantum_boundary_readsets,
@@ -110,9 +111,11 @@ def _fixture(tmp_path, layer=3, chain=(7, 6, 5, 4), checkpoint=8,
         "run_identity": {"plan_sha256": campaign["plan_sha256"],
                          "prepared_sha256": campaign["prepared_sha256"],
                          "campaign_scope": campaign["campaign_scope"]},
+        "stride": _stride(STRIDED),
         "boundary_storage": {
             "session": dict(SESSION),
-            "policy": {"prefetch_batches": PREFETCH_BATCHES}},
+            "policy": {"prefetch_batches": PREFETCH_BATCHES},
+            "directory": str(space / "entries")},
         "boundary_entries": boundary_entries,
         "checkpoints": [checkpoint_record],
         "status": "complete",
@@ -126,22 +129,33 @@ def _fixture(tmp_path, layer=3, chain=(7, 6, 5, 4), checkpoint=8,
     return record, receipt
 
 
+def _stride(boundaries):
+    """The stride block Stage A seals: the checkpoint marks tail first."""
+    marks = sorted(boundaries, reverse=True)
+    value = marks[-1] if len(marks) > 1 or marks[0] > 1 else 1
+    return {"value": value, "source": None, "boundaries": marks,
+            "max_chain_layers": value - 1}
+
+
 def _build(record, receipt):
     return build_quantum_boundary_readset(
         record, receipt, strided_boundaries=STRIDED, n_probes=N_PROBES)
 
 
 def _bind_receipt(record, receipt):
-    """Bind a fixture receipt the way the regen path does, then reseal."""
-    from prismaquant.joint_layer_quanta import bind_adjoint_receipt
-    digest = bind_adjoint_receipt(
-        receipt, plan_sha256=record["campaign"]["plan_sha256"],
+    """Bind the record's stage-A slice the way the regen path does (PQ
+    #993), then reseal."""
+    adjoint_slice, digest = bind_adjoint_slice(
+        receipt, record["layer"], plan_sha256=record["campaign"]["plan_sha256"],
         prepared_sha256=record["campaign"]["prepared_sha256"],
         scope=record["campaign"]["campaign_scope"],
-        checkpoints=sorted(
-            entry["boundary"] for entry in receipt["checkpoints"]))
-    record = dict(record,
-                  adjoint=dict(record["adjoint"], receipt_sha256=digest))
+        checkpoints=receipt["stride"]["boundaries"])
+    adjoint = {key: value for key, value in record["adjoint"].items()
+               if key not in ("receipt_sha256", "slice_sha256", "slice_path")}
+    adjoint.update(adjoint_binding_fields(
+        adjoint_slice, slice_path="/mnt/shared/run/layer-quanta/adjoint-slices/"
+                                  f"{record['quantum_id']}.json"))
+    record = dict(record, adjoint=adjoint)
     return _reseal_like_regen(record), digest
 
 
@@ -279,12 +293,12 @@ def test_seal_deterministic_wire(tmp_path):
     first = seal_manifest_bytes(_build(record, receipt))
     second = seal_manifest_bytes(_build(record, receipt))
     assert first == second
-    # Wire identity (what a reader admits) is not the canonical receipt
+    # Wire identity (what a reader admits) is not the canonical slice
     # identity (what the binder seals): both present, never conflated.
-    assert hashlib.sha256(first).hexdigest() != bind_adjoint_receipt(
-        receipt, plan_sha256=record["campaign"]["plan_sha256"],
+    assert hashlib.sha256(first).hexdigest() != bind_adjoint_slice(
+        receipt, record["layer"], plan_sha256=record["campaign"]["plan_sha256"],
         prepared_sha256=record["campaign"]["prepared_sha256"],
-        scope=record["campaign"]["campaign_scope"], checkpoints=STRIDED)
+        scope=record["campaign"]["campaign_scope"], checkpoints=STRIDED)[1]
 
 
 def _reseal_like_regen(record):
@@ -310,17 +324,11 @@ def test_emit_binds_new_record_generations(tmp_path):
     _, receipt = _real_record_receipt(tmp_path)
     assert receipt["run_identity"]["plan_sha256"] == base3["campaign"][
         "plan_sha256"]
-    digest = bind_adjoint_receipt(
-        receipt, plan_sha256=base3["campaign"]["plan_sha256"],
-        prepared_sha256=base3["campaign"]["prepared_sha256"],
-        scope=base3["campaign"]["campaign_scope"],
-        checkpoints=[8, 16, 24, 32, 40, 45])
-    rec3 = dict(base3, adjoint=dict(base3["adjoint"], receipt_sha256=digest))
-    rec4 = dict(base4, adjoint=dict(base4["adjoint"], receipt_sha256=digest))
-    # The regen path reseals identity when it binds the receipt; the
-    # binder reverifies that seal before deriving anything further.
-    rec3 = _reseal_like_regen(rec3)
-    rec4 = _reseal_like_regen(rec4)
+    # The regen path reseals identity when it binds each record's slice;
+    # the binder reverifies that seal before deriving anything further.
+    rec3, digest3 = _bind_receipt(base3, receipt)
+    rec4, digest4 = _bind_receipt(base4, receipt)
+    assert digest3 != digest4, "each layer binds its own slice"
     before = [json.dumps(r, sort_keys=True) for r in (rec3, rec4)]
     root = str(tmp_path / "run")
     emitted = emit_quantum_boundary_readsets(
@@ -330,7 +338,7 @@ def test_emit_binds_new_record_generations(tmp_path):
     assert [json.dumps(r, sort_keys=True) for r in (rec3, rec4)] == before
     assert len(emitted) == 2
     paths = set()
-    for row, source in zip(emitted, (rec3, rec4)):
+    for row, source, digest in zip(emitted, (rec3, rec4), (digest3, digest4)):
         assert row["manifest_path"] == (
             f"{root}/layer-quanta/adjoint/bound-readsets/"
             f"{source['quantum_id']}.boundary-readset.json.gz")
@@ -341,13 +349,13 @@ def test_emit_binds_new_record_generations(tmp_path):
         bound = row["record"]["boundary_readset"]
         assert bound["manifest_path"] == row["manifest_path"]
         assert bound["manifest_sha256"] == row["manifest_sha256"]
-        assert bound["receipt_sha256"] == digest
+        assert bound["slice_sha256"] == digest
         body = {k: v for k, v in row["record"].items()
                 if k != "identity_sha256"}
         assert canonical_sha256(body, where="quantum record") == row[
             "record"]["identity_sha256"]
         campaign = dict(source["campaign"],
-                        adjoint_receipt_sha256=digest)
+                        adjoint_slice_sha256=digest)
         check_quantum_for_campaign(row["record"], campaign)
     assert "boundary_readset" not in rec3
     assert "boundary_readset" not in rec4
@@ -363,7 +371,16 @@ def test_refuses_chain_outside_stride_owner(tmp_path):
 def test_refuses_missing_checkpoint_boundary(tmp_path):
     record, receipt = _fixture(tmp_path)
     receipt["checkpoints"] = []
-    with pytest.raises(ValueError, match="checkpoints differ"):
+    with pytest.raises(ValueError, match="0 checkpoint records for boundary 8"):
+        _build(record, receipt)
+
+
+def test_refuses_foreign_stride(tmp_path):
+    record, receipt = _fixture(tmp_path)
+    receipt["stride"] = _stride([8, 4])
+    # Under the foreign stride the record's layer reads checkpoint 4, which
+    # this run never sealed: the slice itself refuses before the header check.
+    with pytest.raises(ValueError, match="0 checkpoint records for boundary 4"):
         _build(record, receipt)
 
 
@@ -473,9 +490,11 @@ def _real_record_receipt(tmp_path):
         "run_identity": {"plan_sha256": campaign["plan_sha256"],
                          "prepared_sha256": campaign["prepared_sha256"],
                          "campaign_scope": campaign["campaign_scope"]},
+        "stride": _stride([8, 16, 24, 32, 40, 45]),
         "boundary_storage": {
             "session": dict(SESSION),
-            "policy": {"prefetch_batches": PREFETCH_BATCHES}},
+            "policy": {"prefetch_batches": PREFETCH_BATCHES},
+            "directory": str(space / "entries")},
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
         "status": "complete",
@@ -495,7 +514,7 @@ def test_bound_record_passes_real_campaign_validator(tmp_path):
         n_probes=4)
     wire_sha256 = hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest()
     record, digest = _bind_receipt(record, receipt)
-    assert digest == manifest["annotations"]["receipt_sha256"]
+    assert digest == manifest["annotations"]["slice_sha256"]
     run_root = str(Path(
         record["output_space"]["root"]).resolve().parents[1])
     new = bind_quantum_boundary_readset(
@@ -507,8 +526,8 @@ def test_bound_record_passes_real_campaign_validator(tmp_path):
     campaign = dict(record["campaign"],
                     unit_roster_sha256=record["campaign"].get(
                         "unit_roster_sha256"),
-                    adjoint_receipt_sha256=manifest["annotations"][
-                        "receipt_sha256"])
+                    adjoint_slice_sha256=manifest["annotations"][
+                        "slice_sha256"])
     check_quantum_for_campaign(new, campaign)
     body = {k: v for k, v in new.items() if k != "identity_sha256"}
     assert canonical_sha256(body, where="quantum record") == new[
@@ -522,12 +541,13 @@ def test_binder_rejects_foreign_receipt_for_same_layer(tmp_path):
         record, receipt, strided_boundaries=[8, 16, 24, 32, 40, 45],
         n_probes=4)
     wire_sha256 = hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest()
+    record, _ = _bind_receipt(record, receipt)
     bound = dict(record["adjoint"])
-    bound["receipt_sha256"] = "f" * 64
+    bound["slice_sha256"] = "f" * 64
     record = _reseal_like_regen(dict(record, adjoint=bound))
     run_root = str(Path(
         record["output_space"]["root"]).resolve().parents[1])
-    with pytest.raises(ValueError, match="another stage-A receipt"):
+    with pytest.raises(ValueError, match="another stage-A slice"):
         bind_quantum_boundary_readset(
             record, receipt, manifest=manifest,
             manifest_path=f"{run_root}/layer-quanta/adjoint/bound-readsets/"
@@ -628,9 +648,11 @@ def _tiny_receipt(campaign, space):
         "run_identity": {"plan_sha256": campaign["plan_sha"],
                          "prepared_sha256": campaign["prepared_sha"],
                          "campaign_scope": {"campaign": "readset-r3-fixture"}},
+        "stride": _stride([1, 2]),
         "boundary_storage": {
             "session": dict(session),
-            "policy": {"prefetch_batches": 2}},
+            "policy": {"prefetch_batches": 2},
+            "directory": str(entries_dir)},
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
         "status": "complete",
@@ -711,24 +733,28 @@ def test_cli_binds_readsets_through_real_validators(tmp_path):
            "--records-out", str(out),
            "--adjoint-receipt", str(receipt_path),
            "--boundary-readsets"]) == 0
-    receipt_sha = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
-    canonical = bind_adjoint_receipt(
-        receipt, plan_sha256=campaign["plan_sha"],
-        prepared_sha256=campaign["prepared_sha"],
-        scope={"campaign": "readset-r3-fixture"}, checkpoints=[1, 2])
     records = [json.loads(path.read_text())
                for path in sorted(out.glob("layer-*.json"))]
     assert len(records) == 2
     assert (out / "records.json").is_file()
     for record in records:
-        assert record["adjoint"]["receipt_sha256"] == canonical
+        # Each record binds its own layer's slice (PQ #993), whose file is
+        # the slice's canonical bytes.
+        canonical = bind_adjoint_slice(
+            receipt, record["layer"], plan_sha256=campaign["plan_sha"],
+            prepared_sha256=campaign["prepared_sha"],
+            scope={"campaign": "readset-r3-fixture"}, checkpoints=[1, 2])[1]
+        assert record["adjoint"]["slice_sha256"] == canonical
+        assert "receipt_sha256" not in record["adjoint"]
+        slice_path = Path(record["adjoint"]["slice_path"])
+        assert hashlib.sha256(slice_path.read_bytes()).hexdigest() == canonical
         bound = record["boundary_readset"]
         manifest_path = Path(bound["manifest_path"])
         assert manifest_path.is_file()
         assert hashlib.sha256(
             manifest_path.read_bytes()).hexdigest() == bound[
             "manifest_sha256"]
-        assert bound["receipt_sha256"] == canonical
+        assert bound["slice_sha256"] == canonical
         assert manifest_path.parent.name == "bound-readsets"
         campaign_binding = {
             "plan_sha256": campaign["plan_sha"],
@@ -737,7 +763,7 @@ def test_cli_binds_readsets_through_real_validators(tmp_path):
             "unit_roster_sha256": record["campaign"][
                 "unit_roster_sha256"],
             "campaign_scope": {"campaign": "readset-r3-fixture"},
-            "adjoint_receipt_sha256": canonical,
+            "adjoint_slice_sha256": canonical,
         }
         check_quantum_for_campaign(record, campaign_binding)
         quantum_path = out / f"{record['quantum_id']}.json"
@@ -749,7 +775,7 @@ def test_cli_binds_readsets_through_real_validators(tmp_path):
             plan_sha256=campaign["plan_sha"],
             prepared_path=campaign["prepared_path"],
             prepared_sha256=campaign["prepared_sha"],
-            adjoint_path=receipt_path, adjoint_sha256=receipt_sha,
+            adjoint_path=slice_path, adjoint_sha256=canonical,
             output_root=Path(str(campaign["root"])))
 
 
@@ -806,8 +832,6 @@ def test_binder_refuses_mutated_entry_consistent_rehash(tmp_path):
     import copy
     record, receipt = _fixture(tmp_path)
     manifest = _build(record, receipt)
-    record["adjoint"]["receipt_sha256"] = manifest["annotations"][
-        "receipt_sha256"]
     forged = copy.deepcopy(manifest)
     forged["entries"][0]["bytes"] += 8
     forged["entries"][0]["sha256"] = "c" * 64
@@ -822,7 +846,7 @@ def test_binder_refuses_mutated_entry_consistent_rehash(tmp_path):
     forged["read_plan"]["read_bytes"] = total
     forged_sha = hashlib.sha256(seal_manifest_bytes(forged)).hexdigest()
     record, _ = _bind_receipt(record, receipt)
-    with pytest.raises(ValueError, match="originate from the bound receipt"):
+    with pytest.raises(ValueError, match="originate from the bound slice"):
         bind_quantum_boundary_readset(
             record, receipt, manifest=forged,
             manifest_path="/mnt/shared/run/layer-quanta/adjoint/"
@@ -834,8 +858,6 @@ def test_binder_refuses_mutated_entry_consistent_rehash(tmp_path):
 def test_binder_refuses_foreign_schema(tmp_path):
     record, receipt = _fixture(tmp_path)
     manifest = _build(record, receipt)
-    record["adjoint"]["receipt_sha256"] = manifest["annotations"][
-        "receipt_sha256"]
     manifest["schema"] = MANIFEST_SCHEMA_V1
     wire_sha = hashlib.sha256(seal_manifest_bytes(manifest)).hexdigest()
     record, _ = _bind_receipt(record, receipt)

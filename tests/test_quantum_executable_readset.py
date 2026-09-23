@@ -31,7 +31,8 @@ from prismaquant.joint_layer_quanta import (  # noqa: E402
     ADJOINT_CAPTURE_SCHEMA,
     CHECKPOINT_LOAD_PHASE,
     MANIFEST_SCHEMA_V2,
-    bind_adjoint_receipt,
+    adjoint_binding_fields,
+    bind_adjoint_slice,
     bind_quantum_executable,
     build_quantum_executable_manifest,
     emit_quantum_executable_readsets,
@@ -141,13 +142,40 @@ def _tiny_receipt(tmp_path, campaign):
         "run_identity": {"plan_sha256": campaign["plan_sha256"],
                          "prepared_sha256": campaign["prepared_sha256"],
                          "campaign_scope": campaign["campaign_scope"]},
+        "stride": {"value": 2, "source": None, "boundaries": sorted(STRIDED, reverse=True),
+                   "max_chain_layers": 1},
         "boundary_storage": {
             "session": dict(SESSION),
-            "policy": {"prefetch_batches": PREFETCH_BATCHES}},
+            "policy": {"prefetch_batches": PREFETCH_BATCHES},
+            "directory": str(space / "entries")},
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
         "status": "complete",
     }
+
+
+def _bind_slice(record, receipt, slice_dir, checkpoints=STRIDED):
+    """Re-seal ``record`` bound to its stage-A slice (PQ #993).
+
+    The slice file lands under ``slice_dir`` as its canonical bytes, where
+    the dispatcher's slice gate reads it.
+    """
+    from prismaquant.joint_adjoint_slices import write_adjoint_slice
+    from prismaquant.joint_layer_quanta import canonical_sha256
+    campaign = record["campaign"]
+    adjoint_slice, digest = bind_adjoint_slice(
+        receipt, record["layer"], plan_sha256=campaign["plan_sha256"],
+        prepared_sha256=campaign["prepared_sha256"],
+        scope=campaign["campaign_scope"], checkpoints=checkpoints)
+    slice_path = Path(slice_dir) / f"{record['quantum_id']}.json"
+    write_adjoint_slice(slice_path, adjoint_slice, layer=record["layer"])
+    adjoint = {key: value for key, value in record["adjoint"].items()
+               if key != "receipt_sha256"}
+    adjoint.update(adjoint_binding_fields(adjoint_slice, slice_path=str(slice_path)))
+    record = dict(record, adjoint=adjoint)
+    body = {k: v for k, v in record.items() if k != "identity_sha256"}
+    record["identity_sha256"] = canonical_sha256(body, where="fixture")
+    return record, digest
 
 
 def _layer2(tmp_path):
@@ -283,17 +311,8 @@ def _pb():
 
 def _bound_inputs(tmp_path, root="/mnt/shared/run"):
     """Record bound to its receipt with resealed identity, plus manifest."""
-    from prismaquant.joint_layer_quanta import canonical_sha256
     record, receipt, parent = _layer2(tmp_path)
-    campaign = record["campaign"]
-    digest = bind_adjoint_receipt(
-        receipt, plan_sha256=campaign["plan_sha256"],
-        prepared_sha256=campaign["prepared_sha256"],
-        scope=campaign["campaign_scope"], checkpoints=STRIDED)
-    record = dict(
-        record, adjoint=dict(record["adjoint"], receipt_sha256=digest))
-    body = {k: v for k, v in record.items() if k != "identity_sha256"}
-    record["identity_sha256"] = canonical_sha256(body, where="fixture")
+    record, _ = _bind_slice(record, receipt, tmp_path / "adjoint-slices")
     manifest = build_quantum_executable_manifest(
         record, receipt, parent, strided_boundaries=STRIDED,
         n_probes=N_PROBES, calib=dict(CALIB),
@@ -320,8 +339,8 @@ def test_binder_recomputes_identity_and_anchors_rebuild(tmp_path):
         "manifest_sha256"]
     assert "executable_readset" not in record
     campaign = dict(record["campaign"],
-                    adjoint_receipt_sha256=new["executable_readset"][
-                        "receipt_sha256"])
+                    adjoint_slice_sha256=new["executable_readset"][
+                        "slice_sha256"])
     check_quantum_for_campaign(new, campaign)
     body = {k: v for k, v in new.items() if k != "identity_sha256"}
     assert canonical_sha256(body, where="quantum record") == new[
@@ -377,7 +396,9 @@ def _dispatcher_record(tmp_path, manifest, wire_sha):
                            "manifest_sha256": hashlib.sha256(
                                b"slice").hexdigest()},
               "chunks": [{"name": "layer-002-c000"}],
-              "adjoint": {}}
+              "adjoint": {"slice_path": str(adjoint_path),
+                          "slice_sha256": hashlib.sha256(
+                              adjoint_path.read_bytes()).hexdigest()}}
     (tmp_path / "slice.gz").write_bytes(b"slice")
     # R3: no binding is ever sealed or injected. The built manifest carries
     # binding None (sequencing-only); production dispatch refuses.
@@ -425,14 +446,14 @@ def test_executable_row_parts_propagate_manifest_phases(tmp_path,
     # Production dispatch refuses the same row: typed unsupported binding.
     with pytest.raises(dispatch.ExecutableBindingUnsupported):
         dispatch.quantum_argv(
-            bound, record_path=record_path, output_root=tmp_path,
-            adjoint_path=adjoint_path)
+            bound, record_path=record_path, output_root=tmp_path)
     # Legacy rows keep their existing path (slice manifest, strict tiers).
     legacy = dict(bound)
     del legacy["executable_readset"]
     argv_legacy = dispatch.quantum_argv(
-        legacy, record_path=record_path, output_root=tmp_path,
-        adjoint_path=adjoint_path)
+        legacy, record_path=record_path, output_root=tmp_path)
+    # The quantum receives its slice file, never a receipt (PQ #993).
+    assert argv_legacy[argv_legacy.index("--adjoint-slice") + 1] == str(adjoint_path)
     assert argv_legacy[argv_legacy.index("--data-manifest") + 1].endswith(
         "slice.gz")
     assert argv_legacy[argv_legacy.index("--allowed-tiers") + 1] == (
@@ -577,7 +598,7 @@ def _acceptance_setup(tmp_path, monkeypatch):
         window_partition=partition,
         ram_window_gib=160, max_resident_consumers=2,
         adjoint_receipt=receipt)
-    assert all(r["adjoint"]["receipt_sha256"] is not None
+    assert all(r["adjoint"]["slice_sha256"] is not None
                for r in bound["records"])
     production = {
         "weights": {f"{name}@{fmt}": {
@@ -707,6 +728,7 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
     import prismaquant.joint_cost_quantum as qc
     import prismaquant.perturbed_x_cache as pxc
     from prismaquant import prismabuild_progress as pbprog
+    from prismaquant.joint_adjoint_slices import stage_a_slice
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress,
         quantum_layer_roster, quantum_retained_state,
@@ -865,7 +887,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume):
     events.append(("setup-open", str(setup["calib_path"])))
     payload = run_layer_quantum_core(
         runner, cache, calib_ids, formats_by_qname,
-        record=record, receipt=receipt, execution=execution,
+        record=record, adjoint_slice=stage_a_slice(receipt, layer),
+        execution=execution,
         output_root=setup["output_root"], projection_backend=None,
         resume=resume, resolved_windows=resolved,
         counters=counters, progress=progress)
@@ -1073,7 +1096,7 @@ def _acceptance_setup_expert(tmp_path, monkeypatch):
         window_partition=partition,
         ram_window_gib=160, max_resident_consumers=2,
         adjoint_receipt=receipt)
-    assert all(r["adjoint"]["receipt_sha256"] is not None
+    assert all(r["adjoint"]["slice_sha256"] is not None
                for r in bound["records"])
     production = {
         "weights": {f"{name}@{fmt}": {
@@ -1412,7 +1435,6 @@ def _exec_argv(tmp_path, campaign):
 
 
 def _exec_receipt(tmp_path, campaign):
-    from prismaquant.joint_layer_quanta import bind_adjoint_receipt
     space = tmp_path / "adjoint-space"
     space.mkdir(exist_ok=True)
     (space / "entries").mkdir(parents=True, exist_ok=True)
@@ -1451,9 +1473,12 @@ def _exec_receipt(tmp_path, campaign):
         "run_identity": {"plan_sha256": campaign["plan_sha"],
                          "prepared_sha256": campaign["prepared_sha"],
                          "campaign_scope": scope},
+        "stride": {"value": 2, "source": None, "boundaries": [4, 2],
+                   "max_chain_layers": 1},
         "boundary_storage": {
             "session": dict(SESSION),
-            "policy": {"prefetch_batches": PREFETCH_BATCHES}},
+            "policy": {"prefetch_batches": PREFETCH_BATCHES},
+            "directory": str(space / "entries")},
         "boundary_entries": boundary_entries,
         "checkpoints": checkpoints,
         "status": "complete",
@@ -1485,15 +1510,16 @@ def test_cli_executable_readsets_end_to_end(tmp_path):
            "--records-out", str(out),
            "--adjoint-receipt", str(receipt_path),
            "--executable-readsets"]) == 0
-    canonical = bind_adjoint_receipt(
-        receipt, plan_sha256=campaign["plan_sha"],
-        prepared_sha256=campaign["prepared_sha"],
-        scope={"fixture": "exec-cli"}, checkpoints=[2, 4])
     records = [json.loads(path.read_text())
                for path in sorted(out.glob("layer-*.json"))]
     assert len(records) == 4
     assert (out / "records.json").is_file()
     for record in records:
+        canonical = bind_adjoint_slice(
+            receipt, record["layer"], plan_sha256=campaign["plan_sha"],
+            prepared_sha256=campaign["prepared_sha"],
+            scope={"fixture": "exec-cli"}, checkpoints=[2, 4])[1]
+        assert record["adjoint"]["slice_sha256"] == canonical
         bound = record["executable_readset"]
         manifest_path = Path(bound["manifest_path"])
         assert manifest_path.is_file()
@@ -1502,7 +1528,7 @@ def test_cli_executable_readsets_end_to_end(tmp_path):
         assert hashlib.sha256(
             manifest_path.read_bytes()).hexdigest() == bound[
             "manifest_sha256"]
-        assert bound["receipt_sha256"] == canonical
+        assert bound["slice_sha256"] == canonical
         campaign_binding = {
             "plan_sha256": campaign["plan_sha"],
             "prepared_sha256": campaign["prepared_sha"],
@@ -1510,7 +1536,7 @@ def test_cli_executable_readsets_end_to_end(tmp_path):
             "unit_roster_sha256": record["campaign"][
                 "unit_roster_sha256"],
             "campaign_scope": {"fixture": "exec-cli"},
-            "adjoint_receipt_sha256": canonical,
+            "adjoint_slice_sha256": canonical,
         }
         check_quantum_for_campaign(record, campaign_binding)
         quantum_path = out / f"{record['quantum_id']}.json"
@@ -1522,9 +1548,8 @@ def test_cli_executable_readsets_end_to_end(tmp_path):
             plan_sha256=campaign["plan_sha"],
             prepared_path=campaign["prepared_path"],
             prepared_sha256=campaign["prepared_sha"],
-            adjoint_path=receipt_path,
-            adjoint_sha256=hashlib.sha256(
-                receipt_path.read_bytes()).hexdigest(),
+            adjoint_path=Path(record["adjoint"]["slice_path"]),
+            adjoint_sha256=canonical,
             output_root=Path(str(campaign["root"])))
 
 
@@ -1581,8 +1606,6 @@ def test_dispatcher_refuses_plausible_render_binding(tmp_path, monkeypatch):
     bound_path = _gate_manifest(
         tmp_path, manifest, {"scope": "pb732", "material": "f" * 64})
     wire_sha = hashlib.sha256(bound_path.read_bytes()).hexdigest()
-    adjoint_path = tmp_path / "adjoint.json"
-    adjoint_path.write_text("{}")
     record_path = tmp_path / "record.json"
     record_path.write_text("{}")
     record = {"quantum_id": "layer-003", "layer": 3,
@@ -1605,8 +1628,7 @@ def test_dispatcher_refuses_plausible_render_binding(tmp_path, monkeypatch):
     with pytest.raises(dispatch.ExecutableBindingUnsupported,
                        match="no accepted PB produced-output binding"):
         dispatch.quantum_argv(
-            record, record_path=record_path, output_root=tmp_path,
-            adjoint_path=adjoint_path)
+            record, record_path=record_path, output_root=tmp_path)
 
 
 def test_dispatcher_refuses_unbound_render_prerequisite(tmp_path,
@@ -1625,8 +1647,6 @@ def test_dispatcher_refuses_unbound_render_prerequisite(tmp_path,
     bound_path = tmp_path / "exec-gate.json.gz"
     bound_path.write_bytes(seal_manifest_bytes(manifest))
     wire_sha = hashlib.sha256(bound_path.read_bytes()).hexdigest()
-    adjoint_path = tmp_path / "adjoint.json"
-    adjoint_path.write_text("{}")
     record_path = tmp_path / "record.json"
     record_path.write_text("{}")
     record = {"quantum_id": "layer-003", "layer": 3,
@@ -1647,8 +1667,7 @@ def test_dispatcher_refuses_unbound_render_prerequisite(tmp_path,
     with pytest.raises(dispatch.ExecutableBindingUnsupported,
                        match="no accepted PB produced-output binding"):
         dispatch.quantum_argv(
-            record, record_path=record_path, output_root=tmp_path,
-            adjoint_path=adjoint_path)
+            record, record_path=record_path, output_root=tmp_path)
 
 
 def test_build_refuses_render_binding_fiction(tmp_path):

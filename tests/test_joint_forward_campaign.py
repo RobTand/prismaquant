@@ -8,8 +8,7 @@ import pytest
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_forward_campaign import resolve_forward_campaign
 from prismaquant.joint_layer_quanta import (
-    ADJOINT_CAPTURE_SCHEMA, LAYER_QUANTUM_SCHEMA, bind_adjoint_receipt,
-    canonical_sha256, roster_digest,
+    LAYER_QUANTUM_SCHEMA, canonical_sha256, check_adjoint_run_header, roster_digest,
 )
 
 
@@ -39,15 +38,17 @@ def fixture(tmp_path):
 def test_original_caller_fails_consumer_and_corrected_new_receipt_binds(tmp_path):
     doc, args = fixture(tmp_path)
     original = copy.deepcopy(doc)
-    old_receipt = {'schema': ADJOINT_CAPTURE_SCHEMA, 'run_identity': doc['campaign_identity'],
-                   'checkpoints': [{'boundary': 2}]}
+    # The run header every slice of the Stage A run carries (PQ #993).
+    old_receipt = {'run_identity': doc['campaign_identity'],
+                   'stride': {'value': 2, 'source': None, 'boundaries': [2]},
+                   'boundary_storage': {}}
     expected = dict(plan_sha256=args['plan_sha256'], prepared_sha256=args['prepared_sha256'],
                     scope=doc['published_campaign_identity']['campaign_scope'], checkpoints=[2])
     with pytest.raises(ValueError, match='another scope'):
-        bind_adjoint_receipt(old_receipt, **expected)
+        check_adjoint_run_header(old_receipt, **expected)
     published = resolve_forward_campaign(doc, **args)
     assert published['unit_roster_sha256'] != doc['campaign_identity']['unit_roster_sha256']
-    assert bind_adjoint_receipt({**old_receipt, 'run_identity': published}, **expected)
+    assert check_adjoint_run_header({**old_receipt, 'run_identity': published}, **expected)
     assert doc == original
 
 

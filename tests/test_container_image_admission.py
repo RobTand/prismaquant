@@ -123,6 +123,8 @@ def _quantum_record(tmp_path: Path) -> Path:
     record_path = tmp_path / "layer-001.json"
     slice_path = tmp_path / "layer-001.data-manifest.json"
     slice_path.write_bytes(json.dumps({"slice": "layer-001"}).encode())
+    adjoint_path = tmp_path / "layer-001.adjoint-slice.json"
+    adjoint_path.write_bytes(b'{"slice": "fixture"}')
     if not (tmp_path / "plan.json").exists():
         (tmp_path / "plan.json").write_text("{}")  # the row reads its plan
     record_path.write_text(json.dumps({
@@ -135,7 +137,11 @@ def _quantum_record(tmp_path: Path) -> Path:
         "read_set": {"manifest_path": str(slice_path),
                      "manifest_sha256": hashlib.sha256(
                          slice_path.read_bytes()).hexdigest()},
-        "chunks": [{"name": "layer-001-chunk-000"}]}))
+        "chunks": [{"name": "layer-001-chunk-000"}],
+        # The row's stage-A slice file (PQ #993); quantum_argv checks only
+        # that its bytes hash to the bound digest.
+        "adjoint": {"slice_path": str(adjoint_path),
+                    "slice_sha256": hashlib.sha256(adjoint_path.read_bytes()).hexdigest()}}))
     return record_path
 
 
@@ -148,11 +154,8 @@ def test_stage_a_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec)
 def test_quantum_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec):
     record_path = _quantum_record(tmp_path)
     record = json.loads(record_path.read_text())
-    adjoint_path = tmp_path / "adjoint-capture.json"
-    adjoint_path.write_bytes(b'{"receipt": "fixture"}')
     argv = joint.quantum_argv(record, record_path=record_path,
-                              output_root=tmp_path / "out",
-                              adjoint_path=adjoint_path)
+                              output_root=tmp_path / "out")
     embedded = _embedded_spec(argv)
     assert _pbrun_option(argv, IMAGE_FLAG) == embedded["container"]["image"]
 

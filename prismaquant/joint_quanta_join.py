@@ -70,7 +70,8 @@ EXIT_REFUSED = 1
 
 #: §6.4's payload provenance grammar, pinned by issue #787 (B4). The
 #: contract names the contents -- "the campaign binding, the quantum
-#: identity, the adjoint receipt digest" -- not the keys; these are the
+#: identity, the adjoint digest" -- not the keys; since PQ #993 the adjoint
+#: digest is the quantum's stage-A slice digest, never a receipt's; these are the
 #: blocks the §6 runtime (``prismaquant.joint_cost_quantum``) seals into
 #: every ``cost.pkl``, and the joiner consumes what the producer side
 #: seals. No implementation digest is promised in the payload: the
@@ -80,7 +81,7 @@ EXIT_REFUSED = 1
 REQUIRED_PROVENANCE_BLOCKS = (
     "campaign_binding",
     "distributed_quantum",
-    "adjoint_receipt_sha256",
+    "adjoint_slice_sha256",
 )
 
 #: The campaign-binding block's keys (§6.4 "the campaign binding"; the
@@ -98,7 +99,7 @@ CAMPAIGN_BINDING_KEYS = (
 DISTRIBUTED_QUANTUM_KEYS = (
     "quantum_id",
     "identity_sha256",
-    "adjoint_receipt_sha256",
+    "adjoint_slice_sha256",
     "checkpoint_boundary",
     "chain_layers",
     "windows",
@@ -197,7 +198,8 @@ def _scan_receipts(input_root: Path | None, *, records_dir: Path | None = None) 
     return receipts
 
 
-def _check_record(record: object, receipt: dict, campaign: dict) -> dict:
+def _check_record(record: object, receipt: dict, campaign: dict, *,
+                  stage_a: tuple[str, dict[int, str]] | None = None) -> dict:
     """Custody step 1: the record answers for the receipt's identity and the
     campaign binding. Returns the record."""
     quantum_id = receipt["quantum_id"]
@@ -240,20 +242,117 @@ def _check_record(record: object, receipt: dict, campaign: dict) -> dict:
     # recomputation cannot drift from the seal.
     if binding.get("unit_roster_sha256") != roster_digest(campaign["roster"]):
         raise JoinRefused(f"{where}: record roster digest is not this roster")
-    # §3.2's rule, mirrored from check_quantum_for_campaign: when the caller
-    # pins the stage-A receipt digest, every record must bind exactly it --
-    # an unbound (pre-A) record refuses rather than joining.
-    expected_receipt = campaign.get("adjoint_receipt_sha256")
-    if expected_receipt is not None:
-        actual_receipt = record.get("adjoint", {}).get("receipt_sha256")
-        if actual_receipt is None:
+    # §3.2's rule, mirrored from check_quantum_for_campaign (PQ #993): every
+    # record binds exactly the slice the caller's stage-A proof gives its
+    # layer -- an unbound (pre-A) record, or one binding a whole receipt,
+    # refuses rather than joining. Fail closed per quantum.
+    adjoint = record.get("adjoint", {})
+    if adjoint.get("receipt_sha256") is not None:
+        raise JoinRefused(
+            f"{where}: record binds a whole stage-A receipt, not its slice")
+    actual_slice = adjoint.get("slice_sha256")
+    if actual_slice is None:
+        raise JoinRefused(
+            f"{where}: record is unbound (pre-A): re-seal against its "
+            "stage-A slice before joining")
+    if stage_a is not None:
+        mode, expected_slices = stage_a
+        expected_slice = expected_slices.get(record.get("layer"))
+        if expected_slice is None:
             raise JoinRefused(
-                f"{where}: record is unbound (pre-A): re-seal against the "
-                "stage-A receipt before joining")
-        if actual_receipt != expected_receipt:
+                f"{where}: the stage-A proof gives layer {record.get('layer')} no slice")
+        if actual_slice != expected_slice:
             raise JoinRefused(
-                f"{where}: record binds another stage-A receipt")
+                f"{where}: record binds another stage-A slice than the "
+                f"{mode} gives layer {record.get('layer')}")
     return record
+
+
+def stage_a_expected_slices(campaign: dict) -> tuple[str, dict[int, str]]:
+    """The slice digest the caller's stage-A proof gives every layer.
+
+    Two modes (PQ #993). (a) ``adjoint_receipt``: the completed receipt;
+    every layer's slice is recomputed from it. (b) ``adjoint_bands``: no
+    complete receipt; the bands share one run header, every stride
+    checkpoint from the tail to the lowest has one, and each band gives the
+    slices of the layers it serves. Stage A's backward below the lowest
+    checkpoint is an input to nothing, so mode (b) never waits for it.
+    Returns ``(mode, {layer: slice_sha256})``; refuses any other proof.
+    """
+    from prismaquant.joint_adjoint_slices import (
+        AdjointSliceRefused, adjoint_slice_sha256, band_set,
+        missing_band_boundaries, nearest_checkpoint_boundary,
+        stage_a_receipt_kind, stage_a_run_header, stage_a_slice)
+    receipt = campaign.get("adjoint_receipt")
+    bands = campaign.get("adjoint_bands")
+    if (receipt is None) == (bands is None):
+        raise JoinRefused(
+            "coverage: the join needs exactly one stage-A proof: the completed "
+            "receipt (adjoint_receipt) or the checkpoint bands (adjoint_bands)")
+    try:
+        if receipt is not None:
+            if stage_a_receipt_kind(receipt) != "complete":
+                raise JoinRefused("coverage: adjoint_receipt is not a completed receipt")
+            mode, header = "completed receipt", stage_a_run_header(receipt)
+
+            def source(boundary):
+                return receipt
+        else:
+            indexed = band_set(bands)
+            if not indexed:
+                raise JoinRefused("coverage: an empty band set proves nothing")
+            missing = missing_band_boundaries(indexed)
+            if missing:
+                raise JoinRefused(
+                    f"coverage: stride checkpoints {missing} have no band")
+            mode = "checkpoint bands"
+            header = stage_a_run_header(next(iter(indexed.values())))
+
+            def source(boundary):
+                return indexed[boundary]
+        boundaries = header["stride"]["boundaries"]
+        layers = range(max(int(mark) for mark in boundaries))
+        return mode, {layer: adjoint_slice_sha256(stage_a_slice(
+            source(nearest_checkpoint_boundary(boundaries, layer)), layer))
+            for layer in layers}
+    except AdjointSliceRefused as exc:
+        raise JoinRefused(f"coverage: stage-A proof refused: {exc}") from exc
+
+
+def _proof_header_sha256(campaign: dict) -> str:
+    from prismaquant.joint_adjoint_slices import stage_a_run_header, stage_a_run_header_sha256
+    proof = campaign.get("adjoint_receipt") or campaign["adjoint_bands"][0]
+    return stage_a_run_header_sha256(stage_a_run_header(proof))
+
+
+def _check_stage_a_header(campaign: dict, records: dict[str, dict]) -> None:
+    """The stage-A proof's run header answers for the campaign being joined.
+
+    The same owner the producer binds with (``check_adjoint_run_header``):
+    the run's plan, prepared and scope, or, for a catalog extension, the
+    original run the extension binds. Every record must carry one extension
+    binding. With no record present there is nothing the header could admit.
+    """
+    from prismaquant.joint_adjoint_slices import (
+        AdjointSliceRefused, stage_a_run_header)
+    from prismaquant.joint_layer_quanta import canonical_bytes, check_adjoint_run_header
+    if not records:
+        return
+    extensions = {canonical_bytes(record.get("catalog_extension"))
+                  for record in records.values()}
+    if len(extensions) != 1:
+        raise JoinRefused("custody: records carry different catalog extension bindings")
+    proof = campaign.get("adjoint_receipt") or campaign["adjoint_bands"][0]
+    try:
+        header = stage_a_run_header(proof)
+        check_adjoint_run_header(
+            header, plan_sha256=campaign["plan_sha256"],
+            prepared_sha256=campaign["prepared_sha256"], scope=campaign["scope"],
+            checkpoints=header["stride"]["boundaries"],
+            catalog_extension=next(iter(records.values())).get("catalog_extension"))
+    except (AdjointSliceRefused, ValueError, OSError) as exc:
+        raise JoinRefused(
+            f"coverage: the stage-A proof does not answer for this campaign: {exc}") from exc
 
 
 def _check_tiling(records: dict[str, dict], campaign: dict) -> None:
@@ -359,7 +458,7 @@ def _load_cost_payload(receipt: dict, record: dict, campaign: dict) -> dict:
     expected_identity = {
         "quantum_id": quantum_id,
         "identity_sha256": record["identity_sha256"],
-        "adjoint_receipt_sha256": adjoint.get("receipt_sha256"),
+        "adjoint_slice_sha256": adjoint.get("slice_sha256"),
         "checkpoint_boundary": adjoint.get("checkpoint_boundary"),
         "chain_layers": adjoint.get("chain_layers"),
         "windows": len(record.get("windows", [])),
@@ -370,17 +469,17 @@ def _load_cost_payload(receipt: dict, record: dict, campaign: dict) -> dict:
             raise JoinRefused(
                 f"{where}: payload distributed-quantum {key} does not "
                 "answer for the record (retargeted receipt)")
-    if provenance["adjoint_receipt_sha256"] != adjoint.get("receipt_sha256"):
+    if provenance["adjoint_slice_sha256"] != adjoint.get("slice_sha256"):
         raise JoinRefused(
-            f"{where}: payload adjoint receipt digest does not answer for "
+            f"{where}: payload adjoint slice digest does not answer for "
             "the record")
-    if adjoint.get("receipt_sha256") is None:
-        # The §6.4 adjoint-receipt digest the contract names: an unbound
-        # (pre-A) record never joins -- the same refusal
-        # check_quantum_for_campaign makes for a bound campaign.
+    if adjoint.get("slice_sha256") is None:
+        # The §6.4 adjoint digest the contract names: an unbound (pre-A)
+        # record never joins -- the same refusal check_quantum_for_campaign
+        # makes for a bound campaign.
         raise JoinRefused(
-            f"{where}: record is unbound (pre-A): re-seal against the "
-            "stage-A receipt before joining")
+            f"{where}: record is unbound (pre-A): re-seal against its "
+            "stage-A slice before joining")
     return payload
 
 
@@ -478,9 +577,10 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
     is scanned from ``input_root`` (required then) off each sealed record's
     ``output_space``. ``campaign`` is the caller-supplied binding --
     plan/prepared/manifest digests, scope, roster, ``formats_by_qname``, the
-    parent manifest, and optionally the stage-A receipt digest
-    (``adjoint_receipt_sha256``, checked against every record when present)
-    -- never derived from the surviving shards.
+    parent manifest, and exactly one stage-A proof: the completed receipt
+    (``adjoint_receipt``) or the checkpoint bands (``adjoint_bands``); see
+    :func:`stage_a_expected_slices` -- never derived from the surviving
+    shards. Every record must bind the slice that proof gives its layer.
 
     Returns ``{"status": "complete"|"gapped", "gaps": [...],
     "joint_cost_path": ..., "results_path": ..., "coverage_sha256": ...}``.
@@ -500,14 +600,21 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
                 "roster", "formats_by_qname", "parent_manifest"):
         if key not in campaign:
             raise JoinRefused(f"coverage: campaign binding lacks {key!r}")
+    mode, expected_slices = stage_a_expected_slices(campaign)
+    expected_layers = {int(qid.split("-")[-1]) for qid in _expected_quantum_ids(campaign)}
+    if set(expected_slices) != expected_layers:
+        raise JoinRefused(
+            f"coverage: the stage-A {mode} covers layers "
+            f"{sorted(set(expected_slices) ^ expected_layers)} unlike the campaign")
 
     records: dict[str, dict] = {}
     for receipt in sorted(receipts, key=lambda r: r["quantum_id"]):
         record = _load_json(Path(receipt["record_path"]),
                             where=f"custody {receipt['quantum_id']}")
         records[receipt["quantum_id"]] = _check_record(
-            record, receipt, campaign)
+            record, receipt, campaign, stage_a=(mode, expected_slices))
         receipt["identity_sha256"] = record["identity_sha256"]
+    _check_stage_a_header(campaign, records)
     _check_tiling(records, campaign)
     roster_by_layer = _roster_by_layer(campaign["roster"])
 
@@ -630,6 +737,10 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
                         "coverage_sha256": coverage_sha256},
         "campaign": {key: campaign[key] for key in
                      ("plan_sha256", "prepared_sha256", "manifest_sha256")},
+        # Which stage-A proof admitted the join (PQ #993). The joined payload
+        # does not depend on it: a band set and the completed receipt of one
+        # run give every record the same slice.
+        "stage_a": {"mode": mode, "run_header_sha256": _proof_header_sha256(campaign)},
     }
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -756,11 +867,23 @@ def main(argv: list[str] | None = None) -> int:
                         help="sorted qname roster, one per line")
     parser.add_argument("--formats-by-qname", required=True,
                         help="JSON mapping qname to its prepared format list")
-    parser.add_argument("--adjoint-receipt-sha256", default=None,
-                        help="the stage-A receipt digest every record must "
-                             "bind (optional; refuses unbound records when "
-                             "given)")
+    proof = parser.add_mutually_exclusive_group(required=True)
+    proof.add_argument("--adjoint-receipt",
+                       help="mode (a): the completed stage-A receipt; every "
+                            "record's slice is recomputed from it")
+    proof.add_argument("--adjoint-band", action="append",
+                       help="mode (b): one sealed checkpoint band (repeat once "
+                            "per stride checkpoint)")
+    parser.add_argument("--adjoint-receipt-sha256",
+                        help="file digest of --adjoint-receipt")
+    parser.add_argument("--adjoint-band-sha256", action="append",
+                        help="file digest of each --adjoint-band, in order")
     args = parser.parse_args(argv)
+    if args.adjoint_receipt is not None and not args.adjoint_receipt_sha256:
+        parser.error("--adjoint-receipt needs --adjoint-receipt-sha256")
+    if args.adjoint_band is not None and len(args.adjoint_band_sha256 or []) != len(
+            args.adjoint_band):
+        parser.error("every --adjoint-band needs one --adjoint-band-sha256")
 
     try:
         _check_digest(Path(args.plan), args.plan_sha256, where="campaign plan")
@@ -768,12 +891,22 @@ def main(argv: list[str] | None = None) -> int:
                       where="campaign prepared")
         _check_digest(Path(args.manifest), args.manifest_sha256,
                       where="campaign manifest")
+        from prismaquant.joint_adjoint_slices import load_stage_a_receipt_like
+
+        def _proof(path, digest):
+            try:
+                return load_stage_a_receipt_like(path, digest)
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise JoinRefused(f"coverage: stage-A proof {path}: {exc}") from exc
         campaign = {
             "plan_sha256": args.plan_sha256,
             "prepared_sha256": args.prepared_sha256,
             "manifest_sha256": args.manifest_sha256,
             "scope": _load_json(Path(args.scope), where="campaign scope"),
-            "adjoint_receipt_sha256": args.adjoint_receipt_sha256,
+            **({"adjoint_receipt": _proof(args.adjoint_receipt, args.adjoint_receipt_sha256)}
+               if args.adjoint_receipt is not None else
+               {"adjoint_bands": [_proof(path, digest) for path, digest in zip(
+                   args.adjoint_band, args.adjoint_band_sha256)]}),
             "roster": _read_text_list(Path(args.roster)),
             "formats_by_qname": _load_json(Path(args.formats_by_qname),
                                            where="formats_by_qname"),

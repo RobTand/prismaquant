@@ -106,16 +106,17 @@ def test_resource_gpu_envelope_is_applied_before_any_pricing(resource_fixture, m
 
 def test_extended_catalog_reads_original_capture_namespace_without_rewriting_it():
     from prismaquant.joint_cost_quantum import quantum_adjoint_space
-    receipt = {'boundary_storage': {'directory': '/original/layer-quanta/adjoint/exact-boundaries'},
-        'checkpoints': [{'boundary': 8, 'activation_entries': [
+    # The quantum's stage-A slice (PQ #993): one checkpoint, the one it reads.
+    adjoint_slice = {'boundary_storage': {'directory': '/original/layer-quanta/adjoint/exact-boundaries'},
+        'checkpoint': {'boundary': 8, 'activation_entries': [
             {'path': '/original/layer-quanta/adjoint/checkpoints/boundary-008/entries/cotangent.pt'}],
-            'shared_state_entries': []}]}
-    original = copy.deepcopy(receipt)
-    assert quantum_adjoint_space({'catalog_extension': {'path': '/proof'}}, receipt, '/new') == Path('/original/layer-quanta/adjoint')
-    assert receipt == original
-    receipt['checkpoints'][0]['activation_entries'][0]['path'] = '/new/foreign.pt'
+            'shared_state_entries': []}}
+    original = copy.deepcopy(adjoint_slice)
+    assert quantum_adjoint_space({'catalog_extension': {'path': '/proof'}}, adjoint_slice, '/new') == Path('/original/layer-quanta/adjoint')
+    assert adjoint_slice == original
+    adjoint_slice['checkpoint']['activation_entries'][0]['path'] = '/new/foreign.pt'
     with pytest.raises(RuntimeError, match='escaped'):
-        quantum_adjoint_space({'catalog_extension': {'path': '/proof'}}, receipt, '/new')
+        quantum_adjoint_space({'catalog_extension': {'path': '/proof'}}, adjoint_slice, '/new')
 
 
 def test_worker_resource_verification_uses_sealed_geometry_without_render_stats(resource_fixture, monkeypatch):

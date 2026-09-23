@@ -3,6 +3,13 @@
 
 Run this CPU metadata producer through PB. It never submits children. The emitted
 launch argv is executed by the coordinator using the published PB dispatcher.
+
+Band granularity (PQ #993): the Stage A proof is the completed receipt or any
+set of sealed checkpoint bands. Records are emitted only for the layers whose
+checkpoint has a proof. Re-running with more bands is additive and idempotent:
+the catalog extension binds the Stage A run header (so the first band creates
+it), the extended parent carries no Stage A proof, and every earlier record,
+slice and readset republishes byte for byte.
 """
 from __future__ import annotations
 import argparse
@@ -62,10 +69,20 @@ def extend_parent(parent, additions, *, old_plan, new_plan, prepared, extension)
     return result
 
 
-def metadata_entries(inputs, plan, prepared, extension, receipt):
-    """Add only control dependencies; executable readsets own tensor payloads."""
+def metadata_entries(inputs, plan, prepared, extension):
+    """Add only control dependencies; executable readsets own tensor payloads.
+
+    Nothing here depends on which Stage A proof is in hand (PQ #993), so
+    the parent is one set of bytes for every band set: the extension binds
+    the run header, and the completed receipt and the per-checkpoint
+    ``checkpoint.json`` files are no longer listed. Nothing staged those
+    head entries for a quantum: a quantum reads its own checkpoint's
+    ``checkpoint.json`` directly from the adjoint space and checks it
+    against the slice's sealed checkpoint record (``load_adjoint_checkpoint``);
+    its executable readset stages that checkpoint's tensor entries.
+    """
     from prismaquant.tessera_joint_allocation import _read_bound
-    bindings = [*inputs.values(), extension, receipt, prepared['production_cache']]
+    bindings = [*inputs.values(), extension, prepared['production_cache']]
     bindings += [plan['stage_b_resource_policy'], plan['served_activation_policy'], plan['inputs']['candidate_overlay']]
     documents = [json.loads(_read_bound(b, 'Stage B metadata closure')) for b in
                  (plan['stage_b_resource_policy'], plan['served_activation_policy'], plan['inputs']['candidate_overlay'])]
@@ -77,11 +94,6 @@ def metadata_entries(inputs, plan, prepared, extension, receipt):
     paths = {b['path'] for b in bindings}
     paths.add(proof['fixture_id']['result'])
     paths.update(arm['result'] for arm in proof['arms'])
-    # Capture checkpoint metadata is consumed beside its declared tensor entries.
-    capture = json.loads(_read_bound(receipt, 'original completed capture'))
-    directory = Path(capture['boundary_storage']['directory']).parent
-    paths.update(str(directory/'checkpoints'/f"boundary-{c['boundary']:03d}"/'checkpoint.json')
-                 for c in capture['checkpoints'])
     entries = []
     for path in sorted(paths):
         p = Path(path)
@@ -116,8 +128,18 @@ def prepare(args):
     inputs = _load_json(args.pair_inputs, digest=args.pair_inputs_sha256, where='catalog pair')
     plan = _load_json(Path(inputs['extended_plan']['path']), digest=inputs['extended_plan']['sha256'], where='extended plan')
     prepared = _load_json(Path(inputs['extended_prepared']['path']), digest=inputs['extended_prepared']['sha256'], where='extended preparation')
-    receipt_binding = {'path': str(args.adjoint_receipt.resolve()), 'sha256': args.adjoint_receipt_sha256}
-    receipt = _load_json(args.adjoint_receipt, digest=args.adjoint_receipt_sha256, where='complete original capture')
+    if bool(args.adjoint_receipt) != bool(args.adjoint_receipt_sha256):
+        raise ValueError('--adjoint-receipt and --adjoint-receipt-sha256 go together')
+    proofs = ([(args.adjoint_receipt, args.adjoint_receipt_sha256)] if args.adjoint_receipt else [])
+    if len(args.adjoint_band) != len(args.adjoint_band_sha256):
+        raise ValueError('every --adjoint-band needs one --adjoint-band-sha256')
+    proofs += list(zip(args.adjoint_band, args.adjoint_band_sha256))
+    if not proofs:
+        raise ValueError('Stage B needs sealed Stage A proof: the completed receipt or a checkpoint band')
+    from prismaquant.joint_adjoint_slices import load_stage_a_receipt_like, stage_a_run_header
+    first_binding = {'path': str(Path(proofs[0][0]).resolve()), 'sha256': proofs[0][1]}
+    documents = [load_stage_a_receipt_like(path, digest) for path, digest in proofs]
+    bands = sorted((doc['band']['boundary'] for doc in documents if doc['status'] == 'band'), reverse=True)
     parent = _load_json(args.parent_manifest, digest=args.parent_manifest_sha256, where='original parent manifest')
     derivation = _load_json(args.derivation, digest=args.derivation_sha256, where='original quantum derivation')
     spec = _load_json(args.spec, digest=args.spec_sha256, where='reviewed Stage B container spec')
@@ -128,11 +150,12 @@ def prepare(args):
     proof_path = root/'catalog-extension.json'
     if proof_path.exists():
         extension = bind(proof_path)
-        require_extension(extension, receipt=receipt, plan_sha256=inputs['extended_plan']['sha256'],
+        require_extension(extension, run_header=stage_a_run_header(documents[0]),
+                          plan_sha256=inputs['extended_plan']['sha256'],
                           prepared_sha256=inputs['extended_prepared']['sha256'])
     else:
-        extension = create_extension(inputs=inputs, adjoint_capture=receipt_binding, output=proof_path)
-    additions = metadata_entries(inputs, plan, prepared, extension, receipt_binding)
+        extension = create_extension(inputs=inputs, adjoint_capture=first_binding, output=proof_path)
+    additions = metadata_entries(inputs, plan, prepared, extension)
     updated = extend_parent(parent, additions, old_plan=inputs['original_plan'],
         new_plan=inputs['extended_plan'], prepared=prepared, extension=extension)
     updated['produced_by']['original_parent_manifest'] = {'path': str(args.parent_manifest), 'sha256': args.parent_manifest_sha256}
@@ -144,32 +167,46 @@ def prepare(args):
     _publish(derivation_path, _pretty(derivation), where='original derivation')
     spec_path = root/'stage-b-spec.json'
     _publish(spec_path, _pretty(spec), where='reviewed Stage B spec')
+    proof_argv = []
+    for (path, _), document in zip(proofs, documents):
+        proof_argv += ['--adjoint-receipt' if document['status'] == 'complete' else '--adjoint-band',
+                       str(path)]
     generator = ['--plan', inputs['extended_plan']['path'], '--plan-sha256', inputs['extended_plan']['sha256'],
         '--prepared', inputs['extended_prepared']['path'], '--prepared-sha256', inputs['extended_prepared']['sha256'],
         '--parent-manifest', str(parent_path), '--parent-manifest-sha256', bind(parent_path)['sha256'],
         '--derivation', str(derivation_path), '--partition', str(partition_path),
         '--output-root', plan['output_root'], '--metadata-root', str(root),
-        '--adjoint-receipt', str(args.adjoint_receipt), '--catalog-extension', extension['path'],
+        *proof_argv, '--catalog-extension', extension['path'],
         '--catalog-extension-sha256', extension['sha256'], '--executable-readsets',
         '--source-layers-prefix', 'model.language_model.layers.']
     if regenerate(generator) != 0:
         raise ValueError('generator refused; no launch package published')
     launch = ['python3', 'tools/dispatch_joint_quanta.py', '--records', str(root/'records'),
-        '--output-root', plan['output_root'], '--adjoint-receipt', str(args.adjoint_receipt),
+        '--output-root', plan['output_root'], *proof_argv,
         '--plan', inputs['extended_plan']['path'], '--spec', str(spec_path), '--priority', '-10',
         '--state', str(root/'dispatch-state.json')]
-    _publish(root/'launch.json', _pretty({'schema': 'prismaquant.extended_stage_b_launch.v1',
+    # One launch recipe per proof set, so a later band set adds a recipe
+    # instead of rewriting one (the completed receipt keeps launch.json).
+    launch_name = ('launch.json' if args.adjoint_receipt else
+                   'launch.bands-' + '-'.join(f'{b:03d}' for b in bands) + '.json')
+    _publish(root/launch_name, _pretty({'schema': 'prismaquant.extended_stage_b_launch.v1',
         'catalog_extension': extension, 'resource_policy': plan['stage_b_resource_policy'],
         'generator_argv': generator, 'coordinator_argv': launch,
         'requires': 'reviewed source checkout; all GPU work through published PB dispatcher'}), where='launch recipe')
-    print(json.dumps({'status': 'metadata_ready', 'launch': str(root/'launch.json'), 'catalog_extension': extension}))
+    print(json.dumps({'status': 'metadata_ready', 'launch': str(root/launch_name), 'catalog_extension': extension}))
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('pair-inputs', 'adjoint-receipt', 'parent-manifest', 'derivation', 'spec'):
+    for name in ('pair-inputs', 'parent-manifest', 'derivation', 'spec'):
         parser.add_argument('--'+name, type=Path, required=True)
         parser.add_argument('--'+name+'-sha256', required=True)
+    parser.add_argument('--adjoint-receipt', type=Path, default=None,
+                        help='the completed Stage A receipt')
+    parser.add_argument('--adjoint-receipt-sha256', default=None)
+    parser.add_argument('--adjoint-band', type=Path, action='append', default=[],
+                        help='a sealed checkpoint band (repeatable, PQ #993)')
+    parser.add_argument('--adjoint-band-sha256', action='append', default=[])
     parser.add_argument('--metadata-root', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
