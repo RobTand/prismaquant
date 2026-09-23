@@ -98,6 +98,24 @@ EXIT_GAPPED = 4
 
 IDENTITY_REFUSED_MARKER = "quantum_identity_refused"
 
+#: Opt in to Stage B's kernel-time sessions, one around the chain and one
+#: around each retained window (PQ #1029). Off by default, as Stage A's are
+#: (#899): each session's close sums every CUDA kernel it recorded through
+#: ``key_averages``, and on a GLM-shaped proxy that close was 15.6 s of one
+#: quantum's main thread. The GPU power sampler stays on. ``1`` restores the
+#: kernel-time sum.
+KERNEL_PROFILE_ENV = "PRISMAQUANT_STAGE_B_KERNEL_PROFILE"
+KERNEL_PROFILE_NOT_MEASURED = (
+    "not measured: each torch.profiler session's close sums every kernel it "
+    f"recorded (PQ #1029); {KERNEL_PROFILE_ENV}=1 opts in")
+
+
+def _stage_b_kernel_profiler() -> KernelTimeProfiler:
+    """A Stage B kernel-time profiler: not measured unless asked for."""
+    if os.environ.get(KERNEL_PROFILE_ENV) == "1":
+        return KernelTimeProfiler()
+    return KernelTimeProfiler(not_measured=KERNEL_PROFILE_NOT_MEASURED)
+
 
 class QuantumIdentityRefused(RuntimeError):
     """A digest, schema or binding mismatch: refuse before writing anything."""
@@ -553,7 +571,11 @@ class QuantumCounters:
         self.chain["layers"] += int(layers)
         self.chain["backwards"] += int(backwards)
         self.chain["wall_s"] += float(wall_s)
-        self.chain["kernel_active_s"] += float(kernel_active_s or 0.0)
+        # None (not measured) is sticky: a partial sum is not the chain's.
+        if kernel_active_s is None or self.chain["kernel_active_s"] is None:
+            self.chain["kernel_active_s"] = None
+        else:
+            self.chain["kernel_active_s"] += float(kernel_active_s)
 
     def kernel_block(self, profiler: KernelTimeProfiler) -> None:
         self.total_kernel_active_s += profiler.kernel_active_s
@@ -1591,7 +1613,7 @@ def run_layer_quantum_core(
         # ---- the render-free chain: stage A's arithmetic, reused ---------
         chain_started = time.time()
         chain_backwards = 0
-        chain_kernel = KernelTimeProfiler()
+        chain_kernel = _stage_b_kernel_profiler()
         chain_kernel.__enter__()
         try:
             for chain_layer in chain_layers:
@@ -1623,7 +1645,8 @@ def run_layer_quantum_core(
         counters.chain_step(layers=len(chain_layers),
                             backwards=chain_backwards,
                             wall_s=time.time() - chain_started,
-                            kernel_active_s=chain_kernel.kernel_active_s)
+                            kernel_active_s=(None if chain_kernel.error
+                                             else chain_kernel.kernel_active_s))
 
         # ---- layer L: the single run's retained reverse step --------------
         guard = operator_window_guard(
@@ -2002,7 +2025,7 @@ def run_layer_quantum_core(
                 prepare_retained_window_read(
                     window_index, record=record, progress=progress)
             replay_window = int(window_index)
-            window_kernel = KernelTimeProfiler()
+            window_kernel = _stage_b_kernel_profiler()
             window_kernel.__enter__()
             window_started = time.time()
             counters.enter_phase()
