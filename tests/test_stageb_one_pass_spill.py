@@ -1061,23 +1061,73 @@ def test_spill_scratch_is_unnamed_and_bounded(tmp_path):
     from prismaquant.perturbed_x_cache import StageBSpillScratch
 
     root = _spill_root(tmp_path)
-    scratch = StageBSpillScratch(directory=root, max_bytes=4096, nbytes=4096)
+    scratch = StageBSpillScratch(directory=root, max_bytes=1 << 20, nbytes=3000,
+                                 parts=2, part_padding=512, alignment=512)
     try:
+        block = scratch.block
+        assert block >= 512 and not block & (block - 1)
+        # The payload plus every slot's worst-case padding, on the grid.
+        reserve = 3000 + 2 * (512 + block)
+        assert scratch.capacity == reserve + (-reserve) % block
         assert os.listdir(root) == []
         assert _open_under(root)
-        offset = scratch.allocate(3000)
-        payload = bytes(range(256)) * 11 + bytes(184)
-        scratch.write(offset, [memoryview(payload[:1000]), memoryview(payload[1000:3000])])
-        target = bytearray(3000)
-        scratch.read_into(offset, [memoryview(target)])
-        assert bytes(target) == payload[:3000]
+        source = spill_mod._aligned_buffer(2 * block, block, False)
+        assert source.data_ptr() % block == 0
+        source.copy_(torch.arange(2 * block).remainder(251).to(torch.uint8))
+        view = memoryview(source.numpy())
+        offset = scratch.allocate(2 * block)
+        assert offset == 0
+        # One call per block at a one-block call size; one call for both.
+        assert scratch.write(offset, [view[:block], view[block:]], call_bytes=block) == 2
+        assert scratch.write(offset, [view[:block], view[block:]], call_bytes=4 * block) == 1
+        target = spill_mod._aligned_buffer(2 * block, block, False)
+        assert scratch.read_into(offset, [memoryview(target.numpy())]) == 2 * block
+        assert torch.equal(target, source)
+        # Split reads land in their own views.
+        target.zero_()
+        tail = memoryview(target.numpy())
+        assert scratch.read_into(offset + block, [tail[:block]]) == block
+        assert torch.equal(target[:block], source[block:])
+        with pytest.raises(ValueError, match="direct-I/O block"):
+            scratch.allocate(block + 1)
+        with pytest.raises(RuntimeError, match="direct-I/O grid"):
+            scratch.write(offset, [view[:block // 2]], call_bytes=block)
+        with pytest.raises(RuntimeError, match="outside its allocation"):
+            scratch.read_into(offset + block, [memoryview(target.numpy())])
         with pytest.raises(RuntimeError, match="geometry bound"):
-            scratch.allocate(2000)
+            scratch.allocate(scratch.capacity)
     finally:
         scratch.close()
     assert not _open_under(root) and os.listdir(root) == []
-    with pytest.raises(RuntimeError, match="ceiling"):
+    # The payload alone over the ceiling refuses before a file exists.
+    with pytest.raises(RuntimeError, match="ceiling is 100"):
         StageBSpillScratch(directory=root, max_bytes=100, nbytes=101)
+    # So does the slot padding on top of a payload that fits.
+    with pytest.raises(RuntimeError, match="ceiling is 4096"):
+        StageBSpillScratch(directory=root, max_bytes=4096, nbytes=4096,
+                           parts=1, part_padding=512)
+    with pytest.raises(ValueError, match="power of two"):
+        StageBSpillScratch(directory=root, max_bytes=1 << 20, nbytes=4096,
+                           alignment=768)
+    assert not _open_under(root) and os.listdir(root) == []
+
+
+def test_spill_slot_keeps_the_replay_residue_on_the_grid():
+    block = spill_mod.ADDRESS_ALIGNMENT
+    assert spill_mod._slot(0, 0, 0, block) == (0, 0, 0)
+    assert spill_mod._slot(1, 7, 0, block) == (block, block, block)
+    assert spill_mod._slot(1, 100, 1000, block) == (block, block + 100, 3 * block)
+    assert spill_mod._slot(2 * block, 0, block, block) == (2 * block, 2 * block, 3 * block)
+    for grid in (block, 8 * block):
+        for cursor in range(0, 3 * grid, 97):
+            for residue in (0, 2, 254, block - 2):
+                for nbytes in (2, 510, 512, 514, 4096, 5000):
+                    start, offset, end = spill_mod._slot(cursor, residue, nbytes, grid)
+                    assert start % grid == 0 and 0 <= start - cursor < grid
+                    assert offset % block == residue
+                    assert end % grid == 0 and 0 <= end - (offset + nbytes) < grid
+                    # The padding the scratch reserves per part bounds the slot.
+                    assert end - start < nbytes + block + grid
 
 
 def test_spill_refuses_a_non_dense_input(tmp_path):
@@ -1127,6 +1177,8 @@ def test_spill_geometry_counts_shared_expert_rows_once_per_window():
     g = (INTER + INTER + WIDTH) * total + (INTER + INTER + WIDTH) * TOP_K * total
     assert geometry.x_bytes == 2 * x and geometry.g_bytes_per_probe == 2 * g
     assert geometry.total_bytes == 2 * x + 2 * 2 * g
+    # Per sample: an input and a gradient per probe for every target.
+    assert geometry.max_parts == (2 + 1) * len(layer) * len(tokens)
     unbounded = spill_mod.spill_geometry(
         linears, [tuple(layer)], pending=set(layer), batch_tokens=tokens,
         n_probes=2, element_size=2, experts_per_token=None)
