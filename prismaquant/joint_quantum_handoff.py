@@ -27,9 +27,17 @@ Transport:
   local spool when the sealed environment enables it. Nothing here
   moves bytes itself.
 * ``owner-states.pkl`` (the harvested ``SharedStateCotangents`` states) and
-  ``handoff.json`` (the sealed record) are small files written into the
-  generation directory after the entries are durable. ``handoff.json`` is
-  written last, so its presence implies complete entries.
+  ``handoff.json`` (the sealed record) are one more group of the same
+  publication, of kind ``handoff-record`` (PQ #1015). The owner writes it
+  (``StreamedBoundaryArtifacts.write_produced_files``) only after every
+  entry group is durable, and ``handoff.json`` is its last file, so the
+  record's presence implies complete entries and owner states. Through the
+  spool, durable means PrismaBuild acknowledged the group's export.
+  Unbound (a local or test run), the two files are written directly.
+  Like the entry groups, the record group is prewritten and never
+  committed: PrismaBuild cannot yet commit a write-only group that another
+  action reads (PB #912), so it ends as a retained prewrite. Retirement
+  and the orphan sweep wait on PB #914 (PQ #1007).
 * The consumer reads the plane through ``read_exact_entry_tensors`` (the
   verified exact-entry reader, strict-tier staged when the policy is
   active) and the owner states through the checkpoint's staged small-file
@@ -58,6 +66,9 @@ HANDOFF_SESSION_SCHEMA = "prismaquant.joint_quantum_handoff.session.v1"
 HANDOFF_DIRECTORY = "handoff"
 HANDOFF_RECORD_NAME = "handoff.json"
 HANDOFF_OWNER_STATES_NAME = "owner-states.pkl"
+#: The produced-output group kind of ``owner-states.pkl`` and
+#: ``handoff.json`` (PQ #1015): one group per handoff, group index 0.
+HANDOFF_RECORD_BATCH_KIND = "handoff-record"
 #: The executable read phase a band-serial quantum stages its handoff under,
 #: in place of the checkpoint load and the chain phases.
 HANDOFF_LOAD_PHASE = "handoff-load"
@@ -199,7 +210,6 @@ class HandoffEmitter:
 
     def emit(self, *, grad_plane, cotangent_owners, n_probes: int,
              n_batches: int) -> dict:
-        from .cost_stage_checkpoint import atomic_write_bytes
         from .cost_streaming import StreamedBoundaryArtifacts, normalize_boundary_storage
         from .joint_adjoint_checkpoints import exact_entry_record
 
@@ -253,7 +263,6 @@ class HandoffEmitter:
                             for batch in range(int(n_batches))]},
                 protocol=pickle.HIGHEST_PROTOCOL)
             states_path = directory / HANDOFF_OWNER_STATES_NAME
-            atomic_write_bytes(states_path, states)
             handoff = {
                 "schema": HANDOFF_SCHEMA,
                 "boundary": layer,
@@ -274,7 +283,12 @@ class HandoffEmitter:
             handoff["handoff_sha256"] = handoff_seal_sha256(handoff)
             payload = handoff_record_bytes(handoff)
             path = directory / HANDOFF_RECORD_NAME
-            atomic_write_bytes(path, payload)
+            # One produced group after every entry group has landed; the
+            # record goes last, so its presence implies complete states.
+            owner.write_produced_files(
+                [(HANDOFF_OWNER_STATES_NAME, states),
+                 (HANDOFF_RECORD_NAME, payload)],
+                kind=HANDOFF_RECORD_BATCH_KIND, boundary_index=layer)
         self.published = {"path": str(path),
                           "sha256": hashlib.sha256(payload).hexdigest(),
                           "handoff_sha256": handoff["handoff_sha256"],
@@ -729,7 +743,8 @@ def bind_handoff_publication(*, boundary_storage: Mapping, env=None):
 
 __all__ = [
     "BAND_SERIAL_READSET_SCHEMA", "HANDOFF_DIRECTORY", "HANDOFF_LOAD_PHASE",
-    "HANDOFF_OWNER_STATES_NAME", "HANDOFF_RECORD_NAME", "HANDOFF_SCHEMA",
+    "HANDOFF_OWNER_STATES_NAME", "HANDOFF_RECORD_BATCH_KIND",
+    "HANDOFF_RECORD_NAME", "HANDOFF_SCHEMA",
     "HandoffEmitter", "QuantumHandoffRefused", "band_serial_manifest",
     "band_serial_manifest_bytes", "bind_handoff_publication",
     "handoff_chain_regime_refusal", "handoff_read_entries", "handoff_root",
