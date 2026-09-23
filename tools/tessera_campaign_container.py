@@ -551,6 +551,56 @@ def produced_spool_environment(spec: dict, environ) -> dict:
                                       "local output spool")
 
 
+#: PrismaBuild's sealed list of an action's bounded-local pairs (PB #911):
+#: ``ROOT_ENV:MAX_ENV`` items separated by commas. pbrun charges each pair's
+#: ceiling, rounded up to whole GiB, to the executing box's ``spool_gb``.
+LOCAL_SCRATCH_PAIRS_ENV = "PRISMABUILD_LOCAL_SCRATCH_PAIRS"
+
+#: Every bounded-local scratch kind a campaign container may write on the
+#: executing box's disk, in the order its pair is listed. A kind added here
+#: is forwarded and priced by the same call (``local_scratch_environment``).
+#: The produced spool is not listed: PrismaBuild charges its window through
+#: ``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW`` and refuses its pair in the list.
+LOCAL_SCRATCH_KINDS = (
+    (COTANGENT_SCRATCH_ENV, cotangent_scratch_environment),
+    (STAGE_B_SPILL_ENV, stage_b_spill_environment),
+)
+
+
+def local_scratch_environment(spec: dict, environ) -> dict:
+    """Every declared bounded-local scratch pair, plus PrismaBuild's pair list.
+
+    Each kind in :data:`LOCAL_SCRATCH_KINDS` is validated by its own
+    function, so a root without a sealed positive byte ceiling is refused
+    here, as it is at launch. The pairs that are declared are listed in
+    :data:`LOCAL_SCRATCH_PAIRS_ENV`, so PrismaBuild charges every byte
+    bound it forwards. With no scratch declared this is ``{}`` and the
+    sealed request carries nothing new.
+    """
+
+    if LOCAL_SCRATCH_PAIRS_ENV in spec.get("env", {}):
+        raise RuntimeError(
+            f"spec env {LOCAL_SCRATCH_PAIRS_ENV} is derived from the declared "
+            "scratch kinds, not declared by a spec")
+    forwarded: dict = {}
+    pairs = []
+    for names, environment in LOCAL_SCRATCH_KINDS:
+        declared = environment(spec, environ)
+        if declared:
+            forwarded.update(declared)
+            pairs.append(names)
+    if not pairs:
+        return {}
+    roots = [forwarded[root] for root, _ in pairs]
+    if len(set(roots)) != len(roots):
+        raise RuntimeError(
+            "two bounded-local scratch kinds name the same root; each needs "
+            "its own root so PrismaBuild can charge each ceiling")
+    forwarded[LOCAL_SCRATCH_PAIRS_ENV] = ",".join(
+        f"{root}:{maximum}" for root, maximum in pairs)
+    return forwarded
+
+
 def _bounded_local_environment(spec, environ, names, label):
     declared = spec.get("env", {})
     if not any(environ.get(name) or declared.get(name) for name in names):
