@@ -126,8 +126,8 @@ def require_row_local_activation_qdq(modules, specs_by_qname, activation_max_abs
     This checks exactly that, bit for bit, on this device and dtype, through
     the function the statistics lease calls (``perturbed_x_cache.
     _activation_qdq``), for one Linear of each (format, input width) in the
-    roster. Row ``r`` is scaled by ``2**r`` so that a tensor-wide scale would
-    show. Returns the checked ``(format, input width)`` pairs.
+    roster. Row ``r`` is scaled by ``2**(r - rows // 2)`` so that a tensor-wide
+    scale would show. Returns the checked ``(format, input width)`` pairs.
     """
     from .perturbed_x_cache import _activation_qdq
 
