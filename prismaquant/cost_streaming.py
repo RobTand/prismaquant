@@ -946,9 +946,19 @@ class StreamedBoundaryArtifacts:
                 file_bytes=len(payload),
                 sha256=hashlib.sha256(payload).hexdigest())
             for name, payload in files]
+        total = sum(ref.file_bytes for ref in references)
+        # The files share max_artifact_bytes with the entries, as the
+        # template's payload maximum does on the PrismaBuild side.
+        remaining = self.checkpoint_remaining_bytes()
+        if total > remaining:
+            raise RuntimeError(
+                "exact boundary artifact budget exceeded: produced files need "
+                f"{total} bytes, {remaining} remain of "
+                f"{self.config['max_artifact_bytes']}")
         if self._produced is None:
             for (name, payload) in files:
                 atomic_write_bytes(self.directory / name, payload)
+            self._count_produced_files(total)
             return references
         self._produced_raise_stager_failure()
         batch_id = self._produced.batch_id_for(
@@ -958,17 +968,14 @@ class StreamedBoundaryArtifacts:
             planned += [str(self.directory / name),
                         str(self.directory / name) + ".tmp"]
         self._produced.require_prewrite(
-            batch_id=batch_id,
-            payload_ceiling_bytes=sum(ref.file_bytes for ref in references),
-            paths=planned)
+            batch_id=batch_id, payload_ceiling_bytes=total, paths=planned)
         spool = self._local_output_spool
         try:
             if spool is None:
                 for (name, payload) in files:
                     _link_new_file(self.directory / name, payload)
             else:
-                local = spool.reserve(batch_id, sum(
-                    ref.file_bytes for ref in references))
+                local = spool.reserve(batch_id, total)
                 for (name, payload), reference in zip(files, references):
                     path = Path(local) / name
                     _write_new_file(path, payload)
@@ -983,7 +990,14 @@ class StreamedBoundaryArtifacts:
                 self._produced.abort_prewrite(batch_id=batch_id)
             raise
         self.telemetry["produced_file_groups"] += 1
+        self._count_produced_files(total)
         return references
+
+    def _count_produced_files(self, nbytes):
+        self.telemetry["live_artifact_bytes"] += nbytes
+        self.telemetry["peak_artifact_bytes"] = max(
+            self.telemetry["live_artifact_bytes"],
+            self.telemetry["peak_artifact_bytes"])
 
     def _retire(self, reference, *, missing_ok=False):
         if self._references.get(reference.name) != reference:
