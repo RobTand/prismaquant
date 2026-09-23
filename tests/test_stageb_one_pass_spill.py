@@ -573,10 +573,10 @@ def test_only_probe_zero_inputs_reach_the_host(campaign, monkeypatch, tmp_path):
     staged: dict[int, int] = {}
     original = spill_mod.StageBReplaySpill._stage
 
-    def stage(self, window_index, stream, index, logical, tensor):
+    def stage(self, window_index, stream, *args):
         if stream[0] == "x":
             staged[self._probe] = staged.get(self._probe, 0) + 1
-        return original(self, window_index, stream, index, logical, tensor)
+        return original(self, window_index, stream, *args)
 
     monkeypatch.setattr(spill_mod.StageBReplaySpill, "_stage", stage)
     _clear_output(campaign, layer)
@@ -1116,7 +1116,7 @@ def test_spill_slot_keeps_the_replay_residue_on_the_grid():
     block = spill_mod.ADDRESS_ALIGNMENT
     assert spill_mod._slot(0, 0, 0, block) == (0, 0, 0)
     assert spill_mod._slot(1, 7, 0, block) == (block, block, block)
-    assert spill_mod._slot(1, 100, 1000, block) == (block, block + 100, 3 * block)
+    assert spill_mod._slot(1, 100, 1000, block) == (block, block + 100, 4 * block)
     assert spill_mod._slot(2 * block, 0, block, block) == (2 * block, 2 * block, 3 * block)
     for grid in (block, 8 * block):
         for cursor in range(0, 3 * grid, 97):
