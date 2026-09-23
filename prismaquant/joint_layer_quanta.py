@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -864,16 +865,20 @@ _SAFETENSORS_HEADER_MAX_BYTES = 100_000_000
 
 
 def _layer_source_shards(model_dir: str, num_layers: int, *,
-                         checkpoint_layers_prefix: str):
+                         checkpoint_layers_prefix: str, source_reads=None):
     """``(index path, {shard: [(layer, tensor name), ...]})`` for layers below ``num_layers``.
 
     The streamed reader's selection: every checkpoint tensor named
     ``{checkpoint_layers_prefix}{layer}.*``, grouped by the shard the index
-    places it in.
+    places it in. ``source_reads`` is :func:`read_layer_source_spans`'s.
     """
     index_path = os.path.join(model_dir, "model.safetensors.index.json")
-    with open(index_path, encoding="utf-8") as handle:
-        weight_map = json.load(handle)["weight_map"]
+    if source_reads is None:
+        with open(index_path, encoding="utf-8") as handle:
+            weight_map = json.load(handle)["weight_map"]
+    else:
+        raw = source_reads.whole(index_path, where="checkpoint index")
+        weight_map = json.loads(raw.decode("utf-8"))["weight_map"]
     pattern = re.compile(rf"^{re.escape(checkpoint_layers_prefix)}([0-9]+)\.")
     wanted: dict[str, list[tuple[int, str]]] = {}
     for name, shard in weight_map.items():
@@ -917,7 +922,7 @@ def layer_source_header_reads(model_dir: str, num_layers: int, *,
 
 
 def read_layer_source_spans(model_dir: str, num_layers: int, *,
-                            checkpoint_layers_prefix: str,
+                            checkpoint_layers_prefix: str, source_reads=None,
                             ) -> dict[int, list[tuple[str, int, int]]]:
     """What stage A reads from the source, per layer, as file spans.
 
@@ -930,17 +935,33 @@ def read_layer_source_spans(model_dir: str, num_layers: int, *,
 
     It exists because a read manifest is a claim about what a reader will
     read, and until PQ #898 nothing compared the two.
+
+    ``source_reads`` reads the index and each header from somewhere other
+    than the source's own path: an object with ``whole(path, where=)`` and
+    ``prefix(path, nbytes=, where=)``, the Stage B preparation's staged
+    reads (``stage_b_prep_io.StagedPreparationReads``, PQ #1092). ``prefix``
+    returns the staged ``[0, 8 + length)`` range the manifest declares
+    (:func:`layer_source_header_reads`). None opens the files.
     """
     _index_path, wanted = _layer_source_shards(
-        model_dir, num_layers, checkpoint_layers_prefix=checkpoint_layers_prefix)
+        model_dir, num_layers, checkpoint_layers_prefix=checkpoint_layers_prefix,
+        source_reads=source_reads)
     spans: dict[int, list[tuple[str, int, int]]] = {
         layer: [] for layer in range(num_layers)}
     for shard in sorted(wanted):
         path = os.path.normpath(os.path.join(model_dir, shard))
         size = os.path.getsize(path)
-        with open(path, "rb") as handle:
-            length = _safetensors_header_length(handle, path, size)
-            header = json.loads(handle.read(length))
+        if source_reads is None:
+            with open(path, "rb") as handle:
+                length = _safetensors_header_length(handle, path, size)
+                header = json.loads(handle.read(length))
+        else:
+            raw = source_reads.prefix(path, nbytes=8, where="safetensors header")
+            length = _safetensors_header_length(io.BytesIO(raw), path, size)
+            if len(raw) < 8 + length:
+                raise ValueError(f"{path}: the staged header range holds {len(raw)} "
+                                 f"bytes, not the {8 + length} its length prefix names")
+            header = json.loads(raw[8:8 + length])
         base = 8 + length
         for layer, name in wanted[shard]:
             if name not in header:

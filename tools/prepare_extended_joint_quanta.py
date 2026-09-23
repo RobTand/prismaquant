@@ -21,7 +21,8 @@ from pathlib import Path
 
 from prismaquant.joint_catalog_extension import create_extension, require_extension
 from prismaquant.stage_b_prep_io import (
-    PreparationPublicationRefused, bind_preparation_publication, publish_files)
+    PreparationPublicationRefused, PreparationReadRefused, bind_preparation_publication,
+    bind_staged_reads, publish_files, read_input)
 from tools.regenerate_joint_quanta import (_load_json, _pretty, _retained_budget_provenance,
     main as regenerate)
 
@@ -103,6 +104,15 @@ def control_paths(inputs, plan, prepared, extension=None):
     ``extension`` is None before the catalog extension exists: the
     preparation read set (PQ #1070) is built before this action writes it.
     """
+    return set(control_digests(inputs, plan, prepared, extension))
+
+
+def control_digests(inputs, plan, prepared, extension=None):
+    """:func:`control_paths` with each file's bound SHA-256, or None when unbound.
+
+    The preparation's data manifest declares a digest for every entry
+    (PQ #1092); a bound digest is taken from its binding, not rehashed.
+    """
     from prismaquant.tessera_joint_allocation import _read_bound
     bindings = [*inputs.values(), *([] if extension is None else [extension]),
                 prepared['production_cache']]
@@ -114,10 +124,14 @@ def control_paths(inputs, plan, prepared, extension=None):
     bindings += [activation[k] for k in ('original_prepared', 'original_cache', 'census')]
     bindings += [catalog[k] for k in ('old_prepared', 'old_pwc', 'cost', 'reseal_proof')]
     proof = json.loads(_read_bound(catalog['reseal_proof'], 'encoder adoption proof'))
-    paths = {b['path'] for b in bindings}
-    paths.add(proof['fixture_id']['result'])
-    paths.update(arm['result'] for arm in proof['arms'])
-    return paths
+    digests = {}
+    for binding in bindings:
+        if digests.get(binding['path'], binding['sha256']) != binding['sha256']:
+            raise ValueError(f"control file {binding['path']} is bound to two digests")
+        digests[binding['path']] = binding['sha256']
+    for path in (proof['fixture_id']['result'], *(arm['result'] for arm in proof['arms'])):
+        digests.setdefault(path, None)
+    return digests
 
 
 def require_derived_budget(plan, *, plan_sha256):
@@ -178,6 +192,19 @@ def stage_b_replay_mode(spec):
 
 
 def prepare(args):
+    if getattr(args, 'allowed_tiers', None) is not None and args.data_manifest_sha256 is None:
+        raise ValueError('--allowed-tiers needs --data-manifest-sha256')
+    strict = []
+    if getattr(args, 'data_manifest_sha256', None) is not None:
+        # PQ #1092: every declared input off the stage, bound before the
+        # first read; the files this action writes under the metadata root
+        # are read where they are. The generator binds the same digest.
+        from prismaquant.staged_tier_policy import DEFAULT_ALLOWED_TIERS
+        tiers = args.allowed_tiers or DEFAULT_ALLOWED_TIERS
+        bind_staged_reads(manifest_sha256=args.data_manifest_sha256,
+                          allowed_tiers=tiers, own_outputs=[args.metadata_root])
+        strict = ['--data-manifest-sha256', args.data_manifest_sha256,
+                  '--allowed-tiers', tiers]
     inputs = _load_json(args.pair_inputs, digest=args.pair_inputs_sha256, where='catalog pair')
     plan = _load_json(Path(inputs['extended_plan']['path']), digest=inputs['extended_plan']['sha256'], where='extended plan')
     prepared = _load_json(Path(inputs['extended_prepared']['path']), digest=inputs['extended_prepared']['sha256'], where='extended preparation')
@@ -191,7 +218,11 @@ def prepare(args):
         raise ValueError('Stage B needs sealed Stage A proof: the completed receipt or a checkpoint band')
     from prismaquant.joint_adjoint_slices import load_stage_a_receipt_like, stage_a_run_header
     first_binding = {'path': str(Path(proofs[0][0]).resolve()), 'sha256': proofs[0][1]}
-    documents = [load_stage_a_receipt_like(path, digest) for path, digest in proofs]
+    # Off the stage only when strict: without the flag the call is as before.
+    proof_read = ({'read': lambda p, sha: read_input(p, sha256=sha, where='Stage A proof')}
+                  if strict else {})
+    documents = [load_stage_a_receipt_like(path, digest, **proof_read)
+                 for path, digest in proofs]
     bands = sorted((doc['band']['boundary'] for doc in documents if doc['status'] == 'band'), reverse=True)
     parent = _load_json(args.parent_manifest, digest=args.parent_manifest_sha256, where='original parent manifest')
     derivation = _load_json(args.derivation, digest=args.derivation_sha256, where='original quantum derivation')
@@ -249,6 +280,7 @@ def prepare(args):
     if publication is not None:
         # The generator files its groups under this action's publication.
         generator.append('--produced-output')
+    generator += strict
     if regenerate(generator) != 0:
         raise ValueError('generator refused; no launch package published')
     launch = ['python3', 'tools/dispatch_joint_quanta.py', '--records', str(root/'records'),
@@ -282,6 +314,14 @@ def main(argv=None):
                         help='a sealed checkpoint band (repeatable, PQ #993)')
     parser.add_argument('--adjoint-band-sha256', action='append', default=[])
     parser.add_argument('--metadata-root', type=Path, required=True)
+    parser.add_argument('--data-manifest-sha256', default=None,
+                        help='read every declared input off the PrismaBuild stage, '
+                             'digest-checked, and refuse rather than read the pool '
+                             '(PQ #1092); the digest of the data manifest the action '
+                             'was submitted with. Forwarded to the generator')
+    parser.add_argument('--allowed-tiers', default=None,
+                        help='with --data-manifest-sha256: the staged tiers a read '
+                             'may come from (default ram,ssd)')
     parser.add_argument('--produced-output', action='store_true',
                         help='commit every file as a PrismaBuild produced output of this '
                              'admitted action (PQ #1070); the action must declare '
@@ -290,7 +330,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         prepare(args)
-    except (ValueError, OSError, PreparationPublicationRefused) as exc:
+    except (ValueError, OSError, PreparationPublicationRefused, PreparationReadRefused) as exc:
         parser.exit(3, f'Stage B metadata refused: {exc}\n')
 
 

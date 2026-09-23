@@ -132,8 +132,9 @@ def _load_json(path: Path, *, digest: str | None, where: str):
     The digest always covers the wire bytes. Detection is by gzip magic,
     never by suffix; the gunzip output is bounded and trailing garbage
     after a gzip member refuses rather than being silently ignored."""
+    from prismaquant.stage_b_prep_io import read_input
     try:
-        raw = path.read_bytes()
+        raw = read_input(path, sha256=digest, where=where)
     except OSError as exc:
         raise ValueError(f"{where} unreadable at {path}: {exc}") from exc
     if digest is not None and hashlib.sha256(raw).hexdigest() != digest:
@@ -711,9 +712,10 @@ def _load_production_cache(prepared: dict):
             "path", "sha256"}:
         raise ValueError("the prepared completion names no bound production "
                          "cache (path/SHA256): refusing")
+    from prismaquant.stage_b_prep_io import read_input
     path = Path(reference["path"])
     try:
-        raw = path.read_bytes()
+        raw = read_input(path, sha256=reference["sha256"], where="production cache")
     except OSError as exc:
         raise ValueError(f"production cache unreadable at {path}: "
                          f"{exc}") from exc
@@ -791,6 +793,17 @@ def main(argv=None) -> int:
                     help="authoritative DATA run root sealed into "
                          "output_space and adjoint.boundary_artifacts "
                          "(default: the plan's output_root)")
+    ap.add_argument("--data-manifest-sha256", default=None,
+                    help="PQ #1092: the digest of the data manifest this "
+                         "admitted action was submitted with. Every declared "
+                         "input is then read off PrismaBuild's stage through "
+                         "the residency reader and checked against its "
+                         "digest; a read the stage does not hold refuses, "
+                         "never falling back to the pool. Needs --residency "
+                         "stage. Without it reads are plain, as before")
+    ap.add_argument("--allowed-tiers", default=None,
+                    help="with --data-manifest-sha256: the staged tiers a "
+                         "read may come from (default ram,ssd)")
     ap.add_argument("--produced-output", action="store_true",
                     help="PQ #1070: commit every file this run creates under "
                          "--metadata-root as a PrismaBuild produced output of "
@@ -898,6 +911,23 @@ def main(argv=None) -> int:
     records_out = args.records_out
     if records_out is None and metadata_root is not None:
         records_out = Path(metadata_root) / "records"
+    if args.allowed_tiers is not None and args.data_manifest_sha256 is None:
+        return _fail("--allowed-tiers needs --data-manifest-sha256")
+    if args.data_manifest_sha256 is not None:
+        # PQ #1092: strict staged reads, bound before the first input read.
+        # This run's own outputs (the metadata root and the records it
+        # writes) are read where they are.
+        from prismaquant.stage_b_prep_io import (
+            PreparationReadRefused, bind_staged_reads)
+        from prismaquant.staged_tier_policy import DEFAULT_ALLOWED_TIERS
+        try:
+            bind_staged_reads(
+                manifest_sha256=args.data_manifest_sha256,
+                allowed_tiers=args.allowed_tiers or DEFAULT_ALLOWED_TIERS,
+                own_outputs=[root for root in (metadata_root, records_out)
+                             if root is not None])
+        except PreparationReadRefused as exc:
+            return _fail(str(exc))
     if records_out is None and not args.check_only:
         return _fail("--records-out is required (or pass --metadata-root "
                      "to default it, or --check-only to write nothing)")
@@ -957,13 +987,20 @@ def main(argv=None) -> int:
         return _fail(str(exc))
     from prismaquant.joint_adjoint_slices import (
         adjoint_slice_bytes, band_set, load_stage_a_receipt_like)
+    from prismaquant.stage_b_prep_io import read_input, staged_reads
+
+    # Off the stage only when strict: without the flag the call is as before.
+    proof_read = ({} if staged_reads() is None else {"read": lambda path, sha256:
+                  read_input(path, sha256=sha256, where="Stage A proof")})
     proofs: list = []
     try:
         if args.adjoint_receipt is not None:
-            proofs.append(load_stage_a_receipt_like(args.adjoint_receipt))
+            proofs.append(load_stage_a_receipt_like(args.adjoint_receipt,
+                                                    **proof_read))
             if proofs[0].get("status") != "complete":
                 raise ValueError("--adjoint-receipt is not a completed receipt")
-        bands = [load_stage_a_receipt_like(path) for path in args.adjoint_band]
+        bands = [load_stage_a_receipt_like(path, **proof_read)
+                 for path in args.adjoint_band]
         if any(band.get("status") != "band" for band in bands):
             raise ValueError("--adjoint-band names a document that is not a band")
         band_index = band_set(bands) if bands else {}
@@ -1128,7 +1165,8 @@ def main(argv=None) -> int:
                             "at zero: refusing")
                     source_spans = read_layer_source_spans(
                         source_model_root, len(layers),
-                        checkpoint_layers_prefix=args.source_layers_prefix)
+                        checkpoint_layers_prefix=args.source_layers_prefix,
+                        source_reads=staged_reads())
                 # PQ #917 static prepared-input bridge: the production
                 # pickle loads ONCE here; each layer's prepared contract is
                 # derived from its verified cells through the existing

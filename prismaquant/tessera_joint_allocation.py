@@ -237,6 +237,13 @@ def _bound_stat_fence(path):
 _BOUND_BYTES = {}
 
 
+#: A process-wide reader for :func:`_read_bound`'s bytes, ``(path, sha256,
+#: label) -> bytes``. None reads the path. The Stage B preparation installs
+#: its strict staged reader here (``stage_b_prep_io.bind_staged_reads``,
+#: PQ #1092), so the control documents it reads come off the stage.
+BOUND_READER = None
+
+
 def _read_bound(record, label):
     _require(isinstance(record, dict) and set(record) == {'path', 'sha256'}, f'{label}: bound path and SHA256 required')
     path = Path(record['path'])
@@ -249,7 +256,8 @@ def _read_bound(record, label):
         hit = _BOUND_BYTES.get(key)
         if hit is not None and hit[0] == fence:
             return hit[1]
-    raw = path.read_bytes()
+    raw = (path.read_bytes() if BOUND_READER is None
+           else BOUND_READER(path, record['sha256'], label))
     _same(hashlib.sha256(raw).hexdigest(), record['sha256'], f'{label}: owned bytes')
     if fence is not None and len(raw) == fence[3]:
         _BOUND_BYTES[key] = (fence, raw)
