@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pickle
 import sys
 from pathlib import Path
@@ -583,3 +584,16 @@ def test_the_adjoint_manifest_head_drops_the_walk_reads(tmp_path):
     assert [verbatim["entries"][i]["path"] for i in first["entry_indices"]] == \
         [entry["path"] for entry in head]
     assert "head_walk_reads_dropped" not in verbatim["annotations"]
+
+
+def test_the_walk_read_set_names_only_the_inputs_a_plan_binds(tmp_path):
+    # A catalog extension's plan binds other inputs than the walk's: the
+    # read set names what it binds and nothing else, and no parts directory
+    # without a merged checkpoint.
+    from prismaquant.tessera_joint_aura import head_walk_read_set, is_head_walk_read
+    census, overlay = str(tmp_path / "census.json"), str(tmp_path / "overlay.json")
+    read_set = head_walk_read_set({"census": {"path": census, "sha256": "a" * 64},
+                                   "candidate_overlay": {"path": overlay, "sha256": "b" * 64}})
+    assert read_set == (frozenset({os.path.normpath(census)}), ())
+    assert is_head_walk_read(census, read_set)
+    assert not is_head_walk_read(overlay, read_set)

@@ -21878,7 +21878,9 @@ accepts `--resume` from sealed rows, and it does nothing.
 manifest declares them. `tessera_joint_aura.head_walk_read_set` names them:
 the five plan inputs the walk binds (`campaign_plan`, `census`,
 `campaign_receipts`, `merged_cost` and `merged_checkpoint`) and every file
-under the merged checkpoint's `.parts` directory.
+under the merged checkpoint's `.parts` directory. An input the plan does not
+bind names no read, so a catalog extension's plan, which binds other inputs,
+loses only the walk's inputs it does bind.
 
 - `build_adjoint_manifest` leaves them out of the head phase when the plan
   names its `inputs`, and records `annotations.head_walk_reads_dropped`.

@@ -399,6 +399,20 @@ def test_real_plan_adjoint_manifest():
         if running == head_end:
             break
     assert running == head_end
+    # Stage A takes its head from the prepared completion (PQ #1051), so
+    # the head keeps the parent's entries less the head walk's reads.
+    from prismaquant.tessera_joint_aura import head_walk_read_set, is_head_walk_read
+    read_set = head_walk_read_set(_load_plan()["inputs"])
+    parent_head = parent["entries"][:head_count]
+    kept = [e for e in parent_head if not is_head_walk_read(e["path"], read_set)]
+    walk = [e for e in parent_head if is_head_walk_read(e["path"], read_set)]
+    assert walk, "the real plan's parent head holds the walk's reads"
+    assert manifest["annotations"]["head_walk_reads_dropped"] == {
+        "entries": len(walk), "bytes": sum(e["bytes"] for e in walk)}
+    head_count, head_end = len(kept), sum(e["bytes"] for e in kept)
+    assert [{key: e[key] for key in ("path", "offset", "bytes")}
+            for e in manifest["entries"][:head_count]] == [
+        {key: e[key] for key in ("path", "offset", "bytes")} for e in kept]
     chain_entries = manifest["entries"][head_count:]
     assert manifest["read_plan"]["phases"][0]["bytes"] == head_end
     model_prefix = _load_plan()["model"].rstrip("/") + "/"

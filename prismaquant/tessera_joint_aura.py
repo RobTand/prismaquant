@@ -98,11 +98,14 @@ def head_walk_read_set(inputs) -> tuple[frozenset[str], tuple[str, ...]]:
     parts, whose per-unit files the walk loads. Stage A takes its head from
     the prepared completion instead of walking (PQ #1051), so a Stage A data
     manifest declares none of these (``stage_a_head.drop_head_walk_reads``).
+    A key the plan does not bind names no read: the walk itself refuses such
+    a plan, and a catalog extension's plan binds other inputs.
     """
-    files = frozenset(os.path.normpath(str(inputs[key]["path"]))
-                      for key in HEAD_WALK_INPUT_KEYS)
-    parts = os.path.normpath(str(merged_checkpoint_parts(inputs["merged_checkpoint"]["path"])))
-    return files, (parts,)
+    bound = {key: inputs[key] for key in HEAD_WALK_INPUT_KEYS if key in inputs}
+    files = frozenset(os.path.normpath(str(item["path"])) for item in bound.values())
+    parts = (() if "merged_checkpoint" not in bound else (os.path.normpath(
+        str(merged_checkpoint_parts(bound["merged_checkpoint"]["path"]))),))
+    return files, parts
 
 
 def is_head_walk_read(path, read_set) -> bool:
