@@ -146,7 +146,7 @@ def _at(boundary, probe, batch):
 def _run(root, monkeypatch, *, model="dense", stride=2, implementation=ONE,
          chain_resume=None, interrupt=None, partial_at=None, writes=None,
          identities=None, campaign=None, calib=None, execution=None,
-         generation=1001, forward_refs=None, **core):
+         generation=1001, forward_refs=None, runner_factory=None, **core):
     """One fixture Stage A invocation into ``root``; returns the receipt.
 
     ``interrupt`` raises after the write it matches; ``partial_at`` leaves a
@@ -154,9 +154,13 @@ def _run(root, monkeypatch, *, model="dense", stride=2, implementation=ONE,
     rolled cotangent the invocation writes is appended to ``writes`` as
     ``((boundary, probe, batch), sha256)``; every forward boundary reference
     lands in ``forward_refs`` by ``(boundary, batch)``. The generation id is
-    pinned, so two runs into one path write equal bytes.
+    pinned, so two runs into one path write equal bytes. ``runner_factory``
+    builds the runner in place of the fixture's own.
     """
-    runner = _dense_runner() if model == "dense" else _shared_runner()
+    if runner_factory is not None:
+        runner = runner_factory()
+    else:
+        runner = _dense_runner() if model == "dense" else _shared_runner()
     if execution is None:
         execution = _execution(root)
         policy = _boundary_policy(root / "boundaries")

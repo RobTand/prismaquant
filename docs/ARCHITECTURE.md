@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Stage A's reverse chain prefetches its own first layers (2026-09-23,
+`ws-sa/chain-first-prefetch`, part of PQ #997). The chain installs each
+source layer with `require_prefetched`, and each layer asks only for the
+layers below it, so nothing asked for the chain's first layers. A fresh
+walk got by because its forward pass leaves its top layers resident; a seed
+and a chain resume run no forward pass and refused their first layer. Run
+(a), a seed from R12's checkpoint 045 (`2c164969c33c` on sparklina), failed
+that way: "streamed layer 44 is not resident after its required prefetch".
+The chain now asks for its first `max(1, lookahead)` layers before its first
+install. See "The chain's first layers (#997)". Gate:
+`tests/test_stage_a_chain_prefetch.py`. No format, pipeline default, stage
+or artifact changes, and a fresh walk reads nothing more.
+
 The Stage B spill writes and reads with direct I/O (2026-09-23,
 `ws-1a/spill-io-1060`, PQ #1060). The spill wrote each 256 MiB arena with
 buffered `pwritev`, then `fdatasync` and `POSIX_FADV_DONTNEED`, and read with
@@ -22154,6 +22167,34 @@ The whole read plan falls from 1,045.15 GB to 1,037.06 GB.
 - An extended plan's `candidate_overlay` reads
   (`joint_catalog_extension.attach_candidate_overlay`) are not in the read
   set, so its manifest still declares them. The GLM plan has no overlay.
+
+### The chain's first layers (#997)
+
+Stage A's reverse chain installs each source layer with
+`require_prefetched=runner.require_prefetched_residency`. Under that policy
+`StreamingContext.ensure_loaded` accepts a resident layer or awaits one in
+flight, and refuses anything else rather than read the source synchronously.
+Each roll asks for the layers below it: with the plan's operator windows,
+the next `lookahead` layers after the install; without them, the layer
+`lookahead` below (`schedule_reverse_prefetch`). Nothing asks for the layers
+the chain starts on.
+
+A fresh walk's forward pass leaves its top layers in the source cache, so
+its chain started on them. A seed (#1016) and a chain resume (#1001) run no
+forward pass, and their first install refused. Run (a) of #997, a seed from
+R12's checkpoint 045, refused layer 44 after its head.
+
+Before its first install, the chain now asks for layers `chain_top - 1` down
+to `chain_top - max(1, lookahead)`, nearest first and never below the layer
+it stops at. This mirrors the forward pass's opening prefetches.
+`schedule_prefetch` returns `None` for a resident layer and hands back a
+read already in flight, so a fresh walk reads nothing twice and holds no
+more reads in flight than before.
+
+`tests/test_stage_a_chain_prefetch.py` runs a fresh walk, a seed and a
+resume, with and without operator windows, over a bounded source cache that
+refuses a cold install. The fixture's own streaming context accepts every
+install, which is why the seed and resume tests passed without the prefetch.
 
 ### Band-serial Stage B quanta (#996)
 
