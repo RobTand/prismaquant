@@ -1326,6 +1326,12 @@ def run_adjoint_capture_core(
             chain_top = num_layers
         # A seed stops at its ``through`` boundary; every other run rolls to 0.
         chain_bottom = 0 if seed_plan is None else seed_plan.through
+        # A seed also seals its last plane, stride boundary or not: the plane
+        # at ``through`` is its result, and the end of the walk retires the
+        # rolling entries. The stride block and run identity keep the plan's
+        # boundaries (RobTand/prismaquant#997).
+        checkpoint_layers = (set(boundaries) if seed_plan is None
+                             else set(boundaries) | {seed_plan.through})
         # The seed's rolled plane at its compare boundary, hashed as written.
         plane_digests = ({} if seed_plan is not None and seed_plan.compare is not None
                          else None)
@@ -1458,7 +1464,8 @@ def run_adjoint_capture_core(
                 # A checkpoint layer writes its plane into the checkpoint as
                 # it rolls (RobTand/prismaquant#1002): opened here, after the
                 # layer's sources settled and before any cotangent exists.
-                attempt = open_checkpoint(layer) if layer in boundaries else None
+                attempt = (open_checkpoint(layer) if layer in checkpoint_layers
+                           else None)
 
                 def roll(tensor, batch_index, probe_index):
                     if plane_digests is not None and layer == chain_bottom:
@@ -1493,7 +1500,7 @@ def run_adjoint_capture_core(
                     seal_s = time.time() - sealed
                 chain_telemetry.append({
                     "layer": layer, "wall_s": time.time() - layer_started,
-                    "checkpoint": layer in boundaries,
+                    "checkpoint": layer in checkpoint_layers,
                     "checkpoint_write_s": (None if attempt is None
                                            else attempt.write_seconds),
                     "checkpoint_seal_s": seal_s,
