@@ -15,6 +15,18 @@ See "Stage A dispatch requires the paced spool (#1012)". Gate:
 `tests/test_dispatch_joint_quanta.py`. No format, pipeline default, stage or
 ship gate changes; the campaign dispatcher's default spec changes.
 
+The no-slice Stage B head walk honours the plan's encoder reuse (2026-09-23,
+`ws-tq/1023-legacy-head-encoder-reuse`, PQ #1023). A layer quantum whose
+record binds no head slice runs the whole-journal intake itself, and that call
+omitted `historical_encoder_reuse`. Stage A, the prepare and the slice
+producer all pass the plan's allowance, so on the GLM plan (the Stage B pin's
+encoder seal is not the checkpoint's) this path alone would have refused. It
+now passes the same allowance. The path is kept rather than retired: it is the
+documented behaviour of a record produced without `--head-slices`, and a
+dispatch-time refusal by model scale would need a threshold no objective
+gives. Gate: `tests/test_legacy_head_encoder_reuse_1023.py`. No format,
+pipeline default or ship gate changes.
+
 A Stage B quantum reads nothing but its plan before its readset is bound
 (2026-09-23, `ws-tq/1024-load-plan-readset`, PQ #1024). `_load_plan` hashed
 the plan's `source_identity_cache` and resolved the `boundary_storage`
@@ -626,6 +638,11 @@ declares the paced produced-output spool, the Stage A row refuses a spec
 without it and seals `--residency-ram auto`, and a quantum row seals the
 spool its spec declares; see "Stage A dispatch requires the paced spool
 (#1012)". No format, pipeline default, stage or ship gate changes.
+
+Re-stamped (2026-09-23, `ws-tq/1023-legacy-head-encoder-reuse`) for **the
+no-slice head walk's encoder reuse** (PQ #1023): the quantum's whole-journal
+intake passes the plan's `historical_encoder_reuse`; see "Stage B head slice
+(#1010)". No format, default or stage changes.
 
 Re-stamped (2026-09-23, `ws-tq/1024-load-plan-readset`) for **the Stage B
 readset order** (PQ #1024): a layer quantum binds its data manifest before its
@@ -20959,7 +20976,8 @@ the live model, and binds every PWC render digest. The source-identity
 cache is parsed from the declared bytes and never copied or written
 (`build_streamed_model_identity(identity_cache_bytes=...)`). The head
 reports its cumulative unit count once. A record without a slice runs the
-historical intake unchanged.
+historical intake, with the plan's `historical_encoder_reuse` allowance
+(PQ #1023), as Stage A, the prepare and the slice producer do.
 
 The quantum binds its data manifest before it reads the slice, and loads its
 plan with `defer_pool_reads=True`, so the plan file is the only input it
