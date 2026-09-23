@@ -830,6 +830,15 @@ work and again in the core, a bf16 reduction setting that its Stage A
 slice's run identity does not record; dev mode records the mismatch. See the
 entry at the top. A new Stage B refusal; no format, default or stage changes.
 
+Re-stamped (2026-09-23, `ws-br/pb-test-bound-1055`) for **PrismaBuild's
+per-test bound on every PQ shard** (PQ #1055). Test infrastructure only:
+when `PRISMABUILD_TEST_TIMEOUT_S` is set, `tests/conftest.py` registers
+`prismabuild.pytest_test_bound` from its file, without importing the
+`prismabuild` package, so the bound `pbtest` exports now applies to each test
+on a shard and in an `own_process` child. An `own_process` child is passed
+`-p` only when the parent was. Unset, nothing changes. No format, default,
+stage or ship gate changes. Gate: `tests/test_own_process_isolation.py`.
+
 Re-stamped (2026-09-23, `ws-tq/1014-real-data-tests`) for **fleet-data tests
 skipped by default** (PQ #1014). Test infrastructure only. A test that reads
 fleet-local campaign data or live PrismaBuild state that no PB action declares
