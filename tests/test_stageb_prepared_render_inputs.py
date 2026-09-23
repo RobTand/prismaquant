@@ -103,7 +103,7 @@ def _rebound_record_receipt(record, receipt):
     return record, receipt
 
 
-def _bind_prepared(tmp_path, root):
+def _bind_prepared(tmp_path, root, *, replay_mode=None):
     """Real builder + real binder prepared-input sealing (no hand-seal)."""
     record, receipt, parent, kwargs = _bound_inputs(tmp_path, root=root)
     record, receipt = _rebound_record_receipt(record, receipt)
@@ -113,7 +113,7 @@ def _bind_prepared(tmp_path, root):
         record, receipt, parent, strided_boundaries=STRIDED,
         n_probes=N_PROBES, calib=dict(CALIB),
         render_prerequisite=dict(RENDER_PREREQ),
-        prepared_inputs=prepared)
+        prepared_inputs=prepared, replay_mode=replay_mode)
     wire = jl.seal_manifest_bytes(manifest)
     manifest_path = Path(kwargs["manifest_path"])
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,11 +124,11 @@ def _bind_prepared(tmp_path, root):
         manifest_sha256=hashlib.sha256(wire).hexdigest(),
         output_root=root, strided_boundaries=STRIDED, n_probes=N_PROBES,
         calib=dict(CALIB), render_prerequisite=dict(RENDER_PREREQ),
-        prepared_inputs=prepared)
+        prepared_inputs=prepared, replay_mode=replay_mode)
     return bound, receipt, parent, manifest, files, prepared
 
 
-def _dispatch_prepared(tmp_path, monkeypatch):
+def _dispatch_prepared(tmp_path, monkeypatch, *, replay_mode=None):
     """Normal-CLI dispatch layout around the binder-sealed row."""
     import dispatch_joint_quanta as dispatch
     spec = tmp_path / "spec.json"
@@ -137,7 +137,7 @@ def _dispatch_prepared(tmp_path, monkeypatch):
     monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
     root = str(tmp_path / "run")
     bound, receipt, parent, manifest, files, prepared = _bind_prepared(
-        tmp_path, root)
+        tmp_path, root, replay_mode=replay_mode)
     records = tmp_path / "records"
     records.mkdir(parents=True)
     (records / "layer-002.json").write_text(json.dumps(bound))
