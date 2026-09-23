@@ -21000,7 +21000,13 @@ committed: PrismaBuild commits a group only for a stage copy that the same
 action reads, so each ends as a retained prewrite until a write-only
 commit for another action's read exists (PB #912, PQ #1007). Retirement and
 the orphan sweep wait on PB #914, and the edge between the two actions on
-PB #913. The producer's template
+PB #913. The record group is charged to the template's payload maximum, and
+the owner charges the same bytes to `max_artifact_bytes`; its claim follows
+the entries, so a template sized only for the entry groups refuses after
+they are written. `handoff.json` itself is read from the pool, by the
+dispatcher (`_producer_handoff`) and by the consumer's head check
+(`load_quantum_handoff`); it is a sealed control file, not a staged input.
+The producer's template
 reserves a stage window it never reads, because PrismaBuild has no
 write-only produced-output declaration. No executed PrismaBuild action has
 yet staged handoff entries as a consumer's declared inputs; the derived
