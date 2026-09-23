@@ -56,6 +56,7 @@ import json
 import os
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -1061,6 +1062,111 @@ def acquire_entry_window(resolver, declared, entry: dict):
     return window, key
 
 
+#: Backoff between release attempts: doubles from the first delay up to the
+#: cap. Neither changes what a retry can do (release is idempotent); they
+#: only set how soon a transient clears is noticed.
+_RELEASE_RETRY_FIRST_S = 0.05
+_RELEASE_RETRY_CAP_S = 5.0
+
+
+def _mount_options(path: str, mountinfo: str = "/proc/self/mountinfo"):
+    """``(fstype, {option: value})`` of the mount holding ``path``, or ``None``.
+
+    The longest mount point that is a path prefix wins, as the kernel
+    resolves it. Super options (after the `` - `` separator) carry the NFS
+    ``timeo``/``retrans`` values; per-mount options are merged under them.
+    """
+    target = os.path.abspath(path)
+    best = None
+    try:
+        with open(mountinfo, encoding="utf-8") as stream:
+            rows = stream.read().splitlines()
+    except OSError:
+        return None
+    for row in rows:
+        head, sep, tail = row.partition(" - ")
+        fields = head.split()
+        if not sep or len(fields) < 6:
+            continue
+        point = fields[4].replace("\\040", " ")
+        if not (target == point or target.startswith(point.rstrip("/") + "/")
+                or point == "/"):
+            continue
+        tail_fields = tail.split()
+        if len(tail_fields) < 3:
+            continue
+        options = {}
+        for text in (fields[5], tail_fields[2]):
+            for item in text.split(","):
+                name, _eq, value = item.partition("=")
+                options[name] = value
+        if best is None or len(point) > len(best[0]):
+            best = (point, tail_fields[0], options)
+    if best is None:
+        return None
+    return best[1], best[2]
+
+
+def release_retry_horizon_s(path: str, mountinfo: str = "/proc/self/mountinfo") -> float:
+    """How long a failed pin release is retried: the mount's NFS major timeout.
+
+    PB's ``reader_lease.release`` returns ``False`` -- never the reason --
+    when it cannot read, rewrite or unlink a pin. On the fleet's NFS mount
+    such a failure can be transient: R13 (PB action ``556d7a803098``) died on
+    one in forward-002 on 2026-09-23 after hundreds of clean releases, and
+    the pin it left read and validated cleanly afterwards.
+
+    The horizon is the one the mount itself already treats as transient:
+    ``timeo`` (deciseconds) x (``retrans`` + 1) is how long the NFS client
+    retries one request before it reports the server as not responding. A
+    pin on any other filesystem has no such horizon -- a failure there is not
+    transient -- so it is not retried (``0``).
+    """
+    found = _mount_options(path, mountinfo)
+    if found is None or not found[0].startswith("nfs"):
+        return 0.0
+    options = found[1]
+    try:
+        timeo_s = int(options.get("timeo", "")) / 10.0
+        retrans = int(options.get("retrans", ""))
+    except ValueError:
+        return 0.0
+    if timeo_s <= 0 or retrans < 0:
+        return 0.0
+    return timeo_s * (retrans + 1)
+
+
+def _observe_pin(sdk, queue, consumer, pin_id, ref_id, where) -> str:
+    """What the pin file shows right now, for a release-failure record.
+
+    PB's release does not say which step failed; reading the pin the way it
+    does recovers the errno when the read is what failed, and shows whether
+    the ref is still held when a rewrite or unlink failed.
+    """
+    leases_root = getattr(sdk, "leases_root", None)
+    if leases_root is None:
+        return "unobservable: the SDK names no leases_root"
+    try:
+        root = Path(leases_root(queue, where.get("residency_root")))
+        path = root / str(consumer) / f"{pin_id}.lease.json"
+    except Exception as exc:  # noqa: BLE001 -- diagnostics only
+        return f"unobservable: {type(exc).__name__}: {exc}"
+    try:
+        with open(path, encoding="utf-8") as stream:
+            pin = json.load(stream)
+    except FileNotFoundError:
+        return f"{path}: absent"
+    except OSError as exc:
+        return f"{path}: unreadable: {type(exc).__name__} errno {exc.errno}: {exc}"
+    except ValueError as exc:
+        return f"{path}: unparseable: {exc}"
+    refs = pin.get("refs") if isinstance(pin, dict) else None
+    if not isinstance(refs, dict):
+        return f"{path}: present, no refs object"
+    held = "held" if ref_id in refs else "gone"
+    return f"{path}: present, {len(refs)} ref(s), this ref {held}"
+
+
 class LeaseWindow:
     """One bounded read window, pinned for exactly its holder's lifetime.
 
@@ -1352,17 +1458,51 @@ class LeaseWindow:
         # full scan of the wrong one.
         where = ({"residency_root": str(self._spec["residency_root"])}
                  if self._spec.get("material_namespace") else {})
-        try:
-            released = sdk.release(queue, self._pin_id, self._ref_id,
-                                   consumer_action_key=self._consumer,
-                                   **where)
-        except Exception as exc:
-            raise LeaseRefused(f"lease-release-failed: {exc}",
-                               kind="integrity") from exc
-        # The SDK returns False (never an exception) for a failed pin
-        # write/unlink: only an exact True releases. Anything else keeps
-        # full retry state so a failed exit never silently strands a ref.
-        if released is not True:
-            raise LeaseRefused("lease-release-failed: pin not released",
-                               kind="integrity")
+        # The SDK returns False (never an exception, never the reason) for a
+        # pin it could not read, rewrite or unlink: only an exact True
+        # releases. ``release`` is idempotent -- a ref already dropped
+        # answers True -- so a failed attempt is retried, with its record,
+        # for as long as the mount itself treats a fault as transient
+        # (:func:`release_retry_horizon_s`). Past that, or at once on a
+        # filesystem with no such horizon, the exit refuses and keeps full
+        # retry state, so a failed exit never silently strands a ref.
+        deadline = None
+        delay = _RELEASE_RETRY_FIRST_S
+        attempt = 0
+        while True:
+            attempt += 1
+            error = None
+            try:
+                released = sdk.release(queue, self._pin_id, self._ref_id,
+                                       consumer_action_key=self._consumer,
+                                       **where)
+            except OSError as exc:
+                released, error = None, exc
+            except Exception as exc:
+                raise LeaseRefused(f"lease-release-failed: {exc}",
+                                   kind="integrity") from exc
+            if released is True:
+                break
+            if deadline is None:
+                deadline = time.monotonic() + release_retry_horizon_s(
+                    str(self._queue_root))
+            observed = _observe_pin(sdk, queue, self._consumer, self._pin_id,
+                                    self._ref_id, where)
+            answer = (f"{type(error).__name__}: {error}" if error is not None
+                      else f"returned {released!r}")
+            remaining = deadline - time.monotonic()
+            print(f"[staged-lease] release of pin {self._pin_id} ref "
+                  f"{self._ref_id} attempt {attempt} {answer}; pin: {observed}; "
+                  + (f"retrying for up to {remaining:.1f} s more"
+                     if remaining > 0 else "not retrying"),
+                  flush=True)
+            if remaining <= 0:
+                if error is not None:
+                    raise LeaseRefused(f"lease-release-failed: {error}",
+                                       kind="integrity") from error
+                raise LeaseRefused(
+                    f"lease-release-failed: pin not released ({observed})",
+                    kind="integrity")
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 2, _RELEASE_RETRY_CAP_S)
         self._released = True

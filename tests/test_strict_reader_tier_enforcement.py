@@ -1023,6 +1023,12 @@ def test_release_failure_retains_retry_state_then_releases_exactly(tmp_path, mon
             "covers": covers_for_leads([mover], MANIFEST),
             "expected": {key: {"bytes": len(blob), "sha256": digest}},
             "span": {"start_bytes": 0, "end_bytes": len(blob)}}
+    # A filesystem with no transient horizon: the failed release is not
+    # retried, so the exit refuses at once.
+    import prismaquant.staged_lease as staged_lease_mod
+    monkeypatch.setattr(staged_lease_mod, "release_retry_horizon_s",
+                        lambda path, mountinfo=None: 0.0,
+                        raising=False)
     window = LeaseWindow(spec, acquire_token="token-relfail")
     pin_path = (tmp_path / 'residency' / 'leases' / consumer)
     with window:
@@ -1038,6 +1044,134 @@ def test_release_failure_retains_retry_state_then_releases_exactly(tmp_path, mon
             json.dumps(saved, sort_keys=True) + "\n")
     assert _pins_live(tmp_path, consumer) == []
 
+
+
+def _one_published_window(tmp_path, monkeypatch, token):
+    """A published stage window over one blob, and its lease window."""
+    from prismaquant.staged_lease import LeaseWindow, covers_for_leads
+    _pb()
+    consumer = _hex64(f"consumer-{tmp_path}")
+    import prismabuild.pool as pool_mod
+    import prismabuild.residency_map as map_mod
+    import prismabuild.reader_lease as rl
+    queue, stage = _pb_queue(tmp_path, pool_mod, consumer)
+    blob = b"release-transient-retry-bytes-0123"
+    declared = tmp_path / 'pool' / 'd.bin'
+    declared.parent.mkdir(parents=True, exist_ok=True)
+    declared.write_bytes(blob)
+    staged = stage / 'd.bin'
+    staged.write_bytes(blob)
+    digest = hashlib.sha256(blob).hexdigest()
+    mover = _hex64(f"mover-{tmp_path}")
+    root = tmp_path / 'residency'
+    key = residency_map_key(str(declared), 0)
+    _pb_publish(rl, map_mod, root, stage, consumer, mover, MANIFEST,
+                {key: (declared, staged)})
+    _launch_env(monkeypatch, consumer)
+    monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
+    spec = {"tier_id": STAGE_TIER, "epoch": "",
+            "covers": covers_for_leads([mover], MANIFEST),
+            "expected": {key: {"bytes": len(blob), "sha256": digest}},
+            "span": {"start_bytes": 0, "end_bytes": len(blob)}}
+    return rl, consumer, LeaseWindow(spec, acquire_token=token)
+
+
+def test_a_transient_release_failure_is_retried_and_releases(tmp_path, monkeypatch, capsys):
+    """R13 (556d7a803098) died in forward-002 on one ``False`` from
+    ``release`` after hundreds of clean ones; the pin it left read and
+    validated cleanly afterwards. Inside the mount's transient horizon a
+    failed release is retried (release is idempotent), recorded with what
+    the pin showed, and the window exits released."""
+    require_prismabuild_sdk()
+    import prismaquant.staged_lease as staged_lease_mod
+    rl, consumer, window = _one_published_window(
+        tmp_path, monkeypatch, "token-transient")
+    monkeypatch.setattr(staged_lease_mod, "release_retry_horizon_s",
+                        lambda path, mountinfo=None: 10.0,
+                        raising=False)
+    real_release = rl.release
+    calls = []
+
+    def flaky_release(*args, **kwargs):
+        calls.append(args[2])
+        if len(calls) == 1:
+            return False
+        return real_release(*args, **kwargs)
+
+    monkeypatch.setattr(rl, "release", flaky_release)
+    with window:
+        assert len(_pins_live(tmp_path, consumer)) == 1
+    assert window._released is True
+    assert _pins_live(tmp_path, consumer) == []
+    assert len(calls) == 2 and calls[0] == calls[1]
+    said = capsys.readouterr().out
+    assert "attempt 1 returned False" in said
+    assert "this ref held" in said
+    assert "retrying for up to" in said
+
+
+def test_a_release_failing_past_the_horizon_refuses_with_what_the_pin_showed(
+        tmp_path, monkeypatch, capsys):
+    """A release that keeps failing past the horizon refuses as before --
+    retry state kept, the ref still held -- and the refusal carries the
+    pin's observed state, which PB's bare ``False`` does not."""
+    require_prismabuild_sdk()
+    from prismaquant.staged_lease import LeaseRefused
+    import prismaquant.staged_lease as staged_lease_mod
+    rl, consumer, window = _one_published_window(
+        tmp_path, monkeypatch, "token-persistent")
+    monkeypatch.setattr(staged_lease_mod, "release_retry_horizon_s",
+                        lambda path, mountinfo=None: 0.3,
+                        raising=False)
+    real_release = rl.release
+    monkeypatch.setattr(rl, "release", lambda *args, **kwargs: False)
+    with window:
+        with pytest.raises(LeaseRefused, match="this ref held"):
+            window.__exit__(None, None, None)
+        assert window._released is False
+        assert len(_pins_live(tmp_path, consumer)) == 1
+        said = capsys.readouterr().out
+        assert "not retrying" in said
+        assert said.count("[staged-lease] release of pin") >= 2
+        monkeypatch.setattr(rl, "release", real_release)
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def _mountinfo(tmp_path, rows):
+    path = tmp_path / "mountinfo"
+    path.write_text("".join(row + "\n" for row in rows))
+    return str(path)
+
+
+def test_the_release_horizon_is_the_nfs_mounts_major_timeout(tmp_path):
+    """timeo (deciseconds) x (retrans + 1), read from the mount that holds
+    the path: the horizon the NFS client itself treats as transient."""
+    from prismaquant.staged_lease import release_retry_horizon_s
+    info = _mountinfo(tmp_path, [
+        "22 1 0:21 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p2 rw",
+        "90 22 0:55 / /mnt/shared rw,relatime shared:40 - nfs4 "
+        "dl380g10:/export rw,vers=4.2,hard,proto=tcp,timeo=600,retrans=2,sec=sys",
+        "91 22 0:56 / /mnt/shared/other rw,relatime - tmpfs tmpfs rw,size=1024k",
+    ])
+    assert release_retry_horizon_s(
+        "/mnt/shared/prismabuild-fleet/pb-queue", info) == 180.0
+    assert release_retry_horizon_s("/mnt/shared", info) == 180.0
+    # The longest mount point wins, and a local filesystem is not transient.
+    assert release_retry_horizon_s("/mnt/shared/other/q", info) == 0.0
+    assert release_retry_horizon_s("/home/rob/q", info) == 0.0
+    # A prefix that is not a path component does not match.
+    assert release_retry_horizon_s("/mnt/sharedx/q", info) == 0.0
+
+
+def test_the_release_horizon_is_zero_without_the_nfs_options(tmp_path):
+    from prismaquant.staged_lease import release_retry_horizon_s
+    info = _mountinfo(tmp_path, [
+        "22 1 0:21 / / rw - ext4 /dev/sda1 rw",
+        "90 22 0:55 / /mnt/shared rw - nfs4 dl380g10:/export rw,vers=4.2,hard",
+    ])
+    assert release_retry_horizon_s("/mnt/shared/q", info) == 0.0
+    assert release_retry_horizon_s("/mnt/shared/q",
+                                   str(tmp_path / "missing")) == 0.0
 
 def test_forked_child_window_use_refused_loudly(tmp_path, monkeypatch):
     """Every window operation in a forked child raises: open (would outlive
