@@ -207,7 +207,11 @@ order, and a replayed operand keeps the live shape, strides and, on CUDA, the
 address residue modulo 512. The file is laid out per Linear: one input stream
 per Linear that first read a tensor (an expert's up projection reads its gate
 projection's stream) and one gradient stream per Linear and probe. Inputs are
-written once, at probe 0, and every later probe's inputs must hash-equal them.
+written once, at probe 0, and every later probe's inputs must equal them bit
+for bit: each input is digested on its own device when the hook fires
+(`joint_replay_spill._InputDigest`, two exact multilinear digests mod
+2^31 - 1, PQ #1030), the capture fails at the end of the first probe whose
+input differs, and a later probe's input is never copied to the host.
 The spill refuses a non-dense input, a measurement dtype that is not 16-bit,
 and non-contiguous shared-state cotangent accumulators.
 `joint_replay_spill.spill_geometry` bounds the layer's bytes from shapes and
