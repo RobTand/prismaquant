@@ -1,5 +1,27 @@
 # PrismaQuant Architecture
 
+The Stage B spill checks its inputs on the GPU, not with SHA-256 on the host
+(2026-09-23, `ws-1a/spill-digest-1030`, PQ #1030). Every probe's forward is
+the same, so every later probe's inputs must equal probe 0's, the ones the
+spill writes and the replay reads. The spill writer checked this by hashing
+every staged input with SHA-256 on its thread, and copied each later probe's
+input to the host only to hash it. On the GLM-shaped proxy of #994 the hash
+was 57% of the writer's py-spy samples (PB `028b76eef2fa`), and the capture
+waited 14 to 22 s per quantum for free arenas. Now
+`joint_replay_spill._InputDigest` digests each input on its own device when
+the hook fires: two independent multilinear digests of the input's 16-bit
+words mod 2^31 - 1, in exact int64 arithmetic, so the value does not depend
+on reduction order or device. Probe 0's digests stay on the device beside
+its entries. A later probe's input is digested and never staged, and its
+digests are compared with probe 0's when that probe's capture ends, in one
+stacked comparison per window; the first input that differs fails the
+capture, as before. For inputs that differ, both digests agree with
+probability below 2^-59. Records and identities do not change: the digest
+lived only in memory. `x_digest_checks` in the spill telemetry is now
+counted when a capture ends. Gates: `tests/test_stageb_spill_input_digest.py`,
+`tests/test_stageb_one_pass_spill.py`. No format, default, stage or ship
+gate changes.
+
 One helper pins the matmul settings, and a launch setting pins the bf16
 reduction flag (2026-09-23, `ws-1a/bf16-reduction-1028`, PQ #1028).
 `torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction` lets
@@ -697,8 +719,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-1a/bf16-reduction-1028`.
+As of: 2026-09-23 · `ws-1a/spill-digest-1030`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-1a/spill-digest-1030`) for **the Stage B
+spill's input check** (PQ #1030): each input is digested on its device
+(`joint_replay_spill._InputDigest`) and a later probe's input is never
+copied to the host; the writer no longer hashes. See the entry at the top.
+No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-1a/bf16-reduction-1028`) for **the bf16
 reduction flag's launch setting and stamp** (PQ #1028):
