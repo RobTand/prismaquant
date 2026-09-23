@@ -1,5 +1,44 @@
 # PrismaQuant Architecture
 
+One helper pins the matmul settings, and a launch setting pins the bf16
+reduction flag (2026-09-23, `ws-1a/bf16-reduction-1028`, PQ #1028).
+`torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction` lets
+cuBLAS reduce a split-K bf16 GEMM's partial sums in bf16. It defaults to True,
+no entry point set it, and no identity recorded it. On the GLM-shaped proxy
+of #994 at `operator_gemm` (PB `c0f57b68de40`) it changed nothing at capture
+batch 1: the flag on and off gave byte-identical records. At capture batch 8
+with the flag on, the per-operator statistics moved 25 to 50 times further
+from an FP32-accumulation reference than batch 1 does (dense max relative
+Frobenius 4.95e-2 against 2.01e-3), and 129 of 16384 tokens changed experts,
+each at a router margin below one bf16 ulp. With the flag off, batch 8 was as
+close to the reference as batch 1, with no expert changes. The proxy resolved
+no time cost for the flag (PB `028b76eef2fa`, py-spy and Netdata), at about
+one sixth of the GB10 power envelope.
+
+`matmul_arithmetic.pin_matmul_arithmetic` now pins float32 matmul precision
+`highest`, TF32 off and the bf16 flag at the Stage A
+(`joint_cost_stage_a.run_adjoint_capture`), Stage B
+(`joint_cost_quantum.run_layer_quantum`) and joint AURA
+(`tessera_joint_aura`) entry points and in
+`tools/capture_glm_routing_replay.py`. The flag comes from
+`PRISMAQUANT_BF16_REDUCED_PRECISION_REDUCTION`, sealed in the campaign
+container spec like the Stage B replay regime. Unset keeps PyTorch's default
+and stamps nothing, so every identity, record and receipt keeps its bytes and
+R12's bitwise comparison is unaffected. `off` pins the flag to False and
+stamps `allow_bf16_reduced_precision_reduction: false` into
+`joint_aura.arithmetic_identity` (so every Stage B and joint AURA probe
+identity and cost row), the Stage A chain arithmetic stamp and the Stage A
+run identity. `on` spells the default and is refused. The stamp is read from
+the live flag. The launchers and the dispatcher refuse a malformed setting
+before any work, the join refuses a quantum whose flag differs from the
+rest, and a stamped True fails a row's currency check. The campaign should
+seal `off`: batch 8 is admissible only with it, and under it batch 8 sits at
+batch 1's distance from the FP32 reference. The code default stays PyTorch's,
+so a run that seals nothing, R12 included, keeps its bytes. Gates:
+`tests/test_matmul_arithmetic.py`, `tests/test_stage_a_chain_resume.py`,
+`tests/test_dispatch_joint_quanta.py`. No format, stage or ship gate
+changes, and no default changes.
+
 A Stage B read plan is sealed for its replay mode (2026-09-23,
 `ws-tq/1011-spill-phase-plan`, PQ #1011). The executable manifest staged the
 target layer's boundary run once per (window, probe), but under the one-pass
@@ -654,8 +693,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-tq/1011-spill-phase-plan`.
+As of: 2026-09-23 · `ws-1a/bf16-reduction-1028`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-1a/bf16-reduction-1028`) for **the bf16
+reduction flag's launch setting and stamp** (PQ #1028):
+`matmul_arithmetic.pin_matmul_arithmetic` pins the matmul settings at every
+Stage A, Stage B and joint AURA entry point, and
+`PRISMAQUANT_BF16_REDUCED_PRECISION_REDUCTION=off` stamps the flag into the
+arithmetic identities and the Stage A run identity; see the entry at the top.
+Unset stamps nothing. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-tq/1011-spill-phase-plan`) for **the spill-sealed
 read plan** (PQ #1011): `--replay-mode spill` seals the target boundary run
@@ -21399,9 +21446,11 @@ then reads the reference's entries one at a time. `plane_comparison`
 (`prismaquant.stage_a.seed_plane_comparison.v1`) lists both digests per entry
 with `equal`, `different` and `bitwise_equal`. `matmul_reduction` records
 `torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction` as the
-core read it before the chain (PQ #1038). Stage A reads the flag and never
-sets it, and the flag is outside the run identity; the shared setter and its
-identity stamp are PQ #1028's.
+core read it before the chain (PQ #1038). The core reads the flag and never
+sets it; `pin_matmul_arithmetic` sets it at the entry point, and the run
+identity carries it only when it is off (PQ #1028). A seed's bind identity
+does not carry it, so a seed from a checkpoint sealed under one setting runs
+on under the other; `matmul_reduction` records which.
 
 **The band tool refuses a seed.** `build_band_receipt` refuses a space that
 holds a seed marker or seed receipt, and `stage_a_argv` refuses a sealed
