@@ -78,7 +78,7 @@ from .joint_layer_quanta import (
     adjoint_chain_phase_name,
     adjoint_forward_phase_name,
 )
-from .produced_output_spool import plane_partitions
+from .produced_output_spool import plane_partitions, sealed_spool_root
 from .source_read_plan import chain_opening_window, chain_prefetch_window
 
 
@@ -603,6 +603,7 @@ def _stage_a_per_tensor_nbytes(runner, *, batch_rows: int, seqlen: int) -> int:
 
 def preflight_stage_a_artifact_budget(
     *, declared_bytes: int, demand: dict, plan_sealed_bytes: int | None = None,
+    readback_allowance_bytes: int | None = None,
 ) -> dict:
     """Refuse an under-budget Stage A invocation before any expensive forward.
 
@@ -620,6 +621,17 @@ def preflight_stage_a_artifact_budget(
     authoritative for serialized bytes and unpredicted overhead; this
     catches geometry the plan never derived, like the 416 GiB plan against
     the ~584 GiB floor.
+
+    ``readback_allowance_bytes`` is set for an owner that reads its groups
+    back from a local spool (:func:`stage_a_owner_reads_back_locally`,
+    PQ #1120). Such an owner never commits its groups, so each group's
+    durable charge stays at its prewrite ceiling, every entry at the bound
+    entry size plus the 64 KiB envelope, for the group's whole life. For it
+    the allowance, not the floor, is the gate: it is the planning allowance
+    with every entry at the full batch's size (:func:`_run_artifact_preflight`),
+    and a budget below it refuses here, naming the floor and the allowance,
+    where it would otherwise pass and fail with
+    ``prewrite-exceeds-payload-maxima`` hours into the forward.
     """
     if type(declared_bytes) is bool or type(declared_bytes) is not int:
         raise AdjointIdentityRefused(
@@ -634,12 +646,44 @@ def preflight_stage_a_artifact_budget(
         raise AdjointIdentityRefused(
             "stage A preflight demand carries no planning_estimate_bytes "
             "at or above its floor")
-    if int(declared_bytes) >= int(floor):
-        return {"declared_bytes": int(declared_bytes),
-                "required_floor_bytes": int(floor),
-                "planning_estimate_bytes": int(planning)}
+    if readback_allowance_bytes is not None and (
+            type(readback_allowance_bytes) is not int
+            or readback_allowance_bytes < planning):
+        raise AdjointIdentityRefused(
+            "stage A preflight read-back allowance must be an integer at or "
+            f"above the planning allowance {int(planning)}, got "
+            f"{readback_allowance_bytes!r}")
     sealed_note = (f" (plan sealed {int(plan_sealed_bytes)} bytes)"
                    if plan_sealed_bytes is not None else "")
+    if int(declared_bytes) >= int(floor) and (
+            readback_allowance_bytes is None
+            or int(declared_bytes) >= int(readback_allowance_bytes)):
+        return {"declared_bytes": int(declared_bytes),
+                "required_floor_bytes": int(floor),
+                "planning_estimate_bytes": int(planning),
+                "readback_allowance_bytes": (
+                    None if readback_allowance_bytes is None
+                    else int(readback_allowance_bytes))}
+    if int(declared_bytes) >= int(floor):
+        allowance = int(readback_allowance_bytes)
+        raise AdjointIdentityRefused(
+            "stage A artifact budget below the read-back allowance: this "
+            "owner reads its groups back from its local output spool and "
+            "never commits them, so PrismaBuild keeps each group charged at "
+            "its prewrite ceiling, every entry at the bound entry size plus "
+            f"{ARTIFACT_FILE_HEADER_BYTES} B (PQ #1110, #1120). Need >= "
+            f"{allowance} bytes ({allowance / 1024 ** 3:.2f} GiB, the "
+            "planning allowance with every entry at the full batch's size); "
+            f"the hard floor is {int(floor)} bytes "
+            f"({int(floor) / 1024 ** 3:.2f} GiB raw tensor bytes) and the "
+            f"planning allowance {int(planning)} bytes; declared "
+            f"{int(declared_bytes)} bytes "
+            f"({int(declared_bytes) / 1024 ** 3:.2f} GiB){sealed_note}. "
+            f"Remedy: re-invoke with --artifact-budget-bytes {allowance} (or "
+            f"{ARTIFACT_BUDGET_ENV}={allowance}); the sealed plan is "
+            "unchanged and the override is stamped into the run provenance.")
+    remedy = int(planning if readback_allowance_bytes is None
+                 else readback_allowance_bytes)
     raise AdjointIdentityRefused(
         "stage A artifact budget below this invocation's hard geometry "
         f"floor: need >= {int(floor)} bytes raw "
@@ -660,13 +704,35 @@ def preflight_stage_a_artifact_budget(
         f"{demand.get('n_probes')} probe planes live + "
         f"{demand.get('n_checkpoints')} checkpoints at boundaries "
         f"{demand.get('boundaries')}. Remedy: re-invoke with "
-        f"--artifact-budget-bytes {int(planning)} (or "
-        f"{ARTIFACT_BUDGET_ENV}={int(planning)}); the sealed plan is "
+        f"--artifact-budget-bytes {remedy} (or "
+        f"{ARTIFACT_BUDGET_ENV}={remedy}); the sealed plan is "
         "unchanged and the override is stamped into the run provenance.")
 
 
+def stage_a_owner_reads_back_locally(environ=None) -> bool:
+    """Whether this launch's Stage A owner reads back from a local spool.
+
+    Stage A binds its produced-output owner from the launch environment
+    (:func:`bind_stage_a_produced_output`): an admitted action, one with a
+    ``PRISMABUILD_ACTION_KEY``, binds one, and its local output spool is the
+    root that environment seals (``produced_output_spool.sealed_spool_root``,
+    which ``ProducedOutputSpool.from_publication`` reads). The owner always
+    reads its groups back: the capture passes no ``origin_lifetime``, which
+    a write-only template requires
+    (``StreamedBoundaryArtifacts.bind_produced_output``). Such an owner reads
+    the groups it wrote from its own box and never commits them, so each
+    group stays charged at its prewrite ceiling (PQ #1110, #1120).
+    ``environ`` defaults to ``os.environ``, the environment the owner binds
+    from.
+    """
+    source = os.environ if environ is None else environ
+    if not source.get("PRISMABUILD_ACTION_KEY"):
+        return False
+    return sealed_spool_root(source) is not None
+
+
 def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
-                            space, artifact) -> dict:
+                            space, artifact, *, environ=None) -> dict:
     """Early durable-budget preflight from already-available geometry.
 
     Runs after the runner + calibration load and before any expensive
@@ -681,6 +747,13 @@ def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
     underivable geometry or manifest estimate refuses named rather than
     guessing. The runtime reserve / write / commit guards stay
     authoritative for serialized bytes and unpredicted overhead.
+
+    An owner that reads back from a local spool
+    (:func:`stage_a_owner_reads_back_locally`, read from ``environ``) is
+    gated on its read-back allowance, not the floor (PQ #1120): the planning
+    allowance with a partial last batch priced as a full one, because
+    PrismaBuild reserves every entry of a group at the bound entry size, the
+    full batch's (``boundary_group_ceiling_bytes``).
     """
     _n_probes = int(execution["n_probes"])
     _probe_microbatch = int(execution.get("probe_microbatch", 0))
@@ -756,23 +829,35 @@ def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
         raise AdjointIdentityRefused(
             "stage A preflight cannot bound the checkpoint manifest from "
             f"this invocation's geometry: {exc}") from exc
-    _demand = estimate_stage_a_artifact_demand(
-        n_probes=int(_n_probes), n_full_batches=int(_n_full),
-        remainder_rows=int(_rem_rows),
-        per_full_tensor_nbytes=int(_per_full),
-        per_remainder_tensor_nbytes=_per_rem,
-        num_layers=int(runner.num_layers), stride=int(stride_value),
-        header_bytes=int(ARTIFACT_FILE_HEADER_BYTES),
-        shared_per_checkpoint_bytes=int(_aux_bound),
-        manifest_per_checkpoint_bytes=int(_manifest_bytes))
+    def _estimate(per_remainder):
+        return estimate_stage_a_artifact_demand(
+            n_probes=int(_n_probes), n_full_batches=int(_n_full),
+            remainder_rows=int(_rem_rows),
+            per_full_tensor_nbytes=int(_per_full),
+            per_remainder_tensor_nbytes=per_remainder,
+            num_layers=int(runner.num_layers), stride=int(stride_value),
+            header_bytes=int(ARTIFACT_FILE_HEADER_BYTES),
+            shared_per_checkpoint_bytes=int(_aux_bound),
+            manifest_per_checkpoint_bytes=int(_manifest_bytes))
+
+    _demand = _estimate(_per_rem)
+    _readback_allowance = None
+    if stage_a_owner_reads_back_locally(environ):
+        # Every entry of a group is reserved at the bound entry size, the
+        # full batch's, and never committed down to its actual bytes.
+        _readback_allowance = int(_estimate(
+            int(_per_full) if _rem_rows else None)["planning_estimate_bytes"])
     _preflight = preflight_stage_a_artifact_budget(
         declared_bytes=int(artifact["run_used"]), demand=_demand,
         plan_sealed_bytes=int(artifact["override"]["plan_sealed_bytes"]
                               if artifact["override"] is not None
-                              else int(artifact["run_used"])))
+                              else int(artifact["run_used"])),
+        readback_allowance_bytes=_readback_allowance)
+    _gate = ("floor" if _readback_allowance is None
+             else f"read-back allowance {_readback_allowance} bytes and floor")
     print(f"joint_cost_stage_a: artifact preflight: declared "
           f"{_preflight['declared_bytes']} bytes "
-          f"({_preflight['declared_bytes'] / 1024 ** 3:.2f} GiB) >= floor "
+          f"({_preflight['declared_bytes'] / 1024 ** 3:.2f} GiB) >= {_gate} "
           f"{_preflight['required_floor_bytes']} bytes "
           f"({_preflight['required_floor_bytes'] / 1024 ** 3:.2f} GiB raw; "
           f"planning allowance {_preflight['planning_estimate_bytes']} bytes); "
@@ -783,6 +868,7 @@ def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
         "declared_bytes": _preflight["declared_bytes"],
         "required_floor_bytes": _preflight["required_floor_bytes"],
         "planning_estimate_bytes": _preflight["planning_estimate_bytes"],
+        "readback_allowance_bytes": _preflight["readback_allowance_bytes"],
         "demand": {k: _demand[k] for k in (
             "boundaries", "n_checkpoints", "n_retained_boundary_groups",
             "n_full_batches", "remainder_rows", "n_batches_total",

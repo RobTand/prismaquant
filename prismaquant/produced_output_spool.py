@@ -82,6 +82,23 @@ POLL_S = 0.1
 ENTRY_HEADER_ENVELOPE_BYTES = 65536
 
 
+def sealed_spool_root(env):
+    """The local spool root a producer's sealed environment names, or None.
+
+    ``env`` is the environment a produced-output owner binds from
+    (``BoundaryProducedPublication.env``). A byte bound without a root is
+    refused. :meth:`ProducedOutputSpool.from_publication` builds the spool
+    from this root, and the Stage A budget preflight reads it before the
+    owner binds (PQ #1120).
+    """
+    root = env.get(ROOT_ENV)
+    if not root:
+        if env.get(MAX_ENV):
+            raise ProducedOutputSpoolRefused(f"{MAX_ENV} requires {ROOT_ENV}")
+        return None
+    return str(root)
+
+
 def plane_partitions(*, n_rows, probe_microbatch):
     """The calibration batches a cotangent plane holds one entry for.
 
@@ -188,10 +205,8 @@ class ProducedOutputSpool:
     @classmethod
     def from_publication(cls, publication):
         env = getattr(publication, "env", {})
-        root = env.get(ROOT_ENV)
-        if not root:
-            if env.get(MAX_ENV):
-                raise ProducedOutputSpoolRefused(f"{MAX_ENV} requires {ROOT_ENV}")
+        root = sealed_spool_root(env)
+        if root is None:
             return None
         from .staged_lease import sdk_submodule
         module = sdk_submodule("produced_spool")

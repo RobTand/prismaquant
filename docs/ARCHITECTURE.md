@@ -1,5 +1,41 @@
 # PrismaQuant Architecture
 
+A Stage A owner that reads back from its local spool refuses at admission,
+not hours into its forward (2026-09-23, `fix/1120-1121-readback-budget-window`,
+PQ #1120). Two changes:
+
+- **The budget gate.** Such an owner never commits its groups, so
+  PrismaBuild keeps each one charged at its prewrite ceiling, every entry at
+  the bound entry size plus the 64 KiB envelope. The budget preflight
+  enforced only the raw-tensor floor, so a budget between the floor and the
+  planning allowance passed it and then failed with
+  `prewrite-exceeds-payload-maxima` in the forward. For an admitted owner
+  whose launch environment seals a spool root
+  (`joint_cost_stage_a.stage_a_owner_reads_back_locally`), the preflight now
+  requires the read-back allowance: the planning allowance with a partial
+  last batch priced as a full one, the size PrismaBuild reserves. It refuses
+  before the owner binds, naming the floor, the planning allowance, the
+  read-back allowance and the declared budget. Without a spool, or without
+  an admitted owner, the floor is the gate as before. R13 runs at 640 GiB
+  against an allowance of about 598 GiB at `probe_microbatch` 1, where the
+  two allowances are equal.
+- **The host window.** The Stage A row now seals
+  `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1` beside its two-plane bound
+  (`dispatch_joint_quanta._container_wrap`), so PrismaBuild (PB #910, live
+  in generation `451ec5d62e27`) derives a `spool_gb` demand of the window in
+  whole GiB (pbrun `local_disk_terms`) and charges it at claim against the
+  box's `--spool-gb` offer (sparky 266 GiB, sparklina 327 GiB on
+  2026-09-23). Two rows whose windows together exceed a box's offer are not
+  both placed on it. The campaign spec is unchanged: the opt-in is sealed
+  for the row that reads its planes back, and a spec that declares it `0`
+  refuses. Quantum rows seal the spec's spool as before, with no host
+  window.
+
+Gates: `tests/test_stage_a_readback_budget_1120.py`,
+`tests/test_dispatch_joint_quanta.py`, `tests/test_stage_a_artifact_budget.py`.
+A ship gate does not change; the Stage A admission gate and the Stage A
+row's sealed environment do.
+
 A microbatched Stage A plan seals the two cotangent planes its capture
 writes, not its rows (2026-09-23, `fix/1120-1121-readback-budget-window`,
 PQ #1121). The capture writes one entry per batch of `probe_microbatch`
@@ -1284,6 +1320,13 @@ allowance. This is progress-write coalescing, not relaxed authentication.
 
 As of: 2026-09-23 · `fix/1120-1121-readback-budget-window`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `fix/1120-1121-readback-budget-window`) for **a
+Stage A owner that reads back refusing at admission** (PQ #1120): the budget
+preflight requires the read-back allowance for an owner bound to a local
+spool, and the Stage A row seals the host spool window opt-in so placement
+charges its two-plane window. See the entry at the top. The Stage A
+admission gate changes; no format, pipeline default or ship gate does.
 
 Re-stamped (2026-09-23, `fix/1120-1121-readback-budget-window`) for **a
 microbatched Stage A plan that seals the planes its capture writes**
@@ -22514,8 +22557,9 @@ plus:
 - a writable identity bind of the root, which the campaign container
   requires (`tessera_campaign_container.produced_spool_environment`).
 
-It carries no `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW`; that opt-in waits for
-PB #910. The root directory must exist on the executing box before launch,
+It carries no `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW`; that opt-in waited for
+PB #910. (Since PQ #1120 the Stage A row seals it itself, beside its
+two-plane bound; the spec is unchanged.) The root directory must exist on the executing box before launch,
 because the container's bind source must.
 
 **The rows.** `produced_spool_row_environment` reads the spool from the spec
@@ -22643,11 +22687,24 @@ where a committed batch is priced at its actual bytes. A rolled-away
 cotangent group gives its prewrite back once its files are gone
 (`abort_prewrite`). The forward's boundary groups are never retired in Stage
 A, so their prewrites stay for the whole capture: at R13's shape about 0.4%
-over their actual bytes. The Stage A budget preflight's planning allowance
-prices every file at the same 64 KiB envelope
-(`joint_cost_stage_a.ARTIFACT_FILE_HEADER_BYTES`), so a budget at or above
-that allowance holds them. Files stay at their canonical paths either way;
+over their actual bytes. Files stay at their canonical paths either way;
 PrismaBuild does not sweep an ended owner's outstanding read-back prewrites.
+
+**The budget gate** (PQ #1120). The Stage A budget preflight's planning
+allowance prices every file at the same 64 KiB envelope
+(`joint_cost_stage_a.ARTIFACT_FILE_HEADER_BYTES`), but a partial last batch
+at its own size, where the prewrite prices it at the full batch's. For an
+owner that reads back from a local spool
+(`stage_a_owner_reads_back_locally`: an admitted action whose launch
+environment seals a spool root, the environment the owner binds from), the
+preflight (`_run_artifact_preflight`) computes a read-back allowance, the
+planning allowance with that batch priced as a full one, and
+`preflight_stage_a_artifact_budget` refuses a budget below it before the
+owner binds. The refusal names the floor, both allowances and the declared
+budget, and the remedy is the read-back allowance. Stage A's owner always
+reads back: the capture passes no `origin_lifetime`, which a write-only
+template requires. At `probe_microbatch` 1 there is no partial batch and
+the two allowances are equal.
 
 **Limits.**
 
@@ -22663,9 +22720,12 @@ PrismaBuild does not sweep an ended owner's outstanding read-back prewrites.
   an export action is not one. A barrier that waits longer than the row's
   grace ends as a no-progress kill.
 - PrismaBuild charges the spool to a box's `spool_gb` only with
-  `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1`, which the campaign spec does
-  not set. Until it does, the free-space refusal happens at bind, not at
-  placement.
+  `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1`. The Stage A row seals it
+  (PQ #1120); a quantum row does not, so its spool is refused at bind, not
+  at placement. The box's offer is measured from its free disk when no
+  action holds `spool_gb` there (PrismaBuild `supervise.py`
+  `_spool_budget`), so bytes a quantum row writes are seen only by the next
+  measurement.
 - The fixture chain (`tests/test_stage_a_same_box_readback.py`) and the real
   PrismaBuild exporter test check behavior, not real-scale time. A
   real-scale profile of one GLM step is owed.

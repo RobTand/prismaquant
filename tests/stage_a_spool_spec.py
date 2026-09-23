@@ -30,9 +30,11 @@ FIXTURE_EXECUTION = {"n_probes": 2, "n_calib_samples": 8, "calib_seqlen": 16,
                      "boundary_storage": {"prefetch_batches": 4}}
 SPOOL_WINDOW_BYTES = 2 * 2 * 8 * (16 * FIXTURE_HIDDEN * 2 + 65536)
 #: The spool environment the Stage A row seals: the spec's, with the byte
-#: bound replaced by the plan's two-plane window.
+#: bound replaced by the plan's two-plane window, and the host window opt-in
+#: that has placement charge it (PQ #1120).
 STAGE_A_SPOOL_ENV = {**SPOOL_ENV,
-                     "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": str(SPOOL_WINDOW_BYTES)}
+                     "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": str(SPOOL_WINDOW_BYTES),
+                     "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW": "1"}
 
 
 def stage_a_plan(root, **fields) -> dict:

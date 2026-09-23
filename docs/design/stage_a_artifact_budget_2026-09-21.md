@@ -100,6 +100,12 @@ serialized bytes and unpredicted overhead -- a ceiling between the floor
 and the planning allowance still passes the preflight and is admitted or
 refused at write time, exactly as the scaled regression demonstrates.
 
+(Since PQ #1120, 2026-09-23: an owner that reads its groups back from a
+local output spool is gated on its read-back allowance instead of the
+floor, because PrismaBuild keeps its never-committed groups charged at
+their prewrite ceiling. See `docs/ARCHITECTURE.md`, "Same-box readback and
+write-behind export (#1110)", "The budget gate".)
+
 ## Proposed invocation budget
 
 File-envelope peak `37376 * 16842752 + 16842752 = 629531541504 B

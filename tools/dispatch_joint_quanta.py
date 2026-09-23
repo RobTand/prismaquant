@@ -131,10 +131,12 @@ PRODUCED_SPOOL_ROOT_ENV = "PRISMABUILD_PRODUCED_SPOOL_ROOT"
 PRODUCED_SPOOL_MAX_ENV = "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"
 #: Bytes per element of the execution dtypes a model config may name.
 _CONFIG_DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "float32": 4}
+#: The host spool window opt-in (PB #910), which the Stage A row seals.
+PRODUCED_SPOOL_HOST_WINDOW_ENV = "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"
 #: Opt-ins PrismaBuild reads from the producer's sealed environment, each "0"
 #: or "1": the paced export (PB #891) and the host spool window (PB #910).
 PRODUCED_SPOOL_OPT_IN_ENV = ("PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT",
-                             "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW")
+                             PRODUCED_SPOOL_HOST_WINDOW_ENV)
 STATE_FILENAME = "campaign-state.json"
 
 #: Refusal exits: 3 = the stage-A precondition (or the campaign binding)
@@ -1042,6 +1044,13 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     spec that declares a spool root with no bound, or with one that is not a
     positive decimal byte count, is left as it is, so the row's spool check
     (:func:`produced_spool_row_environment`) refuses it as before.
+
+    With the bound it seals the host window opt-in
+    (``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1``, PB #910), so PrismaBuild
+    charges that window to the executing box's ``spool_gb`` at placement
+    and two rows cannot together overrun one box's spool disk (PQ #1120). A
+    spec that declares the opt-in off refuses: the row reads its planes
+    back from the spool, and an uncharged window is refused only at bind.
     """
     spec = json.loads(Path(spec_path).read_text())
     declared = spec.get("env", {}).get(PRODUCED_SPOOL_MAX_ENV)
@@ -1049,8 +1058,18 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
             and PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})
             and isinstance(declared, str) and declared.isascii()
             and declared.isdigit() and int(declared) > 0):
+        window = spec["env"].get(PRODUCED_SPOOL_HOST_WINDOW_ENV)
+        if window == "0":
+            raise DispatchRefused(
+                f"spec {spec_path} declares {PRODUCED_SPOOL_HOST_WINDOW_ENV}=0, "
+                "but this row reads its cotangent planes back from its spool: "
+                "its window must be charged to the box at placement (PQ #1120)")
         spec["env"] = {**spec["env"],
                        PRODUCED_SPOOL_MAX_ENV: str(int(spool_max_bytes))}
+        # A value other than "0" or "1" is left for the row's spool check,
+        # which refuses it.
+        if window in (None, "1"):
+            spec["env"][PRODUCED_SPOOL_HOST_WINDOW_ENV] = "1"
     require_staged_wait_below_grace(spec, progress)
     # Validate a declared workspace before publishing the row. These same
     # inlined spec bytes supply its outer PB environment below; no ambient
@@ -1393,7 +1412,9 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     progress = [(phase, HEAD_PROGRESS_GRACE_S if phase == "head"
                  else CHUNK_PROGRESS_GRACE_S) for phase in binding["phases"]]
     # The spool's window is the plan's two cotangent planes, not the spec's
-    # bound (PQ #1110): the chain reads its own planes back from it.
+    # bound (PQ #1110): the chain reads its own planes back from it. The
+    # wrapper also seals the host window opt-in, so placement charges that
+    # window to the box (PQ #1120).
     wrapped, container_image = _container_wrap(
         SPEC_PATH, payload, progress=progress,
         spool_max_bytes=stage_a_spool_window_bytes(campaign))
