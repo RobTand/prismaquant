@@ -12,8 +12,12 @@ This module gives both halves a PrismaBuild shape:
 * **Reads.** :func:`preparation_read_entries` lists what the preparation
   reads as data-manifest entries, and :func:`preparation_read_manifest`
   seals them. ``pbrun --data-manifest`` attaches the manifest, so the reads
-  are declared before the action is claimed. The reads themselves stay plain
-  file reads; nothing here routes them through the staged reader.
+  are declared before the action is claimed. With the tools'
+  ``--data-manifest-sha256`` flag, :func:`bind_staged_reads` makes every
+  declared read come from PrismaBuild's stage through the residency reader,
+  its bytes checked against the entry's digest, and refuses a read the stage
+  does not hold instead of reading the pool (PQ #1092). Without the flag the
+  reads are plain file reads, as before.
 * **Writes.** :func:`build_preparation_template` is the write-only
   produced-output template (#912) over the metadata root, submitted with
   ``pbrun --produced-output-template``. With the tools' ``--produced-output``
@@ -91,13 +95,35 @@ def head_phase_entries(parent: Mapping) -> list[dict]:
     return entries
 
 
-def file_entry(path: str | os.PathLike) -> dict:
-    """A whole-file entry for a present file."""
+def _hash_range(path: str, offset: int, size: int) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        handle.seek(offset)
+        remaining = size
+        while remaining:
+            chunk = handle.read(min(remaining, 8 << 20))
+            if not chunk:
+                raise ValueError(f"a declared read runs past the end of {path}")
+            digest.update(chunk)
+            remaining -= len(chunk)
+    return digest.hexdigest()
+
+
+def file_entry(path: str | os.PathLike, sha256: str | None = None) -> dict:
+    """A whole-file entry for a present file, with its SHA-256.
+
+    ``sha256`` is the file's bound digest when the caller holds one; without
+    it the file is hashed. Every entry declares its digest (PQ #1092), so
+    PrismaBuild's staged copy is bound to these bytes and the preparation
+    checks what it reads against them.
+    """
     path = os.path.normpath(os.path.abspath(os.fspath(path)))
     size = os.path.getsize(path)
     if size <= 0:
         raise ValueError(f"a declared read is an empty file: {path}")
-    return {"path": path, "offset": 0, "bytes": int(size), "sha256": None}
+    if sha256 is None:
+        sha256 = _hash_range(path, 0, size)
+    return {"path": path, "offset": 0, "bytes": int(size), "sha256": str(sha256)}
 
 
 def preparation_read_entries(*, head: Sequence[Mapping], files: Iterable,
@@ -110,6 +136,10 @@ def preparation_read_entries(*, head: Sequence[Mapping], files: Iterable,
     headers, :func:`joint_layer_quanta.layer_source_header_reads`). A range
     that a whole-file entry at the same offset already covers is dropped;
     PrismaBuild refuses a repeated ``(path, offset)``.
+
+    A ``files`` item is a path or a ``(path, sha256)`` pair; a bare path, and
+    every range, is hashed here, so each entry the tools add declares its
+    digest (PQ #1092). A head entry keeps the digest the parent gives it.
     """
     entries: list[dict] = []
     index: dict[tuple[str, int], int] = {}
@@ -117,9 +147,10 @@ def preparation_read_entries(*, head: Sequence[Mapping], files: Iterable,
     def add(entry):
         key = (entry["path"], entry["offset"])
         if key in index:
-            held = entries[index[key]]
-            if entry["bytes"] > held["bytes"]:
-                held["bytes"] = entry["bytes"]
+            # The longer read wins whole, digest included: a digest names
+            # exactly its entry's bytes, so it is never stretched.
+            if entry["bytes"] > entries[index[key]]["bytes"]:
+                entries[index[key]] = dict(entry)
             return
         index[key] = len(entries)
         entries.append(dict(entry))
@@ -127,11 +158,16 @@ def preparation_read_entries(*, head: Sequence[Mapping], files: Iterable,
     for entry in head:
         add({"path": os.path.normpath(str(entry["path"])), "offset": int(entry["offset"]),
              "bytes": int(entry["bytes"]), "sha256": entry.get("sha256")})
-    for path in files:
-        add(file_entry(path))
+    for item in files:
+        path, sha256 = (item if isinstance(item, tuple) else (item, None))
+        add(file_entry(path, sha256))
     for path, offset, size in ranges:
-        add({"path": os.path.normpath(str(path)), "offset": int(offset),
-             "bytes": int(size), "sha256": None})
+        path = os.path.normpath(str(path))
+        key = (path, int(offset))
+        if key in index and entries[index[key]]["bytes"] >= int(size):
+            continue
+        add({"path": path, "offset": int(offset), "bytes": int(size),
+             "sha256": _hash_range(path, int(offset), int(size))})
     return entries
 
 
@@ -163,6 +199,179 @@ def preparation_read_manifest(entries: Sequence[Mapping], *, produced_by: Mappin
                                       "entry_indices": list(range(len(rows))),
                                       "bytes": total, "cumulative_bytes": total}],
                           "read_bytes": total}}
+
+
+# --------------------------------------------------------------------------
+# Staged reads (PQ #1092)
+# --------------------------------------------------------------------------
+
+class PreparationReadRefused(ValueError):
+    """A declared read the stage could not serve; the pool is never read instead."""
+
+
+class StagedPreparationReads:
+    """This process's strict reads: the stage, or a refusal.
+
+    Bound once per process by :func:`bind_staged_reads`, from the tools'
+    ``--data-manifest-sha256``. Every read of a declared input goes through
+    the process residency resolver, bound to that manifest digest, and a
+    lifetime-pinned lease window (``staged_whole_file.read_staged_entry``).
+    The bytes read must hash to the map entry's digest, which PrismaBuild
+    derives from the sealed manifest's declared digest, and to the caller's
+    own pinned digest when it has one. A path the stage does not hold
+    refuses. It is never read from the pool.
+
+    ``own_outputs`` are the roots this action writes (the metadata root). A
+    file under one was written by this run or by an earlier run of the same
+    generation. It is not a manifest input, so it is read where it is.
+
+    Not routed yet: the Stage B head walk
+    (``tessera_joint_aura.load_measured_anchor_input``, run by the
+    generator's ``--head-slices``) opens its inputs itself. Those reads still
+    come from the pool under this binding until PQ #1082 routes them. That
+    exemption is named here and in ``docs/ARCHITECTURE.md``, not silent.
+    """
+
+    def __init__(self, resolver, *, manifest_sha256: str, own_outputs=()):
+        self.resolver = resolver
+        self.manifest_sha256 = manifest_sha256
+        self.own_outputs = tuple(os.path.normpath(os.path.abspath(os.fspath(root)))
+                                 for root in own_outputs)
+
+    def owns(self, path) -> bool:
+        path = os.path.normpath(os.path.abspath(os.fspath(path)))
+        return any(path == root or path.startswith(root + os.sep)
+                   for root in self.own_outputs)
+
+    def add_own_output(self, root) -> None:
+        root = os.path.normpath(os.path.abspath(os.fspath(root)))
+        if root not in self.own_outputs:
+            self.own_outputs = (*self.own_outputs, root)
+
+    def _read_entry(self, path: Path, staged: dict, *, where: str,
+                    sha256: str | None) -> bytes:
+        from .staged_tier_policy import TierPolicyRefused
+        from .staged_whole_file import read_staged_entry
+
+        try:
+            raw = read_staged_entry(self.resolver, path, staged, label=where)
+        except TierPolicyRefused as exc:
+            raise PreparationReadRefused(
+                f"{where} at {path} was not served from the stage: {exc}") from exc
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest != staged["sha256"] or (sha256 is not None and digest != sha256):
+            raise PreparationReadRefused(
+                f"{where} at {path}: the staged bytes hash to {digest}, not the "
+                f"digest the manifest and the caller require")
+        return raw
+
+    def whole(self, path, *, sha256: str | None = None, where: str) -> bytes:
+        """One whole declared file off the stage, digest-checked."""
+        path = Path(path)
+        if self.owns(path):
+            return path.read_bytes()
+        staged = self.resolver.staged_read(path, expected_sha256=sha256)
+        if staged is None:
+            raise PreparationReadRefused(
+                f"{where} at {path} is not staged for manifest "
+                f"{self.manifest_sha256[:12]}: refusing rather than reading the pool")
+        return self._read_entry(path, staged, where=where, sha256=sha256)
+
+    def prefix(self, path, *, nbytes: int, where: str) -> bytes:
+        """The staged range entry at offset 0 that covers ``nbytes`` of ``path``.
+
+        The safetensors header reads (``joint_layer_quanta.
+        layer_source_header_reads``) are declared as ``[0, 8 + length)``
+        ranges. This returns that whole entry, so the caller reads the
+        length prefix and the header from one staged, digest-checked copy.
+        """
+        path = Path(path)
+        staged = self.resolver.staged_range(path, 0, nbytes)
+        if staged is None or staged.get("offset") != 0:
+            raise PreparationReadRefused(
+                f"{where} at {path} [0, {nbytes}) is not staged for manifest "
+                f"{self.manifest_sha256[:12]}: refusing rather than reading the pool")
+        return self._read_entry(path, staged, where=where, sha256=None)
+
+
+_STAGED_READS: StagedPreparationReads | None = None
+
+
+def bind_staged_reads(*, manifest_sha256: str, allowed_tiers: str,
+                      own_outputs=(), env: Mapping[str, str] | None = None
+                      ) -> StagedPreparationReads:
+    """Make this process's declared reads strict (PQ #1092).
+
+    ``manifest_sha256`` is the digest of the data manifest the action was
+    submitted with (``stage_b_preparation_submission`` seals it into the
+    command line). This activates the strict tier policy with
+    ``allowed_tiers`` and binds the process residency resolver to the
+    manifest. A process without ``PRISMABUILD_RESIDENCY_MAP`` was not
+    launched with ``--residency stage`` and refuses. A second call with
+    the same digest adds its roots to the bound reads; another digest refuses.
+    """
+    global _STAGED_READS
+    from .residency_map import ENV_VAR, bind_residency_manifest, residency_resolver
+    from .staged_tier_policy import activate_staged_tier_policy
+
+    if not isinstance(manifest_sha256, str) or len(manifest_sha256) != 64 or \
+            any(c not in "0123456789abcdef" for c in manifest_sha256):
+        raise PreparationReadRefused(
+            "--data-manifest-sha256 is the 64-character digest of the "
+            "preparation's data manifest")
+    if _STAGED_READS is not None:
+        if _STAGED_READS.manifest_sha256 != manifest_sha256:
+            raise PreparationReadRefused(
+                "this process's reads are already bound to manifest "
+                f"{_STAGED_READS.manifest_sha256[:12]}, not {manifest_sha256[:12]}")
+        for root in own_outputs:
+            _STAGED_READS.add_own_output(root)
+        return _STAGED_READS
+    source = os.environ if env is None else env
+    if not source.get(ENV_VAR):
+        raise PreparationReadRefused(
+            f"--data-manifest-sha256 reads every input off the stage, but "
+            f"{ENV_VAR} is unset: the action was not launched with --residency stage")
+    try:
+        activate_staged_tier_policy(allowed_tiers)
+    except ValueError as exc:
+        raise PreparationReadRefused(f"--allowed-tiers: {exc}") from exc
+    bind_residency_manifest(manifest_sha256)
+    resolver = residency_resolver()
+    if resolver is None:
+        raise PreparationReadRefused(f"{ENV_VAR} names no residency map")
+    _STAGED_READS = StagedPreparationReads(
+        resolver, manifest_sha256=manifest_sha256, own_outputs=own_outputs)
+    _install_bound_reader(_STAGED_READS)
+    return _STAGED_READS
+
+
+def staged_reads() -> StagedPreparationReads | None:
+    """The bound strict reads, or None when the process reads plainly."""
+    return _STAGED_READS
+
+
+def _install_bound_reader(reads: StagedPreparationReads | None) -> None:
+    # ``tessera_joint_allocation._read_bound`` serves the catalog pair's
+    # control documents and pickles; the preparation reads them through it.
+    from . import tessera_joint_allocation as allocation
+    allocation.BOUND_READER = (None if reads is None else
+                               lambda path, sha256, label: reads.whole(
+                                   path, sha256=sha256, where=label))
+
+
+def reset_staged_reads_for_tests() -> None:
+    global _STAGED_READS
+    _STAGED_READS = None
+    _install_bound_reader(None)
+
+
+def read_input(path, *, sha256: str | None = None, where: str) -> bytes:
+    """A declared input's bytes: off the stage when bound, else read plainly."""
+    reads = _STAGED_READS
+    if reads is None:
+        return Path(path).read_bytes()
+    return reads.whole(path, sha256=sha256, where=where)
 
 
 # --------------------------------------------------------------------------
@@ -409,8 +618,11 @@ def publish_files(publication: PreparationPublication | None, kind: str,
 __all__ = [
     "DATA_MANIFEST_MAX_BYTES", "PREPARATION_READ_PHASE", "PREPARATION_SLOT",
     "PreparationPublication", "PreparationPublicationRefused",
-    "bind_preparation_publication", "build_preparation_template", "file_entry",
+    "PreparationReadRefused", "StagedPreparationReads",
+    "bind_preparation_publication", "bind_staged_reads",
+    "build_preparation_template", "file_entry",
     "head_phase_entries", "preparation_payload_ceiling",
     "preparation_read_entries", "preparation_read_manifest", "publish_files",
-    "reset_preparation_publications_for_tests",
+    "read_input", "reset_preparation_publications_for_tests",
+    "reset_staged_reads_for_tests", "staged_reads",
 ]

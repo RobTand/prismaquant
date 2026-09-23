@@ -1,5 +1,48 @@
 # PrismaQuant Architecture
 
+The Stage B preparation reads its declared inputs off the stage (2026-09-23,
+`ws-tq/1082-prep-reads-staged`, PQ #1092, part of #1082). Since #1070 the
+preparation submits with `--residency stage`, so PrismaBuild stages its
+manifest, but the tools still opened every input at its pool path.
+
+With `--data-manifest-sha256` (and `--allowed-tiers`, default `ram,ssd`),
+`regenerate_joint_quanta` and `prepare_extended_joint_quanta` call
+`stage_b_prep_io.bind_staged_reads`. That call activates the strict tier
+policy and binds the process residency resolver to the manifest. Every
+declared input is then read through a lifetime-pinned lease window
+(`staged_whole_file.read_staged_entry`):
+- the JSON controls (`_load_json`);
+- the production pickle;
+- the Stage A proofs;
+- the catalog pair's bound documents (`tessera_joint_allocation._read_bound`,
+  through its `BOUND_READER` hook);
+- the checkpoint index and each safetensors header range
+  (`read_layer_source_spans(source_reads=)`).
+
+The bytes must hash to the map entry's digest and to the caller's own pinned
+digest. A read the stage does not hold refuses. It is never read from the pool.
+Files under the metadata root are the run's own outputs and are read where
+they are.
+
+`stage_b_preparation_submission` now declares a SHA-256 for every entry it
+adds. Bound digests are taken from their bindings, and the rest are hashed.
+PrismaBuild's copies are therefore pinned to declared bytes. The submission
+also emits `strict_read_flags`, which `prepare_stageb_after_capture.sh`
+appends to the command. Without the flags, the reads are plain file reads,
+as before.
+
+**Named exemption.** The head walk that `--head-slices` runs
+(`tessera_joint_aura.load_measured_anchor_input`: the merged checkpoint, the
+cost pickle, about 36k journal units) still opens its inputs at the pool
+path. That is about 10.9 GB, the bulk of the head phase. PQ #1082 routes it.
+
+Gates:
+- `tests/test_stage_b_prep_staged_reads_1092.py`: a real PrismaBuild lease
+  stack in which every generator input opens at its map `stage_path`;
+- `tests/test_stage_b_prep_io_1070.py`.
+
+No format, pipeline default, stage or ship gate changes.
+
 Container caches sit under the declared local scratch (2026-09-23,
 `ws-tq/1072-container-cache-roots`, PQ #1072, #1014 item f). A campaign
 container writes its HF, Triton and inductor caches, `XDG_CACHE_HOME` and
@@ -1002,8 +1045,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-tq/1072-container-cache-roots`.
+As of: 2026-09-23 · `ws-tq/1082-prep-reads-staged`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-tq/1082-prep-reads-staged`) for **the Stage B
+preparation's staged reads** (PQ #1092): with `--data-manifest-sha256` every
+declared input except the head walk's is read off the stage, digest-checked,
+and refused rather than read from the pool; the submission declares every
+entry's digest. See the entry at the top. No format, pipeline default, stage
+or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-tq/1072-container-cache-roots`) for **container
 caches under the declared local scratch** (PQ #1072): the launcher binds HF,

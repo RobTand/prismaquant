@@ -665,9 +665,14 @@ def write_band_receipt(path: str | os.PathLike, band: dict) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def load_stage_a_receipt_like(path: str | os.PathLike, sha256: str | None = None) -> dict:
-    """Read a complete receipt or a sealed band, file digest checked when given."""
-    raw = Path(path).read_bytes()
+def load_stage_a_receipt_like(path: str | os.PathLike, sha256: str | None = None,
+                              *, read=None) -> dict:
+    """Read a complete receipt or a sealed band, file digest checked when given.
+
+    ``read(path, sha256)`` returns the file's bytes from elsewhere: the
+    Stage B preparation's staged reads (PQ #1092). None reads the path.
+    """
+    raw = Path(path).read_bytes() if read is None else read(path, sha256)
     if sha256 is not None and hashlib.sha256(raw).hexdigest() != str(sha256):
         raise RuntimeError(f"Stage A receipt digest mismatch at {path}")
     document = json.loads(raw)

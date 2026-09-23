@@ -28,7 +28,6 @@ def read_staged_whole_file(path: Path, expected_sha256: str, *,
     mapping escapes, and the returned bytes outlive the lease.
     """
     from .residency_map import residency_resolver
-    from .staged_lease import LeaseRefused, acquire_entry_window
     from .staged_tier_policy import refuse_pool_bulk_read
 
     where = str(path)
@@ -38,6 +37,22 @@ def read_staged_whole_file(path: Path, expected_sha256: str, *,
     staged = resolver.staged_read(path, expected_sha256=expected_sha256)
     if staged is None:
         raise refuse_pool_bulk_read(where, "readset-not-staged")
+    return read_staged_entry(resolver, path, staged, label=label)
+
+
+def read_staged_entry(resolver, path: Path, staged: dict, *, label: str) -> bytes:
+    """The whole of one resolved map entry, read under a lifetime-pinned window.
+
+    ``staged`` is the resolver's answer for ``path``: a whole-file entry
+    (``staged_read``) or a range entry (``staged_range``). The entry's bytes
+    are read once into an owned buffer under the same size and change
+    fences as :func:`read_staged_whole_file`, never from the pool. The
+    caller verifies the bytes against the digest it requires.
+    """
+    from .staged_lease import LeaseRefused, acquire_entry_window
+    from .staged_tier_policy import refuse_pool_bulk_read
+
+    where = str(path)
     size = staged.get("bytes")
     if type(size) is not int or isinstance(size, bool) or size <= 0:
         raise refuse_pool_bulk_read(where, "readset-not-staged")

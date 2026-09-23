@@ -11,8 +11,12 @@ or of ``tools/regenerate_joint_quanta.py`` alone (``regenerate``):
 * ``submission.json``: both digests, the read totals and the ``pbrun``
   options that attach them.
 
-It submits nothing. It reads the small control documents its arguments bind
-and 8 bytes of each selected safetensors shard, and nothing else.
+It submits nothing. It reads the control documents its arguments bind, each
+selected safetensors shard's header, and every declared file that has no
+bound digest, which it hashes: every entry the tools add declares its
+SHA-256 (PQ #1092). ``strict_read_flags`` in ``submission.json`` are the
+flags the tool's command line carries, so the action reads its inputs off
+the stage and refuses rather than reading the pool.
 
 The read set, by source:
 
@@ -60,12 +64,16 @@ def _load(path, sha256, where):
     return _load_json(Path(path), digest=sha256, where=where)
 
 
-def _proof_files(args) -> tuple[list[Path], int]:
-    """The Stage A proof files and the number of records indexes they produce."""
+def _proof_files(args) -> tuple[list[tuple[Path, str | None]], int]:
+    """The Stage A proof files, with their bound digests, and the number of
+    records indexes they produce."""
     files = []
     if args.adjoint_receipt is not None:
-        files.append(Path(args.adjoint_receipt))
-    files += [Path(path) for path in args.adjoint_band]
+        files.append((Path(args.adjoint_receipt), args.adjoint_receipt_sha256))
+    bands = list(args.adjoint_band_sha256) or [None] * len(args.adjoint_band)
+    if len(bands) != len(args.adjoint_band):
+        raise ValueError("every --adjoint-band needs one --adjoint-band-sha256")
+    files += [(Path(path), digest) for path, digest in zip(args.adjoint_band, bands)]
     if not files:
         raise ValueError("Stage B preparation needs sealed Stage A proof: the "
                          "completed receipt or a checkpoint band")
@@ -83,7 +91,7 @@ def _source_reads(plan, parent, prefix):
 
 def prepare_reads(args):
     """``(entries, annotations, quanta, indexes)`` for a preparation run."""
-    from tools.prepare_extended_joint_quanta import SOURCE_LAYERS_PREFIX, control_paths
+    from tools.prepare_extended_joint_quanta import SOURCE_LAYERS_PREFIX, control_digests
 
     inputs = _load(args.pair_inputs, args.pair_inputs_sha256, "catalog pair")
     plan = _load(inputs["extended_plan"]["path"], inputs["extended_plan"]["sha256"],
@@ -97,14 +105,18 @@ def prepare_reads(args):
     proofs, indexes = _proof_files(args)
     extension_path = Path(args.metadata_root) / "catalog-extension.json"
     extension = None
-    files = [args.pair_inputs, args.parent_manifest, args.derivation, args.spec, *proofs]
+    files = [(args.pair_inputs, args.pair_inputs_sha256),
+             (args.parent_manifest, args.parent_manifest_sha256),
+             (args.derivation, args.derivation_sha256), (args.spec, args.spec_sha256),
+             *proofs]
     if extension_path.exists():
         # A later band set binds the extension the first one wrote.
         extension = {"path": str(extension_path.resolve()),
                      "sha256": hashlib.sha256(extension_path.read_bytes()).hexdigest()}
-        files.append(extension_path)
-    files += sorted(control_paths(inputs, plan, prepared, extension))
-    files.append(prepared["production_cache"]["path"])
+        files.append((extension_path, extension["sha256"]))
+    files += sorted(control_digests(inputs, plan, prepared, extension).items())
+    files.append((prepared["production_cache"]["path"],
+                  prepared["production_cache"]["sha256"]))
     entries = preparation_read_entries(
         head=head_phase_entries(parent), files=files,
         ranges=_source_reads(plan, parent, SOURCE_LAYERS_PREFIX))
@@ -123,13 +135,15 @@ def regenerate_reads(args):
     prepared = _load(args.prepared, args.prepared_sha256, "prepared")
     parent = _load(args.parent_manifest, args.parent_manifest_sha256, "parent manifest")
     proofs, indexes = _proof_files(args)
-    files = [args.plan, args.prepared, args.parent_manifest, args.derivation, *proofs]
+    files = [(args.plan, args.plan_sha256), (args.prepared, args.prepared_sha256),
+             (args.parent_manifest, args.parent_manifest_sha256), args.derivation, *proofs]
     if args.partition is not None:
         files.append(args.partition)
     if args.catalog_extension is not None:
         files.append(args.catalog_extension)
     if args.executable_readsets:
-        files.append(prepared["production_cache"]["path"])
+        files.append((prepared["production_cache"]["path"],
+                      prepared["production_cache"]["sha256"]))
     entries = preparation_read_entries(
         head=head_phase_entries(parent), files=files,
         ranges=_source_reads(plan, parent, args.source_layers_prefix))
@@ -173,6 +187,12 @@ def write_submission(args, entries, annotations, quanta, indexes) -> dict:
             "path": str(template_path), "template_id": template["template_id"],
             "sha256": hashlib.sha256(template_bytes).hexdigest()},
         "reads": {"entries": manifest["entry_count"], "bytes": manifest["total_bytes"]},
+        # PQ #1092: appended to the tool's command line, so the action reads
+        # every declared input off the stage, checked against its digest,
+        # and refuses rather than reading the pool.
+        "strict_read_flags": ["--data-manifest-sha256",
+                              hashlib.sha256(manifest_bytes).hexdigest(),
+                              "--allowed-tiers", "ram,ssd"],
         # --residency stage also gives the action PRISMABUILD_RESIDENCY_MAP,
         # which the produced-output binding needs for its queue root.
         "pbrun_options": ["--data-manifest", str(manifest_path),

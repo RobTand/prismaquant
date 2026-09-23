@@ -38,7 +38,9 @@
 # sets PRISMABUILD_RESIDENCY_MAP only for an action with a residency plan
 # (pool.residency_map_environment), and the produced-output binding derives
 # the queue root from it (stage_a_produced_output.launch_queue_root). With
-# --residency none the action would refuse before writing anything.
+# --residency none the action would refuse before writing anything. The
+# strict read flags (--data-manifest-sha256, --allowed-tiers) need the map
+# too: every declared input is read off the stage, digest-checked (PQ #1092).
 set -euo pipefail
 if [[ $# -ne 5 ]]; then
   echo 'usage: prepare_stageb_after_capture.sh PAIR_JSON PAIR_SHA CAPTURE_JSON CAPTURE_SHA FRESH_METADATA_ROOT' >&2
@@ -63,6 +65,9 @@ prep=(--pair-inputs "$1" --pair-inputs-sha256 "$2"
   --spec "$spec" --spec-sha256 "$spec_sha")
 (cd "$checkout" && "$python" -m tools.stage_b_preparation_submission prepare \
   "${prep[@]}" --tier "$tier" --out "$submission" >/dev/null)
+# PQ #1092: the manifest digest and tiers the action reads its inputs under,
+# off the stage and never from the pool.
+mapfile -t strict < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["strict_read_flags"]))' "$submission/submission.json")
 exec python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
   --cwd "$checkout" --tag gb10 --cpus 4 --demand mem_gb=20 --priority -10 \
   --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
@@ -70,4 +75,4 @@ exec python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
   --produced-output-template "$submission/template.json" \
   --residency stage --residency-ram auto \
   --timeout-s 1800 --wait-s 2400 -- \
-  "$python" -m tools.prepare_extended_joint_quanta "${prep[@]}" --produced-output
+  "$python" -m tools.prepare_extended_joint_quanta "${prep[@]}" --produced-output "${strict[@]}"
