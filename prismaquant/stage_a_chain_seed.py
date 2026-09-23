@@ -173,6 +173,9 @@ def _sealed_checkpoint(binding, where) -> tuple[dict, Path]:
     if adjoint_space(root) != path.parents[2]:
         raise ChainSeedRefused(
             f"the seed's {where} {path} is not under a Stage A output root")
+    from .stage_a_retirement import refuse_retired_space
+    refuse_retired_space(path.parents[2], ChainSeedRefused,
+                         what=f"the seed's {where} is retired")
     return record, root
 
 
