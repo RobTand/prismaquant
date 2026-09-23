@@ -890,7 +890,9 @@ Rob's two metrics, defined so a number answers each.
   non-diagnostic** (AGENTS.md principle 13: it reads 96% for a memory-stalled
   kernel exactly as for a saturated one); GPU utilization is therefore
   reported as `kernel_active_s / wall_s` from the action's profiler (CUDA
-  kernel-time sum) plus work per joule (units completed per kWh), and
+  kernel-time sum; opt-in since PQ #1029 under
+  `PRISMAQUANT_STAGE_B_KERNEL_PROFILE=1`, otherwise `None` with the reason)
+  plus work per joule (units completed per kWh), and
   utilization percentages are never used to diagnose the hot path.
 - `chain`: chain-layer backwards count, wall, joules (the stride's price,
   visible per quantum).
