@@ -170,14 +170,28 @@ def test_failed_qualification_releases_unit_and_source(tmp_path, monkeypatch):
 
 
 def test_smaller_serialized_budget_plans_more_windows(tmp_path, monkeypatch):
-    from pathlib import Path
-    runner, data, capture, events, live, observed = fixture(tmp_path, monkeypatch)
-    config = policy()
-    config['max_load_buffer_bytes'] = max(Path(cell['render']).stat().st_size for cell in data.cells.values())
-    cache = bridge.prepare_cache(runner, data, capture=capture, max_render_bytes=10000,
-        file_load_workers=2, qualification_window=config)
-    windows = cache.metadata['prefetch'][0]['windows']
-    assert len(windows) == 4 and all(len(window['keys']) == 1 for window in windows)
+    """The serialized budget alone splits the windows, at one loader.
+
+    A quantum's width is set by the two byte budgets, not by the loader count
+    (#693), so this needs one loader. It asked for two, which made it assert on
+    the shard's CPU count: ``_window_limits`` refuses more loaders than the
+    process's CPU affinity holds, and a one-CPU shard failed (PQ #1032). Both
+    plans run at one loader, so the default budget's two keys per window
+    against the smaller budget's one key per window is the budget's doing.
+    """
+    def key_counts(root, *, smaller):
+        root.mkdir()
+        runner, data, capture, _events, _live, _observed = fixture(root, monkeypatch)
+        config = policy()
+        if smaller:
+            config['max_load_buffer_bytes'] = max(
+                Path(cell['render']).stat().st_size for cell in data.cells.values())
+        cache = bridge.prepare_cache(runner, data, capture=capture, max_render_bytes=10000,
+            file_load_workers=1, qualification_window=config)
+        return [len(window['keys']) for window in cache.metadata['prefetch'][0]['windows']]
+
+    assert key_counts(tmp_path / 'default', smaller=False) == [2, 2]
+    assert key_counts(tmp_path / 'smaller', smaller=True) == [1, 1, 1, 1]
 
 
 def test_wire_read_ahead_reserves_current_and_pending_blobs(tmp_path, monkeypatch):

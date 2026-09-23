@@ -39,6 +39,30 @@ so a run that seals nothing, R12 included, keeps its bytes. Gates:
 `tests/test_dispatch_joint_quanta.py`. No format, stage or ship gate
 changes, and no default changes.
 
+A Stage B read plan is sealed for its replay mode (2026-09-23,
+`ws-tq/1011-spill-phase-plan`, PQ #1011). The executable manifest staged the
+target layer's boundary run once per (window, probe), but under the one-pass
+spill a quantum reads it once per probe, in that probe's capture, and its
+window replays read nothing, so the plan over-declared the run W times.
+`regenerate_joint_quanta --replay-mode spill` now seals the spill's real
+consumption order: after the own source come `render-00`, one `spill-p{probe}`
+phase per probe (the boundary run), then the remaining windows' render
+phases. `prepare_extended_joint_quanta` picks the mode from the reviewed
+Stage B spec: `spill` when it declares `PRISMAQUANT_STAGE_B_SPILL_ROOT`. The
+manifest's `annotations.replay_mode` and the record's
+`executable_readset.replay_mode` say `spill`; a windowed plan carries neither
+and its bytes are unchanged. A quantum refuses, before any GPU work, a plan
+sealed for the other mode than its launch, and the dispatcher accepts
+`render-00` followed by `spill-p0` only on a spill-sealed row. The issue text
+put every spill phase before `render-00`; the runtime opens window 0's
+retained renders before the first capture, so that order would have reported
+the captures under `render-00`. A spill resume whose first pending window is
+not window 0 reports its captures under that window's render phase, because
+progress phases only move forward. Gates:
+`tests/test_spill_phase_plan_1011.py`,
+`tests/test_stageb_one_pass_spill.py`. No format, pipeline default or ship
+gate changes.
+
 The Stage A dispatch requires the paced produced-output spool and seals the
 RAM tier (2026-09-23, `ws-sa/stage-a-spool-1012`, PQ #1012, part of #997).
 Without a sealed spool root, Stage A's owner writes every boundary entry
@@ -260,10 +284,11 @@ the resource policy and every record are unchanged; the counters' new
 `replay` block records the mode, the layer passes and the spill telemetry.
 Unset, the windowed path runs unchanged. The campaign container and the
 dispatcher forward and seal the two variables through a writable identity
-bind, as they do the #956 cotangent scratch. The sealed executable read
-schedule still stages the target layer's boundaries once per (window,
-probe); the spill reads them once per probe, under the first active window's
-replay phases. Separately, the layer quantum imported `PackedExpertProjection`
+bind, as they do the #956 cotangent scratch. A read plan sealed for the
+spill (PQ #1011) stages the target layer's boundaries once per probe, in
+`spill-p{probe}` phases after `render-00`, and the capture reads them under
+those phases; a windowed plan stages them once per (window, probe).
+Separately, the layer quantum imported `PackedExpertProjection`
 from `production_weight_cache`, where it does not exist, so every quantum with
 packed experts failed after its source install; it now imports it from
 `routed_experts`. Gates: `tests/test_stageb_one_pass_spill.py`,
@@ -678,6 +703,12 @@ Stage A, Stage B and joint AURA entry point, and
 `PRISMAQUANT_BF16_REDUCED_PRECISION_REDUCTION=off` stamps the flag into the
 arithmetic identities and the Stage A run identity; see the entry at the top.
 Unset stamps nothing. No format, default, stage or ship gate changes.
+
+Re-stamped (2026-09-23, `ws-tq/1011-spill-phase-plan`) for **the spill-sealed
+read plan** (PQ #1011): `--replay-mode spill` seals the target boundary run
+once per probe in `spill-p{probe}` phases, and a quantum refuses a plan sealed
+for the other replay mode; see "Stage B can replay its windows from a local
+spill". No format, default or stage changes.
 
 Re-stamped (2026-09-23, `ws-sa/stage-a-spool-1012`) for **the Stage A
 dispatch's required spool** (PQ #1012): the dispatcher's default spec
