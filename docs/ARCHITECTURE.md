@@ -1,5 +1,64 @@
 # PrismaQuant Architecture
 
+A read manifest and the streaming loader enumerate one set of source reads
+(2026-09-23, `ws-1a/readset-coverage-1095`, PQ #1095). The first strictly
+staged Stage B quantum (PB `55cf01d2501f`) refused 54 s in, on its first
+resident head tensor (`readset-not-staged`): the executable readset declared
+no range in `model-00001`, which holds `embed_tokens` and `lm_head`. The
+readset listed its source reads from a checkpoint-name regex beside the
+loader's own live-name selection, never listed the head, and nothing
+compared the declaration with the reads before the GPU was admitted.
+
+- **One enumeration.** `prismaquant/source_read_plan.py` holds the loader's
+  selection: the live weight map (`live_weight_map`), the head prefixes
+  (`resident_head_prefixes`) and the prefix selection
+  (`select_source_tensors`). `layer_streaming._materialize` and
+  `_read_layer_to_device` select through it, and
+  `layer_streaming.streaming_source_plan` runs the same selection without a
+  GPU, from the model config, the index and each shard's header. It returns
+  the head's and every layer's tensor spans and the header reads it made.
+  `joint_layer_quanta.read_layer_source_spans` and
+  `layer_source_header_reads` are removed.
+- **The head phase stages the resident head.**
+  `tools/regenerate_joint_quanta.py --source-layers-prefix PREFIX` takes
+  PREFIX as the loader's live decoder layers prefix, refuses unless the
+  prepared unit roster names the same one (`roster_layers_prefix`), and
+  builds every layer's and the head's spans from the source plan.
+  `build_quantum_executable_manifest(head_source=...)` completes the `head`
+  phase with the head's spans (`complete_source_extent`), records
+  `annotations.head_source`, and the binder copies the head's tensors and
+  layers prefix into `record.executable_readset.head_source`. Without it the
+  historical bytes reproduce unchanged. The quantum passes those tensors to
+  `_build_streaming_context(sealed_head_tensors=)`, which refuses before the
+  first head read when its own head selection differs
+  (`source_read_plan.check_sealed_selection`).
+- **A quantum reads only its own walk.** `_install_with_settlement` asks for
+  each layer before installing it, so the first install is no longer
+  refused as not prefetched, and prefetches only the next layers of the
+  quantum's install order (`joint_layer_quanta.quantum_source_layer_order`,
+  `source_read_plan.chain_prefetch_window`). It no longer prefetches
+  `layer - 1`, the next quantum's source, which its readset does not
+  declare.
+- **A coverage check before submission.** `prismaquant/readset_coverage.py`
+  lists, in one pass and without a GPU, every source read a manifest does
+  not stage whole in the phase that reads it: resident head tensors, layer
+  tensors, prefetches outside the walk, and a record whose head selection is
+  unsealed or differs. `tools/dispatch_joint_quanta.py` runs it on every
+  executable row before it prints a dry run or submits, and refuses once,
+  listing every gap. `tools/check_readset_coverage.py` runs it on a Stage B
+  records directory or a Stage A chain walk; for Stage A it models the
+  schedule `joint_cost_stage_a` runs today, which also prefetches the
+  `lookahead` layers below the walk's last layer.
+
+Gates:
+- `tests/test_readset_coverage_1095.py`;
+- `tests/test_stageb_readset_source_coverage.py`,
+  `tests/test_stagea_readset_source_coverage.py` and
+  `tests/test_stage_b_prep_io_1070.py` on the loader's plan.
+
+No format, pipeline default or ship gate changes. The dispatcher's
+pre-submission gate is new.
+
 The GLM test modules run on a transformers 5.16 interpreter (2026-09-23,
 `ws-rm/1090-glm-tf516-lane`, PQ #1090). The PrismaBuild test interpreter
 takes transformers 5.6.0 from `pq-cu130`, and
@@ -51,7 +110,7 @@ declared input is then read through a lifetime-pinned lease window
 - the catalog pair's bound documents (`tessera_joint_allocation._read_bound`,
   through its `BOUND_READER` hook);
 - the checkpoint index and each safetensors header range
-  (`read_layer_source_spans(source_reads=)`).
+  (`layer_streaming.streaming_source_plan(source_reads=)`, PQ #1095).
 
 The bytes must hash to the map entry's digest and to the caller's own pinned
 digest. A read the stage does not hold refuses. It is never read from the pool.
@@ -152,8 +211,8 @@ headers undeclared, and to write every metadata file straight to the pool.
 `tools/stage_b_preparation_submission.py` now writes, beside the metadata
 root, a one-phase v2 data manifest of those reads (the base parent's head
 phase, the control files `control_paths` names, the argument files, the Stage
-A proofs, the production pickle, and the index and header ranges
-`joint_layer_quanta.layer_source_header_reads` returns) and a write-only
+A proofs, the production pickle, and the config, index and header ranges
+`layer_streaming.streaming_source_plan` reads, PQ #1095) and a write-only
 produced-output template over the metadata root (PB #912: zero window, one
 `stage_b_metadata` payload slot, a ceiling of 64 MiB per file it can write).
 `tools/prepare_stageb_after_capture.sh` submits the preparation with both,
@@ -1080,8 +1139,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-rm/1090-glm-tf516-lane`.
+As of: 2026-09-23 · `ws-1a/readset-coverage-1095`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-1a/readset-coverage-1095`) for **one enumeration
+of source reads** (PQ #1095): the readsets take their source spans, now
+including the resident head, from the streaming loader's own selection; the
+loader refuses a sealed head it does not select; a quantum prefetches only
+its own walk; and the dispatcher refuses a package whose readsets miss a
+source read. See the entry at the top. No format, pipeline default or ship
+gate changes.
 
 Re-stamped (2026-09-23, `ws-rm/1090-glm-tf516-lane`) for **the GLM test
 modules' transformers 5.16 interpreter** (PQ #1090): six GLM modules that

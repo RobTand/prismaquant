@@ -1823,7 +1823,49 @@ def plan_consumer_tags(block: Mapping) -> tuple[str, ...]:
     return tuple(raw)
 
 
-def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
+def _coverage_row(record: dict, *, output_root: Path, band: dict | None) -> dict:
+    """What the source-read coverage check needs of one executable row."""
+    handoff = (band or {}).get("handoff")
+    if handoff is not None:
+        # A band-serial consumer takes its cotangent from the handoff and
+        # installs only its own layer.
+        return {"record": record, "manifest_path": str(handoff["manifest_path"]),
+                "manifest_sha256": handoff["manifest_sha256"],
+                "order": (record["layer"],)}
+    manifest = Path(record["executable_readset"].get("manifest_path", ""))
+    if not manifest.is_absolute():
+        manifest = output_root / manifest
+    return {"record": record, "manifest_path": str(manifest),
+            "manifest_sha256": record["executable_readset"]["manifest_sha256"],
+            "order": None}
+
+
+def check_source_coverage(coverage_rows: list[dict], *, coverage=None) -> None:
+    """Refuse a publication whose readsets miss a source read (PQ #1095).
+
+    Every executable row's manifest has to declare every source tensor its
+    quantum's streaming loader reads: the resident head in ``head`` and each
+    installed layer in its source phase (``prismaquant.readset_coverage``).
+    The check reads headers only and needs no GPU. It lists every gap of
+    every row, then refuses once; a dry run refuses the same way.
+    """
+    if not coverage_rows:
+        return
+    if coverage is None:
+        from prismaquant.readset_coverage import quantum_rows_gaps as coverage
+    gaps = coverage(coverage_rows)
+    if gaps:
+        from prismaquant.readset_coverage import gaps_report
+        print(json.dumps(gaps_report(gaps, rows=len(coverage_rows)),
+                         indent=2, sort_keys=True, default=str), file=sys.stderr)
+        raise DispatchRefused(
+            f"{len(gaps)} source read(s) of {len(coverage_rows)} row(s) are "
+            "not declared by their readsets (listed above): rebuild the "
+            "readsets from the loader's source plan")
+
+
+def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
+         _coverage=None) -> int:
     parser = argparse.ArgumentParser(
         description="Publish distributed joint-AURA campaign rows (§5).")
     parser.add_argument("--records", required=True,
@@ -1943,6 +1985,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
     receipt_ok = bool(publishable)
 
     rows: list[dict] = []
+    coverage_rows: list[dict] = []
     # A stage A that was submitted but did not terminally execute (failed,
     # withdrawn, lost) is republished: the state file records the attempt,
     # never the outcome, and retry is free (#5 contract).  Only a terminally
@@ -1988,6 +2031,9 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                         continue
                 handoff = (band or {}).get("handoff")
                 template = (band or {}).get("emit_template")
+                if record.get("executable_readset") is not None:
+                    coverage_rows.append(_coverage_row(
+                        record, output_root=output_root, band=band))
                 rows.append({"kind": "quantum", "quantum_id": quantum_id,
                              "identity_sha256": record["identity_sha256"],
                              "manifest_sha256": (
@@ -2001,6 +2047,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None) -> int:
                                  output_root=output_root, priority=priority,
                                  head_grace_s=args.head_grace_s,
                                  consumer_tags=tags, band=band)})
+        check_source_coverage(coverage_rows, coverage=_coverage)
     except DispatchRefused as exc:
         print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
         return EXIT_PRECONDITION_REFUSED

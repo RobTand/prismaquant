@@ -77,7 +77,9 @@ from .joint_layer_quanta import (
     executable_spill_phase_name,
     executable_source_phase_name,
     qname_layer,
+    quantum_source_layer_order,
 )
+from .source_read_plan import chain_prefetch_window
 from .joint_quantum_handoff import (
     HANDOFF_LOAD_PHASE,
     HandoffEmitter,
@@ -676,25 +678,45 @@ class QuantumCounters:
 # --------------------------------------------------------------------------
 
 
-def _install_with_settlement(runner, layer: int, *, operator_windows) -> None:
-    """Install one source layer the way the single run's reverse walk does."""
+def _install_with_settlement(runner, layer: int, *, operator_windows,
+                             order) -> None:
+    """Install one layer of the quantum's own walk, then prefetch its next.
+
+    ``order`` is the quantum's install order
+    (``joint_layer_quanta.quantum_source_layer_order``), and the executable
+    readset declares a source phase for each of its layers (PQ #1095).
+
+    The layer is asked for first. ``install(require_prefetched=True)``
+    refuses a layer that is neither resident nor in flight, and nothing
+    before the walk's first layer prefetches it; for any later layer the
+    call hands back the read already in flight, or nothing when the layer
+    is resident. After the install, the next ``prefetch_lookahead`` layers
+    of the order are prefetched, and never a layer the quantum does not
+    install. The single run's reverse walk prefetches ``layer - 1`` after
+    every layer; here that read would be the next quantum's source, which
+    this readset does not declare and the strict reader refuses. The
+    context's own top-up is off for the same reason. Under operator windows
+    the prefetched layers settle before the next step, as before.
+    """
+    order = tuple(order)
+    position = order.index(layer)
+    runner.context.schedule_prefetch(layer)
     runner.context.install(
         layer,
         require_prefetched=runner.require_prefetched_residency,
-        **({"prefetch_following": False} if operator_windows is not None else {}),
+        prefetch_following=False,
     )
+    successors = chain_prefetch_window(order, position, runner.prefetch_lookahead)
+    for successor in successors:
+        runner.context.schedule_prefetch(successor)
     if operator_windows is None:
-        runner.schedule_reverse_prefetch(layer)
-    else:
-        successors = range(max(0, layer - runner.prefetch_lookahead), layer)
-        for successor in reversed(successors):
-            runner.context.schedule_prefetch(successor)
-        settle = getattr(runner.context, "settle_prefetched_layers", None)
-        if callable(settle):
-            settle(successors)
-        elif torch.device(runner.device).type == "cuda":
-            raise RuntimeError(
-                "joint operator replay requires source prefetch settlement")
+        return
+    settle = getattr(runner.context, "settle_prefetched_layers", None)
+    if callable(settle):
+        settle(successors)
+    elif torch.device(runner.device).type == "cuda":
+        raise RuntimeError(
+            "joint operator replay requires source prefetch settlement")
 
 
 def _rebuild_batches(runner, *, partitions, shared_pass):
@@ -1148,8 +1170,15 @@ def bind_joint_served_quantizer(formats_by_qname):
     return None
 
 
-def build_quantum_source_runner(config, *, offload_folder):
-    """Rebuild the same sealed BF16 source used by Stage A."""
+def build_quantum_source_runner(config, *, offload_folder,
+                                sealed_head_tensors=None):
+    """Rebuild the same sealed BF16 source used by Stage A.
+
+    ``sealed_head_tensors`` is the resident head the quantum's executable
+    readset declares (``executable_readset.head_source.tensors``, PQ #1095):
+    the streaming context refuses before its first head read when the head
+    it selects differs.
+    """
     from .cost_streaming import build_streamed_causal_lm
     from .model_profiles import detect_profile
     from .tessera_joint_aura import _source_prefetch
@@ -1159,6 +1188,8 @@ def build_quantum_source_runner(config, *, offload_folder):
         offload_folder=str(offload_folder), profile=detect_profile(config["model"]),
         attn_implementation="eager", source_authentication=None,
         source_derivative=config["execution"].get("source_derivative"),
+        **({"sealed_head_tensors": sealed_head_tensors}
+           if sealed_head_tensors is not None else {}),
         **_source_prefetch(config))
 
 
@@ -1628,6 +1659,7 @@ def run_layer_quantum_core(
     # would end on, so the chain below walks no layers.
     chain_layers = ([] if adjoint_handoff is not None else
                     [int(c) for c in record["adjoint"]["chain_layers"]])
+    source_order = quantum_source_layer_order(chain_layers, layer)
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE if adjoint_handoff is None
                                   else HANDOFF_LOAD_PHASE)
@@ -1687,7 +1719,8 @@ def run_layer_quantum_core(
                         progress.enter_read_phase(
                             executable_source_phase_name(chain_layer))
                     _install_with_settlement(runner, chain_layer,
-                                             operator_windows=operator_windows)
+                                             operator_windows=operator_windows,
+                                             order=source_order)
                     if executable:
                         progress.enter_read_phase(
                             executable_bound_phase_name(chain_layer))
@@ -1757,7 +1790,8 @@ def run_layer_quantum_core(
         if executable:
             progress.enter_read_phase(
                 executable_own_source_phase_name(layer))
-        _install_with_settlement(runner, layer, operator_windows=operator_windows)
+        _install_with_settlement(runner, layer, operator_windows=operator_windows,
+                                 order=source_order)
         if packed_members:
             from .routed_experts import PackedExpertProjection
 
@@ -2574,7 +2608,10 @@ def run_layer_quantum(
         else:
             identity_cache = {"identity_cache_path": _seed_source_identity_cache(
                 config, space / "run")}
-        runner = build_quantum_source_runner(config, offload_folder=space / "run" / "offload")
+        runner = build_quantum_source_runner(
+            config, offload_folder=space / "run" / "offload",
+            sealed_head_tensors=((record.get("executable_readset") or {})
+                                 .get("head_source") or {}).get("tensors"))
 
         source = build_streamed_model_identity(runner, config["model"], **identity_cache)
         _same(completion.get("source_model_identity"), source,

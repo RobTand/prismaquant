@@ -53,11 +53,9 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import io
 import json
 import os
 import re
-import struct
 from collections.abc import Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
@@ -74,6 +72,7 @@ MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
 #: A stage-A or executable quantum manifest's record of additions to the
 #: parent's layer extents and the source-coverage gate (PQ #898 / #900).
 SOURCE_COMPLETION_SCHEMA = "prismaquant.joint_layer_quanta.source_completion.v1"
+HEAD_SOURCE_SCHEMA = "prismaquant.joint_layer_quanta.head_source.v1"
 PREPARED_INPUT_SCHEMA = "prismaquant.joint_layer_quanta.prepared_input.v1"
 
 #: The tail leg's telemetry name. It is NOT a read-plan phase: published
@@ -859,128 +858,6 @@ def slice_layer_manifest(parent_manifest: Mapping, layer: int, *,
     }
 
 
-#: A safetensors header is a u64 length and that many bytes of JSON. The bound
-#: is ``layer_streaming``'s own, so the two readers refuse the same files.
-_SAFETENSORS_HEADER_MAX_BYTES = 100_000_000
-
-
-def _layer_source_shards(model_dir: str, num_layers: int, *,
-                         checkpoint_layers_prefix: str, source_reads=None):
-    """``(index path, {shard: [(layer, tensor name), ...]})`` for layers below ``num_layers``.
-
-    The streamed reader's selection: every checkpoint tensor named
-    ``{checkpoint_layers_prefix}{layer}.*``, grouped by the shard the index
-    places it in. ``source_reads`` is :func:`read_layer_source_spans`'s.
-    """
-    index_path = os.path.join(model_dir, "model.safetensors.index.json")
-    if source_reads is None:
-        with open(index_path, encoding="utf-8") as handle:
-            weight_map = json.load(handle)["weight_map"]
-    else:
-        raw = source_reads.whole(index_path, where="checkpoint index")
-        weight_map = json.loads(raw.decode("utf-8"))["weight_map"]
-    pattern = re.compile(rf"^{re.escape(checkpoint_layers_prefix)}([0-9]+)\.")
-    wanted: dict[str, list[tuple[int, str]]] = {}
-    for name, shard in weight_map.items():
-        match = pattern.match(name)
-        if match is None or int(match.group(1)) >= num_layers:
-            continue
-        wanted.setdefault(shard, []).append((int(match.group(1)), name))
-    return index_path, wanted
-
-
-def _safetensors_header_length(handle, path: str, size: int) -> int:
-    """Read a safetensors file's 8-byte length prefix and check it."""
-    raw = handle.read(8)
-    if len(raw) != 8:
-        raise ValueError(f"{path} is too short to be a safetensors file")
-    (length,) = struct.unpack("<Q", raw)
-    if not 0 < length <= min(_SAFETENSORS_HEADER_MAX_BYTES, size - 8):
-        raise ValueError(f"{path} has an invalid safetensors header length")
-    return length
-
-
-def layer_source_header_reads(model_dir: str, num_layers: int, *,
-                              checkpoint_layers_prefix: str,
-                              ) -> list[tuple[str, int, int]]:
-    """The reads :func:`read_layer_source_spans` makes, as ``(path, offset, bytes)``.
-
-    The whole checkpoint index, then each selected shard's length prefix and
-    JSON header, in the order the spans reader opens them (PQ #1070). Finding
-    a header's length reads its first 8 bytes.
-    """
-    index_path, wanted = _layer_source_shards(
-        model_dir, num_layers, checkpoint_layers_prefix=checkpoint_layers_prefix)
-    reads = [(os.path.normpath(index_path), 0, os.path.getsize(index_path))]
-    for shard in sorted(wanted):
-        path = os.path.normpath(os.path.join(model_dir, shard))
-        size = os.path.getsize(path)
-        with open(path, "rb") as handle:
-            length = _safetensors_header_length(handle, path, size)
-        reads.append((path, 0, 8 + length))
-    return reads
-
-
-def read_layer_source_spans(model_dir: str, num_layers: int, *,
-                            checkpoint_layers_prefix: str, source_reads=None,
-                            ) -> dict[int, list[tuple[str, int, int]]]:
-    """What stage A reads from the source, per layer, as file spans.
-
-    ``{layer: [(shard path, start, end), ...]}`` in absolute file offsets, for
-    every checkpoint tensor named ``{checkpoint_layers_prefix}{layer}.*`` with
-    ``0 <= layer < num_layers``. This is the streamed reader's own selection
-    (``layer_streaming._read_layer_to_device`` takes every name under the
-    layer's prefix), read from the same two places it reads: the checkpoint
-    index and each shard's header. Stdlib only, like the rest of this module.
-
-    It exists because a read manifest is a claim about what a reader will
-    read, and until PQ #898 nothing compared the two.
-
-    ``source_reads`` reads the index and each header from somewhere other
-    than the source's own path: an object with ``whole(path, where=)`` and
-    ``prefix(path, nbytes=, where=)``, the Stage B preparation's staged
-    reads (``stage_b_prep_io.StagedPreparationReads``, PQ #1092). ``prefix``
-    returns the staged ``[0, 8 + length)`` range the manifest declares
-    (:func:`layer_source_header_reads`). None opens the files.
-    """
-    _index_path, wanted = _layer_source_shards(
-        model_dir, num_layers, checkpoint_layers_prefix=checkpoint_layers_prefix,
-        source_reads=source_reads)
-    spans: dict[int, list[tuple[str, int, int]]] = {
-        layer: [] for layer in range(num_layers)}
-    for shard in sorted(wanted):
-        path = os.path.normpath(os.path.join(model_dir, shard))
-        size = os.path.getsize(path)
-        if source_reads is None:
-            with open(path, "rb") as handle:
-                length = _safetensors_header_length(handle, path, size)
-                header = json.loads(handle.read(length))
-        else:
-            raw = source_reads.prefix(path, nbytes=8, where="safetensors header")
-            length = _safetensors_header_length(io.BytesIO(raw), path, size)
-            if len(raw) < 8 + length:
-                raise ValueError(f"{path}: the staged header range holds {len(raw)} "
-                                 f"bytes, not the {8 + length} its length prefix names")
-            header = json.loads(raw[8:8 + length])
-        base = 8 + length
-        for layer, name in wanted[shard]:
-            if name not in header:
-                raise ValueError(f"{path} does not hold tensor {name!r}, which "
-                                 "the checkpoint index places in it")
-            begin, end = header[name]["data_offsets"]
-            if (type(begin) is not int or type(end) is not int
-                    or not 0 <= begin <= end <= size - base):
-                raise ValueError(f"{path} tensor {name!r} has an invalid span")
-            if end > begin:
-                spans[layer].append((path, base + begin, base + end))
-    empty = [layer for layer, rows in spans.items() if not rows]
-    if empty:
-        raise ValueError(
-            f"no source tensor is named {checkpoint_layers_prefix}{empty[0]}.*: "
-            "wrong prefix or wrong layer count, refusing")
-    return {layer: sorted(rows) for layer, rows in spans.items()}
-
-
 def uncovered_source_spans(entries: Sequence[Mapping],
                            spans: Sequence[tuple[str, int, int]],
                            ) -> list[tuple[str, int, int]]:
@@ -1059,8 +936,8 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
     The entries list, its digests, and every record the producer seals are
     untouched by the table.
 
-    ``layer_source_spans`` (``read_layer_source_spans``) is what the reader
-    will read. With it, each layer's extent is completed against those spans
+    ``layer_source_spans`` (``layer_streaming.streaming_source_plan``'s
+    ``layer_spans``, PQ #1095) is what the reader will read. With it, each layer's extent is completed against those spans
     and the finished manifest is refused unless it covers all of them: the
     parent's layer phases are a claim, and a claim with a hole in it otherwise
     surfaces hours into a run, as a strict-tier refusal at the first layer
@@ -2003,6 +1880,20 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
 CHECKPOINT_LOAD_PHASE = "checkpoint-load"
 
 
+def quantum_source_layer_order(chain_layers: Sequence[int],
+                               layer: int) -> tuple[int, ...]:
+    """The source layers one quantum installs, in install order (PQ #1095).
+
+    Its chain, descending from the checkpoint boundary, then its own layer.
+    The quantum installs and prefetches exactly these layers
+    (``joint_cost_quantum._install_with_settlement`` with
+    ``source_read_plan.chain_prefetch_window``), and the executable readset
+    declares one source phase for each, in this order. A band-serial
+    consumer walks no chain, so its order is its own layer alone.
+    """
+    return tuple(int(c) for c in chain_layers) + (int(layer),)
+
+
 def executable_source_phase_name(layer: int) -> str:
     """The executable-manifest phase staging one chain layer's source."""
     if type(layer) is not int or isinstance(layer, bool) or layer < 0:
@@ -2417,6 +2308,39 @@ def check_head_slice_binding(head_slice: Mapping, *, layer: int,
     return {**bound, "schema": HEAD_SLICE_SCHEMA, "head_files": files}
 
 
+def _check_head_source(head_source: Mapping) -> dict:
+    """A resident-head declaration the manifest may seal (PQ #1095)."""
+    if not isinstance(head_source, Mapping) or set(head_source) != {
+            "layers_prefix", "tensors", "spans"}:
+        raise ValueError("a resident head names exactly layers_prefix, "
+                         "tensors and spans: refusing")
+    prefix = head_source["layers_prefix"]
+    if type(prefix) is not str or not (prefix == "layers."
+                                       or prefix.endswith(".layers.")):
+        raise ValueError(f"{prefix!r} is not a decoder layers prefix: refusing")
+    tensors = head_source["tensors"]
+    if (not isinstance(tensors, list) or not tensors or any(
+            not isinstance(row, (list, tuple)) or len(row) != 2
+            or any(type(part) is not str or not part for part in row)
+            for row in tensors)):
+        raise ValueError("a resident head names no [shard, tensor] rows: refusing")
+    rows = [list(row) for row in tensors]
+    if rows != sorted(rows) or len({tuple(row) for row in rows}) != len(rows):
+        raise ValueError("resident head tensors are not sorted and unique: "
+                         "refusing")
+    spans = []
+    for span in head_source["spans"]:
+        path, begin, end = span
+        if (type(path) is not str or not os.path.isabs(path)
+                or type(begin) is not int or type(end) is not int
+                or not 0 <= begin < end):
+            raise ValueError(f"resident head span {span!r} is malformed: refusing")
+        spans.append((os.path.normpath(path), begin, end))
+    if not spans:
+        raise ValueError("a resident head declares no spans: refusing")
+    return {"layers_prefix": prefix, "tensors": rows, "spans": sorted(spans)}
+
+
 def build_quantum_executable_manifest(
         record: Mapping, receipt: Mapping, parent_manifest: Mapping, *,
         strided_boundaries: Sequence[int], n_probes: int, calib: Mapping,
@@ -2425,7 +2349,8 @@ def build_quantum_executable_manifest(
         source_model_root: str | None = None,
         prepared_inputs: Mapping | None = None,
         head_slice: Mapping | None = None,
-        replay_mode: str | None = None) -> dict:
+        replay_mode: str | None = None,
+        head_source: Mapping | None = None) -> dict:
     """ONE executable v2 read manifest for a quantum row (PQ #862).
 
     Derived post-capture from the quantum's stage-A slice (``receipt`` is the
@@ -2498,6 +2423,19 @@ def build_quantum_executable_manifest(
     phase is sealed (:func:`quantum_executable_phase_names`).
     ``annotations.replay_mode`` records the mode. The windowed default
     reproduces the historical manifest bytes unchanged.
+
+    With ``head_source`` (PQ #1095), the ``head`` phase also declares the
+    streamed model's resident head: the source tensors
+    ``layer_streaming._materialize`` reads when the quantum builds its
+    source, before any other phase. ``head_source`` is
+    ``{"layers_prefix", "tensors", "spans"}`` from
+    ``layer_streaming.streaming_source_plan``, the enumeration the loader
+    itself selects through. The spans complete the head phase by the same
+    rule as the layer source phases (:func:`complete_source_extent`).
+    ``annotations.head_source`` records the layers prefix, the tensors and
+    the added entries, and the bound record carries the tensors, which the
+    loader compares with its own selection before it reads the head.
+    Without it the historical manifest bytes reproduce unchanged.
     """
     from .joint_adjoint_slices import chain_layers_for
 
@@ -2652,6 +2590,32 @@ def build_quantum_executable_manifest(
                 {"path": row["path"], "offset": 0, "bytes": row["bytes"],
                  "sha256": row["sha256"]}, where=f"head {row['role']}"))
         head_annotation = {"head_slice": bound_head}
+    if head_source is not None:
+        head_source = _check_head_source(head_source)
+        added = complete_source_extent(
+            [manifest_entries[index] for index in head_indices],
+            head_source["spans"],
+            taken={(os.path.normpath(path), offset)
+                   for path, offset in by_coordinates},
+            where="phase head")
+        head_indices.extend(_take(entry, where="resident head source")
+                            for entry in added)
+        missing = uncovered_source_spans(
+            [manifest_entries[index] for index in head_indices],
+            head_source["spans"])
+        if missing:
+            path, begin, end = missing[0]
+            raise ValueError(
+                f"phase head leaves {len(missing)} resident head span(s) "
+                f"undeclared, first {path}:[{begin}, {end}): gap, refusing")
+        head_annotation["head_source"] = {
+            "schema": HEAD_SOURCE_SCHEMA,
+            "layers_prefix": head_source["layers_prefix"],
+            "tensors": head_source["tensors"],
+            "source_spans": len(head_source["spans"]),
+            "added": [dict(path=entry["path"], offset=entry["offset"],
+                           bytes=entry["bytes"]) for entry in added],
+        }
     # The bulk collector owns its own index space; remap it into this
     # manifest's unified space (bulk paths are unique, so order is kept).
     index_of: dict[int, int] = {}
@@ -2875,7 +2839,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             source_model_root: str | None = None,
                             prepared_inputs: Mapping | None = None,
                             head_slice: Mapping | None = None,
-                            replay_mode: str | None = None) -> dict:
+                            replay_mode: str | None = None,
+                            head_source: Mapping | None = None) -> dict:
     """Bind a sealed executable read manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying an ``executable_readset``
@@ -2969,7 +2934,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
             prepared_inputs=prepared_inputs, head_slice=head_slice,
-            replay_mode=replay_mode)
+            replay_mode=replay_mode, head_source=head_source)
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         raise ValueError("the executable readset does not derive from its "
                          f"record, receipt and parent: refusing ({exc})") from exc
@@ -3013,6 +2978,13 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     sealed_mode = manifest.get("annotations", {}).get("replay_mode")
     if sealed_mode is not None:
         fresh["executable_readset"]["replay_mode"] = sealed_mode
+    head_source_sealed = manifest.get("annotations", {}).get("head_source")
+    if head_source_sealed is not None:
+        # The loader compares its own head selection with these tensors
+        # before it reads the head (PQ #1095).
+        fresh["executable_readset"]["head_source"] = {
+            key: copy.deepcopy(head_source_sealed[key])
+            for key in ("schema", "layers_prefix", "tensors")}
     body = {key: value for key, value in fresh.items()
             if key != "identity_sha256"}
     fresh["identity_sha256"] = canonical_sha256(
@@ -3029,7 +3001,8 @@ def emit_quantum_executable_readsets(
         source_model_root: str | None = None,
         prepared_inputs: Mapping | None = None,
         head_slice: Mapping | None = None,
-        replay_mode: str | None = None) -> list[dict]:
+        replay_mode: str | None = None,
+        head_source: Mapping | None = None) -> list[dict]:
     """The post-capture generation path for executable read manifests.
 
     For every record, derives the executable manifest, seals it, and binds
@@ -3059,7 +3032,7 @@ def emit_quantum_executable_readsets(
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
             prepared_inputs=prepared_inputs, head_slice=head_slice,
-            replay_mode=replay_mode)
+            replay_mode=replay_mode, head_source=head_source)
         quantum_id = record.get("quantum_id")
         manifest_path = f"{bound_dir}/{quantum_id}.executable.json.gz"
         if quantum_id in seen or manifest_path in seen:
@@ -3081,7 +3054,7 @@ def emit_quantum_executable_readsets(
                 layer_source_spans=layer_source_spans,
                 source_model_root=source_model_root,
                 prepared_inputs=prepared_inputs, head_slice=head_slice,
-                replay_mode=replay_mode),
+                replay_mode=replay_mode, head_source=head_source),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,

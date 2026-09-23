@@ -23,12 +23,15 @@ from prismaquant.joint_layer_quanta import (
     SOURCE_COMPLETION_SCHEMA,
     build_adjoint_manifest,
     complete_source_extent,
-    read_layer_source_spans,
     uncovered_source_spans,
 )
+from prismaquant.layer_streaming import streaming_source_plan
 
 PUBLISHED_PB_SRC = Path("/mnt/shared/prismabuild-fleet/repo/src")
+#: Checkpoint names. The fixture has no config, so the loader's profile is the
+#: text-only default, which names these layers ``model.layers.N`` live.
 PREFIX = "model.language_model.layers."
+LIVE_PREFIX = "model.layers."
 HEADER_ENTRY_BYTES = 1024
 
 
@@ -104,8 +107,8 @@ def _build(campaign, spans=None):
 
 
 def _spans(campaign):
-    return read_layer_source_spans(campaign["model"], 2,
-                                   checkpoint_layers_prefix=PREFIX)
+    return streaming_source_plan(campaign["model"], layers_prefix=LIVE_PREFIX,
+                                 layers=range(2))["layer_spans"]
 
 
 def _phase(manifest, name):
@@ -128,9 +131,10 @@ def test_a_layer_past_the_count_and_a_tower_outside_the_prefix_are_not_read(camp
 
 
 def test_a_prefix_that_names_nothing_refuses(campaign):
+    # The checkpoint's prefix is not the loader's for a text-only profile.
     with pytest.raises(ValueError, match="wrong prefix or wrong layer count"):
-        read_layer_source_spans(campaign["model"], 2,
-                                checkpoint_layers_prefix="model.layers.")
+        streaming_source_plan(campaign["model"], layers_prefix=PREFIX,
+                              layers=range(2))
 
 
 def test_a_tensor_the_index_names_and_the_shard_lacks_refuses(campaign):

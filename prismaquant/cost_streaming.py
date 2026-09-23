@@ -5152,8 +5152,14 @@ def build_streamed_causal_lm(
     source_authentication=None,
     source_derivative=None,
     source_snapshot_only=False,
+    sealed_head_tensors=None,
 ) -> StreamedCausalLM:
-    """Build the repository's existing streaming context and wrap it."""
+    """Build the repository's existing streaming context and wrap it.
+
+    ``sealed_head_tensors`` is the resident head a read manifest declared;
+    the context refuses before its first head read when its own selection
+    differs (PQ #1095). None checks nothing, as before.
+    """
     from prismaquant.streaming_model import _build_streaming_context
 
     context = _build_streaming_context(
@@ -5169,6 +5175,8 @@ def build_streamed_causal_lm(
         attn_implementation=attn_implementation,
         **({'source_authentication': source_authentication} if source_authentication is not None else {}),
         **({'source_snapshot_only': True} if source_snapshot_only else {}),
+        **({'sealed_head_tensors': sealed_head_tensors}
+           if sealed_head_tensors is not None else {}),
     )
     runner = None
     try:

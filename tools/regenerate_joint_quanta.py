@@ -69,7 +69,11 @@ Gates, all fail closed with exit 3:
   ``bound-readsets/`` -- the new tree's, or the metadata root's.
   With ``--executable-readsets --source-layers-prefix PREFIX`` (PQ #900),
   read the sealed plan's checkpoint index and shard headers once and
-  complete every chain/own source phase against the actual tensor spans.
+  complete every chain/own source phase against the actual tensor spans,
+  and the head phase against the resident head (PQ #1095). The spans come
+  from the streaming loader's own selection
+  (``layer_streaming.streaming_source_plan``); PREFIX is its live decoder
+  layers prefix.
   The parent, slices, chunk tiling and plan/prepared bytes stay intact;
   only the new executable manifest and its binding carry the completion.
   Without the prefix the historical readset bytes reproduce unchanged.
@@ -103,13 +107,13 @@ if __package__:
     from prismaquant.joint_layer_quanta import (
         check_quantum_for_campaign, derive_stride,
         emit_quantum_boundary_readsets, emit_quantum_executable_readsets,
-        layer_quanta, read_layer_source_spans, seal_manifest_bytes)
+        layer_quanta, seal_manifest_bytes)
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from prismaquant.joint_layer_quanta import (
         check_quantum_for_campaign, derive_stride,
         emit_quantum_boundary_readsets, emit_quantum_executable_readsets,
-        layer_quanta, read_layer_source_spans, seal_manifest_bytes)
+        layer_quanta, seal_manifest_bytes)
 
 EXIT_REFUSED = 3
 
@@ -877,12 +881,15 @@ def main(argv=None) -> int:
                          "one-pass spill; the quantum refuses a launch in "
                          "the other mode. Default %(default)s")
     ap.add_argument("--source-layers-prefix", default=None,
-                    help="with --executable-readsets: complete each chain/own "
-                         "source phase from the actual checkpoint tensor "
-                         "spans under this reader prefix (e.g. "
-                         "model.language_model.layers.). Reads the sealed "
-                         "plan's model index and shard headers; slices, "
-                         "chunks and campaign identity stay unchanged")
+                    help="with --executable-readsets: complete the head "
+                         "phase and each chain/own source phase from the "
+                         "tensor spans the streaming loader reads "
+                         "(layer_streaming.streaming_source_plan, PQ #1095). "
+                         "PREFIX is the loader's live decoder layers prefix "
+                         "(e.g. model.language_model.layers.). Reads the "
+                         "sealed plan's model config, index and shard "
+                         "headers; slices, chunks and campaign identity stay "
+                         "unchanged")
     ap.add_argument("--check-only", action="store_true",
                     help="Gate 1 alone; write nothing")
     args = ap.parse_args(argv)
@@ -1158,15 +1165,44 @@ def main(argv=None) -> int:
                         "executable readsets need the sealed plan's absolute "
                         "source model directory: refusing")
                 source_spans = None
+                head_source = None
                 if args.source_layers_prefix is not None:
                     if sorted(layers) != list(range(len(layers))):
                         raise ValueError(
                             "source completion needs parent layers starting "
                             "at zero: refusing")
-                    source_spans = read_layer_source_spans(
-                        source_model_root, len(layers),
-                        checkpoint_layers_prefix=args.source_layers_prefix,
+                    # PQ #1095: the streaming loader's own enumeration, for
+                    # the resident head and every layer alike, under the
+                    # live layers prefix the sealed unit roster names.
+                    from prismaquant.layer_streaming import (
+                        streaming_source_plan,
+                    )
+                    from prismaquant.source_read_plan import (
+                        roster_layers_prefix,
+                    )
+                    roster_prefix = roster_layers_prefix(
+                        prepared.get("formats_by_qname") or {})
+                    if roster_prefix != args.source_layers_prefix:
+                        raise ValueError(
+                            f"--source-layers-prefix "
+                            f"{args.source_layers_prefix!r} is not the live "
+                            f"layers prefix {roster_prefix!r} the prepared "
+                            "unit roster names: refusing")
+                    source_plan = streaming_source_plan(
+                        source_model_root,
+                        layers_prefix=args.source_layers_prefix,
+                        layers=range(len(layers)),
                         source_reads=staged_reads())
+                    source_spans = source_plan["layer_spans"]
+                    head_source = {
+                        "layers_prefix": source_plan["layers_prefix"],
+                        "tensors": source_plan["head_tensors"],
+                        "spans": source_plan["head_spans"]}
+                    print(f"source plan: profile {source_plan['profile']} "
+                          f"(multimodal={source_plan['multimodal']}), "
+                          f"{len(source_plan['head_tensors'])} resident head "
+                          f"tensors in {len(source_plan['head_spans'])} spans, "
+                          f"{len(source_spans)} layers")
                 # PQ #917 static prepared-input bridge: the production
                 # pickle loads ONCE here; each layer's prepared contract is
                 # derived from its verified cells through the existing
@@ -1249,7 +1285,8 @@ def main(argv=None) -> int:
                             prepared_inputs=layer_prepared,
                             head_slice=(head_slices[layer]["binding"]
                                         if head_slices else None),
-                            replay_mode=args.replay_mode):
+                            replay_mode=args.replay_mode,
+                            head_source=head_source):
                         emitted.append(row)
                 produced["records"] = [row["record"] for row in emitted]
                 bound_manifests.extend(

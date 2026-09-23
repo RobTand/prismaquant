@@ -30,6 +30,11 @@ import torch
 import torch.nn as nn
 
 from .autoscale import declared_expert_dtype_covers, declared_fp4_expert_dtype
+from .source_read_plan import (
+    live_weight_map,
+    resident_head_prefixes,
+    select_source_tensors,
+)
 
 try:
     from accelerate.utils.modeling import set_module_tensor_to_device
@@ -189,15 +194,148 @@ def _build_weight_map(model_path: str, *,
             raise FileNotFoundError(f"no safetensors under {model_path}")
         with _source_safe_open(single, framework="pt", source_authentication=source_authentication) as f:
             raw = {k: single for k in f.keys()}
-    model_to_shard: dict[str, str] = {}
-    model_to_ckpt: dict[str, str] = {}
-    for ck, shard in raw.items():
-        mk = profile.checkpoint_to_live_name(ck, multimodal=multimodal)
-        if mk is None:
-            continue
-        model_to_shard[mk] = os.path.join(model_path, shard)
-        model_to_ckpt[mk] = ck
-    return model_to_shard, model_to_ckpt
+    return live_weight_map(
+        raw, model_path,
+        lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal))
+
+
+def construction_multimodal(profile, multimodal: bool) -> bool:
+    """The staging mode the streaming context builds: the caller's, or the
+    multimodal one when the profile has no text-only skeleton route.
+
+    ``_build_streaming_context`` flips its weight map on this, and
+    :func:`streaming_source_plan` enumerates under it, so the two map
+    checkpoint names to live names the same way.
+    """
+    return bool(multimodal) or bool(profile.requires_multimodal_skeleton())
+
+
+def _live_tree_head_extras(profile) -> bool:
+    """Whether the profile's head-resident extras depend on the live module tree."""
+    from .model_profiles.base import ModelProfile
+    return (type(profile).head_resident_extra_prefixes
+            is not ModelProfile.head_resident_extra_prefixes)
+
+
+def streaming_source_plan(model_path: str, *, layers_prefix: str,
+                          layers, source_reads=None) -> dict:
+    """The streaming loader's source reads, enumerated without a GPU (PQ #1095).
+
+    The same selection the loader reads: the checkpoint index mapped to live
+    names through the profile (:func:`construction_multimodal` decides the
+    mapping, as ``_build_streaming_context`` does), the always-resident head
+    under ``source_read_plan.resident_head_prefixes`` (what ``_materialize``
+    loads) and every layer in ``layers`` under ``{layers_prefix}{L}.`` (what
+    ``_read_layer_to_device`` loads when layer ``L`` is installed or
+    prefetched), plus the FP8 ``weight_scale_inv`` siblings those loads read.
+
+    ``layers_prefix`` is the live decoder prefix, for example
+    ``model.language_model.layers.``; the base model's prefix follows from it
+    (``source_read_plan.base_prefix_of_layers``). The loader takes both from
+    its skeleton; this plan takes them from the caller, which reads them off
+    the sealed unit roster. The Stage B quantum compares the two selections
+    before it reads a byte (``_build_streaming_context``'s
+    ``sealed_head_tensors``), so they cannot disagree unnoticed.
+
+    ``source_reads`` reads the index and each header off the stage (PQ #1092);
+    None opens the files.
+
+    Returns ``{"profile", "multimodal", "layers_prefix", "head_prefixes",
+    "head_tensors", "head_spans", "layer_spans", "span_tensors",
+    "header_reads"}``. Spans are ``(path, start, end)``; ``span_tensors``
+    names the checkpoint tensor each span holds. ``head_tensors`` is
+    ``source_read_plan.selection_checkpoint_names`` of the head selection.
+    ``header_reads`` are the reads this plan itself makes, as
+    ``(path, offset, bytes)``: the model config whole when there is one
+    (profile detection opens it), the index whole, then each shard's length
+    prefix and header.
+
+    A profile whose head extras come from the live module tree (its
+    ``head_resident_extra_prefixes`` reads ``root``) cannot be enumerated
+    without a skeleton, and refuses.
+    """
+    from .model_profiles import detect_profile
+    from .source_read_plan import (
+        base_prefix_of_layers, read_safetensors_header,
+        selection_checkpoint_names, tensor_span,
+    )
+
+    profile = detect_profile(model_path)
+    if _live_tree_head_extras(profile):
+        raise ValueError(
+            f"profile {profile.name} derives its resident head from the live "
+            "module tree; its source reads cannot be enumerated without a "
+            "skeleton: refusing")
+    multimodal = construction_multimodal(profile, False)
+    index_path = os.path.normpath(
+        os.path.join(model_path, "model.safetensors.index.json"))
+    if source_reads is None:
+        with open(index_path, "rb") as handle:
+            index_raw = handle.read()
+    else:
+        index_raw = source_reads.whole(index_path, where="checkpoint index")
+    raw = json.loads(index_raw.decode("utf-8"))["weight_map"]
+    model_to_shard, model_to_ckpt = live_weight_map(
+        raw, model_path,
+        lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal))
+    fp8 = _build_fp8_scale_inv_map(model_path, multimodal=multimodal,
+                                   raw_weight_map=raw)
+    head_prefixes = resident_head_prefixes(
+        base_prefix_of_layers(layers_prefix),
+        profile.head_resident_extra_prefixes(None))
+    selections = {"head": select_source_tensors(
+        model_to_shard, model_to_ckpt, head_prefixes)}
+    for layer in layers:
+        selection = select_source_tensors(
+            model_to_shard, model_to_ckpt, (f"{layers_prefix}{int(layer)}.",))
+        if not selection:
+            raise ValueError(f"no source tensor is named {layers_prefix}"
+                             f"{int(layer)}.* in the loader's live names: "
+                             "wrong prefix or wrong layer count, refusing")
+        selections[int(layer)] = selection
+    headers: dict[str, tuple] = {}
+
+    def _header(path):
+        path = os.path.normpath(path)
+        if path not in headers:
+            headers[path] = read_safetensors_header(path, source_reads=source_reads)
+        return headers[path]
+
+    span_tensors: dict[tuple, str] = {}
+
+    def _spans(selection):
+        wanted = [(shard, ckpt) for shard, pairs in selection.items()
+                  for _live, ckpt in pairs]
+        wanted += [fp8[live] for pairs in selection.values()
+                   for live, _ckpt in pairs if live in fp8]
+        spans = set()
+        for shard, ckpt in wanted:
+            header, base, size = _header(shard)
+            span = tensor_span(header, base, size, os.path.normpath(shard), ckpt)
+            if span[2] > span[1]:
+                spans.add(span)
+                span_tensors[span] = ckpt
+        return sorted(spans)
+
+    head_spans = _spans(selections["head"])
+    layer_spans = {layer: _spans(selection)
+                   for layer, selection in selections.items() if layer != "head"}
+    config_path = os.path.normpath(os.path.join(model_path, "config.json"))
+    header_reads = ([(config_path, 0, os.path.getsize(config_path))]
+                    if os.path.isfile(config_path) else [])
+    header_reads.append((index_path, 0, len(index_raw)))
+    header_reads += [(path, 0, base) for path, (_h, base, _s) in sorted(headers.items())]
+    return {
+        "profile": profile.name,
+        "multimodal": multimodal,
+        "layers_prefix": layers_prefix,
+        "head_prefixes": head_prefixes,
+        "head_tensors": selection_checkpoint_names(selections["head"]),
+        "head_spans": head_spans,
+        "layer_spans": layer_spans,
+        "span_tensors": span_tensors,
+        "header_reads": header_reads,
+    }
 
 
 class Fp8ScaleInvMap(dict):
@@ -292,6 +430,7 @@ def _fp8_dequant_block(
 
 def _build_fp8_scale_inv_map(model_path: str, *,
                              multimodal: bool = False, source_authentication=None,
+                             raw_weight_map: dict[str, str] | None = None,
                              ) -> "Fp8ScaleInvMap":
     """Return `{model_weight_key: (scale_shard_path, scale_ckpt_key)}`
     for every native-FP8 weight tensor (fp8_e4m3fn + paired
@@ -309,6 +448,10 @@ def _build_fp8_scale_inv_map(model_path: str, *,
     callers behave exactly as they did before this function existed.
     A non-empty map with no readable/declared weight_block_size raises
     (see `_declared_weight_block_size`).
+
+    ``raw_weight_map`` is the checkpoint index's ``weight_map`` when the
+    caller has already read it (`streaming_source_plan`, which reads it off
+    the stage); None reads the index here, as before.
     """
     # Profile-driven dispatch (refactor #32). Profiles that store FP8
     # scales under a non-standard path (DSv4 uses `.scale` siblings)
@@ -331,7 +474,9 @@ def _build_fp8_scale_inv_map(model_path: str, *,
         )
 
     index_file = os.path.join(model_path, "model.safetensors.index.json")
-    if os.path.exists(index_file):
+    if raw_weight_map is not None:
+        raw = raw_weight_map
+    elif os.path.exists(index_file):
         raw = _source_json(index_file, source_authentication)["weight_map"]
     else:
         single = os.path.join(model_path, "model.safetensors")
@@ -861,10 +1006,8 @@ def _materialize(model: nn.Module, prefixes: list[str],
 
     Returns count of tensors loaded."""
     buffer_dtypes = _model_tensor_dtypes(model, dtype)
-    by_shard: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for model_name, shard in model_to_shard.items():
-        if any(model_name.startswith(p) for p in prefixes):
-            by_shard[shard].append((model_name, model_to_ckpt[model_name]))
+    # The one selection every declared readset is built from (PQ #1095).
+    by_shard = select_source_tensors(model_to_shard, model_to_ckpt, prefixes)
     # Collect loaded tensors first so we can batch the scale-read pass.
     out: dict[str, torch.Tensor] = {}
     open_kwargs = _safe_open_kwargs(device)
@@ -1661,10 +1804,8 @@ def _read_layer_to_device(prefix: str,
     """
     if cancel is not None and cancel.is_set():
         raise CancelledError("layer read cancelled before its staged wait")
-    by_shard: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for model_name, shard in model_to_shard.items():
-        if model_name.startswith(prefix):
-            by_shard[shard].append((model_name, model_to_ckpt[model_name]))
+    # The one selection every declared readset is built from (PQ #1095).
+    by_shard = select_source_tensors(model_to_shard, model_to_ckpt, (prefix,))
     out: dict[str, torch.Tensor] = {}
     open_kwargs = _safe_open_kwargs(device)
     direct = "device" in open_kwargs
@@ -2901,21 +3042,14 @@ def _head_prefixes(root: nn.Module, base_prefix: str) -> list[str]:
     `model.hc_head.` for the multi-stream→single-stream collapse module;
     LFM2.5 adds its `embedding_norm`/`pos_emb`)."""
     p = f"{base_prefix}." if base_prefix else ""
-    prefixes = [
-        f"{p}embed_tokens.",
-        f"{p}norm.",
-        "lm_head.",
-        f"{p}rotary_emb.",
-    ]
+    prefixes = resident_head_prefixes(base_prefix)
     # Profile-driven extension (refactor #32). Default profile returns
     # an empty list; architecture-specific profiles append their own
     # head-resident prefixes here.
     from .model_profiles import DeadVendoredOverrideError, profile_from_model
     try:
         extra = profile_from_model(root).head_resident_extra_prefixes(root)
-        for pref in extra:
-            if pref not in prefixes:
-                prefixes.append(pref)
+        prefixes = resident_head_prefixes(base_prefix, extra)
     except DeadVendoredOverrideError:
         # The legacy fallback below only knows `hc_head`. On a dead override
         # it would silently drop the head-resident prefixes a live profile

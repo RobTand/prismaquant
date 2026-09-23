@@ -441,7 +441,10 @@ def _dispatch_layout(tmp_path, monkeypatch, *, run_identity_extra=None):
 def _main(dispatch, gateway, records, receipt_path, out, *extra):
     return dispatch.main(
         ["--records", str(records), "--output-root", str(out),
-         "--adjoint-receipt", str(receipt_path), *extra], _gateway=gateway)
+         "--adjoint-receipt", str(receipt_path), *extra], _gateway=gateway,
+        # The fixture model has no checkpoint; the source-read coverage gate
+        # has its own tests (test_readset_coverage_1095).
+        _coverage=lambda rows: [])
 
 
 def _inner(argv):

@@ -30,8 +30,9 @@ The read set, by source:
   preparation, the parent manifest, the derivation, the partition, the spec,
   the Stage A proofs and a catalog extension that already exists;
 * the production pickle the preparation binds;
-* the source checkpoint's index and each selected shard's header
-  (``joint_layer_quanta.layer_source_header_reads``).
+* the source checkpoint's index and the header of each shard the streaming
+  loader reads, for the resident head and every layer
+  (``layer_streaming.streaming_source_plan``, PQ #1095).
 
 Not declared: the files the run itself writes and then reads again. The
 preparation writes ``parent.json.gz``, ``partition.json`` and
@@ -51,7 +52,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from prismaquant.joint_layer_quanta import layer_source_header_reads, seal_manifest_bytes  # noqa: E402
+from prismaquant.joint_layer_quanta import seal_manifest_bytes  # noqa: E402
 from prismaquant.stage_b_prep_io import (  # noqa: E402
     build_preparation_template, head_phase_entries, preparation_payload_ceiling,
     preparation_read_entries, preparation_read_manifest)
@@ -82,11 +83,19 @@ def _proof_files(args) -> tuple[list[tuple[Path, str | None]], int]:
 
 
 def _source_reads(plan, parent, prefix):
+    """The reads the generator's source plan makes (PQ #1095).
+
+    ``layer_streaming.streaming_source_plan`` is the enumeration the
+    generator completes the readsets from; this runs it here, off the pool,
+    and declares the index and header reads it made.
+    """
     if prefix is None:
         return []
+    from prismaquant.layer_streaming import streaming_source_plan
+
     layers = (parent.get("annotations") or {}).get("layers") or []
-    return layer_source_header_reads(str(plan["model"]), len(layers),
-                                     checkpoint_layers_prefix=prefix)
+    return streaming_source_plan(str(plan["model"]), layers_prefix=prefix,
+                                 layers=range(len(layers)))["header_reads"]
 
 
 def prepare_reads(args):
