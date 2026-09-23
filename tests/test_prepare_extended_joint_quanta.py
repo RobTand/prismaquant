@@ -32,6 +32,73 @@ def test_extension_parent_only_augments_head_and_keeps_exact_layer_body():
         extend_parent(parent, added, **kwargs)
 
 
+
+def _parent(plan_sha256):
+    return {'schema': 'prismaquant.prismabuild.data_manifest.v1',
+        'entries': [{'path': '/old-plan', 'offset': 0, 'bytes': 10, 'sha256': None},
+                    {'path': '/source', 'offset': 0, 'bytes': 30, 'sha256': None}],
+        'entry_count': 2, 'total_bytes': 40, 'annotations': {'plan_sha256': plan_sha256,
+            'layers': [0],
+            'phases': [{'name': 'head', 'bytes': 10, 'cumulative_bytes': 10},
+                       {'name': 'layer-0', 'bytes': 30, 'cumulative_bytes': 40}]}}
+
+
+_EXTEND = dict(old_plan={'sha256': 'original'}, new_plan={'path': '/new-plan', 'sha256': 'new'},
+               prepared={'formats_by_qname': {'q': ['A8', 'BF16']}}, extension={'path': '/proof'})
+_ADDED = [{'path': '/new-plan', 'offset': 0, 'bytes': 20, 'sha256': None}]
+
+
+def test_a_parent_the_original_run_read_is_extended_though_it_names_an_older_plan():
+    """R13's plan was re-derived from its parent's, which names the older plan (#1126)."""
+    parent = _parent('older')
+    with pytest.raises(ValueError, match='scientific plan'):
+        extend_parent(parent, _ADDED, **_EXTEND)
+    result = extend_parent(parent, _ADDED, read_by_original_run=True, **_EXTEND)
+    assert result['annotations']['plan_sha256'] == 'new'
+    assert result['entries'][-1] == parent['entries'][-1]
+    assert result['annotations']['phases'][0] == {
+        'name': 'head', 'bytes': 30, 'cumulative_bytes': 30}
+    assert result['produced_by']['parent_admitted_by'] == {
+        'rule': 'original_run_read_manifest', 'parent_plan_sha256': 'older'}
+
+
+def test_a_parent_naming_the_original_plan_is_extended_as_before():
+    """The sealed read changes nothing for a parent that names the original plan."""
+    plain = extend_parent(_parent('original'), _ADDED, **_EXTEND)
+    sealed = extend_parent(_parent('original'), _ADDED, read_by_original_run=True, **_EXTEND)
+    assert plain == sealed
+    assert 'parent_admitted_by' not in plain['produced_by']
+
+
+_READ = 'a' * 64
+
+
+def _proof(read, plan='original'):
+    return {'status': 'band', 'run_identity': {'read_manifest_sha256': read, 'plan_sha256': plan}}
+
+
+@pytest.mark.parametrize(('proofs', 'expected'), [
+    ([_proof(_READ)], True),
+    ([_proof(_READ), _proof(_READ)], True),
+    ([_proof('b' * 64)], False),                   # the run read another manifest
+    ([_proof(_READ), _proof('b' * 64)], False),    # proofs of two runs
+    ([_proof(_READ, plan='older')], False),        # read under another plan
+    ([{'status': 'band'}], False),                 # no run identity sealed
+    ([], False),
+])
+def test_only_the_sealed_run_identity_admits_a_parent(proofs, expected):
+    from tools.prepare_extended_joint_quanta import proofs_name_parent_as_read
+    assert proofs_name_parent_as_read(
+        proofs, parent_sha256=_READ, plan_sha256='original') is expected
+
+
+def test_an_unbound_read_manifest_admits_nothing():
+    """Stage A seals all zeros when the dispatcher bound no read manifest."""
+    from tools.prepare_extended_joint_quanta import proofs_name_parent_as_read
+    unbound = '0' * 64
+    assert proofs_name_parent_as_read(
+        [_proof(unbound)], parent_sha256=unbound, plan_sha256='original') is False
+
 def _stage_b_spec(tmp_path, wait):
     """The reviewed local-scratch spec's shape, with a chosen staged-range wait."""
     import json
