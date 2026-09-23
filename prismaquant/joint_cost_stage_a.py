@@ -991,6 +991,7 @@ def run_adjoint_capture_core(
         validate_streamed_model_identity,
     )
     from .kl_fisher import ROW_PROBE_LAYOUT, fisher_probe_scalar
+    from .matmul_arithmetic import bf16_reduction_stamp
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
     from .stage_a_chain_resume import (
         RESUME_COMPATIBILITY_KEY,
@@ -1132,6 +1133,9 @@ def run_adjoint_capture_core(
         "calibration_sha256": bind_identity["calibration_sha256"],
         **({CHAIN_REGIME_KEY: regime_identity}
            if regime_identity is not None else {}),
+        # Absent at PyTorch's default, so a default run's identity keeps its
+        # bytes (PQ #1028).
+        **bf16_reduction_stamp(),
     }
     stride_block = {"value": int(stride), "boundaries": [int(b) for b in boundaries],
                     "max_chain_layers": int(stride) - 1}
@@ -1185,8 +1189,10 @@ def run_adjoint_capture_core(
     checkpoints: list[dict] = []
     chain_telemetry: list[dict] = []
     started = time.time()
-    # Read, never set, here: the shared setter and its identity stamp are
-    # PQ #1028's. A seed records the value its chain ran under (PQ #1038).
+    # Read, never set, here: ``matmul_arithmetic.pin_matmul_arithmetic``
+    # sets it at the entry point, and the run identity carries it when it is
+    # off (PQ #1028). A seed also records the value its chain ran under
+    # (PQ #1038).
     bf16_reduction = bool(
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction)
     capture_started = None
@@ -1554,8 +1560,9 @@ def run_adjoint_capture_core(
             "stride": receipt_stride,
             "boundary_storage": boundary_storage_block(None),
             "seed": seed_plan.binding,
-            # Outside run_identity: the flag is not part of the seed's bind
-            # identity until PQ #1028 stamps it for every run.
+            # Always spelled here, both values. The run identity carries the
+            # flag only when it is off (PQ #1028), so a default seed binds
+            # as it did before.
             "matmul_reduction": {
                 "allow_bf16_reduced_precision_reduction": bf16_reduction},
             "checkpoints": checkpoints,
@@ -1803,6 +1810,14 @@ def run_adjoint_capture(
     from .tessera_reader import load_declared_reader
 
     require_cuda_hot_path("joint_cost_stage_a", "cuda")
+    # A malformed bf16 reduction setting refuses before anything is pinned,
+    # read or loaded (PQ #1028).
+    from .matmul_arithmetic import (
+        MatmulArithmeticRefused, bf16_reduction_from_environment, pin_matmul_arithmetic)
+    try:
+        bf16_reduction_from_environment(os.environ)
+    except MatmulArithmeticRefused as exc:
+        raise AdjointIdentityRefused(str(exc)) from exc
     from .autoscale import require_bounded_capture_environment
 
     execution = config["execution"]
@@ -1811,8 +1826,7 @@ def run_adjoint_capture(
         require_bounded_capture_environment(os.environ)
     os.environ[ACTIVATION_SCALE_ENV] = execution["production_act_scales"]
     torch.set_num_threads(1)
-    torch.set_float32_matmul_precision("highest")
-    torch.backends.cuda.matmul.allow_tf32 = False
+    pin_matmul_arithmetic()
 
     if chain_seed is None and (
             Path(config["output_root"]).resolve() != Path(output_root).resolve()):
