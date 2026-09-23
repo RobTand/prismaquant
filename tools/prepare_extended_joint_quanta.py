@@ -37,12 +37,46 @@ def bind(path):
     return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
-def extend_parent(parent, additions, *, old_plan, new_plan, prepared, extension):
-    """Preserve historical layer extents; complete actual candidate reads downstream."""
+#: What ``joint_cost_stage_a`` seals as ``run_identity.read_manifest_sha256``
+#: when the dispatcher bound no read manifest.
+UNBOUND_READ_MANIFEST_SHA256 = '0' * 64
+
+
+def proofs_name_parent_as_read(proofs, *, parent_sha256, plan_sha256):
+    """Whether every Stage A proof seals ``parent_sha256`` as what its run read (#1126).
+
+    Stage A records the manifest the dispatcher gave it to read as
+    ``run_identity.read_manifest_sha256`` and the plan it ran as
+    ``run_identity.plan_sha256``. A run whose plan was re-derived from its
+    parent's plan (R13) read a parent that names the older plan; that sealed
+    identity, not the parent's own annotation, is what binds the parent to
+    the run. The all-zero digest of an unbound run admits nothing.
+    """
+    if not proofs or parent_sha256 == UNBOUND_READ_MANIFEST_SHA256:
+        return False
+    for proof in proofs:
+        identity = proof.get('run_identity')
+        if (not isinstance(identity, dict)
+                or identity.get('read_manifest_sha256') != parent_sha256
+                or identity.get('plan_sha256') != plan_sha256):
+            return False
+    return True
+
+
+def extend_parent(parent, additions, *, old_plan, new_plan, prepared, extension,
+                  read_by_original_run=False):
+    """Preserve historical layer extents; complete actual candidate reads downstream.
+
+    The base parent names the original plan, or, with ``read_by_original_run``
+    (:func:`proofs_name_parent_as_read`), is the manifest the original run's
+    sealed identity says it read; the result then records that rule.
+    """
     result = copy.deepcopy(parent)
     annotations = result['annotations']
-    if annotations['plan_sha256'] != old_plan['sha256']:
-        raise ValueError('base parent does not name the original scientific plan')
+    parent_plan_sha256 = annotations['plan_sha256']
+    if parent_plan_sha256 != old_plan['sha256'] and not read_by_original_run:
+        raise ValueError('base parent does not name the original scientific plan, '
+                         'and no Stage A proof seals it as what the original run read')
     phases = annotations['phases']
     if phases[0]['name'] != 'head':
         raise ValueError('base parent needs its original first head phase')
@@ -74,6 +108,9 @@ def extend_parent(parent, additions, *, old_plan, new_plan, prepared, extension)
     result['produced_by'] = {'tool': 'tools.prepare_extended_joint_quanta',
         'plan': new_plan['path'], 'plan_sha256': new_plan['sha256'],
         'catalog_extension': extension}
+    if parent_plan_sha256 != old_plan['sha256']:
+        result['produced_by']['parent_admitted_by'] = {
+            'rule': 'original_run_read_manifest', 'parent_plan_sha256': parent_plan_sha256}
     return result
 
 
@@ -248,8 +285,12 @@ def prepare(args):
             publish=lambda path, raw: bool(publish_files(
                 publication, 'extension', [(path, raw, 'catalog extension')])))
     additions = metadata_entries(inputs, plan, prepared, extension)
+    read_by_original_run = proofs_name_parent_as_read(
+        documents, parent_sha256=args.parent_manifest_sha256,
+        plan_sha256=inputs['original_plan']['sha256'])
     updated = extend_parent(parent, additions, old_plan=inputs['original_plan'],
-        new_plan=inputs['extended_plan'], prepared=prepared, extension=extension)
+        new_plan=inputs['extended_plan'], prepared=prepared, extension=extension,
+        read_by_original_run=read_by_original_run)
     updated['produced_by']['original_parent_manifest'] = {'path': str(args.parent_manifest), 'sha256': args.parent_manifest_sha256}
     parent_path = root/'parent.json.gz'
     partition_path = root/'partition.json'

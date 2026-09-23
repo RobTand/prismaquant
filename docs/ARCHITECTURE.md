@@ -21824,7 +21824,13 @@ reads boundary storage and checkpoint manifests from the original capture
 namespace its slice names (`boundary_storage.directory`).
 `prepare_extended_joint_quanta` requires sealed Stage A proof (the completed
 receipt or checkpoint bands, PQ #993), fully qualified old/new PWC records and
-the catalog authority before generating fresh metadata. Historical parent layer extents remain identifiable; actual
+the catalog authority before generating fresh metadata. Its base parent names
+the original plan, or is the manifest every Stage A proof seals as what the run
+read (`run_identity.read_manifest_sha256`, never the all-zero unbound digest)
+under the original plan: a run whose plan was re-derived from its parent's plan
+(R13) read a parent that names the older plan (PQ #1126). The extended parent
+then records that rule and the parent's own plan under
+`produced_by.parent_admitted_by`. Historical parent layer extents remain identifiable; actual
 new candidate reads must be completed by the executable prepared-input producer.
 It emits a coordinator launch recipe without submitting nested PB work.
 A spec may explicitly bind `container_admission_reference` to PB's portable
