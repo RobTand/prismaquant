@@ -450,8 +450,20 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-br/chain-parity-1008`.
+As of: 2026-09-23 · `ws-br/handoff-tiers-1007`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-br/handoff-tiers-1007`) for **the band-serial
+handoff record as a produced group** (PQ #1015, part 1 of #1007):
+`owner-states.pkl` and `handoff.json` are written through the handoff's
+produced-output template and the local output spool, as one group after
+the entries, instead of `atomic_write_bytes`; see "Band-serial Stage B
+quanta (#996)". The group still ends as a retained prewrite until PB #912.
+An executed producer and consumer pair (PB `0e748c47c927`,
+`074394f797b8`) shows `L - 1` reading its handoff from PrismaBuild's tiers.
+No format, default, stage or ship gate changes. Gates:
+`tests/test_band_serial_handoff_produced.py`,
+`tests/test_band_serial_handoff_spool_real_pb.py`.
 
 Re-stamped (2026-09-23, `ws-br/chain-parity-1008`) for **the chain-mode
 readset check** (PQ #1008): a chain-mode layer quantum now refuses, with exit
@@ -21026,17 +21038,24 @@ cotangent owners), and last `handoff.json`
 checkpoint cotangent digest), the entries, the owner-state file, and its own
 seal (`handoff_sha256`). Every entry is durable before the record exists
 (`settle_local_output`), so a failed emission leaves no `handoff.json`.
+`owner-states.pkl` and `handoff.json` are one more group of the same
+owner, of kind `handoff-record`, written in that order
+(`StreamedBoundaryArtifacts.write_produced_files`, PQ #1015).
 
 **Producer.** `joint_cost_quantum --emit-adjoint-handoff` emits after the
 retained-window driver returns. Inside an admitted PrismaBuild action the
 entries go through the row's produced-output template
 (`bind_handoff_publication`, the same binding Stage A uses for its own
 entries). It refuses when the action declared no template, or when the
-template's payload maximum is not the plan's `max_artifact_bytes`. With
-PrismaBuild's local output spool the groups export before the record is
-written. The entries are written with `read_back=False`, as Stage A writes
-its last roll: nothing in the producer reads them, so no stage copy is
-published. Gates: `tests/test_band_serial_handoff_produced.py` and
+template's payload maximum is not the plan's `max_artifact_bytes`. The
+record group claims its exact bytes before the first byte, with each final
+name and its `.tmp` name as planned paths, like an entry group. With
+PrismaBuild's local output spool it is submitted only after every entry
+group's export is acknowledged, and the emitter returns only after its own
+export is acknowledged, so `handoff.json` lands last. Without the spool
+each file is written through its `.tmp` name and linked into place. The
+entries are written with `read_back=False`, as Stage A writes its last
+roll: nothing in the producer reads them, so no stage copy is published. Gates: `tests/test_band_serial_handoff_produced.py` and
 `tests/test_band_serial_handoff_spool_real_pb.py` (each in its own pytest
 process).
 
@@ -21096,10 +21115,25 @@ row that was submitted band-serial.
 
 Limits: nothing deletes a handoff generation, so a campaign keeps one plane
 per producer, and a failed producer attempt leaves its partial generation
-directory. `handoff.json` and `owner-states.pkl` are written directly
-(`atomic_write_bytes`), not through the spool. The producer's template
+directory. The entry groups and the record group are prewritten and never
+committed: PrismaBuild commits a group only for a stage copy that the same
+action reads, so each ends as a retained prewrite until a write-only
+commit for another action's read exists (PB #912, PQ #1007). Retirement and
+the orphan sweep wait on PB #914, and the edge between the two actions on
+PB #913. The record group is charged to the template's payload maximum, and
+the owner charges the same bytes to `max_artifact_bytes`; its claim follows
+the entries, so a template sized only for the entry groups refuses after
+they are written. `handoff.json` itself is read from the pool, by the
+dispatcher (`_producer_handoff`) and by the consumer's head check
+(`load_quantum_handoff`); it is a sealed control file, not a staged input.
+The producer's template
 reserves a stage window it never reads, because PrismaBuild has no
-write-only produced-output declaration. No executed PrismaBuild action has
-yet staged handoff entries as a consumer's declared inputs; the derived
-manifest is checked against PrismaBuild's phase planner
-(`tests/test_band_serial_dispatch.py`).
+write-only produced-output declaration. One executed pair shows the
+consumer side on PrismaBuild's tiers: `tools/band_serial_handoff_live_pair.py`
+ran a producer (PB `0e748c47c927`) and then its `L - 1` consumer (PB
+`074394f797b8`) with `--residency stage` on a two-row qualification slice.
+The consumer read its head entry, every cotangent entry, `owner-states.pkl`
+and the shared passes from the tiers (11 entries, 0 bytes from the pool), and
+was refused a path outside its derived readset. That pair is a qualification run, not a
+campaign layer. The derived manifest is also checked against PrismaBuild's
+phase planner (`tests/test_band_serial_dispatch.py`).
