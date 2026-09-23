@@ -412,10 +412,18 @@ def _check_capture(header, inputs, original):
     calibration = original["calibration_input"]
     _same(identity.get("calibration_sha256"), calibration["calibration_sha256"], "capture calibration")
     _same(identity.get("calibration_shape"), calibration["shape"], "capture calibration shape")
-    # Stage A's roster spelling includes one terminating newline per qname;
-    # the quantum roster uses another spelling. Never compare unlike hashes.
-    roster = "".join(name + "\n" for name in sorted(original["formats_by_qname"]))
-    _same(identity.get("unit_roster_sha256"), hashlib.sha256(roster.encode()).hexdigest(), "capture qname roster")
+    # Stage A seals one of two roster spellings, and the run header says
+    # which. A fresh run hashes one terminating newline per qname. A run
+    # resumed from a forward-recovery capsule seals the campaign's canonical
+    # spelling, the quantum roster (``resolve_forward_campaign``). Never
+    # compare unlike hashes.
+    names = sorted(original["formats_by_qname"])
+    if (header.get("boundary_storage") or {}).get("forward_recovery") is not None:
+        from .joint_layer_quanta import roster_digest
+        expected = roster_digest(names)
+    else:
+        expected = hashlib.sha256("".join(name + "\n" for name in names).encode()).hexdigest()
+    _same(identity.get("unit_roster_sha256"), expected, "capture qname roster")
     plan = _json(inputs["original_plan"], "original plan")
     for key in ("n_probes", "seed_base"):
         _same(identity.get(key), plan["execution"][key], "capture " + key)

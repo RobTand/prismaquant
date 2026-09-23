@@ -18,6 +18,8 @@ extension sections for the contract. In short:
   byte for byte, as the completed receipt.
 - The catalog extension is `joint_catalog_extension.v2`: it binds the
   original run header, so the first band can create it. v1 still verifies.
+  A recovered run's roster digest is checked in the canonical spelling it
+  seals.
 - Prepare, regenerate and dispatch take `--adjoint-band` (repeatable) and act
   on the layers whose checkpoint has a band; more bands add records and
   change none. The joiner takes the completed receipt or a complete band set.
@@ -20527,7 +20529,9 @@ band proves and reports the rest as pending (`stage_a_pending` in
 header (`adjoint_run_header`, `adjoint_run_header_sha256`) instead of the
 receipt, so the first band of a run creates the extension, and a receipt or
 any band of that run verifies against the same bytes. v1 extensions, which
-bind the completed receipt, still verify.
+bind the completed receipt, still verify. The roster check reads the spelling
+the header implies: a fresh run seals one newline per qname; a recovered run
+seals the canonical `roster_digest`.
 
 **Joining.** `joint_quanta_join` takes exactly one Stage A proof:
 

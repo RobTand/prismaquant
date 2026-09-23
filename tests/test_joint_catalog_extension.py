@@ -203,6 +203,35 @@ def test_additive_catalog_binds_original_capture_without_relabelling(tmp_path, c
     assert Path(capture['path']).read_bytes() == original
 
 
+def test_a_recovered_stage_a_binds_its_canonical_roster_spelling(tmp_path, campaign, probe):
+    """A Stage A resumed from a forward-recovery capsule (R10 onward) seals
+    the campaign's canonical roster, ``roster_digest``, not a fresh run's
+    newline spelling. The extension checks the spelling the header implies,
+    so a recovered run's band can create it; either spelling on the other
+    kind of run refuses."""
+    from prismaquant.joint_catalog_extension import extension_run_header
+    from prismaquant.joint_layer_quanta import roster_digest
+    inputs, receipt, _ = _pair(tmp_path, campaign, probe)
+    newline = receipt['run_identity']['unit_roster_sha256']
+    canonical = roster_digest(campaign['roster'])
+    assert canonical != newline
+    recovered = copy.deepcopy(receipt)
+    recovered['boundary_storage']['forward_recovery'] = {
+        'path': '/fixture/forward-recovery.json', 'sha256': 'e' * 64}
+    recovered['run_identity']['unit_roster_sha256'] = canonical
+    bound = create_extension(inputs=inputs, output=tmp_path/'ext-recovered.json',
+                             adjoint_capture=_write(tmp_path, 'recovered.json', recovered))
+    assert extension_run_header(bound) == stage_a_run_header(recovered)
+    stale = copy.deepcopy(recovered)
+    stale['run_identity']['unit_roster_sha256'] = newline
+    fresh = copy.deepcopy(receipt)
+    fresh['run_identity']['unit_roster_sha256'] = canonical
+    for name, document in (('stale', stale), ('fresh', fresh)):
+        with pytest.raises(ValueError, match='capture qname roster'):
+            create_extension(inputs=inputs, output=tmp_path/f'ext-{name}.json',
+                             adjoint_capture=_write(tmp_path, f'{name}.json', document))
+
+
 @pytest.mark.parametrize('change', ['source', 'calibration', 'derivative', 'qnames', 'old_cell',
                                     'old_path', 'unqualified', 'adopted_hessian', 'recipe'])
 def test_extension_refuses_scientific_or_original_candidate_drift(tmp_path, campaign, probe, change):
