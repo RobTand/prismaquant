@@ -2507,8 +2507,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         require_bounded_capture_environment(os.environ)
     os.environ[ACTIVATION_SCALE_ENV] = config["execution"]["production_act_scales"]
     torch.set_num_threads(1)
-    torch.set_float32_matmul_precision("highest")
-    torch.backends.cuda.matmul.allow_tf32 = False
+    from .matmul_arithmetic import pin_matmul_arithmetic
+    pin_matmul_arithmetic()
     execution = config["execution"]
     root = Path(config["output_root"]) / command
     root.mkdir(parents=True, exist_ok=True)

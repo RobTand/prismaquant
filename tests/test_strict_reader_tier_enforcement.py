@@ -1578,10 +1578,13 @@ def test_strict_checkpoint_shared_state_altered_refuses(tmp_path, monkeypatch):
         load_adjoint_checkpoint(adjoint_space(tmp_path), record)
     assert excinfo.value.kind == "integrity"
     assert resolver.report()['bytes_from_pool'] == 0
-    # Only checkpoint.json, read before the altered pickle, counts as a
-    # stage read; none of the altered bytes do.
+    # Only what was read and verified before the altered pickle counts as
+    # stage bytes: checkpoint.json and the cotangent entries (PQ #1026
+    # counts exact entries). None of the altered bytes do.
     manifest_bytes = Path(_checkpoint_manifest_path(record)).stat().st_size
-    assert resolver.report()['bytes_from_stage'] == manifest_bytes
+    entry_bytes = sum(Path(entry["path"]).stat().st_size
+                      for entry in record["activation_entries"])
+    assert resolver.report()['bytes_from_stage'] == manifest_bytes + entry_bytes
 
 
 def test_strict_checkpoint_shared_state_unmapped_refuses(tmp_path, monkeypatch):
@@ -2762,3 +2765,141 @@ def test_a_range_evicted_between_windows_is_refused_or_restaged_never_read_stale
         assert torch.equal(again[ref].view(torch.uint8), tensor.view(torch.uint8))
     assert resolver.report()['bytes_from_pool'] == 0
     assert _pins_live(tmp_path, consumer) == []
+
+
+# -- tier byte counts are complete (PQ #1026) ---------------------------------
+#
+# The resolver's per-tier byte counters are how a run shows its reads rode
+# the tiers. The exact-entry and verified-activation readers recorded which
+# tier served each read but never counted its bytes, so an executed
+# band-serial consumer reported 4,414 of the 17,332 bytes it read. Every
+# test here checks that the tiers sum to the exact bytes of the files read.
+
+
+def _tier_bytes(resolver):
+    report = resolver.report()
+    return {tier: report[f'bytes_from_{tier}'] for tier in ('ram', 'stage', 'pool')}
+
+
+def _sizes(refs):
+    return [Path(ref.path).stat().st_size for ref in refs]
+
+
+def exact_lease_counters_snapshot():
+    from prismaquant.perturbed_x_cache import exact_lease_counters
+    return exact_lease_counters()
+
+
+def test_single_exact_reads_count_every_byte_on_the_stage(tmp_path, monkeypatch):
+    refs, _tensors = _exact_entries(tmp_path, 3)
+    root = _stage_root(tmp_path)
+    resolver, consumer, _mover = _leased_fixture(
+        tmp_path, monkeypatch,
+        {f'e{i}': (Path(ref.path), _stage_whole(root, Path(ref.path)), None)
+         for i, ref in enumerate(refs)})
+    before = exact_lease_counters_snapshot()
+    for ref in refs:
+        _read_exact([ref])
+    assert _lease_deltas(before)["entries_single"] == 3
+    assert _tier_bytes(resolver) == {'ram': 0, 'stage': sum(_sizes(refs)), 'pool': 0}
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_grouped_exact_window_counts_every_byte_on_the_stage(tmp_path, monkeypatch):
+    refs, _tensors = _exact_entries(tmp_path, 4)
+    root = _stage_root(tmp_path)
+    resolver, consumer, _mover = _leased_fixture(
+        tmp_path, monkeypatch,
+        {f'e{i}': (Path(ref.path), _stage_whole(root, Path(ref.path)), None)
+         for i, ref in enumerate(refs)})
+    before = exact_lease_counters_snapshot()
+    _read_exact(refs)
+    assert _lease_deltas(before)["entries_batched"] == 4
+    assert _tier_bytes(resolver) == {'ram': 0, 'stage': sum(_sizes(refs)), 'pool': 0}
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_grouped_window_counts_ram_and_stage_bytes_apart(tmp_path, monkeypatch):
+    refs, _tensors = _exact_entries(tmp_path, 3)
+    resolver, consumer, _rl = _ram_fixture(
+        tmp_path, monkeypatch, refs, ram_offered=[0, 1], ram_published=[0, 1])
+    before = exact_lease_counters_snapshot()
+    _read_exact(refs)
+    assert _lease_deltas(before)["entries_batched"] == 3
+    sizes = _sizes(refs)
+    assert _tier_bytes(resolver) == {'ram': sizes[0] + sizes[1], 'stage': sizes[2],
+                                     'pool': 0}
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_window_reread_one_entry_at_a_time_counts_each_tier(tmp_path, monkeypatch):
+    """A partial RAM cover sends the window down the single-entry path; the
+    entry RAM serves is counted as RAM bytes and the other as stage bytes."""
+    refs, _tensors = _exact_entries(tmp_path, 2)
+    resolver, consumer, _rl = _ram_fixture(
+        tmp_path, monkeypatch, refs, ram_offered=[0, 1], ram_published=[0])
+    before = exact_lease_counters_snapshot()
+    _read_exact(refs)
+    assert _lease_deltas(before)["entries_single"] == 2
+    sizes = _sizes(refs)
+    assert _tier_bytes(resolver) == {'ram': sizes[0], 'stage': sizes[1], 'pool': 0}
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_refused_exact_read_counts_no_bytes(tmp_path, monkeypatch):
+    refs, _tensors = _exact_entries(tmp_path, 2)
+    root = _stage_root(tmp_path)
+    resolver = _strict(monkeypatch, _write_map(
+        tmp_path, {'o': (Path(refs[1].path), _stage_whole(root, Path(refs[1].path)),
+                         None)}))
+    with pytest.raises(TierPolicyRefused, match="staged-not-serving"):
+        _read_exact(refs)
+    assert _tier_bytes(resolver) == {'ram': 0, 'stage': 0, 'pool': 0}
+
+
+def test_a_verified_activation_load_counts_its_bytes_on_the_stage(
+        tmp_path, monkeypatch):
+    from prismaquant.perturbed_x_cache import load_verified_activation_cache_entry
+    pool = tmp_path / 'pool'
+    pool.mkdir(parents=True, exist_ok=True)
+    path = pool / 'capture.pt'
+    torch.save({'inputs': torch.arange(64, dtype=torch.float32).reshape(8, 8)}, path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    root = _stage_root(tmp_path)
+    resolver, consumer, _mover = _leased_fixture(
+        tmp_path, monkeypatch, {'a': (path, _stage_whole(root, path), None)})
+    load_verified_activation_cache_entry(
+        path, expected_sha256=digest, policy=_activation_policy(),
+        max_storage_bytes=4 * 1024 ** 2)
+    assert _tier_bytes(resolver) == {'ram': 0, 'stage': path.stat().st_size, 'pool': 0}
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_declared_reads_under_a_bound_map_count_pool_bytes(tmp_path, monkeypatch):
+    """Without the strict policy the readers open the declared files; with a
+    map bound, those bytes are pool bytes, so the tiers still sum to every
+    byte read."""
+    from prismaquant.perturbed_x_cache import load_verified_activation_cache_entry
+    refs, _tensors = _exact_entries(tmp_path, 3)
+    capture = tmp_path / 'pool' / 'capture.pt'
+    torch.save({'inputs': torch.zeros(4, 4)}, capture)
+    digest = hashlib.sha256(capture.read_bytes()).hexdigest()
+    root = _stage_root(tmp_path)
+    resolver = _bind(monkeypatch, _write_map(
+        tmp_path, {'c': (capture, _stage_whole(root, capture), None)}))
+    _read_exact(refs[:1])
+    _read_exact(refs[1:])
+    load_verified_activation_cache_entry(
+        capture, expected_sha256=digest, policy=_activation_policy(),
+        max_storage_bytes=4 * 1024 ** 2)
+    total = sum(_sizes(refs)) + capture.stat().st_size
+    assert _tier_bytes(resolver) == {'ram': 0, 'stage': 0, 'pool': total}
+
+
+def test_declared_reads_without_a_map_count_nothing(tmp_path, monkeypatch):
+    refs, tensors = _exact_entries(tmp_path, 2)
+    got = _read_exact(refs)
+    for ref, tensor in zip(refs, tensors):
+        assert torch.equal(got[ref], tensor)
+    assert residency_resolver() is None
+

@@ -693,6 +693,24 @@ def _enter_and_open_window(resolver, window, key, path):
     return fd, serving, tier
 
 
+def _record_served_bytes(resolver, path, tier, nbytes):
+    """Count one verified read's bytes against the tier that served it.
+
+    ``tier`` is the serving tier the window reported (``ram`` or ``stage``),
+    or ``None`` for a read of the declared file, which is counted as pool
+    bytes. Called only after the bytes are verified, so a refused read
+    counts nothing. With no resolver there is nothing to count (PQ #1026).
+    """
+    if resolver is None:
+        return
+    if tier is None:
+        resolver.record_pool_read(path, nbytes)
+    elif tier == "ram":
+        resolver.record_ram_read(path, nbytes)
+    else:
+        resolver.record_stage_read(path, nbytes)
+
+
 def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
                                          max_storage_bytes, validate=None,
                                          expected_stat=None, resource_check=None,
@@ -729,13 +747,18 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     source, source_before = path, before
     source_signature = signature
     window = None
+    tier = None
     if strict:
         window, key, _staged, lease_resolver = _acquire_bulk_window(
             path, expected_sha256)
-        descriptor, serving, _tier = _enter_and_open_window(
+        descriptor, serving, tier = _enter_and_open_window(
             lease_resolver, window, key, path)
         source_signature = cache_file_stat_signature(os.fstat(descriptor))
         source, source_before = Path(window.stage_path(key) or path), os.fstat(descriptor)
+    else:
+        # The declared file: pool bytes when a map is bound (PQ #1026).
+        from .residency_map import residency_resolver
+        lease_resolver = residency_resolver()
     def check(label, reserve_bytes=0):
         if resource_check is not None:
             resource_check(label + ':' + path.name, reserve_bytes=reserve_bytes)
@@ -826,6 +849,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
             window.__exit__(None, None, None)
         else:
             os.close(descriptor)
+    _record_served_bytes(lease_resolver, path, tier, consumed)
     try:
         check('after_verified_capture_buffer_release')
     except BaseException:
@@ -1269,6 +1293,18 @@ def exact_lease_counters() -> dict:
     return dict(EXACT_LEASE_COUNTERS)
 
 
+def _declared_entry_resolver(resolver, ref):
+    """The resolver ``ref`` resolves through, or ``None`` when none is bound.
+
+    The same choice :func:`_strict_lease_groups` makes, for the non-strict
+    read of the declared file: its bytes are counted as pool bytes on this
+    resolver, so a run's tier counters sum to every byte it read.
+    """
+    from .residency_map import residency_resolver
+    entry_resolver = resolver(ref) if callable(resolver) else resolver
+    return entry_resolver if entry_resolver is not None else residency_resolver()
+
+
 def _strict_lease_groups(references, resolver):
     """``[(entry resolver, [(ref, staged entry), ...]), ...]`` in read order.
 
@@ -1488,7 +1524,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                 _acquire_bulk_window(path, ref.sha256, resolver=lease_resolver))
             live_windows.append(lease_window)
             try:
-                lease_fd, _serving, _tier = _enter_and_open_window(
+                lease_fd, _serving, tier = _enter_and_open_window(
                     lease_resolver, lease_window, lease_key, path)
             except BaseException:
                 # ``_enter_and_open_window`` already exited the window on
@@ -1502,10 +1538,16 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             source = Path(lease_window.stage_path(lease_key) or path)
             source_before = os.fstat(lease_fd)
             EXACT_LEASE_COUNTERS["entries_single"] += 1
+        else:
+            # The declared file itself: pool bytes, counted on the resolver
+            # this entry would be staged through, when one is bound.
+            tier = None
+            lease_resolver = _declared_entry_resolver(resolver, ref)
         window._tensors[ref] = _read_exact_entry(
             ref, path=path, signature=signature, source=source,
             source_before=source_before, lease_fd=lease_fd, owned=owned,
             release_file_pages=release_file_pages)
+        _record_served_bytes(lease_resolver, path, tier, ref.file_bytes)
         if lease_window is not None:
             # Entry verified: descriptor closed, exact ref released
             # before the next entry acquires.
@@ -1529,8 +1571,9 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             except LeaseRefused as refusal:
                 entry_resolver.record_fallback(path, str(refusal))
                 raise
+            tier = lease_window.serving_tier or "stage"
             entry_resolver.record_serving_tier(
-                path, lease_window.serving_tier or "stage",
+                path, tier,
                 pin_id=str(serving.get("pin_id") or ""),
                 range_ref=str(serving.get("range_ref") or ""))
             try:
@@ -1541,6 +1584,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                     owned=owned, release_file_pages=release_file_pages)
             finally:
                 lease_window.close_fd(lease_fd)
+            _record_served_bytes(entry_resolver, path, tier, ref.file_bytes)
         # Every entry verified: each window closes its descriptors (already
         # closed) and releases its one ref.
         for lease_window in {id(w): w for w, _key in assignments.values()}.values():

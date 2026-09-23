@@ -16,6 +16,7 @@ from prismaquant.glm_routing_replay import capture_replayed_glm_routes
 from prismaquant.joint_adjoint_checkpoints import reference_from_record
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.joint_cost_quantum import build_quantum_source_runner
+from prismaquant.matmul_arithmetic import bf16_reduction_stamp, pin_matmul_arithmetic
 from prismaquant.perturbed_x_cache import prefetch_exact_activation_cache_entries
 from prismaquant.tessera_joint_allocation import _read_bound
 from prismaquant.tessera_joint_aura import _seed_source_identity_cache
@@ -67,8 +68,7 @@ def main():
             or producer_source["tensors"] != prepared["source_model_identity"]["checkpoint_weight_map"]):
         raise ValueError("native producer file/tensor identity differs from original qualified source")
     torch.set_num_threads(1)
-    torch.set_float32_matmul_precision("highest")
-    torch.backends.cuda.matmul.allow_tf32 = False
+    pin_matmul_arithmetic()
     runner = None
     try:
         runner = build_quantum_source_runner(plan, offload_folder=root / "offload")
@@ -96,7 +96,9 @@ def main():
             raise ValueError("routing capture output already exists")
         receipt = {"schema": "prismaquant.glm_routing_replay_receipt.v1", "status": "complete",
                    "spec": spec_binding, "boundary": {"path": str(target), "sha256": hashlib.sha256(raw).hexdigest()},
-                   "metadata": result["metadata"]}
+                   "metadata": result["metadata"],
+                   # Absent at PyTorch's default (PQ #1028).
+                   **bf16_reduction_stamp()}
         if not publish_new_bytes(root / "receipt.json", (json.dumps(receipt, sort_keys=True) + "\n").encode()):
             raise ValueError("routing capture receipt already exists")
         print(json.dumps({"status": "complete", "boundary": receipt["boundary"]}, sort_keys=True))

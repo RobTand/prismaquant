@@ -620,6 +620,12 @@ def _executable_prepared_input(record: dict, *,
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} executable manifest has no read plan: "
             "refusing")
+    replay_mode = block.get("replay_mode")
+    if replay_mode != (manifest_doc.get("annotations") or {}).get("replay_mode") \
+            or replay_mode not in (None, "spill"):
+        raise ExecutableBindingUnsupported(
+            f"quantum {quantum_id!r} bound replay mode {replay_mode!r} is not "
+            "the sealed manifest's: refusing")
     by_name = {phase.get("name"): phase for phase in phases
                if isinstance(phase, dict)}
     order = [phase.get("name") for phase in phases
@@ -646,7 +652,16 @@ def _executable_prepared_input(record: dict, *,
                 f"quantum {quantum_id!r} prepared window {window_index!r} "
                 "seals no render entries: refusing")
         render_name = f"render-{window_index:02d}"
-        replay_name = f"replay-{window_index:02d}-p0"
+        # The render phase sits immediately before the phase that consumes
+        # its window next: the window's first replay (windowed), or under
+        # the one-pass spill the first probe capture for window 0 and the
+        # next window's render after it (PQ #1011).
+        if replay_mode == "spill":
+            replay_name = ("spill-p0" if window_index == 0 else
+                           f"render-{window_index + 1:02d}"
+                           if window_index + 1 < len(sealed_windows) else None)
+        else:
+            replay_name = f"replay-{window_index:02d}-p0"
         render_phase = by_name.get(render_name)
         if not isinstance(render_phase, dict) or \
                 list(render_phase.get("entry_indices", None)
@@ -655,8 +670,14 @@ def _executable_prepared_input(record: dict, *,
                 f"quantum {quantum_id!r} prepared window {window_index!r} "
                 f"stages no {render_name} phase with exactly its render "
                 "entries: refusing")
-        if render_name not in order or replay_name not in order or \
-                order.index(render_name) + 1 != order.index(replay_name):
+        if render_name not in order:
+            follows = False
+        elif replay_name is None:
+            follows = order.index(render_name) + 1 == len(order)
+        else:
+            follows = (replay_name in order and
+                       order.index(render_name) + 1 == order.index(replay_name))
+        if not follows:
             raise ExecutableBindingUnsupported(
                 f"quantum {quantum_id!r} prepared window {window_index!r} "
                 f"does not stage {render_name} immediately before its "
@@ -887,6 +908,10 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     try:
         local_scratch_environment(spec, spec.get("env", {}))
         _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload)
+        # The bf16 reduction flag is sealed in the same spec, so it is
+        # uniform across every quantum of the dispatch (PQ #1028).
+        from prismaquant.matmul_arithmetic import bf16_reduction_from_environment
+        bf16_reduction_from_environment(spec.get("env", {}))
     except (ValueError, RuntimeError) as exc:
         raise DispatchRefused(str(exc)) from exc
     if resource_policy is not None:
@@ -1440,7 +1465,8 @@ def band_serial_roles(records: Sequence[tuple[Path, dict]]) -> dict[str, dict]:
 
 def handoff_template_path(record: Mapping, *, plan: Mapping,
                           adjoint_slice: Mapping, tier: str,
-                          output_root: Path) -> Path:
+                          output_root: Path,
+                          template_id: str | None = None) -> Path:
     """Write and return a producer row's handoff produced-output template.
 
     Derived from the numbers the producer's emitter binds with: the plan's
@@ -1450,6 +1476,11 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
     tier the declaration permits, a fleet fact the submitter names. The file
     is named by its content digest, so a changed tier or plan writes a new
     template and never rewrites one a submitted row already declared.
+
+    ``template_id`` defaults to ``pq-stageb-handoff-<quantum id>``. PrismaBuild
+    files a template under its id and refuses a different template under the
+    same id, so a caller that writes into a scratch root passes an id of its
+    own (the live pair does) rather than the one a campaign row would file.
     """
     from prismaquant.cost_streaming import normalize_boundary_storage
     from prismaquant.joint_quantum_handoff import handoff_root
@@ -1472,7 +1503,8 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
             artifact_max_bytes=int(policy["max_artifact_bytes"]),
             group_size=int(policy["prefetch_batches"]),
             max_entry_tensor_bytes=max(tensors),
-            template_id=f"pq-stageb-handoff-{quantum_id}")
+            template_id=(template_id if template_id is not None
+                         else f"pq-stageb-handoff-{quantum_id}"))
     except (KeyError, TypeError, ValueError) as exc:
         raise DispatchRefused(
             f"quantum {quantum_id!r}: no handoff template derives from the "

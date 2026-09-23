@@ -657,6 +657,30 @@ def test_a_matmul_precision_difference_refuses(tmp_path, monkeypatch):
         torch.set_float32_matmul_precision(precision)
 
 
+def test_a_bf16_reduction_difference_refuses(tmp_path, monkeypatch):
+    """The flag joins the run identity and the chain arithmetic (PQ #1028)."""
+    root = tmp_path / "run"
+    matmul = torch.backends.cuda.matmul
+    monkeypatch.setattr(matmul, "allow_bf16_reduced_precision_reduction", True)
+    _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
+    monkeypatch.setattr(matmul, "allow_bf16_reduced_precision_reduction", False)
+    _refused_untouched(root, monkeypatch, "differs in run_identity, arithmetic$",
+                       chain_resume=_resume(root))
+
+
+def test_the_run_identity_carries_the_bf16_flag_only_when_it_is_off(tmp_path, monkeypatch):
+    from prismaquant.matmul_arithmetic import BF16_REDUCTION_FIELD
+
+    matmul = torch.backends.cuda.matmul
+    monkeypatch.setattr(matmul, "allow_bf16_reduced_precision_reduction", True)
+    default = _run(tmp_path / "default", monkeypatch)["run_identity"]
+    monkeypatch.setattr(matmul, "allow_bf16_reduced_precision_reduction", False)
+    off = _run(tmp_path / "off", monkeypatch)["run_identity"]
+    assert BF16_REDUCTION_FIELD not in default
+    assert off[BF16_REDUCTION_FIELD] is False
+    assert {key: value for key, value in off.items() if key != BF16_REDUCTION_FIELD} == default
+
+
 def test_another_capsule_refuses_and_leaves_the_run_resumable(tmp_path, monkeypatch):
     """The capsule check runs after the rebind; the run stays resumable."""
     from prismaquant import joint_forward_resume
