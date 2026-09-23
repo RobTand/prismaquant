@@ -654,27 +654,57 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
                 output_slice=output_slice, row_slice=row_slice)
             x2 = x.reshape(-1, x.shape[-1]).float()
             g2 = selected.reshape(-1, selected.shape[-1]).float()
-            # Count actual backward observations, including an invoked
-            # expert whose exact contribution is zero. An uninvoked
-            # expert remains count=0 and has UNKNOWN pilot cost.
-            self._observed_tokens[name] += int(x2.shape[0])
-            self._observed_calls[name] += 1
-            self._accumulate((name, None), g2.T @ x2)
-            self.telemetry['operator_gemms'] += 1
-            for index, (spec, _) in enumerate(self.groups[name]):
-                if not spec.act_quant_changes_input:
-                    continue
-                quantized = _activation_qdq(x, spec, self.activation_max_abs, name)
-                if (not isinstance(quantized, torch.Tensor) or quantized.shape != x.shape
-                        or quantized.device != x.device or quantized.dtype != x.dtype):
-                    raise RuntimeError(f"joint statistics QDQ changed residency/dtype/shape for {name}")
-                dx = quantized.reshape_as(x2).float() - x2
-                self._accumulate((name, index), g2.T @ dx)
-                self.telemetry['qdq_calls'] += 1
-                self.telemetry['operator_gemms'] += 1
+            self._observe_rows(name, x, x2, g2, calls=1)
         except BaseException:
             self._fail_observation()
             raise
+
+    def observe_row_chunk(self, name, source_weight, x_rows, g_rows, *, calls):
+        """One GEMM per operator over a chunk of a Linear's replayed rows.
+
+        The Stage B ``operator_gemm`` replay regime (PQ #994) concatenates a
+        Linear's spilled rows in capture order and feeds them here a chunk at
+        a time; ``calls`` counts the invocations whose first row is in the
+        chunk. Same upcasts, QDQ and accumulation as :meth:`_observe_invocation`,
+        over rows that cut across invocations, so the activation QDQ must be
+        row-local (``joint_replay_spill.require_row_local_activation_qdq``).
+        """
+        if self._phase != 'observing' or not self.active:
+            raise RuntimeError("joint statistics backward outside active observation")
+        try:
+            self._require_source(name, source_weight)
+            if x_rows.dim() != 2 or type(calls) is not int or calls < 0:
+                raise RuntimeError(f"joint statistics row chunk is malformed for {name}")
+            select_invocation_gradient(name, source_weight, x_rows, g_rows)
+            self._observe_rows(name, x_rows, x_rows.float(), g_rows.float(), calls=calls)
+        except BaseException:
+            self._fail_observation()
+            raise
+
+    def _observe_rows(self, name, x, x2, g2, *, calls):
+        """Accumulate a block of rows: the operator GEMM, then each QDQ group's.
+
+        ``x`` is the input as the QDQ reads it; ``x2`` and ``g2`` are its rows
+        and the selected gradient's rows in FP32.
+        """
+        # Count actual backward observations, including an invoked
+        # expert whose exact contribution is zero. An uninvoked
+        # expert remains count=0 and has UNKNOWN pilot cost.
+        self._observed_tokens[name] += int(x2.shape[0])
+        self._observed_calls[name] += calls
+        self._accumulate((name, None), g2.T @ x2)
+        self.telemetry['operator_gemms'] += 1
+        for index, (spec, _) in enumerate(self.groups[name]):
+            if not spec.act_quant_changes_input:
+                continue
+            quantized = _activation_qdq(x, spec, self.activation_max_abs, name)
+            if (not isinstance(quantized, torch.Tensor) or quantized.shape != x.shape
+                    or quantized.device != x.device or quantized.dtype != x.dtype):
+                raise RuntimeError(f"joint statistics QDQ changed residency/dtype/shape for {name}")
+            dx = quantized.reshape_as(x2).float() - x2
+            self._accumulate((name, index), g2.T @ dx)
+            self.telemetry['qdq_calls'] += 1
+            self.telemetry['operator_gemms'] += 1
 
     def _observe(self, name, source_weight, x, output, output_slice=None, row_slice=None):
         if self._phase != 'observing' or not self.active:
@@ -901,6 +931,8 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
         validate_projection_backend_identity(arithmetic["projection_backend"])
         if arithmetic != probe["arithmetic"] or arithmetic["projection_dtype"] != "torch.float32" or arithmetic["delta_dtype"] != "torch.float32" or arithmetic["aggregation"] != "sum_signed_invocations_then_square":
             raise ValueError("invalid projection arithmetic")
+        from .joint_replay_regime import replay_regime_of
+        replay_regime_of(arithmetic)
     except (KeyError, TypeError, RuntimeError) as exc:
         raise ValueError(f"joint AURA incomplete identity: {exc}") from exc
     ids = entry.get("probe_ids")

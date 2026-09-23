@@ -30,12 +30,18 @@ def normalize_operator_windows(config):
     return dict(config)
 
 
-def statistics_arithmetic_identity(dtype, backend):
+def statistics_arithmetic_identity(dtype, backend, replay_regime=None):
+    """The statistics arithmetic, with any non-default Stage B replay regime.
+
+    The default regime (``None``) returns the same identity as before regimes
+    existed; see :mod:`prismaquant.joint_replay_regime`.
+    """
+    from .joint_replay_regime import stamp_replay_regime
     result = arithmetic_identity(dtype, backend)
     result.update(weight_projection='summed_output_operator_fp32_gemm',
         operator_accumulation='sum_fp32_matrices_in_backward_invocation_order',
         contraction_order='sum_operators_then_project_each_signed_component')
-    return result
+    return stamp_replay_regime(result, replay_regime)
 
 
 def operator_window_guard(device, *, device_bytes=None):
