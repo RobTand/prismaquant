@@ -272,6 +272,55 @@ def verify_quantum_identity(
     return record, adjoint_slice
 
 
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def chain_readset_sha256(record: Mapping) -> str:
+    """The data-manifest digest a chain-mode row stages, as its record seals it.
+
+    The dispatcher's rule, spelled once more here because the dispatcher
+    cannot be imported on the GPU side (``tools/dispatch_joint_quanta.py``:
+    ``_row_manifest_sha256`` and the ``executable is not None`` branch of
+    ``quantum_argv``). An executable row stages its executable readset; any
+    other row stages its slice manifest. A present but malformed executable
+    block refuses rather than fall back to the slice manifest, exactly as
+    the dispatcher refuses to publish such a row.
+    """
+    executable = record.get("executable_readset")
+    if executable is not None:
+        digest = (executable.get("manifest_sha256")
+                  if isinstance(executable, Mapping) else None)
+        if not isinstance(digest, str) or not _HEX64.fullmatch(digest):
+            raise QuantumIdentityRefused(
+                "the record's executable readset seals no manifest digest")
+        return digest
+    read_set = record.get("read_set")
+    digest = (read_set.get("manifest_sha256")
+              if isinstance(read_set, Mapping) else None)
+    if not isinstance(digest, str) or not _HEX64.fullmatch(digest):
+        raise QuantumIdentityRefused("the record's read set seals no manifest digest")
+    return digest
+
+
+def require_chain_readset(record: Mapping, *, data_manifest_sha256) -> None:
+    """Refuse unless a chain-mode row stages the manifest its record seals.
+
+    The chain-mode twin of ``require_band_serial_readset`` (PQ #1008): the
+    staged manifest is the one the dispatcher derives from the sealed
+    record, so any other digest, or none, names a row that stages other
+    bytes than the record declares. It would also fail at its first
+    unstaged read; this names the cause before any read.
+    """
+    if not isinstance(data_manifest_sha256, str) or \
+            not _HEX64.fullmatch(data_manifest_sha256):
+        raise QuantumIdentityRefused(
+            "a chain-mode quantum needs --data-manifest-sha256: the staged "
+            "data manifest is the one its record seals")
+    if data_manifest_sha256 != chain_readset_sha256(record):
+        raise QuantumIdentityRefused(
+            "the staged data manifest is not the readset the record seals")
+
+
 # --------------------------------------------------------------------------
 # The chunk frontier: windows completed -> the chunk phase being read
 # --------------------------------------------------------------------------
@@ -2341,6 +2390,9 @@ def main(argv=None) -> int:
                     data_manifest_sha256=args.data_manifest_sha256)
             except QuantumHandoffRefused as exc:
                 raise QuantumIdentityRefused(f"adjoint handoff: {exc}") from exc
+        else:
+            require_chain_readset(
+                record, data_manifest_sha256=args.data_manifest_sha256)
     except QuantumIdentityRefused as exc:
         print(f"{IDENTITY_REFUSED_MARKER}: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED

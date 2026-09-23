@@ -45,12 +45,15 @@ pinned by file digest against an IMMUTABLE bundle
 tree, never against that lane's live worktree, and these tests skip loudly
 rather than implying support that does not exist.
 
-KNOWN HARNESS DEFECT, recorded rather than tolerated: resolving the pinned
-candidate inserts its ``src`` on ``sys.path`` and leaves ``prismabuild`` in
-``sys.modules``, so in a shared pytest process this module shadows the
-deployed runtime generation for every other test that imports PrismaBuild.
-Run it in its own pytest invocation. This is the same defect the frozen
-produced-render harness records; it is not fixed blind here.
+OWN PROCESS (PQ #1008). Resolving the pinned candidate inserts its ``src``
+on ``sys.path`` and leaves ``prismabuild`` in ``sys.modules``, and one process
+holds only one ``prismabuild``. So this module and every module that imports
+it are marked ``own_process``: in a session that collects other modules too,
+``tests/conftest.py`` runs their tests in a child pytest of their own and
+reports each outcome under the test's own node id. A caller that is not
+marked, and finds another ``prismabuild`` already imported, FAILS naming the
+marker; it used to skip, which hid 25 tests in a green multi-file shard.
+Only a missing bundle (no pinned candidate resolves on this box) still skips.
 """
 from __future__ import annotations
 
@@ -67,6 +70,9 @@ import threading
 import time
 
 import pytest
+
+# PQ #1008: one pinned prismabuild per process (tests/conftest.py).
+pytestmark = pytest.mark.own_process
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
@@ -147,9 +153,14 @@ def _pb_source() -> tuple[Path, Path]:
     if already is not None and roots:
         resolved = Path(already.__file__).resolve().parent
         if not resolved.is_relative_to((roots[0] / "src").resolve()):
-            pytest.skip(
-                "a different prismabuild is already imported in this "
-                "process and would shadow the pinned candidate bundle")
+            # A failure, not a skip (PQ #1008): a skip here hid 25 tests in
+            # a green multi-file shard. A module marked ``own_process`` never
+            # gets here in a shared session (tests/conftest.py).
+            pytest.fail(
+                f"a different prismabuild ({resolved}) is already imported in "
+                "this process and would shadow the pinned candidate bundle: "
+                "mark the calling module `pytestmark = "
+                "pytest.mark.own_process`")
     for root in roots:
         src = root / "src"
         fleet = root / "tools" / "fleet"
@@ -159,7 +170,10 @@ def _pb_source() -> tuple[Path, Path]:
         _export_pythonpath(src, fleet)
         from prismabuild import produced_output as _po
         if not Path(_po.__file__).resolve().is_relative_to(src.resolve()):
-            pytest.skip("the resolved prismabuild shadows the pinned bundle")
+            pytest.fail(
+                f"the resolved prismabuild ({_po.__file__}) shadows the pinned "
+                "bundle: mark the calling module `pytestmark = "
+                "pytest.mark.own_process`")
         return src, root
     pytest.skip(
         "no PrismaBuild produced-output candidate resolves against "

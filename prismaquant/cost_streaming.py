@@ -529,20 +529,53 @@ class StreamedBoundaryArtifacts:
             self._references[reference.name] = reference
             self._slots[identity["slot"]] = reference
             self.telemetry["live_artifact_bytes"] += reference.file_bytes
+        self._borrow_checkpoint_plane(checkpoint, boundary=boundary, marker=marker,
+                                      what="resumed")
+
+    def authorize_seed_checkpoint(self, checkpoint, *, boundary, session):
+        """Borrow another run's sealed checkpoint plane (PQ #1016).
+
+        A seed run (``stage_a_chain_seed``) binds a fresh generation and
+        continues another run's checkpoint ``boundary``. Its cotangent
+        entries are read under their own ``session`` (the checkpoint's
+        marker, which the caller checked against the pinned manifest), never
+        unlinked, and replaced by the first roll below ``boundary`` exactly
+        as a resumed checkpoint's are. The seed's forward boundaries are the
+        capsule rows :meth:`authorize_forward_inputs` installs first.
+        """
+        if (self._resumed or self._readonly or self._status != "running"
+                or self.session is None):
+            raise RuntimeError("a seed checkpoint requires a freshly bound writable owner")
+        if self._checkpoint_inputs:
+            raise RuntimeError("seed inputs are authorized once")
+        if type(boundary) is not int or boundary < 1:
+            raise RuntimeError("a seeded chain starts at a positive checkpoint boundary")
+        if (not isinstance(session, dict)
+                or set(session) != {"generation", "kind", "run_identity_sha256"}
+                or session["kind"] != "adjoint_checkpoint"
+                or session["generation"] == self.session["generation"]):
+            raise RuntimeError("a seed checkpoint names another run's checkpoint session")
+        self._borrow_checkpoint_plane(checkpoint, boundary=boundary, marker=dict(session),
+                                      what="seed")
+
+    def _borrow_checkpoint_plane(self, checkpoint, *, boundary, marker, what):
+        """Hold a sealed checkpoint's cotangents as inputs the first roll replaces."""
         for reference in checkpoint:
             identity = json.loads(reference.metadata_json)["identity"]
             if (identity["kind"] != "adjoint_checkpoint_cotangent"
                     or identity["session"] != marker
                     or identity["slot"] != reference.name):
                 raise RuntimeError(
-                    "a resumed checkpoint entry is not this generation's checkpoint")
+                    f"a {what} checkpoint entry is not "
+                    + ("this generation's checkpoint" if what == "resumed"
+                       else "the named checkpoint's"))
             if reference.name in self._references:
-                raise RuntimeError("a resumed checkpoint entry repeats a name")
+                raise RuntimeError(f"a {what} checkpoint entry repeats a name")
             self._forward_inputs[reference] = identity
             self._references[reference.name] = reference
             self._checkpoint_inputs[reference] = boundary
         if self._checkpoint_accounted_bytes() > self.config["max_artifact_bytes"]:
-            raise RuntimeError("resumed inputs exceed the artifact budget")
+            raise RuntimeError(f"{what} inputs exceed the artifact budget")
         self.telemetry["peak_artifact_bytes"] = max(
             self.telemetry["peak_artifact_bytes"], self.telemetry["live_artifact_bytes"])
 
