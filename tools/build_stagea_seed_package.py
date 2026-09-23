@@ -10,9 +10,13 @@ a recovery manifest: it keeps the source run's reads at the phases the seed
 enters, and adds the checkpoint files the seed borrows at the phases that
 read them.
 
-* ``head``: the source run's head reads, plus the seed spec, and the
-  ``checkpoint.json`` and shared-state files of checkpoint ``b``, which the
-  seed reads while it restores the chain.
+* ``head``: the source run's head reads, less the head walk's, plus the
+  seed spec, and the ``checkpoint.json`` and shared-state files of
+  checkpoint ``b``, which the seed reads while it restores the chain. Stage A
+  takes its head from the prepared completion (PQ #1051), so the walk's
+  reads leave a source manifest built before #1051
+  (``stage_a_head.drop_source_head_walk_reads``, from the plan's
+  ``inputs``). The plan must be the one the source manifest names.
 * ``chain-(b-1)`` down to ``chain-(through)``: the source run's reads of
   those phases (each layer's weights and its forward boundary rows).
 * ``chain-(b-1)`` also stages checkpoint ``b``'s cotangent plane, which the
@@ -26,8 +30,9 @@ must be the seed's: its chain phases hold that capsule's boundary rows, the
 rows the seed borrows.
 
 The package directory holds ``seed-spec.json``, ``seed-manifest.json.gz``
-and ``package.json`` (digests, phases, and the peak bytes of any two
-consecutive phases, the lead and next windows PrismaBuild admits together).
+and ``package.json`` (digests, phases, the head-walk entries and bytes left
+out, and the peak bytes of any two consecutive phases, the lead and next
+windows PrismaBuild admits together).
 """
 from __future__ import annotations
 
@@ -43,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.joint_layer_quanta import adjoint_chain_phase_name  # noqa: E402
 from prismaquant.joint_adjoint_slices import checkpoint_manifest_entry  # noqa: E402
+from prismaquant.stage_a_head import drop_source_head_walk_reads  # noqa: E402
 from prismaquant.stage_a_chain_seed import (  # noqa: E402
     SEED_SPEC_SCHEMA,
     load_pinned_checkpoint,
@@ -166,13 +172,22 @@ def _pin(path, sha256, what) -> dict:
     return {"path": str(path), "sha256": sha256}
 
 
-def build(*, original_manifest, original_manifest_sha256, checkpoint, capsule, through,
-          implementation_from, implementation_to, compare, output, validate=None) -> dict:
-    """Write the package into ``output``, a directory that must not exist."""
+def build(*, original_manifest, original_manifest_sha256, plan, checkpoint, capsule,
+          through, implementation_from, implementation_to, compare, output,
+          validate=None) -> dict:
+    """Write the package into ``output``, a directory that must not exist.
+
+    ``plan`` is the pinned ``{path, sha256}`` of the plan the source manifest
+    names; its ``inputs`` say which head entries are the head walk's.
+    """
     wire = Path(original_manifest).read_bytes()
     if hashlib.sha256(wire).hexdigest() != original_manifest_sha256:
         raise SeedPackageRefused("the source manifest does not have the pinned digest")
     original = json.loads(gzip.decompress(wire) if wire[:2] == b"\x1f\x8b" else wire)
+    try:
+        original, dropped = drop_source_head_walk_reads(original, plan)
+    except ValueError as error:
+        raise SeedPackageRefused(str(error)) from error
     declared = (None if implementation_from is None and implementation_to is None
                 else {"from": implementation_from, "to": implementation_to})
     spec = normalize_seed_spec({
@@ -202,6 +217,7 @@ def build(*, original_manifest, original_manifest_sha256, checkpoint, capsule, t
         "phases": [{"name": phase["name"], "bytes": phase["bytes"],
                     "entries": len(phase["entry_indices"])} for phase in phases],
         "read_bytes": manifest["read_plan"]["read_bytes"],
+        "head_walk_reads_dropped": dropped,
         "peak_consecutive_phase_bytes": peak_consecutive_bytes(phases),
     }
     root.mkdir(parents=True, exist_ok=False)
@@ -221,6 +237,10 @@ def main(argv=None) -> int:
     parser.add_argument("--original-manifest", required=True,
                         help="the source run's submitted Stage A data manifest")
     parser.add_argument("--original-manifest-sha256", required=True)
+    parser.add_argument("--plan", required=True,
+                        help="the plan the source manifest names; its inputs "
+                             "say which head entries are the head walk's")
+    parser.add_argument("--plan-sha256", required=True)
     parser.add_argument("--checkpoint", required=True,
                         help="the source run's sealed checkpoint.json the seed continues")
     parser.add_argument("--checkpoint-sha256", required=True)
@@ -238,6 +258,7 @@ def main(argv=None) -> int:
     package = build(
         original_manifest=args.original_manifest,
         original_manifest_sha256=args.original_manifest_sha256,
+        plan={"path": args.plan, "sha256": args.plan_sha256},
         checkpoint=_pin(args.checkpoint, args.checkpoint_sha256, "checkpoint"),
         capsule=_pin(args.capsule, args.capsule_sha256, "capsule"),
         through=args.through, implementation_from=args.implementation_from,

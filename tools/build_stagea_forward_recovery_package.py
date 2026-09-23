@@ -5,6 +5,14 @@
 fields come from a reviewed declaration (``--campaign-fields``), and the
 attempt fields (label, source head, recovery manifest digest, capsule) from
 this build. Every template field must be declared, and no other.
+
+The recovery manifest keeps the source run's reads, less the head walk's:
+Stage A takes its head from the prepared completion (PQ #1051), so a source
+manifest built before #1051 declares reads the relaunch never makes
+(``stage_a_head.drop_source_head_walk_reads``). ``--plan`` is the plan the
+campaign binds and the source manifest names; its ``inputs`` say which head
+entries are the walk's. ``launch-fields.json`` records the entries and bytes
+left out.
 """
 import argparse
 import gzip
@@ -18,6 +26,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.joint_forward_resume import _read, chain_documents
+from prismaquant.stage_a_head import drop_source_head_walk_reads
 
 TEMPLATE = Path(__file__).resolve().parent / 'templates' / 'stagea_forward_recovery_launch.py.template'
 MANIFEST_NAME = 'adjoint-recovery-manifest.json.gz'
@@ -53,6 +62,21 @@ def render_launcher(campaign, *, label, source_head, manifest_sha256, capsule):
     if used != set(fields):
         raise ValueError(f'launcher fields and template placeholders differ: {sorted(used ^ set(fields))}')
     return template.substitute(fields)
+
+
+def load_original(path, campaign, plan):
+    """``(manifest, dropped)``: the source run's manifest, less the head walk's reads.
+
+    ``plan`` is the pinned ``{path, sha256}`` of the campaign's plan. Refuses a
+    manifest whose digest is not the campaign's, and a plan the campaign does
+    not bind.
+    """
+    wire = Path(path).read_bytes()
+    if hashlib.sha256(wire).hexdigest() != campaign.get('original_manifest_sha256'):
+        raise ValueError('original scientific read manifest changed')
+    if plan['sha256'] != campaign.get('campaign_bindings', {}).get('plan_sha256'):
+        raise ValueError('the plan is not the one the campaign binds')
+    return drop_source_head_walk_reads(json.loads(gzip.decompress(wire)), plan)
 
 
 def recovery_manifest(original, capsule, bound):
@@ -128,6 +152,10 @@ def main():
     parser.add_argument('--capsule', required=True)
     parser.add_argument('--capsule-sha256', required=True)
     parser.add_argument('--original-manifest', required=True)
+    parser.add_argument('--plan', required=True,
+                        help='the plan the campaign binds; its inputs say which '
+                             'head entries are the head walk\'s (PQ #1051)')
+    parser.add_argument('--plan-sha256', required=True)
     parser.add_argument('--campaign-fields', required=True,
                         help='reviewed campaign launcher declaration (JSON), for example '
                              'tools/templates/glm_full512_stagea_campaign_fields.json')
@@ -142,10 +170,8 @@ def main():
     campaign = json.loads(Path(args.campaign_fields).read_text())
     bound = {'path': args.capsule, 'sha256': args.capsule_sha256}
     capsule, _ = _read(args.capsule, args.capsule_sha256)
-    wire = Path(args.original_manifest).read_bytes()
-    if hashlib.sha256(wire).hexdigest() != campaign.get('original_manifest_sha256'):
-        raise ValueError('original scientific read manifest changed')
-    original = json.loads(gzip.decompress(wire))
+    original, dropped = load_original(args.original_manifest, campaign,
+                                      {'path': args.plan, 'sha256': args.plan_sha256})
     manifest = recovery_manifest(original, capsule, bound)
     from prismaquant.staged_lease import sdk_submodule
     sdk_submodule('core').validate_data_manifest(manifest)
@@ -166,7 +192,7 @@ def main():
     names.append('stagea-512-template-r7.json')
     (root / 'launch-fields.json').write_text(json.dumps({
         'campaign': campaign, 'label': label, 'source_head': args.source_head,
-        'manifest_sha256': digest, 'capsule': bound,
+        'manifest_sha256': digest, 'capsule': bound, 'head_walk_reads_dropped': dropped,
         'template_sha256': hashlib.sha256(TEMPLATE.read_bytes()).hexdigest()},
         indent=2) + '\n')
     names.append('launch-fields.json')
@@ -175,6 +201,7 @@ def main():
     (root / f'launch-{label}.py').write_text(launcher)
     print(json.dumps({'package': str(root), 'source_head': args.source_head,
         'data_manifest_sha256': digest, 'capsule': bound, 'frontier': capsule['frontier'],
+        'head_walk_reads_dropped': dropped,
         'phases': len(manifest['read_plan']['phases']),
         'max_phase_bytes': max(p['bytes'] for p in manifest['read_plan']['phases']),
         'runtime_pin_pending': True}, sort_keys=True))
