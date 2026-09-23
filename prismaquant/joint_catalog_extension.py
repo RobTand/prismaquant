@@ -429,12 +429,15 @@ def _check_capture(header, inputs, original):
         _same(identity.get(key), plan["execution"][key], "capture " + key)
 
 
-def create_extension(*, inputs, adjoint_capture, output):
+def create_extension(*, inputs, adjoint_capture, output, publish=None):
     """Publish an extension binding the original Stage A run header.
 
     ``adjoint_capture`` names the completed receipt or any sealed checkpoint
     band of the original run; only its run header enters the document, so
     the extension is the same bytes whichever of them created it.
+    ``publish(path, raw)`` writes the file and returns whether it created it;
+    the default is ``publish_new_bytes``. The Stage B preparation passes its
+    produced-output writer (PQ #1070).
     """
     evidence = verify_catalog_pair(inputs)
     header = _run_header(_json(adjoint_capture, "original adjoint capture"))
@@ -443,7 +446,8 @@ def create_extension(*, inputs, adjoint_capture, output):
         "adjoint_run_header_sha256": canonical_json_sha256(header, where="original Stage A run header"),
         "evidence": evidence}
     raw = (json.dumps(document, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
-    _require(publish_new_bytes(Path(output), raw), "extension output already exists; refusing overwrite")
+    writer = publish_new_bytes if publish is None else publish
+    _require(writer(Path(output), raw), "extension output already exists; refusing overwrite")
     return {"path": str(Path(output).resolve()), "sha256": hashlib.sha256(raw).hexdigest()}
 
 
