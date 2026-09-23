@@ -253,6 +253,13 @@ class StreamedBoundaryArtifacts:
         self._produced_ahead = set()
         self._produced_ahead_refusals = []
         self._produced_retained_boundary = None
+        # Probe fusion (RobTand/prismaquant#997) reads sample-major: every
+        # window reads one boundary group and one incoming group per probe,
+        # and the same groups again in the next window until the group
+        # ends. ``_produced_retained_reads`` is what the next window of the
+        # same pass reads again, kept staged across this window's exit.
+        self._produced_retained_reads = frozenset()
+        self._produced_read_order = "probe_major"
         # The read path's lookahead (RobTand/prismaquant#989): the groups
         # the NEXT window reads, asked for while this one computes. The set
         # is what that request still wants; a window that opens takes its
@@ -1360,7 +1367,8 @@ class StreamedBoundaryArtifacts:
 
     def bind_produced_output(self, publication, *, group_size, n_batches,
                              max_entry_tensor_bytes,
-                             staging_timeout_s=900.0, window_groups=None):
+                             staging_timeout_s=900.0, window_groups=None,
+                             read_order="probe_major"):
         """Stage this generation's entries through ``publication``.
 
         Called after :meth:`bind`, because the entry directory this owner
@@ -1406,6 +1414,14 @@ class StreamedBoundaryArtifacts:
         stays reserved for the read path and the rest is taken only while
         it is free.
 
+        ``read_order`` is the order the reverse roll reads in.
+        ``"probe_major"`` (the default) is one boundary group and one
+        incoming cotangent group per window, probe outer. ``"sample_major"``
+        is the fused roll (RobTand/prismaquant#997): one boundary group and
+        one incoming group PER PROBE in every window, so a window reads
+        ``1 + n_probes`` groups at once, and that many, not two, are the
+        read path's own share of the sealed window.
+
         A read-only attached generation can never take this binding: an
         attached owner does not write, so it has nothing to declare and its
         entries stay ordinary input-map reads.
@@ -1446,12 +1462,25 @@ class StreamedBoundaryArtifacts:
             raise ValueError(
                 "produced output window_groups must be an int of at least 2: "
                 "one read window holds a boundary group and a cotangent group")
+        if read_order == "probe_major":
+            read_groups = 2
+        elif read_order == "sample_major":
+            read_groups = 1 + int(self._n_probes)
+        else:
+            raise ValueError(f"unknown produced read order {read_order!r}")
+        if window_groups < read_groups:
+            raise ValueError(
+                f"the sealed window funds {window_groups} groups; a "
+                f"{read_order} read window holds {read_groups} at once "
+                "(one boundary group and one incoming group per probe)")
+        self._produced_read_order = read_order
         self._produced_plan = {"group_size": int(group_size),
                                "n_batches": int(n_batches),
                                "max_entry_tensor_bytes": int(max_entry_tensor_bytes),
                                "staging_timeout_s": float(staging_timeout_s),
                                "window_groups": int(window_groups),
-                               "ahead_groups": int(window_groups) - 2}
+                               "read_groups": read_groups,
+                               "ahead_groups": int(window_groups) - read_groups}
 
         from .produced_output_spool import ProducedOutputSpool
         self._local_output_spool = ProducedOutputSpool.from_publication(
@@ -2027,7 +2056,7 @@ class StreamedBoundaryArtifacts:
         reserve = 0 if lookahead else self._produced_lookahead_reserve
         return (len(self._produced_ahead) + reserve < plan["ahead_groups"]
                 and len(self._produced_held) + (0 if holding else 1)
-                + reserve <= plan["window_groups"] - 2)
+                + reserve <= plan["window_groups"] - plan["read_groups"])
 
     def _produced_ahead_deadline(self, started):
         """The instant an optional step that began at ``started`` must end.
@@ -2168,6 +2197,9 @@ class StreamedBoundaryArtifacts:
                                 if self._local_output_spool is not None else None),
                 "window_groups": self._produced_plan["window_groups"],
                 "ahead_groups": self._produced_plan["ahead_groups"],
+                **({"read_order": self._produced_read_order,
+                    "read_groups": self._produced_plan["read_groups"]}
+                   if self._produced_read_order != "probe_major" else {}),
                 "telemetry": {name: value
                               for name, value in self.telemetry.items()
                               if name.startswith("produced_")},
@@ -2340,7 +2372,11 @@ class StreamedBoundaryArtifacts:
             # gives its credit back only when PrismaBuild confirms it. Leave
             # room for both, so this request never waits on that
             # confirmation for a slot a write-time publication took.
-            self._produced_lookahead_reserve = 2 * len(keys)
+            # A fused window mostly reads the groups the open window already
+            # holds; those need no new credit, so only the rest reserve it.
+            fresh = (keys if self._produced_read_order != "sample_major"
+                     else [key for key in keys if key not in self._produced_held])
+            self._produced_lookahead_reserve = 2 * len(fresh)
             self.telemetry["produced_read_ahead_requests"] += 1
         keys = tuple(keys)
         step = {"deadline": None}
@@ -2443,6 +2479,37 @@ class StreamedBoundaryArtifacts:
                             and key[1] == int(boundary_index) and key[2] < 0]
                 self._release_produced_window(keys)
 
+    def retain_produced_reads(self, references):
+        """Keep the groups ``references`` read staged across this window's exit.
+
+        The fused roll's retention (RobTand/prismaquant#997). A sample-major
+        window reads the same boundary group and incoming groups as the
+        window after it, until the group ends; without this each exit would
+        retire them and the next window would stage them again. Called
+        while a window is open, with what the NEXT window of the same pass
+        reads; a newer call replaces an older one, and ``()`` retains
+        nothing. Like the boundary retention it keeps a group only while
+        the read-ahead share has room for it; otherwise the group is retired
+        at exit as before. Staging only: no read and no order changes.
+        """
+
+        if self._produced is None or self._produced_plan["ahead_groups"] <= 0:
+            return 0
+        from .perturbed_x_cache import ExactActivationReference
+
+        with self._produced_lock.held():
+            keys = set()
+            for reference in references:
+                if (not isinstance(reference, ExactActivationReference)
+                        or reference in self._forward_inputs
+                        or reference in self._attached_forward_inputs):
+                    continue
+                key, group = self._produced_group_for(reference)
+                if group is not None:
+                    keys.add(key)
+            self._produced_retained_reads = frozenset(keys)
+        return len(keys)
+
     def _produced_wait_for_credit(self, need, keep=()):
         """Get credit back until ``need`` more groups fit the window.
 
@@ -2496,9 +2563,11 @@ class StreamedBoundaryArtifacts:
 
         reclaimed = 0
         candidates = [key for key in list(self._produced_release_pending)]
-        candidates += [key for key in sorted(
-            self._produced_ahead, key=self._produced_surrender_order)
-            if key not in self._produced_release_pending]
+        order = (self._produced_sample_major_surrender_order
+                 if self._produced_read_order == "sample_major"
+                 else self._produced_surrender_order)
+        candidates += [key for key in sorted(self._produced_ahead, key=order)
+                       if key not in self._produced_release_pending]
         for key in candidates:
             if until is not None and until():
                 break
@@ -2544,6 +2613,22 @@ class StreamedBoundaryArtifacts:
 
         kind, boundary_index, probe, group_index = key
         return (kind == "boundary", boundary_index, -probe, -group_index)
+
+    @staticmethod
+    def _produced_sample_major_surrender_order(key):
+        """The fused roll's surrender order (RobTand/prismaquant#997).
+
+        The fused roll reads every probe's incoming group beside the
+        boundary group, group by group, so a group's next read is set by the
+        layer that reads it and its group index alone. A boundary plane
+        ``b`` is read by layer ``b``; a cotangent plane ``b`` is layer
+        ``b - 1``'s incoming. Layers descend, so the lowest reading layer
+        is read last, and inside it the highest group index.
+        """
+
+        kind, boundary_index, _probe, group_index = key
+        reader = boundary_index if kind == "boundary" else boundary_index - 1
+        return (reader, -group_index)
 
     #: How long a read waits before asking again after PrismaBuild could
     #: not take a census of this owner's funding.
@@ -3310,12 +3395,14 @@ class StreamedBoundaryArtifacts:
             # the next probe pass must not be found queued for retirement by
             # the read that wants it.
             retained = self._produced_retained_boundary
+            again = self._produced_retained_reads
             ask = []
             for key in keys:
                 group = self._produced_groups.get(key)
                 if group is None or group["retired"]:
                     continue
-                if (retained is not None and key[0] == "boundary"
+                if (key in again) or (
+                        retained is not None and key[0] == "boundary"
                         and key[1] == retained and key[2] < 0):
                     # Another probe pass reads this group. Keep it staged if
                     # the read-ahead share has room for it (or holds it).
@@ -3595,6 +3682,147 @@ def _boundary_window_references(batches, boundary_index, incoming, indices):
     if incoming is not None:
         references.extend(incoming[index] for index in indices)
     return references
+
+
+def _fused_window_references(batches, boundary_index, incoming, indices):
+    """What one window of ``prefetched_fused_boundary_windows`` reads, in order.
+
+    The boundary entries of ``indices``, then each probe's incoming entries
+    of the same indices, probe ascending. ``incoming`` is one entry list per
+    probe, or ``None`` when the caller supplies incoming tensors itself.
+    """
+
+    references = [batches[index].activations_cpu[boundary_index] for index in indices]
+    if incoming is not None:
+        for entries in incoming:
+            references.extend(entries[index] for index in indices)
+    return references
+
+
+def fused_window_size(*, prefetch_batches, max_resident_bytes, per_batch_bytes,
+                      batch_size):
+    """How many batches one fused window reads (RobTand/prismaquant#997).
+
+    The fused roll holds, for every batch of a window, its boundary entry
+    and every probe's incoming entry (``per_batch_bytes``) inside the sealed
+    ``max_resident_bytes``. The window is the largest multiple of
+    ``batch_size`` that fits and divides ``prefetch_batches``, so a window
+    never straddles a produced group. Refuses when no window holds one
+    whole batch group: that regime does not fit this run's sealed policy,
+    and the policy is not changed to make it fit.
+    """
+
+    from .joint_adjoint_slices import ChainRegimeRefused
+
+    group, batch_size = int(prefetch_batches), int(batch_size)
+    per_batch_bytes = int(per_batch_bytes)
+    if per_batch_bytes <= 0:
+        raise ChainRegimeRefused("a fused window needs a positive per-batch size")
+    fits = int(max_resident_bytes) // per_batch_bytes
+    sizes = [size for size in range(batch_size, group + 1, batch_size)
+             if group % size == 0 and size <= fits]
+    if not sizes:
+        raise ChainRegimeRefused(
+            f"a fused window at batch size {batch_size} holds "
+            f"{batch_size * per_batch_bytes} bytes; the sealed max_resident_bytes "
+            f"{int(max_resident_bytes)} holds {fits} batches, and the window "
+            f"must be a multiple of the batch size that divides "
+            f"prefetch_batches {group}")
+    return max(sizes)
+
+
+def fused_window_batches(storage, batches, boundary_index, incoming, *, batch_size):
+    """``fused_window_size`` for one roll, from the entries it will read."""
+
+    if storage is None:
+        return max(len(batches), 1)
+    per_batch = max(batch.activations_cpu[boundary_index].tensor_bytes
+                    for batch in batches)
+    if incoming is not None:
+        per_batch += sum(max(entry.tensor_bytes for entry in entries)
+                         for entries in incoming)
+    return fused_window_size(
+        prefetch_batches=storage.config["prefetch_batches"],
+        max_resident_bytes=storage.config["max_resident_bytes"],
+        per_batch_bytes=per_batch, batch_size=batch_size)
+
+
+@contextmanager
+def prefetched_fused_boundary_windows(storage, batches, boundary_index, incoming=None,
+                                      *, window_batches, then=None):
+    """Sample-major windows for the fused roll (RobTand/prismaquant#997).
+
+    Each window reads ``window_batches`` boundary entries and, beside them,
+    the same batches' incoming entries for every probe, so one layer forward
+    serves every probe's backward. Yields ``(indices, boundary, incoming)``
+    per window: ``boundary(index)`` and ``incoming(probe, index)`` return
+    the window's verified CPU tensors (``incoming`` returns ``None`` when the
+    caller supplies incoming tensors itself). Batch order is preserved.
+
+    Staging as in ``prefetched_boundary_batches``: the next window's groups
+    are asked for as soon as a window opens, and the groups the next window
+    of the same pass reads again are kept staged across the exit. ``then``
+    names the pass read after this one, ``(boundary_index, incoming)`` with
+    ``incoming`` one list per probe; its first window is asked for from this
+    pass's last window.
+    """
+
+    window_batches = int(window_batches)
+    if window_batches < 1:
+        raise ValueError("a fused window reads at least one batch")
+
+    def iterate():
+        lookahead = (None if storage is None
+                     else getattr(storage, "stage_produced_reads_ahead", None))
+        retain_next = (None if storage is None
+                       else getattr(storage, "retain_produced_reads", None))
+        count = len(batches)
+        for start in range(0, count, window_batches):
+            indices = range(start, min(start + window_batches, count))
+            if storage is None:
+                yield (indices,
+                       lambda index: batches[index].activations_cpu[boundary_index],
+                       lambda probe, index: (None if incoming is None
+                                             else incoming[probe][index]))
+                continue
+            references = _fused_window_references(
+                batches, boundary_index, incoming, indices)
+            again = ()
+            if start + window_batches < count:
+                following = _fused_window_references(
+                    batches, boundary_index, incoming,
+                    range(start + window_batches,
+                          min(start + 2 * window_batches, count)))
+                again = following
+            elif then is not None:
+                following = _fused_window_references(
+                    batches, then[0], then[1], range(0, min(window_batches, count)))
+            else:
+                following = ()
+            with storage.prefetch(references) as window:
+                if retain_next is not None:
+                    retain_next(again)
+                if lookahead is not None and following:
+                    lookahead(following)
+
+                def boundary(index, window=window):
+                    return storage.get(window, batches[index].activations_cpu[boundary_index])
+
+                def incoming_of(probe, index, window=window):
+                    if incoming is None:
+                        return None
+                    return storage.get(window, incoming[probe][index])
+
+                yield indices, boundary, incoming_of
+    iterator = iterate()
+    try:
+        yield iterator
+    finally:
+        iterator.close()
+        if storage is not None:
+            retain_next = getattr(storage, "retain_produced_reads", None)
+            if retain_next is not None:
+                retain_next(())
 
 
 @contextmanager

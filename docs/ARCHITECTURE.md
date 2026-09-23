@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Stage A's chain regime (2026-09-23, `ws-sa/stagea-throughput-997`, PQ #997):
+the render-free chain (`render_free_layer_roll`) can now carry B samples per
+layer forward and backward (`--chain-batch-size B`), and run one forward per
+sample group with one backward per probe (`--chain-probe-fusion on`). The
+default, B = 1 with fusion off, is the pre-#997 roll byte for byte and
+stamps nothing. A non-default regime is part of the run's identity: the
+receipt's `run_identity.chain_regime` carries it, so every band and slice
+does, and a quantum's chain rebuild runs the slice's regime. See "The Stage A
+chain regime (#997)" for the contract. Gates:
+`tests/test_stage_a_chain_regime.py`,
+`tests/test_stage_a_produced_fused_windows.py`. No format, pipeline default
+or ship gate changes.
+
 Stage B reads Stage A by slice and by checkpoint band (2026-09-22,
 `ws-br/stageb-band-receipts-993`, PQ #993). A layer quantum reads one
 checkpoint and the forward boundary entries of its own chain, and Stage A
@@ -341,8 +354,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-22 · `ws-br/stageb-band-receipts-993`.
+As of: 2026-09-23 · `ws-sa/stagea-throughput-997`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-sa/stagea-throughput-997`) for **the Stage A
+chain regime** (PQ #997): batched and probe-fused render-free chain rolls,
+the regime stamp in `run_identity`, the sample-major produced read order,
+and the quantum's chain reading its slice's regime; see "The Stage A chain
+regime (#997)". The default regime writes the bytes it wrote before. No
+format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-22, `ws-br/stageb-band-receipts-993`) for **Stage B
 reading Stage A by slice and by checkpoint band** (PQ #993). Records, the
@@ -20557,3 +20577,60 @@ extension as rooted cached-unit authority (`tessera.cached_unit`), so a
 campaign whose extension a band created cannot export selected cached units
 until Tessera reads v2 (`tests/test_tessera_selected_cache.py` records the
 refusal).
+
+### The Stage A chain regime (#997)
+
+The render-free chain (`joint_adjoint_checkpoints.render_free_layer_roll`)
+is Stage A's reverse walk and every quantum's chain rebuild. Its regime is two
+values, validated by `joint_adjoint_slices.normalize_chain_regime`:
+
+- `batch_size` B: how many calibration samples one layer forward and one
+  backward carry. The roll stacks B consecutive samples' boundary and incoming
+  cotangent, runs one `isolated_layer` call and one `autograd.backward`, and
+  hands each sample's row of the input cotangent to `roll`. Layer metadata for
+  a group comes from the runner's own `_prepare` on the group's stacked token
+  ids, so masks, positions and rotary embeddings are what a B-row forward
+  builds. B changes GEMM shapes and therefore rounding: two batch sizes are
+  statistically equivalent, never bitwise equal. B must divide the sealed
+  `prefetch_batches`, so a group never spans two read windows.
+- `probe_fusion`: one forward per sample group, then one backward per probe
+  on the retained graph (`retain_graph` until the last probe), clearing the
+  input gradient before each so every probe's cotangent is its own. At a
+  fixed B this is bitwise-neutral: the same forward and backward kernels on
+  the same bytes. It reads sample-major
+  (`cost_streaming.prefetched_fused_boundary_windows`): a window holds each
+  sample's boundary entry and every probe's incoming entry, and is the
+  largest multiple of B that divides `prefetch_batches` and fits the sealed
+  `max_resident_bytes` (`fused_window_size`). The sealed policy is never
+  changed to make a regime fit; a regime that does not fit refuses before the
+  forward capture (`joint_cost_stage_a._require_chain_regime_fits`).
+
+Both need an empty per-sample pass state: no profile shared state for the
+layer (`isolated_layer_pass_state`) and no shared-state cotangent in any
+owner (`SharedStateCotangents.is_empty`). A profile that grafts shared forward
+state per (probe, sample), as Gemma4's KV sharing does, refuses a grouped roll
+(`ChainRegimeRefused`); B = 1 unfused keeps serving it. GLM's profile carries
+no pass state.
+
+**Identity.** The default regime (B = 1, fusion off) stamps nothing, so every
+receipt, band and slice written before #997 keeps its bytes and digest. A
+non-default regime is stamped as `run_identity.chain_regime`
+(`prismaquant.stage_a.chain_regime.v1`, `batch_size`, `probe_fusion`); a
+stamped default refuses, so one regime has one spelling. The Stage A CLI
+takes `--chain-batch-size` and `--chain-probe-fusion {on,off}`; the band tool
+reads the same flags from the sealed request (`request_chain_regime`), so a
+band's run header equals the receipt's. A quantum reads the regime from its
+slice (`chain_regime_of`) and rebuilds its chain at Stage A's B, which is
+what makes its chained cotangents Stage A's own; a malformed stamp refuses
+as a quantum identity error.
+
+**Produced staging.** A fused run binds its produced-output owner with
+`read_order="sample_major"`: a read window holds `1 + n_probes` groups, not
+two, so the sealed window must fund at least that many and the read-ahead
+share is what remains. The groups the next window of the same pass reads
+again stay staged across the exit (`retain_produced_reads`), and the
+read-ahead gives up groups by the layer that reads them next
+(`_produced_sample_major_surrender_order`). Probe-major runs are unchanged.
+
+Measured claims about the regime's speed and energy live in the PR and the
+PQ #997 record, not here; this section states only the contract.
