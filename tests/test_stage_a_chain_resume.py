@@ -19,6 +19,8 @@ its lowest sealed checkpoint. The claims these tests hold it to:
 The fixture is a five-layer dense model at stride 2, so the run seals the
 tail checkpoint 5 and checkpoints 4 and 2, and a four-layer model whose
 layers share K/V state, so a checkpoint carries a non-empty shared adjoint.
+The equality test also runs the dense model at stride 1, resuming from
+checkpoint 1, and bound to a forward-recovery capsule, the way R13 launches.
 """
 from __future__ import annotations
 
@@ -142,14 +144,15 @@ def _at(boundary, probe, batch):
 def _run(root, monkeypatch, *, model="dense", stride=2, implementation=ONE,
          chain_resume=None, interrupt=None, partial_at=None, writes=None,
          identities=None, campaign=None, calib=None, execution=None,
-         **core):
+         generation=1001, forward_refs=None, **core):
     """One fixture Stage A invocation into ``root``; returns the receipt.
 
     ``interrupt`` raises after the write it matches; ``partial_at`` leaves a
     checkpoint directory half written at that boundary and raises. Every
     rolled cotangent the invocation writes is appended to ``writes`` as
-    ``((boundary, probe, batch), sha256)``. The generation id is pinned, so
-    two runs into one path write equal bytes.
+    ``((boundary, probe, batch), sha256)``; every forward boundary reference
+    lands in ``forward_refs`` by ``(boundary, batch)``. The generation id is
+    pinned, so two runs into one path write equal bytes.
     """
     runner = _dense_runner() if model == "dense" else _shared_runner()
     if execution is None:
@@ -163,6 +166,8 @@ def _run(root, monkeypatch, *, model="dense", stride=2, implementation=ONE,
 
     def recorded(self, tensor, **kw):
         reference = write(self, tensor, **kw)
+        if kw.get("probe_index") is None and forward_refs is not None:
+            forward_refs[kw["boundary_index"], kw["batch_index"]] = reference
         if kw.get("probe_index") is not None and writes is not None:
             data = tensor.detach().to("cpu").contiguous()
             writes.append(((kw["boundary_index"], kw["probe_index"], kw["batch_index"]),
@@ -188,7 +193,7 @@ def _run(root, monkeypatch, *, model="dense", stride=2, implementation=ONE,
         patch.setattr(StreamedBoundaryArtifacts, "write", recorded)
         patch.setattr(StreamedBoundaryArtifacts, "bind", bound)
         patch.setattr(stage_a, "write_checkpoint_with_snapshot", partial)
-        patch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=1001))
+        patch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=generation))
         receipt = stage_a.run_adjoint_capture_core(
             runner, draw() if calib is None else calib, execution=execution,
             output_root=root, stride=stride,
@@ -248,10 +253,42 @@ def _merged(writes):
     return merged
 
 
-def _band(root, boundary, identity, stride=2):
+def _band(root, boundary, sources, stride=2):
+    """``sources`` is ``{"bind_identity": ...}`` or ``{"forward_recovery": ...}``."""
     return json.loads(json.dumps(build_band_receipt(
-        output_root=root, boundary=boundary, stride_value=stride,
-        bind_identity=identity, **DIGESTS)))
+        output_root=root, boundary=boundary, stride_value=stride, **sources, **DIGESTS)))
+
+
+def _capsule(tmp_path, monkeypatch):
+    """R9's forward pass, contained after boundary 1, frozen into a capsule.
+
+    The same shape as ``test_stage_a_bands``: the capsule is what R13's own
+    launch binds, so a chain resume must continue a capsule-bound run too.
+    """
+    from prismaquant import joint_forward_resume as recovery_mod
+    from test_joint_forward_resume import _bound, _chain_sdk, _owner_spool
+
+    monkeypatch.setattr(recovery_mod, "_sdk", _chain_sdk)
+    refs, identities = {}, []
+    last = len(draw()) - 1
+    _interrupted(tmp_path / "r9", monkeypatch, generation=9, forward_refs=refs,
+                 identities=identities,
+                 interrupt=lambda kw: kw.get("probe_index") is None and (
+                     kw["boundary_index"], kw["batch_index"]) == (1, last))
+    spool, instance, template = _owner_spool(tmp_path, "e" * 64, refs)
+    ref = refs[0, 0]
+    capsule = tmp_path / "r9-to-r10.json"
+    recovery_mod.build_forward_recovery(specification={
+        "schema": recovery_mod.SCHEMA, "queue_root": str(tmp_path / "queue"),
+        "instance": instance, "template": template,
+        "session": json.loads(ref.metadata_json)["identity"]["session"],
+        "original_bind_identity": identities[-1],
+        "campaign_identity": {**CAMPAIGN, "campaign_scope": None},
+        "implementation_compatibility": {"original": ONE, "recovery": TWO,
+                                         "scope": "forward-identical-memory-only"},
+        "n_batches": len(draw()), "entry_shape": list(ref.shape), "entry_dtype": ref.dtype},
+        spool_directory=spool, output=capsule, frontier=1)
+    return _bound(capsule)
 
 
 def _slices(band):
@@ -270,6 +307,12 @@ SHAPES = {
     "partial-checkpoint": dict(partial_at=2, resumes_from=4),
     # SIGKILL: no exception handler ran, the generation still says running.
     "killed": dict(interrupt=_at(1, 0, 4), resumes_from=2, killed=True),
+    # Stride 1: the resume point is checkpoint 1, so the only roll left is
+    # layer 0's, which writes without reading back.
+    "last-layer-only": dict(interrupt=_at(0, 2, 1), resumes_from=1, stride=1),
+    # R13's shape: a run bound to a forward-recovery capsule (boundaries 0
+    # and 1 are the capsule's), killed mid-chain.
+    "capsule-bound": dict(interrupt=_at(3, 1, 2), resumes_from=4, capsule=True),
 }
 
 
@@ -284,18 +327,24 @@ def test_a_resumed_run_writes_what_the_uninterrupted_run_writes(tmp_path, monkey
     spec = dict(SHAPES[shape])
     resumes_from = spec.pop("resumes_from")
     killed = spec.pop("killed", False)
+    stride = spec.pop("stride", 2)
+    run = {"stride": stride}
+    if spec.pop("capsule", False):
+        run.update(forward_recovery=_capsule(tmp_path, monkeypatch), implementation=TWO)
     root = tmp_path / "run"
     identities, baseline_writes = [], []
-    baseline = _run(root, monkeypatch, writes=baseline_writes, identities=identities)
-    identity = identities[-1]
-    assert baseline["stride"]["boundaries"] == [5, 4, 2]
-    assert [c["boundary"] for c in baseline["checkpoints"]] == [5, 4, 2]
-    baseline_bands = {b: _band(root, b, identity) for b in (5, 4, 2)}
+    baseline = _run(root, monkeypatch, writes=baseline_writes, identities=identities, **run)
+    sources = ({"forward_recovery": run["forward_recovery"]} if "forward_recovery" in run
+               else {"bind_identity": identities[-1]})
+    marks = {1: [5, 4, 3, 2, 1], 2: [5, 4, 2]}[stride]
+    assert baseline["stride"]["boundaries"] == marks
+    assert [c["boundary"] for c in baseline["checkpoints"]] == marks
+    baseline_bands = {b: _band(root, b, sources, stride) for b in marks}
     aside = tmp_path / "baseline"
     root.rename(aside)
 
     writes = []
-    _interrupted(root, monkeypatch, writes=writes, **spec)
+    _interrupted(root, monkeypatch, writes=writes, **run, **spec)
     space = adjoint_space(root)
     generation = _generation(root)
     status = json.loads(generation.read_text())
@@ -305,7 +354,8 @@ def test_a_resumed_run_writes_what_the_uninterrupted_run_writes(tmp_path, monkey
     assert not adjoint_receipt_path(space).exists()
     assert chain_state_path(space).is_file()
     entries = generation.parent / "entries"
-    assert {f"boundary-{b}-{k}-at-{k}.pt" for b in range(5) for k in range(5)} <= {
+    own = range(2 if "forward_recovery" in run else 0, 5)
+    assert {f"boundary-{b}-{k}-at-{k}.pt" for b in range(5) for k in own} <= {
         path.name for path in entries.iterdir()}
     sealed = sorted(int(path.parent.name.removeprefix("boundary-"))
                     for path in (space / "checkpoints").glob("boundary-*/checkpoint.json"))
@@ -315,15 +365,16 @@ def test_a_resumed_run_writes_what_the_uninterrupted_run_writes(tmp_path, monkey
     if killed:
         status["status"] = "running"
         generation.write_text(json.dumps(status))
-    early_bands = {b: _band(root, b, identity) for b in sealed}
+    early_bands = {b: _band(root, b, sources, stride) for b in sealed}
 
-    resumed = _run(root, monkeypatch, writes=writes,
+    resumed = _run(root, monkeypatch, writes=writes, **run,
                    chain_resume=_resume(root, resume_from=resumes_from))
 
     assert _merged(writes) == _merged(baseline_writes)
     record = json.loads((space / "resumes" / "resume-001.json").read_text())
     assert record["index"] == 1 and record["switch_checkpoint"] == resumes_from
-    assert record["compatibility"] is None and record["implementation_sha256"] == ONE
+    assert record["compatibility"] is None
+    assert record["implementation_sha256"] == run.get("implementation", ONE)
     assert record["removed_rolling_entries"] == len(leftovers)
     set_aside = ["boundary-002.partial-resume-001"] if shape == "partial-checkpoint" else []
     assert record["partial_checkpoints_set_aside"] == set_aside
@@ -345,9 +396,9 @@ def test_a_resumed_run_writes_what_the_uninterrupted_run_writes(tmp_path, monkey
 
     # Bands sealed before the resume and after it form one set, and every
     # band and slice is the uninterrupted run's.
-    bands = {**{b: _band(root, b, identity) for b in (5, 4, 2) if b not in early_bands},
+    bands = {**{b: _band(root, b, sources, stride) for b in marks if b not in early_bands},
              **early_bands}
-    assert sorted(band_set(bands.values())) == [2, 4, 5]
+    assert sorted(band_set(bands.values())) == sorted(marks)
     for boundary, band in bands.items():
         assert canonical_json_bytes(band, where="band") == \
             canonical_json_bytes(baseline_bands[boundary], where="band")
@@ -467,7 +518,7 @@ def test_a_declared_implementation_switch_is_recorded_outside_the_header(
     assert [r["implementation_sha256"] for r in records] == [TWO, TWO]
     assert [r["switch_checkpoint"] for r in records] == [4, 2]
 
-    bands = {b: _band(root, b, identity) for b in (5, 4, 2)}
+    bands = {b: _band(root, b, {"bind_identity": identity}) for b in (5, 4, 2)}
     assert [RESUME_COMPATIBILITY_KEY in bands[b] for b in (5, 4)] == [False, False]
     assert bands[2][RESUME_COMPATIBILITY_KEY] == [declared]
     assert sorted(band_set(bands.values())) == [2, 4, 5]
@@ -518,19 +569,36 @@ def _refusal_kwargs(root, name):
     return cases[name]
 
 
-REFUSALS = ["batch-size", "probe-fusion", "plan", "prepared", "read-manifest",
-            "unit-roster", "stride", "artifact-budget", "read-window", "calibration",
-            "probes", "seed", "arithmetic", "chain-state-digest",
-            "not-the-lowest-checkpoint", "implementation-undeclared",
-            "declaration-without-switch", "declaration-of-another-switch",
-            "certified-mode"]
+#: Each relaunch and the reason it must refuse for: a refusal for another
+#: reason would pass a bare ``pytest.raises`` and prove nothing.
+REFUSALS = {
+    "batch-size": "differs in run_identity$",
+    "probe-fusion": "differs in run_identity$",
+    "plan": "differs in run_identity$",
+    "prepared": "differs in run_identity$",
+    "read-manifest": "differs in run_identity$",
+    "unit-roster": "differs in run_identity$",
+    "stride": "differs in stride$",
+    "artifact-budget": "another boundary storage policy",
+    "read-window": "another boundary storage policy",
+    "calibration": "differs in run_identity, bind_identity$",
+    "probes": "differs in run_identity, bind_identity$",
+    "seed": "differs in run_identity, bind_identity$",
+    "arithmetic": "differs in arithmetic$",
+    "chain-state-digest": "does not have the pinned digest",
+    "not-the-lowest-checkpoint": "the lowest sealed checkpoint of the run is 4",
+    "implementation-undeclared": "needs an explicit --resume-implementation-compatibility",
+    "declaration-without-switch": "names a switch that is not happening",
+    "declaration-of-another-switch": "is not the switch this relaunch makes",
+    "certified-mode": "requires PRISMAQUANT_DEV_MODE=1",
+}
 
 
-def _refused_untouched(root, monkeypatch, **kw):
-    """Refuse the relaunch; nothing but the generation status file changes."""
+def _refused_untouched(root, monkeypatch, match, **kw):
+    """Refuse the relaunch for ``match``; nothing but the generation status changes."""
     before_names, before = _names(root), _tree(root)
     generation = str(_generation(root).relative_to(root))
-    with pytest.raises(AdjointIdentityRefused):
+    with pytest.raises(AdjointIdentityRefused, match=match):
         _run(root, monkeypatch, **kw)
     assert _names(root) == before_names, "a refused resume removed or renamed a path"
     after = _tree(root)
@@ -539,7 +607,7 @@ def _refused_untouched(root, monkeypatch, **kw):
     return json.loads((root / generation).read_text())["status"]
 
 
-@pytest.mark.parametrize("name", REFUSALS)
+@pytest.mark.parametrize("name", sorted(REFUSALS))
 def test_every_regime_difference_refuses_before_anything_is_removed(
         tmp_path, monkeypatch, name):
     root = tmp_path / "run"
@@ -551,7 +619,7 @@ def test_every_regime_difference_refuses_before_anything_is_removed(
         monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     elif dev_mode is False:
         monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
-    assert _refused_untouched(root, monkeypatch, **kw) == "failed"
+    assert _refused_untouched(root, monkeypatch, REFUSALS[name], **kw) == "failed"
 
 
 def test_a_matmul_precision_difference_refuses(tmp_path, monkeypatch):
@@ -561,7 +629,8 @@ def test_a_matmul_precision_difference_refuses(tmp_path, monkeypatch):
     other = "medium" if precision != "medium" else "high"
     torch.set_float32_matmul_precision(other)
     try:
-        _refused_untouched(root, monkeypatch, chain_resume=_resume(root))
+        _refused_untouched(root, monkeypatch, "differs in arithmetic$",
+                           chain_resume=_resume(root))
     finally:
         torch.set_float32_matmul_precision(precision)
 
@@ -577,7 +646,8 @@ def test_another_capsule_refuses_and_leaves_the_run_resumable(tmp_path, monkeypa
                       lambda *a, **kw: SimpleNamespace(
                           receipt_binding={"capsule": "another"}, frontier=0,
                           n_batches=len(draw()), records={}))
-        assert _refused_untouched(root, monkeypatch, chain_resume=_resume(root)) == "failed"
+        assert _refused_untouched(root, monkeypatch, "another forward-recovery capsule",
+                                  chain_resume=_resume(root)) == "failed"
     resumed = _run(root, monkeypatch, chain_resume=_resume(root, resume_from=4))
     assert [c["boundary"] for c in resumed["checkpoints"]] == [5, 4, 2]
 
@@ -587,13 +657,15 @@ def test_a_checkpoint_gap_refuses(tmp_path, monkeypatch):
     _interrupted(root, monkeypatch, interrupt=_at(0, 2, 1))
     four = checkpoint_directory(adjoint_space(root), 4)
     four.rename(four.with_name(four.name + ".gone"))
-    _refused_untouched(root, monkeypatch, chain_resume=_resume(root))
+    _refused_untouched(root, monkeypatch, "a gap cannot be resumed across",
+                       chain_resume=_resume(root))
 
 
 def test_a_completed_run_and_a_completed_generation_refuse(tmp_path, monkeypatch):
     root = tmp_path / "run"
     write_adjoint_receipt(adjoint_space(root), _run(root, monkeypatch))
-    _refused_untouched(root, monkeypatch, chain_resume=_resume(root))
+    _refused_untouched(root, monkeypatch, "the run completed",
+                       chain_resume=_resume(root))
 
     root = tmp_path / "complete-generation"
     _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
@@ -601,7 +673,8 @@ def test_a_completed_run_and_a_completed_generation_refuse(tmp_path, monkeypatch
     status = json.loads(generation.read_text())
     status["status"] = "complete"
     generation.write_text(json.dumps(status))
-    assert _refused_untouched(root, monkeypatch, chain_resume=_resume(root)) == "complete"
+    assert _refused_untouched(root, monkeypatch, "only an interrupted run resumes",
+                              chain_resume=_resume(root)) == "complete"
 
 
 def test_a_run_interrupted_before_its_tail_checkpoint_has_no_chain_to_resume(
@@ -640,7 +713,8 @@ def test_the_interrupted_owner_must_be_contained(tmp_path, monkeypatch):
         raise ChainResumeRefused("the owner is still running")
 
     monkeypatch.setattr(resume_mod, "require_producer_contained", live)
-    _refused_untouched(root, monkeypatch, chain_resume=_resume(root))
+    _refused_untouched(root, monkeypatch, "the owner is still running",
+                       chain_resume=_resume(root))
     asked = []
     monkeypatch.setattr(resume_mod, "require_producer_contained", asked.append)
     _run(root, monkeypatch, chain_resume=_resume(root))
