@@ -2242,13 +2242,69 @@ def _source_extent_entries(parent_manifest: Mapping, *,
     return runs
 
 
+def check_head_slice_binding(head_slice: Mapping, *, layer: int,
+                             prepared_sha256: str,
+                             production_pkl_sha256: str) -> dict:
+    """A head-slice binding the manifest may declare (PQ #1010).
+
+    ``{path, sha256, bytes, schema, head_files}``: the slice file itself and
+    the digest-bound head files it names. The slice must be this layer's,
+    and its prepared completion and production pickle must be the sealed
+    campaign's. The slice bytes are the producer's; this checks the binding.
+    """
+    from .joint_stage_b_head import HEAD_FILE_ROLES, HEAD_SLICE_SCHEMA
+
+    def _file(row, where):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"{where} is not an object: refusing")
+        path, size, digest = row.get("path"), row.get("bytes"), row.get("sha256")
+        if type(path) is not str or not path.startswith("/") or \
+                os.path.normpath(path) != path:
+            raise ValueError(f"{where} names no absolute path: refusing")
+        if type(size) is not int or isinstance(size, bool) or size <= 0:
+            raise ValueError(f"{where} carries no byte length: refusing")
+        if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError(f"{where} carries no digest: refusing")
+        return {"path": path, "sha256": digest, "bytes": size}
+
+    if not isinstance(head_slice, Mapping) or set(head_slice) != {
+            "path", "sha256", "bytes", "schema", "head_files"}:
+        raise ValueError("a head slice binding names exactly path, sha256, "
+                         "bytes, schema and head_files: refusing")
+    if head_slice["schema"] != HEAD_SLICE_SCHEMA:
+        raise ValueError("a head slice binding names a foreign schema: refusing")
+    bound = _file(head_slice, "head slice")
+    if not bound["path"].endswith(f"/head-slices/layer-{int(layer):03d}.json"):
+        raise ValueError(f"head slice {bound['path']} is not layer {layer}'s: "
+                         "refusing")
+    rows = head_slice["head_files"]
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("a head slice binding names no head files: refusing")
+    files = []
+    for row in rows:
+        role = row.get("role") if isinstance(row, Mapping) else None
+        if role not in HEAD_FILE_ROLES or any(role == seen["role"] for seen in files):
+            raise ValueError(f"head file role {role!r} is unknown or repeated: "
+                             "refusing")
+        files.append({"role": role, **_file(row, f"head {role}")})
+    by_role = {row["role"]: row for row in files}
+    if by_role.get("prepared", {}).get("sha256") != prepared_sha256:
+        raise ValueError("the head slice binds another prepared completion: "
+                         "refusing")
+    if by_role.get("production_cache", {}).get("sha256") != production_pkl_sha256:
+        raise ValueError("the head slice binds another production pickle: "
+                         "refusing")
+    return {**bound, "schema": HEAD_SLICE_SCHEMA, "head_files": files}
+
+
 def build_quantum_executable_manifest(
         record: Mapping, receipt: Mapping, parent_manifest: Mapping, *,
         strided_boundaries: Sequence[int], n_probes: int, calib: Mapping,
         render_prerequisite: Mapping,
         layer_source_spans: Mapping[int, Sequence] | None = None,
         source_model_root: str | None = None,
-        prepared_inputs: Mapping | None = None) -> dict:
+        prepared_inputs: Mapping | None = None,
+        head_slice: Mapping | None = None) -> dict:
     """ONE executable v2 read manifest for a quantum row (PQ #862).
 
     Derived post-capture from the quantum's stage-A slice (``receipt`` is the
@@ -2305,6 +2361,15 @@ def build_quantum_executable_manifest(
     that window's replay phases, and ``annotations.prepared_input``
     carries the bound membership. Production dispatch accepts only that
     complete contract; legacy sequencing-only records keep refusing.
+
+    With ``head_slice`` (PQ #1010), the ``head`` phase declares the layer's
+    sealed Stage B head slice and the head files it binds (the prepared
+    completion, the production pickle and, when the plan binds them, the
+    served activation policy and the source-identity cache) after the
+    calibration entry, and ``annotations.head_slice`` carries the binding.
+    The quantum then reads nothing else from the campaign inputs before its
+    first GPU allocation. Without it the historical manifest bytes
+    reproduce unchanged.
     """
     from .joint_adjoint_slices import chain_layers_for
 
@@ -2443,6 +2508,21 @@ def build_quantum_executable_manifest(
     head_index = _take(
         {"path": calib_path, "offset": 0, "bytes": calib_bytes,
          "sha256": calib_sha256}, where="calibration intake")
+    head_indices = [head_index]
+    head_annotation: dict = {}
+    if head_slice is not None:
+        bound_head = check_head_slice_binding(
+            head_slice, layer=layer, prepared_sha256=campaign["prepared_sha256"],
+            production_pkl_sha256=prerequisite["production_pkl_sha256"])
+        head_indices.append(_take(
+            {"path": bound_head["path"], "offset": 0,
+             "bytes": bound_head["bytes"], "sha256": bound_head["sha256"]},
+            where="head slice"))
+        for row in bound_head["head_files"]:
+            head_indices.append(_take(
+                {"path": row["path"], "offset": 0, "bytes": row["bytes"],
+                 "sha256": row["sha256"]}, where=f"head {row['role']}"))
+        head_annotation = {"head_slice": bound_head}
     # The bulk collector owns its own index space; remap it into this
     # manifest's unified space (bulk paths are unique, so order is kept).
     index_of: dict[int, int] = {}
@@ -2508,7 +2588,7 @@ def build_quantum_executable_manifest(
         read_phases.append({"name": name, "entry_indices": list(indices),
                             "bytes": size, "cumulative_bytes": cumulative})
 
-    _seal_phase("head", [head_index])
+    _seal_phase("head", head_indices)
     _seal_phase(CHECKPOINT_LOAD_PHASE, checkpoint_indices)
     for boundary in chain:
         _seal_phase(executable_source_phase_name(boundary),
@@ -2576,6 +2656,7 @@ def build_quantum_executable_manifest(
                       "sha256": calib_sha256},
             "render_prerequisite": prerequisite,
             **prepared_annotation,
+            **head_annotation,
             **({"source_completion": {
                 "schema": SOURCE_COMPLETION_SCHEMA,
                 "layers_checked": len(needed),
@@ -2655,7 +2736,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             metadata_root: str | None = None,
                             layer_source_spans: Mapping[int, Sequence] | None = None,
                             source_model_root: str | None = None,
-                            prepared_inputs: Mapping | None = None) -> dict:
+                            prepared_inputs: Mapping | None = None,
+                            head_slice: Mapping | None = None) -> dict:
     """Bind a sealed executable read manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying an ``executable_readset``
@@ -2671,7 +2753,9 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     mode and the bound block additionally carries the sealed
     ``prepared_input`` membership the manifest annotations carry, so the
     dispatcher and the runtime can compare it without re-reading the
-    manifest bytes.
+    manifest bytes. With ``head_slice`` (PQ #1010) the block carries the
+    head slice's path, digest, size and schema, which is how the quantum
+    finds its head.
     """
     import copy
     import os
@@ -2745,7 +2829,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
             calib=calib, render_prerequisite=render_prerequisite,
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
-            prepared_inputs=prepared_inputs)
+            prepared_inputs=prepared_inputs, head_slice=head_slice)
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         raise ValueError("the executable readset does not derive from its "
                          f"record, receipt and parent: refusing ({exc})") from exc
@@ -2782,6 +2866,10 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                  for key in ("path", "offset", "bytes", "sha256")}
                 for index in window.get("entry_indices", [])]
         fresh["executable_readset"]["prepared_input"] = block_prepared
+    head_sealed = manifest.get("annotations", {}).get("head_slice")
+    if head_sealed is not None:
+        fresh["executable_readset"]["head_slice"] = {
+            key: head_sealed[key] for key in ("path", "sha256", "bytes", "schema")}
     body = {key: value for key, value in fresh.items()
             if key != "identity_sha256"}
     fresh["identity_sha256"] = canonical_sha256(
@@ -2796,7 +2884,8 @@ def emit_quantum_executable_readsets(
         output_root: str, metadata_root: str | None = None,
         layer_source_spans: Mapping[int, Sequence] | None = None,
         source_model_root: str | None = None,
-        prepared_inputs: Mapping | None = None) -> list[dict]:
+        prepared_inputs: Mapping | None = None,
+        head_slice: Mapping | None = None) -> list[dict]:
     """The post-capture generation path for executable read manifests.
 
     For every record, derives the executable manifest, seals it, and binds
@@ -2825,7 +2914,7 @@ def emit_quantum_executable_readsets(
             calib=calib, render_prerequisite=render_prerequisite,
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
-            prepared_inputs=prepared_inputs)
+            prepared_inputs=prepared_inputs, head_slice=head_slice)
         quantum_id = record.get("quantum_id")
         manifest_path = f"{bound_dir}/{quantum_id}.executable.json.gz"
         if quantum_id in seen or manifest_path in seen:
@@ -2846,7 +2935,7 @@ def emit_quantum_executable_readsets(
                 metadata_root=metadata_root,
                 layer_source_spans=layer_source_spans,
                 source_model_root=source_model_root,
-                prepared_inputs=prepared_inputs),
+                prepared_inputs=prepared_inputs, head_slice=head_slice),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,

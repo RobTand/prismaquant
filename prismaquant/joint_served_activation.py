@@ -103,7 +103,23 @@ def format_activation_maxima(maxima, spec):
 
 def activate_policy(cache, bound):
     """Attach pricing-only policy; leave persisted maxima and all receipts intact."""
-    policy = verify_policy(bound)
+    return _attach_policy(cache, bound, verify_policy(bound))
+
+
+def activate_verified_policy(cache, bound, policy):
+    """Attach a policy whose derivation was verified once, at prepare.
+
+    The Stage B head slice (PQ #1010) re-derives the policy in the metadata
+    producer and binds its file by digest; the quantum passes the bytes it
+    read against that digest. The scope and every cache-facing check below
+    still run here; only the campaign-wide re-derivation does not repeat.
+    """
+    _require(isinstance(policy, dict) and policy.get("schema") == SCHEMA
+             and policy.get("format") == FORMAT, "unknown policy scope")
+    return _attach_policy(cache, bound, policy)
+
+
+def _attach_policy(cache, bound, policy):
     from .nvfp4_activation_contract import resolve_input_global_scale_policy
     _require(resolve_input_global_scale_policy() == policy["executed_grouping"]["input_global_scale_policy"],
              "active scale arithmetic differs from the explicit policy")
