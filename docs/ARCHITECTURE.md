@@ -1,5 +1,37 @@
 # PrismaQuant Architecture
 
+Container caches sit under the declared local scratch (2026-09-23,
+`ws-tq/1072-container-cache-roots`, PQ #1072, #1014 item f). A campaign
+container writes its HF, Triton and inductor caches, `XDG_CACHE_HOME` and
+`PRISMAQUANT_TMPDIR` somewhere. Left to the container's writable overlay,
+those writes are unbounded and invisible to PrismaBuild.
+
+When a row declares bounded local scratch (PB #911), the launcher binds each
+of these that the spec leaves unset under `<root>/container-cache/<name>`
+(`tessera_campaign_container.container_cache_environment`). The root is the
+first declared kind in `LOCAL_SCRATCH_KINDS` order: the cotangent scratch,
+then the Stage B spill. Its writable identity bind is already required. A
+value set in the spec wins. The defaults are derived at launch from the
+sealed scratch pair, so the sealed spec and the outer request are unchanged.
+A row with no scratch launches exactly as before.
+
+`dispatch_joint_quanta` warns (`OverlayCacheWarning`), and does not refuse,
+when a spec points one of them at `/tmp`, `/var/tmp` or a path that no
+writable mount covers. It warns whether or not scratch is declared. The
+launcher's preamble lists the same variables as `overlay_pinned_caches`.
+
+Limits:
+- The caches are charged to PrismaBuild through nothing but the scratch
+  pair's own ceiling. The spill preallocates up to that ceiling, so cache
+  bytes can run past what PrismaBuild charged. Their size is unmeasured.
+- The caches persist on the box's disk across rows.
+- The campaign's default spec (`spec-hostcap32-ram-dev-spool.json`) pins all
+  five to `/tmp` and declares no scratch, so it warns and changes nothing
+  until a spec declares a scratch root and drops those pins.
+
+Gate: `tests/test_container_cache_roots_1072.py`. No format, pipeline
+default, stage or ship gate changes.
+
 A superseded Stage A run's checkpoints and the entries they pin can be
 retired (2026-09-23, `ws-tq/1073-retire-superseded-pins`, PQ #1073). Since
 #1036 a checkpoint names the owner's own cotangent entries instead of copying
@@ -970,8 +1002,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-tq/1073-retire-superseded-pins`.
+As of: 2026-09-23 · `ws-tq/1072-container-cache-roots`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-tq/1072-container-cache-roots`) for **container
+caches under the declared local scratch** (PQ #1072): the launcher binds HF,
+Triton, inductor, XDG and `PRISMAQUANT_TMPDIR` under the first declared scratch
+root when the spec leaves them unset, and the dispatcher warns on a spec that
+pins them to the overlay. See the entry at the top. No format, pipeline
+default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-tq/1073-retire-superseded-pins`) for **retiring
 a superseded Stage A run's pinned checkpoint entries** (PQ #1073): an operator

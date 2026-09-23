@@ -40,12 +40,14 @@ import json
 import subprocess
 import sys
 import time
+import warnings
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
 if __package__:
     from tools.tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
+        container_cache_environment,
         admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
@@ -59,6 +61,7 @@ else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
+        container_cache_environment,
         admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
@@ -879,6 +882,33 @@ def produced_spool_row_environment(spec: Mapping) -> dict:
     return forwarded
 
 
+class OverlayCacheWarning(UserWarning):
+    """A spec points a container cache at the overlay or /tmp (PQ #1072)."""
+
+
+def _warn_overlay_caches(spec: dict, scratch: dict) -> None:
+    """Warn, but do not refuse, when a spec pins a cache to the overlay.
+
+    When the row declares bounded local scratch, the launcher binds every
+    cache the spec leaves unset under the scratch root
+    (``container_cache_environment``). A value set in the spec wins over
+    that default. A value on ``/tmp``, ``/var/tmp`` or an unmounted path
+    writes to the container overlay, which is unbounded and invisible to
+    PrismaBuild. The warning fires with or without declared scratch.
+    """
+    _defaults, pinned = container_cache_environment(spec, scratch)
+    if pinned:
+        env = spec.get("env", {})
+        named = ", ".join(f"{name}={env[name]}" for name in pinned)
+        hint = ("unset them to bind them under the declared scratch root"
+                if scratch else
+                "declare a bounded local scratch root to bind them there")
+        warnings.warn(
+            f"the campaign spec pins container caches to the overlay: {named}; "
+            f"these writes are unbounded and invisible to PrismaBuild; {hint}",
+            OverlayCacheWarning, stacklevel=3)
+
+
 def _container_wrap(spec_path: Path, payload: list[str], *,
                     progress: Sequence[tuple[str, int]],
                     resource_policy=None) -> tuple[list[str], str | None]:
@@ -906,7 +936,8 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     # inlined spec bytes supply its outer PB environment below; no ambient
     # coordinator environment or second spec read participates.
     try:
-        local_scratch_environment(spec, spec.get("env", {}))
+        scratch = local_scratch_environment(spec, spec.get("env", {}))
+        _warn_overlay_caches(spec, scratch)
         _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload)
         # The bf16 reduction flag is sealed in the same spec, so it is
         # uniform across every quantum of the dispatch (PQ #1028).

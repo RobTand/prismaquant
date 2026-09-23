@@ -601,6 +601,72 @@ def local_scratch_environment(spec: dict, environ) -> dict:
     return forwarded
 
 
+#: The container's write caches and PrismaQuant's temp parent, each with the
+#: subdirectory it gets under a declared scratch root (PQ #1072, #1014 item f).
+#: Left unset, each one lands in the container's writable overlay, which is
+#: bounded by nothing and invisible to PrismaBuild.
+CONTAINER_CACHE_ENV = (
+    ("HF_HOME", "hf"),
+    ("TRITON_CACHE_DIR", "triton"),
+    ("TORCHINDUCTOR_CACHE_DIR", "inductor"),
+    ("XDG_CACHE_HOME", "xdg"),
+    ("PRISMAQUANT_TMPDIR", "tmp"),
+)
+#: The directory under the scratch root that holds the caches.
+CONTAINER_CACHE_DIRNAME = "container-cache"
+#: Container paths that are always the overlay, whatever the spec mounts.
+_OVERLAY_TEMP_ROOTS = (PurePosixPath("/tmp"), PurePosixPath("/var/tmp"))
+
+
+def _on_writable_mount(spec: dict, value: str) -> bool:
+    path = PurePosixPath(value)
+    if any(path == root or root in path.parents for root in _OVERLAY_TEMP_ROOTS):
+        return False
+    covering = [mount for mount in spec.get("container", {}).get("mounts", [])
+                if (PurePosixPath(mount["target"]) == path
+                    or PurePosixPath(mount["target"]) in path.parents)]
+    if not covering:
+        return False
+    nearest = max(covering, key=lambda item: len(PurePosixPath(item["target"]).parts))
+    return not nearest.get("readonly", False)
+
+
+def container_cache_environment(spec: dict, scratch: dict) -> "tuple[dict, list[str]]":
+    """Default cache roots under the declared scratch, and the overlay pins.
+
+    ``scratch`` is the forwarded bounded-local environment
+    (:func:`local_scratch_environment` or the per-kind calls). When it
+    declares a root, each variable in :data:`CONTAINER_CACHE_ENV` that the
+    spec leaves unset gets ``<root>/container-cache/<subdir>``. The root is
+    the first declared kind in :data:`LOCAL_SCRATCH_KINDS` order: the
+    cotangent scratch, then the Stage B spill. It sits on a writable
+    identity bind, which the kind's own check has already required.
+
+    A variable the spec sets keeps its value, so the default never overrides
+    a declaration. The second return value names each variable the spec
+    points at ``/tmp``, ``/var/tmp`` or a path that no writable mount
+    covers, that is, the overlay. Callers warn about them. They do not
+    refuse them.
+
+    The caches' bytes are not charged separately. They fall inside the scratch
+    root's disk, and only that pair's ceiling is charged to PrismaBuild
+    (PB #911).
+    """
+
+    declared = spec.get("env", {}) if isinstance(spec, dict) else {}
+    pinned = [name for name, _ in CONTAINER_CACHE_ENV
+              if isinstance(declared.get(name), str)
+              and not _on_writable_mount(spec, declared[name])]
+    root = next((scratch[names[0]] for names, _ in LOCAL_SCRATCH_KINDS
+                 if scratch.get(names[0])), None)
+    if root is None:
+        return {}, pinned
+    base = PurePosixPath(root) / CONTAINER_CACHE_DIRNAME
+    defaults = {name: str(base / subdir) for name, subdir in CONTAINER_CACHE_ENV
+                if name not in declared}
+    return defaults, pinned
+
+
 def _bounded_local_environment(spec, environ, names, label):
     declared = spec.get("env", {})
     if not any(environ.get(name) or declared.get(name) for name in names):
@@ -929,12 +995,15 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
     # row-env check that already keeps it: a legacy row sealed with
     # ``MIMALLOC_PURGE_DELAY=10`` reached the container with ``0``.
     bounded_defaults = BOUNDED_CAPTURE_ENV if bounded else {}
-    forwarded = {SAFE_PATH_ENV: "1", **spec.get("env", {}),
+    scratch = {**cotangent_scratch_environment(spec, environ if environ is not None else {}),
+               **stage_b_spill_environment(spec, environ if environ is not None else {})}
+    # The caches' defaults come first, so any value in the spec overrides
+    # them (PQ #1072).
+    cache_defaults, _pinned = container_cache_environment(spec, scratch)
+    forwarded = {SAFE_PATH_ENV: "1", **cache_defaults, **spec.get("env", {}),
                  **bounded_defaults,
                  **progress_environment(spec, environ if environ is not None else {}),
-                 **residency_env, **reader_env,
-                 **cotangent_scratch_environment(spec, environ if environ is not None else {}),
-                 **stage_b_spill_environment(spec, environ if environ is not None else {}),
+                 **residency_env, **reader_env, **scratch,
                  **produced_spool_environment(spec, environ if environ is not None else {})}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
@@ -1041,6 +1110,9 @@ def main(argv=None) -> int:
                       "uid": os.getuid(), "gid": os.getgid(),
                       "gpu_attached": with_gpu, "gpu_decision": gpu_reason,
                       "checkout_commit": commit,
+                      "overlay_pinned_caches": container_cache_environment(
+                          spec, {**cotangent_scratch_environment(spec, os.environ),
+                                 **stage_b_spill_environment(spec, os.environ)})[1],
                       **imports}), flush=True)
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
                             uid=os.getuid(), gid=os.getgid(), image_id=image_id,
