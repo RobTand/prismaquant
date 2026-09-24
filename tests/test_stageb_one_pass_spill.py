@@ -546,6 +546,58 @@ def test_the_launcher_hands_the_core_the_plan_free_memory_floor():
     assert config["execution"] == {"n_probes": 4}
 
 
+def test_a_band_serial_producer_admits_each_roll_before_its_capture_and_handoff(
+        campaign, monkeypatch, tmp_path):
+    """A producer that rolls a chain is admitted per roll (PQ #1163).
+
+    Under band-serial dispatch (PQ #996, #1194) only a consumer, which loads
+    its producer's handoff, skips the chain. A producer with no handoff to
+    load, such as R13 row 42 (chain [44, 43]), rolls its chain, captures at
+    the chain's batch size and emits its handoff. Layer 0 (chain [1]) stands
+    in for it with a stand-in emitter, since layer 0 has no successor. The
+    guard admits the roll before it runs, with the planned chain workspace,
+    and the capture and the handoff follow the roll.
+    """
+    import prismaquant.joint_cost_quantum as quantum_mod
+
+    layer = 0
+    policy, budget, retained = _policy_budget()
+    workspace = 3 * budget.workspace_reserve_bytes
+    priced = _chain_priced(retained, workspace_bytes=workspace)
+    monkeypatch.setitem(globals(), "_policy_budget", lambda: (policy, budget, priced))
+    _stamp_chain_regime(monkeypatch)
+    guard = _DeviceRecordingGuard(campaign.device)
+    _mark_rolls(monkeypatch, guard)
+    emitted = []
+
+    def emit(**kwargs):
+        guard.admissions.append(("handoff_emit", 0, 0))
+        emitted.append(sorted(kwargs))
+        return {}
+
+    emitter = SimpleNamespace(capture_batch=CHAIN_REGIME["batch_size"], emit=emit,
+                              published={})
+    original = quantum_mod.run_layer_quantum_core
+    monkeypatch.setattr(quantum_mod, "run_layer_quantum_core",
+                        lambda *args, **kwargs: original(
+                            *args, handoff_emitter=emitter, **kwargs))
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                              regime=f"capture_batch={CHAIN_REGIME['batch_size']}")
+    assert payload is not None, _chain(state.error)
+    assert emitted, "the producer never emitted its handoff"
+    labels = [entry[0] for entry in guard.admissions]
+    roll = labels.index(f"{ROLL_MARKER}:1")
+    admitted = labels.index("before_chain_layer_roll:1")
+    assert admitted < roll, labels
+    assert guard.admissions[admitted][1:] == (0, workspace)
+    captures = [index for index, label in enumerate(labels)
+                if label == "before_joint_window_backward"]
+    assert captures and roll < captures[0], labels
+    assert captures[-1] < labels.index("handoff_emit"), labels
+
+
 def _record_capture_sides(monkeypatch):
     """Record every read of the spill's host and device capture reserves.
 

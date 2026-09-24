@@ -272,3 +272,46 @@ def test_the_measurement_tool_declares_the_headroom_owner_when_the_plan_prices_n
     assert planned.chain_device_peak_bytes() == DEVICE
     assert declare_chain_owner(config, {'run_identity': {}}, [44, 43]) == {
         'source': 'plan', 'chain_workspace_reserve_bytes': headroom, 'chain_layers': [43, 44]}
+
+
+#: GLM-5.3 body layer shapes (``model_profiles/specs/glm5_next.json``): sparse
+#: MLA attention at 3, 7, ..., 43, KDA linear attention at the other routed
+#: layers. Dense layers 0 to 2 have no measured chain owner.
+GLM_DSA = list(range(3, 45, 4))
+GLM_KDA = [layer for layer in range(3, 45) if layer not in GLM_DSA]
+
+
+def test_band_045_rows_42_41_and_40_admit_every_roll_under_the_measured_owners():
+    """R13 band 045 below its checkpoint at boundary 45 (PQ #1163).
+
+    In chain mode row 42 rolls [44, 43], row 41 rolls [44, 43, 42] and row 40
+    rolls [44, 43, 42, 41]: KDA and sparse MLA layers, the two shapes PB
+    ``1b6bc9e5d2be`` measured. Every roll resolves to the largest measured
+    workspace, charged beside the largest measured reservation, inside the
+    68 GiB device envelope and the 96 GiB physical budget less its margin.
+    One byte more than the reported device margin refuses at derivation.
+    """
+    from prismaquant.joint_adjoint_slices import chain_layers_for
+
+    shapes = {'kda_routed_moe': _owner(GLM_KDA, KDA_44),
+              'dsa_routed_moe': _owner(GLM_DSA, DSA_43)}
+    budget, record = _derive(**_chain(shapes))
+    chains = {row: list(chain_layers_for(45, row)) for row in (42, 41, 40)}
+    assert chains == {42: [44, 43], 41: [44, 43, 42], 40: [44, 43, 42, 41]}
+    for layers in chains.values():
+        assert [budget.chain_workspace_bytes(4, fused=True, layer=layer)
+                for layer in layers] == [KDA_44[0]] * len(layers)
+    chain = record['chain']
+    assert chain['device_peak_bytes'] == KDA_44[0] + DSA_43[1] == 72410464256
+    assert chain['device_margin_bytes'] == DEVICE - 72410464256 == 603979776
+    assert chain['peak_planned_bytes'] == 86944190464 <= BOUND
+    assert record['peak_planned_bytes'] >= chain['peak_planned_bytes']
+    # A dense layer has no priced shape, so a chain through it refuses.
+    with pytest.raises(RuntimeError, match='chain layer 2 has no priced chain layer shape'):
+        budget.chain_workspace_bytes(4, fused=True, layer=2)
+    # One byte past the margin: the KDA shape still fits alone, but the budget
+    # charges it beside DSA's larger reservation, and that refuses.
+    over = (KDA_44[0] + chain['device_margin_bytes'] + 1, KDA_44[1], KDA_44[2])
+    with pytest.raises(RuntimeError, match='chain phase cannot fit the device envelope'):
+        _derive(**_chain({'kda_routed_moe': _owner(GLM_KDA, over),
+                          'dsa_routed_moe': _owner(GLM_DSA, DSA_43)}))
