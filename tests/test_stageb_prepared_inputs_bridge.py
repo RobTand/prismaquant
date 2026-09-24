@@ -126,20 +126,26 @@ def _execution():
     }
 
 
-def _campaign_files(tmp_path):
-    """Plan/prepared/parent/derivation/partition/receipt files + digests."""
+def _campaign_files(tmp_path, *, execution=None, model_config=None):
+    """Plan/prepared/parent/derivation/partition/receipt files + digests.
+
+    ``execution`` adds fields to the plan's execution block; ``model_config``
+    writes the source ``config.json``.
+    """
     files = _render_files(tmp_path)
     pkl_path = _production_pkl(tmp_path, files)
     pkl_sha = hashlib.sha256(pkl_path.read_bytes()).hexdigest()
     out_root = tmp_path / "run"
     model_dir = tmp_path / "model"
     model_dir.mkdir(parents=True, exist_ok=True)
+    if model_config is not None:
+        (model_dir / "config.json").write_text(json.dumps(model_config))
     calib = tmp_path / "calib.pt"
     torch.save(torch.arange(16, dtype=torch.float32), calib)
     plan = {
         "output_root": str(out_root),
         "model": str(model_dir),
-        "execution": _execution(),
+        "execution": {**_execution(), **(execution or {})},
         "calibration_input": {
             "path": str(calib),
             "sha256": hashlib.sha256(calib.read_bytes()).hexdigest()},
@@ -194,10 +200,11 @@ def _campaign_files(tmp_path):
     }
 
 
-def _run_regen(tmp_path):
+def _run_regen(tmp_path, *extra, execution=None, model_config=None):
     """The normal generator CLI; returns (records_dir, out_root)."""
     import regenerate_joint_quanta as regen
-    layout = _campaign_files(tmp_path)
+    layout = _campaign_files(tmp_path, execution=execution,
+                             model_config=model_config)
     records_out = tmp_path / "regen" / "records"
     code = regen.main([
         "--plan", str(layout["plan_path"]),
@@ -212,6 +219,7 @@ def _run_regen(tmp_path):
         "--output-root", str(tmp_path / "run"),
         "--adjoint-receipt", str(layout["receipt_path"]),
         "--executable-readsets",
+        *extra,
     ])
     assert code == 0, f"generator CLI refuses the bridge fixture: {code}"
     return layout, records_out
@@ -251,6 +259,51 @@ def test_regen_cli_derives_prepared_contracts(tmp_path):
             assert hashlib.sha256(
                 Path(entry["path"]).read_bytes()).hexdigest() == entry[
                 "sha256"]
+
+
+# The spill bound (WS-SB4): 3 calibration rows of 8 tokens, one row per batch,
+# captured 2 batches per pass -> groups of 16 and 8 tokens, 24 in all.
+SPILL_EXECUTION = {"n_calib_samples": 3, "calib_seqlen": 8, "probe_microbatch": 1}
+QWEN3_CONFIG = {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}
+
+
+@pytest.mark.parametrize("grid, reservation", [(None, 61440), (512, 18432)])
+def test_regen_spill_mode_seals_the_spill_bound(tmp_path, grid, reservation):
+    """``--replay-mode spill`` seals every record's spill bound.
+
+    Each layer has two windows of one dense 16x32 target, so a token spills
+    64 input and 32 gradient elements. In bf16 over 24 tokens that is
+    3072 + 2 probes x 1536 = 6144 bytes, in (2 + 1) x 2 targets x 2 groups
+    = 12 parts. The reservation adds 12 x (512 + grid) and rounds to the
+    grid: 61440 on the default 4096-byte grid, 18432 on a 512-byte one.
+    """
+    from prismaquant.joint_replay_spill import check_spill_bound
+    extra = ["--replay-mode", "spill", "--replay-regime", "capture_batch=2"]
+    if grid is not None:
+        extra += ["--spill-block-bytes", str(grid)]
+    _layout, records_out = _run_regen(
+        tmp_path, *extra, execution=SPILL_EXECUTION, model_config=QWEN3_CONFIG)
+    paths = sorted(records_out.glob("layer-*.json"))
+    assert len(paths) == len(LAYERS)
+    for record_path in paths:
+        bound = json.loads(record_path.read_text())[
+            "executable_readset"]["spill_bound"]
+        assert check_spill_bound(bound) == reservation
+        assert bound["block"] == (grid or 4096)
+        assert bound["capture_batch"] == 2
+        assert bound["element_dtype"] == "bfloat16"
+        geometry = bound["geometry"]
+        assert geometry["tokens"] == 24
+        assert geometry["max_batch_tokens"] == 16
+        assert geometry["total_bytes"] == 6144
+        assert geometry["max_parts"] == 12
+
+
+def test_regen_windowed_mode_seals_no_spill_bound(tmp_path):
+    _layout, records_out = _run_regen(tmp_path)
+    for record_path in sorted(records_out.glob("layer-*.json")):
+        assert "spill_bound" not in json.loads(
+            record_path.read_text())["executable_readset"]
 
 
 def test_regen_refuses_unadmittable_budget(tmp_path, capsys, monkeypatch):

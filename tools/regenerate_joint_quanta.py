@@ -1274,8 +1274,15 @@ def main(argv=None) -> int:
                         SPILL_SEAL_BLOCK_BYTES,
                     )
                     from prismaquant.model_profiles import detect_profile
+                    # The config is a declared header read of the source
+                    # plan (``streaming_source_plan``); under strict reads
+                    # it comes off the stage like the checkpoint index.
+                    config_path = os.path.normpath(
+                        os.path.join(source_model_root, "config.json"))
+                    reads = staged_reads()
                     model_config = json.loads(
-                        (Path(source_model_root) / "config.json").read_text())
+                        Path(config_path).read_bytes() if reads is None
+                        else reads.whole(config_path, where="source config"))
                     try:
                         profile = detect_profile(source_model_root)
                     except RuntimeError as exc:
