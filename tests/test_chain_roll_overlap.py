@@ -17,9 +17,13 @@ to ``roll`` one step late, while the next backward runs. The claims:
 * On CUDA, a roll that keeps nothing receives each row in its own pinned
   buffer; the default roll receives pageable rows it may keep. Both are the
   gradient's bytes, and the rolled planes equal the pre-#997 roll's.
+* ``on_durable`` reports each row once, right after ``roll`` has written it
+  (an exact entry renamed from ``.pt.tmp`` into place, readable), and never
+  reports a row whose write failed (RobTand/prismaquant#1165).
 """
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -318,6 +322,75 @@ def test_a_failed_backward_is_raised_and_the_waiting_step_never_rolls(
     # Step 0's rows waited behind the second backward, which failed; in no
     # regime is step 0 the last of its window, so nothing rolled.
     assert calls == []
+
+
+# -- the durable-row hook (RobTand/prismaquant#1165) ---------------------------
+
+@REGIMES
+@pytest.mark.parametrize("failing", [None, (1, 2)], ids=["all-written", "one-fails"])
+def test_on_durable_reports_a_row_only_after_its_entry_is_renamed_into_place(
+        tmp_path, monkeypatch, batch_size, fusion, failing):
+    """Stage A's roll writes an exact entry; the hook sees it on disk, readable.
+
+    ``failing`` names the (probe, batch) whose rename fails: the writer
+    raises, removes its ``.pt.tmp``, and that row is never reported, nor is
+    any row after it (the roll stops where the write failed).
+    """
+    _model, runner = _toy_runner()
+    batches = _toy_batches(runner, IDS)
+    incoming = _incoming(len(batches), N_PROBES)
+    layer = 0
+    events, written = [], {}
+    replace = os.replace
+
+    def refusing_replace(source, target, *args, **kwargs):
+        if failing is not None and Path(target).name == cache_module.activation_cache_filename(
+                f"cotangent-{failing[0]}-{failing[1]}"):
+            raise OSError("rename failed")
+        return replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", refusing_replace)
+
+    def roll(tensor, batch, probe):
+        events.append(("roll", (layer, probe, batch)))
+        name = f"cotangent-{probe}-{batch}"
+        nbytes = tensor.numel() * tensor.element_size()
+        written[(layer, probe, batch)] = (write_exact_activation_cache_entry(
+            tmp_path, name, tensor, identity={"slot": name},
+            max_tensor_bytes=nbytes, max_file_bytes=nbytes + 65536), tensor.clone())
+
+    def on_durable(key):
+        reference, tensor = written[key]
+        path = Path(reference.path)
+        assert path.is_file() and not path.with_suffix(".pt.tmp").exists()
+        payload = torch.load(path, map_location="cpu", weights_only=True)["inputs"]
+        assert torch.equal(payload, tensor)
+        events.append(("durable", key))
+
+    run = lambda: render_free_layer_roll(  # noqa: E731
+        runner, storage=None, batches=batches, layer=layer,
+        cotangents=_owners(len(batches), N_PROBES), n_probes=N_PROBES,
+        incoming_entries=None,
+        incoming_tensor=lambda probe, batch: incoming[probe][batch],
+        roll=roll, batch_size=batch_size, probe_fusion=fusion, on_durable=on_durable)
+    if failing is None:
+        run()
+    else:
+        with pytest.raises(OSError, match="rename failed"):
+            run()
+    rolled = [key for kind, key in events if kind == "roll"]
+    # Each row is reported once, right after its own roll returned.
+    assert events == [event for key in rolled for event in (
+        ("roll", key), ("durable", key))][:len(events)]
+    reported = [key for kind, key in events if kind == "durable"]
+    assert len(set(reported)) == len(reported)
+    if failing is None:
+        assert reported == rolled
+        assert len(reported) == len(batches) * N_PROBES
+    else:
+        failed = (layer, *failing)
+        assert rolled[-1] == failed and reported == rolled[:-1]
+        assert not list(tmp_path.glob("*.pt.tmp"))
 
 
 # -- the exact writer's one host copy ------------------------------------------
