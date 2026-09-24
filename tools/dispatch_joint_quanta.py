@@ -111,7 +111,7 @@ HEAD_PROGRESS_GRACE_S = 1800
 #:
 #: * W is the spec's ``PRISMAQUANT_STAGED_RANGE_WAIT_S``, read with the
 #:   reader's own rules. The reader sets one deadline, start + W, for every
-#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1846 in
+#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1852 in
 #:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:525 in
 #:   load_handoff_inputs). Without a PrismaBuild landing record the phase
 #:   waits at most W in total; with one (PB #989) its waits are declared and
