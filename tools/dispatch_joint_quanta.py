@@ -111,8 +111,8 @@ HEAD_PROGRESS_GRACE_S = 1800
 #:
 #: * W is the spec's ``PRISMAQUANT_STAGED_RANGE_WAIT_S``, read with the
 #:   reader's own rules. The reader sets one deadline, start + W, for every
-#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1705 in
-#:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:519 in
+#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1846 in
+#:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:525 in
 #:   load_handoff_inputs). Without a PrismaBuild landing record the phase
 #:   waits at most W in total; with one (PB #989) its waits are declared and
 #:   exempt from the no-progress clock.
@@ -126,7 +126,7 @@ LOAD_PHASE_FLOOR_SCHEMA = "prismaquant.load_phase_floor.v1"
 LOAD_PHASE_BOUND = (
     "grace = W + ceil(bytes / floor). The reader sets one deadline, start + W, "
     "for every staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py"
-    ":1705 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:519 "
+    ":1846 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:525 "
     "load_handoff_inputs), so without a PrismaBuild landing record the phase "
     "waits at most W in total, and with one (PB #989) the waits are declared "
     "and exempt. At or above the floor rate the transfer takes at most "
