@@ -25,9 +25,18 @@ and `peak_conservative_bytes` stay raw, because the Tessera lane subtracts the
 baseline from its cap; `baseline.committed_bytes` and `peak_committed_bytes`
 are recorded beside them. The margins do not change: 2 GiB under the cgroup
 cap and the 8 GiB host floor (#1158 tracks that floor against the 8.5 GiB
-MemAvailable of the 2026-09-14 hang). Gate:
+MemAvailable of the 2026-09-14 hang). The device split:
+`check_operator_allocation` takes `reserve_device_bytes`, and the Stage B
+window backward and spill capture charge their CUDA allocations there (the
+retained budget's backward workspace, PQ #1151, times the stored batches, the
+lease's statistics, and the target inputs the spill holds), so an aggregate
+guard also holds them against the device envelope. Only the spill's pinned host arenas stay on the host
+side (`StageBReplaySpill.capture_reserve_host_bytes`). A guard without a
+device envelope takes the sum, as before. Gates:
 `tests/test_committed_memory_1157.py`, which carries the row's own
-`memory.stat` from sparky (attempt 2). This changes a guard's admission
+`memory.stat` from sparky (attempt 2), and
+`test_capture_pass_charges_its_cuda_allocations_to_the_device_side` in
+`tests/test_stageb_one_pass_spill.py`. This changes a guard's admission
 arithmetic. No format, pipeline stage, default or ship gate changes.
 
 Stage B plans the capture pass it charges (2026-09-24,
@@ -71,10 +80,11 @@ The live guard admits each step, charged on the device side: B=1 under the
 declared reserve, each later step under the previous step's measured peak
 times the batch ratio. It writes a JSON receipt of the device peak deltas and
 the cgroup `memory.stat` at each group's host peak, then stops the quantum.
-Two charges stay outside the shared quantity: the spill's own pinned reserve
-(`StageBReplaySpill.capture_reserve_bytes`), which the plan cannot see, and
-the spill window replay, which still charges the operator windows' declared
-reserve. Gates: `tests/test_stage_b_capture_pricing.py`,
+Two charges stay outside the shared quantity: the spill's own capture
+reserve, which the plan cannot see (since PQ #1157 its pinned host arenas,
+`StageBReplaySpill.capture_reserve_host_bytes`, and its held target inputs,
+`capture_reserve_device_bytes`), and the spill window replay, which still
+charges the operator windows' declared reserve. Gates: `tests/test_stage_b_capture_pricing.py`,
 `tests/test_stageb_one_pass_spill.py`
 (`test_capture_pass_charges_the_planned_workspace_per_stored_batch`),
 `tests/test_joint_stageb_resources.py`,
@@ -1726,8 +1736,9 @@ Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-24, `ws-sb4/1157-committed-memory`) for **the capture
 guard and the retained plan's baseline check admitting on committed memory,
-not page cache** (PQ #1157, part of #1141). See the entry at the top. No
-format, pipeline default, stage or ship gate changes.
+not page cache, and the Stage B capture charging its CUDA allocations to the
+device side** (PQ #1157, part of #1141). See the entry at the top. No format,
+pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-sb4/1151-capture-workspace`) for **the Stage B
 plan pricing the capture pass the guard charges, the measured capture

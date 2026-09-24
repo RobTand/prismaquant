@@ -184,3 +184,29 @@ def test_a_race_never_counts_less_than_the_stat_states(tmp_path):
     stat = _stat(FIXTURE["memory.stat"])
     stated = stat["anon"] + stat["shmem"] + stat["file_dirty"] + stat["file_writeback"]
     assert mm.committed_cgroup_bytes(stated // 2, stat) == stated
+
+
+def test_the_device_side_of_an_allocation_is_held_against_the_envelope(tmp_path, host):
+    """The capture's CUDA allocations reach the device envelope (PQ #1157)."""
+    from prismaquant import joint_statistics_replay as replay
+
+    guard = _stage_b_guard(tmp_path, FIXTURE["memory.stat"])
+    room = R13_GPU_BYTES - host
+    record = replay.check_operator_allocation(
+        guard, "before_joint_window_backward", reserve_bytes=0, reserve_device_bytes=room)
+    assert record["future_device_allocation_bytes"] == room
+    with pytest.raises(RuntimeError, match="capture device memory refusal"):
+        replay.check_operator_allocation(
+            guard, "before_joint_window_backward:over", reserve_bytes=0,
+            reserve_device_bytes=room + 1)
+
+
+def test_a_guard_without_a_device_envelope_takes_the_sum(tmp_path, host):
+    from prismaquant import joint_statistics_replay as replay
+
+    guard = mm.CaptureMemoryGuard("cuda", **_cgroup(tmp_path, FIXTURE["memory.stat"]))
+    guard.check = lambda label, *, reserve_bytes=0, reserve_device_bytes=0: dict(
+        label=label, reserve_bytes=reserve_bytes, reserve_device_bytes=reserve_device_bytes)
+    record = replay.check_operator_allocation(guard, "sum", reserve_bytes=3,
+                                              reserve_device_bytes=4)
+    assert record == dict(label="sum", reserve_bytes=7, reserve_device_bytes=0)

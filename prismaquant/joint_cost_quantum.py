@@ -2165,16 +2165,23 @@ def run_layer_quantum_core(
             # come; the per-sample floors below stay. The workspace is the
             # retained budget's, the same quantity its derivation planned the
             # capture pass with (PQ #1151): one reserve per stored batch.
+            # The backward's workspace, the lease's statistics and the inputs
+            # the spill capture holds are CUDA allocations, so they are charged
+            # to the device side; only the spill's pinned host arenas are not
+            # (PQ #1157), and ``spill.capture`` has allocated those by now.
             if guard is not None:
                 check_operator_allocation(
-                    guard, "before_joint_window_backward", reserve_bytes=(
+                    guard, "before_joint_window_backward",
+                    reserve_bytes=(0 if observer is None
+                                   else spill.capture_reserve_host_bytes),
+                    reserve_device_bytes=(
                         retained_budget.capture_workspace_bytes(
                             1 if observer is None else capture_batch)
                         + (0 if lease is None
                            else lease.statistics_capacity_bytes
                            - lease.resident_statistics_bytes)
                         + (0 if observer is None
-                           else spill.capture_reserve_bytes)))
+                           else spill.capture_reserve_device_bytes)))
             if observer is not None and capture_batch > 1:
                 batched_capture(active_probe, observer)
                 counters.replay["layer_passes"] += 1

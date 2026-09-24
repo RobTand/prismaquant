@@ -71,15 +71,26 @@ def operator_window_guard(device, *, device_bytes=None):
     return guard
 
 
-def check_operator_allocation(guard, label, *, reserve_bytes):
+def check_operator_allocation(guard, label, *, reserve_bytes, reserve_device_bytes=0):
     """Release retired blocks before charging a phase's future allocations.
 
     Live source, statistics and PWC owners remain intact. The existing physical
     guard still charges their entire CUDA reservation and cgroup footprint.
+
+    ``reserve_device_bytes`` is the part of the future allocation the CUDA
+    allocator will hold. A guard with a declared device envelope takes it on
+    the device side, where it is also held against ``device_bytes``; a guard
+    without one has no device budget, so the two sides are charged as one sum
+    exactly as before (PQ #1157).
     """
     from .aura_cost import _release_streamed_anchor_allocator_cache
     _release_streamed_anchor_allocator_cache(guard.device)
-    return guard.check(label, reserve_bytes=reserve_bytes)
+    if not reserve_device_bytes:
+        return guard.check(label, reserve_bytes=reserve_bytes)
+    if getattr(guard, 'device_bytes', None) is None:
+        return guard.check(label, reserve_bytes=reserve_bytes + reserve_device_bytes)
+    return guard.check(label, reserve_bytes=reserve_bytes,
+                       reserve_device_bytes=reserve_device_bytes)
 
 
 @contextmanager
