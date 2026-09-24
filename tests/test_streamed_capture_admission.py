@@ -108,6 +108,7 @@ def memory_guard(tmp_path, monkeypatch):
     child.mkdir(parents=True)
     (root/'memory.max').write_text(str(16*gib))
     (root/'memory.current').write_text(str(gib))
+    (root/'memory.stat').write_text("anon 0\nfile 0\nshmem 0\nfile_dirty 0\nfile_writeback 0\n")  # no page cache (PQ #1157)
     (child/'memory.max').write_text('max')
     membership = tmp_path/'membership'
     membership.write_text('0::/job\n')

@@ -2021,7 +2021,8 @@ def compute_aura_cost_streamed(
         statistics_arithmetic_identity,
     )
     operator_windows = normalize_operator_windows(operator_windows)
-    from .joint_retained_window_plan import normalize_retained_execution, RetainedWindowBudget
+    from .joint_retained_window_plan import (
+        OBSERVED_BASELINE_KEY, normalize_retained_execution, RetainedWindowBudget)
     if retained_operator_windows is not None:
         retained_operator_windows = normalize_retained_execution(retained_operator_windows,
             operator_windows=operator_windows,
@@ -2060,7 +2061,7 @@ def compute_aura_cost_streamed(
         if operator_guard is not None:
             observed = check_operator_allocation(operator_guard, f'before_retained_{stage}:{layer}', reserve_bytes=0)
             retained_budget.require_observed_baseline(
-                observed_bytes=observed['conservative_cgroup_plus_cuda_reserved_bytes'],
+                observed_bytes=observed[OBSERVED_BASELINE_KEY],
                 source_bytes=source_bytes, actual_auxiliary_bytes=actual_auxiliary_bytes,
                 label=f'before_retained_{stage}:{layer}')
             auxiliary_growth = max(0, retained_budget.auxiliary_reserve_bytes - actual_auxiliary_bytes)

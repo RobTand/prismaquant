@@ -1399,6 +1399,7 @@ def run_layer_quantum_core(
         reference_from_record,
         render_free_layer_roll,
     )
+    from .joint_retained_window_plan import OBSERVED_BASELINE_KEY
     from .joint_statistics_replay import (
         check_operator_allocation,
         observe_and_project_retained_windows,
@@ -1944,8 +1945,7 @@ def run_layer_quantum_core(
                 observed = check_operator_allocation(
                     guard, f"before_quantum_{stage_label}:{layer}", reserve_bytes=0)
                 retained_budget.require_observed_baseline(
-                    observed_bytes=observed[
-                        "conservative_cgroup_plus_cuda_reserved_bytes"],
+                    observed_bytes=observed[OBSERVED_BASELINE_KEY],
                     source_bytes=source_bytes, actual_auxiliary_bytes=0,
                     label=f"before_quantum_{stage_label}:{layer}")
                 check_operator_allocation(

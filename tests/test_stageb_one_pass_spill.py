@@ -335,7 +335,8 @@ class _RecordingGuard:
 
     def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
         self.admissions.append((label, reserve_bytes))
-        return {"conservative_cgroup_plus_cuda_reserved_bytes": 0}
+        return {"conservative_cgroup_plus_cuda_reserved_bytes": 0,
+                "committed_cgroup_plus_cuda_reserved_bytes": 0}
 
 
 def test_layer_quantum_charges_each_phase_to_its_guard(campaign, monkeypatch):
