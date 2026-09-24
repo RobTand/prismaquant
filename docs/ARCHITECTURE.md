@@ -1,5 +1,20 @@
 # PrismaQuant Architecture
 
+Checkpoint planes stream in leased windows (2026-09-24,
+`ws-rd/1142-grouped-reads`, PQ #1142). Stage B checkpoint-load and
+handoff-load, the Stage A seed comparison and `checkpoint_plane_distance`
+read an exact-entry plane through
+`joint_adjoint_checkpoints.stream_exact_entry_tensors`. `exact_entry_windows`
+splits the plane under the caller's `max_resident_bytes`: at the R13 policy, a
+window is 68 entries of 16 MiB. Each window takes one lease, the next window
+is read on a background thread while the consumer takes the current one, and
+the entries of a window are read on `PRISMAQUANT_LAYER_READ_THREADS` threads.
+Every per-entry check and refusal kind is unchanged. On the R13 layer-044
+plane, Stage B checkpoint-load went from 6.8 to 45.9 entries/s, 115 to
+770 MB/s (bench action `9e83f378e35c`). Gate:
+`tests/test_strict_reader_tier_enforcement.py`. No format, default, stage or
+ship gate changes.
+
 Stage A chain split dispatch (2026-09-24, `ws-pl/stage-a-split-dispatch`,
 PQ #738). A split round now has a dispatcher. Until `pbcampaign` carries
 the residency fields (PB #1082), the rows are plain `pbrun` submissions,
@@ -54,8 +69,8 @@ It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
 row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
-(`prismaquant/joint_adjoint_checkpoints.py:1705`,
-`prismaquant/joint_quantum_handoff.py:519`), so the phase waits at most W in
+(`prismaquant/joint_adjoint_checkpoints.py:1852`,
+`prismaquant/joint_quantum_handoff.py:525`), so the phase waits at most W in
 total outside a PrismaBuild landing record. The bytes are the phase's count
 in the row's read plan. The built-in floor, 62,954,973 B/s, is the slowest
 30 s read window of the R13 layer-044 v4 and v5 gates (action keys
@@ -1461,7 +1476,8 @@ Stage B may explicitly seal `PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
 `PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` to keep its cotangent working plane
 on local disk. The existing boundary owner preallocates the exact tensor-byte
 extent in a private disposable file, loads authenticated checkpoint entries
-one at a time through the existing strict pinned reader, and owns cleanup.
+through the existing strict pinned reader in leased windows under its
+resident budget (PQ #1142), and owns cleanup.
 Every coordinate has a fixed dtype/shape slot; replay reads owned CPU tensors
 and overwrites the same slot, syncing and dropping file pages after I/O.
 There are no mmap tensor views and no second retained checkpoint plane.
@@ -1624,8 +1640,13 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-pl/stage-a-split-dispatch`.
+As of: 2026-09-24 · `ws-rd/1142-grouped-reads`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-rd/1142-grouped-reads`) for **checkpoint planes
+streamed in leased windows** (PQ #1142): one lease per budget window, one
+window read ahead, and a window's entries read on several threads. See the
+entry at the top. No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-pl/stage-a-split-dispatch`) for **Stage A chain
 split dispatch** (PQ #738): the split round's manifest builder and
@@ -22879,7 +22900,7 @@ the capsule rows, the declaration (scope `stage-a-chain-seed`), and the
 compare checkpoint. It also records the seed's own run identity, stride and
 checkpoints, retention and telemetry. With a compare checkpoint, the seed
 hashes each rolled `(probe, batch)` payload at `through` as it writes it,
-then reads the reference's entries one at a time. `plane_comparison`
+then streams the reference's entries in leased windows (PQ #1142). `plane_comparison`
 (`prismaquant.stage_a.seed_plane_comparison.v1`) lists both digests per entry
 with `equal`, `different` and `bitwise_equal`. `matmul_reduction` records
 `torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction` as the

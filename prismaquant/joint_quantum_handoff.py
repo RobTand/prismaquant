@@ -48,9 +48,9 @@ Transport:
   static readset and declares nothing, so its producer's batches wait;
   declaring them is the consumer's ``--after`` edge, which waits on
   PrismaBuild #946 (PQ #1007).
-* The consumer reads the plane through ``read_exact_entry_tensors`` (the
-  verified exact-entry reader, strict-tier staged when the policy is
-  active) and the owner states through the checkpoint's staged small-file
+* The consumer streams the plane through ``stream_exact_entry_tensors``
+  (windows of the verified exact-entry reader, strict-tier staged when the
+  policy is active) and the owner states through the checkpoint's staged small-file
   reader. The forward shared-pass states come from the consumer's own
   Stage A slice checkpoint, exactly as chain mode reads them.
 
@@ -62,6 +62,7 @@ an identity failure.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -476,7 +477,8 @@ def _shared_pass_entries(checkpoint_record: Mapping) -> list[dict]:
 
 def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                         n_probes: int, n_batches: int, cotangent_factory=None,
-                        shared_state_max_bytes: int | None = None):
+                        shared_state_max_bytes: int | None = None,
+                        max_resident_bytes: int | None = None, residency_check=None):
     """Read what chain mode would hold after the chain, from the handoff.
 
     Returns ``(grad_plane, shared_adjoint, shared_pass)`` in
@@ -490,6 +492,10 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     checkpoint that is the whole pack, shared-adjoint members included
     (about 285 KB on a GLM checkpoint), of which only the shared-pass
     members are deserialized.
+
+    The plane streams in windows under ``max_resident_bytes``, charged to
+    ``residency_check``, exactly as a checkpoint load streams its own
+    (:func:`~prismaquant.joint_adjoint_checkpoints.stream_exact_entry_tensors`).
     """
     from .cost_streaming import _state_storage_bytes
     from .io_spans import ReadRateReporter
@@ -497,9 +503,9 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
         _await_checkpoint_entry,
         _entry_bytes,
         _read_shared_state_payload,
-        read_exact_entry_tensors,
         read_shared_state_pack,
         shared_state_slot,
+        stream_exact_entry_tensors,
     )
     from .joint_adjoint_slices import checkpoint_is_packed
     from .residency_shard_reader import staged_range_wait_s
@@ -530,13 +536,15 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     rate = ReadRateReporter(
         "handoff-load", total_entries=len(entries),
         total_bytes=sum(_entry_bytes(entry) for entry in entries))
-    for entry in entries:
-        probe, batch, _at = _plane_coordinates(entry)
-        _await_checkpoint_entry(entry, deadline=deadline)
-        tensors = read_exact_entry_tensors([entry], expected_session=handoff["session"])
-        plane[(probe, batch)] = tensors.pop(entry["name"])
-        del tensors
-        rate.entry(_entry_bytes(entry))
+    with closing(stream_exact_entry_tensors(
+            entries, expected_session=handoff["session"],
+            max_resident_bytes=max_resident_bytes, residency_check=residency_check,
+            deadline=deadline)) as stream:
+        for entry, tensor in stream:
+            probe, batch, _at = _plane_coordinates(entry)
+            plane[(probe, batch)] = tensor
+            del tensor
+            rate.entry(_entry_bytes(entry))
     rate.done()
 
     def staged(path, entry, label):

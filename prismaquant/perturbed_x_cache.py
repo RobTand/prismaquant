@@ -20,9 +20,12 @@ import re
 import stat
 import struct
 import sys
+import threading
 import zipfile
 from collections import OrderedDict, defaultdict
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait as wait_futures
 from contextlib import contextmanager
+from functools import partial
 from dataclasses import dataclass, field, replace as _dataclass_replace
 from pathlib import Path
 from typing import Iterator, Mapping
@@ -1404,14 +1407,51 @@ class EntryReadScratch:
 
     def __init__(self):
         self._buffer = bytearray()
+        # Concurrent readers (PQ #1142) borrow one buffer each. The first is
+        # this scratch's own, so a serial read uses exactly the buffer
+        # :meth:`buffer` returns; each further reader that ever ran at once
+        # adds one more, kept for the next window like the first.
+        self._lock = threading.Lock()
+        self._idle = None
+        self._extra = []
 
     def buffer(self, size):
         if len(self._buffer) < size:
             self._buffer = bytearray(size)
         return self._buffer
 
+    @contextmanager
+    def lend(self):
+        """One buffer for one of several concurrent readers.
+
+        Yields an object with :meth:`buffer`, held by one reader until it
+        returns it. The scratch never holds more buffers than the most
+        readers that ran at once, which the exact-entry read pool bounds.
+        Reusing a buffer is safe because ``torch.load`` copies every tensor
+        out of it before the reader returns it.
+        """
+        with self._lock:
+            if self._idle is None:
+                self._idle = [self]
+            if self._idle:
+                slot = self._idle.pop()
+            else:
+                slot = EntryReadScratch()
+                self._extra.append(slot)
+        try:
+            yield slot
+        finally:
+            with self._lock:
+                if self._idle is not None:
+                    self._idle.append(slot)
+
     def release(self):
         self._buffer = bytearray()
+        with self._lock:
+            for slot in self._extra:
+                slot.release()
+            self._extra = []
+            self._idle = None
 
 
 class _ExactActivationPrefetch:
@@ -1439,6 +1479,101 @@ EXACT_LEASE_COUNTERS = {"windows_batched": 0, "entries_batched": 0,
 def exact_lease_counters() -> dict:
     """A copy of :data:`EXACT_LEASE_COUNTERS` for a report."""
     return dict(EXACT_LEASE_COUNTERS)
+
+
+_EXACT_READ_POOL = None
+_EXACT_READ_POOL_THREADS = 0
+_EXACT_READ_POOL_LOCK = threading.Lock()
+
+
+def exact_read_threads() -> int:
+    """How many entries of one exact read window are read at once.
+
+    The streamed-layer read knob, ``PRISMAQUANT_LAYER_READ_THREADS``
+    (:func:`~prismaquant.layer_streaming.layer_read_threads`), so a run
+    declares its read concurrency once. 1 restores the serial read.
+    """
+    from .layer_streaming import layer_read_threads
+    return layer_read_threads()
+
+
+def _exact_read_pool(threads):
+    """The shared pool that reads exact entries, or ``None`` for one thread.
+
+    Its own pool, not the layer-read pool: a caller that already reads
+    several windows at once (a read-ahead thread, a plane comparison) waits
+    on these workers, and a worker of one pool that waits on work queued to
+    the same pool can deadlock it once every worker is waiting. Nothing
+    running on this pool submits to it.
+    """
+    global _EXACT_READ_POOL, _EXACT_READ_POOL_THREADS
+    if threads <= 1:
+        return None
+    with _EXACT_READ_POOL_LOCK:
+        if _EXACT_READ_POOL is None or _EXACT_READ_POOL_THREADS != threads:
+            if _EXACT_READ_POOL is not None:
+                _EXACT_READ_POOL.shutdown(wait=False)
+            _EXACT_READ_POOL = ThreadPoolExecutor(
+                max_workers=threads, thread_name_prefix="exactread")
+            _EXACT_READ_POOL_THREADS = threads
+        return _EXACT_READ_POOL
+
+
+_NOT_STARTED = object()
+
+
+def _run_in_order(pool, calls):
+    """Run ``calls`` on ``pool``; their results, in call order.
+
+    Every call has returned before this does, on success and on failure,
+    so no worker still reads a pinned descriptor once the caller releases
+    its lease. A failure raises the exception of the lowest-indexed call
+    that failed, and calls after a failure that have not started yet never
+    start: the refusal a serial loop raises, whichever worker finished
+    first. With no pool, or one call, the calls run here in order.
+    """
+    if pool is None or len(calls) < 2:
+        return [call() for call in calls]
+    # The lowest index that has failed so far. A worker checks it before it
+    # starts a call, so a call queued after a failure never starts, even
+    # when the pool picks it up before this thread sees the failure. Calls
+    # below that index still run: a serial loop would have run them first.
+    first_failure = [len(calls)]
+    lock = threading.Lock()
+
+    def guarded(index, call):
+        with lock:
+            if index > first_failure[0]:
+                return _NOT_STARTED
+        try:
+            return call()
+        except BaseException:
+            with lock:
+                first_failure[0] = min(first_failure[0], index)
+            raise
+
+    futures = [pool.submit(guarded, index, call) for index, call in enumerate(calls)]
+    try:
+        remaining = set(futures)
+        while remaining:
+            done, remaining = wait_futures(remaining, return_when=FIRST_EXCEPTION)
+            failed = [index for index, future in enumerate(futures)
+                      if future in done and not future.cancelled()
+                      and future.exception() is not None]
+            if failed:
+                for future in futures[min(failed) + 1:]:
+                    future.cancel()
+    except BaseException:
+        for future in futures:
+            future.cancel()
+        raise
+    finally:
+        wait_futures(futures)
+    for future in futures:
+        # A cancelled call follows a failed one, which raises first.
+        if not future.cancelled() and future.exception() is not None:
+            raise future.exception()
+    return [future.result() for future in futures]
 
 
 def _declared_entry_resolver(resolver, ref):
@@ -1663,6 +1798,13 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     name, metadata, shape, dtype and storage size of the loaded tensor
     against the reference the owner recorded. The window keys the tensor
     by that reference, so the caller cannot tell which copy served it.
+
+    The entries are read :func:`exact_read_threads` at a time (PQ #1142),
+    each on its own buffer from ``scratch``, and each through every fence
+    above before the window is exposed. Leases are entered and released on
+    the calling thread, and a lease is released only after every read under
+    it has returned. A refusal is the one the serial read raises: the
+    first failing entry in window order, with its kind unchanged.
     """
     references = tuple(references)
     if any(not isinstance(ref, ExactActivationReference) for ref in references):
@@ -1683,16 +1825,18 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     local_paths = dict(local_paths or {})
     if any(ref not in references for ref in local_paths):
         raise ValueError("a local exact entry is not in the window it is read for")
+    pool = _exact_read_pool(exact_read_threads())
 
     def read_local(ref):
         """The owner's own copy on this box: the same fences, on that file."""
         path, prefetched_stat, signature = _exact_entry_prechecks(
             ref, path=local_paths[ref], **prechecks)
         local = _dataclass_replace(ref, path=str(path))
-        window._tensors[ref] = _read_exact_entry(
-            local, path=path, signature=signature, source=path,
-            source_before=prefetched_stat, lease_fd=None, owned=owned,
-            release_file_pages=release_file_pages)
+        with owned.lend() as buffer:
+            window._tensors[ref] = _read_exact_entry(
+                local, path=path, signature=signature, source=path,
+                source_before=prefetched_stat, lease_fd=None, owned=buffer,
+                release_file_pages=release_file_pages)
 
     def read_single(ref, lease_resolver=None):
         """The single-entry read: its own window, released after verifying."""
@@ -1723,10 +1867,11 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             # this entry would be staged through, when one is bound.
             tier = None
             lease_resolver = _declared_entry_resolver(resolver, ref)
-        window._tensors[ref] = _read_exact_entry(
-            ref, path=path, signature=signature, source=source,
-            source_before=source_before, lease_fd=lease_fd, owned=owned,
-            release_file_pages=release_file_pages)
+        with owned.lend() as buffer:
+            window._tensors[ref] = _read_exact_entry(
+                ref, path=path, signature=signature, source=source,
+                source_before=source_before, lease_fd=lease_fd, owned=buffer,
+                release_file_pages=release_file_pages)
         _record_served_bytes(lease_resolver, path, tier, ref.file_bytes)
         if lease_window is not None:
             # Entry verified: descriptor closed, exact ref released
@@ -1734,37 +1879,49 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             lease_window.__exit__(None, None, None)
             live_windows.remove(lease_window)
 
-    def read_group(entry_resolver, members):
-        """One material namespace's entries under shared lease windows."""
+    def read_leased(entry_resolver, assignments, ref, path, signature):
+        """One entry of a group, opened and read under the group's pin."""
         from .staged_lease import LeaseRefused
-        checked = [(ref, _exact_entry_prechecks(ref, **prechecks)) for ref, _ in members]
+        lease_window, key = assignments[ref]
+        try:
+            lease_fd, serving = lease_window.open(key)
+        except LeaseRefused as refusal:
+            entry_resolver.record_fallback(path, str(refusal))
+            raise
+        tier = lease_window.serving_tier or "stage"
+        entry_resolver.record_serving_tier(
+            path, tier,
+            pin_id=str(serving.get("pin_id") or ""),
+            range_ref=str(serving.get("range_ref") or ""))
+        try:
+            with owned.lend() as buffer:
+                window._tensors[ref] = _read_exact_entry(
+                    ref, path=path, signature=signature,
+                    source=Path(lease_window.stage_path(key) or path),
+                    source_before=os.fstat(lease_fd), lease_fd=lease_fd,
+                    owned=buffer, release_file_pages=release_file_pages)
+        finally:
+            lease_window.close_fd(lease_fd)
+        _record_served_bytes(entry_resolver, path, tier, ref.file_bytes)
+
+    def read_group(entry_resolver, members):
+        """One material namespace's entries under shared lease windows.
+
+        The fences before the pin, and the entries under it, run on the
+        exact-read pool; the pin is entered and released here, on the
+        calling thread, and only after every entry's read has returned.
+        """
+        checked = _run_in_order(pool, [partial(_exact_entry_prechecks, ref, **prechecks)
+                                       for ref, _ in members])
         assignments = (_enter_group_lease(entry_resolver, members, live_windows)
                        if len(members) > 1 else None)
         if assignments is None:
             for ref, _staged in members:
                 read_single(ref, entry_resolver)
             return
-        for ref, (path, _prefetched_stat, signature) in checked:
-            lease_window, key = assignments[ref]
-            try:
-                lease_fd, serving = lease_window.open(key)
-            except LeaseRefused as refusal:
-                entry_resolver.record_fallback(path, str(refusal))
-                raise
-            tier = lease_window.serving_tier or "stage"
-            entry_resolver.record_serving_tier(
-                path, tier,
-                pin_id=str(serving.get("pin_id") or ""),
-                range_ref=str(serving.get("range_ref") or ""))
-            try:
-                window._tensors[ref] = _read_exact_entry(
-                    ref, path=path, signature=signature,
-                    source=Path(lease_window.stage_path(key) or path),
-                    source_before=os.fstat(lease_fd), lease_fd=lease_fd,
-                    owned=owned, release_file_pages=release_file_pages)
-            finally:
-                lease_window.close_fd(lease_fd)
-            _record_served_bytes(entry_resolver, path, tier, ref.file_bytes)
+        _run_in_order(pool, [
+            partial(read_leased, entry_resolver, assignments, ref, path, signature)
+            for (ref, _staged), (path, _prefetched_stat, signature) in zip(members, checked)])
         # Every entry verified: each window closes its descriptors (already
         # closed) and releases its one ref.
         for lease_window in {id(w): w for w, _key in assignments.values()}.values():
@@ -1780,16 +1937,14 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         # buffer holds one entry, not the window; a caller that owns an
         # EntryReadScratch keeps it across windows.
         owned = EntryReadScratch() if scratch is None else scratch
-        for ref in references:
-            if ref in local_paths:
-                read_local(ref)
+        _run_in_order(pool, [partial(read_local, ref)
+                             for ref in references if ref in local_paths])
         staged = tuple(ref for ref in references if ref not in local_paths)
         if strict:
             for entry_resolver, members in _strict_lease_groups(staged, resolver):
                 read_group(entry_resolver, members)
         else:
-            for ref in staged:
-                read_single(ref)
+            _run_in_order(pool, [partial(read_single, ref) for ref in staged])
         if scratch is None:
             owned.release()
         window.active = True

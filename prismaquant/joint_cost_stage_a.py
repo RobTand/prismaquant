@@ -1864,7 +1864,9 @@ def run_adjoint_capture_core(
             "matmul_reduction": {
                 "allow_bf16_reduced_precision_reduction": bf16_reduction},
             "checkpoints": checkpoints,
-            "plane_comparison": compare_seed_plane(seed_plan, plane_digests),
+            "plane_comparison": compare_seed_plane(
+                seed_plan, plane_digests,
+                max_resident_bytes=int(storage_policy["max_resident_bytes"])),
             "retention": retention,
             "artifact_budget_override": artifact_budget_stamp,
             "telemetry": {
