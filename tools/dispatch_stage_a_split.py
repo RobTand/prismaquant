@@ -422,6 +422,22 @@ def pb_ending(round_dir, name) -> dict:
     return record
 
 
+_PREP_RECEIPT = re.compile(r"resume-(\d{3,})\.json")
+
+
+def _latest_prep_receipt(directory):
+    """The highest-indexed ``resume-NNN.json`` prep receipt, or ``None``.
+
+    The capture writes ``resume-NNN.results.json`` and
+    ``resume-NNN.counters.json`` beside each receipt; neither is a receipt.
+    """
+    if not directory.is_dir():
+        return None
+    found = [(int(match.group(1)), path) for path in directory.iterdir()
+             if (match := _PREP_RECEIPT.fullmatch(path.name))]
+    return json.loads(max(found)[1].read_text()) if found else None
+
+
 def require_ready(document, round_dir, row) -> None:
     """Refuse ``row`` until every row it follows has finished (see the module doc)."""
     from prismaquant.joint_adjoint_checkpoints import adjoint_space, checkpoint_directory
@@ -436,8 +452,7 @@ def require_ready(document, round_dir, row) -> None:
         return
     if kind == "quantum":
         pb_ending(round_dir, "prep")
-        preps = sorted((split_root(space) / "preps").glob("resume-*.json"))
-        receipt = json.loads(preps[-1].read_text()) if preps else None
+        receipt = _latest_prep_receipt(split_root(space) / "preps")
         stamp = None if receipt is None else receipt["resume"].get("split")
         if (stamp is None or (stamp["from"], stamp["through"], stamp["ranges"])
                 != (document["from"], document["through"], document["ranges"])):

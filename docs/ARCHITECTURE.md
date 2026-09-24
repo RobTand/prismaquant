@@ -1,5 +1,54 @@
 # PrismaQuant Architecture
 
+A chain quantum waits for its own layer's source under `own-LLL-source`
+(2026-09-24, `fix/1166-settle-in-owner-phase`, PQ #1166). Under operator
+windows, the chain step used to settle the prefetch of the next layer of the
+install order before it reported `chain-NNN-bound`. For the last chain layer,
+that next layer is the quantum's own layer, which `own-LLL-source` stages two
+phases later. So the consumer blocked under `chain-NNN-source` on bytes
+PrismaBuild stages after `chain-NNN-bound`. On R13 layer 043
+(PB `93247fc2…`), `chain-044-source` lasted 502 s. A staged wait stood
+declared for 494 s of it, and py-spy found the main thread in that settle.
+The chain step now leaves that prefetch in flight, so the read overlaps the
+chain roll (`_install_with_settlement(settle_successors=False)`). After the
+quantum reports `own-LLL-source`, `_await_own_source` waits for the read,
+before the operator guard's first observation, which still sees no pending
+owner and no loader temporaries. The roll takes no guard observation and no
+residency snapshot. Its only memory check is the `min_free_gib` floor. Gate:
+`tests/test_staged_wait_phase_1166.py`. It drives the real quantum, windowed
+and spill, and records every consumer wait: a source install, a prefetch
+settle, or an exact boundary or checkpoint read. It checks that the first
+phase staging each wait's ranges is the current phase or an earlier one. No
+format, default, pipeline stage, record identity or ship gate changes.
+
+The joint dispatcher checks projection shapes before a row runs (2026-09-24,
+`fix/1175-projection-shape-check`, PQ #1175). The R13 Stage B plan selects
+the fused projection kernel `fused_fp32_v1`, whose packaged qualification
+covers six first-model shapes and none of GLM-5.3-Flash's. Nothing compared
+the two before a row ran, so v7's first attempt (PB `80dbab43…`) found out at
+its first `finish_observations`, after 480 s, 60.5 GB read and 43.3 GB
+written. Every joint reduction is `product_sum(operator, weight)`, and every
+operand has its target's weight shape `(out, in)` (`joint_aura.py`: `G.T @ X`,
+`G.T @ dX`, the source weight and each candidate `dW`). So
+`dispatch_joint_quanta.quantum_argv` now reads the weight shapes of the
+quantum's joint statistics targets (the members of the record's sealed
+prepared-input windows, or the prepared roster's units in the record's layer
+for a record without them) from the safetensors headers of the plan's `model`
+(the shard index and the headers only), and compares them with the selected
+backend's qualified shapes (`check_projection_shapes`,
+`joint_projection_backend.check_qualified_shapes`). The reference `torch`
+backend accepts every shape and reads nothing. The comparison is a seal
+through `seal_check`: certified mode refuses before anything is submitted,
+and names the unqualified shapes and the qualified set; dev mode prints one
+`[DEV-MODE]` line with the number of shapes that will run on the reference
+arithmetic and the shapes themselves, and publishes. At run time those
+shapes run `(left * right).sum()`, as PQ #1176 made them. A target whose
+weight the headers do not hold refuses in both modes: that shape cannot be
+checked. The packaged qualification, the plan's `projection_backend` and the
+backend identity do not change. Gate:
+`tests/test_projection_shape_check_1175.py`. No format, pipeline stage,
+record identity, lane or ship gate changes.
+
 The chain roll's host side overlaps the GPU (2026-09-24,
 `ws-rd/1162-chain-roll-overlap`, PQ #1162). `render_free_layer_roll` used
 to copy each backward's input cotangent to the host with a blocking copy,
@@ -33,7 +82,8 @@ activation policies and spill bound; the join; both dispatchers, including the
 joint dispatcher's source coverage check, which reads a re-declared plan or
 prepared completion by its on-disk bytes (`readset_coverage.quantum_rows_gaps`);
 the catalog extension; and the projection-backend runtime qualification and
-its qualified shapes. In dev mode the joint dispatcher also names the plan and prepared files in each
+its qualified shapes, which the joint dispatcher also compares with each
+row's target weight shapes before it submits the row (PQ #1175). In dev mode the joint dispatcher also names the plan and prepared files in each
 row's argv by the digests of their bytes on disk, so the quantum's own byte
 check passes on a re-declared file; certified mode names the record's
 digests, as before, and the quantum refuses a re-declared file
@@ -150,10 +200,12 @@ reserve times the stored batches. The guard (`joint_cost_quantum`,
 derivation planned, instead of from the operator windows. With
 `capture_batch=B`, `derive_retained_window_budget` plans the capture pass as
 `RetainedWindowBudget.capture_peak_bytes`: the fixed owners with the one
-reserve replaced by B reserves, beside the largest window's renders, since a
-resumed quantum captures in its first active window and no statistics lease
-is open during a capture. A capture that does not fit the physical budget
-less its margin refuses at derivation. The derivation records it under
+reserve replaced by B reserves, beside the largest window's renders, an upper
+bound on window 0's: a fresh quantum captures inside window 0's retained
+lifetime, a resume that has committed window 0 captures with no renders
+resident (PQ #1172), and no statistics lease is open during a capture. A
+capture that does not fit the physical budget less its margin refuses at
+derivation. The derivation records it under
 `capture`, and `peak_planned_bytes` becomes the larger of the window peaks
 and the capture peak.
 
@@ -333,8 +385,10 @@ term, and the stamp names each field that differs. `--compute-ceiling FILE`
 layer-044 row, `spill-pP` is 300 + 137 + 4393 + 1800 = 6630 s and
 `render-NN` is 300 + 95 + 1800 = 2195 s. For layer 043, `chain-044-bound` is
 300 + 137 + 1686 = 2123 s. Source phases and read-only render phases keep
-900 s. A source phase also settles the next layer's source (PQ #1166), so a
-byte-derived source grace would have to count those bytes too.
+900 s. Until PQ #1166 a source phase also settled the next layer's source,
+so a byte-derived source grace would have had to count those bytes too. A
+source phase now waits only for its own layer's source (see the entry at the
+top).
 
 Each compute stamp (`prismaquant.compute_phase_grace.v1`) rides
 `--progress-grace-derivation` beside the load stamps. One basis entry per row
@@ -346,10 +400,36 @@ prices. This changes a dispatcher default (the compute-phase grace) and adds
 one dispatcher option. No format, pipeline stage, record identity or ship
 gate changes.
 
-A resumed spill row whose first active window is not window 0 runs its
+A resumed spill row whose first active window is not window 0 ran its
 captures under that window's `render-NN` phase, because progress phases only
-move forward. That grace has no capture term. This change does not cover that
-case.
+move forward, and that grace has no capture term. PQ #1172 moves those
+captures under their `spill-pP` phases (see below).
+
+A resumed spill row captures under its spill phases (2026-09-24,
+`fix/1172-resume-capture-phase`, PQ #1172). A resume whose first active
+window k is 1 or later captures every probe again, because the spill scratch
+is an `O_TMPFILE`. `observe_and_project_retained_windows` ran those captures
+after window k's `before_window` had entered `render-k`, whose grace prices
+only window k's replays. The row could not report `spill-pP` again, because
+progress phases only move forward, so PrismaBuild ended it as `no_progress`
+on every retry. The captures now run in window 0's slot, where the sealed
+order puts the `spill-pP` phases: right after window 0's `before_window`
+enters `render-00`, before any later window's. A fresh run is unchanged: its
+captures still run inside window 0's retained lifetime, each just before that
+probe's window-0 replay. On a resume no retained window is open during the
+captures. A capture reads source weights and the own boundary, never a render,
+so nothing it needs is missing, and it holds less than on a fresh run. The
+own boundary is staged in the `spill-pP` phases, so each capture now reads it
+under the phase that stages it, as a fresh run does. Window k then replays
+from the spill under `render-k`, as the dispatcher prices it. The window
+profiler of a skipped window now closes when the next window opens, so the
+captures' kernel time is counted. The phase list and every sealed manifest are
+unchanged; so are the dispatcher's graces. Gate:
+`tests/test_resume_capture_phase_1172.py`. It drives the real quantum with
+the prepared-render phases a production row seals, commits window 0 and
+resumes, and checks that each capture runs under `spill-pP` and that every
+unit runs under a phase whose dispatcher pricing names it, in the priced
+count. No format, pipeline stage, record identity or ship gate changes.
 
 Dev mode runs an unqualified projection shape on the reference arithmetic
 (2026-09-24, `fix/1176-devmode-reference-projection`, PQ #1176). The packaged
@@ -363,8 +443,9 @@ every call. In dev mode it prints one `[DEV-MODE]` line per shape and computes
 `(left * right).sum()`, the arithmetic the binary is qualified to equal; the
 binary never runs on that shape. Operands of different shapes, and a
 reduction with autograd enabled, refuse in both modes. The backend identity
-and the qualification file do not change. PQ #1175 tracks a check before the
-row that compares the qualified shapes with the model's. Gate:
+and the qualification file do not change. The check before the row that
+compares the qualified shapes with the model's is PQ #1175 (entry at the
+top). Gate:
 `tests/test_joint_projection_backend.py`. No format, pipeline stage, record
 identity or ship gate changes.
 
@@ -793,7 +874,8 @@ compared the declaration with the reads before the GPU was admitted.
   quantum's install order (`joint_layer_quanta.quantum_source_layer_order`,
   `source_read_plan.chain_prefetch_window`). It no longer prefetches
   `layer - 1`, the next quantum's source, which its readset does not
-  declare.
+  declare. A chain step does not wait for those prefetches; the consumer
+  waits for each layer under its own source phase (PQ #1166).
 - **A coverage check before submission.** `prismaquant/readset_coverage.py`
   lists, in one pass and without a GPU, every source read a manifest does
   not stage whole in the phase that reads it: resident head tensors, layer
@@ -1254,8 +1336,9 @@ sealed for the other mode than its launch, and the dispatcher accepts
 put every spill phase before `render-00`; the runtime opens window 0's
 retained renders before the first capture, so that order would have reported
 the captures under `render-00`. A spill resume whose first pending window is
-not window 0 reports its captures under that window's render phase, because
-progress phases only move forward. Gates:
+not window 0 reported its captures under that window's render phase, because
+progress phases only move forward; since PQ #1172 it captures under the
+`spill-pP` phases, before any later window's render phase. Gates:
 `tests/test_spill_phase_plan_1011.py`,
 `tests/test_stageb_one_pass_spill.py`. No format, pipeline default or ship
 gate changes.
@@ -1907,8 +1990,30 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-rd/1162-chain-roll-overlap`.
+As of: 2026-09-24 · `fix/1166-settle-in-owner-phase`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `fix/1166-settle-in-owner-phase`) for **a chain
+quantum's wait for its own layer's source** (PQ #1166): the chain step no
+longer settles its successors' prefetches, and the quantum waits for its own
+layer's source after it reports `own-LLL-source`. A runtime order changes; no
+phase list, sealed manifest, grace, format, pipeline stage, lane or ship gate
+changes.
+
+Re-stamped (2026-09-24, `fix/1172-resume-capture-phase`) for **a resumed
+spill row's captures** (PQ #1172): a resume whose first active window is 1 or
+later captures every probe under its sealed `spill-pP` phase, right after
+window 0's `before_window`, instead of under the first active window's
+`render-NN`. A runtime order changes; no phase list, sealed manifest, grace,
+format, pipeline stage, lane or ship gate changes.
+
+Re-stamped (2026-09-24, `fix/1175-projection-shape-check`) for **the
+projection shape check before the row** (PQ #1175): the joint dispatcher
+reads the quantum's target weight shapes from the checkpoint headers and
+compares them with the fused kernel's qualified shapes through `seal_check`.
+Certified mode refuses before submission; dev mode prints one `[DEV-MODE]`
+line and publishes. It adds a dispatcher gate; no format, default, pipeline
+stage, record identity, lane or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-rd/1162-chain-roll-overlap`) for **the chain
 roll's host side overlapping the GPU** (PQ #1162): cotangent copies with no

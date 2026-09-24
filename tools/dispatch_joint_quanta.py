@@ -1323,8 +1323,10 @@ def compute_phase_work(name: str, *, replay_mode: str, entries,
     ``joint_statistics_replay.observe_and_project_retained_windows``: a spill
     row captures each probe under ``spill-pP`` and replays the first window
     for that probe under the same phase, and replays every later window under
-    its ``render-NN`` phase. ``render-00`` of a spill row, and every
-    ``render-NN`` of a windowed row, only read.
+    its ``render-NN`` phase. A resume that has committed window 0 still
+    captures under ``spill-pP`` and replays nothing there (PQ #1172), so the
+    replay term of ``spill-pP`` is an upper bound for it. ``render-00`` of a
+    spill row, and every ``render-NN`` of a windowed row, only read.
     """
     def counted(*values):
         return all(type(value) is int and value > 0 for value in values)
@@ -1795,6 +1797,132 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
             raise DispatchRefused("explicit portable image admission requires content SHA and inspected scientific image identity")
     return argv, admission or default_admission
 
+#: A checkpoint's shard index, by model directory. A band publishes many rows
+#: of one model; the dispatcher reads the index once.
+_CHECKPOINT_INDEX: dict[str, dict] = {}
+#: Shard headers already read, by shard path. Header bytes only.
+_SHARD_HEADERS: dict[str, dict] = {}
+
+
+def _checkpoint_weight_shapes(model: Path, names: Sequence[str], *,
+                              where: str) -> dict[str, tuple[int, ...]]:
+    """Each target's weight shape, from the checkpoint's safetensors headers.
+
+    ``names`` are roster qnames; a target's weight is the tensor
+    ``<qname>.weight``. Reads the shard index and the headers of the shards
+    that hold the targets, never a payload byte. A target the headers do not
+    hold refuses in both modes: a shape the dispatcher cannot read is not a
+    qualified shape, and it is not a seal either (PQ #1175).
+    """
+    from prismaquant.source_read_plan import read_safetensors_header
+
+    root = str(model)
+    index_path = Path(root) / "model.safetensors.index.json"
+    if root not in _CHECKPOINT_INDEX:
+        try:
+            if index_path.is_file():
+                weight_map = json.loads(index_path.read_text())["weight_map"]
+            else:
+                weight_map = None
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise DispatchRefused(f"{where}: checkpoint index {index_path} is "
+                                  f"unreadable: {exc}") from exc
+        _CHECKPOINT_INDEX[root] = {"weight_map": weight_map}
+    weight_map = _CHECKPOINT_INDEX[root]["weight_map"]
+    by_shard: dict[str, list[str]] = {}
+    missing = []
+    for name in names:
+        tensor = f"{name}.weight"
+        shard = ("model.safetensors" if weight_map is None
+                 else weight_map.get(tensor))
+        if not isinstance(shard, str):
+            missing.append(name)
+            continue
+        by_shard.setdefault(shard, []).append(name)
+    shapes: dict[str, tuple[int, ...]] = {}
+    for shard, members in sorted(by_shard.items()):
+        path = str(Path(root) / shard)
+        if path not in _SHARD_HEADERS:
+            try:
+                _SHARD_HEADERS[path] = read_safetensors_header(path)[0]
+            except (OSError, ValueError) as exc:
+                raise DispatchRefused(f"{where}: checkpoint shard header {path} "
+                                      f"is unreadable: {exc}") from exc
+        header = _SHARD_HEADERS[path]
+        for name in members:
+            row = header.get(f"{name}.weight")
+            shape = row.get("shape") if isinstance(row, dict) else None
+            if not isinstance(shape, list):
+                missing.append(name)
+                continue
+            shapes[name] = tuple(int(size) for size in shape)
+    if missing:
+        raise DispatchRefused(
+            f"{where}: the checkpoint headers at {root} hold no weight for "
+            f"{len(missing)} target(s), so their projection shapes cannot be "
+            f"checked against the kernel's qualification: {sorted(missing)[:4]}")
+    return shapes
+
+
+def check_projection_shapes(record: Mapping, *, plan: Mapping,
+                            prepared_input: Mapping | None) -> list:
+    """Compare the row's projection shapes with its kernel's qualification.
+
+    PQ #1175. The plan's ``execution.projection_backend`` selects the
+    reduction kernel. The reference ``torch`` backend accepts every shape,
+    and this reads nothing for it. For ``fused_fp32_v1`` the row's shapes
+    are the ``(out, in)`` weight shapes of the quantum's joint statistics
+    targets (every ``product_sum`` operand has its target's weight shape,
+    ``joint_aura.py``). The targets are the members of the record's sealed
+    prepared-input windows, or, for a record without them, the prepared
+    roster's units in the record's layer. Their shapes come from the
+    safetensors headers of the plan's ``model``.
+
+    Certified mode refuses with :class:`DispatchRefused` before anything is
+    submitted. Dev mode prints one ``[DEV-MODE]`` line and the row runs
+    those shapes on the reference arithmetic (PQ #1176). Returns the shapes
+    that will run on the reference arithmetic.
+    """
+    from prismaquant.joint_projection_backend import (
+        check_qualified_shapes, qualified_shapes)
+
+    quantum_id = record.get("quantum_id")
+    where = f"quantum {quantum_id!r}"
+    config = (plan.get("execution") or {}).get("projection_backend")
+    try:
+        if qualified_shapes(config) is None:
+            return []
+    except ValueError as exc:
+        raise DispatchRefused(f"{where}: {exc}") from exc
+    if prepared_input is not None:
+        names = [str(name) for window in prepared_input.get("windows", [])
+                 for name, _fmt in window.get("members", [])]
+    else:
+        from prismaquant.joint_layer_quanta import qname_layer
+        campaign = record.get("campaign") or {}
+        try:
+            prepared = json.loads(Path(campaign["prepared_path"]).read_bytes())
+            roster = prepared["formats_by_qname"]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise DispatchRefused(f"{where}: prepared roster is unreadable: "
+                                  f"{exc}") from exc
+        names = [name for name in roster if qname_layer(name) == record.get("layer")]
+    names = sorted(set(names))
+    if not names:
+        raise DispatchRefused(f"{where}: no joint statistics target to check "
+                              "against the projection kernel's qualification")
+    model = plan.get("model")
+    if not isinstance(model, str) or not model:
+        raise DispatchRefused(f"{where}: the plan names no source model")
+    shapes = _checkpoint_weight_shapes(Path(model), names, where=where)
+    malformed = sorted(name for name, shape in shapes.items() if len(shape) != 2)
+    if malformed:
+        raise DispatchRefused(f"{where}: target weights are not matrices: "
+                              f"{malformed[:4]}")
+    return check_qualified_shapes(config, shapes.values(), where=where,
+                                  refusal=DispatchRefused)
+
+
 def _sealed_spill_bound(record: Mapping) -> Mapping | None:
     """The row's validated spill bound, or ``None`` for a row that does not spill.
 
@@ -1897,6 +2025,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             f"({emit_template}), but the client at {PBRUN} carries no "
             "--produced-output-template")
     resource_policy = None
+    prepared_input = None
     executable = record.get("executable_readset")
     # At most one parse of the campaign spec, made when a load phase first
     # needs its staged wait; _container_wrap then seals that same parse.
@@ -1959,7 +2088,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         # foreign or malformed prepared contract, a bare mover reference)
         # refuses below with the typed refusal; manifest/phase propagation
         # stays exercised through _executable_row_parts directly.
-        _executable_prepared_input(record, output_root=output_root)
+        _, prepared_input = _executable_prepared_input(record, output_root=output_root)
         if handoff is not None:
             # The sealed chain manifest passes its gate here; the row stages
             # the readset derived from it and this handoff.
@@ -2016,6 +2145,9 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         plan = json.loads(plan_raw)
     except (OSError, ValueError) as exc:
         raise DispatchRefused(f"quantum {quantum_id!r} source plan is unreadable: {exc}") from exc
+    # PQ #1175: before anything is submitted, the row's projection shapes
+    # against its kernel's qualification. Certified mode refuses here.
+    check_projection_shapes(record, plan=plan, prepared_input=prepared_input)
     resource_bound = plan.get("stage_b_resource_policy") is not None
     if not resource_bound:
         plan_sha256 = _argv_file_sha256(campaign, "plan", raw=plan_raw,
