@@ -37,10 +37,14 @@ These still refuse in both modes:
   `max_gpu_bytes`, dev mode prints both and applies the plan's
   (`joint_stageb_resources.enforce_device_policy`).
 
-`tests/test_no_new_seals.py` scans the campaign modules for identity
-`if`-then-`raise` sites and fails on any site that is not on its allowlist.
-Each allowlist entry names its kind (integrity, structure, wall or ambiguous)
-and its reason.
+`tests/test_no_new_seals.py` scans the campaign modules, the Stage B resource
+and plan modules among them, for identity checks and fails on any site that
+is not on its allowlist. A site is an `if`-then-`raise`, or a `_require(...)`
+call, whose condition compares two non-literal values that name a digest, an
+identity or a resource ceiling (`max_*bytes`, `gpu_bytes`, `limits`), including
+field names carried by an enclosing loop over a literal. Each allowlist entry
+names its kind (integrity, structure, wall, resource or ambiguous) and its
+reason.
 
 Dev mode also skips work that only a seal needed. A chain resume does not
 rebuild the source model identity; it records `not computed`. The catalog

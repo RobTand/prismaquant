@@ -6,20 +6,29 @@ through ``prismaquant.dev_mode.seal_check``, which refuses only under
 ``PRISMAQUANT_DEV_MODE=0``.
 
 This lint finds every ``if`` whose test compares two non-literal values with
-``==`` or ``!=``, where a name on either side mentions ``sha256``,
-``identity`` or ``digest``, and whose body raises. Every such site on the
-campaign path is on the allowlist below with its reason. Most are byte
-integrity: bytes that do not hash to the digest they were stored under, or a
-record that does not reproduce its own seal. A new site fails this test until
-it goes through ``seal_check`` or earns an allowlist entry with a reason.
+``==`` or ``!=`` and whose body raises, and every ``_require(...)`` or
+``require(...)`` call whose first argument is such a comparison. A site counts
+when a name on either side mentions ``sha256``, ``identity`` or ``digest``, or
+a resource ceiling (``max_*bytes``, ``gpu_bytes``, ``limit``, ``limits``,
+``ceiling``). Inside a ``for`` loop over a literal tuple or list, a side that
+uses the loop variable also carries the names in that literal, so
+``for field in ("plan_sha256", ...): if header[field] != requested: raise``
+counts. Every such site on the campaign path is on the allowlist below with
+its reason. Most are byte integrity: bytes that do not hash to the digest they
+were stored under, or a record that does not reproduce its own seal. A new site
+fails this test until it goes through ``seal_check`` or earns an allowlist
+entry with a reason.
 
 The allowlist keys on (file, enclosing function) with an exact count, so a new
 seal inside an allowlisted function also fails. Converting a site to
 ``seal_check`` lowers the count and fails the test too, until the entry is
 updated.
 
-The lint reads ``if``-then-``raise`` sites only. Helpers that compare and raise
-inside a call (``_same(...)``) are outside it.
+The ``_require`` call form and the resource-ceiling names were added after a
+Stage B device limit (``joint_stageb_resources.enforce_device_policy``) went
+unseen: ``_require(config["max_gpu_bytes"] == limits["gpu_bytes"], ...)``.
+Helpers that take the two values as arguments (``_same(a, b, ...)``) are still
+outside the lint.
 """
 from __future__ import annotations
 
@@ -33,22 +42,32 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 # The campaign path: Stage A, Stage B, the join, the dispatchers, the catalog
-# extension, the qualification, and the modules they call for identities.
+# extension, the qualification, and the modules they call for identities,
+# resource ceilings and plans.
 MODULES = (
     "prismaquant/aura_cost.py",
     "prismaquant/cost_currency.py",
     "prismaquant/cost_streaming.py",
     "prismaquant/dev_mode.py",
+    "prismaquant/joint_adjoint_band.py",
     "prismaquant/joint_adjoint_checkpoints.py",
     "prismaquant/joint_catalog_extension.py",
     "prismaquant/joint_cost_quantum.py",
+    "prismaquant/joint_cost_read_schedule.py",
     "prismaquant/joint_cost_stage_a.py",
     "prismaquant/joint_forward_resume.py",
     "prismaquant/joint_layer_quanta.py",
     "prismaquant/joint_projection_backend.py",
     "prismaquant/joint_quanta_join.py",
+    "prismaquant/joint_quantum_handoff.py",
     "prismaquant/joint_replay_spill.py",
+    "prismaquant/joint_retained_window_plan.py",
+    "prismaquant/joint_served_activation.py",
     "prismaquant/joint_stage_b_head.py",
+    "prismaquant/joint_stageb_resources.py",
+    "prismaquant/joint_statistics_replay.py",
+    "prismaquant/memory_management.py",
+    "prismaquant/stage_b_workspace_profile.py",
     "prismaquant/stage_a_chain_resume.py",
     "prismaquant/stage_a_chain_seed.py",
     "prismaquant/stage_a_chain_split.py",
@@ -62,9 +81,12 @@ INTEGRITY = "integrity"
 STRUCTURE = "structure"
 WALL = "wall"
 AMBIGUOUS = "ambiguous"
+RESOURCE = "resource"
 
 # (file, enclosing function) -> (count, kind, reason). ``wall`` is a data or
 # layout identity (calibration, roster, probes) that dev mode must not cross.
+# ``resource`` is a resource or OOM guard over the running values, which stays
+# in both modes.
 # ``ambiguous`` was listed in the PQ #1147 report; the ruling (2026-09-24)
 # keeps each such site a refusal in both modes, as on main.
 ALLOWLIST = {
@@ -134,8 +156,8 @@ ALLOWLIST = {
     ("prismaquant/joint_forward_resume.py", "build_forward_recovery"): (
         1, INTEGRITY, "a local export manifest changed after it was written"),
     ("prismaquant/joint_layer_quanta.py", "check_quantum_for_campaign"): (
-        2, AMBIGUOUS, "the record reproduces its own seal (integrity); the Stage A slice "
-        "binding (ambiguous, #1147 report)"),
+        3, AMBIGUOUS, "the record reproduces its own seal (integrity); the unit roster "
+        "the record measured (wall); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_layer_quanta.py", "covered_slices"): (
         1, WALL, "Stage A proofs from mixed runs cover no one chain"),
     ("prismaquant/joint_layer_quanta.py", "bind_quantum_boundary_readset"): (
@@ -197,8 +219,9 @@ ALLOWLIST = {
     ("prismaquant/tessera_joint_aura.py", "_read_wire_bytes"): (
         1, INTEGRITY, "staged wire bytes against the receipt digest"),
     ("tools/dispatch_joint_quanta.py", "_executable_prepared_input"): (
-        3, AMBIGUOUS, "the manifest wire against its digest (integrity); the prepared "
-        "payload and Stage A slice bindings (ambiguous, #1147 report)"),
+        5, AMBIGUOUS, "the manifest wire against its digest (integrity); the prepared "
+        "payload, its render prerequisite, the bound prepared contract and the Stage A "
+        "slice bindings, one executable's internal agreement (ambiguous, #1147 report)"),
     ("tools/dispatch_joint_quanta.py", "quantum_argv"): (
         1, INTEGRITY, "slice bytes against the digest"),
     ("tools/dispatch_joint_quanta.py", "check_stage_a_proofs"): (
@@ -232,10 +255,85 @@ ALLOWLIST = {
         1, INTEGRITY, "production cache bytes against the pinned digest"),
     ("tools/regenerate_joint_quanta.py", "main"): (
         1, STRUCTURE, "a path and its digest are supplied together"),
+    # Found by the _require call form, loop fields and resource ceilings.
+    ("prismaquant/joint_cost_stage_a.py", "bind_stage_a_produced_output"): (
+        1, RESOURCE, "the produced-output template's durable payload maximum against the "
+        "running artifact ceiling: PrismaBuild admits the one and the run spends the other"),
+    ("prismaquant/tessera_joint_aura.py", "_bound"): (
+        1, INTEGRITY, "an artifact's bytes against the digest it was bound under"),
+    ("prismaquant/tessera_joint_aura.py", "require_encoder_source_reuse_record"): (
+        1, STRUCTURE, "a reuse record names two different encoder seals"),
+    ("tools/dispatch_joint_quanta.py", "_container_wrap"): (
+        1, RESOURCE, "the container's host and device envelope against the plan's own bound "
+        "resource policy, both running values"),
+    ("tools/dispatch_joint_quanta.py", "_stage_manifest_binding"): (
+        1, AMBIGUOUS, "a Stage A data manifest's plan and prepared digests against the "
+        "campaign's: the read set was built for a plan (ambiguous, #1147 report)"),
+    ("prismaquant/joint_adjoint_band.py", "_json_file"): (
+        1, INTEGRITY, "file bytes against their bound digest"),
+    ("prismaquant/joint_adjoint_band.py", "read_sealed_checkpoint"): (
+        1, INTEGRITY, "a checkpoint record reproduces its own seal"),
+    ("prismaquant/joint_adjoint_band.py", "own_boundary_entry"): (
+        1, STRUCTURE, "an entry's recorded session, slot and coordinates are the ones "
+        "its path names"),
+    ("prismaquant/joint_adjoint_band.py", "capsule_recovery"): (
+        1, AMBIGUOUS, "the forward-recovery capsule's plan, prepared and read-manifest "
+        "digests against the sealed request's (ambiguous, #1147 report)"),
+    ("prismaquant/joint_adjoint_band.py", "build_band_receipt"): (
+        3, AMBIGUOUS, "the reconstructed run identity hashes to the session's (integrity); "
+        "the supplied bind identity, unit roster and campaign scope against the capsule's "
+        "(ambiguous, #1147 report)"),
+    ("prismaquant/joint_adjoint_band.py", "stage_a_argv"): (
+        1, STRUCTURE, "a forward-recovery path and its digest are supplied together"),
+    ("prismaquant/joint_adjoint_band.py", "sealed_chain_state"): (
+        1, AMBIGUOUS, "the chain state's plan, prepared and read-manifest digests against "
+        "the sealed request's (ambiguous, #1147 report)"),
+    ("prismaquant/joint_adjoint_band.py", "band_from_request"): (
+        1, INTEGRITY, "the sealed request's bytes against the supplied digest"),
+    ("prismaquant/joint_cost_read_schedule.py", "_read_sealed"): (
+        1, INTEGRITY, "manifest bytes against their digest"),
+    ("prismaquant/joint_cost_read_schedule.py", "load_joint_cost_read_schedule"): (
+        2, AMBIGUOUS, "the read schedule's plan and prepared bindings against the running "
+        "ones; reached only by tessera_joint_aura run --cost-read-manifest, which no "
+        "dispatcher passes (ambiguous, #1147 report)"),
+    ("prismaquant/joint_cost_read_schedule.py", "_bind_runtime"): (
+        1, WALL, "the schedule's window partition digest against the partition the running "
+        "budget derives: the windows the schedule reads"),
+    ("prismaquant/joint_quantum_handoff.py", "load_quantum_handoff"): (
+        3, INTEGRITY, "handoff bytes against their digest; the record reproduces its own "
+        "seal; each entry names the handoff's session (structure)"),
+    ("prismaquant/joint_quantum_handoff.py", "load_handoff_inputs.staged"): (
+        1, INTEGRITY, "a staged entry's bytes against their recorded digest and size"),
+    ("prismaquant/joint_quantum_handoff.py", "band_serial_manifest_bytes"): (
+        1, INTEGRITY, "the manifest wire against its digest"),
+    ("prismaquant/joint_quantum_handoff.py", "require_band_serial_readset"): (
+        1, INTEGRITY, "the readset wire against the data manifest digest"),
+    ("prismaquant/joint_quantum_handoff.py", "bind_handoff_publication"): (
+        1, RESOURCE, "the handoff template's durable payload maximum against the owner's "
+        "running artifact ceiling"),
+    ("prismaquant/joint_served_activation.py", "_policy_bytes"): (
+        1, INTEGRITY, "policy input bytes against their bound digest"),
+    ("prismaquant/joint_served_activation.py", "verify_policy"): (
+        1, INTEGRITY, "the policy's inputs did not change while it was derived"),
+    ("prismaquant/joint_stageb_resources.py", "derive_policy"): (
+        1, STRUCTURE, "the policy's original preparation names the policy's original plan"),
+    ("prismaquant/joint_stageb_resources.py", "verify_policy"): (
+        2, INTEGRITY, "the policy reproduces its own derivation; its inputs did not change "
+        "while it was derived"),
+    ("prismaquant/joint_stageb_resources.py", "require_plan_resources"): (
+        2, STRUCTURE, "an extension plan differs from its original only through a resource "
+        "proof; both plans are named in the proof"),
+    ("prismaquant/joint_stageb_resources.py", "enforce_device_policy"): (
+        1, STRUCTURE, "without a head slice, the plan's max_gpu_bytes against its own bound "
+        "policy: one plan's internal agreement. The head slice's sealed limit is a "
+        "seal_check"),
 }
 
-_NAMES = re.compile(r"sha256|identity|digest", re.IGNORECASE)
+_NAMES = re.compile(r"sha256|identity|digest|max_\w*bytes|gpu_bytes|^limits?$|ceiling",
+                    re.IGNORECASE)
 _LITERALS = (ast.Constant, ast.Set, ast.Dict, ast.List, ast.Tuple)
+# Assertion helpers whose first argument is the checked condition.
+_REQUIRE_HELPERS = {"_require", "require"}
 
 
 def _texts(node):
@@ -249,7 +347,8 @@ def _texts(node):
             yield child.value
 
 
-def _is_identity_compare(test) -> bool:
+def _is_identity_compare(test, loops=()) -> bool:
+    """``loops``: (loop variable names, literal iterable) of each enclosing ``for``."""
     for node in ast.walk(test):
         if not isinstance(node, ast.Compare):
             continue
@@ -257,10 +356,13 @@ def _is_identity_compare(test) -> bool:
         for op, right in zip(node.ops, node.comparators):
             if (isinstance(op, (ast.Eq, ast.NotEq))
                     and not isinstance(left, _LITERALS)
-                    and not isinstance(right, _LITERALS)
-                    and any(_NAMES.search(text) for side in (left, right)
-                            for text in _texts(side))):
-                return True
+                    and not isinstance(right, _LITERALS)):
+                texts = [text for side in (left, right) for text in _texts(side)]
+                for targets, iterable in loops:
+                    if targets & set(texts):
+                        texts.extend(_texts(iterable))
+                if any(_NAMES.search(text) for text in texts):
+                    return True
             left = right
     return False
 
@@ -268,6 +370,7 @@ def _is_identity_compare(test) -> bool:
 class _Sites(ast.NodeVisitor):
     def __init__(self):
         self.stack: list[str] = []
+        self.loops: list[tuple[set, ast.AST]] = []
         self.found: list[tuple[str, int]] = []
 
     def _scope(self, node):
@@ -277,15 +380,33 @@ class _Sites(ast.NodeVisitor):
 
     visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _scope
 
+    def visit_For(self, node):
+        if not isinstance(node.iter, (ast.Tuple, ast.List)):
+            self.generic_visit(node)
+            return
+        targets = {name.id for name in ast.walk(node.target) if isinstance(name, ast.Name)}
+        self.loops.append((targets, node.iter))
+        self.generic_visit(node)
+        self.loops.pop()
+
+    def _site(self, node):
+        self.found.append((".".join(self.stack) or "<module>", node.lineno))
+
     def visit_If(self, node):
-        if _is_identity_compare(node.test) and any(
+        if _is_identity_compare(node.test, self.loops) and any(
                 isinstance(statement, ast.Raise) for statement in node.body):
-            self.found.append((".".join(self.stack) or "<module>", node.lineno))
+            self._site(node)
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        if (isinstance(node.func, ast.Name) and node.func.id in _REQUIRE_HELPERS
+                and node.args and _is_identity_compare(node.args[0], self.loops)):
+            self._site(node)
         self.generic_visit(node)
 
 
 def seal_sites(source: str) -> list[tuple[str, int]]:
-    """(enclosing function, line) of each identity if-then-raise in ``source``."""
+    """(enclosing function, line) of each identity check the lint counts in ``source``."""
     visitor = _Sites()
     visitor.visit(ast.parse(source))
     return visitor.found
@@ -304,7 +425,7 @@ def violations(sources: dict[str, str]) -> list[str]:
         allowed = ALLOWLIST.get(key, (0, None, None))[0]
         if counts[key] > allowed:
             problems.append(
-                f"{key[0]}:{lines[key]} {key[1]}: {counts[key]} identity if-raise site(s), "
+                f"{key[0]}:{lines[key]} {key[1]}: {counts[key]} identity check site(s), "
                 f"{allowed} allowed. A run seal goes through dev_mode.seal_check; "
                 "a byte-integrity check needs an ALLOWLIST entry with its reason")
         elif counts[key] < allowed:
@@ -326,7 +447,7 @@ def test_every_allowlist_entry_gives_its_kind_and_reason():
     for key, (count, kind, reason) in ALLOWLIST.items():
         assert key[0] in MODULES, key
         assert count >= 1, key
-        assert kind in {INTEGRITY, STRUCTURE, WALL, AMBIGUOUS}, key
+        assert kind in {INTEGRITY, STRUCTURE, WALL, AMBIGUOUS, RESOURCE}, key
         assert isinstance(reason, str) and len(reason) > 20, key
 
 
@@ -362,6 +483,52 @@ def test_a_new_seal_fails_the_lint(allowed):
     assert len(problems) == 1
     assert "seal_check" in problems[0]
     assert ("verify_quantum_identity: 5" if allowed else "load_run: 1") in problems[0]
+
+
+NEW_SEAL_FORMS = {
+    "require-call": '''
+
+def load_limits(config, limits):
+    _require(config["max_gpu_bytes"] == limits["gpu_bytes"], "device limit differs")
+''',
+    "loop-field": '''
+
+def load_header(header, plan, prepared):
+    for field, requested in (("plan_sha256", plan), ("prepared_sha256", prepared)):
+        if header.get(field) != requested:
+            raise RuntimeError("the run seals another " + field)
+''',
+    "resource-ceiling": '''
+
+def load_ceiling(declared, boundary_storage):
+    if declared != int(boundary_storage["max_artifact_bytes"]):
+        raise RuntimeError("the template declares another ceiling")
+''',
+}
+
+
+@pytest.mark.parametrize("form", sorted(NEW_SEAL_FORMS))
+def test_the_lint_sees_each_seal_form(form):
+    """The forms the Stage B device limit showed: a call, a loop field, a ceiling."""
+    sources = _campaign_sources()
+    path = "prismaquant/joint_stageb_resources.py"
+    sources[path] += NEW_SEAL_FORMS[form]
+    problems = violations(sources)
+    assert len(problems) == 1
+    function = {"require-call": "load_limits", "loop-field": "load_header",
+                "resource-ceiling": "load_ceiling"}[form]
+    assert f"{function}: 1" in problems[0]
+
+
+def test_the_lint_ignores_a_comparison_with_a_literal():
+    sources = _campaign_sources()
+    path = "prismaquant/joint_stageb_resources.py"
+    sources[path] += '''
+
+def load_schema(policy):
+    _require(policy["gpu_bytes"] != 0, "the policy bounds no device")
+'''
+    assert violations(sources) == []
 
 
 def test_converting_a_site_requires_lowering_its_entry():
