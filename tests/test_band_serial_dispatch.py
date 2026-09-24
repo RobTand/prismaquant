@@ -175,7 +175,8 @@ def _emit(record, *, shift=0.0):
                           "directory": "/unused", "max_resident_bytes": 1 << 24,
                           "max_auxiliary_bytes": 1 << 24,
                           "max_artifact_bytes": ARTIFACT_MAX,
-                          "prefetch_batches": PREFETCH})
+                          "prefetch_batches": PREFETCH},
+        capture_batch=1)
     plane = {(p, b): torch.full((2, 4), 10.0 * p + b + shift)
              for p in range(N_PROBES) for b in range(N_BATCHES)}
     owners = [[_Owner({"scale": float(p + b)}) for b in range(N_BATCHES)]

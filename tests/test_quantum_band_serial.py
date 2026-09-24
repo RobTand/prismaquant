@@ -104,8 +104,10 @@ def _campaign(tmp_path, monkeypatch, *, fusion=False):
 
 
 def _emitter(record, adjoint_slice, execution):
+    # This fixture runs the default replay regime: a capture batch of one.
     return HandoffEmitter(record=record, adjoint_slice=adjoint_slice,
-                          boundary_storage=execution["boundary_storage"])
+                          boundary_storage=execution["boundary_storage"],
+                          capture_batch=1)
 
 
 def _consumer(handoff):
@@ -396,25 +398,46 @@ def test_the_band_top_takes_no_handoff(tmp_path, monkeypatch):
                              record=record, adjoint_slice=adjoint_slice)
 
 
-def test_the_emitter_refuses_layer_zero_and_a_batched_regime(tmp_path, monkeypatch):
+def test_the_emitter_refuses_layer_zero_and_a_capture_batch_off_the_chains(
+        tmp_path, monkeypatch):
+    """A producer captures at its slice's chain batch size, and only there
+    (PQ #994, #997): the plane it hands off is then the chain's plane."""
     receipt_record = {"layer": 0}
     with pytest.raises(QuantumHandoffRefused, match="layer 0"):
-        HandoffEmitter(record=receipt_record,
-                       adjoint_slice={"run_identity": {}}, boundary_storage={})
+        HandoffEmitter(record=receipt_record, adjoint_slice={"run_identity": {}},
+                       boundary_storage={}, capture_batch=1)
     batched = chain_regime_identity({"batch_size": 8, "probe_fusion": True})
-    with pytest.raises(QuantumHandoffRefused, match="batch size 8"):
+    with pytest.raises(QuantumHandoffRefused, match="batch size 8.*captured at batch 1"):
         HandoffEmitter(record={"layer": 2},
                        adjoint_slice={"run_identity": {"chain_regime": batched}},
-                       boundary_storage={})
+                       boundary_storage={}, capture_batch=1)
+    # The default chain regime rolls per sample: a batched capture refuses.
+    with pytest.raises(QuantumHandoffRefused, match="batch size 1.*captured at batch 4"):
+        HandoffEmitter(record={"layer": 2}, adjoint_slice={"run_identity": {}},
+                       boundary_storage={}, capture_batch=4)
     with pytest.raises(QuantumHandoffRefused, match="chain regime is malformed"):
         HandoffEmitter(record={"layer": 2},
                        adjoint_slice={"run_identity": {"chain_regime": {"batch_size": 1}}},
-                       boundary_storage={})
+                       boundary_storage={}, capture_batch=1)
+    with pytest.raises(QuantumHandoffRefused, match="positive integer"):
+        HandoffEmitter(record={"layer": 2}, adjoint_slice={"run_identity": {}},
+                       boundary_storage={}, capture_batch=0)
+    with pytest.raises(TypeError):
+        HandoffEmitter(record={"layer": 2}, adjoint_slice={"run_identity": {}},
+                       boundary_storage={})  # the capture batch is never implied
     # Probe fusion at a batch size of one is the per-sample arithmetic.
     fused = chain_regime_identity({"batch_size": 1, "probe_fusion": True})
     HandoffEmitter(record={"layer": 2},
                    adjoint_slice={"run_identity": {"chain_regime": fused}},
-                   boundary_storage={})
+                   boundary_storage={}, capture_batch=1)
+    # A batched chain regime admits the same batch, fusion on or off.
+    for fusion in (False, True):
+        regime = chain_regime_identity({"batch_size": 8, "probe_fusion": fusion})
+        emitter = HandoffEmitter(
+            record={"layer": 2},
+            adjoint_slice={"run_identity": {"chain_regime": regime}},
+            boundary_storage={}, capture_batch=8)
+        assert emitter.capture_batch == 8
 
 
 def test_a_failed_emission_publishes_no_record(tmp_path, monkeypatch):
@@ -432,7 +455,8 @@ def test_a_failed_emission_publishes_no_record(tmp_path, monkeypatch):
 
     def broken(record, adjoint_slice, execution):
         return Broken(record=record, adjoint_slice=adjoint_slice,
-                      boundary_storage=execution["boundary_storage"])
+                      boundary_storage=execution["boundary_storage"],
+                      capture_batch=1)
 
     with pytest.raises(RuntimeError, match="plane read failed"):
         _quantum(tmp_path, monkeypatch, single=single, receipt=receipt,

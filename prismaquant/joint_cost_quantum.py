@@ -1508,9 +1508,19 @@ def run_layer_quantum_core(
                 "the spill; declare PRISMAQUANT_STAGE_B_SPILL_ROOT and "
                 "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
         counters.replay["regime"] = replay_regime_identity(replay_regime)
-    if handoff_emitter is not None and handoff_regime_refusal(replay_regime):
-        raise QuantumIdentityRefused(
-            f"quantum {quantum_id}: {handoff_regime_refusal(replay_regime)}")
+    # A band-serial producer (PQ #996) captures at the slice's chain batch
+    # size, so the plane it hands off is the one the consumer's chain
+    # rebuild ends on; any other capture batch refuses before GPU work.
+    if handoff_emitter is not None:
+        refusal = handoff_regime_refusal(
+            replay_regime, chain_batch_size=chain_regime["batch_size"])
+        if refusal:
+            raise QuantumIdentityRefused(f"quantum {quantum_id}: {refusal}")
+        if int(handoff_emitter.capture_batch) != replay_regime["capture_batch"]:
+            raise QuantumIdentityRefused(
+                f"quantum {quantum_id}: the handoff emitter was built for capture "
+                f"batch {handoff_emitter.capture_batch}, and this launch captures "
+                f"at {replay_regime['capture_batch']}")
     capture_batch = replay_regime["capture_batch"]
     # PQ #1151: an opt-in measurement of the capture workspace, read once.
     from .stage_b_workspace_profile import profile_capture_workspace, profile_request
@@ -2823,8 +2833,25 @@ def run_layer_quantum(
         require_slice_bf16_reduction(
             adjoint_slice, bf16_reduction,
             where=f"quantum {record.get('quantum_id', '?')}")
-    if emit_handoff and handoff_regime_refusal(replay_regime):
-        raise QuantumIdentityRefused(handoff_regime_refusal(replay_regime))
+    handoff_capture_batch = None
+    if emit_handoff:
+        # The producer's capture batch must be the batch size the slice's
+        # chain regime rolls at (PQ #994, #997): the plane it hands off is
+        # then the consumer's chain plane. The core repeats the check on the
+        # verified slice; this one refuses before any head work.
+        from .joint_adjoint_slices import ChainRegimeRefused, chain_regime_of
+        from .joint_replay_regime import normalize_replay_regime
+        try:
+            chain_batch_size = chain_regime_of(
+                adjoint_slice["run_identity"])["batch_size"]
+        except (ChainRegimeRefused, KeyError, TypeError) as exc:
+            raise QuantumIdentityRefused(
+                f"the stage-A slice's chain regime: {exc}") from exc
+        refusal = handoff_regime_refusal(replay_regime,
+                                         chain_batch_size=chain_batch_size)
+        if refusal:
+            raise QuantumIdentityRefused(refusal)
+        handoff_capture_batch = normalize_replay_regime(replay_regime)["capture_batch"]
     from .joint_stageb_resources import enforce_device_policy
     # Bind the readset before the first head read, so the head slice and
     # every declared entry after it resolve through residency (PQ #1024).
@@ -2890,6 +2917,7 @@ def run_layer_quantum(
             handoff_emitter = HandoffEmitter(
                 record=record, adjoint_slice=adjoint_slice,
                 boundary_storage=execution["boundary_storage"],
+                capture_batch=handoff_capture_batch,
                 publication=bind_handoff_publication(
                     boundary_storage=execution["boundary_storage"]))
         except QuantumHandoffRefused as exc:

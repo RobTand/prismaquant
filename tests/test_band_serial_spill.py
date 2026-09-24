@@ -54,8 +54,10 @@ def _run(campaign, monkeypatch, *, layer, spill_root=None, handoff=None, emit=Fa
     published = {}
 
     def band_serial(*args, record, adjoint_slice, execution, **kwargs):
+        # This suite's producer captures at batch 1 (the default regime).
         emitter = (HandoffEmitter(record=record, adjoint_slice=adjoint_slice,
-                                  boundary_storage=execution["boundary_storage"])
+                                  boundary_storage=execution["boundary_storage"],
+                                  capture_batch=1)
                    if emit else None)
         bound = (None if handoff is None else load_quantum_handoff(
             handoff["path"], handoff["sha256"], record=record,

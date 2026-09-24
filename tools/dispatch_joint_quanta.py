@@ -1590,13 +1590,17 @@ def require_staged_wait_below_grace(spec: Mapping,
             f"kill instead of the reader's staging refusal. Set it below {grace} s")
 
 
-def _require_replay_regime(spec: dict, *, emits_handoff: bool = False) -> None:
+def _require_replay_regime(spec: dict, *, emits_handoff: bool = False,
+                           chain_batch_size: int | None = None) -> None:
     """Validate the Stage B replay regime the sealed spec declares (#994).
 
     One spec wraps every quantum of a dispatch, so the regime is uniform by
     construction. It changes the statistics arithmetic, and it replays only
     from the spill, so the spec must declare the spill beside it. A
-    band-serial producer (#996) runs only a batch-1 capture.
+    band-serial producer (#996) captures at ``chain_batch_size``, the batch
+    size its slice's Stage A chain regime rolls at (#997), so the plane it
+    hands off is the one its consumer's chain rebuild ends on; any other
+    capture batch refuses (``joint_replay_regime.handoff_regime_refusal``).
     """
     from prismaquant.joint_replay_regime import (
         handoff_regime_refusal, replay_regime_from_environment)
@@ -1606,8 +1610,42 @@ def _require_replay_regime(spec: dict, *, emits_handoff: bool = False) -> None:
     if regime is not None and not stage_b_spill_environment(spec, env):
         raise RuntimeError("a non-default Stage B replay regime replays from the "
                            "spill; declare the spill in the same spec")
-    if emits_handoff and handoff_regime_refusal(regime):
-        raise RuntimeError(handoff_regime_refusal(regime))
+    if emits_handoff:
+        if chain_batch_size is None:
+            raise RuntimeError("a band-serial producer row names the chain batch "
+                               "size its slice rolls at")
+        refusal = handoff_regime_refusal(regime, chain_batch_size=chain_batch_size)
+        if refusal:
+            raise RuntimeError(refusal)
+
+
+def _spec_capture_batch(spec_path: Path) -> int:
+    """The capture batch the sealed spec's replay regime launches (default 1)."""
+    from prismaquant.joint_replay_regime import (
+        ReplayRegimeRefused, normalize_replay_regime, replay_regime_from_environment)
+
+    try:
+        spec = json.loads(Path(spec_path).read_text())
+    except (OSError, ValueError) as exc:
+        raise DispatchRefused(f"campaign spec {spec_path}: {exc}") from exc
+    try:
+        return normalize_replay_regime(
+            replay_regime_from_environment(spec.get("env") or {}))["capture_batch"]
+    except ReplayRegimeRefused as exc:
+        raise DispatchRefused(f"campaign spec {spec_path}: {exc}") from exc
+
+
+def _slice_chain_batch_size(record: Mapping) -> int:
+    """The batch size the record's Stage A slice rolls its chain at (#997)."""
+    from prismaquant.joint_adjoint_slices import ChainRegimeRefused, chain_regime_of
+
+    adjoint_slice = _read_bound_slice(record)
+    try:
+        return chain_regime_of(dict(adjoint_slice["run_identity"]))["batch_size"]
+    except (ChainRegimeRefused, KeyError, TypeError) as exc:
+        raise DispatchRefused(
+            f"quantum {record.get('quantum_id')!r} stage-A slice chain regime: "
+            f"{exc}") from exc
 
 
 def produced_spool_row_environment(spec: Mapping) -> dict:
@@ -1683,7 +1721,9 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                     resource_policy=None,
                     spool_max_bytes: int | None = None,
                     spill_bound: Mapping | None = None,
-                    spec: dict | None = None) -> tuple[list[str], str | None]:
+                    spec: dict | None = None,
+                    handoff_chain_batch_size: int | None = None,
+                    ) -> tuple[list[str], str | None]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -1773,7 +1813,8 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     try:
         scratch = local_scratch_environment(spec, spec.get("env", {}))
         _warn_overlay_caches(spec, scratch)
-        _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload)
+        _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload,
+                               chain_batch_size=handoff_chain_batch_size)
         # The bf16 reduction flag is sealed in the same spec, so it is
         # uniform across every quantum of the dispatch (PQ #1028).
         from prismaquant.matmul_arithmetic import bf16_reduction_from_environment
@@ -2195,8 +2236,10 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     if handoff is not None:
         band_payload += ["--adjoint-handoff", str(handoff["path"]),
                          "--adjoint-handoff-sha256", str(handoff["sha256"])]
+    handoff_chain_batch_size = None
     if emit_template is not None:
         band_payload.append("--emit-adjoint-handoff")
+        handoff_chain_batch_size = _slice_chain_batch_size(record)
     if grace_stamps:
         band_payload += [PROGRESS_GRACE_FLAG,
                          json.dumps(grace_stamps, sort_keys=True,
@@ -2216,7 +2259,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--resume",
         "--output-root", str(output_root), *band_payload], progress=progress,
         resource_policy=resource_policy, spill_bound=_sealed_spill_bound(record),
-        spec=spec_parse.get("spec"))
+        spec=spec_parse.get("spec"),
+        handoff_chain_batch_size=handoff_chain_batch_size)
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
         argv += ["--tag", str(tag)]
@@ -2762,20 +2806,25 @@ def _producer_handoff(producer: Mapping, *, key: str | None,
 def fresh_band_role(record: Mapping, *, roles: Mapping, by_id: Mapping,
                     last_submission: Mapping, submitted_keys: Mapping,
                     gateway: "Gateway", tier: str | None,
-                    output_root: Path) -> tuple[dict | None, str | None]:
+                    output_root: Path, capture_batch: int = 1,
+                    ) -> tuple[dict | None, str | None]:
     """The band-serial role of a row never submitted before.
 
     Returns ``(band, None)`` to publish or ``(None, reason)`` while the row
     waits for its producer. A consumer takes its producer's handoff; a
     producer emits one only for a successor never yet submitted, since a
-    submitted row keeps the mode it was submitted in.
+    submitted row keeps the mode it was submitted in. ``capture_batch`` is
+    the spec's launch regime's (:func:`_spec_capture_batch`): a band runs
+    serial only when its slice's chain regime rolls at that batch size
+    (PQ #994, #997), the batch the handed-off plane is captured at.
     """
     from prismaquant.joint_quantum_handoff import handoff_chain_regime_refusal
 
     quantum_id = record["quantum_id"]
     role = roles[quantum_id]
     adjoint_slice = _read_bound_slice(record)
-    refusal = handoff_chain_regime_refusal(adjoint_slice.get("run_identity"))
+    refusal = handoff_chain_regime_refusal(adjoint_slice.get("run_identity"),
+                                           capture_batch=capture_batch)
     if refusal is not None:
         raise DispatchRefused(f"quantum {quantum_id!r} cannot run band-serial: {refusal}")
     band: dict = {}
@@ -3133,6 +3182,13 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
     roles = band_serial_roles(records)
     by_id = {record["quantum_id"]: record for _, record in records}
     band_pending: list[dict] = []
+    band_capture_batch = 1
+    if args.band_serial:
+        try:
+            band_capture_batch = _spec_capture_batch(SPEC_PATH)
+        except DispatchRefused as exc:
+            print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
+            return EXIT_PRECONDITION_REFUSED
     stage_a_keys = [event.get("action_key") for event in events
                     if event.get("event") == "stage-a-submitted"]
 
@@ -3200,7 +3256,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                         record, roles=roles, by_id=by_id,
                         last_submission=last_submission,
                         submitted_keys=submitted_keys, gateway=gateway,
-                        tier=args.handoff_tier, output_root=output_root)
+                        tier=args.handoff_tier, output_root=output_root,
+                        capture_batch=band_capture_batch)
                     if waiting is not None:
                         band_pending.append({"quantum_id": quantum_id,
                                              "reason": waiting})

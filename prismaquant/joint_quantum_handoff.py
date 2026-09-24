@@ -3,12 +3,17 @@
 Inside a checkpoint band, layer quantum ``L - 1`` needs the cotangent at
 boundary ``L`` as its incoming plane. In chain mode it rebuilds that plane
 from the band's Stage A checkpoint through ``render_free_layer_roll``: one
-render-free backward per chain layer, probe and batch. Quantum ``L`` has
-already computed the same plane: its final replay pass writes
-``grad_plane[(probe, batch)] = x_in.grad`` for every probe and batch, and
-harvests the shared-state cotangent owners in place. That pass is the
-``replay_backward(final=True)`` body that ``render_free_layer_roll`` also
-runs, so the planes are the same arithmetic in the same order.
+render-free backward per chain layer, probe and batch group, in the Stage A
+run's chain regime (PQ #997). Quantum ``L`` has already computed the same
+plane: its final replay pass writes ``grad_plane[(probe, batch)] = x_in.grad``
+for every probe and batch, and harvests the shared-state cotangent owners in
+place. That pass is the ``replay_backward(final=True)`` body that
+``render_free_layer_roll`` also runs, per sample at ``capture_batch`` 1 and
+per batch group at ``capture_batch`` B (``capture_group``, the same grouping
+and kernels as ``_roll_group``), so the planes are the same arithmetic when
+the producer's capture batch equals the chain regime's batch size, and only
+then (:func:`handoff_chain_regime_refusal`). The producer stamps its
+capture batch into the handoff; the consumer refuses any other.
 
 This module lets quantum ``L`` publish that plane and those owner states as
 a **handoff**, and lets quantum ``L - 1`` read it instead of walking the
@@ -121,30 +126,36 @@ def handoff_record_bytes(record: Mapping) -> bytes:
                        allow_nan=False) + "\n").encode()
 
 
-def handoff_chain_regime_refusal(run_identity: Mapping) -> str | None:
-    """Why this Stage A run's chain arithmetic cannot take a handoff, or None.
+def handoff_chain_regime_refusal(run_identity: Mapping, *,
+                                 capture_batch: int) -> str | None:
+    """Why this Stage A run's chain cannot take a handoff captured at
+    ``capture_batch``, or None.
 
     The handoff plane comes from the producer's final replay pass: one
-    backward per (probe, batch). A chain-mode quantum rebuilds its chain in
-    the Stage A run's own regime (PQ #997). Probe fusion is bitwise-neutral
-    at a fixed batch size, so a batch size of one gives the final pass's
-    bytes with fusion on or off. Any other batch size changes the GEMM
-    shapes and so the rounding: the handoff would not be sha256-equal to
-    that run's chain, and the run must rebuild it. A malformed stamp
-    refuses with the parser's reason.
+    backward per (probe, group of ``capture_batch`` stored batches). A
+    chain-mode quantum rebuilds its chain in the Stage A run's own regime
+    (PQ #997), one backward per (probe, group of ``batch_size`` batches).
+    Probe fusion is bitwise-neutral at a fixed batch size, so the two are the
+    same bytes exactly when the batch sizes are equal, fusion on or off. Any
+    other capture batch changes the GEMM shapes and so the rounding: the
+    handoff would not be sha256-equal to that run's chain, and the run must
+    rebuild it. A malformed stamp refuses with the parser's reason.
     """
     from .joint_adjoint_slices import ChainRegimeRefused, chain_regime_of
 
+    if type(capture_batch) is not int or capture_batch < 1:
+        return f"the capture batch must be a positive integer, got {capture_batch!r}"
     if not isinstance(run_identity, Mapping):
         return "the Stage A slice carries no run identity"
     try:
         regime = chain_regime_of(dict(run_identity))
     except ChainRegimeRefused as exc:
         return str(exc)
-    if regime["batch_size"] != 1:
+    if regime["batch_size"] != capture_batch:
         return (f"the Stage A run's chain regime has batch size "
-                f"{regime['batch_size']}; its chain rounds differently from "
-                "the producer's per-sample final pass")
+                f"{regime['batch_size']}, and the handoff plane is captured at "
+                f"batch {capture_batch}; the chain rounds differently from the "
+                "producer's final pass at any other batch size")
     return None
 
 
@@ -204,15 +215,19 @@ class HandoffEmitter:
     """Publish one quantum's final plane and owner states for ``L - 1``.
 
     Built by the orchestration before the core runs, so a missing
-    produced-output binding refuses before any GPU work. The core calls
-    :meth:`emit` inside its storage context, after the retained-window
-    driver returns: the final pass has then written the boundary-``L``
-    plane and harvested every owner.
+    produced-output binding, or a capture batch the slice's chain regime
+    does not roll at, refuses before any GPU work. ``capture_batch`` is the
+    launch regime's (``joint_replay_regime``); it is stamped into the
+    handoff's ``producer`` block. The core calls :meth:`emit` inside its
+    storage context, after the retained-window driver returns: the final
+    pass has then written the boundary-``L`` plane and harvested every
+    owner.
     """
 
     def __init__(self, *, record: Mapping, adjoint_slice: Mapping,
-                 boundary_storage: Mapping, publication=None):
-        refusal = handoff_chain_regime_refusal(adjoint_slice.get("run_identity"))
+                 boundary_storage: Mapping, capture_batch: int, publication=None):
+        refusal = handoff_chain_regime_refusal(adjoint_slice.get("run_identity"),
+                                               capture_batch=capture_batch)
         if refusal is not None:
             raise QuantumHandoffRefused(f"cannot emit a handoff: {refusal}")
         if int(record["layer"]) < 1:
@@ -228,6 +243,7 @@ class HandoffEmitter:
         self.record = record
         self.adjoint_slice = adjoint_slice
         self.boundary_storage = dict(boundary_storage)
+        self.capture_batch = int(capture_batch)
         self.publication = publication
         self.published: dict | None = None
 
@@ -246,6 +262,9 @@ class HandoffEmitter:
             "identity_sha256": str(record["identity_sha256"]),
             "adjoint_slice_sha256": str(record["adjoint"]["slice_sha256"]),
             "chain_layers": [int(c) for c in record["adjoint"]["chain_layers"]],
+            # The batch the plane was captured at (PQ #994): the consumer
+            # admits it only at its slice's chain batch size.
+            "capture_batch": self.capture_batch,
         }
         policy = normalize_boundary_storage({
             **self.boundary_storage,
@@ -360,9 +379,6 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
     if handoff_record_bytes(handoff) != raw:
         raise QuantumHandoffRefused("the handoff record is not in canonical form")
 
-    refusal = handoff_chain_regime_refusal(adjoint_slice.get("run_identity"))
-    if refusal is not None:
-        raise QuantumHandoffRefused(refusal)
     layer = int(record["layer"])
     successor = layer + 1
     if handoff["boundary"] != successor:
@@ -374,6 +390,17 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
             or producer.get("quantum_id") != quantum_id(successor):
         raise QuantumHandoffRefused(
             f"the handoff was not produced by quantum {quantum_id(successor)}")
+    # The plane is the chain's only at the chain's batch size: the batch the
+    # producer captured at, stamped in the handoff, must be the batch size
+    # this consumer's slice rolls its chain at (PQ #994, #997).
+    capture_batch = producer.get("capture_batch")
+    if type(capture_batch) is not int or capture_batch < 1:
+        raise QuantumHandoffRefused(
+            "the handoff records no capture batch for its plane")
+    refusal = handoff_chain_regime_refusal(adjoint_slice.get("run_identity"),
+                                           capture_batch=capture_batch)
+    if refusal is not None:
+        raise QuantumHandoffRefused(refusal)
     boundary = int(record["adjoint"]["checkpoint_boundary"])
     if not successor < boundary:
         raise QuantumHandoffRefused(
