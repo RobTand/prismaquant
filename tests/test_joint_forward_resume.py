@@ -145,7 +145,7 @@ def test_recovered_tail_and_reverse_checkpoints_equal_uninterrupted(tmp_path, mo
             output_root=path, stride=1, source_model_identity=_model_identity('joint-source'),
             unit_roster_sha256='a'*64, plan_sha256='b'*64, prepared_sha256='c'*64,
             read_manifest_sha256='d'*64, implementation_sha256='e'*64,
-            forward_recovery=bound)
+            campaign_scope={'fixture': True}, forward_recovery=bound)
     retained = {}
     write = StreamedBoundaryArtifacts.write
     def interrupted(self, tensor, **kw):
@@ -196,11 +196,13 @@ def test_recovered_tail_and_reverse_checkpoints_equal_uninterrupted(tmp_path, mo
     from prismaquant.joint_layer_quanta import check_adjoint_run_header
     from prismaquant.joint_adjoint_checkpoints import reference_from_record
     # The resumed run's sealed receipt answers for the campaign and gives
-    # every layer its slice (PQ #993).
+    # every layer its slice (PQ #993). The run seals a campaign scope: an
+    # unset scope is never compared with an unset scope (PQ #1126).
     sealed = json.loads(json.dumps(resumed))
     assert check_adjoint_run_header(
         stage_a_run_header(sealed), plan_sha256='b'*64, prepared_sha256='c'*64,
-        scope=None, checkpoints=[c['boundary'] for c in resumed['checkpoints']])
+        scope={'fixture': True},
+        checkpoints=[c['boundary'] for c in resumed['checkpoints']])
     assert all(stage_a_slice(sealed, layer)['boundary_storage']['forward_recovery']
                == resumed['boundary_storage']['forward_recovery']
                for layer in range(max(sealed['stride']['boundaries'])))
