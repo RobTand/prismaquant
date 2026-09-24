@@ -140,7 +140,9 @@ ALLOWLIST = {
     ("prismaquant/joint_cost_quantum.py", "bind_joint_served_quantizer"): (
         1, AMBIGUOUS, "a format override against the served quantizer binding"),
     ("prismaquant/joint_cost_quantum.py", "run_layer_quantum_core"): (
-        1, AMBIGUOUS, "the Stage A slice handed in against the one the record binds"),
+        2, AMBIGUOUS, "the Stage A slice handed in against the one the record binds "
+        "(ambiguous, #1147 report); the probe identity the rows carry against the one "
+        "validated, within one run (integrity, #1183)"),
     ("prismaquant/joint_cost_quantum.py", "run_layer_quantum_core._record_joint_operator"): (
         1, INTEGRITY, "the operator measured is the render the cache holds, within one run"),
     ("prismaquant/joint_cost_quantum.py", "run_layer_quantum_core.commit_streamed_units"): (

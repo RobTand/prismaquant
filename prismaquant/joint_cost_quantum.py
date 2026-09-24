@@ -1398,6 +1398,7 @@ def run_layer_quantum_core(
         source_execution_identity,
         squared_signed,
         validate_joint_aura_entry,
+        validated_probe_identity,
     )
     from .joint_adjoint_checkpoints import (
         load_adjoint_checkpoint,
@@ -1577,6 +1578,18 @@ def run_layer_quantum_core(
     if probe_layout is not None:
         joint_probe_identity["noise_layout"] = probe_layout
         joint_probe_identity["arithmetic"]["execution_partition"] = execution_partition
+    # The probe identity is final here. It carries the source model's
+    # identity (8.8 MB of JSON for GLM-5.3), which every operator and every
+    # (unit, format) row serialized again, several times each, while the GPU
+    # idled (PQ #1183). Validate and hash it once, and check fresh rows
+    # through that. The rows themselves carry this ordinary dict, as before;
+    # the provenance digest below proves it did not change after this point.
+    joint_probe = validated_probe_identity(joint_probe_identity)
+
+    def validate_row(row):
+        if row["probe_identity"] is joint_probe_identity:
+            row = {**row, "probe_identity": joint_probe}
+        return validate_joint_aura_entry(row)
 
     prepared_render_identities = production_cache.metadata["verified_cells"]
     expected_pairs = {(name, fmt) for name in names for fmt in render_formats[name]}
@@ -2039,7 +2052,7 @@ def run_layer_quantum_core(
                 "rendered_weight": rendered_identity,
                 "activation": activation,
                 "arithmetic": joint_probe_identity["arithmetic"],
-                "probe_identity_sha256": identity_sha256(joint_probe_identity),
+                "probe_identity_sha256": identity_sha256(joint_probe),
             }
             if activation_policy is not None and fmt != "BF16":
                 policy_record = operator_policy_record(
@@ -2074,11 +2087,13 @@ def run_layer_quantum_core(
                                       for _ in range(n_probes)]
                     else:
                         components = joint_components[(name, fmt)]
-                    rows[fmt] = make_joint_aura_entry(
+                    row = make_joint_aura_entry(
                         operator_identity=joint_operators[(name, fmt)],
-                        probe_identity=joint_probe_identity,
+                        probe_identity=joint_probe,
                         signed_components=components,
                     )
+                    row["probe_identity"] = joint_probe_identity
+                    rows[fmt] = row
                 joint_rows[name] = rows
                 _write_aura_unit_checkpoint(
                     checkpoint_root, qname=name,
@@ -2515,13 +2530,16 @@ def run_layer_quantum_core(
         s2=s2, s4=s4, x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
         col_energy={}, weight_mse_diagnostic={})
     payload["costs"] = joint_rows
+    probe_identity_sha256 = identity_sha256(joint_probe_identity)
+    if probe_identity_sha256 != identity_sha256(joint_probe):
+        raise RuntimeError("joint probe identity changed after it was validated")
     payload["provenance"].update({
         "cost_mode": "aura", "joint_activation": True,
         "cost_currency": "joint_aura_predicted_dloss",
         "joint_aura_identity": joint_run_identity,
         "joint_aura_identity_sha256": identity_sha256(joint_run_identity),
         "probe_identity": joint_probe_identity,
-        "probe_identity_sha256": identity_sha256(joint_probe_identity),
+        "probe_identity_sha256": probe_identity_sha256,
         "joint_operator_windows": operator_window_receipts,
         "measurement_status": "research",
         "uncertainty_scope": "probe_sampling_conditional_on_fixed_calibration",
@@ -2547,7 +2565,7 @@ def run_layer_quantum_core(
             raise RuntimeError(
                 f"layer quantum candidate scope mismatch for {name}")
         for fmt, row in rows.items():
-            if not validate_joint_aura_entry(row):
+            if not validate_row(row):
                 raise RuntimeError(f"invalid measured joint cost for {name}@{fmt}")
     return payload
 
