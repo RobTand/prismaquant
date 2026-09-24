@@ -79,6 +79,10 @@ def test_actual_incomplete_capture_validator_still_refuses_before_model(tmp_path
 @pytest.fixture
 def controlled(tmp_path, monkeypatch):
     from prismaquant import joint_aura, tessera_calibration_cache as cache
+    # The CPU state issuance requires, whatever device the shard has (#1169).
+    # The gate still runs; its refusal has its own test below.
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    monkeypatch.setattr(torch.cuda, 'is_initialized', lambda: False)
     plan, calls = fixture_plan(tmp_path), []
     model = torch.nn.Linear(2, 2, device='meta')
     observed = dict(gates={'fixture': {'lower_bound': -5}}, fixture='unit-test-only')
