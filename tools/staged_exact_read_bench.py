@@ -29,6 +29,8 @@ Workloads:
 * ``stage-b``: ``load_adjoint_checkpoint`` of a whole checkpoint plane, the
   production call, into a sink (``--sink scratch`` is the production local
   cotangent scratch; ``discard`` counts and drops).
+* ``stage-b-discard``: the same load into the discarding sink whatever
+  ``--sink`` says, so the read rate is measured apart from the sink's writes.
 * ``stage-a``: R13-shaped fused windows (``--stage-a-batches`` boundary
   entries plus each probe's cotangent of the same batches) through
   ``prefetch_exact_activation_cache_entries``, the Stage A seam.
@@ -309,9 +311,11 @@ def child_stage_b(args, slice_doc) -> dict:
     arena = None
     sink = None
 
+    discard = args.sink == "discard" or args.child == "stage-b-discard"
+
     def factory(rows):
         nonlocal arena, sink
-        if args.sink == "discard":
+        if discard:
             sink = _DiscardSink()
             return sink
         from prismaquant.perturbed_x_cache import ExactCotangentScratch
@@ -414,7 +418,8 @@ def _residency(resolver):
 
 
 CHILDREN = {"paths": child_paths, "ceiling": child_ceiling,
-            "stage-b": child_stage_b, "stage-a": child_stage_a}
+            "stage-b": child_stage_b, "stage-b-discard": child_stage_b,
+            "stage-a": child_stage_a}
 
 
 def child_main(args) -> int:
@@ -437,8 +442,9 @@ def _git_head(tree: str) -> str | None:
 
 
 def run_child(args, mode: str, *, tree: str, sdk_root: str | None, out: Path,
-              label: str, profile: bool, extra=()) -> dict:
+              label: str, profile: bool, extra=(), arm_env=None) -> dict:
     env = dict(os.environ)
+    env.update(arm_env or {})
     env["PYTHONPATH"] = tree + (os.pathsep + env["PYTHONPATH"]
                                 if env.get("PYTHONPATH") else "")
     if sdk_root:
@@ -465,6 +471,7 @@ def run_child(args, mode: str, *, tree: str, sdk_root: str | None, out: Path,
     if done.returncode != 0 or result is None:
         raise SystemExit(f"{label}: child exited {done.returncode}; see {out}/{label}.stderr")
     result.update({"label": label, "mode": mode, "sdk_root": sdk_root,
+                   "arm_env": dict(arm_env or {}),
                    "started_unix": round(started_unix, 3),
                    "ended_unix": round(time.time(), 3),
                    "child_wall_s": round(wall, 3),
@@ -480,7 +487,14 @@ def driver_main(args) -> int:
         name, _, rest = spec.partition("=")
         tree, _, sdk = rest.partition(":")
         arms.append({"name": name, "tree": str(Path(tree).resolve()),
-                     "sdk_root": sdk or None, "head": _git_head(tree)})
+                     "sdk_root": sdk or None, "head": _git_head(tree), "env": {}})
+    for spec in args.arm_env:
+        name, _, setting = spec.partition("=")
+        key, _, value = setting.partition("=")
+        matched = [arm for arm in arms if arm["name"] == name]
+        if not matched or not key:
+            raise SystemExit(f"--arm-env {spec!r} names no arm or no variable")
+        matched[0]["env"][key] = value
     own_tree = str(Path(__file__).resolve().parents[1])
     report = {"schema": "prismaquant.staged_exact_read_bench.v1",
               "host": os.uname().nodename, "action_key": os.environ.get(
@@ -507,7 +521,8 @@ def driver_main(args) -> int:
                 label = f"r{repeat}-{workload}-{arm['name']}"
                 result = run_child(args, workload, tree=arm["tree"],
                                    sdk_root=arm["sdk_root"], out=out, label=label,
-                                   profile=args.py_spy is not None)
+                                   profile=args.py_spy is not None,
+                                   arm_env=arm["env"])
                 result.update({"arm": arm["name"], "repeat": repeat,
                                "workload": workload, "advised_files": advised})
                 report["runs"].append(result)
@@ -543,6 +558,9 @@ def main(argv=None) -> int:
     # driver only
     parser.add_argument("--arm", action="append", default=[],
                         help="NAME=TREE[:SDK_ROOT]; repeatable")
+    parser.add_argument("--arm-env", action="append", default=[],
+                        help="NAME=VARIABLE=VALUE: set one environment variable "
+                             "for one arm's children; repeatable")
     parser.add_argument("--workloads", type=lambda s: s.split(","),
                         default=["stage-b", "stage-a"])
     parser.add_argument("--repeats", type=int, default=2)
