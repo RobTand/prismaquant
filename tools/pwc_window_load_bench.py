@@ -277,6 +277,16 @@ def run_quantum(args):
         shutil.rmtree(scratch)
     scratch.mkdir(parents=True)
     with pytest.MonkeyPatch.context() as patch:
+        # The producer source digest binds every identity to the package's
+        # source, so it differs between two trees by design. One fixed value
+        # on both trees leaves every other leaf, and every digest over them,
+        # comparable.
+        pinned = hashlib.sha256(b'pwc-window-load-bench source').hexdigest()
+        for module in [module for name, module in sys.modules.items()
+                       if name.startswith('prismaquant') and module is not None]:
+            for attribute in ('_production_cache_source_sha256', '_aura_source_sha256'):
+                if callable(getattr(module, attribute, None)):
+                    patch.setattr(module, attribute, lambda *a, **k: pinned)
         single, receipt, output_root = _campaign(scratch, patch)
         payload, record, _counters = runtime._run_quantum(
             scratch, patch, single=single, layer=1, receipt=receipt,
@@ -331,6 +341,13 @@ def _leaves(obj, path: str, out: dict | None = None) -> dict:
             _leaves(value, f'{path}[{index}]', out)
     elif isinstance(obj, float):
         out[path] = f'float:{obj.hex()}'
+    elif isinstance(obj, (bytes, bytearray)):
+        try:
+            inner = pickle.loads(obj)
+        except Exception:  # not a pickle: compare the bytes
+            out[path] = f'bytes:{hashlib.sha256(obj).hexdigest()}'
+        else:
+            _leaves(inner, f'{path}<pickle>', out)
     else:
         text = repr(obj)
         out[path] = text if len(text) <= 160 else (
