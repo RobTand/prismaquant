@@ -14,8 +14,8 @@ source identity; the Stage B quantum record, head slice, resource and
 activation policies and spill bound; the join; both dispatchers, including the
 joint dispatcher's source coverage check, which reads a re-declared plan or
 prepared completion by its on-disk bytes (`readset_coverage.quantum_rows_gaps`);
-the catalog extension; and the projection-backend runtime qualification. In
-dev mode the joint dispatcher also names the plan and prepared files in each
+the catalog extension; and the projection-backend runtime qualification and
+its qualified shapes. In dev mode the joint dispatcher also names the plan and prepared files in each
 row's argv by the digests of their bytes on disk, so the quantum's own byte
 check passes on a re-declared file; certified mode names the record's
 digests, as before, and the quantum refuses a re-declared file
@@ -332,6 +332,23 @@ A resumed spill row whose first active window is not window 0 runs its
 captures under that window's `render-NN` phase, because progress phases only
 move forward. That grace has no capture term. This change does not cover that
 case.
+
+Dev mode runs an unqualified projection shape on the reference arithmetic
+(2026-09-24, `fix/1176-devmode-reference-projection`, PQ #1176). The packaged
+qualification of `fused_fp32_v1` lists the matrix shapes on which the binary
+reproduces `(left * right).sum()` bit for bit: six shapes from the first
+model. `_FusedProjection.product_sum` refused every other shape in both modes,
+so every GLM-5.3-Flash Stage B row refused at its first `finish_observations`
+(v7, PB `80dbab43…`, after 480 s). The qualified shapes are now a seal. In
+certified mode an unlisted shape still refuses, with the same message, on
+every call. In dev mode it prints one `[DEV-MODE]` line per shape and computes
+`(left * right).sum()`, the arithmetic the binary is qualified to equal; the
+binary never runs on that shape. Operands of different shapes, and a
+reduction with autograd enabled, refuse in both modes. The backend identity
+and the qualification file do not change. PQ #1175 tracks a check before the
+row that compares the qualified shapes with the model's. Gate:
+`tests/test_joint_projection_backend.py`. No format, pipeline stage, record
+identity or ship gate changes.
 
 A failed Stage B quantum writes its counters (2026-09-24,
 `ws-sb4/stage-io-baseline`). `counters.json` was written only after the layer
@@ -1872,8 +1889,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-prog/1165-compute-phase-progress`.
+As of: 2026-09-24 · `fix/1176-devmode-reference-projection`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `fix/1176-devmode-reference-projection`) for the
+**qualified projection shapes as a seal** (PQ #1176): in dev mode a matrix
+shape outside `fused_fp32_v1`'s packaged qualification prints one `[DEV-MODE]`
+line and computes `(left * right).sum()` instead of refusing; certified mode
+still refuses. A dev-mode default changes; no format, pipeline stage, record
+identity, lane or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-prog/1165-compute-phase-progress`) for the
 **compute-phase grace** (PQ #1165): the joint dispatcher derives the grace of

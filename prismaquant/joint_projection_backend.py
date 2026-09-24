@@ -21,7 +21,7 @@ import subprocess
 
 import torch
 
-from .dev_mode import seal_check
+from .dev_mode import dev_mode_enabled, seal_check
 from .kernels import joint_projection_reduce as kernel
 
 SCHEMA = 'prismaquant.joint_projection_backend.v1'
@@ -214,6 +214,8 @@ class _FusedProjection:
         self._device = device
         self._identity = deepcopy(identity)
         self._shapes = frozenset(tuple(shape) for shape in identity['qualified_shapes'])
+        # Unqualified shapes dev mode has already printed, one line each.
+        self._recorded_shapes = set()
 
     @property
     def identity(self):
@@ -229,13 +231,34 @@ class _FusedProjection:
     def product_sum(self, left, right):
         self.require_device(left.device)
         self.require_device(right.device)
-        if tuple(left.shape) not in self._shapes or left.shape != right.shape:
+        if left.shape != right.shape:
             raise RuntimeError('joint projection matrix shape is outside the packaged qualification')
+        qualified = tuple(left.shape) in self._shapes or self._record_unqualified(tuple(left.shape))
         if torch.is_grad_enabled() and (left.requires_grad or right.requires_grad):
             raise RuntimeError('joint projection reduction has no autograd registration; use under no_grad')
-        if not kernel.fast_path_eligible(left, right):
+        if not qualified or not kernel.fast_path_eligible(left, right):
             return (left * right).sum()
         return self._module.mul_sum(left, right)
+
+    def _record_unqualified(self, shape):
+        """Refuse an unqualified shape, or in dev mode run the reference on it.
+
+        The qualification is a seal: it certifies that the binary equals
+        ``(left * right).sum()`` bit for bit on the shapes it lists. Certified
+        mode refuses any other shape on every call. Dev mode (PQ #1147) prints
+        one line per shape and returns ``False``, so the caller computes the
+        reference arithmetic the binary is qualified to equal and never runs
+        the binary on the shape (PQ #1176).
+        """
+        if shape in self._recorded_shapes and dev_mode_enabled():
+            return False
+        seal_check('joint projection qualified shape', sorted(self._shapes), shape, same=False,
+                   where='joint projection qualification; this shape runs the reference '
+                         'arithmetic (left * right).sum()',
+                   refusal=lambda: RuntimeError(
+                       'joint projection matrix shape is outside the packaged qualification'))
+        self._recorded_shapes.add(shape)
+        return False
 
 
 def require_prewarmed_projection(backend, *, device):
