@@ -406,6 +406,30 @@ def test_a_quantum_rolls_nothing_below_through_and_keeps_its_last_plane(
     assert receipt["digests"]["payload_sha256"] == rolled
 
 
+def test_a_quantums_digests_land_when_the_digest_layer_is_rolled(tmp_path, monkeypatch):
+    """The round's tripwire: the digests are on disk before the quantum ends."""
+    root = tmp_path / "run"
+    _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
+    _prep(root, monkeypatch)
+    writes = []
+    label = quantum_label(4, 2, *RANGES[0])
+    quanta = adjoint_space(root) / "split" / "quanta"
+    # The quantum dies on its first write below the digest layer.
+    _interrupted(root, monkeypatch, interrupt=_at(2, 0, 0), writes=writes,
+                 chain_resume=_resume(root, resume_from=4),
+                 chain_split={"role": "quantum", "through": 2, "samples": RANGES[0],
+                              "digest_layer": 3})
+    assert not (quanta / f"{label}.json").exists(), "no receipt: the quantum died"
+    document = json.loads((quanta / f"{label}.digests.json").read_text())
+    assert document["schema"] == "prismaquant.stage_a.chain_split_digests.v1"
+    assert (document["label"], document["layer"], document["samples"]) == (
+        label, 3, RANGES[0])
+    assert document["payload_sha256"] == {
+        f"{probe}-{batch}": digest for (boundary, probe, batch), digest in writes
+        if boundary == 3}
+    assert len(document["payload_sha256"]) == N_PROBES * 2
+
+
 # -- decision 9: the join is whole and verified ----------------------------------
 
 def test_the_join_refuses_a_missing_range(tmp_path, monkeypatch):

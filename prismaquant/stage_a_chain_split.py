@@ -48,6 +48,7 @@ SPLIT_SCHEMA = "prismaquant.stage_a.chain_split.v1"
 PREP_RECEIPT_SCHEMA = "prismaquant.stage_a.chain_split_prep.v1"
 QUANTUM_RECEIPT_SCHEMA = "prismaquant.stage_a.chain_split_quantum.v1"
 JOIN_RECEIPT_SCHEMA = "prismaquant.stage_a.chain_split_join.v1"
+SPLIT_DIGESTS_SCHEMA = "prismaquant.stage_a.chain_split_digests.v1"
 PREP, QUANTUM = "prep", "quantum"
 _RANGE = re.compile(r"samples-(\d{6,})-(\d{6,})")
 _ROLLING = re.compile(r"cotangent-(\d+)-(\d+)-at-(\d+)\.pt(\.tmp)?")

@@ -886,7 +886,8 @@ def stage_a_memory_gib(campaign: Mapping) -> int:
     return -(-bound // 1024 ** 3)
 
 
-def stage_a_spool_window_bytes(campaign: Mapping) -> int:
+def stage_a_spool_window_bytes(campaign: Mapping,
+                               batch_range: Sequence[int] | None = None) -> int:
     """The Stage A row's local output window: two cotangent planes (PQ #1110).
 
     The reverse chain reads the cotangent plane it wrote one layer earlier
@@ -912,6 +913,10 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
     from the live model at bind and refuses a sealed window below it
     (``StreamedBoundaryArtifacts._require_local_window``), so a config this
     reads differently from the runner fails before any forward work.
+
+    ``batch_range`` (a chain split quantum, PQ #738) is the ``(start, stop)``
+    of the batches the row owns: its planes hold those batches only, and the
+    capture derives its need from the same range.
     """
 
     from prismaquant.produced_output_spool import (plane_partitions,
@@ -947,8 +952,15 @@ def stage_a_spool_window_bytes(campaign: Mapping) -> int:
     # The capture binds n_batches=len(row_offsets) from the same partition
     # (joint_cost_stage_a.py bind_produced_output) and derives its need from
     # it, so the seal and the bind's need are one number.
+    n_batches = len(row_offsets)
+    if batch_range is not None:
+        start, stop = (int(value) for value in batch_range)
+        if not 0 <= start < stop <= n_batches:
+            raise DispatchRefused(
+                f"batch range {start}:{stop} is not inside the plan's {n_batches} batches")
+        n_batches = stop - start
     return two_plane_window_bytes(
-        n_probes=n_probes, n_batches=len(row_offsets), group_size=group_size,
+        n_probes=n_probes, n_batches=n_batches, group_size=group_size,
         max_entry_tensor_bytes=tensor_bytes)
 
 
@@ -1615,7 +1627,8 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                  prefetch_override: Path | None = None,
                  artifact_budget_bytes: int | str | None = None,
                  produced_output_template: Path | None = None,
-                 binding: dict | None = None) -> list[str]:
+                 binding: dict | None = None,
+                 batch_range: Sequence[int] | None = None) -> list[str]:
     """The §5.2 stage-A submission argv: the adjoint capture goes first and
     alone; quanta wait on its receipt.  The campaign binding every record
     carries names the plan and prepared inputs (with digests) the capture's
@@ -1657,6 +1670,10 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     ``binding`` (optional) is a precomputed :func:`_stage_manifest_binding`
     for this manifest and campaign, so a caller that also records the
     digests does not read the manifest twice.
+
+    ``batch_range`` (optional, PQ #738) is a chain split quantum's
+    ``(start, stop)``: the row's spool window is two planes of those
+    batches (:func:`stage_a_spool_window_bytes`), not of the whole run.
 
     The spec must declare the produced output spool (PQ #1012): its root on
     the executing box's own disk and its byte bound, sealed into the request
@@ -1732,7 +1749,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     # window to the box (PQ #1120).
     wrapped, container_image = _container_wrap(
         SPEC_PATH, payload, progress=progress,
-        spool_max_bytes=stage_a_spool_window_bytes(campaign))
+        spool_max_bytes=stage_a_spool_window_bytes(campaign, batch_range))
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
     spool = produced_spool_row_environment(sealed_spec)
     if not spool:

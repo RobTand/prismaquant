@@ -1757,6 +1757,12 @@ def run_adjoint_capture_core(
                     sealed = time.time()
                     seal_checkpoint(attempt)
                     seal_s = time.time() - sealed
+                if layer_digests is not None and layer == split["digest_layer"]:
+                    # Published the moment the layer is rolled, not with
+                    # the receipt four layers later: a digest mismatch is
+                    # the round's early stop (PQ #738).
+                    _write_split_digests(space, label, samples,
+                                         _split_digest_block(split, layer_digests))
                 chain_telemetry.append({
                     "layer": layer, "wall_s": time.time() - layer_started,
                     "checkpoint": layer in checkpoint_layers,
@@ -1823,10 +1829,8 @@ def run_adjoint_capture_core(
                           "cotangent_sha256": record["cotangent_sha256"],
                           "cotangents": len(record["activation_entries"])}
                          for record in checkpoints],
-            "digests": (None if layer_digests is None else {
-                "layer": split["digest_layer"],
-                "payload_sha256": {f"{probe}-{batch}": digest for (probe, batch), digest
-                                   in sorted(layer_digests.items())}}),
+            "digests": (None if layer_digests is None
+                        else _split_digest_block(split, layer_digests)),
             "retention": retention,
             "artifact_budget_override": artifact_budget_stamp,
             "telemetry": {
@@ -1916,6 +1920,26 @@ def run_adjoint_capture_core(
     # stdout.
     receipt["telemetry"].update(_produced_output_block(storage))
     return receipt
+
+
+def _split_digest_block(split, layer_digests) -> dict:
+    """A quantum's payload digests at its digest layer, by ``"probe-batch"``."""
+    return {"layer": split["digest_layer"],
+            "payload_sha256": {f"{probe}-{batch}": digest for (probe, batch), digest
+                               in sorted(layer_digests.items())}}
+
+
+def _write_split_digests(space, label, samples, block) -> Path:
+    """Write a quantum's digest block beside its receipt, before the receipt."""
+    from .stage_a_chain_split import SPLIT_DIGESTS_SCHEMA
+
+    path = _split_quantum_path(space, label, "digests.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = {"schema": SPLIT_DIGESTS_SCHEMA, "label": label,
+                "samples": list(samples), **block}
+    atomic_write_bytes(path, (json.dumps(document, sort_keys=True, indent=2)
+                              + "\n").encode())
+    return path
 
 
 def _split_quantum_path(space, label, suffix) -> Path:

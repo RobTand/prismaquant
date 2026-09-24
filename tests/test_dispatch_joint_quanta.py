@@ -670,6 +670,24 @@ def test_the_two_plane_window_at_the_glm_shape(tmp_path):
         "probe_microbatch": 1, "boundary_storage": {"prefetch_batches": 64}}}))
     window = stage_a_spool_window_bytes({"plan_path": str(plan)})
     assert window == 2 * 4 * 512 * (512 * 4096 * 4 * 2 + 65536) == 68_987_912_192
+    # PQ #738: a split quantum of R13's round 1 owns 64 of the 512 batches.
+    quantum = stage_a_spool_window_bytes({"plan_path": str(plan)}, (64, 128))
+    assert quantum == 2 * 4 * 64 * (512 * 4096 * 4 * 2 + 65536) == window // 8
+
+
+def test_a_split_quantum_seals_two_planes_of_its_own_batches(tmp_path, campaign):
+    """PQ #738: a split quantum's spool holds its own range's planes, and the
+    capture derives its need from the same range, so the row seals that
+    window rather than the whole run's."""
+    argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign, batch_range=(4, 8))
+    envs = dict(env.split("=", 1) for env in _envelope_envs(argv))
+    assert int(envs["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"]) == SPOOL_WINDOW_BYTES // 2
+    tail = argv[argv.index("--") + 1:]
+    sealed = json.loads(tail[tail.index("--spec") + 1])
+    assert sealed["env"]["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"] == str(
+        SPOOL_WINDOW_BYTES // 2)
+    with pytest.raises(DispatchRefused, match="not inside the plan's 8 batches"):
+        stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign, batch_range=(4, 9))
 
 
 def test_stage_a_seals_the_host_window_beside_its_two_plane_bound(tmp_path, campaign):

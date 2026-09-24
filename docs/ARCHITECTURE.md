@@ -1,5 +1,28 @@
 # PrismaQuant Architecture
 
+Stage A chain split dispatch (2026-09-24, `ws-pl/stage-a-split-dispatch`,
+PQ #738). A split round now has a dispatcher. Until `pbcampaign` carries
+the residency fields (PB #1082), the rows are plain `pbrun` submissions,
+`--tag gb10 --priority -10`, never a host.
+
+- **`tools/build_stagea_split_package.py`** derives the prep's and each
+  quantum's data manifest from the source run's own. The prep stages the
+  head and the round's small records. A quantum also stages the resume
+  checkpoint's pack and, per chain phase, its own samples' boundary rows
+  and, at the first, its own cotangents.
+- **`tools/dispatch_stage_a_split.py`** seals every row's `pbrun` argv from
+  one clean checkout and submits a row only once the rows it follows have
+  left their receipts and ended `executed` with exit 0. `compare` holds each
+  quantum's digests at its digest layer to a baseline.
+- **`split/quanta/<label>.digests.json`** lands as the digest layer rolls,
+  not at the quantum's end.
+- `dispatch_joint_quanta.stage_a_argv(batch_range=)` seals a quantum's spool
+  window as two planes of its own batches.
+
+See "Stage A chain split dispatch (#738)". Gate:
+`tests/test_dispatch_stage_a_split.py`, `tests/test_stage_a_split_package.py`.
+No format, pipeline default or ship gate changes.
+
 Stage A chain split (2026-09-24, `ws-pl/stage-a-split`, PQ #738). A resumed
 Stage A reverse chain can run as several PrismaBuild rows over disjoint
 sample ranges instead of one owner. Below a sealed checkpoint the chain
@@ -1601,8 +1624,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-pl/stage-a-split`.
+As of: 2026-09-24 · `ws-pl/stage-a-split-dispatch`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-pl/stage-a-split-dispatch`) for **Stage A chain
+split dispatch** (PQ #738): the split round's manifest builder and
+dispatcher, the quantum's digests file written as its digest layer rolls,
+and a quantum's spool window over its own batches. See "Stage A chain split
+dispatch (#738)". No format, default, stage or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-pl/stage-a-split`) for **Stage A chain split**
 (PQ #738): a resumed reverse chain run as a prep row, sample-range quanta
@@ -22992,8 +23021,82 @@ default regime, a batched, fused one, and R13's shape (several fused
 batches per read window). It chains two rounds through a joined checkpoint, and restores a non-empty shared adjoint. It also covers
 global indices, owner status files, the borrowed range, a retry prep and
 the join's refusals. `tests/test_stage_a_split_produced_range.py` runs the
-range-bound produced-output owner against PrismaBuild. No dispatcher
-submits split rows yet.
+range-bound produced-output owner against PrismaBuild.
+
+### Stage A chain split dispatch (#738)
+
+A split round is submitted as plain `pbrun` rows until `pbcampaign` carries
+the residency fields (PB #1082): `--tag gb10 --priority -10`, never a host.
+`pbrun --after` does not order them. It defers a consumer on a producer's
+write-only template and builds the consumer's manifest from the batches the
+producer committed, and a prep commits nothing.
+
+**Manifests** (`tools/build_stagea_split_package.py`). Under the `ram,ssd`
+tier policy a row reads the run's boundary rows and the checkpoint's
+cotangents through the process input map, so each must be a staged entry.
+The builder takes the source run's submitted manifest, the run's output
+root, the chain state's digest and the lowest sealed checkpoint's digest,
+and writes one manifest per row:
+
+- The prep: the source `head`, plus `chain-state.json` and the
+  `checkpoint.json` of every sealed checkpoint.
+- A quantum: the prep's head plus the resume checkpoint's shared-state pack,
+  then `chain-(b-1)` down to `chain-(through)`. Each phase is the source's
+  reads of that layer followed by the layer's boundary rows for the
+  quantum's samples; `chain-(b-1)` also stages the checkpoint's cotangents
+  for those samples.
+
+The resume checkpoint is the lowest sealed one, as `plan_chain_resume` finds
+it: the tail in the first round, a joined checkpoint afterwards. Every added
+entry is stat-checked, and the PrismaBuild core validator checks each
+manifest. `split-package.json` records each manifest's phases, bytes and
+source bytes. Each quantum reads the round's layer sources once, so a round
+of N quanta reads them N times.
+
+**Rows** (`tools/dispatch_stage_a_split.py`). `seal` writes the round
+directory from one clean checkout: a produced-output template per Stage A
+row, and `round.json`, with every row's `pbrun` argv and the digest of
+every input. All rows run that checkout, because `plan_chain_resume`
+requires the running implementation to be the one the latest resume record
+stamps. The prep alone carries `--resume-implementation-compatibility`,
+when the checkout differs from that record. Each Stage A row is
+`stage_a_argv`'s full residency path with per-row numbers:
+
+- The spool window is two planes of the row's own batches
+  (`stage_a_spool_window_bytes(batch_range=)`), which the capture's bind
+  derives from the same range. The prep writes nothing and is sized as the
+  round's widest quantum.
+- The template's stage window is the base template's, capped at the groups
+  a row can hold across two consecutive boundaries: one boundary group and
+  one cotangent group per probe, per read window of its range.
+- `--residency-prefetch-depth-gib` is the furthest source byte the chain's
+  prefetch reaches past the phase being read, from the row's manifest.
+- `--residency-read-mb-s` is an estimate: the largest steady chain phase
+  over the single owner's measured seconds per layer, scaled by the row's
+  share of the samples. The derivation is recorded with the row.
+
+`plan` prints the sealed rows after checking every pin. `submit` refuses a
+row until the rows it follows are done: a quantum until the prep's receipt
+is on disk, stamps this round and this implementation, and the prep's
+PrismaBuild ending is `executed` with exit 0. A join waits for every quantum's
+ending and receipt, a band for its join, and `band-set` (a `band_set` over
+the run's earlier bands and the round's) for the bands. Each submission's
+argv and `pbrun` output land in `submissions/`.
+
+**The digest tripwire.** A quantum given `--chain-split-digest-layer L`
+writes `split/quanta/<label>.digests.json`
+(`prismaquant.stage_a.chain_split_digests.v1`) as soon as layer `L` is
+rolled, not at its end, and the receipt carries the same block. `compare`
+holds every landed file to a baseline map of
+`cotangent-{probe}-{batch}-at-{L}.pt` payload digests and exits 4 on a
+mismatch.
+
+**Tests.** `tests/test_stage_a_split_package.py` runs the fixture's prep and
+quanta and holds each manifest to what the row read: every pre-existing file
+a quantum reads is declared, and every row the builder adds is read. It
+also stages a later round from a joined checkpoint.
+`tests/test_dispatch_stage_a_split.py` seals a round of the fixture run and
+drives the ordering with a fake `pbrun` over the fixture's real receipts.
 
 ### Stage A dispatch requires the paced spool (#1012)
 
