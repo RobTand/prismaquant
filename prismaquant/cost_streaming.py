@@ -829,6 +829,17 @@ class StreamedBoundaryArtifacts:
         self.telemetry["peak_resident_tensor_bytes"] = max(
             value, self.telemetry["peak_resident_tensor_bytes"])
 
+    def reserve_resident(self, delta):
+        """Charge ``delta`` exact tensor bytes to this owner's resident budget.
+
+        Negative releases. For a reader outside the owner that holds exact
+        tensors under the same ``max_resident_bytes``, such as the
+        checkpoint plane stream (PQ #1142): it refuses like a window of the
+        owner's own when the budget would be exceeded, and fires the bound
+        memory hook on a charge.
+        """
+        self._reserve(delta)
+
     @staticmethod
     def _auxiliary_owners(batches, cotangents):
         metadata = [(batch.input_ids, batch.position_ids, batch.position_embeddings,

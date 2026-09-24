@@ -22,7 +22,8 @@ import pickle
 import re
 import struct
 import time
-from contextlib import nullcontext
+from concurrent.futures import ThreadPoolExecutor, wait as wait_futures
+from contextlib import closing, nullcontext
 from pathlib import Path
 
 import torch
@@ -247,6 +248,143 @@ def read_exact_entry_tensors(records, *, expected_session) -> dict:
         for reference in references:
             tensors[reference.name] = window.get(reference)
     return tensors
+
+
+def exact_entry_windows(records, *, max_resident_bytes):
+    """``(windows, read_ahead)``: ``records`` split in order under a budget.
+
+    ``max_resident_bytes`` bounds the tensor bytes a stream of these
+    records holds at once. When it fits two of the largest entry, the
+    stream holds two windows -- the one its consumer is taking and the one
+    being read -- so each window is at most half of it. When it fits one
+    entry but not two, one window is held at a time and nothing is read
+    ahead. ``None`` is one entry per window with nothing read ahead: the
+    read every caller made before a budget was passed. A budget under one
+    entry refuses; it is never shrunk to fit.
+    """
+    records = tuple(records)
+    if not records:
+        return [], False
+    if max_resident_bytes is None:
+        return [[record] for record in records], False
+    if type(max_resident_bytes) is not int or max_resident_bytes <= 0:
+        raise ValueError("an exact entry stream needs a positive resident byte budget")
+    largest = max(int(record["tensor_bytes"]) for record in records)
+    if largest > max_resident_bytes:
+        raise RuntimeError(
+            f"an exact entry of {largest} tensor bytes exceeds the stream's "
+            f"resident budget of {max_resident_bytes} bytes")
+    read_ahead = max_resident_bytes >= 2 * largest
+    limit = max_resident_bytes // 2 if read_ahead else max_resident_bytes
+    windows, window, held = [], [], 0
+    for record in records:
+        size = int(record["tensor_bytes"])
+        if window and held + size > limit:
+            windows.append(window)
+            window, held = [], 0
+        window.append(record)
+        held += size
+    windows.append(window)
+    return windows, read_ahead
+
+
+def _await_checkpoint_entries(entries, *, deadline):
+    """Wait for one window of entries at once; the exact reader keeps its pin checks.
+
+    :func:`_await_checkpoint_entry` for a list: one poll asks PrismaBuild
+    for every entry's cover in one lookup (PQ #997), and falls back to one
+    lookup per entry only when that answer cannot name the missing one.
+    """
+    from .staged_tier_policy import policy_is_active
+    if not entries or not policy_is_active():
+        return None
+    from .residency_map import residency_resolver
+    from .residency_shard_reader import await_staged_spans
+    from .staged_lease import stage_cover_is_published, stage_covers_are_published
+    resolver = residency_resolver()
+    if resolver is None:
+        return None  # The strict reader supplies its existing missing-context refusal.
+    return await_staged_spans(
+        resolver, [(entry["path"], 0, entry["file_bytes"], entry["file_bytes"])
+                   for entry in entries],
+        deadline=deadline, published=stage_cover_is_published,
+        published_batch=stage_covers_are_published)
+
+
+def stream_exact_entry_tensors(records, *, expected_session, max_resident_bytes=None,
+                               residency_check=None, deadline=None):
+    """Yield ``(record, tensor)`` for every record, in order, window by window.
+
+    The streaming form of :func:`read_exact_entry_tensors` for a whole
+    plane (PQ #1142). :func:`exact_entry_windows` splits the records under
+    ``max_resident_bytes``. Each window is awaited as one set of spans,
+    leased as one group and read on the exact-read pool, and every entry is
+    verified before any of the window is yielded. While the consumer takes
+    one window, the next is awaited and read on one background thread, so
+    the stream never holds more than two windows.
+
+    ``residency_check(delta)`` is charged for a window's tensor bytes on
+    the consumer's thread before its read starts, and released once the
+    consumer has taken all of it, or on any exit. A refused read raises
+    when the consumer reaches that window, after every earlier window has
+    been yielded; a lease refusal keeps its kind.
+
+    Close the generator (``contextlib.closing``) when the consumer may stop
+    early: closing waits for a read in flight and releases its charge.
+    """
+    from .residency_shard_reader import staged_range_wait_s
+    windows, read_ahead = exact_entry_windows(records, max_resident_bytes=max_resident_bytes)
+    if not windows:
+        return
+    if deadline is None:
+        deadline = time.monotonic() + staged_range_wait_s()
+
+    def read(window):
+        _await_checkpoint_entries(window, deadline=deadline)
+        return read_exact_entry_tensors(window, expected_session=expected_session)
+
+    held = []  # (charge, future or tensors), oldest first
+
+    def start(window):
+        charge = sum(int(record["tensor_bytes"]) for record in window)
+        if residency_check is not None:
+            residency_check(charge)
+        held.append([charge, None])
+        held[-1][1] = (reader.submit(read, window) if reader is not None
+                       else read(window))
+
+    def release(slot):
+        held.remove(slot)
+        if residency_check is not None:
+            residency_check(-slot[0])
+
+    reader = (ThreadPoolExecutor(max_workers=1, thread_name_prefix="exactstream")
+              if read_ahead and len(windows) > 1 else None)
+    try:
+        start(windows[0])
+        for index, window in enumerate(windows):
+            slot = held[0]
+            tensors = slot[1].result() if reader is not None else slot[1]
+            slot[1] = None
+            if index + 1 < len(windows) and reader is not None:
+                start(windows[index + 1])
+            for record in window:
+                yield record, tensors.pop(record["name"])
+            del tensors
+            release(slot)
+            if index + 1 < len(windows) and reader is None:
+                start(windows[index + 1])
+    finally:
+        # A read in flight still holds pins and bytes: let it finish (its
+        # own exit releases the pins), then drop it and its charge.
+        for slot in list(held):
+            if reader is not None and slot[1] is not None:
+                slot[1].cancel()
+                wait_futures([slot[1]])
+            slot[1] = None
+            release(slot)
+        if reader is not None:
+            reader.shutdown(wait=True)
 
 
 # --------------------------------------------------------------------------
@@ -1697,13 +1835,16 @@ def _entry_bytes(entry) -> int:
 
 def load_adjoint_checkpoint(
     space: str | os.PathLike, record: dict, *, cotangent_factory=None,
-    shared_state_max_bytes=None,
+    shared_state_max_bytes=None, max_resident_bytes=None, residency_check=None,
 ) -> tuple[dict, dict, dict]:
     """Read one checkpoint back, verifying every digest it claims.
 
     Returns ``(cotangents, shared_adjoint, shared_pass)`` with CPU tensors and
     deserialized state. A caller-owned cotangent factory may provide bounded
     working storage; verified entry windows are released before the next load.
+    The cotangent plane streams through :func:`stream_exact_entry_tensors`
+    in windows under ``max_resident_bytes``, charged to ``residency_check``;
+    with no budget it is read one entry at a time, as before.
     Refuses on any digest or shape mismatch: a checkpoint
     whose bytes moved is a new identity, never a silent partial read.
     """
@@ -1734,12 +1875,13 @@ def load_adjoint_checkpoint(
     rate = ReadRateReporter(
         "checkpoint-load", total_entries=len(entries),
         total_bytes=sum(_entry_bytes(entry) for entry in entries))
-    for entry in entries:
-        _await_checkpoint_entry(entry, deadline=deadline)
-        tensors = read_exact_entry_tensors([entry], expected_session=session)
-        cotangents[by_name[entry["name"]]] = tensors.pop(entry["name"])
-        del tensors
-        rate.entry(_entry_bytes(entry))
+    with closing(stream_exact_entry_tensors(
+            entries, expected_session=session, max_resident_bytes=max_resident_bytes,
+            residency_check=residency_check, deadline=deadline)) as stream:
+        for entry, tensor in stream:
+            cotangents[by_name[entry["name"]]] = tensor
+            del tensor
+            rate.entry(_entry_bytes(entry))
     rate.done()
     shared_adjoint, shared_pass = _load_checkpoint_shared_states(
         stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
@@ -2348,7 +2490,8 @@ __all__ = [
     "derive_checkpoint_boundaries", "dev_mode_enabled", "dev_mode_stamp",
     "exact_entry_record", "load_adjoint_checkpoint", "load_adjoint_receipt",
     "nearest_checkpoint_boundary", "read_exact_entry_tensors",
-    "reference_from_record", "render_free_layer_roll", "require_dev_mode",
+    "exact_entry_windows", "reference_from_record", "render_free_layer_roll",
+    "require_dev_mode", "stream_exact_entry_tensors",
     "wall_clock_seconds", "write_adjoint_checkpoint", "write_adjoint_receipt",
     "write_checkpoint_cotangent_entry",
 ]

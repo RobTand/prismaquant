@@ -413,19 +413,21 @@ def tensor_payload_sha256(tensor) -> str:
     return hashlib.sha256(data.view(torch.uint8).numpy()).hexdigest()
 
 
-def compare_seed_plane(plan: ChainSeed, digests: dict) -> dict:
+def compare_seed_plane(plan: ChainSeed, digests: dict, *, max_resident_bytes=None) -> dict:
     """Every rolled ``(probe, batch)`` payload digest against the reference's.
 
     ``digests`` are the seed's own, taken as it wrote the plane at
-    ``plan.through``. The reference entries are read back one at a time
-    through the same staged path a checkpoint load takes, after its manifest
-    is checked against the pinned record.
+    ``plan.through``. The reference entries stream back through the same
+    staged path a checkpoint load takes, in windows under
+    ``max_resident_bytes`` (one entry at a time without one), after its
+    manifest is checked against the pinned record.
     """
+    from contextlib import closing
+
     from .joint_adjoint_checkpoints import (
-        _await_checkpoint_entry,
         _verified_checkpoint_manifest,
         checkpoint_entry_session,
-        read_exact_entry_tensors,
+        stream_exact_entry_tensors,
     )
     from .residency_shard_reader import staged_range_wait_s
     import time
@@ -439,16 +441,16 @@ def compare_seed_plane(plan: ChainSeed, digests: dict) -> dict:
         raise ChainSeedRefused(
             "the seed did not roll a whole plane at the compare boundary")
     entries = []
-    for (probe, batch) in sorted(plan.compare["plane"]):
-        row = plan.compare["plane"][probe, batch]
-        _await_checkpoint_entry(row, deadline=deadline)
-        tensors = read_exact_entry_tensors(
-            [row], expected_session=checkpoint_entry_session(reference))
-        theirs = tensor_payload_sha256(tensors.pop(row["name"]))
-        del tensors
-        entries.append({"probe": probe, "batch": batch,
-                        "seed_sha256": digests[probe, batch],
-                        "reference_sha256": theirs})
+    keys = sorted(plan.compare["plane"])
+    with closing(stream_exact_entry_tensors(
+            [plan.compare["plane"][key] for key in keys],
+            expected_session=checkpoint_entry_session(reference),
+            max_resident_bytes=max_resident_bytes, deadline=deadline)) as stream:
+        for (probe, batch), (_row, tensor) in zip(keys, stream):
+            entries.append({"probe": probe, "batch": batch,
+                            "seed_sha256": digests[probe, batch],
+                            "reference_sha256": tensor_payload_sha256(tensor)})
+            del tensor
     equal = sum(entry["seed_sha256"] == entry["reference_sha256"] for entry in entries)
     return {
         "schema": SEED_COMPARISON_SCHEMA,

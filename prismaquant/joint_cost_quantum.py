@@ -1830,13 +1830,17 @@ def run_layer_quantum_core(
                 grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
                     source_adjoint_space, checkpoint_record,
                     cotangent_factory=storage.checkpoint_cotangent_sink,
-                    shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+                    shared_state_max_bytes=storage.config["max_auxiliary_bytes"],
+                    max_resident_bytes=storage.config["max_resident_bytes"],
+                    residency_check=storage.reserve_resident)
             else:
                 grad_plane, shared_adjoint, shared_pass = load_handoff_inputs(
                     adjoint_handoff, checkpoint_record, n_probes=n_probes,
                     n_batches=len(row_offsets),
                     cotangent_factory=storage.checkpoint_cotangent_sink,
-                    shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+                    shared_state_max_bytes=storage.config["max_auxiliary_bytes"],
+                    max_resident_bytes=storage.config["max_resident_bytes"],
+                    residency_check=storage.reserve_resident)
         cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
                              for _ in row_offsets] for _ in range(n_probes)]
         for (probe, batch), state in shared_adjoint.items():
