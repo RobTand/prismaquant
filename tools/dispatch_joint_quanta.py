@@ -2898,16 +2898,25 @@ class Gateway:
         return {"action_key": answer["action_key"], "status": answer.get("status", "")}
 
     def is_terminal_executed(self, action_key: str) -> bool:
+        """Whether PB has finished this action's work, as ``pbwait`` says.
+
+        ``pbwait`` prints a row table and returns its verdict as the exit
+        code, 0 when the work is done; it prints no JSON (PQ #1197). Both
+        must say done: the verdict, and this key's own row, ``executed`` or
+        ``cache_hit`` (a memoized result is the same result). The caller
+        then reads the action's outputs and checks them itself.
+        """
+        from prismaquant.pbwait_table import DONE_STATUSES, parse_pbwait_table
+
         proc = subprocess.run(
             [sys.executable, str(PBWAIT), "--wait-s", "0", action_key],
             capture_output=True, text=True)
-        try:
-            answer = json.loads(proc.stdout.strip().splitlines()[-1])
-        except (ValueError, IndexError):
+        if proc.returncode != 0:
             return False
-        return answer.get("status") == "executed" or (
-            isinstance(answer.get("terminal"), dict)
-            and answer["terminal"].get("status") == "executed")
+        # The table names a key by its 12-character prefix.
+        rows = [row for row in parse_pbwait_table(proc.stdout)
+                if len(row.get("key", "")) >= 12 and action_key.startswith(row["key"])]
+        return len(rows) == 1 and rows[0].get("status") in DONE_STATUSES
 
 
 class FakeGateway(Gateway):
