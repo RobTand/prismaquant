@@ -142,6 +142,10 @@ def _pair(tmp_path, campaign, probe, *, scoped=False, identity=None):
         common['calibration_input']['artifact_sha256'] = bindings['calibration_input']['sha256']
     newplan = {**copy.deepcopy(oldplan), 'inputs': {'fixture': 'new'},
                'output_root': str(tmp_path / 'new-output')}
+    if scoped:
+        # The prepare flow's launch recipe embeds the extended plan's policy.
+        newplan['stage_b_resource_policy'] = _write(tmp_path, 'resource-policy.json',
+                                                    {'fixture': 'policy'})
     inputs = {'original_plan': _write(tmp_path, 'old-plan.json', oldplan),
               'extended_plan': _write(tmp_path, 'new-plan.json', newplan)}
     for label, weights, cells, plan in [('original', old_weights, old_cells, oldplan),
@@ -336,7 +340,13 @@ def test_a_null_scope_proof_without_a_derived_scope_refuses(tmp_path, campaign, 
     inputs, receipt, capture, identity, scope = _scoped_case(tmp_path, campaign, probe)
     header = stage_a_run_header(receipt)
     args = _site_args(inputs, campaign)
+    # Without an extension the header answers for the original plan; asked
+    # under that plan, the sealed null is what refuses, not the plan digest.
     with pytest.raises(ValueError, match='another scope'):
+        check_adjoint_run_header(header, **{**args,
+                                            'plan_sha256': inputs['original_plan']['sha256'],
+                                            'prepared_sha256': inputs['original_prepared']['sha256']})
+    with pytest.raises(ValueError):
         check_adjoint_run_header(header, **args)
     bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json',
                              campaign_identity=identity)
