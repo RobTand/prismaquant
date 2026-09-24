@@ -64,8 +64,9 @@ WALL = "wall"
 AMBIGUOUS = "ambiguous"
 
 # (file, enclosing function) -> (count, kind, reason). ``wall`` is a data or
-# layout identity (calibration, roster, probes) that dev mode must not cross;
-# ``ambiguous`` is listed in the PQ #1147 report for a ruling.
+# layout identity (calibration, roster, probes) that dev mode must not cross.
+# ``ambiguous`` was listed in the PQ #1147 report; the ruling (2026-09-24)
+# keeps each such site a refusal in both modes, as on main.
 ALLOWLIST = {
     ("prismaquant/aura_cost.py", "_load_aura_unit_checkpoint"): (
         1, INTEGRITY, "a unit checkpoint's envelope digest against its payload bytes"),
