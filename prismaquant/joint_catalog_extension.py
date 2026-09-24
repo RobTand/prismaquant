@@ -23,6 +23,23 @@ SCHEMA = "prismaquant.joint_catalog_extension.v2"
 #: extension can be created from the first sealed band. v1 documents still
 #: verify: their receipt's header must equal the header a slice carries.
 SCHEMA_V1 = "prismaquant.joint_catalog_extension.v1"
+#: v3 (PQ #1126) is v2 plus ``original_campaign_scope``, written only when the
+#: bound run header seals ``campaign_scope: null`` (R13 ran without a
+#: forward-recovery capsule under a plan that declares no scope). The scope is
+#: derived once, at creation, from the original plan by the one scope builder
+#: (``tools.dispatch_tessera_campaign.joint_campaign_scope``, which re-hashes
+#: every artifact the plan binds) against the frozen campaign identity file.
+#: A header that seals its scope keeps producing v2 bytes: the sealed scope
+#: rules, and nothing is embedded over it.
+SCHEMA_V3 = "prismaquant.joint_catalog_extension.v3"
+DERIVED_SCOPE_SCHEMA = "prismaquant.joint_catalog_extension.derived_scope.v1"
+DERIVED_SCOPE_RULE = "sealed_null_derived_from_original_plan"
+#: The artifacts a campaign scope names, where a joint plan binds them by
+#: path and digest. Consumers compare these stated bindings; only creation
+#: re-hashes the bytes.
+SCOPE_ARTIFACT_BINDINGS = (("inputs", "census"), ("inputs", "campaign_plan"),
+                           ("inputs", "merged_checkpoint"), ("calibration_input",),
+                           ("canonical_capture",))
 INPUTS = ("original_plan", "original_prepared", "extended_plan", "extended_prepared")
 # These select candidate artifacts or their output namespace; every other
 # plan field, including the entire execution/derivative policy, stays exact.
@@ -427,9 +444,126 @@ def _check_capture(header, inputs, original):
     plan = _json(inputs["original_plan"], "original plan")
     for key in ("n_probes", "seed_base"):
         _same(identity.get(key), plan["execution"][key], "capture " + key)
+    return plan
 
 
-def create_extension(*, inputs, adjoint_capture, output, publish=None):
+def _plan_scope_bindings(plan):
+    """The five artifacts a scope names, exactly as the original plan states them."""
+    bound = {}
+    for keys in SCOPE_ARTIFACT_BINDINGS:
+        value = plan
+        for key in keys:
+            value = value.get(key) if isinstance(value, dict) else None
+        _require(isinstance(value, dict) and set(value) == {"path", "sha256"},
+                 "original plan binds no " + ".".join(keys))
+        bound[keys[-1]] = dict(value)
+    return bound
+
+
+def derive_original_campaign_scope(original_plan, campaign_identity):
+    """The original campaign's scope, derived once from the original plan (PQ #1126).
+
+    The one scope builder, ``joint_campaign_scope``, reads the plan's bound
+    census and campaign plan and re-hashes every artifact the scope names,
+    the merged checkpoint included; ``verify_joint_campaign_scope`` then holds
+    it to the frozen campaign identity, field for field, and to the
+    ``complete_campaign`` kind. The stamp is the one the dispatcher puts on
+    every campaign-scoped submission: the scope plus the identity file's
+    digest. This is the whole cost, paid at creation; consumers recheck the
+    embedded block against the plan's stated digests and the identity file.
+    """
+    from tools.dispatch_tessera_campaign import (
+        COMPLETE_CAMPAIGN_SCOPE, ScopeRefused, verify_joint_campaign_scope)
+    _require(isinstance(campaign_identity, dict) and set(campaign_identity) == {"path", "sha256"},
+             "the frozen campaign identity needs a bound path and SHA256")
+    plan = _json(original_plan, "original plan")
+    campaign = _json(campaign_identity, "frozen campaign identity")
+    try:
+        scope = verify_joint_campaign_scope(
+            plan, require_scope=COMPLETE_CAMPAIGN_SCOPE, campaign=campaign,
+            label="catalog extension: original plan " + original_plan["sha256"][:12])
+    except ScopeRefused as exc:
+        raise ValueError("joint catalog extension: the original plan's campaign scope "
+                         f"refused: {exc}") from exc
+    scope = {**scope, "campaign_identity_sha256": campaign_identity["sha256"]}
+    return {"schema": DERIVED_SCOPE_SCHEMA, "rule": DERIVED_SCOPE_RULE, "scope": scope,
+            "derived_from": {"original_plan": dict(original_plan),
+                             "campaign_identity": dict(campaign_identity),
+                             "require_scope": COMPLETE_CAMPAIGN_SCOPE,
+                             "bound_artifacts": _plan_scope_bindings(plan)}}
+
+
+def _check_derived_scope(block, inputs, plan):
+    """Recheck an embedded derived scope the cheap way, and return it.
+
+    The bytes it cost to derive are not re-read here. What is rechecked: the
+    block names this extension's original plan and the ``complete_campaign``
+    kind; its artifact bindings are the plan's stated ones; the identity file
+    it binds (a few hundred bytes, re-hashed) carries every frozen identity
+    field the scope carries, and its digest is the scope's stamp; the kind,
+    window and sequence-length fields are the plan's; the checkpoint digest
+    and the declared roster counts are the plan's. The parent's own scope,
+    sealed in every record, is what the effective scope is then compared
+    with, byte for byte, at every site.
+    """
+    from tools.dispatch_tessera_campaign import (
+        CAMPAIGN_IDENTITY_FIELDS, CAMPAIGN_IDENTITY_SCHEMA, CAMPAIGN_SCOPE_SCHEMA,
+        COMPLETE_CAMPAIGN_SCOPE)
+    _require(isinstance(block, dict), "derived campaign scope block is not a mapping")
+    _same(block.get("schema"), DERIVED_SCOPE_SCHEMA, "derived scope schema")
+    _same(block.get("rule"), DERIVED_SCOPE_RULE, "derived scope rule")
+    derived = block.get("derived_from")
+    _require(isinstance(derived, dict), "derived scope names no derivation")
+    _same(derived.get("original_plan"), inputs["original_plan"], "derived scope original plan")
+    _same(derived.get("require_scope"), COMPLETE_CAMPAIGN_SCOPE, "derived scope required kind")
+    _same(derived.get("bound_artifacts"), _plan_scope_bindings(plan), "derived scope artifact bindings")
+    scope = block.get("scope")
+    _require(isinstance(scope, dict) and scope, "derived scope is empty")
+    identity_bound = derived.get("campaign_identity")
+    campaign = _json(identity_bound, "frozen campaign identity")
+    _same(campaign.get("schema"), CAMPAIGN_IDENTITY_SCHEMA, "frozen campaign identity schema")
+    for field in CAMPAIGN_IDENTITY_FIELDS:
+        _same(scope.get(field), campaign.get(field), "derived scope " + field)
+    _same(scope.get("campaign_identity_sha256"), identity_bound["sha256"], "derived scope identity stamp")
+    _same(scope.get("schema"), CAMPAIGN_SCOPE_SCHEMA, "derived scope schema")
+    _same(scope.get("kind"), COMPLETE_CAMPAIGN_SCOPE, "derived scope kind")
+    _same(scope.get("selection_sha256"), None, "derived scope selection")
+    _same(scope.get("window_count"), scope.get("campaign_window_count"), "derived scope window count")
+    execution = plan.get("execution") or {}
+    _same(scope.get("window_count"), execution.get("n_calib_samples"), "derived scope evaluated windows")
+    _same(scope.get("calib_seqlen"), execution.get("calib_seqlen"), "derived scope sequence length")
+    _require(plan.get("joint_eval") is None, "original plan evaluates a diagnostic panel")
+    plan_inputs = plan.get("inputs") or {}
+    _same(scope.get("campaign_checkpoint_sha256"), plan_inputs["merged_checkpoint"]["sha256"],
+          "derived scope campaign checkpoint")
+    _same((scope.get("source_unit_count"), scope.get("campaign_group_count")),
+          (plan_inputs.get("required_source_units"), plan_inputs.get("required_campaign_groups")),
+          "derived scope declared roster counts")
+    return scope
+
+
+def _effective_run_identity(document, header, inputs, plan):
+    """The run identity consumers compare with the campaign's.
+
+    The sealed one when the run sealed a scope; otherwise the sealed identity
+    with the extension's derived scope in place of the null, admitted only
+    because the extension binds exactly this run header and the plan it
+    sealed (``_check_capture``). A null with no derivation stays a null, which
+    no campaign scope equals.
+    """
+    identity = header["run_identity"]
+    block = document.get("original_campaign_scope")
+    if identity.get("campaign_scope") is not None:
+        _require(block is None, "the original run sealed its campaign scope; "
+                 "a derived scope over a sealed one is refused")
+        return identity
+    _require(document.get("schema") == SCHEMA_V3 and block is not None,
+             "the original run sealed no campaign scope and the extension derives none; "
+             "create it with the frozen campaign identity (--campaign-identity)")
+    return {**identity, "campaign_scope": _check_derived_scope(block, inputs, plan)}
+
+
+def create_extension(*, inputs, adjoint_capture, output, publish=None, campaign_identity=None):
     """Publish an extension binding the original Stage A run header.
 
     ``adjoint_capture`` names the completed receipt or any sealed checkpoint
@@ -438,13 +572,29 @@ def create_extension(*, inputs, adjoint_capture, output, publish=None):
     ``publish(path, raw)`` writes the file and returns whether it created it;
     the default is ``publish_new_bytes``. The Stage B preparation passes its
     produced-output writer (PQ #1070).
+
+    ``campaign_identity`` binds the operator's frozen campaign identity file
+    by path and SHA256. It is required, and used, only when the run header
+    seals ``campaign_scope: null`` (PQ #1126): the document is then v3 and
+    carries the scope :func:`derive_original_campaign_scope` derives from the
+    original plan. A header that seals its scope creates the v2 bytes it
+    always did, whether or not an identity is given.
     """
     evidence = verify_catalog_pair(inputs)
     header = _run_header(_json(adjoint_capture, "original adjoint capture"))
-    _check_capture(header, inputs, _json(inputs["original_prepared"], "original prepared"))
+    plan = _check_capture(header, inputs, _json(inputs["original_prepared"], "original prepared"))
     document = {"schema": SCHEMA, "inputs": inputs, "adjoint_run_header": header,
         "adjoint_run_header_sha256": canonical_json_sha256(header, where="original Stage A run header"),
         "evidence": evidence}
+    if header["run_identity"].get("campaign_scope") is None:
+        _require(campaign_identity is not None,
+                 "the original run sealed no campaign scope (PQ #1126); bind the frozen campaign "
+                 "identity (--campaign-identity, --campaign-identity-sha256) so the scope is "
+                 "derived from the original plan")
+        block = derive_original_campaign_scope(inputs["original_plan"], campaign_identity)
+        # The creator holds its own block to the consumers' check before publishing it.
+        _check_derived_scope(block, inputs, plan)
+        document.update(schema=SCHEMA_V3, original_campaign_scope=block)
     raw = (json.dumps(document, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
     writer = publish_new_bytes if publish is None else publish
     _require(writer(Path(output), raw), "extension output already exists; refusing overwrite")
@@ -459,24 +609,28 @@ def extension_run_header(bound):
     verifies it independently.
     """
     document = _json(bound, "catalog extension")
-    if document.get("schema") == SCHEMA:
+    if document.get("schema") in (SCHEMA, SCHEMA_V3):
         return document["adjoint_run_header"]
     _same(document.get("schema"), SCHEMA_V1, "extension schema")
     return _run_header(_json(document["adjoint_capture"], "original adjoint capture"))
 
 
 def require_extension(bound, *, run_header, plan_sha256, prepared_sha256):
-    """Independently check the pair and return the original run identity.
+    """Independently check the pair and return the effective original run identity.
 
     ``run_header`` is the Stage A run header a slice, band or receipt
-    carries; the extension must bind exactly it.
+    carries; the extension must bind exactly it. The identity returned is
+    the sealed one, or, for a v3 extension over a run that sealed
+    ``campaign_scope: null``, the sealed identity with the derived scope in
+    its place (:func:`_effective_run_identity`); consumers compare its
+    ``campaign_scope`` with the campaign's.
     """
     document = _json(bound, "catalog extension")
-    _require(document.get("schema") in (SCHEMA, SCHEMA_V1), "extension schema differs")
+    _require(document.get("schema") in (SCHEMA, SCHEMA_V1, SCHEMA_V3), "extension schema differs")
     inputs = document["inputs"]
     _same(inputs["extended_plan"]["sha256"], plan_sha256, "extended plan binding")
     _same(inputs["extended_prepared"]["sha256"], prepared_sha256, "extended prepared binding")
-    if document["schema"] == SCHEMA:
+    if document["schema"] in (SCHEMA, SCHEMA_V3):
         header = document["adjoint_run_header"]
         _same(document["adjoint_run_header_sha256"],
               canonical_json_sha256(header, where="original Stage A run header"),
@@ -489,9 +643,18 @@ def require_extension(bound, *, run_header, plan_sha256, prepared_sha256):
     _same(canonical_json_sha256(header, where="original Stage A run header"),
           canonical_json_sha256(run_header, where="Stage A run header"),
           "original Stage A run header")
-    _check_capture(header, inputs, _json(inputs["original_prepared"], "original prepared"))
+    plan = _check_capture(header, inputs, _json(inputs["original_prepared"], "original prepared"))
+    identity = _effective_run_identity(document, header, inputs, plan)
     _same(document["evidence"], verify_catalog_pair(inputs), "independently recomputed extension evidence")
-    return header["run_identity"]
+    return identity
+
+
+def extension_campaign_identity(document):
+    """The frozen campaign identity binding a v3 extension derives its scope from, or None."""
+    block = document.get("original_campaign_scope") if document.get("schema") == SCHEMA_V3 else None
+    if block is None:
+        return None
+    return dict(block["derived_from"]["campaign_identity"])
 
 
 def _hessian_reference_commitments(hessian, where):
@@ -656,9 +819,15 @@ def main(argv=None):
                         help="validate proposed metadata, without creating capture-reuse authority")
     parser.add_argument("--adjoint-capture")
     parser.add_argument("--adjoint-capture-sha256")
+    parser.add_argument("--campaign-identity", default=None,
+                        help="the frozen campaign identity file; required when the original "
+                             "run sealed campaign_scope null (PQ #1126)")
+    parser.add_argument("--campaign-identity-sha256", default=None)
     parser.add_argument("--out")
     args = parser.parse_args(argv)
     inputs = json.loads(Path(args.inputs).read_bytes())
+    if bool(args.campaign_identity) != bool(args.campaign_identity_sha256):
+        parser.error("--campaign-identity and --campaign-identity-sha256 go together")
     if args.check_catalog_only:
         if args.adjoint_capture or args.adjoint_capture_sha256 or args.out:
             parser.error("catalog-only validation takes no capture or publication path")
@@ -667,8 +836,11 @@ def main(argv=None):
         return 0
     if not args.adjoint_capture or not args.adjoint_capture_sha256 or not args.out:
         parser.error("capture path, SHA256 and fresh output path are required to create an extension")
+    identity = (None if args.campaign_identity is None else
+                {"path": str(Path(args.campaign_identity).resolve()), "sha256": args.campaign_identity_sha256})
     result = create_extension(inputs=inputs,
-        adjoint_capture={"path": args.adjoint_capture, "sha256": args.adjoint_capture_sha256}, output=args.out)
+        adjoint_capture={"path": args.adjoint_capture, "sha256": args.adjoint_capture_sha256},
+        output=args.out, campaign_identity=identity)
     print(json.dumps(result, sort_keys=True))
     return 0
 
@@ -706,6 +878,9 @@ def selected_cache_read_paths(manifest):
         if kind == 'extension':
             if document.get('schema') == SCHEMA_V1:
                 add(document['adjoint_capture'])
+            identity = extension_campaign_identity(document)
+            if identity is not None:
+                add(identity)
             for name, value in document['inputs'].items():
                 control(value, 'plan' if name.endswith('_plan') else 'prepared')
         elif kind == 'plan':
