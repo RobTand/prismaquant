@@ -44,6 +44,26 @@ fifteen full-size elementwise ops, including an int64 code tensor.
   identity without the field, so `native_execution_binding.
   require_reference_quantizer` no longer finds it equal to a new joint row's.
 
+- **One Triton trap, caught by the raw-bit comparison.** Triton's unary minus
+  is `0 - x`, so `-(+0.0)` is `+0.0`, while Torch's `-magnitude` gives `-0.0`
+  for the negative-zero code. The first kernel matched under `torch.equal` and
+  differed in up to 6% of the output bits; the sign is now bit 3 of the code
+  moved onto the float's sign bit.
+- **Measured** (PB `1eb8d8882b0a`, sparklina, GB10, campaign image
+  `prismaquant-glm-derivative:causal-exp-v1-20260908`, torch 2.13, Triton
+  3.7.1, interleaved A/B in one process, 5 rounds, box otherwise idle). At the
+  campaign chunk, 65,536 x 4,096 bf16: the leg takes 11.8 ms per call instead
+  of 178.8 ms (15.1x), the host is back in 0.11 ms instead of 169.9 ms, and a
+  replay-shaped chunk (`g.T @ x`, the QDQ, `g.T @ dx`) takes 149 ms instead of
+  311 ms (2.09x). GPU power during the leg is 64 W (46% of the 140 W envelope)
+  instead of 41 W (29%), and the energy per call is 0.76 J instead of 7.27 J.
+  The torch profiler shows one `cudaStreamSynchronize` per call (714 ms over 5
+  calls) in the old leg and none in the new one, and 10.2 kernels per call
+  (15.5 ms of device time) instead of 29.2 (182.5 ms). Small shapes gain 2.5x
+  (37 x 512, 256 x 1,536) to 12x (1,024 x 2,048). The SHA-256 of both legs'
+  outputs is equal on all seven bench shapes. Not measured: a real Stage B
+  row window.
+
 Gates: `tests/test_nvfp4_served_qdq_no_sync.py` (red on the base) and
 `tests/test_nvfp4_served_dequant_kernel.py`. Bench:
 `tools/nvfp4_served_qdq_bench.py`, an interleaved A/B of both legs with the
