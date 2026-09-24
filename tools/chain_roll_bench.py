@@ -39,8 +39,8 @@ Subcommands:
   the R13 spec plus the scratch and py-spy mounts, without the produced
   spool.
 * ``host`` (the action's command, on the worker) extracts the base arm's
-  ``prismaquant`` from the action's own Git snapshot into scratch, then runs
-  ``drive`` in the campaign container.
+  ``prismaquant`` and ``tools`` from the action's own Git snapshot into
+  scratch, then runs ``drive`` in the campaign container.
 * ``drive`` (in the container) runs each repeat's arms in alternating order,
   each as one ``child`` process under ``py-spy record``.
 * ``child`` (in the container) builds, installs, rolls once, digests the
@@ -210,8 +210,10 @@ def cmd_host(args) -> int:
     if base.exists():
         raise SystemExit(f"{base} exists: use a fresh --label")
     base.mkdir(parents=True)
+    # ``tools`` too: prismaquant imports a few of its modules
+    # (``glm_source_derivative`` reads ``tools.container_runtime_identity``).
     archive = subprocess.run(["git", "-c", "safe.directory=*", "archive", args.base_ref,
-                              "prismaquant"], check=True, capture_output=True).stdout
+                              "prismaquant", "tools"], check=True, capture_output=True).stdout
     subprocess.run(["tar", "-x", "-C", str(base)], input=archive, check=True)
     commit = subprocess.run(["git", "-c", "safe.directory=*", "rev-parse", args.base_ref],
                             check=True, capture_output=True, text=True).stdout.strip()
