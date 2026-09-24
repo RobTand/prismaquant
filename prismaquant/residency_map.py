@@ -1181,8 +1181,12 @@ class ResidencyResolver:
         """PrismaBuild's landing record for this consumer, or ``None``.
 
         ``<consumer>.landing.json`` beside the map (PB #989): for every
-        pending in-horizon range, its mover, the mover's state and the
-        tier's expectation of when it lands. ``None`` when the generation
+        pending range, its mover, the mover's state and the tier's
+        expectation of when it lands. Since PB #1018 it lists every leg the
+        consumer has still to read, a leg the stage window has not reached
+        with ``deferred_by``, and carries a ``horizon`` block; a record
+        without the ``horizon`` key lists only the legs inside the refill
+        horizon. ``None`` when the generation
         that composed the map writes no such record, when the record is not
         a regular file, or when it names another tier or manifest than the
         map this resolver is bound to -- each is "nothing published to wait
@@ -1256,6 +1260,20 @@ class ResidencyResolver:
             if low < high:
                 out.append((base + low - offset, base + high - offset))
         return out
+
+    def read_order_bound(self) -> bool:
+        """Whether the sealed read order is bound here (PQ #1113).
+
+        :meth:`read_order_positions` answers an empty list both for a span
+        the read order does not contain and when there is no read order to
+        place it in. The reader refuses the first at once and keeps its
+        bounded wait for the second, so it asks this. Loads the read order
+        on first use, as that method does.
+        """
+        with self._lock:
+            if not self._read_order_attempted:
+                self._load_read_order()
+            return self._read_order is not None
 
     def _load_read_order(self) -> None:
         """Caller holds the lock. Runs at most once per binding."""

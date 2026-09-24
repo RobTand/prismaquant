@@ -1,11 +1,10 @@
 """The reader follows every leg PrismaBuild lists, and refuses what it cannot (#1113).
 
 PB #1018 lists every leg a claimed consumer has still to read in its landing
-record, not only the legs inside the consumer's refill horizon.  A leg the
-stage window has not reached is ``unpublished`` with ``deferred_by``
-(``horizon``, or ``first-progress`` before the consumer's first accepted
-progress), and the record's ``horizon`` block says where the window stops and
-the consumption rate that moves it.  Such a record carries the ``horizon`` key
+record while the consumer has a refill horizon, not only the legs inside it.
+A leg past the horizon is ``unpublished`` with ``deferred_by: horizon``, and
+the record's ``horizon`` block says where the window stops and the
+consumption rate that moves it.  Such a record carries the ``horizon`` key
 (``null`` when the horizon is undefined); a record without it predates #1018.
 
 What the reader does with that:

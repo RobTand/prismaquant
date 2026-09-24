@@ -1,5 +1,46 @@
 # PrismaQuant Architecture
 
+A staged-range reader waits on a leg PrismaBuild defers and refuses a span
+no leg covers at once (2026-09-24, `fix/1113-landing-verdict`, PQ #1113,
+PB #1018). PrismaBuild's landing record listed only the legs inside the
+consumer's refill horizon, so a reader blocked on a leg past it found no row
+and ran out the 300 s clock, even while the tier loop lived and the leg was
+coming.
+
+- **What PrismaBuild writes now.** While the consumer has a refill
+  horizon, the record lists every leg it has still to read. A leg past the
+  horizon is `unpublished`, with `deferred_by: horizon` and a `waiting_for`
+  text. With no horizon, as before the consumer's first accepted progress,
+  it lists only what the window publishes regardless: the phase being read
+  and one step of run-ahead. A later leg has no row, because nothing could
+  extend a horizon that does not exist, so the reader's clock bounds it.
+  The record gains a `horizon` block: the horizon's end byte, the phase the
+  consumer is reading, the advance mover and the consumption rate that
+  moves it. `null` means the horizon is undefined. A record without the
+  `horizon` key predates PB #1018.
+- **The wait** (`residency_shard_reader.landing_verdict`). A deferred leg
+  is `unpublished`, a state `residency_map.LANDING_STATES` already lists, so
+  the reader waits on it while the tier loop lives, declares it in
+  `<progress path>.staged-wait` as it declares any other mover, and refuses
+  once the tier loop is silent. `_describe_landing` says the leg is deferred,
+  where the horizon ends, what the consumer is reading and at what rate.
+- **The refusal.** Under a record that lists every leg, a span the bound
+  read order does not contain refuses at once, naming the span: no leg of
+  the consumer's plan covers it, so no mover will stage it.
+  `ResidencyResolver.read_order_bound` tells that case apart from a reader
+  with no read order bound, which keeps the bounded wait.
+- **Where the clock stays.** No landing record, an older record without
+  the `horizon` key, no bound read order, and an in-order span the record
+  does not list: a leg past the one step before first progress, a leg of
+  a phase the consumer has passed, or a range that has just become
+  resident. The last is why an unlisted in-order span is not refused: the
+  tier loop composes the map before it rewrites the record, so such a range
+  can be missing from the record one poll before the reader sees it in the
+  map.
+
+Gate: `tests/test_landing_verdict_deferred_legs.py`. No format, pipeline
+default, stage or ship gate changes.
+
 A Stage B row's spill ceiling is now the need its record seals (2026-09-24,
 `ws-sb4/spill-ceiling`). PB action `6f4f058751e6` (R13 layer 44, sparklina)
 refused 60 s into its head phase: the spill needed 199,051,640,832 bytes,
@@ -1444,8 +1485,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-sb4/spill-ceiling`.
+As of: 2026-09-24 · `fix/1113-landing-verdict`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `fix/1113-landing-verdict`) for **a staged-range
+reader that waits on a leg PrismaBuild defers past the refill horizon and
+refuses a span outside the bound read order at once** (PQ #1113, PB #1018).
+See the entry at the top. No format, pipeline default, stage or ship gate
+changes.
 
 Re-stamped (2026-09-24, `ws-sb4/spill-ceiling`) for **a Stage B spill
 ceiling sealed from the layer's need**: the record builder seals each spill
@@ -2502,8 +2549,10 @@ the module-global bounded `_LAYER_READ_POOL`, so a worker sleeping on a cold
 future range is a worker the current layer's already-staged reads queue
 behind; a ready current-layer read now proceeds while every lookahead layer is
 cold. Where PrismaBuild's landing record covers the pending spans (PB #989,
-PQ #1107), it waits while their movers are queued or copying and refuses on a
-terminal mover or a silent tier loop; otherwise it waits under one deadline
+PQ #1107), it waits while their movers are queued or copying, or deferred
+past the refill horizon (PB #1018, PQ #1113), and refuses on a terminal
+mover or a silent tier loop. A record that lists every leg refuses a span
+outside the bound read order at once, naming it; otherwise it waits under one deadline
 for the whole layer, however many shards it
 spans (`PRISMAQUANT_STAGED_RANGE_WAIT_S`, default 300 s, `0` restores the
 pre-#874 behaviour, and the value must be finite; the joint dispatcher
