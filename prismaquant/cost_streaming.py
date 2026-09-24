@@ -131,6 +131,33 @@ def check_boundary_storage(config):
     return config
 
 
+#: The boundary storage policy fields that fix how the stored entries are laid
+#: out and grouped: the schema, the capture order, and the read window that
+#: keys every published group (``_produced_group_key`` divides the batch index
+#: by it). A reader of the generation depends on them, so a resume under other
+#: values refuses in both modes (PQ #1147). The byte ceilings
+#: (``max_resident_bytes``, ``max_auxiliary_bytes``, ``max_artifact_bytes``)
+#: bound one run's own memory and disk and are run seals; the relaunch's guards
+#: enforce its own values either way.
+BOUNDARY_STORAGE_LAYOUT_FIELDS = ("schema", "capture_order", "prefetch_batches")
+
+
+def boundary_storage_layout_differs(recorded, running) -> bool:
+    """True when two boundary storage policies lay out stored entries differently.
+
+    That is, when their field sets differ or any of
+    ``BOUNDARY_STORAGE_LAYOUT_FIELDS`` differs. A policy that differs only in
+    its byte ceilings lays the entries out the same way.
+    """
+
+    if not isinstance(recorded, dict) or not isinstance(running, dict):
+        return recorded != running
+    if set(recorded) != set(running):
+        return True
+    return any(recorded.get(name) != running.get(name)
+               for name in BOUNDARY_STORAGE_LAYOUT_FIELDS)
+
+
 def normalize_boundary_storage(config):
     """The checked policy with its directory resolved.
 
@@ -501,9 +528,12 @@ class StreamedBoundaryArtifacts:
 
         ``identity`` is the bind identity the relaunch recomputed; it must
         hash to the session's ``run_identity_sha256``, as it did at ``bind``.
-        The storage policy and the status are run seals (PQ #1147):
-        certified mode refuses on each, and dev mode prints a ``[DEV-MODE]``
-        line and reopens the generation.
+        The status refuses in both modes, and so does a storage policy that
+        lays the entries out differently (``BOUNDARY_STORAGE_LAYOUT_FIELDS``).
+        A policy that differs only in its byte
+        ceilings is a run seal (PQ #1147): certified mode refuses, and dev
+        mode prints a ``[DEV-MODE]`` line and reopens the generation under
+        this owner's own ceilings.
 
         The rebound owner holds no entries yet. What the resumed chain reads
         is borrowed through :meth:`authorize_resume_inputs`.
@@ -538,16 +568,16 @@ class StreamedBoundaryArtifacts:
         if status.get("session") != session:
             raise RuntimeError(
                 f"{status_path} names another session than the chain resume")
+        policy_refusal = RuntimeError(
+            f"{status_path} was written under another boundary storage policy")
+        if boundary_storage_layout_differs(status.get("policy"), self.identity):
+            raise policy_refusal
         seal_check("boundary storage policy", status.get("policy"), self.identity,
-                   where=str(status_path),
-                   refusal=RuntimeError(
-                       f"{status_path} was written under another boundary storage policy"))
-        seal_check("generation status", "running or failed", status.get("status"),
-                   where=str(status_path),
-                   same=status.get("status") in ("running", "failed"),
-                   refusal=RuntimeError(
-                       f"the resumed generation's status is {status.get('status')!r}; "
-                       "only an interrupted run (running or failed) resumes"))
+                   where=str(status_path), refusal=policy_refusal)
+        if status.get("status") not in ("running", "failed"):
+            raise RuntimeError(
+                f"the resumed generation's status is {status.get('status')!r}; "
+                "only an interrupted run (running or failed) resumes")
         if not (directory / "entries").is_dir():
             raise RuntimeError(f"the resumed generation has no entries at {directory}")
         if owner_label is not None:
@@ -5734,9 +5764,8 @@ def _read_source_checkpoint_digest_cache(
     """Digests keyed by the six-field stat fingerprint of the file they cover.
 
     A corrupt or foreign cache is not an error: it simply reuses nothing.
-    Certified mode then hashes every shard; dev mode refuses the
-    unannounced seal fast with the byte count instead (see the portable
-    reuse policy). The cache can only ever make the identity CHEAPER,
+    Both modes then hash every shard; dev mode also prints a ``[DEV-MODE]``
+    line with the byte count first (PQ #1147). The cache can only ever make the identity CHEAPER,
     never different -- the fingerprint it keys on includes ``ctime_ns``, which
     ``utime`` cannot restore after an in-place same-size rewrite.
     """
@@ -6002,16 +6031,16 @@ def build_source_checkpoint_identity(
         digests.append(str(cached["sha256"]) if cached is not None else None)
     misses = [index for index, digest in enumerate(digests) if digest is None]
     if misses and dev_mode_enabled():
+        # The digests key every cache, so a miss is hashed in both modes
+        # (PQ #1147): dev mode only says so, loudly. Campaign rows declare a
+        # covering cache and never reach this.
         total = sum(int(fingerprints[index]["size"]) for index in misses)
         where = (f"the declared digest cache {digest_cache_path} does not "
                  "cover them" if digest_cache_path is not None
                  else "no digest cache is declared")
-        raise RuntimeError(
-            "dev mode refuses an unannounced source rehash of "
-            f"{total} bytes across {len(misses)} shard(s): {where}; "
-            "initialize it with an explicit certified run instead "
-            "(certified mode would hash them here)"
-        )
+        dev_warning(
+            f"source rehash of {total} bytes across {len(misses)} shard(s): "
+            f"{where}; hashing them now")
     for index, digest in zip(
         misses,
         _hash_source_shards(
@@ -6287,33 +6316,31 @@ def build_streamed_model_identity(
             "client device-number difference (dev-only portable reuse; "
             "certified mode would rehash): uncertified")
     if dev_mode_enabled():
+        # The digests key every cache, so uncovered shards are hashed below in
+        # both modes (PQ #1147): dev mode only says so, loudly.
         if not have_cache:
             total_live = sum(
                 int(fingerprint["size"]) for fingerprint in fingerprints)
             where = (f"at the declared {cache_path}" if cache_path is not None
                      else "with none declared")
-            raise RuntimeError(
-                "dev mode refuses an unannounced source rehash of "
-                f"{total_live} bytes: no usable identity cache {where}; "
-                "initialize one with an explicit certified run instead"
-            )
-        uncovered = [
-            (str(fingerprint["path"]), int(fingerprint["size"]))
-            for fingerprint in fingerprints
-            if str(fingerprint["path"]) not in reusable_sha
-        ]
-        if uncovered:
-            total = sum(size for _, size in uncovered)
-            new_paths = [path for path, _ in uncovered
-                         if path not in mutated_paths]
-            raise RuntimeError(
-                "dev mode refuses an unannounced source rehash of "
-                f"{total} bytes across {len(uncovered)} shard(s) "
-                f"({len(mutated_paths)} mutated, {len(new_paths)} new; "
-                f"first: {uncovered[0][0]}); refresh the declared cache "
-                f"{cache_path} from the current source instead "
-                "(certified mode would hash them here)"
-            )
+            dev_warning(
+                f"source rehash of {total_live} bytes: no usable identity "
+                f"cache {where}; hashing every shard now")
+        else:
+            uncovered = [
+                (str(fingerprint["path"]), int(fingerprint["size"]))
+                for fingerprint in fingerprints
+                if str(fingerprint["path"]) not in reusable_sha
+            ]
+            if uncovered:
+                total = sum(size for _, size in uncovered)
+                new_paths = [path for path, _ in uncovered
+                             if path not in mutated_paths]
+                dev_warning(
+                    f"source rehash of {total} bytes across {len(uncovered)} "
+                    f"shard(s) ({len(mutated_paths)} mutated, {len(new_paths)} "
+                    f"new; first: {uncovered[0][0]}): the declared cache "
+                    f"{cache_path} does not cover them; hashing them now")
 
     shards: list[dict[str, object]] = []
     for path, fingerprint in zip(shard_paths, fingerprints, strict=True):

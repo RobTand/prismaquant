@@ -5,8 +5,9 @@ RED-first: the stat fingerprint keys cached digests on host-local
 other and rehashes the whole checkpoint. Only long-landed names are
 imported at module scope; the new predicate is imported lazily where the
 test needs it so RED collects. Fixture shards are tiny local files --
-payload hashing is mocked to refuse (dev reuse) or count (certified
-rehash); no model bytes are ever read here.
+payload hashing is mocked to refuse (reuse) or count (a rehash, which since
+PQ #1147 dev mode runs too, with a ``[DEV-MODE]`` byte-count line); no model
+bytes are ever read here.
 """
 from __future__ import annotations
 
@@ -190,21 +191,26 @@ def test_certified_rehashes_across_device_difference(
     assert len(calls) == len(shards)
 
 
-def test_dev_refuses_mutated_cache_with_byte_count(
+def test_dev_warns_and_rehashes_mutated_cache(
         monkeypatch, checkpoint, capsys):
+    """The digests key every cache, so dev mode hashes what the cache does
+    not cover, as certified mode does, and says so with the byte count
+    (PQ #1147)."""
     root, shards = checkpoint
     cache = root / "identity-cache.json"
     _build_cache(root, shards)
-    payload = json.loads(cache.read_text())
     names = sorted(shards)
     grown = root / names[0]
     grown.write_bytes(b"a" * 65537)
     _dev_on(monkeypatch)
-    _refusing_hash(monkeypatch)
-    with pytest.raises(RuntimeError, match="[Bb]ytes"):
-        cs.build_streamed_model_identity(
-            _runner(shards), str(root), identity_cache_path=cache)
-    assert "DEV-MODE" not in capsys.readouterr().out
+    calls = _counting_hash(monkeypatch)
+    identity = cs.build_streamed_model_identity(
+        _runner(shards), str(root), identity_cache_path=cache)
+    assert [Path(call).resolve() for call in calls] == [grown.resolve()]
+    out = capsys.readouterr().out
+    assert "[DEV-MODE] source rehash of 65537 bytes" in out
+    assert hashlib.sha256(b"a" * 65537).hexdigest() in {
+        row["sha256"] for row in identity["shards"]}
 
 
 def test_certified_still_rehashes_mutated_cache(monkeypatch, checkpoint):
@@ -220,15 +226,16 @@ def test_certified_still_rehashes_mutated_cache(monkeypatch, checkpoint):
     assert len(calls) == 1
 
 
-def test_dev_missing_cache_refuses_with_byte_count(
-        monkeypatch, checkpoint):
+def test_dev_missing_cache_warns_and_hashes(
+        monkeypatch, checkpoint, capsys):
     root, shards = checkpoint
     _dev_on(monkeypatch)
-    _refusing_hash(monkeypatch)
-    with pytest.raises(RuntimeError, match="[Bb]ytes"):
-        cs.build_streamed_model_identity(
-            _runner(shards), str(root),
-            identity_cache_path=root / "identity-cache.json")
+    calls = _counting_hash(monkeypatch)
+    cs.build_streamed_model_identity(
+        _runner(shards), str(root),
+        identity_cache_path=root / "identity-cache.json")
+    assert len(calls) == len(shards)
+    assert "[DEV-MODE] source rehash of 196608 bytes" in capsys.readouterr().out
 
 
 def test_certified_missing_cache_hashes(monkeypatch, checkpoint):
@@ -241,21 +248,25 @@ def test_certified_missing_cache_hashes(monkeypatch, checkpoint):
     assert len(calls) == len(shards)
 
 
-def test_dev_top_up_without_contract_refuses(monkeypatch, tmp_path):
+def test_dev_top_up_warns_and_hashes_only_new_shards(
+        monkeypatch, tmp_path, capsys):
     root = tmp_path / "model"
     root.mkdir()
     shard_a = root / "a.safetensors"
     shard_a.write_bytes(b"a" * 65536)
     cache = root / "identity-cache.json"
+    _dev_off(monkeypatch)
     cs.build_streamed_model_identity(
         _runner({"a": shard_a}), str(root), identity_cache_path=cache)
-    (root / "b.safetensors").write_bytes(b"b" * 131072)
+    shard_b = root / "b.safetensors"
+    shard_b.write_bytes(b"b" * 131072)
     _dev_on(monkeypatch)
-    _refusing_hash(monkeypatch)
-    with pytest.raises(RuntimeError, match="[Bb]ytes"):
-        cs.build_streamed_model_identity(
-            _runner({"a": shard_a, "b": root / "b.safetensors"}), str(root),
-            identity_cache_path=cache)
+    calls = _counting_hash(monkeypatch)
+    cs.build_streamed_model_identity(
+        _runner({"a": shard_a, "b": shard_b}), str(root),
+        identity_cache_path=cache)
+    assert [Path(call).resolve() for call in calls] == [shard_b.resolve()]
+    assert "[DEV-MODE] source rehash of 131072 bytes" in capsys.readouterr().out
 
 
 def test_certified_top_up_hashes_only_new_shards(monkeypatch, tmp_path):
@@ -358,7 +369,8 @@ def test_digest_cache_memo_stays_strict_in_certified(
     assert len(calls) == 2
 
 
-def test_digest_cache_memo_miss_refuses_in_dev(monkeypatch, tmp_path):
+def test_digest_cache_memo_miss_warns_and_hashes_in_dev(
+        monkeypatch, tmp_path, capsys):
     from prismaquant.cost_streaming import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     cache_path = tmp_path / "digest-cache.json"
@@ -371,21 +383,27 @@ def test_digest_cache_memo_miss_refuses_in_dev(monkeypatch, tmp_path):
         {"schema": "prismaquant.source_checkpoint.digest_cache.v1",
          "entries": entries}))
     _dev_on(monkeypatch)
-    _refusing_hash(monkeypatch)
-    with pytest.raises(RuntimeError, match="[Bb]ytes"):
-        build_source_checkpoint_identity(
-            str(root), digest_cache_path=cache_path)
+    calls = _counting_hash(monkeypatch)
+    identity = build_source_checkpoint_identity(
+        str(root), digest_cache_path=cache_path)
+    assert [Path(call).resolve() for call in calls] == [
+        (root / "b.safetensors").resolve()]
+    assert "[DEV-MODE] source rehash of 131072 bytes" in capsys.readouterr().out
+    assert identity["shards"][1]["sha256"] == hashlib.sha256(
+        b"b" * 131072).hexdigest()
 
 
-def test_digest_cache_memo_none_path_refuses_in_dev(monkeypatch, tmp_path):
-    """Omitting the cache path is not an escape hatch: dev still refuses
-    the hidden giant hash; certified preparation is the explicit path."""
+def test_digest_cache_memo_none_path_warns_and_hashes_in_dev(
+        monkeypatch, tmp_path, capsys):
+    """Omitting the cache path hides nothing: dev mode hashes every shard,
+    as certified mode does, and prints the byte count first (PQ #1147)."""
     from prismaquant.cost_streaming import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     _dev_on(monkeypatch)
-    _refusing_hash(monkeypatch)
-    with pytest.raises(RuntimeError, match="[Bb]ytes"):
-        build_source_checkpoint_identity(str(root), digest_cache_path=None)
+    calls = _counting_hash(monkeypatch)
+    build_source_checkpoint_identity(str(root), digest_cache_path=None)
+    assert len(calls) == 2
+    assert "[DEV-MODE] source rehash of 196608 bytes" in capsys.readouterr().out
 
 
 def test_digest_cache_memo_none_path_hashes_in_certified(monkeypatch, tmp_path):
@@ -402,11 +420,12 @@ def test_digest_cache_memo_none_path_hashes_in_certified(monkeypatch, tmp_path):
     "wrong-typed-device",
     "extra-unknown-field",
 ])
-def test_digest_cache_memo_malformed_rows_refuse_in_dev(
-        monkeypatch, tmp_path, mutation):
+def test_digest_cache_memo_malformed_rows_never_reuse_in_dev(
+        monkeypatch, tmp_path, mutation, capsys):
     """A stored row without the exact six-field shape must never reuse --
     without the gate a device-less row would match every host's portable
-    key. Refusal, no payload hash; certified behavior covered beside."""
+    key. Every shard is hashed, with a ``[DEV-MODE]`` line; certified
+    behavior is covered beside."""
     from prismaquant.cost_streaming import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     cache_path = tmp_path / "digest-cache.json"
@@ -430,10 +449,13 @@ def test_digest_cache_memo_malformed_rows_refuse_in_dev(
         {"schema": "prismaquant.source_checkpoint.digest_cache.v1",
          "entries": entries}))
     _dev_on(monkeypatch)
-    _refusing_hash(monkeypatch)
-    with pytest.raises(RuntimeError, match="[Bb]ytes"):
-        build_source_checkpoint_identity(
-            str(root), digest_cache_path=cache_path)
+    calls = _counting_hash(monkeypatch)
+    identity = build_source_checkpoint_identity(
+        str(root), digest_cache_path=cache_path)
+    assert len(calls) == 2
+    assert "[DEV-MODE] source rehash of 196608 bytes" in capsys.readouterr().out
+    assert [row["sha256"] for row in identity["shards"]] == [
+        real[str(root / "a.safetensors")], real[str(root / "b.safetensors")]]
 
 
 def test_digest_cache_memo_malformed_rows_hash_in_certified(
@@ -457,13 +479,15 @@ def test_digest_cache_memo_malformed_rows_hash_in_certified(
     assert len(calls) == 2
 
 
-def test_build_none_path_refuses_in_dev(monkeypatch, checkpoint):
+def test_build_none_path_warns_and_hashes_in_dev(
+        monkeypatch, checkpoint, capsys):
     root, shards = checkpoint
     _dev_on(monkeypatch)
-    _refusing_hash(monkeypatch)
-    with pytest.raises(RuntimeError, match="[Bb]ytes"):
-        cs.build_streamed_model_identity(
-            _runner(shards), str(root), identity_cache_path=None)
+    calls = _counting_hash(monkeypatch)
+    cs.build_streamed_model_identity(
+        _runner(shards), str(root), identity_cache_path=None)
+    assert len(calls) == len(shards)
+    assert "[DEV-MODE] source rehash of 196608 bytes" in capsys.readouterr().out
 
 
 def test_build_none_path_hashes_in_certified(monkeypatch, checkpoint):

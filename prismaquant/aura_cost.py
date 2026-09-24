@@ -242,6 +242,35 @@ def _write_aura_checkpoint_manifest(
     return identity_sha256
 
 
+def _dev_archive_checkpoint_lineage(root: Path, reason: str) -> Path:
+    """Rename a checkpoint lineage aside and start a fresh one.
+
+    The house pattern used manually on 2026-09-19 (Rob's dev-mode decision):
+    the lineage is archived whole -- renamed with a ``.dev-archived-<iso>``
+    suffix, never deleted, never silently reused -- and a fresh lineage
+    starts in its place. Since PQ #1147 only unit checkpoints that exist
+    without a manifest come here: they have no recorded identity to be
+    reused under. Certified mode never calls this; it refuses reuse AND
+    recompute.
+    """
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archived = root.with_name(f"{root.name}.dev-archived-{stamp}")
+    suffix = 0
+    while archived.exists():  # two archives inside one second
+        suffix += 1
+        archived = root.with_name(f"{root.name}.dev-archived-{stamp}-{suffix}")
+    root.rename(archived)
+    root.mkdir(parents=True, exist_ok=True)
+    from prismaquant.dev_mode import dev_warning
+
+    dev_warning(
+        f"archived AURA checkpoint lineage to {archived.name} and started a "
+        f"fresh one (dev mode): {reason}")
+    return archived
+
+
 def _load_aura_checkpoint_manifest(
     checkpoint_dir: Path,
     expected_identity: Mapping[str, object],
@@ -395,7 +424,7 @@ def _prepare_aura_checkpoints(
     identity: Mapping[str, object],
     names: Sequence[str],
 ) -> tuple[Path, str, dict[str, dict[str, object]]]:
-    from prismaquant.dev_mode import seal_check
+    from prismaquant.dev_mode import dev_mode_enabled, seal_check
 
     root = Path(checkpoint_dir)
     if root.exists() and not root.is_dir():
@@ -415,12 +444,18 @@ def _prepare_aura_checkpoints(
     else:
         existing_units = sorted((root / "units").glob("*.pkl"))
         if existing_units:
-            # Units with no manifest have no recorded identity to reuse them
-            # under; both modes refuse, and a human decides (PQ #1147).
-            raise RuntimeError(
-                "AURA checkpoint units exist without a manifest; refusing "
-                f"name-gated reuse or recompute. sample={existing_units[:8]}"
-            )
+            if dev_mode_enabled():
+                # Units with no manifest have no recorded identity to reuse
+                # them under (an interrupted transition): dev mode archives
+                # them whole and recomputes, as before PQ #1147.
+                _dev_archive_checkpoint_lineage(
+                    root,
+                    f"{len(existing_units)} unit checkpoints exist without a manifest")
+            else:
+                raise RuntimeError(
+                    "AURA checkpoint units exist without a manifest; refusing "
+                    f"name-gated reuse or recompute. sample={existing_units[:8]}"
+                )
         identity_sha256 = _write_aura_checkpoint_manifest(
             root,
             identity,

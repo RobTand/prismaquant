@@ -51,6 +51,7 @@ MODULES = (
     "prismaquant/joint_stage_b_head.py",
     "prismaquant/stage_a_chain_resume.py",
     "prismaquant/stage_a_chain_seed.py",
+    "prismaquant/stage_a_chain_split.py",
     "prismaquant/tessera_joint_aura.py",
     "tools/dispatch_joint_quanta.py",
     "tools/dispatch_tessera_campaign.py",
@@ -170,6 +171,8 @@ ALLOWLIST = {
         1, WALL, "quanta joined into one table share their probe and measurement shape"),
     ("prismaquant/stage_a_chain_resume.py", "load_chain_state"): (
         2, INTEGRITY, "chain state bytes against the pinned digest and its own seal"),
+    ("prismaquant/stage_a_chain_resume.py", "read_chain_state"): (
+        1, INTEGRITY, "chain state bytes reproduce their own seal (a split join's reader)"),
     ("prismaquant/stage_a_chain_resume.py", "resume_records"): (
         1, INTEGRITY, "a resume record reproduces its own seal"),
     ("prismaquant/stage_a_chain_resume.py", "plan_chain_resume"): (
@@ -185,6 +188,9 @@ ALLOWLIST = {
         1, STRUCTURE, "the seed rolled a whole plane at the compare boundary"),
     ("prismaquant/stage_a_chain_seed.py", "checkpoint_plane_distance"): (
         1, WALL, "two checkpoints compared as arms of one run share a bind identity"),
+    ("prismaquant/stage_a_chain_split.py", "read_partial"): (
+        2, INTEGRITY, "a partial's manifest reproduces its own bytes and seal; its pack "
+        "against the size and digest its row names"),
     ("prismaquant/tessera_joint_aura.py", "_read_verified_wire_blob"): (
         1, INTEGRITY, "staged wire bytes against the receipt digest"),
     ("prismaquant/tessera_joint_aura.py", "_read_wire_bytes"): (

@@ -148,6 +148,89 @@ def test_join_admits_rows_whose_probe_identity_differs(tmp_path, campaign, unset
     assert "[DEV-MODE] seal probe identity differs" in unset()
 
 
+def _restamp_probe(root, quantum, field, value, *, first_only=False):
+    """Rewrite a quantum's joint rows with ``probe_identity[field] = value``.
+
+    Every digest over the probe identity is recomputed, so each row still
+    validates on its own. Returns ``(rewritten, joint_rows)``.
+    """
+    import pickle
+
+    from prismaquant.joint_aura import identity_sha256
+
+    path = root / "layer-quanta" / quantum / "cost.pkl"
+    payload = pickle.loads(path.read_bytes())
+    rewritten = total = 0
+    for rows in payload["costs"].values():
+        for fmt, entry in list(rows.items()):
+            if not isinstance(entry, dict) or "error" in entry:
+                continue
+            total += 1
+            if first_only and rewritten:
+                continue
+            entry = copy.deepcopy(entry)
+            entry["probe_identity"][field] = value
+            operator = entry["joint_operator_identity"]
+            digest = identity_sha256(entry["probe_identity"])
+            entry["probe_identity_sha256"] = operator["probe_identity_sha256"] = digest
+            entry["joint_operator_identity_sha256"] = identity_sha256(operator)
+            rows[fmt] = entry
+            rewritten += 1
+    path.write_bytes(pickle.dumps(payload))
+    return rewritten, total
+
+
+def test_join_refuses_a_quantum_of_another_calibration_draw(tmp_path, campaign, unset):
+    """The calibration draw is what was measured: a wall in dev mode too."""
+    from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta
+    from tests.test_joint_quanta_allocator_bridge import _generated_outputs
+    from tests.test_stageb_replay_regime import _quanta
+
+    root, campaign, _, _, _ = _generated_outputs(tmp_path, campaign)
+    _restamp_probe(root, _quanta(root)[1], "calibration_sha256", "9" * 64)
+    with pytest.raises(JoinRefused, match="probe or measurement identity differs"):
+        join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
+                          output_dir=tmp_path / "joined")
+    assert "[DEV-MODE] seal probe identity" not in unset()
+
+
+def test_rows_of_another_calibration_draw_refuse_in_one_cost_table(tmp_path, campaign, unset):
+    from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta
+    from tests.test_joint_quanta_allocator_bridge import _generated_outputs
+    from tests.test_stageb_replay_regime import _quanta
+
+    root, campaign, _, _, _ = _generated_outputs(tmp_path, campaign)
+    rewritten, total = _restamp_probe(root, _quanta(root)[1], "calibration_sha256",
+                                      "9" * 64, first_only=True)
+    assert rewritten == 1 < total
+    with pytest.raises(JoinRefused, match="rows do not share one probe/calibration identity"):
+        join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
+                          output_dir=tmp_path / "joined")
+    assert "[DEV-MODE] seal probe identity" not in unset()
+
+
+def test_rows_of_another_producer_source_are_ranked_with_a_stamp(
+        tmp_path, campaign, unset, monkeypatch):
+    """The producer source is how a cost was computed, not what was measured."""
+    from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta
+    from tests.test_joint_quanta_allocator_bridge import _generated_outputs
+    from tests.test_stageb_replay_regime import _quanta
+
+    root, campaign, _, _, _ = _generated_outputs(tmp_path, campaign)
+    rewritten, total = _restamp_probe(root, _quanta(root)[1], "producer_source_sha256",
+                                      "9" * 64, first_only=True)
+    assert rewritten == 1 < total
+    result = join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
+                               output_dir=tmp_path / "joined")
+    assert result["status"] == "complete"
+    assert ("[DEV-MODE] seal probe identity differs at producer_source_sha256"
+            in unset())
+    monkeypatch.setenv(ENV, "0")
+    with pytest.raises(JoinRefused, match="rows do not share one probe/calibration identity"):
+        join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
+                          output_dir=tmp_path / "certified")
+
+
 # -- the quantum record and the stage-A header ---------------------------------
 
 def _record(**campaign_fields):
@@ -340,3 +423,95 @@ def test_an_aura_lineage_of_another_producer_is_reused_by_default(tmp_path, monk
     assert model.forward_calls == 0
     assert repr(payload["costs"]) == repr(first["costs"])
     assert not sorted(tmp_path.glob("checkpoints.dev-archived-*"))
+
+
+def test_aura_units_without_a_manifest_are_archived_and_recomputed_by_default(
+        tmp_path, monkeypatch, capsys):
+    """Units with no manifest have no recorded identity to be reused under.
+    Dev mode archives the lineage whole and recomputes, as it did before
+    PQ #1147; certified mode refuses, as before."""
+    from tests.test_dev_mode_provenance_gates import _aura_run
+
+    _, first = _aura_run(tmp_path, monkeypatch, source_sha="a" * 64, resume=False)
+    root = tmp_path / "checkpoints"
+    (root / "manifest.json").unlink()
+    units = sorted(path.name for path in (root / "units").glob("*.pkl"))
+    assert units
+    with pytest.raises(RuntimeError, match="without a manifest"):
+        _aura_run(tmp_path, monkeypatch, source_sha="a" * 64, resume=True)
+    assert not sorted(tmp_path.glob("checkpoints.dev-archived-*"))
+    monkeypatch.delenv(ENV, raising=False)
+    capsys.readouterr()
+    model, payload = _aura_run(tmp_path, monkeypatch, source_sha="a" * 64, resume=True)
+    assert "[DEV-MODE] archived AURA checkpoint lineage" in capsys.readouterr().out
+    archived = sorted(tmp_path.glob("checkpoints.dev-archived-*"))
+    assert len(archived) == 1
+    assert sorted(path.name for path in (archived[0] / "units").glob("*.pkl")) == units
+    assert (root / "manifest.json").is_file()
+    assert model.forward_calls > 0
+    assert repr(payload["costs"]) == repr(first["costs"])
+
+
+# -- the boundary generation a chain resume reopens -----------------------------
+
+def _bound_generation(tmp_path):
+    """An interrupted run's boundary generation: status ``running``."""
+    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
+
+    config = {"schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "exact"),
+              "max_resident_bytes": 1 << 20, "max_auxiliary_bytes": 1 << 20,
+              "max_artifact_bytes": 1 << 20, "prefetch_batches": 4}
+    owner = StreamedBoundaryArtifacts(config)
+    owner.bind({"source_model": "fixture"}, n_probes=2, published=True)
+    (owner.directory / "entries").mkdir(exist_ok=True)
+    return config, dict(owner.session)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("max_resident_bytes", 1 << 21), ("max_auxiliary_bytes", 1 << 21),
+    ("max_artifact_bytes", 1 << 21)])
+def test_rebind_stamps_a_byte_ceiling_difference(tmp_path, unset, monkeypatch, field, value):
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+
+    config, session = _bound_generation(tmp_path)
+    owner = StreamedBoundaryArtifacts({**config, field: value})
+    owner.rebind(session, identity={"source_model": "fixture"}, n_probes=2)
+    assert f"[DEV-MODE] seal boundary storage policy differs at {field}" in unset()
+    assert owner.session == session
+    monkeypatch.setenv(ENV, "0")
+    with pytest.raises(RuntimeError, match="another boundary storage policy"):
+        StreamedBoundaryArtifacts({**config, field: value}).rebind(
+            session, identity={"source_model": "fixture"}, n_probes=2)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("prefetch_batches", 8), ("schema", "prismaquant.aura.boundary_storage.v2")])
+def test_rebind_refuses_a_boundary_layout_difference(tmp_path, unset, field, value):
+    """The schema, the capture order and the read window lay out the stored
+    entries: a wall in dev mode too (PQ #1147)."""
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+
+    config, session = _bound_generation(tmp_path)
+    running = {**config, field: value}
+    if value == "prismaquant.aura.boundary_storage.v2":
+        running["capture_order"] = "layer_major"
+    with pytest.raises(RuntimeError, match="another boundary storage policy"):
+        StreamedBoundaryArtifacts(running).rebind(
+            session, identity={"source_model": "fixture"}, n_probes=2)
+    assert "[DEV-MODE]" not in unset()
+
+
+@pytest.mark.parametrize("status", ["complete", "attached", "retained"])
+def test_rebind_refuses_a_generation_that_did_not_stop_partway(tmp_path, unset, status):
+    """Another owner or reader holds it: a wall in dev mode too (PQ #1147)."""
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+
+    config, session = _bound_generation(tmp_path)
+    path = Path(config["directory"]) / session["generation"] / "generation.json"
+    document = json.loads(path.read_text())
+    document["status"] = status
+    path.write_text(json.dumps(document))
+    with pytest.raises(RuntimeError, match=f"status is '{status}'"):
+        StreamedBoundaryArtifacts(config).rebind(
+            session, identity={"source_model": "fixture"}, n_probes=2)
+    assert "[DEV-MODE]" not in unset()

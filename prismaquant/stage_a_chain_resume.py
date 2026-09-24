@@ -16,15 +16,21 @@ A chain resume relaunches that run from ``b``:
   them from anywhere else.
 * It **refuses** in both modes when the chain's layout or data differs: the
   stride, the partition and layer counts, the chain regime (batch size, probe
-  fusion), the calibration draw, the probes or the unit roster.
+  fusion), the calibration draw, the probes or the unit roster. It also
+  refuses when the boundary storage layout differs (the schema, the capture
+  order and the read window ``prefetch_batches`` that groups the published
+  entries: ``cost_streaming.BOUNDARY_STORAGE_LAYOUT_FIELDS``), and when the
+  generation did not stop partway (``running`` or ``failed``): a
+  ``complete``, ``attached`` or ``retained`` generation belongs to another
+  reader or owner.
 * Its **run seals** go through ``seal_check`` (PQ #1147): the arithmetic
   stamp, the plan, the preparation, the read manifest, the implementation,
   the campaign scope, the source model, the artifact budget, the boundary
-  storage policy, the capsule binding and the generation status. Certified
-  mode (``PRISMAQUANT_DEV_MODE=0``) refuses on each as before. Dev mode prints
-  one ``[DEV-MODE]`` line per difference and continues with the stored chain.
-  A relaunch may pass ``NOT_COMPUTED`` for a seal input it would derive only
-  to compare it.
+  storage byte ceilings and the capsule binding. Certified mode
+  (``PRISMAQUANT_DEV_MODE=0``) refuses on each as before. Dev mode prints one
+  ``[DEV-MODE]`` line per difference and continues with the stored chain. A
+  relaunch may pass ``NOT_COMPUTED`` for a seal input it would derive only to
+  compare it.
 
 **Same implementation.** A resume under the implementation that sealed
 checkpoint ``b`` is a plain bitwise continuation: the receipt, every
@@ -385,10 +391,14 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
         for name in differing:
             seal_check(f"chain state {name}", document[name], recomputed.get(name),
                        where="Stage A chain resume", refusal=refusal)
+    from .cost_streaming import boundary_storage_layout_differs
+
     storage = document["boundary_storage"]
+    storage_refusal = ChainResumeRefused("the relaunch runs another boundary storage policy")
+    if boundary_storage_layout_differs(storage["policy"], recomputed.get("boundary_policy")):
+        raise storage_refusal
     seal_check("boundary storage policy", storage["policy"], recomputed.get("boundary_policy"),
-               where="Stage A chain resume",
-               refusal=ChainResumeRefused("the relaunch runs another boundary storage policy"))
+               where="Stage A chain resume", refusal=storage_refusal)
     if recomputed.get("boundary_directory") != storage["directory"]:
         raise ChainResumeRefused("the relaunch writes another boundary directory")
     session = storage["session"]
@@ -463,12 +473,10 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
         raise ChainResumeRefused(f"the run's generation has no status file: {exc}") from exc
     if status.get("session") != session:
         raise ChainResumeRefused("the run's generation names another session")
-    seal_check("generation status", "running or failed", status.get("status"),
-               where="Stage A chain resume",
-               same=status.get("status") in ("running", "failed"),
-               refusal=ChainResumeRefused(
-                   f"the run's generation status is {status.get('status')!r}; only an "
-                   "interrupted run resumes"))
+    if status.get("status") not in ("running", "failed"):
+        raise ChainResumeRefused(
+            f"the run's generation status is {status.get('status')!r}; only an "
+            "interrupted run resumes")
     for producer in [document["producer"], *(record["producer"] for record in records)]:
         if producer is not None:
             require_producer_contained(producer)

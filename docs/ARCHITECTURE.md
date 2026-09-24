@@ -23,7 +23,14 @@ These still refuse in both modes:
   does not reproduce its own seal, and a missing unit.
 - Layout and data identities: the stride, the batch and layer counts, the
   unit roster, the calibration draw, the probes, the seed, the chain regime
-  and the token scope.
+  and the token scope. The boundary storage layout (the schema, the capture
+  order and the read window `prefetch_batches`) is a wall; its byte ceilings
+  are seals. A joint AURA row's calibration draw, probes, token scope, source
+  model, source execution and execution partition are walls; its producer
+  source and the rest of its arithmetic are seals.
+- Ownership: a chain resume reopens only a boundary generation that stopped
+  partway (`running` or `failed`). A `complete`, `attached` or `retained`
+  generation belongs to another reader or owner and refuses.
 - Resource guards. The spill bound admits another recorded geometry in dev
   mode, but a live spill over the admitted ceiling still refuses.
 
@@ -37,8 +44,12 @@ rebuild the source model identity; it records `not computed`. The catalog
 extension does not re-derive the original campaign scope, which re-hashed the
 merged checkpoint (302.653 s measured under #833). AURA reuses stored
 checkpoint rows from another producer instead of archiving the lineage and
-recomputing it. A resume adopts the chain state's stored run and bind
-identities, so the run it continues keeps its own records.
+recomputing it; unit checkpoints with no manifest have no recorded identity
+to be reused under, so dev mode archives them and recomputes, as before. A
+resume adopts the chain state's stored run and bind identities, so the run it
+continues keeps its own records. A source identity that no cache covers is
+hashed in both modes, because the digests key every cache; dev mode prints
+the byte count first.
 
 A certified submitter (`PRISMAQUANT_DEV_MODE=0`) now seals `0` into the
 container spec env, because unset in the container now means dev mode. This
@@ -48,9 +59,11 @@ every campaign quantum, as before. This changes a runtime default: the meaning
 of an unset `PRISMAQUANT_DEV_MODE`. No format, pipeline stage, lane or ship
 gate changes. Gates: `tests/test_sealing_off_1147.py`,
 `tests/test_no_new_seals.py`, `tests/test_stage_a_chain_resume.py`,
-`tests/test_stage_a_chain_seed.py`, `tests/test_stage_b_head_slice.py`,
+`tests/test_stage_a_chain_seed.py`, `tests/test_stage_a_chain_split.py`,
+`tests/test_stage_b_head_slice.py`,
 `tests/test_stage_b_spill_ceiling_sealed.py`,
-`tests/test_dev_mode_provenance_gates.py`.
+`tests/test_dev_mode_provenance_gates.py`,
+`tests/test_source_identity_portable_device.py`.
 
 Stage B plans the capture pass it charges (2026-09-24,
 `ws-sb4/1151-capture-workspace`, PQ #1151). The capture guard charges
@@ -1750,7 +1763,7 @@ Re-stamped (2026-09-24, `ws-1147/sealing-off`) for **sealing off by default**
 (PQ #1147): `PRISMAQUANT_DEV_MODE` means dev mode unless it is `0`, and every
 run-gate seal on the campaign path goes through `dev_mode.seal_check`, which
 prints a `[DEV-MODE]` line and continues in dev mode. Byte integrity, layout
-and data identities, and resource guards still refuse. See the entry at the
+and data identities, ownership, and resource guards still refuse. See the entry at the
 top and §3.4. A runtime default changes; no format, pipeline stage, lane or
 ship gate changes.
 
@@ -3152,8 +3165,9 @@ hidden giant hash in either entry point: a missing, unrecognized, mutated,
 or contract-less top-up cache each refuses fast with the byte count, and so
 does a call with no cache path at all (initialize explicitly with a
 certified run, which remains the existing explicit preparation path);
-certified rehash behavior is unchanged. Gate:
-`tests/test_source_identity_portable_device.py`.
+certified rehash behavior is unchanged. (Superseded 2026-09-24 by PQ #1147:
+with dev mode the default, dev mode hashes those shards too and prints the
+byte count first.) Gate: `tests/test_source_identity_portable_device.py`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-20, `flash/stagea-forward-read-plan-20260920`) for **the
@@ -13956,14 +13970,21 @@ Rob, 2026-09-24: "All sealing should be disabled until further notice."
   hash to their stored digest, a record that does not reproduce its own seal,
   a missing unit. Layout and data identities: the stride, the batch and layer
   counts, the roster, the calibration draw, the probes, the seed, the chain
-  regime, the token scope. Resource guards, including the spill bound's
-  capacity half. A digest that covers calibration and cannot be split into
-  fields (the seed's and the rebind's bind-identity digests) stays a
-  refusal; a dev resume compares the identity key by key first and then
-  rebinds the stored one.
+  regime, the token scope, the boundary storage layout (schema, capture
+  order, read window), and a joint AURA row's calibration draw and probes
+  (`cost_currency.PROBE_IDENTITY_SEAL_FIELDS` names the fields that are
+  seals). Ownership: a resume reopens only a `running` or `failed` boundary
+  generation. Resource guards, including the spill bound's capacity half. A
+  digest that covers calibration and cannot be split into fields (the seed's
+  and the rebind's bind-identity digests) stays a refusal; a dev resume
+  compares the identity key by key first and then rebinds the stored one.
 - **Reuse, not recompute.** A mismatched AURA checkpoint lineage is reused
   with a `[DEV-MODE]` line, not archived and recomputed; corrupt checkpoints
-  still refuse. A chain resume adopts the chain state's stored run and bind
+  still refuse. Unit checkpoints with no manifest have no recorded identity,
+  so dev mode archives them (`<root>.dev-archived-<iso>`) and recomputes, as
+  before #1147. A source identity no cache covers is hashed in both modes
+  (the digests key every cache); dev mode prints the byte count first. A
+  chain resume adopts the chain state's stored run and bind
   identities and does not rebuild the source model identity only to compare
   it (it records `not computed`). The catalog extension does not re-derive
   the original campaign scope.
@@ -22912,13 +22933,17 @@ Before anything is removed, `plan_chain_resume` checks the list below. Since
 PQ #1147 the run seals in it go through `seal_check`: certified mode
 (`PRISMAQUANT_DEV_MODE=0`) refuses on each, and dev mode (the default) prints
 a `[DEV-MODE]` line and continues with the stored chain. The run seals are the
-arithmetic stamp, the artifact budget override, the storage policy, the
-generation status, the capsule binding, and these identity fields: the plan,
-the preparation, the read manifest, the implementation, the campaign scope,
-the bf16 reduction, the source model and the producer source. Every other
-difference refuses in both modes: the stride, the batch and layer counts, the
-roster, the calibration, the probes, the seed, the chain regime, the boundary
-directory and the checkpoint checks. In dev mode a relaunch does not rebuild
+arithmetic stamp, the artifact budget override, the boundary storage byte
+ceilings (`max_resident_bytes`, `max_auxiliary_bytes`, `max_artifact_bytes`),
+the capsule binding, and these identity fields: the plan, the preparation, the
+read manifest, the implementation, the campaign scope, the bf16 reduction, the
+source model and the producer source. Every other difference refuses in both
+modes: the stride, the batch and layer counts, the roster, the calibration,
+the probes, the seed, the chain regime, the boundary storage layout (the
+schema, the capture order and the read window `prefetch_batches`, which keys
+every published group: `cost_streaming.BOUNDARY_STORAGE_LAYOUT_FIELDS`), the
+boundary directory, the generation status (only a `running` or `failed`
+generation reopens) and the checkpoint checks. In dev mode a relaunch does not rebuild
 the source model identity only to compare it; the check prints `not computed`,
 and the resume adopts the chain state's stored run and bind identities.
 

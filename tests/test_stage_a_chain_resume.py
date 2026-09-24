@@ -595,6 +595,8 @@ def _refusal_kwargs(root, name):
         "artifact-budget": dict(boundary_artifact_bytes=(1 << 24) - 256),
         "read-window": dict(execution={**execution, "boundary_storage": {
             **policy, "prefetch_batches": 1}}),
+        "resident-cap": dict(execution={**execution, "boundary_storage": {
+            **policy, "max_resident_bytes": CAP + 256}}),
         "calibration": dict(calib=other_draw),
         "probes": dict(execution={**execution, "n_probes": 3}),
         "seed": dict(execution={**execution, "seed_base": 7001}),
@@ -626,6 +628,7 @@ REFUSALS = {
     "stride": "differs in stride$",
     "artifact-budget": "another boundary storage policy",
     "read-window": "another boundary storage policy",
+    "resident-cap": "another boundary storage policy",
     "calibration": "differs in run_identity, bind_identity$",
     "probes": "differs in run_identity, bind_identity$",
     "seed": "differs in run_identity, bind_identity$",
@@ -834,12 +837,14 @@ def test_the_resume_flags_need_the_chain_state_digest(capsys):
 # -- dev mode, the default since PQ #1147: run seals stamp and continue ---------
 
 #: Relaunches that differ from the interrupted run only in a run seal. With
-#: ``PRISMAQUANT_DEV_MODE`` unset each prints ``[DEV-MODE]`` and resumes.
-DEV_SEALS = ("plan", "prepared", "read-manifest", "artifact-budget", "read-window",
+#: ``PRISMAQUANT_DEV_MODE`` unset each prints ``[DEV-MODE]`` and resumes. The
+#: boundary storage byte ceilings (``artifact-budget``, ``resident-cap``) are
+#: seals; the read window lays out the published groups and is a wall.
+DEV_SEALS = ("plan", "prepared", "read-manifest", "artifact-budget", "resident-cap",
              "arithmetic", "implementation-undeclared")
 #: Relaunches that differ in the chain's layout or data: walls in dev mode too.
 DEV_WALLS = ("batch-size", "probe-fusion", "unit-roster", "stride", "calibration",
-             "probes", "seed")
+             "probes", "seed", "read-window")
 
 
 def _dev_resume(root, monkeypatch, capsys, **kw):
@@ -912,17 +917,41 @@ def test_dev_mode_resume_does_not_compute_the_source_identity(
         _run(certified, monkeypatch, chain_resume=_resume(certified))
 
 
-def test_dev_mode_reopens_a_generation_whose_status_is_not_interrupted(
-        tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("status_value", ["complete", "attached", "retained"])
+def test_dev_mode_refuses_a_generation_whose_status_is_not_interrupted(
+        tmp_path, monkeypatch, capsys, status_value):
+    """A finished, attached or retained generation belongs to another owner
+    or reader: a resume writing into it refuses in both modes (PQ #1147)."""
     root = tmp_path / "run"
     _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
     generation = _generation(root)
     status = json.loads(generation.read_text())
-    status["status"] = "complete"
+    status["status"] = status_value
     generation.write_text(json.dumps(status))
-    resumed, out = _dev_resume(root, monkeypatch, capsys, chain_resume=_resume(root))
-    assert "[DEV-MODE] seal generation status differs" in out
-    assert [c["boundary"] for c in resumed["checkpoints"]] == [5, 4, 2]
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    with pytest.raises(AdjointIdentityRefused, match=f"status is '{status_value}'"):
+        _run(root, monkeypatch, chain_resume=_resume(root))
+    assert "[DEV-MODE] seal generation status" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema", "prismaquant.aura.boundary_storage.v0"),
+    ("capture_order", "sample_major")])
+def test_a_boundary_storage_layout_difference_refuses_in_dev_mode(field, value):
+    """The schema, the capture order and the read window lay out the stored
+    entries; the byte ceilings bound one run's memory and disk."""
+    from prismaquant.cost_streaming import boundary_storage_layout_differs
+
+    stored = {"schema": "prismaquant.aura.boundary_storage.v2", "capture_order": "layer_major",
+              "max_resident_bytes": 1, "max_auxiliary_bytes": 2, "max_artifact_bytes": 3,
+              "prefetch_batches": 4}
+    assert boundary_storage_layout_differs(stored, {**stored, field: value})
+    assert boundary_storage_layout_differs(stored, {**stored, "prefetch_batches": 8})
+    assert boundary_storage_layout_differs(stored, {k: v for k, v in stored.items()
+                                                    if k != "capture_order"})
+    for ceiling in ("max_resident_bytes", "max_auxiliary_bytes", "max_artifact_bytes"):
+        assert not boundary_storage_layout_differs(stored, {**stored, ceiling: 99})
 
 
 def test_dev_mode_resumes_under_another_capsule_binding(tmp_path, monkeypatch, capsys):

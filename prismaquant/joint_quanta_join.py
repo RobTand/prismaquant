@@ -784,10 +784,12 @@ def _preserve_allocation_payload(joined, payloads, records):
     if not all(present):
         raise JoinRefused("allocation: mixed measured and parser-only quantum payloads")
     from prismaquant.schemas import validate_probe_payload, validate_cost_payload
-    from prismaquant.cost_currency import CostCurrencyError, require_run_currency
+    from prismaquant.cost_currency import (
+        CostCurrencyError, first_joint_probe_identity, probe_identity_walls_differ,
+        require_run_currency)
 
     stats, provenance = {}, {}
-    shared = None
+    shared = shared_probe = None
     for quantum, payload in sorted(payloads.items()):
         try:
             validate_probe_payload(payload)
@@ -805,17 +807,21 @@ def _preserve_allocation_payload(joined, payloads, records):
         identity["stage_b_resource_policy"] = payload["provenance"].get("stage_b_resource_policy")
         if not identity["probe_identity_sha256"]:
             raise JoinRefused(f"allocation {quantum}: complete joint currency required")
+        probe = first_joint_probe_identity(payload["costs"])
         if shared is not None:
-            # schema, n_probes and token_scope are the measurement's shape and
-            # stay a wall; the probe identity digest and the two policies are
-            # run seals (PQ #1147): dev mode prints them and joins the rows.
+            # schema, n_probes and token_scope are the measurement's shape,
+            # and the probe identity's calibration draw and probes are what
+            # was measured: both stay a wall. The rest of the probe identity
+            # (producer source, arithmetic) and the two policies are run
+            # seals (PQ #1147): dev mode prints them and joins the rows.
             shape = ("schema", "n_probes", "token_scope")
-            if any(identity[key] != shared[key] for key in shape):
+            if (any(identity[key] != shared[key] for key in shape)
+                    or probe_identity_walls_differ(shared_probe, probe)):
                 raise JoinRefused(f"allocation {quantum}: probe or measurement identity differs")
             seal_check("probe identity", shared, identity, where=f"allocation {quantum}",
                        refusal=lambda: JoinRefused(
                            f"allocation {quantum}: probe or measurement identity differs"))
-        shared = identity
+        shared, shared_probe = identity, probe
         for unit, stat in payload["stats"].items():
             if unit in stats:
                 raise JoinRefused(f"allocation {unit}: duplicate statistic")

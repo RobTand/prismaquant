@@ -459,6 +459,34 @@ def test_the_join_refuses_a_partial_whose_pack_changed(tmp_path, monkeypatch):
                               n_batches=N_BATCHES)
 
 
+def test_the_join_refuses_partials_of_two_sessions_in_dev_mode_too(
+        tmp_path, monkeypatch, capsys):
+    """Not a run seal (PQ #1147): a checkpoint record holds one session, and
+    every reader holds each row to it (``checkpoint_cotangent_plane``), so a
+    mixed join would publish a checkpoint no reader accepts. Dev mode refuses
+    as certified mode does, and prints no ``[DEV-MODE]`` line."""
+    from prismaquant.joint_adjoint_slices import (
+        checkpoint_manifest_bytes, checkpoint_seal_sha256)
+
+    root = tmp_path / "run"
+    _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
+    _prep(root, monkeypatch)
+    for samples in RANGES:
+        _quantum(root, monkeypatch, samples)
+    manifest = partial_directory(adjoint_space(root), 2, *RANGES[1]) / "checkpoint.json"
+    record = json.loads(manifest.read_bytes())
+    record["session"] = {**record["session"], "run_identity_sha256": "9" * 64}
+    record["cotangent_sha256"] = checkpoint_seal_sha256(record)
+    manifest.write_bytes(checkpoint_manifest_bytes(record))
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    with pytest.raises(_refused(), match="name 2 sessions"):
+        join_split_checkpoint(adjoint_space(root), 2, n_probes=N_PROBES,
+                              n_batches=N_BATCHES)
+    assert "[DEV-MODE]" not in capsys.readouterr().out
+    assert not checkpoint_directory(adjoint_space(root), 2).exists()
+
+
 def test_a_quantum_refuses_a_range_that_splits_a_read_window(tmp_path, monkeypatch):
     root = tmp_path / "run"
     _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
