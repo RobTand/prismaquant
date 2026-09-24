@@ -180,6 +180,33 @@ def _restamp_probe(root, quantum, field, value, *, first_only=False):
     return rewritten, total
 
 
+_PROBE_IDENTITY = {
+    "schema": "prismaquant.joint_aura.probes.v2", "calibration_sha256": "1" * 64,
+    "calibration_shape": [2, 4], "calibration_dtype": "torch.int64", "n_probes": 2,
+    "seed_base": 1, "token_scope": "all", "temperature": 1.0,
+    "distribution": "rademacher", "normalization": "global_kl_fisher",
+    "source_model": {"content_sha256": "2" * 64}, "source_execution": {"schema": "v1"},
+    "producer_source_sha256": "3" * 64,
+    "arithmetic": {"dtype": "torch.bfloat16", "execution_partition": {"rows": 2}},
+}
+
+
+@pytest.mark.parametrize("field,value,wall", [
+    ("calibration_sha256", "9" * 64, True), ("calibration_shape", [1, 4], True),
+    ("n_probes", 3, True), ("seed_base", 7, True), ("token_scope", "tail", True),
+    ("noise_layout", {"rows": 2}, True), ("source_model", {"content_sha256": "8" * 64}, True),
+    ("source_execution", {"schema": "v2"}, True),
+    ("producer_source_sha256", "9" * 64, False),
+    ("arithmetic", {"dtype": "torch.float16", "execution_partition": {"rows": 2}}, False),
+    ("arithmetic", {"dtype": "torch.bfloat16", "execution_partition": {"rows": 4}}, True),
+])
+def test_a_probe_identity_splits_what_was_measured_from_how(field, value, wall):
+    """One split for the cost table, the join and Stage B's restored rows."""
+    from prismaquant.cost_currency import probe_identity_walls_differ
+
+    assert probe_identity_walls_differ(_PROBE_IDENTITY, {**_PROBE_IDENTITY, field: value}) is wall
+
+
 def test_join_refuses_a_quantum_of_another_calibration_draw(tmp_path, campaign, unset):
     """The calibration draw is what was measured: a wall in dev mode too."""
     from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta

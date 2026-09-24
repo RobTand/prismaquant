@@ -40,6 +40,7 @@ from types import SimpleNamespace
 import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
+from .cost_currency import probe_identity_seals, probe_identity_walls_differ
 from .dev_mode import seal_check
 from .io_spans import IoSpanLog, failure_outcome, read_proc_io, stage_span_log
 from .joint_adjoint_checkpoints import (
@@ -1696,11 +1697,16 @@ def run_layer_quantum_core(
                 operator = row["joint_operator_identity"]
                 if operator["qname"] != name or operator["format"] != fmt:
                     raise ValueError("probe/operator alignment mismatch")
-                # The probe identity binds the producer source and the Stage
-                # B resource policy (PQ #1147): a run seal. Dev mode prints a
-                # difference and reuses the checkpointed row.
-                seal_check("joint probe identity", joint_probe_identity,
-                           row["probe_identity"], where=f"joint AURA checkpoint {name}@{fmt}",
+                # What the row measured (the calibration draw, the probes)
+                # refuses in both modes; its producer source and arithmetic
+                # (the Stage B resource policy among them) are run seals
+                # (PQ #1147): dev mode prints them and reuses the row.
+                if probe_identity_walls_differ(joint_probe_identity, row["probe_identity"]):
+                    raise ValueError("probe/operator alignment mismatch")
+                seal_check("joint probe identity", probe_identity_seals(joint_probe_identity),
+                           probe_identity_seals(row["probe_identity"]),
+                           where=f"joint AURA checkpoint {name}@{fmt}",
+                           same=row["probe_identity"] == joint_probe_identity,
                            refusal=lambda: ValueError("probe/operator alignment mismatch"))
                 if fmt in render_formats[name]:
                     if operator["rendered_weight"] != joint_cache_renders[name][fmt]:
