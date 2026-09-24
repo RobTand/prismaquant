@@ -3232,22 +3232,55 @@ def test_parallel_reads_raise_the_first_failure_in_window_order():
     assert _run_in_order(None, [lambda: ok(7)]) == [7]
 
 
+class _StartAtSubmitPool:
+    """A pool that starts each call the moment it is submitted.
+
+    The worst case for cancelling after a failure: every call has been
+    picked up before the caller can see the first one fail.
+    """
+
+    def submit(self, fn, *args):
+        from concurrent.futures import Future
+        future = Future()
+        try:
+            future.set_result(fn(*args))
+        except BaseException as exc:
+            future.set_exception(exc)
+        return future
+
+
 def test_calls_after_a_failure_that_have_not_started_never_start():
     from concurrent.futures import ThreadPoolExecutor
     from prismaquant.perturbed_x_cache import _run_in_order
-    pool = ThreadPoolExecutor(max_workers=1)
+    worker = ThreadPoolExecutor(max_workers=1)
+    try:
+        for pool in (_StartAtSubmitPool(), worker):
+            ran = []
+
+            def fail():
+                ran.append("fail")
+                raise ValueError("first")
+
+            with pytest.raises(ValueError, match="first"):
+                _run_in_order(pool, [fail] + [lambda i=i: ran.append(i) for i in range(4)])
+            assert ran == ["fail"], (pool, ran)
+    finally:
+        worker.shutdown(wait=True)
+
+
+def test_calls_before_a_later_failure_still_run_and_raise_first():
+    from prismaquant.perturbed_x_cache import _run_in_order
     ran = []
 
-    def fail():
-        ran.append("fail")
-        raise ValueError("first")
+    def fail(index):
+        ran.append(index)
+        raise ValueError(f"entry {index}")
 
-    try:
-        with pytest.raises(ValueError, match="first"):
-            _run_in_order(pool, [fail] + [lambda i=i: ran.append(i) for i in range(4)])
-    finally:
-        pool.shutdown(wait=True)
-    assert ran[0] == "fail" and len(ran) <= 2, ran
+    # Calls 0 and 2 fail; the serial loop raises entry 0 and never starts 1.
+    with pytest.raises(ValueError, match="entry 0"):
+        _run_in_order(_StartAtSubmitPool(), [lambda: fail(0), lambda: ran.append(1),
+                                             lambda: fail(2)])
+    assert ran == [0], ran
 
 
 def test_concurrent_readers_borrow_distinct_buffers_and_release_frees_them():
