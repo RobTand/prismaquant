@@ -1552,8 +1552,9 @@ def run_adjoint_capture_core(
             # reverse twin of the forward pass's opening prefetches. A seed or
             # a resume runs no forward pass, so nothing else asks for them
             # (RobTand/prismaquant#997). After a fresh walk the top layers are
-            # usually still resident, and ``schedule_prefetch`` returns None
-            # for a resident layer, so nothing is read twice.
+            # usually still resident, and ``schedule_prefetch`` owns a
+            # resident layer until its install instead of reading it again
+            # (RobTand/prismaquant#1124), so nothing is read twice.
             for layer in chain_opening_window(chain_order, runner.prefetch_lookahead):
                 runner.context.schedule_prefetch(layer)
         for position, layer in enumerate(chain_order):
@@ -1586,6 +1587,12 @@ def run_adjoint_capture_core(
                     elif torch.device(runner.device).type == "cuda":
                         raise RuntimeError(
                             "render-free chain requires source prefetch settlement")
+                summary = getattr(runner.context, "prefetch_summary", None)
+                if callable(summary):
+                    # The loader's counters at every chain boundary, once
+                    # the successors settled and before the roll
+                    # (RobTand/prismaquant#1124).
+                    log(f"chain layer {layer} settled: {summary()}")
                 # A checkpoint layer writes its plane into the checkpoint as
                 # it rolls (RobTand/prismaquant#1002): opened here, after the
                 # layer's sources settled and before any cotangent exists.

@@ -1,5 +1,31 @@
 # PrismaQuant Architecture
 
+A schedule now owns a resident layer until its install claims it
+(2026-09-23, `fix/1124-settled-prefetch`, PQ #1124). R13 stopped at
+chain-042 with "streamed layer 42 is not resident after its required
+prefetch". The forward walk left layers 42 to 44 in the source cache as
+ordinary read entries. At chain-043 the chain scheduled its successors
+42 and 41: `schedule_prefetch(42)` returned None for the resident layer, so
+nothing owned it, and settlement accepted it on a cache peek. Layer 41's
+read then made room under the three-entry cap
+(`LayerCache.prepare_for_load`) by evicting the least recently used
+unpinned entry, which was 42 and not 44, the layer the chain had finished.
+
+- **Ownership.** With prefetch delivery on (the default),
+  `StreamingContext.schedule_prefetch` on a resident layer takes the two
+  holds a prefetch read takes: `LayerCache.pin_resident` pins the entry, so
+  eviction prefers every unpinned entry, and a completed future in
+  `_inflight` keeps the bytes reachable through any drop that happens
+  anyway, until `ensure_loaded` claims them. Nothing is read or copied. A
+  held future is now returned before the resident check.
+  `PRISMAQUANT_PREFETCH_DELIVERY=0` keeps the old None.
+- **Counters.** `prefetch_summary()` adds `resident_owned`,
+  `pressure_evictions` and `evicted_pinned`, and the Stage A chain logs it
+  at every layer once the successors settle.
+
+Gate: `tests/test_stage_a_settled_successor_ownership.py`, the real Stage A
+core over a real StreamingContext and LayerCache with operator windows.
+
 A Stage A owner that reads back from its local spool refuses at admission,
 not hours into its forward (2026-09-23, `fix/1120-1121-readback-budget-window`,
 PQ #1120). Two changes:
@@ -7193,10 +7219,10 @@ Re-stamped (2026-09-08, `triage/layer-major-prefetch-reassert`) for the exact
 layer-major visitor's residency contract (#403). `StreamedCausalLM.
 visit_layer_batches` with v2 `layer_major` storage keeps no residency state of
 its own: the streaming runner owns residency, and `StreamingContext.
-schedule_prefetch` is idempotent (None for a hot layer, the held future for a
-read in flight or delivered and unclaimed, a fresh read only when nothing is
-held, and None with a counted memory skip when the pressure floor refuses a
-fresh one). A held read is now returned before the pressure floor and admission
+schedule_prefetch` is idempotent (the held future for a read in flight or
+delivered and unclaimed, an owning completed future for a hot layer since
+PQ #1124, a fresh read only when nothing is held, and None with a counted
+memory skip when the pressure floor refuses a fresh one). A held read is now returned before the pressure floor and admission
 gates, so re-asserting a schedule under pressure is never counted as a memory
 skip. The visitor speculates each layer once ahead of its turn
 (`prefetch_lookahead`) and re-asserts it once, immediately before
@@ -22895,9 +22921,9 @@ R12's checkpoint 045, refused layer 44 after its head.
 Before its first install, the chain now asks for layers `chain_top - 1` down
 to `chain_top - max(1, lookahead)`, nearest first and never below the layer
 it stops at. This mirrors the forward pass's opening prefetches.
-`schedule_prefetch` returns `None` for a resident layer and hands back a
-read already in flight, so a fresh walk reads nothing twice and holds no
-more reads in flight than before.
+`schedule_prefetch` owns a resident layer until its install (PQ #1124) and
+hands back a read already in flight, so a fresh walk reads nothing twice and
+holds no more reads in flight than before.
 
 `tests/test_stage_a_chain_prefetch.py` runs a fresh walk, a seed and a
 resume, with and without operator windows, over a bounded source cache that

@@ -36,7 +36,7 @@ import re
 import threading
 import time
 from contextlib import contextmanager
-from concurrent.futures import CancelledError, ThreadPoolExecutor
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from typing import Any
 
 import torch
@@ -733,6 +733,8 @@ class StreamingContext:
         # the delivery fix these were silently discarded and re-read.
         self.prefetch_delivered_unretained = 0
         self.prefetch_released_stale = 0
+        # Resident layers a schedule took ownership of (#1124).
+        self.prefetch_resident_owned = 0
         self.configure_runtime_pressure_floor()
 
     def memory_pressure_floor_bytes(self) -> int:
@@ -884,8 +886,6 @@ class StreamingContext:
             return None
         if L < 0 or L >= self.num_layers:
             return None
-        if self.layer_cache.peek(L):
-            return None
         with self._inflight_lock:
             held = self._inflight.get(L)
         if held is not None:
@@ -894,6 +894,14 @@ class StreamingContext:
             # schedule under pressure must receive the read it already owns
             # rather than a refusal counted as a memory skip (#403).
             return held
+        if self.layer_cache.peek(L):
+            if not _prefetch_delivery_enabled():
+                return None
+            owner = self._own_resident_layer(L)
+            if owner is not None:
+                return owner
+            # Evicted between the check and the claim: read it like any
+            # other layer that is not resident.
         pressure_floor = self.memory_pressure_floor_bytes()
         if pressure_floor > 0:
             try:
@@ -923,6 +931,35 @@ class StreamingContext:
             fut = self.prefetch_pool.submit(self._prefetch_worker, L)
             self._inflight[L] = fut
             return fut
+
+    def _own_resident_layer(self, L: int):
+        """Own a resident layer a caller has scheduled until its install.
+
+        A layer the cache already holds used to be scheduled as nothing: no
+        future owned it, and the cache kept it only as an ordinary read
+        entry. A traversal that then settled it as its next layer could lose
+        it to the entry cap when a sibling read made room, because the least
+        recently used unpinned entry is exactly the layer the walk visited
+        longest ago (RobTand/prismaquant#1124). The schedule is the same
+        declaration of near-future use a prefetch read makes, so it takes the
+        same two holds on the resident bytes. The pin makes eviction prefer
+        any other entry, and the completed future keeps the bytes reachable
+        through any drop that happens anyway, until ``ensure_loaded`` claims
+        them. Nothing is read or copied. Returns None when the entry left
+        the cache before the claim.
+        """
+        with self._inflight_lock:
+            held = self._inflight.get(L)
+            if held is not None:
+                return held
+            tensors = self.layer_cache.pin_resident(L)
+            if tensors is None:
+                return None
+            owner = Future()
+            owner.set_result(tensors)
+            self._inflight[L] = owner
+        self.prefetch_resident_owned = getattr(self, 'prefetch_resident_owned', 0) + 1
+        return owner
 
     def _top_up_prefetch(self, L: int) -> None:
         """Keep the achievable lookahead window enqueued for a +-1 walk.
@@ -1338,6 +1375,7 @@ class StreamingContext:
         self.prefetch_memory_skips = 0
         self.prefetch_delivered_unretained = 0
         self.prefetch_released_stale = 0
+        self.prefetch_resident_owned = 0
         # The next chunk starts a fresh forward walk; a stale stride would
         # make the first install top-up in the previous chunk's direction.
         self._last_installed = None
@@ -1400,7 +1438,10 @@ class StreamingContext:
                 f"pressure_floor={floor_gb:.1f}GB "
                 f"mem_skips={self.prefetch_memory_skips} "
                 f"delivered_unretained={self.prefetch_delivered_unretained} "
-                f"released_stale={self.prefetch_released_stale}")
+                f"released_stale={self.prefetch_released_stale} "
+                f"resident_owned={getattr(self, 'prefetch_resident_owned', 0)} "
+                f"pressure_evictions={getattr(self.layer_cache, 'pressure_evictions', 0)} "
+                f"evicted_pinned={getattr(self.layer_cache, 'evicted_pinned', 0)}")
 
 
 def _resolve_declared_model_cls(config, default_cls):
