@@ -2196,6 +2196,9 @@ class _RollPipeline:
             host = torch.empty(source.shape, dtype=source.dtype, pin_memory=True)
             host.copy_(source, non_blocking=True)
             rows.append(host)
+        # The device gradient may be freed before its copy lands: the CUDA
+        # caching allocator reuses its block only in this stream's order,
+        # after the queued copy. The pinned rows are held until delivery.
         copied = torch.cuda.Event()
         copied.record(torch.cuda.current_stream(self._device))
         return copied, rows, indices, probe_index
