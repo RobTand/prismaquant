@@ -3339,3 +3339,153 @@ def test_closing_a_stream_early_releases_every_charge(tmp_path):
             max_resident_bytes=2 * entry_bytes, residency_check=charge)) as stream:
         names = [entry["name"] for entry, _tensor in stream]
     assert names == [entry["name"] for entry in entries] and held == [0]
+
+
+# -- a strict exact-entry read waits for a declared entry's landing (PQ #1204)
+#
+# The Stage B chain roll reads its boundary window through
+# ``prefetch_exact_activation_cache_entries``. Under the strict policy that
+# reader looked each entry up in the map and refused ``staged-not-serving``
+# on a miss, so an entry whose mover had not landed yet ended the row. Row 37
+# of band 040 (PB 0b0642250b51) died that way while the checkpoint loader in
+# the same process waited on PrismaBuild's landing record and succeeded.
+# These run the real chain: real PB writers land the entry mid-read.
+
+
+def _entry_sizes(refs):
+    return [(Path(ref.path), 0, Path(ref.path).stat().st_size) for ref in refs]
+
+
+def test_a_grouped_exact_window_waits_for_a_declared_entry_landing_after_it_began(
+        tmp_path, monkeypatch):
+    """Two entries are staged and one lands mid-read: one wait, one lease."""
+    refs, tensors = _exact_entries(tmp_path, 3)
+    root = _stage_root(tmp_path)
+    staged = {i: _stage_whole(root, Path(ref.path)) for i, ref in enumerate(refs)}
+    resolver, consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_entry_sizes(refs))
+    landed = {'e0': (Path(refs[0].path), staged[0]),
+              'e2': (Path(refs[2].path), staged[2])}
+    publish(landed)
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "90")
+    assert resolver.declared_readset()['state'] == 'bound'
+    before = exact_lease_counters_snapshot()
+
+    def mover_leg():
+        time.sleep(2.0)
+        publish({**landed, 'e1': (Path(refs[1].path), staged[1])})
+
+    thread = threading.Thread(target=mover_leg, name='late-entry-mover')
+    thread.start()
+    try:
+        got = _read_exact(refs)
+    finally:
+        thread.join(timeout=120)
+        assert not thread.is_alive()
+
+    for ref, tensor in zip(refs, tensors):
+        assert torch.equal(got[ref].view(torch.uint8), tensor.view(torch.uint8))
+    report = resolver.report()
+    assert report['range_waits_served'] == 1
+    assert report['range_waits_refused'] == 0
+    assert report['range_wait_polls'] >= 1
+    assert _lease_deltas(before)["entries_batched"] == 3
+    assert _tier_bytes(resolver) == {'ram': 0, 'stage': sum(_sizes(refs)), 'pool': 0}
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_mapped_exact_window_under_a_bound_readset_never_enters_the_wait(
+        tmp_path, monkeypatch):
+    """Every entry already mapped: the read costs what it cost before #1204."""
+    from prismaquant import residency_shard_reader
+    refs, _tensors = _exact_entries(tmp_path, 2)
+    root = _stage_root(tmp_path)
+    resolver, consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_entry_sizes(refs))
+    publish({f'e{i}': (Path(ref.path), _stage_whole(root, Path(ref.path)))
+             for i, ref in enumerate(refs)})
+
+    def no_wait(*_args, **_kwargs):
+        raise AssertionError("a mapped entry entered the landing wait")
+
+    monkeypatch.setattr(residency_shard_reader, "await_staged_spans", no_wait)
+    _read_exact(refs)
+    report = resolver.report()
+    assert report['range_wait_polls'] == 0
+    assert report['range_waits_served'] == 0
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_grouped_exact_window_does_not_wait_on_an_undeclared_entry(
+        tmp_path, monkeypatch):
+    """An entry the sealed readset never names refuses at once, whatever the bound."""
+    refs, _tensors = _exact_entries(tmp_path, 2)
+    root = _stage_root(tmp_path)
+    resolver, _consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_entry_sizes(refs[:1]))
+    publish({'e0': (Path(refs[0].path), _stage_whole(root, Path(refs[0].path)))})
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "600")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="staged-not-serving"):
+        _read_exact(refs)
+    assert time.monotonic() - started < 30.0
+    report = resolver.report()
+    assert report['range_wait_polls'] == 0
+    assert report['range_waits_refused'] == 0
+    assert _tier_bytes(resolver) == {'ram': 0, 'stage': 0, 'pool': 0}
+
+
+def test_a_grouped_exact_window_refuses_when_its_bounded_wait_runs_out(
+        tmp_path, monkeypatch):
+    """A declared entry nothing lands, with no landing record: the bound, then refuse."""
+    refs, _tensors = _exact_entries(tmp_path, 2)
+    root = _stage_root(tmp_path)
+    resolver, consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_entry_sizes(refs))
+    publish({'e0': (Path(refs[0].path), _stage_whole(root, Path(refs[0].path)))})
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "3")
+
+    started = time.monotonic()
+    with pytest.raises(TierPolicyRefused, match="staged-not-serving"):
+        _read_exact(refs)
+    waited = time.monotonic() - started
+    assert 2.0 <= waited < 60.0, f"waited {waited:.1f}s against a 3s bound"
+    report = resolver.report()
+    assert report['range_waits_refused'] == 1
+    assert report['range_waits_served'] == 0
+    assert _tier_bytes(resolver) == {'ram': 0, 'stage': 0, 'pool': 0}
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_verified_activation_load_waits_for_its_declared_entry_landing(
+        tmp_path, monkeypatch):
+    """The single-entry strict reader waits the same way (``_acquire_bulk_window``)."""
+    from prismaquant.perturbed_x_cache import load_verified_activation_cache_entry
+    pool = tmp_path / 'pool'
+    pool.mkdir(parents=True, exist_ok=True)
+    path = pool / 'capture.pt'
+    torch.save({'inputs': torch.arange(64, dtype=torch.float32).reshape(8, 8)}, path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    staged = _stage_whole(_stage_root(tmp_path), path)
+    resolver, consumer, _digest, publish = _mid_flight_fixture(
+        tmp_path, monkeypatch, declared=_whole_file(path))
+    monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "90")
+
+    def mover_leg():
+        time.sleep(2.0)
+        publish({'a': (path, staged)})
+
+    thread = threading.Thread(target=mover_leg, name='late-capture-mover')
+    thread.start()
+    try:
+        load_verified_activation_cache_entry(
+            path, expected_sha256=digest, policy=_activation_policy(),
+            max_storage_bytes=4 * 1024 ** 2)
+    finally:
+        thread.join(timeout=120)
+        assert not thread.is_alive()
+    report = resolver.report()
+    assert report['range_waits_served'] == 1
+    assert _tier_bytes(resolver) == {'ram': 0, 'stage': path.stat().st_size, 'pool': 0}
+    assert _pins_live(tmp_path, consumer) == []

@@ -85,6 +85,71 @@ Gates: `tests/test_kda_chunk_kernel.py`, `tests/test_kda_capture_kernel.py`,
 format, pipeline default, stage, lane or ship gate changes. A launch without
 the setting runs and records what it did before.
 
+A Stage B window spans its staged-render wait and its unit commit (2026-09-24,
+`perf/1207-unit-journal-overlap`, PQ #1207). The `window` span holds the
+staged-render wait in `before_window`, the replay and projections, and the
+unit commit in `after_window`; `windows[i].wall_s` holds only the middle part.
+Their difference, the wait plus the commit, was 1.3 to 3.3 s per render
+window on rows 38, 39 and 43, 2.4 to 5.7 s on most of row 42's, and 18 to
+23 s on the two row-42 windows that a py-spy sample was taken over. Each part is now a child
+span of the window: `window-wait` around `prepare_retained_window_read`, and
+`commit` around `commit_streamed_units`, with the `units` it made durable.
+The commit itself is unchanged: its bytes, its order and the point at which a
+unit counts are as before.
+
+- **What the commit costs.** `tools/unit_journal_bench.py` runs the commit's
+  per-unit body on the real functions over a production unit checkpoint's
+  inputs (6.5 MB per unit, almost all of it the shared probe identity's
+  `source_model`). On one GB10 performance core it takes 1.0 to 5.2 s per
+  59-unit window, depending on the load on the box; about 60% of that is
+  pickling the unit state, about 25% the write and fsync, and about 7% the
+  SHA-256. There are no GPU tensors on this path: the unit state is Python
+  floats and lists. Holding the job's memory cgroup at `memory.max` on page
+  cache did not change it, and a blocking py-spy at 50 Hz added about 30%.
+
+Gates: `tests/test_stage_b_window_spans_1207.py`. No format, pipeline
+default, stage or ship gate changes.
+
+A strict exact-entry read waits for a declared entry's landing (2026-09-24,
+`fix/1204-strict-entry-landing-wait`, PQ #1204). Under the strict tier
+policy, `prefetch_exact_activation_cache_entries` looked each entry up in the
+residency map and refused `staged-not-serving` when the map did not hold it
+yet. The Stage B chain roll reads its boundary window through that reader, so
+a row failed whenever the roll reached an entry before PrismaBuild's mover
+landed it. Row 37 of band 040 (PB `0b0642250b51`) died that way, 197 s in,
+while the checkpoint loader in the same process had waited on the landing
+record and succeeded. The loader waits before it calls the reader
+(`joint_adjoint_checkpoints._await_checkpoint_entries`); the chain roll
+(`cost_streaming.StreamedBoundaryArtifacts.prefetch`) waits only for its
+forward inputs.
+
+- **The wait.** `perturbed_x_cache._await_entry_landing` runs
+  `residency_shard_reader.await_staged_spans` over one whole-file span per
+  missing entry, with the loader's proof check
+  (`stage_cover_is_published`, batched per window). It is the same wait: the
+  landing record governs it, the deadline applies only where no record covers
+  the entries, and it writes the same log lines and `record_range_wait`
+  counts.
+- **Where it runs.** `_strict_lease_groups` looks every entry up first, as
+  before. It awaits the entries of one resolver that missed in a single call,
+  looks them up again, and then groups the window for its one lease per tier
+  (PQ #997, #1142). `_acquire_bulk_window`, the single-entry strict reader
+  behind `load_verified_activation_cache_entry`, waits the same way. An entry
+  the map already holds costs one lookup, as before.
+- **What still refuses at once.** An unbound sealed readset does not wait, as
+  in `layer_streaming._await_layer_readset`. An entry the bound readset does
+  not declare, a covering entry that fails a hard check, and every refusal of
+  the landing record end the wait at once. Each refusal is still
+  `staged-not-serving`.
+- **One deadline.** A window has one bound, however many resolvers its
+  missing entries span. `prefetch_exact_activation_cache_entries` and
+  `read_exact_entry_tensors` take `deadline`, and
+  `stream_exact_entry_tensors` passes the loader's own, so a checkpoint entry
+  the reader waits for again does not start a second bound.
+
+Gates: the #1204 tests in `tests/test_strict_reader_tier_enforcement.py`. No
+format, pipeline default, stage or ship gate changes.
+
 Stage B plans and admits its chain phase (2026-09-24,
 `fix/1163-chain-phase-admission`, PQ #1163). A chain-mode quantum rolls each
 chain layer from its checkpoint down to `layer + 1` before its retained
@@ -525,7 +590,7 @@ It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
 row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
-(`prismaquant/joint_adjoint_checkpoints.py:1852`,
+(`prismaquant/joint_adjoint_checkpoints.py:1856`,
 `prismaquant/joint_quantum_handoff.py:552`), so the phase waits at most W in
 total outside a PrismaBuild landing record. The bytes are the phase's count
 in the row's read plan. The built-in floor, 62,954,973 B/s, is the slowest
@@ -695,7 +760,9 @@ said nothing about its own reads between the head and the records.
   Stage A's split runs can open it unchanged.
 - **Stage B's spans.** `run_layer_quantum` opens spans for the head (to the
   core), checkpoint-load or handoff-load, each chain layer, the own-source
-  install, each window, each (window, probe) replay, each probe's spill
+  install, each window, each window's staged-render wait (`window-wait`) and
+  unit commit (`commit`, with the `units` it made durable), both children of
+  the window (PQ #1207), each (window, probe) replay, each probe's spill
   capture, the tail after the last window (`payload`: the handoff write
   under a `handoff-out` child, the payload assembly and the final check of
   every row, with `units` and `rows`; PQ #1187), the runner `teardown`, and
@@ -2235,6 +2302,16 @@ qualification, and stamped into the probe arithmetic. See the entry at the
 top and §10's producer-side kernels. No format, pipeline default, stage, lane
 or ship gate changes; a launch without the setting is unchanged.
 
+Re-stamped (2026-09-24, `perf/1207-unit-journal-overlap`) for **a Stage B
+window's `window-wait` and `commit` child spans** (PQ #1207). See the entry
+at the top. No format, pipeline default, stage or ship gate changes.
+
+Re-stamped (2026-09-24, `fix/1204-strict-entry-landing-wait`) for **the
+strict exact-entry reader waiting on PrismaBuild's landing record for an entry
+the sealed readset declares and the map does not hold yet** (PQ #1204). See
+the entry at the top. No format, pipeline default, stage or ship gate
+changes.
+
 Re-stamped (2026-09-24, `fix/1192-render-window-pipeline`) for **a Stage B
 render window's load work on the loader pool** (PQ #1192, #1195). A retained
 window opened with `render_identities=True`, which `run_layer_quantum_core`
@@ -3416,7 +3493,8 @@ never reads payload and never refuses, so an unreachable range still fails
 from the same line with the same error. It is scoped by
 `policy_is_active()`, so a non-strict reader holding a map is untouched, and
 it is the layer path only — the production weight cache and the wire reader do
-not wait. Cost when everything is staged: one header parse per shard in the
+not wait. (Since PQ #1204 the strict exact-entry reader also waits, on the
+same wait; see the entry at the top.) Cost when everything is staged: one header parse per shard in the
 submitting thread, and no sleeps.
 
 **What this makes slower, honestly.** An *undeclared* range under a bound

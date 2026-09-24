@@ -227,12 +227,14 @@ def reference_from_record(record: dict):
     )
 
 
-def read_exact_entry_tensors(records, *, expected_session) -> dict:
+def read_exact_entry_tensors(records, *, expected_session, deadline=None) -> dict:
     """Read whole exact entries back, digest-verified, name -> CPU tensor.
 
     Uses the activation owner's verified window reader (hash-then-load in one
     pass), sized to the caller's entry list. Checkpoint restoration passes one
     entry at a time so no read window owns the complete cotangent plane.
+    ``deadline`` is the caller's staged-range wait bound, passed on so an
+    entry the reader waits for again shares it (PQ #1204).
     """
     from .perturbed_x_cache import prefetch_exact_activation_cache_entries
 
@@ -244,6 +246,7 @@ def read_exact_entry_tensors(records, *, expected_session) -> dict:
     references = [reference_from_record(record) for record in records]
     with prefetch_exact_activation_cache_entries(
         references, max_tensor_bytes=total, expected_session=expected_session,
+        deadline=deadline,
     ) as window:
         for reference in references:
             tensors[reference.name] = window.get(reference)
@@ -341,7 +344,8 @@ def stream_exact_entry_tensors(records, *, expected_session, max_resident_bytes=
 
     def read(window):
         _await_checkpoint_entries(window, deadline=deadline)
-        return read_exact_entry_tensors(window, expected_session=expected_session)
+        return read_exact_entry_tensors(window, expected_session=expected_session,
+                                        deadline=deadline)
 
     held = []  # (charge, future or tensors), oldest first
 
