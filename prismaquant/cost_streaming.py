@@ -366,6 +366,8 @@ class StreamedBoundaryArtifacts:
         self._stager_death_recorded = False
         self._stager_death_raised = False
         self._stager_preclaimed = set()
+        #: One stager look at the oldest live export is queued (PQ #1128).
+        self._export_poll_queued = False
         self._produced_release_queued = set()
         self._produced_live_keys = frozenset()
         import threading
@@ -430,6 +432,8 @@ class StreamedBoundaryArtifacts:
             "produced_deferred_unlinks_done": 0,
             "produced_deferred_unlink_bytes": 0,
             "produced_groups_prewrite_released": 0,
+            # Entry I/O off the compute thread (PQ #1128).
+            "produced_export_polls": 0,
             "produced_compute_blocked_s": 0.0,
             **{f"produced_compute_blocked_{reason}_s": 0.0
                for reason in self.PRODUCED_BLOCKED_REASONS}}
@@ -875,7 +879,6 @@ class StreamedBoundaryArtifacts:
             raise RuntimeError(
                 "a write-only produced output is never read back by the action "
                 "that writes it: write its entries with read_back=False")
-        self._commit_local_output_progress()
         self._produced_flush_deferred_unlinks()
         kind = "boundary" if probe_index is None else "cotangent"
         coordinates = {"batch": batch_index, "boundary": boundary_index, "probe": probe_index}
@@ -987,6 +990,7 @@ class StreamedBoundaryArtifacts:
         elif previous is not None:
             self._retire(previous)
         if self._local_output_spool is not None:
+            self._request_export_poll()
             self._commit_local_output_progress()
         elif self._progress is not None:
             self._progress.entry(layer=boundary_index, partition=batch_index, kind=kind)
@@ -994,7 +998,47 @@ class StreamedBoundaryArtifacts:
             self._check_memory("exact activation publication")
         return reference
 
+    def _request_export_poll(self):
+        """Have the stager look at the oldest live export (PQ #1128).
+
+        One look per write, oldest first (``ProducedOutputSpool.poll_oldest``),
+        and never on the compute thread while a stager runs: before #1128
+        every write polled every live export twice here. At most one look is
+        queued at a time, in the stager's ordered lane, so it neither blocks
+        the compute thread on a full optional lane nor piles up behind a
+        slow export. A refused export raises on the stager and surfaces at
+        the owner's next call, as every stager failure does. With no stager
+        the look runs here, once.
+        """
+
+        from .produced_stager import ORDERED, StagerClosed
+
+        spool = self._local_output_spool
+        if spool is None or not spool.exporting():
+            return
+        stager = self._stager
+        if stager is not None and not self._produced_on_stager():
+            if self._export_poll_queued:
+                return
+            self._export_poll_queued = True
+
+            def poll():
+                self._export_poll_queued = False
+                spool.poll_oldest(where="write-poll")
+
+            def dropped():
+                self._export_poll_queued = False
+
+            try:
+                stager.submit(poll, kind=ORDERED, label="export-poll",
+                              on_drop=dropped)
+                return
+            except StagerClosed:
+                self._export_poll_queued = False
+        spool.poll_oldest(where="write-poll")
+
     def _commit_local_output_progress(self):
+        """Report the entries whose exports were acknowledged. Polls nothing."""
         if self._local_output_spool is None:
             return
         for reference in self._local_output_spool.durable_entries():
@@ -2498,7 +2542,11 @@ class StreamedBoundaryArtifacts:
             # Time spent running, over every run: a task that gave the lane
             # back while it waited was not busy in between (PQ #989).
             ran = task.busy_s
-            if task.label != "poll":
+            if task.label == "export-poll":
+                # One per write while an export is live (PQ #1128): counted
+                # on its own, so the task count stays the staging steps.
+                self.telemetry["produced_export_polls"] += 1
+            elif task.label != "poll":
                 self.telemetry["produced_stager_tasks"] += 1
             self.telemetry["produced_stager_busy_s"] += max(ran, 0.0)
             self.telemetry["produced_stager_requeues"] += task.requeues

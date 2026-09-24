@@ -266,7 +266,9 @@ def test_a_group_held_on_this_box_is_never_published_ahead(
     group's local export, and PQ #989 made it give the lane back while it
     waited. A group this box still holds is now read from its local copy,
     so it is never published ahead at all: nothing waits on its export on
-    the stager, and an urgent read runs at once.
+    the stager, and an urgent read runs at once. The one step that asks
+    about the export there is the per-write look (PQ #1128), which reads its
+    state once and returns.
     """
 
     from prismaquant.produced_output_spool import ProducedOutputSpool
@@ -283,12 +285,13 @@ def test_a_group_held_on_this_box_is_never_published_ahead(
     backend = spool_tests.ControlledExport(tmp_path / "local")
     storage._local_output_spool = ProducedOutputSpool(
         backend, capacity_deferred=spool_tests.CapacityDeferred)
-    polled_on_stager = threading.Event()
+    polled_on_stager = []
     real_poll = backend.poll_group
 
     def poll_group(batch_id):
         if threading.current_thread().name == STAGER_THREAD:
-            polled_on_stager.set()
+            # The step running on the stager is the one asking.
+            polled_on_stager.append(storage._stager._inflight.label)
         return real_poll(batch_id)
 
     backend.poll_group = poll_group
@@ -298,8 +301,9 @@ def test_a_group_held_on_this_box_is_never_published_ahead(
     started = threading.Event()
     storage._stager.submit(started.set, kind=URGENT, label="read")
     assert started.wait(5.0)
-    assert not polled_on_stager.is_set(), (
-        "nothing on the stager waits on the export of a group held here")
+    assert set(polled_on_stager) <= {"export-poll"}, (
+        "nothing on the stager but the per-write look asks about the export "
+        "of a group held here", polled_on_stager)
     assert group["published"] is None
     assert key not in storage._produced_held
     assert key not in storage._produced_ahead

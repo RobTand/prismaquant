@@ -1,5 +1,36 @@
 # PrismaQuant Architecture
 
+The Stage A compute thread no longer polls PrismaBuild exports on every
+write (2026-09-23, `ws-pl/1128-io-overlap`, PQ #1128). Since #1110, each
+`StreamedBoundaryArtifacts.write` asked PrismaBuild about every live export
+twice, once before and once after the entry, on the thread that drives the
+GPU. On R13's layer-44 roll that was 11.0% of the main thread's samples.
+
+- **One look, on the stager.** After each write the owner queues one
+  `export-poll` task in the stager's ordered lane. At most one is queued at
+  a time. It calls `ProducedOutputSpool.poll_oldest`, which reads the
+  oldest live export and moves on to the next while each one reads
+  acknowledged. A write therefore costs one PrismaBuild `poll_group`
+  however many exports are live. With no stager, the owner makes the same
+  single look inline.
+- **Progress polls nothing.** `ProducedOutputSpool.durable_entries` only
+  hands over the entries already found acknowledged. Progress still
+  reports an entry only after its export is acknowledged (#480).
+- **Stated cost.** Progress is recorded in submission order: an export
+  that lands before an older one is recorded when the older one lands. A
+  failed export that is not the oldest surfaces when the ones before it
+  resolve, or at the next wait that polls every export (`drain`,
+  `await_group`, `_make_room_locked`). Both still surface before the
+  capture's receipt. A refused export is recorded once, whichever thread
+  reads it.
+- **Counter.** `produced_export_polls` counts the stager's looks; they are
+  not counted in `produced_stager_tasks`.
+
+The read, write and unlink rows of #1128 are unchanged; see
+"Same-box readback and write-behind export (#1110)". Gate:
+`tests/test_stage_a_io_overlap_1128.py`. No format, pipeline default, stage,
+boundary policy, run identity or ship gate changes.
+
 A schedule now owns a resident layer until its install claims it
 (2026-09-23, `fix/1124-settled-prefetch`, PQ #1124). R13 stopped at
 chain-042 with "streamed layer 42 is not resident after its required
@@ -1177,6 +1208,13 @@ generation record and receipt carry a `retained` block naming the origins and
 bytes still owned. No format, lane, pin, kernel order, ship-gate verdict or
 default changes.
 
+Stager export polls (2026-09-23, PQ #1128): the stager also runs the owner's
+per-write export poll, as an `export-poll` task in its ordered lane, at most
+one queued at a time. A refused export raises on the stager and surfaces at
+the owner's next call, like any stager failure. A poll dropped at close
+clears its queued flag through its `on_drop` callback, and
+`settle_local_output` still drains every export before the receipt.
+
 Stage B may explicitly seal `PRISMAQUANT_STAGE_B_COTANGENT_ROOT` and
 `PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES` to keep its cotangent working plane
 on local disk. The existing boundary owner preallocates the exact tensor-byte
@@ -1344,8 +1382,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `fix/1120-1121-readback-budget-window`.
+As of: 2026-09-23 · `ws-pl/1128-io-overlap`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `ws-pl/1128-io-overlap`) for **a Stage A compute
+thread that polls no export per write** (PQ #1128): the stager makes one
+look per write, oldest export first, and progress drains only what was
+already found acknowledged. See the entry at the top. No format, pipeline
+default, stage, boundary policy, run identity or ship gate changes.
 
 Re-stamped (2026-09-23, `fix/1120-1121-readback-budget-window`) for **a
 Stage A owner that reads back refusing at admission** (PQ #1120): the budget
@@ -22672,7 +22716,10 @@ no pool bytes.
 - `await_checkpoint_references` before a checkpoint manifest is sealed;
 - `write_produced_files` before the handoff record is written after its
   entry groups;
-- progress, which advances only for acknowledged entries (#480);
+- progress, which advances only for acknowledged entries (#480). Progress
+  itself polls nothing (PQ #1128): after each write the stager makes one
+  look, oldest export first (`poll_oldest`), and progress reports what the
+  looks and the waits found acknowledged, in submission order;
 - `settle_local_output` at the capture's end, which drains every export,
   releases the landed groups and runs the deferred unlinks.
 
