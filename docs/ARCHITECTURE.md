@@ -39,10 +39,15 @@ fifteen full-size elementwise ops, including an int64 code tensor.
   another, and the leg refuses if the module cannot load. There is no fallback
   to the Torch composition. The field is recorded in every row's identity and
   is not a reuse axis (`SERVED_QUANTIZER_REUSE_AXES` is unchanged), because a
-  cost priced by either implementation is the same number. It does change the
-  record: a native reference receipt written before this change carries an
-  identity without the field, so `native_execution_binding.
-  require_reference_quantizer` no longer finds it equal to a new joint row's.
+  cost priced by either implementation is the same number. Every comparison
+  of two served-quantiser records goes through one helper,
+  `served_quantizer_reuse_differences` (`schema` plus the reuse axes):
+  `require_matching_served_quantizer` for retained render scores, and
+  `native_execution_binding.require_reference_quantizer` for a native
+  reference against a joint row, which hashed the whole record before. A
+  native reference or a Stage B row recorded before the field existed
+  therefore still binds a row that carries it, while a difference on any
+  reuse axis still refuses.
 
 - **One Triton trap, caught by the raw-bit comparison.** Triton's unary minus
   is `0 - x`, so `-(+0.0)` is `+0.0`, while Torch's `-magnitude` gives `-0.0`

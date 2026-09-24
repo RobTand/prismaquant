@@ -2369,6 +2369,24 @@ SERVED_QUANTIZER_REUSE_AXES = (
 )
 
 
+def served_quantizer_reuse_differences(recorded, current) -> list[str]:
+    """The fields on which two served-quantiser identities price different numbers.
+
+    ``schema`` plus :data:`SERVED_QUANTIZER_REUSE_AXES`, in that order. Either
+    side is a record (a mapping, as ``as_record`` writes it) or a
+    :class:`ServedQuantizerIdentity`. Values are compared as written, never
+    through ``str``: ``None`` and the string ``'None'`` are different claims.
+    A field outside these, such as ``dequant_kernel`` (#1211), is recorded
+    and never compared: both implementations it names give bit-identical
+    output, so a cost priced by either is the same number.
+    """
+    def value(side, field):
+        return side.get(field) if isinstance(side, Mapping) else getattr(side, field)
+
+    return [field for field in ("schema", *SERVED_QUANTIZER_REUSE_AXES)
+            if value(recorded, field) != value(current, field)]
+
+
 def require_matching_served_quantizer(
     recorded: "Mapping[str, object] | None",
     *,
@@ -2423,10 +2441,7 @@ def require_matching_served_quantizer(
         )
     # Compared as written, never through ``str``: ``None`` and the STRING
     # ``'None'`` are different claims about the operator.
-    differing = [
-        axis for axis in SERVED_QUANTIZER_REUSE_AXES
-        if recorded.get(axis) != getattr(current, axis)
-    ]
+    differing = served_quantizer_reuse_differences(recorded, current)
     if differing:
         raise ServedQuantizerUnboundError(
             f"{consumer}: {qname!r} was priced under "
