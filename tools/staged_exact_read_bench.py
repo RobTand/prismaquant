@@ -745,6 +745,7 @@ def child_stage_b(args, slice_doc) -> dict:
         if got != entries:
             raise RuntimeError(f"stage-b read {got} of {entries} entries")
         if arena is not None:
+            readback_mode = _scratch_mode(arena)
             # Every slot read back once, in plane order, as Stage B's renders do.
             back = time.monotonic()
             nbytes = 0
@@ -753,7 +754,8 @@ def child_stage_b(args, slice_doc) -> dict:
                 nbytes += tensor.numel() * tensor.element_size()
                 del tensor
             readback = {"slots": len(arena), "bytes": nbytes,
-                        "wall_s": round(time.monotonic() - back, 4)}
+                        "wall_s": round(time.monotonic() - back, 4),
+                        "scratch_mode": readback_mode}
             readback["mb_s"] = round(nbytes / max(readback["wall_s"], 1e-9) / 1e6, 1)
     finally:
         if arena is not None:
@@ -765,6 +767,13 @@ def child_stage_b(args, slice_doc) -> dict:
             "counters": _counters(), "residency": _residency(resolver),
             "sink": "discard" if discard else variant, "readback": readback,
             "memcg": memcg.report()}
+
+
+def _scratch_mode(arena):
+    """Which path a scratch took: the tree's ``_direct`` grid when it has one."""
+    direct = getattr(arena, "_direct", "absent")
+    return {"direct": list(direct) if isinstance(direct, tuple) else direct,
+            "class": type(arena).__name__}
 
 
 def child_sink_feed(args, slice_doc) -> dict:
@@ -801,6 +810,7 @@ def child_sink_feed(args, slice_doc) -> dict:
     arena = scratch_class(rows, directory=args.scratch_root,
                           max_bytes=args.scratch_max_bytes,
                           max_tensor_bytes=policy["max_resident_bytes"])
+    mode = _scratch_mode(arena)
     memcg_all = MemcgPeaks()
     try:
         with memcg_all:
@@ -836,6 +846,7 @@ def child_sink_feed(args, slice_doc) -> dict:
             "window_bytes": window_bytes, "wall_s": load["wall_s"],
             "entries_per_s": load["entries_per_s"], "mb_s": load["mb_s"],
             "phases": phases, "memcg": memcg_all.report(), "variant_counters": extra,
+            "scratch_mode": mode,
             "scratch_fs": _statfs_type(args.scratch_root)}
 
 
