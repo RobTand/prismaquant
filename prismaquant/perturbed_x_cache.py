@@ -993,7 +993,19 @@ class ExactCotangentScratch:
 
     This disposable arithmetic workspace is not a checkpoint or an input
     cache. Its owner replays immutable checkpoint entries after interruption.
-    Allocation is real disk space; every completed I/O requests page release.
+    Allocation is real disk space.
+
+    The file holds no page cache: the cgroup charges cached file bytes to
+    the job, and a plane of 2,048 16 MiB slots is far larger than its
+    resident budget. When every slot is a whole number of the file's
+    direct-I/O blocks (``statx`` ``STATX_DIOALIGN``), which a Stage B plane
+    is, slots are written and read with ``O_DIRECT`` (PQ #1152): the device
+    reads from and writes into the tensor's own memory, or one reused
+    aligned buffer when its address is off the grid, and a write that
+    returns has reached the device. Otherwise every write is synced and
+    every completed I/O drops the file's pages, one slot at a time. Nothing
+    is durable either way: a slot is published once its write returns and
+    the file dies with the process.
     """
 
     @staticmethod
@@ -1051,16 +1063,57 @@ class ExactCotangentScratch:
             raise RuntimeError("cotangent scratch exceeds its sealed disk byte ceiling")
         root = self._require_local_disk(directory)
         self._file = tempfile.TemporaryFile(prefix='pq-cotangent-', dir=root)
+        self._direct = None
+        self._bounce = None
         try:
             os.posix_fallocate(self._file.fileno(), 0, self.tensor_bytes)
             os.fdatasync(self._file.fileno())
             self._drop_pages()
+            self._direct = self._direct_grid()
         except BaseException:
             self.close()
             raise
 
+    def _direct_grid(self):
+        """Switch the file to ``O_DIRECT`` when every slot is on its grid.
+
+        Returns ``(memory, offset)`` alignment, or ``None`` to keep the
+        buffered path: a file system without direct I/O, or a slot size
+        that is not a whole number of its offset blocks.
+        """
+        import fcntl
+        fd = self._file.fileno()
+        try:
+            memory, offset = _direct_io_alignment(fd)
+        except (OSError, RuntimeError):
+            return None
+        if any(size % offset for _start, size, _shape, _dtype in self._slots.values()):
+            return None
+        fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_DIRECT)
+        return memory, offset
+
     def _drop_pages(self):
         os.posix_fadvise(self._file.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+
+    def _device_buffer(self, tensor, size):
+        """A view the device may fill or drain: the tensor's own bytes when
+        its address is on the memory grid, else the reused bounce buffer."""
+        import mmap
+        if tensor.data_ptr() % self._direct[0] == 0:
+            return memoryview(tensor.view(torch.uint8).reshape(-1).numpy()), False
+        if self._bounce is None:
+            # Page-aligned, which is on any memory grid a device reports.
+            self._bounce = mmap.mmap(-1, max(self.max_slot_bytes, mmap.PAGESIZE))
+        return memoryview(self._bounce)[:size], True
+
+    def _direct_io(self, call, view, offset, size, what):
+        done = 0
+        while done < size:
+            moved = call(self._file.fileno(), [view[done:]], offset + done)
+            if moved <= 0 or moved % self._direct[1]:
+                # A resumed direct call would start off the grid.
+                raise RuntimeError(f"cotangent scratch short direct {what}")
+            done += moved
 
     def __len__(self):
         return len(self._slots)
@@ -1073,6 +1126,19 @@ class ExactCotangentScratch:
             raise RuntimeError("cotangent scratch slot is not ready")
         offset, size, shape, dtype = self._slots[key]
         tensor = torch.empty(shape, dtype=dtype, device='cpu')
+        if self._direct is not None:
+            view, bounced = self._device_buffer(tensor, size)
+            try:
+                self._direct_io(os.preadv, view, offset, size, "read")
+                if bounced:
+                    out = memoryview(tensor.view(torch.uint8).reshape(-1).numpy())
+                    try:
+                        out[:] = view
+                    finally:
+                        out.release()
+            finally:
+                view.release()
+            return tensor
         view = memoryview(tensor.view(torch.uint8).reshape(-1).numpy())
         try:
             done = 0
@@ -1096,6 +1162,20 @@ class ExactCotangentScratch:
         self._written.discard(key)
         # At most one slot-sized compaction, as in the exact-entry writer.
         compact = tensor.detach().contiguous()
+        if self._direct is not None:
+            view, bounced = self._device_buffer(compact, size)
+            try:
+                if bounced:
+                    source = memoryview(compact.view(torch.uint8).reshape(-1).numpy())
+                    try:
+                        view[:] = source
+                    finally:
+                        source.release()
+                self._direct_io(os.pwritev, view, offset, size, "write")
+                self._written.add(key)
+            finally:
+                view.release()
+            return
         view = memoryview(compact.view(torch.uint8).reshape(-1).numpy())
         try:
             done = 0
@@ -1114,6 +1194,9 @@ class ExactCotangentScratch:
         if self._file is not None:
             self._file.close()
             self._file = None
+        if self._bounce is not None:
+            self._bounce.close()
+            self._bounce = None
         self._written.clear()
 
 
@@ -1348,6 +1431,19 @@ def _direct_io_block(fd):
     file offsets, lengths and buffer addresses. A file that reports no
     direct-I/O support, or a kernel without ``STATX_DIOALIGN``, is refused.
     """
+    block = max(_direct_io_alignment(fd))
+    if block & (block - 1):
+        raise RuntimeError(f"Stage B spill direct-I/O alignment {block} is not a power of two")
+    return block
+
+
+def _direct_io_alignment(fd):
+    """``(memory, offset)``: the file's direct-I/O alignments from ``statx``.
+
+    ``memory`` is what a buffer address must be a multiple of; ``offset`` is
+    what file offsets and lengths must be multiples of. Refuses as
+    :func:`_direct_io_block` does.
+    """
     import ctypes
     statx_dioalign, at_empty_path = 0x2000, 0x1000
     libc = ctypes.CDLL(None, use_errno=True)
@@ -1367,10 +1463,7 @@ def _direct_io_block(fd):
     if not mask & statx_dioalign or not memory or not offset:
         raise RuntimeError("Stage B spill root does not support direct I/O "
                            "(statx reports no STATX_DIOALIGN)")
-    block = max(memory, offset)
-    if block & (block - 1):
-        raise RuntimeError(f"Stage B spill direct-I/O alignment {block} is not a power of two")
-    return block
+    return memory, offset
 
 
 def _direct_io_error(exc, what, block):

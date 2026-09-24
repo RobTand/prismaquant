@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+The Stage B cotangent scratch writes with `O_DIRECT` (2026-09-24,
+`ws-rd/1152-cotangent-scratch`, PQ #1152). After #1142, Stage B
+checkpoint-load was bound by its local scratch, not by reading:
+`ExactCotangentScratch` ran `fdatasync` and a whole-file
+`posix_fadvise(DONTNEED)` after every 16 MiB slot write, and the whole-file
+drop again after every read, and py-spy put 77-79% of the load's main thread
+there. When every slot is a whole number of the file's direct-I/O offset
+blocks (`statx` `STATX_DIOALIGN`), as a Stage B plane's slots are, the file
+descriptor is switched to `O_DIRECT`: slots are written from and read into
+the tensor's own memory, or one reused page-aligned buffer when its address
+is off the memory grid, with no sync and no page drop, so the file holds no
+page cache for the cgroup to charge. A slot is still published only after
+its write returns. Any other layout keeps the per-slot sync and page drop.
+Gate: `tests/test_stageb_cotangent_scratch.py`. No format, default, slot
+layout, disk byte ceiling, refusal or ship gate changes.
+
 A chain quantum waits for its own layer's source under `own-LLL-source`
 (2026-09-24, `fix/1166-settle-in-owner-phase`, PQ #1166). Under operator
 windows, the chain step used to settle the prefetch of the next layer of the
@@ -1832,7 +1848,12 @@ extent in a private disposable file, loads authenticated checkpoint entries
 through the existing strict pinned reader in leased windows under its
 resident budget (PQ #1142), and owns cleanup.
 Every coordinate has a fixed dtype/shape slot; replay reads owned CPU tensors
-and overwrites the same slot, syncing and dropping file pages after I/O.
+and overwrites the same slot. The file keeps no page cache, which the cgroup
+would charge to the job (PQ #1152). When every slot is a whole number of the
+file's direct-I/O blocks, as a Stage B plane of 16 MiB slots is, slots are
+written and read with `O_DIRECT` and no sync, straight from and into the
+tensor's memory. Otherwise each write is synced and each I/O drops the file's
+pages, one slot at a time.
 There are no mmap tensor views and no second retained checkpoint plane.
 Checkpoint/source/bound/replay phases and layer/probe/batch arithmetic order
 remain unchanged. The container requires the explicitly sealed same-path
@@ -1993,8 +2014,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `fix/1166-settle-in-owner-phase`.
+As of: 2026-09-24 · `ws-rd/1152-cotangent-scratch`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-rd/1152-cotangent-scratch`) for **the cotangent
+scratch's direct I/O** (PQ #1152): on grid-sized slots the scratch writes and
+reads with `O_DIRECT`, with no per-slot `fdatasync` and no whole-file page
+drop. Other layouts keep the per-slot sync and drop. No format, default,
+pipeline stage, record identity, lane or ship gate changes.
 
 Re-stamped (2026-09-24, `fix/1166-settle-in-owner-phase`) for **a chain
 quantum's wait for its own layer's source** (PQ #1166): the chain step no
