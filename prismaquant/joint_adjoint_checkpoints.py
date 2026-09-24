@@ -1929,7 +1929,7 @@ def render_free_layer_roll(
     runner, *, storage, batches, layer, cotangents, n_probes,
     incoming_entries, incoming_tensor, roll, min_free_gib: float = 0.0,
     then=None, batch_size: int = 1, probe_fusion: bool = False,
-    roll_may_keep: bool = True,
+    roll_may_keep: bool = True, on_durable=None,
 ) -> int:
     """Roll the cotangent through one layer with no renders and no projection.
 
@@ -1988,6 +1988,16 @@ def render_free_layer_roll(
     or staging that follows names only rolled rows. ``roll_may_keep=False``
     says ``roll`` keeps no row after it returns; on CUDA it then receives
     each row in its own pinned buffer instead of a pageable copy.
+
+    ``on_durable(key)`` is called once per row, right after ``roll`` has
+    returned for it, with ``key = (layer, probe_index, batch_index)`` in
+    ``roll``'s own coordinates (RobTand/prismaquant#1165). Because ``roll``
+    runs one backward late, this, not the end of a backward, is when the row
+    exists: Stage A's exact entry has been renamed from ``.pt.tmp`` into
+    place. The row is exactly as durable as ``roll`` made it, and a ``roll``
+    that only stores the row in memory reports a row in memory. A row whose
+    ``roll`` raised, and a row still waiting when the roll fails, is never
+    reported. ``None`` (the default) reports nothing.
     """
     regime = normalize_chain_regime(batch_size, probe_fusion)
     # Staging only, never order: every probe pass below re-reads this
@@ -2001,7 +2011,10 @@ def render_free_layer_roll(
     stage_ahead = getattr(storage, "stage_produced_boundary_ahead", None)
     if stage_ahead is not None and int(layer) > 0:
         stage_ahead(int(layer) - 1)
-    pipeline = _RollPipeline(roll, device=runner.device, roll_may_keep=roll_may_keep)
+    pipeline = _RollPipeline(
+        roll, device=runner.device, roll_may_keep=roll_may_keep,
+        on_durable=(None if on_durable is None else
+                    lambda batch, probe: on_durable((int(layer), int(probe), int(batch)))))
     try:
         if regime["probe_fusion"]:
             backwards = _render_free_fused_passes(
@@ -2158,10 +2171,14 @@ class _RollPipeline:
     without a second copy. A ``roll`` that may keep a row receives a pageable
     copy of it instead, so a plane kept in memory never holds pinned pages.
     Off CUDA the rows are the gradient's, exactly as before.
+
+    ``on_durable(batch_index, probe_index)``, when given, is called after
+    ``roll`` returns for each row, and never for a row whose ``roll`` raised.
     """
 
-    def __init__(self, roll, *, device, roll_may_keep=True):
+    def __init__(self, roll, *, device, roll_may_keep=True, on_durable=None):
         self._roll = roll
+        self._on_durable = on_durable
         self._device = torch.device(device)
         self._cuda = self._device.type == "cuda"
         self._keep = bool(roll_may_keep)
@@ -2216,6 +2233,8 @@ class _RollPipeline:
             rows[position] = None
             self._roll(row, index, probe_index)
             row = None
+            if self._on_durable is not None:
+                self._on_durable(index, probe_index)
 
 
 def _render_free_probe_passes(

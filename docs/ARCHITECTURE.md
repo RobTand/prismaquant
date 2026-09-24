@@ -22785,7 +22785,10 @@ which rolls the rows still waiting, so the next window and the next layer's
 staged first window name only rolled entries. A failure raises where it
 happens; the row still waiting then is never rolled. `roll` stays on the
 compute thread because it writes through the boundary owner, whose
-bookkeeping belongs to that thread.
+bookkeeping belongs to that thread. A caller that counts written rows passes
+`on_durable`: it is called with `(layer, probe, batch)` right after `roll`
+returns for that row, never for a row whose `roll` raised (PQ #1165). The end
+of a backward is not that point, since the row rolls one backward later.
 
 Measured claims about the regime's speed and energy live in the PR and the
 PQ #997 record, not here; this section states only the contract.
