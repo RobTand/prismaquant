@@ -19,7 +19,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from prismaquant.joint_catalog_extension import create_extension, require_extension
+from prismaquant.joint_catalog_extension import (
+    create_extension, extension_campaign_identity, require_extension)
 from prismaquant.stage_b_prep_io import (
     PreparationPublicationRefused, PreparationReadRefused, bind_preparation_publication,
     bind_staged_reads, publish_files, read_input)
@@ -153,6 +154,14 @@ def control_digests(inputs, plan, prepared, extension=None):
     from prismaquant.tessera_joint_allocation import _read_bound
     bindings = [*inputs.values(), *([] if extension is None else [extension]),
                 prepared['production_cache']]
+    if extension is not None:
+        # A v3 extension derives the original run's null scope from the
+        # original plan and the frozen campaign identity (PQ #1126); every
+        # consumer re-reads that identity file, so it is a control dependency.
+        identity = extension_campaign_identity(
+            json.loads(_read_bound(extension, 'Stage B catalog extension')))
+        if identity is not None:
+            bindings.append(identity)
     bindings += [plan['stage_b_resource_policy'], plan['served_activation_policy'], plan['inputs']['candidate_overlay']]
     documents = [json.loads(_read_bound(b, 'Stage B metadata closure')) for b in
                  (plan['stage_b_resource_policy'], plan['served_activation_policy'], plan['inputs']['candidate_overlay'])]
@@ -228,6 +237,17 @@ def stage_b_replay_mode(spec):
     return 'windowed' if declared is None else 'spill'
 
 
+def campaign_identity_binding(args):
+    """The frozen campaign identity the command line binds, or None."""
+    path = getattr(args, 'campaign_identity', None)
+    digest = getattr(args, 'campaign_identity_sha256', None)
+    if bool(path) != bool(digest):
+        raise ValueError('--campaign-identity and --campaign-identity-sha256 go together')
+    if path is None:
+        return None
+    return {'path': str(Path(path).resolve()), 'sha256': str(digest)}
+
+
 def prepare(args):
     if getattr(args, 'allowed_tiers', None) is not None and args.data_manifest_sha256 is None:
         raise ValueError('--allowed-tiers needs --data-manifest-sha256')
@@ -280,8 +300,13 @@ def prepare(args):
                           plan_sha256=inputs['extended_plan']['sha256'],
                           prepared_sha256=inputs['extended_prepared']['sha256'])
     else:
+        # PQ #1126: a run that sealed campaign_scope null (R13) needs the
+        # frozen campaign identity, so the extension derives the original
+        # campaign's scope from the original plan; a run that sealed its
+        # scope ignores the binding and creates the v2 bytes it always did.
         extension = create_extension(
             inputs=inputs, adjoint_capture=first_binding, output=proof_path,
+            campaign_identity=campaign_identity_binding(args),
             publish=lambda path, raw: bool(publish_files(
                 publication, 'extension', [(path, raw, 'catalog extension')])))
     additions = metadata_entries(inputs, plan, prepared, extension)
@@ -355,6 +380,12 @@ def main(argv=None):
                         help='a sealed checkpoint band (repeatable, PQ #993)')
     parser.add_argument('--adjoint-band-sha256', action='append', default=[])
     parser.add_argument('--metadata-root', type=Path, required=True)
+    parser.add_argument('--campaign-identity', type=Path, default=None,
+                        help='the frozen campaign identity file (PQ #1126); required when '
+                             'the Stage A proofs seal campaign_scope null, so the catalog '
+                             'extension derives the original campaign scope from the '
+                             'original plan')
+    parser.add_argument('--campaign-identity-sha256', default=None)
     parser.add_argument('--data-manifest-sha256', default=None,
                         help='read every declared input off the PrismaBuild stage, '
                              'digest-checked, and refuse rather than read the pool '

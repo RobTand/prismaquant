@@ -1314,11 +1314,19 @@ def check_adjoint_run_identity(header: Mapping, *, plan_sha256: str,
     """
     if not isinstance(header, dict) or not isinstance(header.get("run_identity"), dict):
         raise ValueError("a stage-A run header must carry a run identity: refusing")
+    # An unset scope never admits anything: a run that sealed no scope
+    # (R13, PQ #1126) does not answer for a campaign that names none, so
+    # null is never compared with null.
+    if not isinstance(scope, dict) or not scope:
+        raise ValueError("the campaign scope is unset: refusing")
     identity = header["run_identity"]
     if catalog_extension is not None:
+        # The effective identity: the sealed one, or, for a v3 extension over
+        # a run that sealed campaign_scope null, the sealed identity with the
+        # scope the extension derived from the original plan (PQ #1126).
         from .joint_catalog_extension import require_extension
-        require_extension(catalog_extension, run_header=header,
-                          plan_sha256=plan_sha256, prepared_sha256=prepared_sha256)
+        identity = require_extension(catalog_extension, run_header=header,
+                                     plan_sha256=plan_sha256, prepared_sha256=prepared_sha256)
     else:
         for field, expected in (("plan_sha256", plan_sha256),
                                 ("prepared_sha256", prepared_sha256)):

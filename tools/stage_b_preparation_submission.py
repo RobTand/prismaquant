@@ -118,6 +118,13 @@ def prepare_reads(args):
              (args.parent_manifest, args.parent_manifest_sha256),
              (args.derivation, args.derivation_sha256), (args.spec, args.spec_sha256),
              *proofs]
+    if args.campaign_identity is not None:
+        # PQ #1126: the frozen campaign identity the extension binds when the
+        # proofs seal campaign_scope null; the preparation reads it to derive
+        # the scope, and control_digests declares it once the extension exists.
+        if args.campaign_identity_sha256 is None:
+            raise ValueError("--campaign-identity needs --campaign-identity-sha256")
+        files.append((args.campaign_identity, args.campaign_identity_sha256))
     if extension_path.exists():
         # A later band set binds the extension the first one wrote.
         extension = {"path": str(extension_path.resolve()),
@@ -150,6 +157,14 @@ def regenerate_reads(args):
         files.append(args.partition)
     if args.catalog_extension is not None:
         files.append(args.catalog_extension)
+        # PQ #1126: a v3 extension re-reads the frozen campaign identity it
+        # derived the original scope from; declare it so the strict readset
+        # admits the generator's check.
+        from prismaquant.joint_catalog_extension import extension_campaign_identity
+        identity = extension_campaign_identity(
+            json.loads(Path(args.catalog_extension).read_bytes()))
+        if identity is not None:
+            files.append((Path(identity["path"]), identity["sha256"]))
     if args.executable_readsets:
         files.append((prepared["production_cache"]["path"],
                       prepared["production_cache"]["sha256"]))
@@ -233,6 +248,10 @@ def main(argv=None) -> int:
     for name in ("pair-inputs", "parent-manifest", "derivation", "spec"):
         prep.add_argument("--" + name, type=Path, required=True)
         prep.add_argument("--" + name + "-sha256", required=True)
+    prep.add_argument("--campaign-identity", type=Path, default=None,
+                      help="the frozen campaign identity the preparation binds when the "
+                           "Stage A proofs seal campaign_scope null (PQ #1126)")
+    prep.add_argument("--campaign-identity-sha256", default=None)
     _common(prep)
     regen = tools.add_parser("regenerate")
     for name in ("plan", "prepared", "parent-manifest"):
