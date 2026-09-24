@@ -740,7 +740,8 @@ def _check_event_order(events, manifest, *, layer, chain,
 
 
 def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
-                   replay_mode=None, spill_bound_edit=None, spill_ceiling=None):
+                   replay_mode=None, spill_bound_edit=None, spill_ceiling=None,
+                   prepared_render_phases=False):
     """One real run_layer_quantum_core with instrumented seams.
 
     ``replay_mode`` is the mode the executable plan is sealed for (PQ
@@ -748,6 +749,10 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
     spill-sealed plan also seals the layer's spill bound, and a spill launch
     takes its ceiling from it, as the dispatcher sets it; ``spill_bound_edit``
     rewrites the sealed bound and ``spill_ceiling`` replaces that ceiling.
+
+    ``prepared_render_phases`` seals the prepared-render contract (PQ #917)
+    from the fixture's own PWC files, so the plan carries one ``render-NN``
+    phase per window, as a production row does.
     """
     import contextlib
 
@@ -886,11 +891,37 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
              "bytes": setup["calib_path"].stat().st_size,
              "sha256": hashlib.sha256(
                  setup["calib_path"].read_bytes()).hexdigest()}
+    prepared_inputs = None
+    if prepared_render_phases:
+        # Every roster unit stages its measured render formats, whole-file,
+        # from the PWC files the retained windows load.
+        from prismaquant.joint_layer_quanta import PREPARED_INPUT_SCHEMA
+        windows = []
+        for window in resolved:
+            members = [[name, fmt] for name in window["names"]
+                       for fmt in roster.render_formats[name]]
+            entries = []
+            for name, fmt in members:
+                path = Path(cache.weights[(name, fmt)])
+                entries.append({
+                    "qname": name, "fmt": fmt, "path": str(path), "offset": 0,
+                    "bytes": path.stat().st_size,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+            windows.append({"window_index": int(window["window_index"]),
+                            "members": members, "entries": entries})
+        prepared_inputs = {
+            "schema": PREPARED_INPUT_SCHEMA,
+            "production_pkl_sha256": setup["render_prerequisite"][
+                "production_pkl_sha256"],
+            "unit_roster_sha256": setup["render_prerequisite"][
+                "unit_roster_sha256"],
+            "prepared_sha256": record["campaign"]["prepared_sha256"],
+            "windows": windows}
     manifest = build_quantum_executable_manifest(
         record, receipt, setup["parent"], strided_boundaries=strided,
         n_probes=n_probes, calib=dict(calib),
         render_prerequisite=dict(setup["render_prerequisite"]),
-        replay_mode=replay_mode)
+        replay_mode=replay_mode, prepared_inputs=prepared_inputs)
     spill_bound = None
     if replay_mode == "spill":
         # The record builder seals the bound offline, from verified render
@@ -939,6 +970,7 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
         n_probes=n_probes,
         calib=dict(calib),
         render_prerequisite=dict(setup["render_prerequisite"]),
+        prepared_inputs=prepared_inputs,
         replay_mode=replay_mode, spill_bound=spill_bound)
     monkeypatch.setenv(
         "PRISMABUILD_ACTION_PROGRESS_PHASES",
