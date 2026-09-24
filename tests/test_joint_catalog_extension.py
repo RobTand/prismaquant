@@ -199,13 +199,22 @@ def _site_args(inputs, campaign):
                 scope=campaign['scope'], checkpoints=[3])
 
 
-def _all_three_sites(tmp_path, inputs, receipt, capture, campaign, bound):
-    """Run the generator, the dispatcher and the quantum gate on one proof set.
+def _join_campaign(inputs, receipt, campaign):
+    """The joiner's view of the campaign: the proof and what the parent annotates."""
+    return {'adjoint_receipt': receipt, 'adjoint_bands': [],
+            'plan_sha256': inputs['extended_plan']['sha256'],
+            'prepared_sha256': inputs['extended_prepared']['sha256'], 'scope': campaign['scope']}
+
+
+def _all_four_sites(tmp_path, inputs, receipt, capture, campaign, bound):
+    """Run the generator, the dispatcher, the quantum gate and the joiner's
+    header check on one proof set.
 
     Returns the generator's records. Every site raises its own refusal type
     when the run header does not answer for the campaign.
     """
     from prismaquant.joint_cost_quantum import verify_quantum_identity
+    from prismaquant.joint_quanta_join import _check_stage_a_header
     from tools.dispatch_joint_quanta import check_stage_a_proofs
     plan = json.loads(Path(inputs['extended_plan']['path']).read_bytes())
     prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
@@ -229,6 +238,8 @@ def _all_three_sites(tmp_path, inputs, receipt, capture, campaign, bound):
         prepared_path=Path(inputs['extended_prepared']['path']), prepared_sha256=args['prepared_sha256'],
         adjoint_path=Path(first['adjoint']['slice_path']), adjoint_sha256=first['adjoint']['slice_sha256'],
         output_root=Path(plan['output_root']))
+    _check_stage_a_header(_join_campaign(inputs, receipt, campaign),
+                          {record['quantum_id']: record for record in produced['records']})
     return produced['records']
 
 
@@ -247,7 +258,7 @@ def test_a_null_scope_run_is_admitted_through_the_derived_scope_at_every_site(tm
     that declares no scope), while the parent it read annotates the campaign's
     ``complete_campaign`` scope (PQ #1126). The extension derives the scope
     once from the original plan with the one scope builder, binds the frozen
-    identity file, and the generator, the dispatcher and the quantum admit
+    identity file, and the generator, the dispatcher, the quantum and the joiner admit
     the run under it."""
     from prismaquant.joint_catalog_extension import SCHEMA_V3, DERIVED_SCOPE_SCHEMA
     inputs, receipt, capture, identity, scope = _scoped_case(tmp_path, campaign, probe)
@@ -275,7 +286,7 @@ def test_a_null_scope_run_is_admitted_through_the_derived_scope_at_every_site(tm
         {k: v for k, v in header['run_identity'].items() if k != 'campaign_scope'}
     assert check_adjoint_run_header(header, **args, catalog_extension=bound) == \
         stage_a_run_header_sha256(header)
-    records = _all_three_sites(tmp_path, inputs, receipt, capture, campaign, bound)
+    records = _all_four_sites(tmp_path, inputs, receipt, capture, campaign, bound)
     assert len(records) == 3
     assert all(record['campaign']['campaign_scope'] == scope for record in records)
     # The first sealed band of the run creates the same bytes as the receipt.
@@ -290,13 +301,14 @@ def test_a_null_scope_run_is_admitted_through_the_derived_scope_at_every_site(tm
 def test_a_derived_scope_that_is_not_the_parents_refuses_at_every_site(tmp_path, campaign, probe):
     """The parent annotates another campaign (here, another checkpoint digest):
     the derived scope is still this plan's, and it is not the parent's, so the
-    generator, the dispatcher and the quantum refuse."""
+    generator, the dispatcher, the quantum and the joiner refuse."""
     from prismaquant.joint_cost_quantum import QuantumIdentityRefused, verify_quantum_identity
+    from prismaquant.joint_quanta_join import JoinRefused, _check_stage_a_header
     from tools.dispatch_joint_quanta import DispatchRefused, check_stage_a_proofs
     inputs, receipt, capture, identity, scope = _scoped_case(tmp_path, campaign, probe)
     bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json',
                              campaign_identity=identity)
-    records = _all_three_sites(tmp_path, inputs, receipt, capture, campaign, bound)
+    records = _all_four_sites(tmp_path, inputs, receipt, capture, campaign, bound)
     other = {**scope, 'campaign_checkpoint_sha256': '0' * 64}
     header = stage_a_run_header(receipt)
     with pytest.raises(ValueError, match='another scope'):
@@ -325,6 +337,9 @@ def test_a_derived_scope_that_is_not_the_parents_refuses_at_every_site(tmp_path,
             adjoint_path=Path(rescoped[0]['adjoint']['slice_path']),
             adjoint_sha256=rescoped[0]['adjoint']['slice_sha256'],
             output_root=Path(plan['output_root']))
+    with pytest.raises(JoinRefused, match='another scope'):
+        _check_stage_a_header(_join_campaign(inputs, receipt, campaign),
+                              {record['quantum_id']: record for record in rescoped})
 
 
 def test_a_null_scope_proof_without_a_derived_scope_refuses(tmp_path, campaign, probe):
@@ -382,7 +397,7 @@ def test_a_sealed_scope_other_than_the_parents_refuses_even_with_an_extension(tm
         check_adjoint_run_header(header, **{**args, 'scope': other}, catalog_extension=bound)
     _adopt_scope(campaign, other)
     with pytest.raises(ValueError, match='another scope'):
-        _all_three_sites(tmp_path, inputs, receipt, capture, campaign, bound)
+        _all_four_sites(tmp_path, inputs, receipt, capture, campaign, bound)
     # A sealed scope with a derived block on top refuses: the sealed scope rules.
     inputs2, receipt2, capture2, identity, scope = _scoped_case(tmp_path/'scoped', campaign, probe)
     derived = create_extension(inputs=inputs2, adjoint_capture=capture2, campaign_identity=identity,
