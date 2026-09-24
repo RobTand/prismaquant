@@ -1,5 +1,42 @@
 # PrismaQuant Architecture
 
+Stage B records its IO per phase, and the checkpoint loaders print a read
+rate (2026-09-24, `ws-sb4/stage-io-baseline`). The v6 gate is the IO baseline
+that later IO work (PQ #1142, #1143) measures against, and until now a quantum
+said nothing about its own reads between the head and the records.
+
+- **Spans** (`prismaquant/io_spans.py`). `IoSpanLog` opens and closes named
+  spans. Each span prints one `[io-span] {json}` line, with its wall time,
+  start and end epochs, the change in every `/proc/self/io` counter, and
+  the change in the residency map's `bytes_from_ram`/`bytes_from_stage`/
+  `bytes_from_pool`. It also carries the GPU power sampler's samples, joules
+  and mean watts against the 140 W envelope. Spans nest, and each record
+  names its parent. `stage_span_log` builds the same log for any stage, and
+  Stage A's split runs can open it unchanged.
+- **Stage B's spans.** `run_layer_quantum` opens spans for the head (to the
+  core), checkpoint-load or handoff-load, each chain layer, the own-source
+  install, each window, each (window, probe) replay, each probe's spill
+  capture, and records out. `counters.json` gains `io_spans`, every span
+  closed before the counters are written. The power sampler now starts
+  before the head, so the counters' `wall_s` and `gpu_joules` include the
+  head.
+- **What the counters see.** `/proc/self/io` covers the process's thread
+  group, including prefetch threads, and no child process. `read_bytes` is
+  storage-layer reads, and `rchar` includes page-cache hits. Neither names a
+  device or a mount. Pair spans with the host's diskstats and mountstats by
+  epoch. The three copies of the `/proc/self/io` reader (Stage A, Stage B,
+  the joint run) now call `io_spans.read_proc_io`.
+- **Rate lines.** `load_adjoint_checkpoint` and `load_handoff_inputs` print
+  `[read-rate] {json}` every 64 entries or 30 s, with entries, bytes, the
+  interval and mean MB/s, the ETA and the process's IO since the start.
+  They report no PrismaBuild units, because a read into a disposable scratch
+  is not durable work (PB #480).
+
+The IO path is unchanged: nothing reads or writes workload data for these.
+Gates: `tests/test_io_spans.py`, `tests/test_stageb_one_pass_spill.py`,
+`tests/test_quantum_band_serial.py`. No format, pipeline default, stage or
+ship gate changes.
+
 A staged-range reader waits on a leg PrismaBuild defers and refuses a span
 no leg covers at once (2026-09-24, `fix/1113-landing-verdict`, PQ #1113,
 PB #1018). PrismaBuild's landing record listed only the legs inside the

@@ -328,7 +328,7 @@ def test_a_handoff_binds_its_consumer_and_refuses_everything_else(tmp_path, monk
     path.write_bytes(raw)
 
 
-def test_owner_states_travel_per_probe_and_sample(tmp_path, monkeypatch):
+def test_owner_states_travel_per_probe_and_sample(tmp_path, monkeypatch, capsys):
     """Distinct shared-state owners survive the handoff, coordinate by coordinate.
 
     The end-to-end fixtures share no KV state, so each of their owner states
@@ -362,10 +362,18 @@ def test_owner_states_travel_per_probe_and_sample(tmp_path, monkeypatch):
     record, adjoint_slice = _consumer_record(producer_record, layer=1, receipt=receipt)
     bound = load_quantum_handoff(published["path"], published["sha256"],
                                  record=record, adjoint_slice=adjoint_slice)
+    capsys.readouterr()
     read_plane, shared_adjoint, _shared_pass = load_handoff_inputs(
         bound, adjoint_slice["checkpoint"], n_probes=n_probes, n_batches=n_batches)
     assert {key: _tensor_digest(value) for key, value in read_plane.items()} == \
         {key: _tensor_digest(value) for key, value in plane.items()}
+    # The handoff read prints its rate lines, ending with a final one.
+    from prismaquant.io_spans import READ_RATE_MARKER
+    rates = [json.loads(line[len(READ_RATE_MARKER) + 1:])
+             for line in capsys.readouterr().out.splitlines()
+             if line.startswith(READ_RATE_MARKER + " {")]
+    assert [(r["label"], r["final"]) for r in rates][-1] == ("handoff-load", True)
+    assert rates[-1]["entries"] == rates[-1]["entries_total"] == n_probes * n_batches
     expected = {(probe, batch): _state_digest(owners[probe][batch].state_dict())
                 for probe in range(n_probes) for batch in range(n_batches)}
     assert len(set(map(repr, expected.values()))) == n_probes * n_batches

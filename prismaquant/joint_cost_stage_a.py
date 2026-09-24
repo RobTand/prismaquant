@@ -1830,11 +1830,9 @@ def _stage_a_kernel_profiler() -> KernelTimeProfiler:
 
 
 def _io_counters() -> dict:
-    values = {}
-    for line in Path("/proc/self/io").read_text().splitlines():
-        key, value = line.split(":", 1)
-        values[key] = int(value)
-    return values
+    from .io_spans import read_proc_io
+
+    return read_proc_io()
 
 
 def bind_stage_a_produced_output(*, artifact_max_bytes, tier=None,

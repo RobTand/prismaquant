@@ -40,6 +40,7 @@ from types import SimpleNamespace
 import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
+from .io_spans import IoSpanLog, read_proc_io, stage_span_log
 from .joint_adjoint_checkpoints import (
     QUANTUM_COUNTERS_SCHEMA,
     QUANTUM_RECORD_SCHEMA,
@@ -507,6 +508,11 @@ class QuantumProgress:
 # --------------------------------------------------------------------------
 
 
+def quantum_io_spans(quantum_id, sampler) -> IoSpanLog:
+    """The quantum's span log: ``/proc/self/io``, residency tiers and GPU watts."""
+    return stage_span_log(str(quantum_id), power_sampler=sampler)
+
+
 class QuantumCounters:
     """Rob's two metrics, per chunk phase and per window (§8.1).
 
@@ -517,15 +523,22 @@ class QuantumCounters:
     non-diagnostic (AGENTS.md principle 13).
     """
 
-    def __init__(self, *, quantum_id, identity_sha256, chunks, frontier: ChunkFrontier):
+    def __init__(self, *, quantum_id, identity_sha256, chunks, frontier: ChunkFrontier,
+                 io_spans: IoSpanLog | None = None, sampler=None,
+                 started: float | None = None):
         from .residency_map import residency_report
 
         self._report = residency_report
         self._frontier = frontier
         self.quantum_id = str(quantum_id)
         self.identity_sha256 = str(identity_sha256)
-        self.started = time.time()
-        self.sampler = GpuPowerSampler().start()
+        # A caller that started the power sampler and the span log before
+        # the head (``run_layer_quantum``) passes both, with the time it
+        # started them, so wall time and joules cover the same interval.
+        self.started = time.time() if started is None else float(started)
+        self.sampler = GpuPowerSampler().start() if sampler is None else sampler
+        self.io = io_spans if io_spans is not None else quantum_io_spans(
+            self.quantum_id, self.sampler)
         self.total_kernel_active_s = 0.0
         self._kernel_error = None
         self.phases = [{"name": str(chunk["name"]),
@@ -654,6 +667,8 @@ class QuantumCounters:
             "replay": dict(self.replay),
             "phases": self.phases,
             "windows": self.windows,
+            # Every closed span, in close order (prismaquant.io_spans).
+            "io_spans": list(self.io.records),
         }
         if self._kernel_error:
             counters["kernel_profiler_error"] = self._kernel_error
@@ -1806,17 +1821,19 @@ def run_layer_quantum_core(
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE if adjoint_handoff is None
                                   else HANDOFF_LOAD_PHASE)
     with storage, (spill if spill is not None else nullcontext()):
-        if adjoint_handoff is None:
-            grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
-                source_adjoint_space, checkpoint_record,
-                cotangent_factory=storage.checkpoint_cotangent_sink,
-                shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
-        else:
-            grad_plane, shared_adjoint, shared_pass = load_handoff_inputs(
-                adjoint_handoff, checkpoint_record, n_probes=n_probes,
-                n_batches=len(row_offsets),
-                cotangent_factory=storage.checkpoint_cotangent_sink,
-                shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+        with counters.io.span(CHECKPOINT_LOAD_PHASE if adjoint_handoff is None
+                              else HANDOFF_LOAD_PHASE):
+            if adjoint_handoff is None:
+                grad_plane, shared_adjoint, shared_pass = load_adjoint_checkpoint(
+                    source_adjoint_space, checkpoint_record,
+                    cotangent_factory=storage.checkpoint_cotangent_sink,
+                    shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
+            else:
+                grad_plane, shared_adjoint, shared_pass = load_handoff_inputs(
+                    adjoint_handoff, checkpoint_record, n_probes=n_probes,
+                    n_batches=len(row_offsets),
+                    cotangent_factory=storage.checkpoint_cotangent_sink,
+                    shared_state_max_bytes=storage.config["max_auxiliary_bytes"])
         cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
                              for _ in row_offsets] for _ in range(n_probes)]
         for (probe, batch), state in shared_adjoint.items():
@@ -1856,29 +1873,30 @@ def run_layer_quantum_core(
         chain_kernel.__enter__()
         try:
             for chain_layer in chain_layers:
-                try:
-                    if executable:
-                        progress.enter_read_phase(
-                            executable_source_phase_name(chain_layer))
-                    _install_with_settlement(runner, chain_layer,
-                                             operator_windows=operator_windows,
-                                             order=source_order)
-                    if executable:
-                        progress.enter_read_phase(
-                            executable_bound_phase_name(chain_layer))
-                    backwards = render_free_layer_roll(
-                        runner, storage=storage, batches=batches, layer=chain_layer,
-                        cotangents=cotangent_owners, n_probes=n_probes,
-                        incoming_entries=None,
-                        incoming_tensor=lambda probe, batch: grad_plane[(probe, batch)],
-                        roll=lambda tensor, batch, probe: grad_plane.__setitem__(
-                            (probe, batch), tensor),
-                        min_free_gib=min_free_gib,
-                        batch_size=chain_regime["batch_size"],
-                        probe_fusion=chain_regime["probe_fusion"])
-                    chain_backwards += backwards
-                finally:
-                    runner.context.unload(chain_layer)
+                with counters.io.span("chain-layer", layer=int(chain_layer)):
+                    try:
+                        if executable:
+                            progress.enter_read_phase(
+                                executable_source_phase_name(chain_layer))
+                        _install_with_settlement(runner, chain_layer,
+                                                 operator_windows=operator_windows,
+                                                 order=source_order)
+                        if executable:
+                            progress.enter_read_phase(
+                                executable_bound_phase_name(chain_layer))
+                        backwards = render_free_layer_roll(
+                            runner, storage=storage, batches=batches, layer=chain_layer,
+                            cotangents=cotangent_owners, n_probes=n_probes,
+                            incoming_entries=None,
+                            incoming_tensor=lambda probe, batch: grad_plane[(probe, batch)],
+                            roll=lambda tensor, batch, probe: grad_plane.__setitem__(
+                                (probe, batch), tensor),
+                            min_free_gib=min_free_gib,
+                            batch_size=chain_regime["batch_size"],
+                            probe_fusion=chain_regime["probe_fusion"])
+                        chain_backwards += backwards
+                    finally:
+                        runner.context.unload(chain_layer)
         finally:
             chain_kernel.__exit__(None, None, None)
         counters.kernel_block(chain_kernel)
@@ -1935,8 +1953,9 @@ def run_layer_quantum_core(
         if executable:
             progress.enter_read_phase(
                 executable_own_source_phase_name(layer))
-        _install_with_settlement(runner, layer, operator_windows=operator_windows,
-                                 order=source_order)
+        with counters.io.span("own-source", layer=int(layer)):
+            _install_with_settlement(runner, layer, operator_windows=operator_windows,
+                                     order=source_order)
         if packed_members:
             from .routed_experts import PackedExpertProjection
 
@@ -2255,10 +2274,23 @@ def run_layer_quantum_core(
         window_kernel: KernelTimeProfiler | None = None
         window_started = time.time()
         replay_window: int | None = None
+        # One span per window, opened before its staged-render wait and
+        # closed after its units commit. A window whose units were all
+        # journalled earlier gets no after_window call; its span closes as
+        # ``skipped`` when the next window opens, or when the replay returns.
+        window_span = None
+
+        def close_skipped_window():
+            nonlocal window_span
+            if window_span is not None and not window_span.closed:
+                counters.io.close(window_span, outcome="skipped")
+            window_span = None
 
         def before_window(window_index, window_names):
-            nonlocal window_kernel, window_started, replay_window
+            nonlocal window_kernel, window_started, replay_window, window_span
             del window_names
+            close_skipped_window()
+            window_span = counters.io.open("window", window=int(window_index))
             if executable:
                 # PQ #917: the production window-readiness body -- the
                 # render phase first, then the bounded staged-render
@@ -2292,8 +2324,10 @@ def run_layer_quantum_core(
                 progress.enter_read_phase(
                     executable_spill_phase_name(probe_index) if sealed_spill
                     else executable_replay_phase_name(replay_window, probe_index))
-            return replay_backward(
-                final=final, lease=lease, probe=probe_index)
+            with counters.io.span("replay", window=replay_window,
+                                  probe=int(probe_index), mode="window"):
+                return replay_backward(
+                    final=final, lease=lease, probe=probe_index)
 
         def after_window(window_index, window_names):
             nonlocal window_kernel
@@ -2314,6 +2348,8 @@ def run_layer_quantum_core(
             counters.enter_phase()
             counters.mark_phase_units(len(completed_units))
             progress.commit()
+            if window_span is not None:
+                counters.io.close(window_span)
 
         spill_driver = None
         if spill is not None:
@@ -2330,10 +2366,11 @@ def run_layer_quantum_core(
                 if executable:
                     progress.enter_read_phase(
                         executable_spill_phase_name(probe_index))
-                with spill.capture(
-                        probe_index, spill_modules, spill_specs,
-                        activation_max_abs=joint_activation_maxima(production_cache),
-                        projection_backend=projection_backend) as observer:
+                with counters.io.span("spill-capture", probe=int(probe_index)), \
+                        spill.capture(
+                            probe_index, spill_modules, spill_specs,
+                            activation_max_abs=joint_activation_maxima(production_cache),
+                            projection_backend=projection_backend) as observer:
                     replay_backward(final=True, lease=None, probe=probe_index,
                                     observer=observer)
 
@@ -2346,7 +2383,9 @@ def run_layer_quantum_core(
                             + lease.statistics_capacity_bytes
                             - lease.resident_statistics_bytes
                             + spill.replay_reserve_bytes))
-                spill.replay(window_index, probe_index, lease)
+                with counters.io.span("replay", window=int(window_index),
+                                      probe=int(probe_index), mode="spill"):
+                    spill.replay(window_index, probe_index, lease)
 
             spill_driver = SimpleNamespace(capture=spill_capture, replay=spill_replay)
 
@@ -2370,6 +2409,7 @@ def run_layer_quantum_core(
                 after_window=after_window,
                 spill=spill_driver,
             )
+            close_skipped_window()
         finally:
             if spill is not None:
                 counters.replay["spill"] = dict(spill.telemetry)
@@ -2441,11 +2481,12 @@ def run_layer_quantum_core(
 
 
 def _io_counters() -> dict:
-    values = {}
-    for line in Path("/proc/self/io").read_text().splitlines():
-        key, value = line.split(":", 1)
-        values[key] = int(value)
-    return values
+    return read_proc_io()
+
+
+def _resolved_units(resolved_windows) -> int:
+    return (sum(len(window["names"]) for window in resolved_windows)
+            if resolved_windows is not None else 0)
 
 
 def publish_quantum_outputs(record, *, payload, result, counters,
@@ -2633,11 +2674,20 @@ def run_layer_quantum(
             raise QuantumIdentityRefused(str(exc)) from exc
 
     started, before_io = time.time(), _io_counters()
+    # The power sampler and the span log start before the head, so the head
+    # has a span and its watts, and the counters' joules and wall time cover
+    # the same interval.
+    power = GpuPowerSampler().start()
+    io_spans = quantum_io_spans(record["quantum_id"], power)
     runner = None
     payload = None
     counters = None
     resolved_windows: list[dict] | None = None
     try:
+        # The ``head`` span covers everything before the core enters
+        # checkpoint-load: the head read, the source runner and the window
+        # handshake. That is the stretch PrismaBuild reports as ``head``.
+        head_span = io_spans.open("head")
         # Bind before cache/intake work. The core repeats this idempotently
         # for direct callers and stamps the actual arithmetic in row identity.
         if head_slice is not None:
@@ -2801,11 +2851,13 @@ def run_layer_quantum(
             quantum_id=record["quantum_id"], identity_sha256=record["identity_sha256"],
             chunks=record["chunks"],
             frontier=ChunkFrontier(chunks=record["chunks"],
-                                   windows=resolved_windows))
+                                   windows=resolved_windows),
+            io_spans=io_spans, sampler=power, started=started)
         # Head-phase currency continues from the head-committed base (§6.2
         # step 5): the same cumulative units the single run reports.
         progress = QuantumProgress(frontier=counters._frontier,
                                    base_units=progress_base)
+        io_spans.close(head_span)
         payload = run_layer_quantum_core(
             runner, cache, ids.to(runner.device), formats_by_qname,
             record=record, adjoint_slice=adjoint_slice, execution=execution_runtime,
@@ -2833,14 +2885,20 @@ def run_layer_quantum(
             result["residency"] = residency
 
     # ---- writes: only under layer-quanta/layer-NNN/ (§6.4) ---------------
-    units_total = (sum(len(window["names"]) for window in resolved_windows)
-                   if resolved_windows is not None else 0)
+    units_total = _resolved_units(resolved_windows)
+    records_span = io_spans.open("records-out")
     counters_done = counters.finish(
         units_done=len(payload["costs"]) if payload else 0,
         units_total=units_total)
-    status_record = publish_quantum_outputs(
-        record, payload=payload, result=result, counters=counters_done,
-        units_total=units_total)
+    try:
+        status_record = publish_quantum_outputs(
+            record, payload=payload, result=result, counters=counters_done,
+            units_total=units_total)
+    except BaseException as error:
+        io_spans.close(records_span, error=error)
+        raise
+    # Its line is the record of the writes; counters.json is already out.
+    io_spans.close(records_span)
     result["passed"] = status_record["status"] == "complete"
     return result
 
