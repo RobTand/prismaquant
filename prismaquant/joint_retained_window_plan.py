@@ -34,14 +34,22 @@ DERIVED_BUDGET_FIELDS = ('load_buffer_bytes', 'candidate_delta_bytes',
                          'max_windows_per_layer')
 #: The owners that land on the HOST side of a unified-memory box, which the
 #: kernel bounds with the container's own cgroup cap whatever the aggregate
-#: says (``CaptureMemoryGuard._check`` holds ``memory.current`` against
-#: ``cap - margin`` in aggregate mode too). Retained renders belong here:
+#: says (``CaptureMemoryGuard._check`` holds the cgroup's committed bytes
+#: against ``cap - margin`` in aggregate mode too). Retained renders belong here:
 #: ``ProductionWeightCache._load_file_tensor`` reads every candidate with
 #: ``map_location="cpu"`` and the retained window holds those CPU tensors for
 #: the whole window, while the fp32 delta and the statistics matrices are
 #: built on the device.
 HOST_RESIDENT_BUDGET_FIELDS = ('safety_margin_bytes', 'metadata_reserve_bytes',
                                'load_buffer_bytes', 'read_page_reserve_bytes')
+
+
+#: The capture-guard reading ``require_observed_baseline`` compares with the
+#: declared owners: committed cgroup memory plus the whole CUDA reservation
+#: (``memory_management.committed_cgroup_bytes``). One key, named once, so the
+#: joint-cost quantum and the AURA retained path cannot read two definitions
+#: (PQ #1157).
+OBSERVED_BASELINE_KEY = 'committed_cgroup_plus_cuda_reserved_bytes'
 
 
 def _integer(value, name, *, positive=False):
@@ -166,6 +174,13 @@ class RetainedWindowBudget:
                 f'margin against a {cap}-byte guard less {margin} margin')
 
     def require_observed_baseline(self, *, observed_bytes, source_bytes, label, actual_auxiliary_bytes=0):
+        """Refuse a process floor its declared owners do not hold.
+
+        ``observed_bytes`` is the capture guard's ``OBSERVED_BASELINE_KEY``
+        reading: committed cgroup memory plus the whole CUDA reservation. Clean
+        file pages left by a source or checkpoint read are not in it, because
+        the kernel drops them before it refuses an allocation (PQ #1157).
+        """
         _integer(observed_bytes, 'observed_bytes')
         _integer(actual_auxiliary_bytes, 'actual_auxiliary_bytes')
         if actual_auxiliary_bytes > self.auxiliary_reserve_bytes:
@@ -174,7 +189,7 @@ class RetainedWindowBudget:
         limit = (self.metadata_reserve_bytes + self.runtime_reserve_bytes
                  + source_bytes + actual_auxiliary_bytes)
         if observed_bytes > limit:
-            raise RuntimeError(f'{label}: actual cgroup-plus-CUDA baseline {observed_bytes} exceeds declared '
+            raise RuntimeError(f'{label}: committed cgroup-plus-CUDA baseline {observed_bytes} exceeds declared '
                                f'metadata/runtime/source/auxiliary owners {limit}; reseal an admitted plan')
 
 

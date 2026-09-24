@@ -913,9 +913,18 @@ class StageBReplaySpill:
 
         Each arena is allocated one grid block over, to align its start.
         """
-        arenas = 0 if self._arenas else (
+        return self.capture_reserve_host_bytes + self.capture_reserve_device_bytes
+
+    @property
+    def capture_reserve_host_bytes(self):
+        """The pinned host arenas, until ``capture`` allocates them on entry."""
+        return 0 if self._arenas else (
             (self.arena_bytes + self._block) * self.telemetry["arenas"])
-        return arenas + self.geometry.batch_x_bytes
+
+    @property
+    def capture_reserve_device_bytes(self):
+        """Every target input the capture holds on the device until its backward."""
+        return self.geometry.batch_x_bytes
 
     @property
     def replay_reserve_bytes(self):

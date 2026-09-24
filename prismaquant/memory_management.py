@@ -33,6 +33,74 @@ DEFAULT_HOST_FLOOR_BYTES = 8*1024**3
 #: conservative single-budget arithmetic it was written against.
 SEPARATE_RESERVATIONS = "separates_cpu_and_device_reservations"
 
+#: The ``memory.stat`` keys the committed-memory definition reads. Every
+#: cgroup v2 kernel publishes them; a stat without one of them refuses rather
+#: than reading the missing key as zero.
+COMMITTED_MEMORY_STAT_KEYS = ('anon', 'file', 'shmem', 'file_dirty', 'file_writeback')
+
+
+def read_memory_stat(path) -> dict:
+    """Parse one cgroup ``memory.stat`` file into ``{key: bytes}``."""
+    stat = {}
+    for line in Path(path).read_text().splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            raise RuntimeError(f'cgroup memory.stat line is malformed: {line!r}')
+        stat[fields[0]] = int(fields[1])
+    return stat
+
+
+def clean_file_bytes(stat) -> int:
+    """File pages the kernel can drop without writing anything first.
+
+    ``file`` counts every page-cache page charged to the cgroup, including
+    tmpfs and shared memory (``shmem``) and pages still waiting to be written
+    (``file_dirty``, ``file_writeback``). What remains is clean cache: a read
+    of a checkpoint or an NFS source leaves it behind, and the kernel reclaims
+    it before it would refuse an allocation at ``memory.max``.
+    """
+    missing = [key for key in COMMITTED_MEMORY_STAT_KEYS if key not in stat]
+    if missing:
+        raise RuntimeError(
+            f'cgroup memory.stat lacks {missing}; the committed-memory '
+            'definition cannot be computed without them')
+    values = {key: stat[key] for key in COMMITTED_MEMORY_STAT_KEYS}
+    if any(type(value) is not int or value < 0 for value in values.values()):
+        raise RuntimeError(f'cgroup memory.stat values are invalid: {values}')
+    return max(0, values['file'] - values['shmem'] - values['file_dirty']
+               - values['file_writeback'])
+
+
+def committed_cgroup_bytes(current_bytes: int, stat) -> int:
+    """The cgroup memory that reclaim cannot free without writing it out.
+
+    This is the one committed-memory definition. The capture guard admits
+    against it, and the retained plan's observed-baseline check compares it
+    with its declared owners (PQ #1141): anon, shmem, kernel memory, dirty and
+    writeback file pages, and every other charge, which is ``memory.current``
+    less the clean file pages of :func:`clean_file_bytes`.
+
+    Clean file pages are never committed. ``memory.current`` counts them, so a
+    guard that reads ``memory.current`` refuses a row for page cache the
+    kernel would have dropped: on sparklina, the layer-44 own-source read left
+    about 21.8 GB of clean NFS cache charged beside 4.7 GB of anon, and the
+    retained plan refused a baseline that its declared owners held with about
+    20 GB to spare.
+
+    Written as a subtraction, not a sum of the committed keys, so that a charge
+    nobody listed here (reclaimable slab, socket buffers, zswap, swap cache)
+    stays committed. Pass a ``stat`` read BEFORE ``current_bytes``: cache that
+    grows between the two reads then counts as committed, which is the safe
+    side. Cache the kernel drops between the reads is the unsafe side, so the
+    result never falls below what the same stat states is committed outright
+    (anon, shmem, dirty and writeback pages).
+    """
+    if type(current_bytes) is not int or current_bytes < 0:
+        raise RuntimeError(f'cgroup memory.current is invalid: {current_bytes!r}')
+    clean = clean_file_bytes(stat)
+    stated = stat['anon'] + stat['shmem'] + stat['file_dirty'] + stat['file_writeback']
+    return max(current_bytes - clean, stated)
+
 
 def reserve_allocation(resource_check, label, *, cpu_bytes=0, device_bytes=0):
     """Charge one future allocation to the budget it actually belongs to.
@@ -141,14 +209,22 @@ class CaptureMemoryGuard:
     reservation is deliberately conservative even where charges overlap. The
     guard never changes a cache policy or drops system-wide page caches.
 
-    Every reading is ABSOLUTE: ``memory.current`` plus the whole CUDA
-    reservation for the process, not the growth a phase caused. ``check``
+    Every reading is ABSOLUTE: the cgroup's COMMITTED bytes
+    (:func:`committed_cgroup_bytes`, which is ``memory.current`` less the clean
+    file pages the kernel reclaims before it refuses an allocation) plus the
+    whole CUDA reservation for the process, not the growth a phase caused.
+    Every admission below reads committed bytes wherever it once read
+    ``memory.current``; the reading still carries the raw charge as
+    ``cgroup_current_bytes`` and ``conservative_cgroup_plus_cuda_reserved_bytes``
+    beside ``committed_cgroup_plus_cuda_reserved_bytes`` (PQ #1157). ``check``
     compares that absolute reading, plus the caller's future allocation, with
     the cgroup cap less the margin, so its own arithmetic is already in one
     unit. What is not in that unit is a phase PLAN, which states deltas; a
     caller that admits a plan against the raw cap is out by whatever this
     process already held. ``baseline`` is that floor, measured at the first
-    ``check``, and ``baseline_bytes`` is what such a caller subtracts.
+    ``check``, and ``baseline_bytes`` is what such a caller subtracts. It stays
+    the raw charge (``memory.current`` plus CUDA): the Tessera lane subtracts
+    it from its cap, and ``baseline['committed_bytes']`` is recorded beside it.
     ``peak_checkpoint`` and ``peak_by_checkpoint_prefix`` say where the peak
     was observed, so a plan that undercharges is attributable from one
     receipt instead of a rerun.
@@ -183,9 +259,9 @@ class CaptureMemoryGuard:
         (``104 GiB > 24 GiB``) after a 9.9 h prepare, on a check that had never
         passed since it landed (``c6baaeb70a``). In this mode ``check`` holds:
 
-          * ``memory.current + cuda_reserved + every reservation`` against
+          * ``committed + cuda_reserved + every reservation`` against
             ``cpu cap + device_bytes - MARGIN_BYTES``, the plan's own arithmetic;
-          * ``memory.current`` alone against ``cpu cap - MARGIN_BYTES``, because
+          * ``committed`` alone against ``cpu cap - MARGIN_BYTES``, because
             the kernel still enforces that cap whatever the sum says;
           * ``cuda_reserved + device reservation`` against ``device_bytes``;
           * the host's available memory against ``host_floor_bytes``.
@@ -201,7 +277,7 @@ class CaptureMemoryGuard:
         reservation). So when a caller states the device envelope, ``check``
         holds:
 
-          * the cgroup's own accounted bytes against ``cap - MARGIN_BYTES``,
+          * the cgroup's own committed bytes against ``cap - MARGIN_BYTES``,
             which is the CPU side the kernel enforces with ``--memory``;
           * ``torch.cuda.memory_reserved`` against ``device_bytes``, which is
             the device side (and ``enforce_device_envelope`` is what makes that
@@ -216,9 +292,9 @@ class CaptureMemoryGuard:
         the job can still draw on rather than something reserved from it.
 
         WITHOUT ``device_bytes`` the guard keeps its original conservative
-        predicate: ``memory.current`` plus the whole CUDA reservation against
+        predicate: committed bytes plus the whole CUDA reservation against
         ``cap - MARGIN_BYTES``. Every existing caller is in that mode, and its
-        arithmetic is unchanged.
+        arithmetic is unchanged apart from the committed-memory definition.
         """
         self.device = torch.device(device)
         if type(host_floor_bytes) is not int or host_floor_bytes < MIN_HOST_FLOOR_BYTES:
@@ -267,6 +343,7 @@ class CaptureMemoryGuard:
         self.failure = None
         self.peak_bytes = 0
         self.peak_cpu_bytes = 0
+        self.peak_committed_bytes = 0
         self.peak_device_bytes = 0
         self.peak_checkpoint = None
         self.peak_by_checkpoint_prefix = {}
@@ -336,7 +413,10 @@ class CaptureMemoryGuard:
                     'the two budgets apart')
             raw = (self.scope/'memory.max').read_text().strip()
             cap = self.cap_bytes if raw == 'max' else min(self.cap_bytes, int(raw))
+            # The stat first, then the charge: see committed_cgroup_bytes.
+            stat = read_memory_stat(self.scope/'memory.stat')
             current = int((self.scope/'memory.current').read_text())
+            committed = committed_cgroup_bytes(current, stat)
             reserved = int(torch.cuda.memory_reserved(self.device))
             host = _host_memory_info()
             if host is None or current < 0 or reserved < 0:
@@ -345,8 +425,11 @@ class CaptureMemoryGuard:
             if not 0 <= available <= total:
                 raise RuntimeError('capture host memory observations are invalid')
             self.last = dict(label=str(label), cgroup_current_bytes=current,
+                cgroup_committed_bytes=committed,
+                cgroup_clean_file_bytes=clean_file_bytes(stat),
                 cuda_reserved_bytes=reserved,
                 conservative_cgroup_plus_cuda_reserved_bytes=current+reserved,
+                committed_cgroup_plus_cuda_reserved_bytes=committed+reserved,
                 host_mem_available_bytes=available, cap_bytes=cap,
                 cpu_cap_bytes=self.cpu_cap_bytes,
                 future_allocation_bytes=reserve_bytes,
@@ -357,7 +440,7 @@ class CaptureMemoryGuard:
                 # is the conservative answer when the caller has not said which
                 # budget the device residency belongs to.
                 self.last['enforced'] = 'cgroup-plus-cuda-reserved'
-                over_budget = current+reserved+reserve_bytes > cap-self.margin_bytes
+                over_budget = committed+reserved+reserve_bytes > cap-self.margin_bytes
                 over_device = False
                 host_need = self.host_floor_bytes+reserve_bytes
             elif self.aggregate_envelope:
@@ -371,9 +454,9 @@ class CaptureMemoryGuard:
                     device_refusal_threshold_bytes=self.device_bytes,
                     host_floor_bytes=self.host_floor_bytes,
                     cpu_refusal_threshold_bytes=cap-self.margin_bytes)
-                over_budget = (current+reserved+reserve_bytes+reserve_device_bytes
+                over_budget = (committed+reserved+reserve_bytes+reserve_device_bytes
                                > cap+self.device_bytes-self.margin_bytes
-                               or current > cap-self.margin_bytes)
+                               or committed > cap-self.margin_bytes)
                 over_device = reserved+reserve_device_bytes > self.device_bytes
                 host_need = (self.host_floor_bytes+reserve_bytes
                              +reserve_device_bytes)
@@ -389,7 +472,7 @@ class CaptureMemoryGuard:
                     device_refusal_threshold_bytes=self.device_bytes,
                     host_floor_bytes=self.host_floor_bytes,
                     cpu_refusal_threshold_bytes=cap-self.margin_bytes)
-                over_budget = current+reserve_bytes > cap-self.margin_bytes
+                over_budget = committed+reserve_bytes > cap-self.margin_bytes
                 over_device = reserved+reserve_device_bytes > self.device_bytes
                 host_need = (self.host_floor_bytes+reserve_bytes
                              +reserve_device_bytes)
@@ -404,11 +487,15 @@ class CaptureMemoryGuard:
                 # producer-side constant can know a consumer's floor.
                 self.baseline = dict(label=str(label), bytes=current+reserved,
                     measured_in_process=True, cgroup_current_bytes=current,
-                    cuda_reserved_bytes=reserved)
+                    cuda_reserved_bytes=reserved,
+                    committed_bytes=committed+reserved,
+                    cgroup_committed_bytes=committed)
             if current+reserved > self.peak_bytes:
                 self.peak_bytes = current+reserved
                 self.peak_checkpoint = str(label)
             self.peak_cpu_bytes = max(self.peak_cpu_bytes, current)
+            self.peak_committed_bytes = max(self.peak_committed_bytes,
+                                            committed+reserved)
             self.peak_device_bytes = max(self.peak_device_bytes, reserved)
             # Labels carry a per-unit suffix after ':'; the prefixes are the
             # bounded set of phase names, so this attributes a peak to the
@@ -421,7 +508,8 @@ class CaptureMemoryGuard:
             if over_budget and self.aggregate_envelope:
                 raise RuntimeError(
                     f'capture aggregate memory refusal: the cgroup has '
-                    f'{current} bytes charged, {reserved} bytes are reserved on '
+                    f'{committed} bytes committed ({current} charged), '
+                    f'{reserved} bytes are reserved on '
                     f'{self.device} and {reserve_bytes+reserve_device_bytes} more '
                     f'is requested against a {cap+self.device_bytes}-byte aggregate '
                     f'envelope ({cap}-byte cgroup cap) less a '
@@ -429,7 +517,8 @@ class CaptureMemoryGuard:
             if over_budget:
                 raise RuntimeError(
                     f'capture CPU memory refusal: the cgroup has '
-                    f'{current} bytes charged and {reserve_bytes} more is '
+                    f'{committed} bytes committed ({current} charged) and '
+                    f'{reserve_bytes} more is '
                     f'requested against a {cap}-byte cap less a '
                     f'{self.margin_bytes}-byte margin')
             if over_device:
@@ -451,6 +540,7 @@ class CaptureMemoryGuard:
             aggregate_envelope=self.aggregate_envelope,
             margin_bytes=self.margin_bytes, host_floor_bytes=self.host_floor_bytes,
             peak_conservative_bytes=self.peak_bytes,
+            peak_committed_bytes=self.peak_committed_bytes,
             peak_checkpoint=self.peak_checkpoint,
             peak_by_checkpoint_prefix=dict(self.peak_by_checkpoint_prefix),
             baseline=None if self.baseline is None else dict(self.baseline),

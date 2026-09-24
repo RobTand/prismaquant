@@ -232,6 +232,7 @@ def test_selected_guard_measures_its_own_process_floor(tmp_path, monkeypatch):
     child.mkdir(parents=True)
     (root/'memory.max').write_text(str(16*gib))
     (root/'memory.current').write_text(str(gib))
+    (root/'memory.stat').write_text("anon 0\nfile 0\nshmem 0\nfile_dirty 0\nfile_writeback 0\n")  # no page cache (PQ #1157)
     (child/'memory.max').write_text('max')
     membership = tmp_path/'membership'
     membership.write_text('0::/job\n')
@@ -248,7 +249,7 @@ def test_selected_guard_measures_its_own_process_floor(tmp_path, monkeypatch):
     # The floor stays the first reading; the peak moves and says where.
     assert snapshot['baseline'] == dict(label='before_selected_capture_identity',
         bytes=3*gib, measured_in_process=True, cgroup_current_bytes=gib,
-        cuda_reserved_bytes=2*gib)
+        cuda_reserved_bytes=2*gib, committed_bytes=3*gib, cgroup_committed_bytes=gib)
     assert snapshot['peak_conservative_bytes'] == 6*gib
     assert snapshot['peak_checkpoint'] == 'before_selected_encoder_factors:layers.0.proj'
     assert snapshot['peak_by_checkpoint_prefix'] == {
@@ -450,6 +451,7 @@ def _row_is_admitted(tmp_path, mem_gb, memory_bytes, floor_bytes, monkeypatch):
     child.mkdir(parents=True, exist_ok=True)
     (root/'memory.max').write_text(str(mem_gb * 1024 ** 3))
     (root/'memory.current').write_text(str(floor_bytes))
+    (root/'memory.stat').write_text("anon 0\nfile 0\nshmem 0\nfile_dirty 0\nfile_writeback 0\n")  # no page cache (PQ #1157)
     (child/'memory.max').write_text('max')
     membership = tmp_path/'membership'
     membership.write_text('0::/job\n')

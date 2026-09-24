@@ -42,7 +42,7 @@ def test_source_and_metadata_are_load_bearing_not_free_capacity():
 def test_early_floor_check_refuses_unmeasured_extra_owners():
     b = budget()
     b.require_observed_baseline(observed_bytes=320, source_bytes=100, label='before_capture', actual_auxiliary_bytes=20)
-    with pytest.raises(RuntimeError, match='actual cgroup-plus-CUDA baseline'):
+    with pytest.raises(RuntimeError, match='committed cgroup-plus-CUDA baseline'):
         b.require_observed_baseline(observed_bytes=321, source_bytes=100, label='before_capture', actual_auxiliary_bytes=20)
 
 
