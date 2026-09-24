@@ -313,7 +313,7 @@ def observe_and_project_retained_windows(
         source_bytes, backward, record_operator, consume_probe,
         collect_col_energy, backend, guard=None, source_fingerprints=None,
         completed_names=(), sealed_windows=None, before_window=None, after_window=None,
-        spill=None):
+        spill=None, render_identities=False):
     """Replay all probes inside each admitted target's retained PWC lifetime.
 
     The selected-key-only PWC preflight and scalar target planner run before
@@ -339,6 +339,11 @@ def observe_and_project_retained_windows(
     capture, which the row cannot leave (PQ #1172).
     ``backward`` is not called for an active window in this mode.
 
+    ``render_identities`` asks the PWC loader threads to hash each render as
+    they load it (PQ #1192), for a ``record_operator`` that reads the hash
+    through ``cache.resident_render_identity`` instead of hashing the render
+    itself on every probe.
+
     ``source_bytes`` is the caller's declared, separately checked source-owner
     cap. Passing a varying per-layer observation here would change the sealed
     target-window roster. This utility does not check the pre-capture physical
@@ -362,6 +367,8 @@ def observe_and_project_retained_windows(
         raise TypeError('retained joint spill replay needs capture and replay callables')
     if type(collect_col_energy) is not bool:
         raise ValueError('retained joint replay column-energy flag must be boolean')
+    if type(render_identities) is not bool:
+        raise ValueError('retained joint replay render-identity flag must be boolean')
     for policy_key, budget_value in (
             ('max_statistics_bytes', retained_budget.statistics_cap_bytes),
             ('max_candidate_bytes', retained_budget.candidate_delta_bytes),
@@ -456,6 +463,7 @@ def observe_and_project_retained_windows(
                 max_load_buffer_bytes=retained_budget.load_buffer_bytes,
                 release_file_pages=True,
                 before_load_quantum=before_load_quantum if guard is not None else None,
+                render_identities=render_identities,
                 ) as candidate_receipt:
             for probe_index in range(n_probes):
                 require_sources()

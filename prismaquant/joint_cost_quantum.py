@@ -2165,8 +2165,9 @@ def run_layer_quantum_core(
             activation = activation_identity(fr.get_format(fmt), scales, name)
             if fmt in render_formats[name]:
                 # A measured render is the window's resident PWC tensor,
-                # read by every probe: hash it once per load (PQ #1192). The
-                # comparison below still runs on every probe.
+                # read by every probe: its loader thread hashed it once, when
+                # it loaded it (PQ #1192). The comparison below still runs on
+                # every probe.
                 rendered_identity = production_cache.resident_render_identity(
                     name, fmt, rendered)
             else:
@@ -2643,6 +2644,9 @@ def run_layer_quantum_core(
                 before_window=before_window,
                 after_window=after_window,
                 spill=spill_driver,
+                # The loader threads hash each render as they load it, so
+                # _record_joint_operator reads a hash (PQ #1192).
+                render_identities=True,
             )
             close_skipped_window()
         finally:

@@ -559,6 +559,49 @@ class ProductionWeightCache:
             raise RuntimeError('PWC window file storage estimate changed')
         return path, before, estimate, storage_bytes
 
+    def _prefill_window_archive_memo(self, keys, max_workers):
+        """Scan the selected files' archive directories on the loader pool.
+
+        Each scan opens one file and reads its ZIP end record and central
+        directory. On a Stage B window that is one cold read per candidate
+        of the declared file, and run one after another on the main thread
+        they were 14% of row 43's main-thread samples while the GPU idled
+        (PQ #1192). Here each distinct file is scanned once, on at most
+        ``max_workers`` threads (``_window_limits`` has already bounded that
+        by the assigned CPU affinity), with exactly the reads and stat checks
+        of ``_window_file``, and the result lands in the window's archive
+        memo.
+
+        This only warms the memo. The caller's serial preflight then runs
+        ``_window_file`` for every key as before: it re-stats each file and
+        uses a scan only when the file's stat signature still matches, and a
+        scan that failed here is simply missing, so the serial pass repeats
+        it and raises the same refusal, for the same first key, as before.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        memo = self._window_archive_memo()
+        pending = {}
+        for key in keys:
+            value = self.weights.get(key)
+            if not isinstance(value, (str, Path)):
+                continue
+            path = str(Path(self._path_for_value(value)).absolute())
+            if path not in memo:
+                pending.setdefault(path, key)
+        if not pending:
+            return
+
+        def scan(key):
+            try:
+                self._window_file(key)
+            except Exception:  # noqa: BLE001 -- the serial preflight refuses
+                pass           # this key again, in order, with the same error.
+
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(pending)),
+                                thread_name_prefix='pwc-archive-scan') as pool:
+            list(pool.map(scan, pending.values()))
+
     def _window_archive_memo(self):
         """Per-file archive storage totals for the current window lifetime.
 
@@ -638,6 +681,7 @@ class ProductionWeightCache:
         baseline = sum(self._window_resident_storages().values())
         if baseline > max_resident_bytes:
             raise RuntimeError('PWC existing resident storage exceeds retained window budget')
+        self._prefill_window_archive_memo(keys, max_workers)
 
         # Preflight every selected file before the first load. The persistent
         # charge is its complete archive storage, while the serialized file
@@ -712,7 +756,8 @@ class ProductionWeightCache:
     def retained_window(self, keys, *, max_resident_bytes: int, max_workers: int,
                         max_load_buffer_bytes: int | None = None,
                         release_file_pages: bool = False,
-                        before_load_quantum=None):
+                        before_load_quantum=None,
+                        render_identities: bool = False):
         """Keep many selected renders resident across repeated consumer passes.
 
         Only PWC owns the tensors. The existing prefetch pool loads bounded
@@ -725,6 +770,11 @@ class ProductionWeightCache:
         of physical reclaim; ``before_load_quantum`` may enforce a live host
         guard before the next load, on this thread, using current resident
         bytes, all remaining incoming storage and the next serialized buffer.
+
+        With ``render_identities``, each loader thread also hashes the tensor
+        it loaded (``_cb_cache_tensor_identity``) before the tensor is handed
+        out, and ``resident_render_identity`` serves that hash for the rest
+        of the load's lifetime (PQ #1192).
         """
         if getattr(self, '_resident_window_files', None) is not None:
             raise RuntimeError('PWC resident windows cannot be nested')
@@ -732,6 +782,8 @@ class ProductionWeightCache:
             raise ValueError('PWC window page release must be boolean')
         if before_load_quantum is not None and not callable(before_load_quantum):
             raise TypeError('PWC before_load_quantum must be callable')
+        if type(render_identities) is not bool:
+            raise ValueError('PWC window render identities must be boolean')
         (keys, quanta, files, file_costs, peak_buffer_bytes, buffer_cap) = (
             self._retained_window_preflight(
                 keys, max_resident_bytes=max_resident_bytes,
@@ -739,6 +791,7 @@ class ProductionWeightCache:
                 max_load_buffer_bytes=max_load_buffer_bytes))
         self._resident_window_files = files
         self._resident_window_receipt_keys = frozenset(file_costs)
+        self._resident_window_render_identities = render_identities
         try:
             loaded = 0
             remaining_incoming_bytes = sum(cost[2] for cost in file_costs.values())
@@ -789,6 +842,7 @@ class ProductionWeightCache:
             finally:
                 self._resident_window_files = None
                 self._resident_window_receipt_keys = frozenset()
+                self._resident_window_render_identities = False
                 self._forget_window_archive_bytes()
 
     @contextmanager
@@ -1506,6 +1560,19 @@ class ProductionWeightCache:
             # as its render identity, and is dropped with the receipt.
             self._file_load_receipts[key] = (tensor, observed, {})
 
+    def _loaded_render_identity(self, tensor, observed):
+        """Hash one just-loaded render on its loader thread, if the window asks.
+
+        Only a retained window opened with ``render_identities`` asks, and
+        only a load with a receipt (``observed``) can keep the result. The
+        tensor is still private to the loader thread here, so its bytes and
+        its guard are the ones the receipt records. ``hashlib`` releases the
+        GIL for each 8 MiB chunk, so the loaders hash in parallel.
+        """
+        if observed is None or not getattr(self, '_resident_window_render_identities', False):
+            return None
+        return {"rendered_identity": _cb_cache_tensor_identity(tensor)}
+
     def resident_render_identity(self, name: str, fmt: str, tensor) -> dict:
         """Return the content identity of one resident render, hashed once per load.
 
@@ -1591,14 +1658,16 @@ class ProductionWeightCache:
             if value is None or isinstance(value, torch.Tensor):
                 return None
             tensor, receipt = self._load_file_tensor(value, key)
-            return key, value, tensor, receipt
+            # Hashed here, on the loader thread, before the tensor is handed
+            # out, when the window asked for it (PQ #1192).
+            return key, value, tensor, receipt, self._loaded_render_identity(tensor, receipt)
 
         loaded_count = 0
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             for item in pool.map(_load_one, keys):
                 if item is None:
                     continue
-                key, original_value, tensor, receipt = item
+                key, original_value, tensor, receipt, derived = item
                 if isinstance(self.weights.get(key), torch.Tensor):
                     continue
                 self._check_expected_file_sha256(key, receipt)
@@ -1606,6 +1675,9 @@ class ProductionWeightCache:
                 self.weights[key] = tensor
                 self._record_lru_load(key, original_value, tensor)
                 self._record_file_load(key, tensor, receipt)
+                entry = (self._file_load_receipts or {}).get(key)
+                if derived and entry is not None and entry[0] is tensor:
+                    entry[2].update(derived)
                 if getattr(self, "_expected_file_sha256", None) is not None:
                     self.file_load_receipt(key, tensor)
                 loaded_count += 1
