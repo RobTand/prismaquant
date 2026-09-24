@@ -1,5 +1,97 @@
 # PrismaQuant Architecture
 
+The dispatcher derives Stage B's load-phase grace (2026-09-24,
+`ws-sb4/stage-io-baseline`, PB #480). `checkpoint-load` and `handoff-load`
+commit no progress units, so their grace is the phase's whole time budget.
+It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
+row as W + ceil(bytes / floor). W is the spec's
+`PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
+for every staged wait in the phase
+(`prismaquant/joint_adjoint_checkpoints.py:1705`,
+`prismaquant/joint_quantum_handoff.py:519`), so the phase waits at most W in
+total outside a PrismaBuild landing record. The bytes are the phase's count
+in the row's read plan. The built-in floor, 62,954,973 B/s, is the slowest
+30 s read window of the R13 layer-044 v4 and v5 gates (action keys
+`70e7baeb…`, `2dc14529…`), measured with one reader on the dl380g10 link.
+For layer 44 the grace is 300 + 546 = 846 s.
+
+The floor applies only at the concurrency it was measured at. The link-reader
+count is the number of quantum rows the dispatch publishes, never a silent 1.
+`--quantum ID` (repeatable) publishes only the named rows, and an unknown ID
+refuses. `--link-readers N` replaces the count. The built-in floor applies
+only when the count is 1. At any other count, the row needs a
+`--checkpoint-load-floor` document measured at that count. Without one, it
+takes the blanket 1800 s. A document measured at another count refuses. No
+concurrency discount is applied. Readers from other workloads on the same
+link, and rows published by an earlier dispatch, are not counted. A
+resubmitted row keeps the link count recorded in its first
+`quantum-submitted` event, even when `--quantum` or `--link-readers` gives
+this dispatch another count, so it stays the same action. A phase whose plan declares no bytes, or 0 bytes, also
+takes the blanket grace.
+
+Each row's stamps (mode, grace, W, bytes, reader count and its source,
+scope, and the floor with its source keys, or the reason for the blanket
+grace) ride the payload as `--progress-grace-derivation`. They also go into
+the dry-run row and the `quantum-submitted` state event. The quantum copies
+them into `results.json` and `counters.json`, including the failure
+counters, and reads nothing from them. Gates: `tests/test_load_phase_grace.py`,
+`tests/test_quantum_failure_counters.py`. This changes a dispatcher default
+(the load-phase grace) and adds three dispatcher options. No format,
+pipeline stage or ship gate changes.
+
+A failed Stage B quantum writes its counters (2026-09-24,
+`ws-sb4/stage-io-baseline`). `counters.json` was written only after the layer
+core returned, so the v4 and v5 gate failures left no record of their own
+phases. `run_layer_quantum` now calls `write_failure_counters` when an
+exception leaves the head or the core, before the runner's teardown. It
+closes every open span as `interrupted` and writes the counters with `units`
+done as `null`. An `outcome` block names the error type, the message and
+the spans it interrupted. A failure before the counters exist, in the head,
+writes the spans and the GPU power only. `status.json` and `cost.pkl` stay
+the success path's, and a success document now carries
+`outcome: {status: complete | gapped}`. The write never raises over the
+run's own error. It covers exceptions, not a SIGKILL: the host sampler
+remains the instrument for an out-of-memory kill. Gates:
+`tests/test_quantum_failure_counters.py`. No format, pipeline default, stage
+or ship gate changes.
+
+Stage B records its IO per phase, and the checkpoint loaders print a read
+rate (2026-09-24, `ws-sb4/stage-io-baseline`). The v6 gate is the IO baseline
+that later IO work (PQ #1142, #1143) measures against, and until now a quantum
+said nothing about its own reads between the head and the records.
+
+- **Spans** (`prismaquant/io_spans.py`). `IoSpanLog` opens and closes named
+  spans. Each span prints one `[io-span] {json}` line, with its wall time,
+  start and end epochs, the change in every `/proc/self/io` counter, and
+  the change in the residency map's `bytes_from_ram`/`bytes_from_stage`/
+  `bytes_from_pool`. It also carries the GPU power sampler's samples, joules
+  and mean watts against the 140 W envelope. Spans nest, and each record
+  names its parent. `stage_span_log` builds the same log for any stage, and
+  Stage A's split runs can open it unchanged.
+- **Stage B's spans.** `run_layer_quantum` opens spans for the head (to the
+  core), checkpoint-load or handoff-load, each chain layer, the own-source
+  install, each window, each (window, probe) replay, each probe's spill
+  capture, and records out. `counters.json` gains `io_spans`, every span
+  closed before the counters are written. The power sampler now starts
+  before the head, so the counters' `wall_s` and `gpu_joules` include the
+  head.
+- **What the counters see.** `/proc/self/io` covers the process's thread
+  group, including prefetch threads, and no child process. `read_bytes` is
+  storage-layer reads, and `rchar` includes page-cache hits. Neither names a
+  device or a mount. Pair spans with the host's diskstats and mountstats by
+  epoch. The three copies of the `/proc/self/io` reader (Stage A, Stage B,
+  the joint run) now call `io_spans.read_proc_io`.
+- **Rate lines.** `load_adjoint_checkpoint` and `load_handoff_inputs` print
+  `[read-rate] {json}` every 64 entries or 30 s, with entries, bytes, the
+  interval and mean MB/s, the ETA and the process's IO since the start.
+  They report no PrismaBuild units, because a read into a disposable scratch
+  is not durable work (PB #480).
+
+The IO path is unchanged: nothing reads or writes workload data for these.
+Gates: `tests/test_io_spans.py`, `tests/test_stageb_one_pass_spill.py`,
+`tests/test_quantum_band_serial.py`. No format, pipeline default, stage or
+ship gate changes.
+
 A staged-range reader waits on a leg PrismaBuild defers and refuses a span
 no leg covers at once (2026-09-24, `fix/1113-landing-verdict`, PQ #1113,
 PB #1018). PrismaBuild's landing record listed only the legs inside the

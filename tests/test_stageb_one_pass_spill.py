@@ -362,6 +362,49 @@ def test_layer_quantum_charges_each_phase_to_its_guard(campaign, monkeypatch):
         assert label in labels
 
 
+@pytest.mark.parametrize("spilled", [False, True], ids=["windowed", "spill"])
+def test_layer_quantum_opens_one_io_span_per_phase(campaign, monkeypatch, tmp_path,
+                                                   capsys, spilled):
+    """Every phase of a quantum has its ``/proc/self/io`` span, in counters.json.
+
+    The v6 IO baseline reads these: checkpoint-load, each chain layer, the
+    own-source install, each window, each (window, probe) replay and each
+    probe's spill capture. The checkpoint loader also prints rate lines.
+    """
+    from prismaquant.io_spans import PROC_IO_FIELDS, READ_RATE_MARKER
+
+    layer = 1
+    _clear_output(campaign, layer)
+    kwargs = ({"spill_root": _spill_root(tmp_path), "ceiling": 1 << 30}
+              if spilled else {})
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, **kwargs)
+    assert payload is not None, _chain(state.error)
+    spans = state.counters_block["io_spans"]
+    windows = len(campaign.preflight[layer])
+    chain = [int(c) for c in campaign.records[layer]["adjoint"]["chain_layers"]]
+    assert [s["span"] for s in spans].count("checkpoint-load") == 1
+    assert [s["layer"] for s in spans if s["span"] == "chain-layer"] == chain
+    assert [s["layer"] for s in spans if s["span"] == "own-source"] == [layer]
+    assert [s["window"] for s in spans if s["span"] == "window"] == list(range(windows))
+    replays = [s for s in spans if s["span"] == "replay"]
+    assert sorted((s["window"], s["probe"]) for s in replays) == [
+        (w, p) for w in range(windows) for p in range(N_PROBES)]
+    assert {s["mode"] for s in replays} == {"spill" if spilled else "window"}
+    assert {s["parent"] for s in replays} == {"window"}
+    captures = [s["probe"] for s in spans if s["span"] == "spill-capture"]
+    assert captures == (list(range(N_PROBES)) if spilled else [])
+    assert {s["outcome"] for s in spans} == {"ok"}
+    assert all(set(PROC_IO_FIELDS) <= set(s["proc_io"]) for s in spans)
+    assert {s["scope"] for s in spans} == {campaign.records[layer]["quantum_id"]}
+    rates = [json.loads(line[len(READ_RATE_MARKER) + 1:])
+             for line in capsys.readouterr().out.splitlines()
+             if line.startswith(READ_RATE_MARKER + " {")]
+    final = [r for r in rates if r["final"]]
+    assert [r["label"] for r in final] == ["checkpoint-load"]
+    assert final[0]["entries"] == final[0]["entries_total"] > 0
+    assert final[0]["bytes"] == final[0]["bytes_total"] > 0
+
+
 def _checkpoint_dir(campaign, layer):
     return Path(campaign.records[layer]["output_space"]["checkpoint_dir"])
 

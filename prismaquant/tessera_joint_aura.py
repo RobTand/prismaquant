@@ -2278,11 +2278,9 @@ def _load_plan(path, digest, *, projection_runtime=True, defer_pool_reads=False)
 
 
 def _io_counters():
-    values = {}
-    for line in Path("/proc/self/io").read_text().splitlines():
-        key, value = line.split(":", 1)
-        values[key] = int(value)
-    return values
+    from .io_spans import read_proc_io
+
+    return read_proc_io()
 
 
 ACTIVATION_SCALE_ENV = "PRISMAQUANT_PROD_ACT_SCALES"
