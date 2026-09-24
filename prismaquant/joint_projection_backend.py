@@ -193,6 +193,55 @@ def validate_projection_backend_identity(identity):
         raise ValueError('joint projection arithmetic has an unqualified backend identity')
 
 
+def qualified_shapes(config=None):
+    """The matrix shapes the selected backend is qualified on, read without CUDA.
+
+    Returns ``None`` for the reference backend, which accepts every shape.
+    For ``fused_fp32_v1`` it returns the packaged qualification's shapes as
+    ``(out, in)`` tuples. The selector is validated first, as the row's
+    prewarm validates it.
+    """
+    config = normalize_projection_backend(config)
+    if config['name'] == 'torch':
+        return None
+    return frozenset(tuple(int(size) for size in shape)
+                     for shape in _qualification()[0]['qualified_shapes'])
+
+
+def check_qualified_shapes(config, shapes, *, where, refusal=RuntimeError):
+    """Compare the shapes a row will reduce with its backend, before the row runs.
+
+    ``shapes`` are the ``(out, in)`` weight shapes of the row's joint
+    statistics targets. Every reduction is ``product_sum(operator, weight)``
+    with both operands shaped as the target's weight (``joint_aura.py``), so
+    these are exactly the shapes ``_FusedProjection.product_sum`` meets.
+
+    The qualification is a seal (PQ #1176), so this goes through
+    ``seal_check`` (PQ #1175). Certified mode raises ``refusal`` with a
+    message that names the unqualified shapes and the qualified set. Dev mode
+    prints one ``[DEV-MODE]`` line with the number of shapes that will run on
+    the reference arithmetic and the shapes themselves, and continues. At run
+    time those shapes then run ``(left * right).sum()``, as #1176 made them.
+
+    Returns the shapes that will run on the reference arithmetic, sorted.
+    """
+    qualified = qualified_shapes(config)
+    if qualified is None:
+        return []
+    shapes = sorted({tuple(int(size) for size in shape) for shape in shapes})
+    unqualified = [shape for shape in shapes if shape not in qualified]
+    listed = sorted(qualified)
+    message = ('%s: joint projection matrix shapes are outside the packaged qualification of %s: '
+               '%d of %d reduction shapes are unqualified %s; qualified shapes %s'
+               % (where, FUSED_NAME, len(unqualified), len(shapes), unqualified, listed))
+    seal_check('joint projection qualified shapes', listed, unqualified, same=not unqualified,
+               where='%s; %d of %d reduction shapes run the reference arithmetic '
+                     '(left * right).sum(): actual lists them, expected is the qualification of %s'
+                     % (where, len(unqualified), len(shapes), FUSED_NAME),
+               refusal=lambda: refusal(message))
+    return unqualified
+
+
 class _TorchProjection:
     @property
     def identity(self):

@@ -248,3 +248,84 @@ def test_the_reference_backend_accepts_every_shape(tmp_path, dispatch, monkeypat
     code, out, err = _main(dispatch, argv, capsys)
     assert code == 0, err
     assert _shape_lines(out) == []
+
+
+# ---- the check itself -------------------------------------------------------
+
+
+def _plan(model, projection_backend=FUSED):
+    execution = {} if projection_backend is None else {"projection_backend": projection_backend}
+    return {"model": str(model), "execution": execution}
+
+
+def _windows(names):
+    return {"windows": [{"window_index": 0, "members": [[name, "FMT-A"] for name in names]}]}
+
+
+@pytest.mark.parametrize("dev", ["0", "1"])
+def test_a_qualified_roster_passes_silently(tmp_path, monkeypatch, capsys, dev):
+    import dispatch_joint_quanta as dispatch
+    # Two of the first model's qualified shapes.
+    targets = {"model.layers.0.mlp.gate_proj": [7168, 2048],
+               "model.layers.0.mlp.down_proj": [2048, 7168]}
+    model = _header_only_checkpoint(tmp_path / "first", targets)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev)
+    assert dispatch.check_projection_shapes(
+        {"quantum_id": "layer-000", "layer": 0}, plan=_plan(model),
+        prepared_input=_windows(targets)) == []
+    assert "[DEV-MODE]" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("dev", ["0", "1"])
+def test_the_reference_backend_reads_nothing(tmp_path, monkeypatch, dev):
+    import dispatch_joint_quanta as dispatch
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev)
+    # No checkpoint exists at the plan's model: torch accepts every shape.
+    assert dispatch.check_projection_shapes(
+        {"quantum_id": "layer-002", "layer": 2},
+        plan=_plan(tmp_path / "absent", projection_backend=None),
+        prepared_input=_windows(GLM_TARGETS)) == []
+    assert dispatch.check_projection_shapes(
+        {"quantum_id": "layer-002", "layer": 2},
+        plan=_plan(tmp_path / "absent", projection_backend={"name": "torch"}),
+        prepared_input=_windows(GLM_TARGETS)) == []
+
+
+@pytest.mark.parametrize("dev", ["0", "1"])
+def test_a_target_the_headers_do_not_hold_refuses_in_both_modes(tmp_path, monkeypatch, dev):
+    import dispatch_joint_quanta as dispatch
+    model = _header_only_checkpoint(tmp_path / "glm", GLM_TARGETS)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev)
+    absent = LAYER + "experts.1.gate_proj"
+    with pytest.raises(dispatch.DispatchRefused, match="hold no weight for 1 target"):
+        dispatch.check_projection_shapes(
+            {"quantum_id": "layer-002", "layer": 2}, plan=_plan(model),
+            prepared_input=_windows([*GLM_TARGETS, absent]))
+
+
+def test_a_record_without_prepared_windows_reads_the_prepared_roster(
+        tmp_path, monkeypatch, capsys):
+    import dispatch_joint_quanta as dispatch
+    model = _header_only_checkpoint(tmp_path / "glm", GLM_TARGETS)
+    prepared = tmp_path / "prepared.json"
+    # A unit of another layer is not this quantum's target, and the
+    # checkpoint above does not hold it.
+    prepared.write_text(json.dumps({"formats_by_qname": {
+        **{name: ["FMT-A"] for name in GLM_TARGETS},
+        "model.language_model.layers.3.mlp.experts.0.gate_proj": ["FMT-A"]}}))
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    assert dispatch.check_projection_shapes(
+        {"quantum_id": "layer-002", "layer": 2,
+         "campaign": {"prepared_path": str(prepared)}},
+        plan=_plan(model), prepared_input=None) == list(GLM_SHAPES)
+    assert len(_shape_lines(capsys.readouterr().out)) == 1
+
+
+def test_a_selector_outside_the_qualification_refuses(tmp_path):
+    import dispatch_joint_quanta as dispatch
+    foreign = {"name": backend.FUSED_NAME,
+               "binary": {"path": "/other.so", "sha256": "0" * 64}}
+    with pytest.raises(dispatch.DispatchRefused, match="outside the packaged qualification"):
+        dispatch.check_projection_shapes(
+            {"quantum_id": "layer-002", "layer": 2}, plan=_plan(tmp_path, foreign),
+            prepared_input=_windows(GLM_TARGETS))

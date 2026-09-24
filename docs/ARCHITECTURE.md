@@ -1,5 +1,33 @@
 # PrismaQuant Architecture
 
+The joint dispatcher checks projection shapes before a row runs (2026-09-24,
+`fix/1175-projection-shape-check`, PQ #1175). The R13 Stage B plan selects
+the fused projection kernel `fused_fp32_v1`, whose packaged qualification
+covers six first-model shapes and none of GLM-5.3-Flash's. Nothing compared
+the two before a row ran, so v7's first attempt (PB `80dbab43…`) found out at
+its first `finish_observations`, after 480 s, 60.5 GB read and 43.3 GB
+written. Every joint reduction is `product_sum(operator, weight)`, and every
+operand has its target's weight shape `(out, in)` (`joint_aura.py`: `G.T @ X`,
+`G.T @ dX`, the source weight and each candidate `dW`). So
+`dispatch_joint_quanta.quantum_argv` now reads the weight shapes of the
+quantum's joint statistics targets (the members of the record's sealed
+prepared-input windows, or the prepared roster's units in the record's layer
+for a record without them) from the safetensors headers of the plan's `model`
+(the shard index and the headers only), and compares them with the selected
+backend's qualified shapes (`check_projection_shapes`,
+`joint_projection_backend.check_qualified_shapes`). The reference `torch`
+backend accepts every shape and reads nothing. The comparison is a seal
+through `seal_check`: certified mode refuses before anything is submitted,
+and names the unqualified shapes and the qualified set; dev mode prints one
+`[DEV-MODE]` line with the number of shapes that will run on the reference
+arithmetic and the shapes themselves, and publishes. At run time those
+shapes run `(left * right).sum()`, as PQ #1176 made them. A target whose
+weight the headers do not hold refuses in both modes: that shape cannot be
+checked. The packaged qualification, the plan's `projection_backend` and the
+backend identity do not change. Gate:
+`tests/test_projection_shape_check_1175.py`. No format, pipeline stage,
+record identity, lane or ship gate changes.
+
 The chain roll's host side overlaps the GPU (2026-09-24,
 `ws-rd/1162-chain-roll-overlap`, PQ #1162). `render_free_layer_roll` used
 to copy each backward's input cotangent to the host with a blocking copy,
@@ -33,7 +61,8 @@ activation policies and spill bound; the join; both dispatchers, including the
 joint dispatcher's source coverage check, which reads a re-declared plan or
 prepared completion by its on-disk bytes (`readset_coverage.quantum_rows_gaps`);
 the catalog extension; and the projection-backend runtime qualification and
-its qualified shapes. In dev mode the joint dispatcher also names the plan and prepared files in each
+its qualified shapes, which the joint dispatcher also compares with each
+row's target weight shapes before it submits the row (PQ #1175). In dev mode the joint dispatcher also names the plan and prepared files in each
 row's argv by the digests of their bytes on disk, so the quantum's own byte
 check passes on a re-declared file; certified mode names the record's
 digests, as before, and the quantum refuses a re-declared file
@@ -363,8 +392,9 @@ every call. In dev mode it prints one `[DEV-MODE]` line per shape and computes
 `(left * right).sum()`, the arithmetic the binary is qualified to equal; the
 binary never runs on that shape. Operands of different shapes, and a
 reduction with autograd enabled, refuse in both modes. The backend identity
-and the qualification file do not change. PQ #1175 tracks a check before the
-row that compares the qualified shapes with the model's. Gate:
+and the qualification file do not change. The check before the row that
+compares the qualified shapes with the model's is PQ #1175 (entry at the
+top). Gate:
 `tests/test_joint_projection_backend.py`. No format, pipeline stage, record
 identity or ship gate changes.
 
@@ -1907,8 +1937,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-rd/1162-chain-roll-overlap`.
+As of: 2026-09-24 · `fix/1175-projection-shape-check`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `fix/1175-projection-shape-check`) for **the
+projection shape check before the row** (PQ #1175): the joint dispatcher
+reads the quantum's target weight shapes from the checkpoint headers and
+compares them with the fused kernel's qualified shapes through `seal_check`.
+Certified mode refuses before submission; dev mode prints one `[DEV-MODE]`
+line and publishes. It adds a dispatcher gate; no format, default, pipeline
+stage, record identity, lane or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-rd/1162-chain-roll-overlap`) for **the chain
 roll's host side overlapping the GPU** (PQ #1162): cotangent copies with no
