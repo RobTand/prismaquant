@@ -190,7 +190,8 @@ def shared_adjoint_copy_plan(cotangents) -> tuple[bool, int]:
 
 
 def write_checkpoint_with_snapshot(storage, space, *, boundary, session, cotangents,
-                                   shared_pass, plane=None, attempt=None) -> dict:
+                                   shared_pass, plane=None, attempt=None,
+                                   batch_offset=0) -> dict:
     """Snapshot + hold + writer lifetime the actual Stage-A caller uses.
 
     Zero-copy borrowed snapshot when every accumulator is already CPU
@@ -208,6 +209,10 @@ def write_checkpoint_with_snapshot(storage, space, *, boundary, session, cotange
     roll produced them, and this writes the shared states and seals; a
     failure retains the attempt. With ``plane`` it is
     ``write_adjoint_checkpoint``'s read-back writer.
+
+    ``batch_offset`` (a chain split quantum, PQ #738) is the global index of
+    ``cotangents``' first batch: the snapshot is keyed by global batch, as
+    the checkpoint names every entry.
     """
     from .joint_adjoint_checkpoints import write_adjoint_checkpoint
 
@@ -233,6 +238,9 @@ def write_checkpoint_with_snapshot(storage, space, *, boundary, session, cotange
     needs_copy, copy_bytes = shared_adjoint_copy_plan(cotangents)
     if not needs_copy:
         snapshot = shared_adjoint_snapshot(cotangents)
+        if batch_offset:
+            snapshot = {(probe, batch_offset + batch): state
+                        for (probe, batch), state in snapshot.items()}
         try:
             return write(snapshot)
         finally:
@@ -244,7 +252,7 @@ def write_checkpoint_with_snapshot(storage, space, *, boundary, session, cotange
                 for batch in range(len(cotangents[probe])):
                     owner = cotangents[probe][batch]
                     owner_needs, _ = owner.snapshot_copy_plan()
-                    snapshot[(probe, batch)] = (
+                    snapshot[(probe, batch_offset + batch)] = (
                         owner.state_dict() if owner_needs else owner.borrowed_state_dict())
             return write(snapshot)
         finally:
@@ -879,13 +887,18 @@ def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
     }
 
 
-def _resumed_chain_inputs(plan, *, recovery, n_batches, n_probes):
+def _resumed_chain_inputs(plan, *, recovery, n_batches, n_probes, samples=None):
     """What a resumed chain reads, checked before anything is removed (PQ #1001).
 
     Returns ``(boundary_rows, own_boundaries, checkpoint_plane)``: every
     forward boundary reference by layer, the ones this generation wrote
     (the rest are the capsule's, already installed), and the sealed
     checkpoint's activation cotangent references by ``(probe, batch)``.
+
+    ``samples`` (a chain split quantum, PQ #738) is the ``(start, stop)`` of
+    global batches this owner rolls. The sealed checkpoint is still a whole
+    plane; the owner borrows only its range's boundaries and cotangents,
+    keyed by global batch.
     """
     from .joint_adjoint_checkpoints import reference_from_record
 
@@ -922,10 +935,17 @@ def _resumed_chain_inputs(plan, *, recovery, n_batches, n_probes):
         raise AdjointIdentityRefused(
             f"chain resume refused: checkpoint {plan.boundary} is not a whole "
             f"{n_probes} x {n_batches} cotangent plane")
+    if samples is not None:
+        start, stop = samples
+        own = [reference for boundary in range(num_layers) if str(boundary) not in recovered
+               for reference in rows[boundary][start:stop]]
+        plane = {(probe, batch): reference for (probe, batch), reference in plane.items()
+                 if start <= batch < stop}
     return rows, own, plane
 
 
-def _restore_resumed_chain(runner, storage, space, plan, *, inputs, partitions, n_probes):
+def _restore_resumed_chain(runner, storage, space, plan, *, inputs, partitions, n_probes,
+                           batch_offset=0):
     """The chain's state at the sealed checkpoint a resume starts from (PQ #1001).
 
     Rebuilt the way a layer quantum rebuilds its chain from a checkpoint
@@ -936,7 +956,9 @@ def _restore_resumed_chain(runner, storage, space, plan, *, inputs, partitions, 
     instead of a plane loaded into memory.
 
     Returns ``(batches, cotangents, grad_outs)`` as the uninterrupted run
-    holds them right after sealing checkpoint ``plan.boundary``.
+    holds them right after sealing checkpoint ``plan.boundary``. With
+    ``batch_offset`` (a split quantum, PQ #738) they are the uninterrupted
+    run's for the ``len(partitions)`` batches from that global index.
     """
     from .joint_adjoint_checkpoints import load_checkpoint_shared_states
 
@@ -950,7 +972,7 @@ def _restore_resumed_chain(runner, storage, space, plan, *, inputs, partitions, 
     return _chain_at_checkpoint(
         runner, storage, rows=rows, plane=plane, shared_adjoint=shared_adjoint,
         shared_pass=shared_pass, partitions=partitions, n_probes=n_probes,
-        num_layers=num_layers)
+        num_layers=num_layers, batch_offset=batch_offset)
 
 
 def _restore_seeded_chain(runner, storage, plan, *, partitions, n_probes, num_layers):
@@ -981,26 +1003,33 @@ def _restore_seeded_chain(runner, storage, plan, *, partitions, n_probes, num_la
 
 
 def _chain_at_checkpoint(runner, storage, *, rows, plane, shared_adjoint, shared_pass,
-                         partitions, n_probes, num_layers):
+                         partitions, n_probes, num_layers, batch_offset=0):
     """``(batches, cotangents, grad_outs)`` right after a checkpoint is sealed.
 
     ``rows`` maps each forward boundary the chain reads to its references by
     batch; ``plane`` maps ``(probe, batch)`` to the checkpoint's cotangent
-    reference.
+    reference. Both, and the shared states, are keyed by global batch; the
+    lists returned hold ``len(partitions)`` batches from ``batch_offset``
+    (0 but for a split quantum, PQ #738), in order.
     """
     from .joint_cost_quantum import _rebuild_batches
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
     n_batches = len(partitions)
-    batches = _rebuild_batches(runner, partitions=partitions, shared_pass=shared_pass)
+    batches = _rebuild_batches(
+        runner, partitions=partitions,
+        shared_pass={batch - batch_offset: state for batch, state in shared_pass.items()
+                     if batch_offset <= batch < batch_offset + n_batches})
     for batch_index, batch in enumerate(batches):
-        batch.activations_cpu = [rows[boundary][batch_index] if boundary in rows else None
+        batch.activations_cpu = [rows[boundary][batch_offset + batch_index]
+                                 if boundary in rows else None
                                  for boundary in range(num_layers)] + [torch.empty(0)]
     cotangents = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
                    for _ in batches] for _ in range(n_probes)]
     for (probe, batch), state in shared_adjoint.items():
-        cotangents[probe][batch].load_state_dict(state)
-    grad_outs = [[plane[(probe, batch)] for batch in range(n_batches)]
+        if batch_offset <= batch < batch_offset + n_batches:
+            cotangents[probe][batch - batch_offset].load_state_dict(state)
+    grad_outs = [[plane[(probe, batch_offset + batch)] for batch in range(n_batches)]
                  for probe in range(n_probes)]
     storage.watch_auxiliary(batches, cotangents)
     storage.check_auxiliary(batches, cotangents=cotangents)
@@ -1014,7 +1043,7 @@ def run_adjoint_capture_core(
     boundary_artifact_bytes=None, artifact_budget_stamp=None,
     min_free_gib=0.0, progress=None, produced_output=None, forward_recovery=None,
     chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
-    arithmetic_extra=None, chain_seed=None,
+    arithmetic_extra=None, chain_seed=None, chain_split=None,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -1074,6 +1103,17 @@ def run_adjoint_capture_core(
     the spec's ``through`` boundary and returns a seed receipt instead of an
     adjoint receipt. It runs no forward pass and no tail, writes no chain
     state, and refuses beside ``chain_resume`` or ``forward_recovery``.
+
+    ``chain_split`` (with ``chain_resume``, PQ #738) runs one part of a
+    resumed chain split by sample (``stage_a_chain_split``). A **prep**
+    (``{role: prep, through, ranges}``) seals the round's resume record and
+    removes the named ranges' rolling entries, and rolls nothing. A
+    **quantum** (``{role: quantum, through, samples, digest_layer}``)
+    rebinds the run's session as one owner of the global batches
+    ``samples``, rolls them from the lowest sealed checkpoint to
+    ``through``, seals a partial checkpoint of its range at every stride
+    checkpoint on the way, and returns a quantum receipt. The join publishes
+    each whole checkpoint from the partials.
     """
     from .cost_streaming import (
         StreamedBoundaryArtifacts,
@@ -1108,6 +1148,18 @@ def run_adjoint_capture_core(
         write_seed_marker,
     )
 
+    split = None
+    if chain_split is not None:
+        from .stage_a_chain_split import ChainSplitRefused, normalize_chain_split
+        try:
+            split = normalize_chain_split(chain_split)
+        except ChainSplitRefused as exc:
+            raise AdjointIdentityRefused(f"chain split refused: {exc}") from exc
+        if chain_resume is None or chain_seed is not None:
+            raise AdjointIdentityRefused(
+                "chain split refused: a split continues a run's own sealed chain, so it "
+                "is a chain resume and never a seed")
+    quantum = split is not None and split["role"] == "quantum"
     if chain_seed is not None:
         if chain_resume is not None or forward_recovery is not None:
             raise AdjointIdentityRefused(
@@ -1251,6 +1303,35 @@ def run_adjoint_capture_core(
                 resume_from=chain_resume.get("resume_from"))
         except ChainResumeRefused as exc:
             raise AdjointIdentityRefused(f"chain resume refused: {exc}") from exc
+    split_marks = ()
+    batch_offset = 0
+    samples = None
+    label = None
+    if split is not None:
+        from .stage_a_chain_split import (
+            ChainSplitRefused, check_ranges, partial_directory, quantum_label,
+            split_boundaries)
+        group_size = int(storage_policy["prefetch_batches"])
+        try:
+            split_marks = split_boundaries(boundaries, resume_plan.boundary,
+                                           split["through"])
+            if quantum:
+                samples = tuple(split["samples"])
+                check_ranges([samples], n_batches=len(row_offsets), group_size=group_size,
+                             where="the quantum's")
+                if split["digest_layer"] is not None and not (
+                        split["through"] <= split["digest_layer"] < resume_plan.boundary):
+                    raise ChainSplitRefused(
+                        f"the quantum rolls layers {resume_plan.boundary - 1} down to "
+                        f"{split['through']}; it never writes layer {split['digest_layer']}")
+        except ChainSplitRefused as exc:
+            raise AdjointIdentityRefused(f"chain split refused: {exc}") from exc
+        if quantum:
+            batch_offset = samples[0]
+            label = quantum_label(resume_plan.boundary, split["through"], *samples)
+        else:
+            return _split_prep(space, resume_plan, split, boundaries=boundaries,
+                               n_batches=len(row_offsets), group_size=group_size)
     seed_plan = None
     if chain_seed is not None:
         try:
@@ -1301,12 +1382,17 @@ def run_adjoint_capture_core(
         # Before the bind creates anything: this root is a seed's for good,
         # and the band tool refuses it (RobTand/prismaquant#1016).
         write_seed_marker(space, seed_plan, run_identity=run_identity)
-    with _failed_produced_output_record(space, storage), storage:
+    # A split quantum keeps its own record: several quanta fail independently.
+    failure_records = (None if label is None
+                       else _split_quantum_path(space, label, "produced-output.failures.jsonl"))
+    with _failed_produced_output_record(space, storage, path=failure_records), storage:
         if resume_plan is None:
             storage.bind(bind_identity, n_probes=n_probes, published=True)
         else:
+            # A split quantum is one owner of the run's generation among
+            # several: its status is its own file (PQ #738).
             storage.rebind(resume_plan.session, identity=bind_identity,
-                           n_probes=n_probes)
+                           n_probes=n_probes, owner_label=label)
         if produced_output is not None:
             # After bind, because the entry directory this owner chose is
             # what must sit inside the publication's bound output prefix;
@@ -1324,11 +1410,20 @@ def run_adjoint_capture_core(
                 # The fused roll reads every probe's incoming group beside
                 # the boundary group (RobTand/prismaquant#997).
                 **({"read_order": "sample_major"}
-                   if chain_regime["probe_fusion"] else {}))
+                   if chain_regime["probe_fusion"] else {}),
+                # A split quantum writes only its own range's groups (PQ #738).
+                **({"batch_range": samples} if quantum else {}))
             log("boundary capture: produced-output binding "
                 f"{produced_output.instance['owner_action_key']} "
                 f"prefix={produced_output.output_prefix} "
                 f"group={int(storage_policy['prefetch_batches'])}")
+        if quantum:
+            # What a later prep reads before it removes this range's rolling
+            # entries: the PrismaBuild owner that writes them (PQ #738).
+            storage.stamp_owner(
+                producer=producer_binding(produced_output),
+                split={"from": resume_plan.boundary, "through": split["through"],
+                       "samples": list(samples)})
         if progress is not None:
             # The initial boundary loop reports under the declared head
             # phase until the first forward observer fires. Entering moves
@@ -1361,6 +1456,8 @@ def run_adjoint_capture_core(
             # for its successor survives it. Each cotangent is the gradient
             # of its batch's input boundary cast to the runner dtype, so the
             # boundary entry's shape and that dtype are its exact spec.
+            # Keyed by global batch: a split quantum's partial names its
+            # range's entries as the whole checkpoint does (PQ #738).
             itemsize = torch.empty((), dtype=runner.dtype).element_size()
             specs = {}
             for batch in range(len(batches)):
@@ -1369,17 +1466,20 @@ def run_adjoint_capture_core(
                 for dim in shape:
                     nbytes *= dim
                 for probe in range(n_probes):
-                    specs[probe, batch] = (nbytes, shape, str(runner.dtype))
+                    specs[probe, batch_offset + batch] = (nbytes, shape, str(runner.dtype))
             return open_adjoint_checkpoint(
                 space, boundary=boundary, session=checkpoint_session(),
                 specs=specs,
-                shared_adjoint_keys=[(probe, batch)
+                shared_adjoint_keys=[(probe, batch_offset + batch)
                                      for probe in range(len(cotangents))
                                      for batch in range(len(cotangents[probe]))],
-                shared_pass_keys=range(len(batches)), owner=storage,
+                shared_pass_keys=range(batch_offset, batch_offset + len(batches)),
+                owner=storage,
                 # PQ #1036: the checkpoint names the owner's entries at this
                 # boundary instead of writing a second copy of the plane.
-                referenced=True)
+                referenced=True,
+                **({"directory": partial_directory(space, boundary, *samples)}
+                   if quantum else {}))
 
         def checkpoint_session():
             return {"generation": storage.session["generation"],
@@ -1387,12 +1487,13 @@ def run_adjoint_capture_core(
                     "run_identity_sha256": storage.session["run_identity_sha256"]}
 
         def seal_checkpoint(attempt) -> None:
-            shared_pass = {batch: batches[batch].shared_pass_state
+            shared_pass = {batch_offset + batch: batches[batch].shared_pass_state
                            for batch in range(len(batches))}
             record = write_checkpoint_with_snapshot(
                 storage, space, boundary=attempt.boundary,
                 session=checkpoint_session(), attempt=attempt,
-                cotangents=cotangents, shared_pass=shared_pass)
+                cotangents=cotangents, shared_pass=shared_pass,
+                **({"batch_offset": batch_offset} if quantum else {}))
             checkpoints.append(record)
             log(f"checkpoint published at boundary {attempt.boundary} "
                 f"({attempt.written_activations} cotangent entries)")
@@ -1401,21 +1502,29 @@ def run_adjoint_capture_core(
             # Every check first; the interrupted attempt's working entries
             # are removed only once the relaunch is known to continue it.
             inputs = _resumed_chain_inputs(resume_plan, recovery=recovery,
-                                           n_batches=len(row_offsets), n_probes=n_probes)
-            resume_record = apply_chain_resume(
-                space, resume_plan, producer=producer_binding(produced_output))
+                                           n_batches=len(row_offsets), n_probes=n_probes,
+                                           samples=samples)
+            offsets = (row_offsets if samples is None
+                       else row_offsets[samples[0]:samples[1]])
+            if not quantum:
+                resume_record = apply_chain_resume(
+                    space, resume_plan, producer=producer_binding(produced_output))
             batches, cotangents, grad_outs = _restore_resumed_chain(
                 runner, storage, space, resume_plan, inputs=inputs,
-                partitions=[calib_ids[offset:offset + batch_rows]
-                            for offset in row_offsets],
-                n_probes=n_probes)
-            checkpoints.extend(resume_plan.checkpoints)
+                partitions=[calib_ids[offset:offset + batch_rows] for offset in offsets],
+                n_probes=n_probes, batch_offset=batch_offset)
             chain_top = resume_plan.boundary
-            log(f"chain resume {resume_record['index']}: continuing below sealed "
-                f"checkpoint {chain_top}; removed "
-                f"{resume_record['removed_rolling_entries']} rolling entries, set aside "
-                f"{len(resume_record['partial_checkpoints_set_aside'])} partial "
-                "checkpoint directories")
+            if quantum:
+                # The prep ran the round's resume record once (PQ #738).
+                log(f"chain split quantum {label}: batches {samples[0]}:{samples[1]} "
+                    f"below sealed checkpoint {chain_top} down to {split['through']}")
+            else:
+                checkpoints.extend(resume_plan.checkpoints)
+                log(f"chain resume {resume_record['index']}: continuing below sealed "
+                    f"checkpoint {chain_top}; removed "
+                    f"{resume_record['removed_rolling_entries']} rolling entries, set "
+                    f"aside {len(resume_record['partial_checkpoints_set_aside'])} partial "
+                    "checkpoint directories")
         elif seed_plan is not None:
             batches, cotangents, grad_outs = _restore_seeded_chain(
                 runner, storage, seed_plan,
@@ -1428,14 +1537,22 @@ def run_adjoint_capture_core(
                 f"(sealed by implementation {seed_plan.sealed_by[:12]})")
         else:
             chain_top = num_layers
-        # A seed stops at its ``through`` boundary; every other run rolls to 0.
-        chain_bottom = 0 if seed_plan is None else seed_plan.through
+        # A seed stops at its ``through`` boundary, and so does a split
+        # quantum (PQ #738); every other run rolls to 0.
+        chain_bottom = (seed_plan.through if seed_plan is not None
+                        else split["through"] if quantum else 0)
         # A seed also seals its last plane, stride boundary or not: the plane
         # at ``through`` is its result, and the end of the walk retires the
         # rolling entries. The stride block and run identity keep the plan's
-        # boundaries (RobTand/prismaquant#997).
-        checkpoint_layers = (set(boundaries) if seed_plan is None
+        # boundaries (RobTand/prismaquant#997). A split quantum seals a
+        # partial at every stride checkpoint of its round.
+        checkpoint_layers = (set(split_marks) if quantum
+                             else set(boundaries) if seed_plan is None
                              else set(boundaries) | {seed_plan.through})
+        # A quantum's payload digests at one named layer, as it writes them:
+        # the bitwise check against another run's plane at that layer.
+        layer_digests = ({} if quantum and split["digest_layer"] is not None
+                         else None)
         # The seed's rolled plane at its compare boundary, hashed as written.
         plane_digests = ({} if seed_plan is not None and seed_plan.compare is not None
                          else None)
@@ -1600,19 +1717,27 @@ def run_adjoint_capture_core(
                            else None)
 
                 def roll(tensor, batch_index, probe_index):
+                    # ``batch_index`` is the roll's own position; the entry,
+                    # its checkpoint row and every digest name the global
+                    # batch (a split quantum starts at ``batch_offset``).
+                    batch = batch_offset + batch_index
                     if plane_digests is not None and layer == chain_bottom:
-                        plane_digests[probe_index, batch_index] = (
+                        plane_digests[probe_index, batch] = (
                             tensor_payload_sha256(tensor))
-                    # Layer 0 is the walk's last roll: no read follows it,
-                    # and its entries are retired right after the loop.
+                    if layer_digests is not None and layer == split["digest_layer"]:
+                        layer_digests[probe_index, batch] = (
+                            tensor_payload_sha256(tensor))
+                    # The walk's last roll: no read follows it. Its entries
+                    # are retired right after the loop, or kept by the
+                    # checkpoint that names them.
                     grad_outs[probe_index][batch_index] = storage.write(
-                        tensor, batch_index=batch_index, boundary_index=layer,
+                        tensor, batch_index=batch, boundary_index=layer,
                         probe_index=probe_index,
                         previous=grad_outs[probe_index][batch_index],
-                        **({} if layer > 0 else {"read_back": False}))
+                        **({} if layer > chain_bottom else {"read_back": False}))
                     if attempt is not None:
                         attempt.reference_activation(
-                            probe_index, batch_index,
+                            probe_index, batch,
                             grad_outs[probe_index][batch_index])
 
                 chain_backwards += render_free_layer_roll(
@@ -1667,7 +1792,7 @@ def run_adjoint_capture_core(
 
         storage.settle_local_output()
         boundary_entries: dict[str, list[dict]] = {}
-        if seed_plan is None:
+        if seed_plan is None and not quantum:
             for boundary in range(num_layers):
                 boundary_entries[str(boundary)] = [
                     exact_entry_record(batch.activations_cpu[boundary])
@@ -1677,6 +1802,45 @@ def run_adjoint_capture_core(
     receipt_stride = {"value": int(stride), "source": None,  # filled by caller
                       "boundaries": [int(b) for b in boundaries],
                       "max_chain_layers": int(stride) - 1}
+    if quantum:
+        from .stage_a_chain_split import QUANTUM_RECEIPT_SCHEMA
+        # One part of a split chain: its partials are the join's inputs,
+        # and it is never a band source itself (PQ #738).
+        receipt = {
+            "schema": QUANTUM_RECEIPT_SCHEMA,
+            "entry_point": ADJOINT_CAPTURE_ENTRY_POINT,
+            "status": "complete",
+            "run_identity": run_identity,
+            "stride": receipt_stride,
+            "boundary_storage": boundary_storage_block(recovery),
+            "split": {"label": label, "from": resume_plan.boundary,
+                      "through": split["through"], "boundaries": list(split_marks),
+                      "samples": list(samples)},
+            "implementation_sha256": str(implementation_sha256),
+            "partials": [{"boundary": record["boundary"],
+                          "directory": str(partial_directory(
+                              space, record["boundary"], *samples)),
+                          "cotangent_sha256": record["cotangent_sha256"],
+                          "cotangents": len(record["activation_entries"])}
+                         for record in checkpoints],
+            "digests": (None if layer_digests is None else {
+                "layer": split["digest_layer"],
+                "payload_sha256": {f"{probe}-{batch}": digest for (probe, batch), digest
+                                   in sorted(layer_digests.items())}}),
+            "retention": retention,
+            "artifact_budget_override": artifact_budget_stamp,
+            "telemetry": {
+                "started_unix": started,
+                "wall_s": time.time() - started,
+                "chain_wall_s": (time.time() - chain_started
+                                 if chain_started else None),
+                "chain_backwards": chain_backwards,
+                "chain_layers": chain_telemetry,
+            },
+            "dev_mode": dev_mode_stamp(),
+        }
+        receipt["telemetry"].update(_produced_output_block(storage))
+        return receipt
     if seed_plan is not None:
         # A seed is a measurement, never a campaign run: its receipt has its
         # own schema and file, and the band tool refuses its space
@@ -1754,6 +1918,50 @@ def run_adjoint_capture_core(
     return receipt
 
 
+def _split_quantum_path(space, label, suffix) -> Path:
+    """A split quantum's own file beside its receipt (PQ #738)."""
+    from .stage_a_chain_split import quantum_directory
+
+    return quantum_directory(space) / f"{label}.{suffix}"
+
+
+def _split_prep(space, plan, split, *, boundaries, n_batches, group_size) -> dict:
+    """A split round's prep (PQ #738): the resume record, run once; no roll.
+
+    ``plan_chain_resume`` has already checked the relaunch. This scopes its
+    leftovers to the ranges the prep launches, removes them, sets aside
+    those ranges' partials and owner status files, and seals the round's
+    resume record with the split stamped in it.
+    """
+    import dataclasses
+
+    from .stage_a_chain_resume import apply_chain_resume
+    from .stage_a_chain_split import (
+        PREP_RECEIPT_SCHEMA, ChainSplitRefused, apply_split_prep, prepare_split_prep)
+
+    started = time.time()
+    storage = plan.document["boundary_storage"]
+    generation = Path(storage["directory"]) / str(storage["session"]["generation"])
+    try:
+        prep = prepare_split_prep(space, plan, split, boundaries=boundaries,
+                                  generation_directory=generation, n_batches=n_batches,
+                                  group_size=group_size)
+    except ChainSplitRefused as exc:
+        raise AdjointIdentityRefused(f"chain split refused: {exc}") from exc
+    record = apply_chain_resume(space, dataclasses.replace(plan, leftovers=prep["leftovers"]),
+                                producer=None, split=prep["stamp"])
+    moved = apply_split_prep(prep, index=record["index"])
+    print(f"joint_cost_stage_a: chain split prep {record['index']}: rounds "
+          f"{plan.boundary} -> {split['through']} over {len(split['ranges'])} ranges; "
+          f"removed {record['removed_rolling_entries']} rolling entries, set aside "
+          f"{len(moved['set_aside'])} partials and owner files", flush=True)
+    return {"schema": PREP_RECEIPT_SCHEMA, "status": "complete", "resume": record,
+            "boundaries": prep["boundaries"], "ranges": split["ranges"],
+            "set_aside": moved["set_aside"],
+            "telemetry": {"started_unix": started, "wall_s": time.time() - started},
+            "dev_mode": dev_mode_stamp()}
+
+
 def _produced_output_block(storage) -> dict:
     """The owner's closing staging facts, as a receipt block that seals.
 
@@ -1784,7 +1992,7 @@ FAILED_PRODUCED_OUTPUT_RECORDS = "produced-output.failures.jsonl"
 
 
 @contextmanager
-def _failed_produced_output_record(space, storage):
+def _failed_produced_output_record(space, storage, *, path=None):
     """Keep the owner's staging records when the capture fails (PQ #1110).
 
     A finished capture seals them into its receipt
@@ -1808,7 +2016,10 @@ def _failed_produced_output_record(space, storage):
                     "unix": time.time(),
                     "error": f"{type(error).__name__}: {error}"[:2000],
                     **block}, sort_keys=True, default=repr, allow_nan=False)
-                with open(Path(space) / FAILED_PRODUCED_OUTPUT_RECORDS, "a") as out:
+                target = (Path(space) / FAILED_PRODUCED_OUTPUT_RECORDS if path is None
+                          else Path(path))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with open(target, "a") as out:
                     out.write(line + "\n")
         except Exception as record_error:            # noqa: BLE001
             print("joint_cost_stage_a: the failed capture's produced-output "
@@ -1942,7 +2153,7 @@ def run_adjoint_capture(
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
     prefetch_override=None, artifact_budget_bytes=None, forward_recovery=None,
     chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
-    chain_seed=None, head_walk=False,
+    chain_seed=None, head_walk=False, chain_split=None,
 ) -> dict:
     """Load the head phase and run the adjoint capture (one PB action).
 
@@ -1964,6 +2175,11 @@ def run_adjoint_capture(
     root that is not the plan's: the plan's ``output_root`` must be the
     source run's root instead. The seed receipt is written to
     ``seed-receipt.json``, never ``adjoint-capture.json``.
+
+    ``chain_split`` (with ``chain_resume``, PQ #738) runs one row of a split
+    round. A prep's receipt goes to ``split/preps/resume-NNN.json``; a
+    quantum's to ``split/quanta/<label>.json``; and each writes its results
+    and counters beside it, never over the run's own.
     """
     from .aura_cost import _aura_source_sha256
     from .calibration_data import load_calibration_input
@@ -2063,6 +2279,7 @@ def run_adjoint_capture(
         **({"chain_regime": regime_stamp} if regime_stamp is not None else {}),
         **({"chain_resume": dict(chain_resume)} if chain_resume is not None else {}),
         **({"chain_seed": dict(chain_seed)} if chain_seed is not None else {}),
+        **({"chain_split": dict(chain_split)} if chain_split is not None else {}),
         "env": {"host": socket.gethostname(), "started_epoch": time.time(),
                 "torch": str(torch.__version__), "cuda": torch.version.cuda,
                 "affinity": sorted(os.sched_getaffinity(0))},
@@ -2200,11 +2417,12 @@ def run_adjoint_capture(
             min_free_gib=config.get("min_free_gib", 0.0), progress=progress,
             produced_output=publication, forward_recovery=forward_recovery,
             chain_batch_size=chain_batch_size, chain_probe_fusion=chain_probe_fusion,
-            chain_resume=chain_resume, chain_seed=chain_seed,
+            chain_resume=chain_resume, chain_seed=chain_seed, chain_split=chain_split,
             arithmetic_extra={
                 "container_content_sha256": result["env"]["container_content_sha256"],
                 "projection_backend": projection_backend.identity})
-        receipt["stride"]["source"] = stride_source
+        if "stride" in receipt:
+            receipt["stride"]["source"] = stride_source
         receipt["device_envelope"] = result["device_envelope"]
         torch.cuda.synchronize()
         result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
@@ -2214,7 +2432,11 @@ def run_adjoint_capture(
         # Outside the run identity and the chain state: which arm read the
         # head is a fact about this launch, not about the science.
         receipt["head"] = head.record
-        if chain_seed is not None:
+        split_files = None
+        if chain_split is not None:
+            split_files = _write_split_receipt(space, receipt)
+            result["split_receipt"] = split_files["receipt"]
+        elif chain_seed is not None:
             from .stage_a_chain_seed import write_seed_receipt
             result["seed_receipt"] = write_seed_receipt(space, receipt)
             result["plane_comparison"] = (
@@ -2231,7 +2453,7 @@ def run_adjoint_capture(
         result["checkpoints"] = [
             {"boundary": entry["boundary"],
              "cotangent_sha256": entry["cotangent_sha256"]}
-            for entry in receipt["checkpoints"]]
+            for entry in receipt.get("checkpoints", receipt.get("partials", []))]
         result["passed"] = True
     except BaseException as error:
         # Said before any teardown. On 2026-09-21 the teardown below took the
@@ -2282,13 +2504,35 @@ def run_adjoint_capture(
         "artifact_preflight": result.get("artifact_preflight"),
         "device_envelope": result.get("device_envelope"),
     }
-    atomic_write_bytes(space / "counters.json",
+    # A split row's own files: several rows of one run finish independently.
+    counters_path, results_path = (
+        (space / "counters.json", space / "results.json") if split_files is None
+        else (Path(split_files["counters"]), Path(split_files["results"])))
+    atomic_write_bytes(counters_path,
                        (json.dumps(counters, sort_keys=True, indent=2,
                                    allow_nan=False) + "\n").encode())
-    atomic_write_bytes(space / "results.json",
+    atomic_write_bytes(results_path,
                        (json.dumps(result, sort_keys=True, indent=2,
                                    allow_nan=False) + "\n").encode())
     return result
+
+
+def _write_split_receipt(space, receipt) -> dict:
+    """Write a split row's receipt; return it and its results and counters paths."""
+    from .stage_a_chain_split import PREP_RECEIPT_SCHEMA, quantum_directory, split_root
+
+    if receipt["schema"] == PREP_RECEIPT_SCHEMA:
+        stem = split_root(space) / "preps" / f"resume-{receipt['resume']['index']:03d}"
+    else:
+        stem = quantum_directory(space) / receipt["split"]["label"]
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    payload = (json.dumps(receipt, sort_keys=True, indent=2, allow_nan=False)
+               + "\n").encode()
+    path = stem.with_name(stem.name + ".json")
+    atomic_write_bytes(path, payload)
+    return {"receipt": {"path": str(path), "sha256": hashlib.sha256(payload).hexdigest()},
+            "results": str(stem.with_name(stem.name + ".results.json")),
+            "counters": str(stem.with_name(stem.name + ".counters.json"))}
 
 
 def _chain_resume_argument(args):
@@ -2302,6 +2546,37 @@ def _chain_resume_argument(args):
         raise AdjointIdentityRefused(str(exc)) from exc
     return {"chain_state_sha256": args.resume_chain_state_sha256,
             "declaration": declaration, "resume_from": args.resume_from_checkpoint}
+
+
+def _chain_split_argument(args, parser):
+    """The core's ``chain_split`` from the split flags, or ``None`` (PQ #738)."""
+    if args.chain_split_prep is None and args.chain_split_quantum is None:
+        if args.chain_split_ranges is not None or args.chain_split_digest_layer is not None:
+            parser.error("--chain-split-ranges and --chain-split-digest-layer belong to "
+                         "a split prep or quantum")
+        return None
+    if args.chain_split_prep is not None and args.chain_split_quantum is not None:
+        parser.error("a row is a split prep or a split quantum, not both")
+    if args.resume_chain_state_sha256 is None or args.resume_from_checkpoint is None:
+        parser.error("a split row continues a run's sealed chain: it needs "
+                     "--resume-chain-state-sha256 and --resume-from-checkpoint")
+    from .stage_a_chain_split import ChainSplitRefused, parse_ranges
+    try:
+        if args.chain_split_prep is not None:
+            if args.chain_split_ranges is None or args.chain_split_digest_layer is not None:
+                parser.error("a split prep takes --chain-split-ranges and no digest layer")
+            return {"role": "prep", "through": args.chain_split_prep,
+                    "ranges": parse_ranges(args.chain_split_ranges)}
+        if args.chain_split_ranges is not None:
+            parser.error("a split quantum names its own samples in --chain-split-quantum")
+        pieces = args.chain_split_quantum.split(":")
+        if len(pieces) != 3 or not all(piece.isdigit() for piece in pieces):
+            parser.error("--chain-split-quantum is THROUGH:START:STOP")
+        through, start, stop = (int(piece) for piece in pieces)
+        return {"role": "quantum", "through": through, "samples": [start, stop],
+                "digest_layer": args.chain_split_digest_layer}
+    except ChainSplitRefused as exc:
+        parser.error(str(exc))
 
 
 def _chain_seed_argument(args):
@@ -2394,7 +2669,23 @@ def main(argv=None) -> int:
                              "writes a seed receipt the band tool refuses "
                              "(RobTand/prismaquant#1016)")
     parser.add_argument("--chain-seed-sha256", default=None)
+    parser.add_argument("--chain-split-prep", type=int, default=None, metavar="THROUGH",
+                        help="a split round's prep row (PQ #738): seal the round's "
+                             "resume record and remove the rolling entries of "
+                             "--chain-split-ranges; rolls nothing")
+    parser.add_argument("--chain-split-ranges", default=None, metavar="S:E,...",
+                        help="the sample ranges a split prep launches")
+    parser.add_argument("--chain-split-quantum", default=None,
+                        metavar="THROUGH:START:STOP",
+                        help="one split quantum (PQ #738): roll global samples "
+                             "START..STOP-1 from the lowest sealed checkpoint down "
+                             "to THROUGH, sealing a partial checkpoint of the range "
+                             "at every stride checkpoint on the way")
+    parser.add_argument("--chain-split-digest-layer", type=int, default=None,
+                        help="a split quantum also records each rolled payload's "
+                             "sha256 at this layer in its receipt")
     args = parser.parse_args(argv)
+    chain_split = _chain_split_argument(args, parser)
     if bool(args.chain_seed) != bool(args.chain_seed_sha256):
         parser.error("--chain-seed and --chain-seed-sha256 must be paired")
     if args.chain_seed is not None and (
@@ -2434,13 +2725,13 @@ def main(argv=None) -> int:
             chain_batch_size=args.chain_batch_size,
             chain_probe_fusion=args.chain_probe_fusion == "on",
             chain_resume=_chain_resume_argument(args),
-            chain_seed=_chain_seed_argument(args))
+            chain_seed=_chain_seed_argument(args), chain_split=chain_split)
     except AdjointIdentityRefused as exc:
         print(f"adjoint_identity_refused: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED
     print(json.dumps({key: result[key] for key in (
-        "command", "passed", "stride", "checkpoints", "plane_comparison")
-        if key in result}))
+        "command", "passed", "stride", "checkpoints", "plane_comparison",
+        "split_receipt") if key in result}))
     return EXIT_OK if result["passed"] else EXIT_FAILURE
 
 

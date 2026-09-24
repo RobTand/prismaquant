@@ -1243,7 +1243,7 @@ class AdjointCheckpointAttempt:
 def open_adjoint_checkpoint(
     space: str | os.PathLike, *, boundary: int, session: dict, specs: dict,
     shared_adjoint_keys, shared_pass_keys, owner, referenced: bool = False,
-    packed: bool | None = None,
+    packed: bool | None = None, directory: str | os.PathLike | None = None,
 ) -> AdjointCheckpointAttempt:
     """Reserve checkpoint ``boundary`` before the pass that produces its plane.
 
@@ -1261,6 +1261,11 @@ def open_adjoint_checkpoint(
     the roll hands each entry over with ``reference_activation``. Its shared
     states are one pack (v3, PQ #1037) unless ``packed=False``, as in
     ``write_adjoint_checkpoint``.
+
+    ``directory`` (a chain split quantum's partial checkpoint, PQ #738)
+    replaces ``checkpoints/boundary-NNN``: the attempt is written there, in
+    the same layout, and is not a checkpoint of ``space`` until the join
+    publishes one from every range's partial.
     """
     packed = bool(referenced) if packed is None else bool(packed)
     _checkpoint_schema(referenced=bool(referenced), packed=packed)
@@ -1280,7 +1285,8 @@ def open_adjoint_checkpoint(
     shared_adjoint = dict.fromkeys(shared_adjoint_keys)
     shared_pass = dict.fromkeys(shared_pass_keys)
     _checkpoint_shared_keys(shared_adjoint, shared_pass)
-    checkpoint_dir = checkpoint_directory(space, boundary)
+    checkpoint_dir = (checkpoint_directory(space, boundary) if directory is None
+                      else Path(directory))
     names = sorted(name for name, _ in _iter_shared_states(shared_adjoint, shared_pass))
     widest = int(owner.config["max_artifact_bytes"])
     return _reserve_checkpoint_attempt(

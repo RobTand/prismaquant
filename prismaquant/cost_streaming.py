@@ -279,6 +279,13 @@ class StreamedBoundaryArtifacts:
         #: and moves its bytes to the checkpoint ledger; its file stays.
         self._pinned_checkpoint_entries = {}
         self._resumed = False
+        #: A chain split quantum (PQ #738) is one of several owners of one
+        #: generation, each over its own sample range. Its status goes to
+        #: ``owners/<label>.json`` and never to ``generation.json``, which
+        #: stays the run's: one owner's clean exit does not say the run is
+        #: complete while another owner still rolls.
+        self._owner_label = None
+        self._owner_fields = {}
         self._attached_forward_inputs = frozenset()
         self._active_window = None
         self._check_memory = None
@@ -477,7 +484,8 @@ class StreamedBoundaryArtifacts:
         self._status = "running"
         self._publish_status()
 
-    def rebind(self, session, *, identity, n_probes, check_memory=None):
+    def rebind(self, session, *, identity, n_probes, check_memory=None,
+               owner_label=None):
         """Adopt this run's own published generation again (PQ #1001).
 
         A chain resume is the same run relaunched: it keeps the original
@@ -496,6 +504,11 @@ class StreamedBoundaryArtifacts:
 
         The rebound owner holds no entries yet. What the resumed chain reads
         is borrowed through :meth:`authorize_resume_inputs`.
+
+        ``owner_label`` (a chain split quantum, PQ #738) makes this owner one
+        of several of the generation: its status is written to
+        ``owners/<owner_label>.json`` beside ``generation.json``, which this
+        owner never rewrites.
         """
         from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
         if self.session is not None:
@@ -528,6 +541,12 @@ class StreamedBoundaryArtifacts:
                 "only an interrupted run (running or failed) resumes")
         if not (directory / "entries").is_dir():
             raise RuntimeError(f"the resumed generation has no entries at {directory}")
+        if owner_label is not None:
+            if (type(owner_label) is not str
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", owner_label)):
+                raise RuntimeError(
+                    f"an owner label is a plain file name, not {owner_label!r}")
+            self._owner_label = owner_label
         self._n_probes = n_probes
         self._check_memory = check_memory
         self._published = True
@@ -744,6 +763,29 @@ class StreamedBoundaryArtifacts:
                 "origins": len(self._references),
                 "origin_bytes": self.telemetry["live_artifact_bytes"]}
 
+    def status_path(self):
+        """The file this owner's status is written to.
+
+        ``generation.json`` for the generation's one owner; a chain split
+        quantum's own ``owners/<label>.json`` (PQ #738).
+        """
+        if self.directory is None:
+            return None
+        if self._owner_label is not None:
+            return self.directory / "owners" / f"{self._owner_label}.json"
+        return self.directory / "generation.json"
+
+    def stamp_owner(self, **fields):
+        """Add fields to a split owner's status file and write it now.
+
+        The producer binding a later prep reads for its containment check
+        is stamped here once the owner's produced output is bound.
+        """
+        if self._owner_label is None:
+            raise RuntimeError("only a split owner stamps its own status file")
+        self._owner_fields.update(fields)
+        self._publish_status()
+
     def _publish_status(self):
         if self.directory is None or self._readonly:
             return
@@ -751,10 +793,14 @@ class StreamedBoundaryArtifacts:
         data = {"schema": self.config["schema"], "session": self.session,
                 "policy": self.identity, "status": self._status,
                 "working_artifacts_reusable": False, "telemetry": self.telemetry}
+        if self._owner_label is not None:
+            data["owner"] = {"label": self._owner_label, **self._owner_fields}
         retained = self._retained_debt()
         if retained is not None:
             data["retained"] = retained
-        atomic_write_bytes(self.directory / "generation.json",
+        path = self.status_path()
+        path.parent.mkdir(exist_ok=True)
+        atomic_write_bytes(path,
             (json.dumps(data, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
 
     def checkpoint_cotangent_sink(self, records):
@@ -930,6 +976,13 @@ class StreamedBoundaryArtifacts:
         produced_group = None
         if self._produced is not None:
             self._produced_raise_stager_failure()
+            plan = self._produced_plan
+            if not plan["batch_start"] <= batch_index < plan["batch_stop"]:
+                # A split quantum's groups are its own range's (PQ #738):
+                # this entry's group belongs to another owner.
+                raise RuntimeError(
+                    f"batch {batch_index} is outside this owner's produced range "
+                    f"{plan['batch_start']}:{plan['batch_stop']}")
             produced_group = self._produced_group_for_write(
                 self._produced_group_key(
                     kind=kind, batch_index=batch_index,
@@ -2183,7 +2236,8 @@ class StreamedBoundaryArtifacts:
     def bind_produced_output(self, publication, *, group_size, n_batches,
                              max_entry_tensor_bytes,
                              staging_timeout_s=900.0, window_groups=None,
-                             read_order="probe_major", origin_lifetime=None):
+                             read_order="probe_major", origin_lifetime=None,
+                             batch_range=None):
         """Stage this generation's entries through ``publication``.
 
         Called after :meth:`bind`, because the entry directory this owner
@@ -2251,6 +2305,14 @@ class StreamedBoundaryArtifacts:
         export, in :meth:`settle_local_output`. ``origin_lifetime`` is the
         lifetime of those commits (#914) and is required for a write-only
         publication and refused for any other: ``retain`` or ``consumed``.
+
+        ``batch_range`` (a chain split quantum, PQ #738) is the ``(start,
+        stop)`` of global batches this owner writes, out of ``n_batches``.
+        ``start`` is a whole number of groups and ``stop`` is too, or is
+        ``n_batches``, so every group this owner writes is its own. A group
+        slot, a prewrite ahead of the writer and the local window stay
+        inside the range: a claim on the next group would claim another
+        owner's paths.
         """
 
         if self._produced is not None:
@@ -2268,6 +2330,14 @@ class StreamedBoundaryArtifacts:
                             ("max_entry_tensor_bytes", max_entry_tensor_bytes)):
             if type(value) is not int or value <= 0:
                 raise ValueError(f"produced output {name} must be a positive int")
+        batch_start, batch_stop = (0, n_batches) if batch_range is None else batch_range
+        if (type(batch_start) is not int or type(batch_stop) is not int
+                or not 0 <= batch_start < batch_stop <= n_batches
+                or batch_start % group_size
+                or (batch_stop % group_size and batch_stop != n_batches)):
+            raise ValueError(
+                f"produced output batch_range {batch_range!r} is not whole groups of "
+                f"{group_size} inside {n_batches} batches")
         entries = self.directory / "entries"
         if not publication.contains(entries):
             raise RuntimeError(
@@ -2320,6 +2390,8 @@ class StreamedBoundaryArtifacts:
         self._produced_read_order = read_order
         self._produced_plan = {"group_size": int(group_size),
                                "n_batches": int(n_batches),
+                               "batch_start": int(batch_start),
+                               "batch_stop": int(batch_stop),
                                "max_entry_tensor_bytes": int(max_entry_tensor_bytes),
                                "staging_timeout_s": float(staging_timeout_s),
                                "window_groups": int(window_groups),
@@ -2357,8 +2429,10 @@ class StreamedBoundaryArtifacts:
         from .produced_output_spool import (ProducedWindowRefused,
                                             two_plane_window_bytes)
         plan = self._produced_plan
+        # The owner's own batches: a split quantum holds its range's planes.
         need = two_plane_window_bytes(
-            n_probes=int(self._n_probes), n_batches=plan["n_batches"],
+            n_probes=int(self._n_probes),
+            n_batches=plan["batch_stop"] - plan["batch_start"],
             group_size=plan["group_size"],
             group_ceiling=lambda entries: publication.group_ceiling_bytes(
                 entries=entries,
@@ -2368,7 +2442,8 @@ class StreamedBoundaryArtifacts:
         if sealed is not None and sealed < need:
             raise ProducedWindowRefused(
                 f"the sealed local output window is {sealed} B; two cotangent "
-                f"planes of {self._n_probes} probes x {plan['n_batches']} "
+                f"planes of {self._n_probes} probes x "
+                f"{plan['batch_stop'] - plan['batch_start']} "
                 f"batches need {need} B. Seal the producer's spool bound at "
                 "the plan's two-plane window (tools/dispatch_joint_quanta.py "
                 "stage_a_spool_window_bytes)")
@@ -2724,7 +2799,7 @@ class StreamedBoundaryArtifacts:
                 return group
             following = (key[0], key[1], key[2], key[3] + 1)
             plan = self._produced_plan
-            if (following[3] * plan["group_size"] < plan["n_batches"]
+            if (following[3] * plan["group_size"] < plan["batch_stop"]
                     and following not in self._produced_groups
                     and following not in self._stager_preclaimed):
                 self._stager_preclaimed.add(following)
@@ -2788,7 +2863,7 @@ class StreamedBoundaryArtifacts:
         kind, boundary_index, probe, group_index = key
         plan = self._produced_plan
         start = group_index * plan["group_size"]
-        stop = min(start + plan["group_size"], plan["n_batches"])
+        stop = min(start + plan["group_size"], plan["batch_stop"])
         for batch_index in range(start, stop):
             slot = (f"boundary-{batch_index}-{boundary_index}" if probe < 0
                     else f"cotangent-{probe}-{batch_index}")
@@ -4645,8 +4720,9 @@ class StreamedBoundaryArtifacts:
             self._publish_status()
 
     def receipt(self):
+        path = self.status_path()
         out = {"policy": self.identity, "session": self.session, "status": self._status,
-                "generation_manifest": str(self.directory / "generation.json") if self.directory else None,
+                "generation_manifest": str(path) if path is not None else None,
                 "working_artifacts_reusable": False, "telemetry": dict(self.telemetry)}
         retained = self._retained_debt()
         if retained is not None:

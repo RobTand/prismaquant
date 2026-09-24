@@ -1,5 +1,29 @@
 # PrismaQuant Architecture
 
+Stage A chain split (2026-09-24, `ws-pl/stage-a-split`, PQ #738). A resumed
+Stage A reverse chain can run as several PrismaBuild rows over disjoint
+sample ranges instead of one owner. Below a sealed checkpoint the chain
+carries no state between calibration samples, so the rows between two
+stride checkpoints split by sample.
+
+- **A prep row per round** (`--chain-split-prep THROUGH
+  --chain-split-ranges S:E,...`) runs the round's chain resume once: it
+  writes the resume record, with the split stamped in it, and removes the
+  interrupted attempt's rolling entries of the ranges it names. It rolls
+  nothing.
+- **Quanta** (`--chain-split-quantum THROUGH:START:STOP`) each rebind the
+  run's generation as one of several owners, with their own status file,
+  roll one range of global sample indices for all probes down to
+  `THROUGH`, and seal a partial checkpoint of the range at every stride
+  checkpoint on the way. A range is whole read windows.
+- **A join per boundary** (`python -m prismaquant.stage_a_chain_split`)
+  verifies each partial's bytes, requires the partials to cover the whole
+  probe x sample plane, and publishes the checkpoint a single owner seals.
+
+See "Stage A chain split (#738)". Gate: `tests/test_stage_a_chain_split.py`,
+`tests/test_stage_a_split_produced_range.py`. No format, pipeline default or
+ship gate changes. A run without the split flags writes the same bytes.
+
 The dispatcher derives Stage B's load-phase grace (2026-09-24,
 `ws-sb4/stage-io-baseline`, PB #480). `checkpoint-load` and `handoff-load`
 commit no progress units, so their grace is the phase's whole time budget.
@@ -1577,8 +1601,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `fix/1113-landing-verdict`.
+As of: 2026-09-24 · `ws-pl/stage-a-split`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-pl/stage-a-split`) for **Stage A chain split**
+(PQ #738): a resumed reverse chain run as a prep row, sample-range quanta
+and a join per boundary; the split flags, several owners of one generation,
+a produced-output owner bound to a sample range, and the join tool. See
+"Stage A chain split (#738)". No format, default, stage or ship gate
+changes.
 
 Re-stamped (2026-09-24, `fix/1113-landing-verdict`) for **a staged-range
 reader that waits on a leg PrismaBuild defers past the refill horizon and
@@ -22872,6 +22903,97 @@ both digests and the largest bytes of two consecutive phases, the lead and
 next windows PrismaBuild admits together. The CLI validates the manifest with
 PrismaBuild's `validate_data_manifest` before it writes anything. No
 dispatcher submits a seed; a launcher seals the request from the package.
+
+### Stage A chain split (#738)
+
+A chain resume (#1001) relaunches one run's reverse chain as one owner. The
+chain split relaunches it as several PrismaBuild rows
+(`prismaquant/stage_a_chain_split.py`). Below a sealed checkpoint the
+reverse chain carries no state between calibration samples: each
+`(probe, batch)` cotangent and its shared-state owner roll through a layer
+on their own, and a batched or fused chain regime groups samples only
+inside one read window. So the layers between two stride checkpoints split
+by sample range, and any free GPU can run each range. Every split row is a
+chain resume: it takes `--resume-chain-state-sha256` and
+`--resume-from-checkpoint b`, and `plan_chain_resume` checks it as it
+checks any relaunch.
+
+**Rounds.** A round runs from the lowest sealed checkpoint `b` down to a
+lower stride checkpoint `through` (on GLM-5.3: 45 to 40, then 40 to 32,
+and so on). It is one prep row, one quantum per sample range, and one join
+per stride checkpoint in `[through, b)`, ordered by the campaign manifest.
+The next round resumes from the joined `through`.
+
+**The prep** (`--chain-split-prep THROUGH --chain-split-ranges S:E,...`)
+is the round's `apply_chain_resume`, run once, and rolls nothing. It checks
+that the ranges are disjoint and are whole read windows
+(`prefetch_batches`); the last range may end at the batch count. It removes
+only the rolling entries whose sample lies in a named range and that no
+sealed partial of another range names. It renames aside, never deletes, the
+named ranges' partial checkpoints and owner status files of the same round,
+and it refuses a partial of another range that overlaps a named range. The
+resume record (`resumes/resume-III.json`) gains a `split` stamp
+(`prismaquant.stage_a.chain_split.v1`: `from`, `through`, `boundaries`,
+`ranges`). A retry prep names only the ranges that failed, so every range
+that finished keeps its entries and its partials. Before it removes a
+range's entries it requires that range's PrismaBuild owner, if recorded as
+running, to be contained. Its receipt is `split/preps/resume-III.json`.
+
+**A quantum** (`--chain-split-quantum THROUGH:START:STOP`, optionally
+`--chain-split-digest-layer L` with `through <= L < b`) rolls the samples
+`[START, STOP)` for every probe:
+
+- It rebinds the run's generation as one owner among several
+  (`StreamedBoundaryArtifacts.rebind(owner_label=...)`). Its status goes to
+  `<generation>/owners/from-BBB-through-TTT-samples-SSSSSS-EEEEEE.json`,
+  never to `generation.json`, so the run still reads as interrupted to the
+  next round's prep.
+- Under a PrismaBuild publication it binds its produced output to its
+  range (`bind_produced_output(batch_range=)`): it claims and prewrites only
+  its own groups, and a write outside the range refuses.
+- It names every entry, cotangent row, shared state and digest by global
+  sample index. It borrows only its range's forward boundary entries and
+  checkpoint `b` rows, and restores only its range's shared states.
+- At each stride checkpoint in `[through, b)` it seals a partial checkpoint
+  in the layout of a whole one, at
+  `split/boundary-NNN/samples-SSSSSS-EEEEEE`. It stops at `through`: it
+  rolls nothing below it, and the entries at `through` stay because the
+  partial names them.
+- It writes no receipt at the run's receipt path. Its receipt,
+  `split/quanta/<label>.json`, lists its partials and, with a digest layer,
+  the payload digest of every cotangent it rolled at that layer.
+
+**The join** (`python -m prismaquant.stage_a_chain_split --output-root R
+--boundary N`, CPU only) publishes `checkpoints/boundary-NNN` from the
+partials at `N`. It reads each partial's manifest and requires it to be the
+writer's own serialization of a self-sealed record. It checks the pack's
+size and digest, every pack member's digest and every cotangent file's size.
+The partials must tile samples `0..n_batches` with no gap or overlap, and
+their rows must cover every probe and sample; a missing `(probe, sample)`
+refuses. It merges the cotangent rows and the shared-state members in name
+order into one pack and one manifest, the single owner's layout, so the
+band tool reads the result unchanged. A half-written target directory is
+renamed to `boundary-NNN.partial-join-III`; a sealed one refuses. Exit 2 on
+refusal.
+
+**What is checked, and what is not.** The split adds no comparison of a
+run's source, implementation, plan or session with a recorded one. It
+checks that the bytes it reads are the bytes written and that the plane it
+publishes is whole. Byte identity with a single owner is a test property,
+not a runtime check. Split rows still pass the relaunch checks
+`plan_chain_resume` and `rebind` make today; a separate sweep turns those
+into dev-mode stamps. The join requires all partials to carry one session,
+because a checkpoint record names one session and its readers hold every
+row to it.
+
+**Tests.** `tests/test_stage_a_chain_split.py` joins two quanta into the
+single owner's checkpoint, pack members and band, byte for byte, in the
+default regime, a batched, fused one, and R13's shape (several fused
+batches per read window). It chains two rounds through a joined checkpoint, and restores a non-empty shared adjoint. It also covers
+global indices, owner status files, the borrowed range, a retry prep and
+the join's refusals. `tests/test_stage_a_split_produced_range.py` runs the
+range-bound produced-output owner against PrismaBuild. No dispatcher
+submits split rows yet.
 
 ### Stage A dispatch requires the paced spool (#1012)
 

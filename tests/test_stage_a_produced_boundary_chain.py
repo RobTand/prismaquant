@@ -391,7 +391,7 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
                  gib: int = 4, staging_timeout_s: float = 900.0,
                  published=False, producer_environment=None, claim_capacity=None,
                  n_probes=1, read_order=None, storage_config=None,
-                 max_entry_tensor_bytes=1 << 14):
+                 max_entry_tensor_bytes=1 << 14, batch_range=None):
     """A real queue, admitted owner, declared template, bound publication,
     and a real ``StreamedBoundaryArtifacts`` writing inside its prefix.
 
@@ -399,7 +399,8 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
     roll's read order (``bind_produced_output``); the defaults are the
     probe-major roll every test here was written for. ``storage_config``
     overrides the owner's byte bounds and ``max_entry_tensor_bytes`` the
-    entry bound, for a fixture with larger entries (PQ #1128's profile)."""
+    entry bound, for a fixture with larger entries (PQ #1128's profile).
+    ``batch_range`` binds a split quantum's own range (PQ #738)."""
 
     _src, pb_repo = _pb_source()
     from prismaquant.staged_lease import set_lease_helper_root
@@ -454,7 +455,8 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
         publication, group_size=GROUP_SIZE, n_batches=n_batches,
         max_entry_tensor_bytes=max_entry_tensor_bytes,
         staging_timeout_s=staging_timeout_s,
-        **({"read_order": read_order} if read_order is not None else {}))
+        **({"read_order": read_order} if read_order is not None else {}),
+        **({"batch_range": batch_range} if batch_range is not None else {}))
     return storage, publication, q, env, pb_repo
 
 

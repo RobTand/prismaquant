@@ -182,6 +182,26 @@ def load_chain_state(space, sha256) -> dict:
     return document
 
 
+def read_chain_state(space) -> dict:
+    """The chain state as written, its own seal checked; no pinned digest.
+
+    For a reader that needs the run's numbers (a split join, PQ #738), not a
+    relaunch that must be the same run: the bytes must seal their own
+    content, and nothing is compared with a recorded digest.
+    """
+    path = chain_state_path(space)
+    try:
+        document = json.loads(path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise ChainResumeRefused(f"the run has no readable chain state at {path}") from exc
+    if (not isinstance(document, dict) or document.get("schema") != CHAIN_STATE_SCHEMA
+            or set(document) != _STATE_FIELDS
+            or _seal(document)["chain_state_sha256"] != document["chain_state_sha256"]):
+        raise ChainResumeRefused(f"{path} is not a {CHAIN_STATE_SCHEMA} document that "
+                                 "seals its own content")
+    return document
+
+
 def parse_declaration(text) -> dict | None:
     """``FROM:TO`` implementation digests, or ``None``."""
     if text is None:
@@ -445,10 +465,12 @@ def producer_binding(publication) -> dict | None:
             "queue_root": str(publication.queue.root)}
 
 
-def apply_chain_resume(space, plan: ChainResume, *, producer=None) -> dict:
+def apply_chain_resume(space, plan: ChainResume, *, producer=None, split=None) -> dict:
     """Remove the interrupted attempt's working entries and seal the resume record.
 
-    Runs after every check. Returns the record it sealed.
+    Runs after every check. Returns the record it sealed. ``split`` (a
+    chain split prep, PQ #738) is stamped into the record as ``split``; a
+    record without it keeps its bytes.
     """
     for path in plan.leftovers:
         path.unlink(missing_ok=True)
@@ -467,6 +489,7 @@ def apply_chain_resume(space, plan: ChainResume, *, producer=None) -> dict:
         "producer": producer,
         "removed_rolling_entries": len(plan.leftovers),
         "partial_checkpoints_set_aside": set_aside,
+        **({"split": split} if split is not None else {}),
     }, where="chain resume record")
     record = {**body, "record_sha256": canonical_json_sha256(body, where="chain resume record")}
     path = resume_directory(space) / f"resume-{plan.index:03d}.json"
