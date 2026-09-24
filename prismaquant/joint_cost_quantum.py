@@ -908,6 +908,62 @@ def quantum_layer_roster(runner, formats_by_qname, layer):
 # --------------------------------------------------------------------------
 
 
+def _verified_cells(production_cache) -> dict:
+    """The production cache's verified cells, keyed ``(qname, format)``."""
+    metadata = getattr(production_cache, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        raise ValueError("the production cache carries no metadata: refusing")
+    raw_verified = metadata.get("verified_cells")
+    if not isinstance(raw_verified, Mapping) or not raw_verified:
+        raise ValueError(
+            "the production cache carries no verified cells: refusing")
+    verified: dict[tuple[str, str], dict] = {}
+    for key, value in raw_verified.items():
+        if not isinstance(key, (list, tuple)) or len(key) != 2:
+            raise ValueError(
+                "a verified cell names no (qname, format) pair: refusing")
+        verified[(str(key[0]), str(key[1]))] = value
+    return verified
+
+
+def _verified_render_shapes(verified: Mapping, names, render_formats: Mapping
+                            ) -> dict[str, tuple[int, int]]:
+    """Each unit's render shape, which every render format must agree on.
+
+    Every cell must also carry its render digest: this is the check the
+    prepared-input bridge seals the digests after.
+    """
+    result: dict[str, tuple[int, int]] = {}
+    for name in names:
+        shapes = set()
+        for fmt in render_formats[name]:
+            cell = verified.get((name, fmt))
+            if not isinstance(cell, dict):
+                raise ValueError(
+                    f"prepared renders hold no verified cell for "
+                    f"{name}@{fmt}: refusing")
+            cell_digest = cell.get("render_file_sha256")
+            if type(cell_digest) is not str or not re.fullmatch(
+                    r"[0-9a-f]{64}", cell_digest):
+                raise ValueError(
+                    f"verified cell {name}@{fmt} carries no render digest: "
+                    "refusing")
+            shape = (cell.get("rendered_weight") or {}).get("shape")
+            if (not isinstance(shape, (list, tuple)) or len(shape) != 2
+                    or any(type(dim) is not int or dim <= 0
+                           for dim in shape)):
+                raise ValueError(
+                    f"verified cell {name}@{fmt} carries no render shape: "
+                    "refusing")
+            shapes.add(tuple(shape))
+        if len(shapes) != 1:
+            raise ValueError(
+                f"verified cell shapes disagree across {name!r} formats: "
+                "refusing")
+        result[name] = shapes.pop()
+    return result
+
+
 def derive_layer_prepared_inputs(record: dict, *, execution: Mapping,
                                  formats_by_qname: Mapping,
                                  production_cache,
@@ -970,52 +1026,13 @@ def derive_layer_prepared_inputs(record: dict, *, execution: Mapping,
             raise ValueError(
                 f"unit {name!r} has no measured render format: refusing")
         render_formats[name] = fmts
-    metadata = getattr(production_cache, "metadata", None)
-    if not isinstance(metadata, Mapping):
-        raise ValueError("the production cache carries no metadata: refusing")
-    raw_verified = metadata.get("verified_cells")
-    if not isinstance(raw_verified, Mapping) or not raw_verified:
-        raise ValueError(
-            "the production cache carries no verified cells: refusing")
-    verified: dict[tuple[str, str], dict] = {}
-    for key, value in raw_verified.items():
-        if not isinstance(key, (list, tuple)) or len(key) != 2:
-            raise ValueError(
-                "a verified cell names no (qname, format) pair: refusing")
-        verified[(str(key[0]), str(key[1]))] = value
+    verified = _verified_cells(production_cache)
     weights = getattr(production_cache, "weights", None)
     if not isinstance(weights, Mapping):
         raise ValueError("the production cache carries no weights: refusing")
-    stubs: dict[str, SimpleNamespace] = {}
-    for name in names:
-        shapes = set()
-        for fmt in render_formats[name]:
-            cell = verified.get((name, fmt))
-            if not isinstance(cell, dict):
-                raise ValueError(
-                    f"prepared renders hold no verified cell for "
-                    f"{name}@{fmt}: refusing")
-            cell_digest = cell.get("render_file_sha256")
-            if type(cell_digest) is not str or not re.fullmatch(
-                    r"[0-9a-f]{64}", cell_digest):
-                raise ValueError(
-                    f"verified cell {name}@{fmt} carries no render digest: "
-                    "refusing")
-            shape = (cell.get("rendered_weight") or {}).get("shape")
-            if (not isinstance(shape, (list, tuple)) or len(shape) != 2
-                    or any(type(dim) is not int or dim <= 0
-                           for dim in shape)):
-                raise ValueError(
-                    f"verified cell {name}@{fmt} carries no render shape: "
-                    "refusing")
-            shapes.add(tuple(shape))
-        if len(shapes) != 1:
-            raise ValueError(
-                f"verified cell shapes disagree across {name!r} formats: "
-                "refusing")
-        rows, columns = shapes.pop()
-        stubs[name] = SimpleNamespace(
-            weight=SimpleNamespace(shape=(rows, columns)))
+    stubs = {name: SimpleNamespace(weight=SimpleNamespace(shape=shape))
+             for name, shape in _verified_render_shapes(
+                 verified, names, render_formats).items()}
     try:
         retained = quantum_retained_state(execution)
         admitted = preflight_joint_operator_admission(
@@ -1090,6 +1107,79 @@ def derive_layer_prepared_inputs(record: dict, *, execution: Mapping,
             "unit_roster_sha256": unit_roster_sha256,
             "prepared_sha256": prepared_sha256,
             "windows": windows}
+
+
+def derive_layer_spill_bound(prepared_inputs: Mapping, *, execution: Mapping,
+                             production_cache, profile, model_config: Mapping,
+                             replay_regime=None, block: int) -> dict:
+    """Seal one layer quantum's spill bound for the one-pass replay.
+
+    The bound is ``spill_geometry`` over the layer's whole roster, with
+    every input the quantum's own geometry reads, taken from what the
+    record already seals:
+
+    * the retained windows and their members from ``prepared_inputs``
+      (:func:`derive_layer_prepared_inputs`), which the quantum resolves
+      and compares before it replays;
+    * each unit's shape from the production cache's verified render cells,
+      and its packed-expert role from ``profile``
+      (``joint_replay_spill.sealed_spill_targets``);
+    * the probe count, calibration shape and probe microbatch from the
+      plan's ``execution`` block, and the capture batch from the launch's
+      ``replay_regime``;
+    * the routed top-k from the source ``model_config`` (``config.json``);
+    * the 16-bit dtype the source runner measures in.
+
+    ``block`` is the direct-I/O grid the reservation is sized on, the one
+    input the plan does not carry; the scratch refuses a coarser live grid.
+    A resume spills a subset of the roster, which reserves no more.
+    """
+    from .joint_replay_regime import normalize_replay_regime
+    from .joint_replay_spill import (
+        SPILL_SEAL_DTYPE,
+        experts_per_token,
+        seal_spill_bound,
+        sealed_spill_targets,
+        spill_capture_batch_tokens,
+        spill_geometry,
+    )
+
+    windows = prepared_inputs.get("windows") if isinstance(
+        prepared_inputs, Mapping) else None
+    if not isinstance(windows, list) or not windows:
+        raise ValueError("a spill bound needs the layer's sealed prepared "
+                         "windows: refusing")
+    window_names: list[tuple[str, ...]] = []
+    render_formats: dict[str, list[str]] = {}
+    for window in windows:
+        names = []
+        for qname, fmt in window["members"]:
+            render_formats.setdefault(qname, []).append(fmt)
+            if qname not in names:
+                names.append(qname)
+        window_names.append(tuple(names))
+    shapes = _verified_render_shapes(_verified_cells(production_cache),
+                                     sorted(render_formats), render_formats)
+    execution = dict(execution)
+    capture_batch = normalize_replay_regime(replay_regime)["capture_batch"]
+    try:
+        geometry = spill_geometry(
+            sealed_spill_targets(shapes, profile), window_names,
+            pending=set(render_formats),
+            batch_tokens=spill_capture_batch_tokens(
+                execution["n_calib_samples"], execution["calib_seqlen"],
+                probe_microbatch=int(execution.get("probe_microbatch", 0)),
+                capture_batch=capture_batch),
+            n_probes=execution["n_probes"],
+            element_size=torch.empty((), dtype=getattr(
+                torch, SPILL_SEAL_DTYPE)).element_size(),
+            experts_per_token=experts_per_token(
+                SimpleNamespace(config=model_config)))
+        return seal_spill_bound(geometry, block=block,
+                                capture_batch=capture_batch,
+                                element_dtype=SPILL_SEAL_DTYPE)
+    except (RuntimeError, KeyError, TypeError) as exc:
+        raise ValueError(f"spill bound derivation refuses: {exc}") from exc
 
 
 def prepare_retained_window_read(window_index: int, *, record: Mapping,
@@ -1617,11 +1707,15 @@ def run_layer_quantum_core(
 
     from .joint_replay_spill import (
         REPLAY_SPILL,
+        SpillBoundRefused,
         StageBReplaySpill,
         experts_per_token,
+        require_sealed_spill_bound,
+        spill_capture_batch_tokens,
         spill_geometry,
         stage_b_spill_config,
     )
+    from .perturbed_x_cache import SpillGridRefused
 
     spill = None
     spill_config = stage_b_spill_config()
@@ -1656,19 +1750,49 @@ def run_layer_quantum_core(
             counters.replay["row_local_qdq"] = [list(pair) for pair in checked]
         spill_windows = [tuple(name for name in window["names"] if name in spill_pending)
                          for window in resolved_windows]
+        spill_batch_tokens = spill_capture_batch_tokens(
+            len(calib_ids), int(calib_ids.shape[1]),
+            probe_microbatch=probe_microbatch, capture_batch=capture_batch)
+        if len(spill_batch_tokens) != len(capture_groups):
+            raise RuntimeError("Stage B spill capture groups differ from the "
+                               "stored batches")
+        spill_element_size = torch.empty((), dtype=runner.dtype).element_size()
+        spill_top_k = experts_per_token(runner.model)
         spill_bound = spill_geometry(
             linears, spill_windows, pending=spill_pending,
-            batch_tokens=[sum(int(calib_ids[row_offsets[index]:row_offsets[index]
-                                            + batch_rows].numel()) for index in group)
-                          for group in capture_groups],
-            n_probes=n_probes,
-            element_size=torch.empty((), dtype=runner.dtype).element_size(),
-            experts_per_token=experts_per_token(runner.model))
-        spill = StageBReplaySpill(
-            root=spill_config[0], max_bytes=spill_config[1], geometry=spill_bound,
-            window_names=spill_windows, n_probes=n_probes, dtype=runner.dtype,
-            device=runner.device, accumulation=replay_regime["accumulation"],
-            chunk_rows=replay_regime["chunk_rows"])
+            batch_tokens=spill_batch_tokens, n_probes=n_probes,
+            element_size=spill_element_size, experts_per_token=spill_top_k)
+        # The ceiling is the record's sealed reservation for the whole roster
+        # (the dispatcher sets it). The quantum recomputes that geometry from
+        # its live modules before any GPU work; a resume's pending subset
+        # then reserves no more than the seal.
+        sealed_grid = None
+        if sealed_spill:
+            sealed_bound = sealed_block.get("spill_bound")
+            if sealed_bound is None:
+                raise QuantumIdentityRefused(
+                    f"quantum {quantum_id}: its executable readset is sealed for "
+                    "the spill replay but seals no spill bound; regenerate it")
+            roster_bound = spill_geometry(
+                linears, [tuple(window["names"]) for window in resolved_windows],
+                pending={name for name in names if render_formats[name]},
+                batch_tokens=spill_batch_tokens, n_probes=n_probes,
+                element_size=spill_element_size, experts_per_token=spill_top_k)
+            try:
+                sealed_grid = require_sealed_spill_bound(
+                    sealed_bound, roster_bound, capture_batch=capture_batch,
+                    element_dtype=str(runner.dtype).removeprefix("torch."),
+                    ceiling=spill_config[1])
+            except SpillBoundRefused as exc:
+                raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
+        try:
+            spill = StageBReplaySpill(
+                root=spill_config[0], max_bytes=spill_config[1], geometry=spill_bound,
+                window_names=spill_windows, n_probes=n_probes, dtype=runner.dtype,
+                device=runner.device, accumulation=replay_regime["accumulation"],
+                chunk_rows=replay_regime["chunk_rows"], max_block=sealed_grid)
+        except SpillGridRefused as exc:
+            raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
         counters.replay.update(mode=REPLAY_SPILL, spill_geometry=spill_bound.as_dict())
         if capture_batch > 1:
             counters.replay["capture_groups"] = len(capture_groups)

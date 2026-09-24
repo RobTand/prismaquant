@@ -46,7 +46,12 @@ The scratch is declared like the #956 cotangent sink: an environment root and
 a byte ceiling, forwarded by the campaign container launcher through an
 identity bind. The layer's spill bytes are bounded from geometry before any
 GPU work and the whole bound is allocated up front; see
-``perturbed_x_cache.StageBSpillScratch``. All spill I/O is direct
+``perturbed_x_cache.StageBSpillScratch``. The ceiling is not a spec literal:
+the record builder seals the layer's full-roster geometry and its reservation
+(:func:`seal_spill_bound`), the dispatcher sets the row's ceiling, and so
+PrismaBuild's ``spool_gb`` charge, from that reservation, and the quantum
+recomputes the geometry and refuses a record whose seal differs
+(:func:`require_sealed_spill_bound`). All spill I/O is direct
 (``O_DIRECT``, PQ #1060): the arena, the file and the read buffer share one
 slot layout on the file's direct-I/O grid (``_slot``), so each tensor
 writes from the pinned arena and reads back into the pinned read buffer
@@ -71,7 +76,7 @@ from .joint_aura import (
     select_invocation_gradient,
 )
 from .joint_replay_regime import OPERATOR_GEMM, PER_INVOCATION, normalize_replay_regime
-from .routed_experts import PackedExpertProjection
+from .routed_experts import PackedExpertProjection, ProfileRoutedExpertClassifier
 
 SPILL_ENV = ("PRISMAQUANT_STAGE_B_SPILL_ROOT", "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
 REPLAY_WINDOWED = "windowed"
@@ -102,6 +107,18 @@ READ_CALL_BYTES = 1 << 20
 READ_WORKERS = 4
 #: Writer and read-ahead threads by default; tests run the same I/O inline.
 DEFAULT_THREADS = True
+#: The sealed spill bound's schema (``executable_readset.spill_bound``).
+SPILL_BOUND_SCHEMA = "prismaquant.stage_b_spill_bound.v1"
+#: The direct-I/O grid a sealed spill bound is sized on unless the builder is
+#: told otherwise: 4 KiB, the page size and the ext4 block of the spill roots
+#: the campaign declares (the grid lina's root reported in PB 6f4f058751e6).
+#: It is the one input to the reservation that the plan does not carry. The
+#: scratch refuses a coarser live grid before it allocates the file
+#: (``StageBSpillScratch(max_block=...)``).
+SPILL_SEAL_BLOCK_BYTES = 4096
+#: The quantum measures in the streamed source's dtype, which is bfloat16
+#: (``joint_cost_quantum.build_quantum_source_runner``).
+SPILL_SEAL_DTYPE = "bfloat16"
 _TOP_K_KEYS = ("num_experts_per_tok", "num_experts_per_token", "moe_top_k",
                "num_active_experts")
 
@@ -122,7 +139,11 @@ def stage_b_spill_config(environ=None):
 def experts_per_token(model):
     """The declared routed top-k, or ``None`` when the config states none."""
     config = getattr(model, "config", None)
-    for candidate in (config, getattr(config, "text_config", None)):
+    # A config.json read as a mapping (the record builder, before any model
+    # exists) nests its text config the same way the live config does.
+    text_config = (config.get("text_config") if isinstance(config, Mapping)
+                   else getattr(config, "text_config", None))
+    for candidate in (config, text_config):
         if candidate is None:
             continue
         for key in _TOP_K_KEYS:
@@ -176,6 +197,68 @@ def require_row_local_activation_qdq(modules, specs_by_qname, activation_max_abs
                     "measures")
             checked[(fmt, width)] = name
     return sorted(checked)
+
+
+@dataclass(frozen=True)
+class SpillTarget:
+    """What the spill geometry reads of one target: its shape and its role.
+
+    ``packed`` is ``(module_qname, param_name, projection_name, expert_id)``
+    for a routed expert's view of a packed parameter, and ``None`` for a
+    target that spills every token. The quantum takes it from the live
+    module (:func:`spill_target`); the record builder takes it from the
+    verified render shape and the profile (:func:`sealed_spill_targets`).
+    """
+
+    out_features: int
+    in_features: int
+    packed: tuple | None = None
+
+
+def spill_target(module):
+    """The :class:`SpillTarget` of a live target (or of a sealed one)."""
+    if isinstance(module, SpillTarget):
+        return module
+    out_features, in_features = (int(size) for size in module.weight.shape)
+    if isinstance(module, PackedExpertProjection):
+        return SpillTarget(out_features, in_features,
+                           (module.module_qname, module.param_name,
+                            module.projection_name, int(module.expert_id)))
+    return SpillTarget(out_features, in_features)
+
+
+def sealed_spill_targets(shapes, profile):
+    """Spill targets from verified render shapes, before any model exists.
+
+    A name the profile classifies as a routed expert is a view of its
+    packed parameter, keyed as ``profile_declared_packed_expert_projections``
+    keys the live view: the qname is ``{module}.{expert}.{projection}`` and
+    the parameter is the projection's declared packed parent. Every other
+    name spills every token. The quantum recomputes the geometry from its
+    live modules and refuses a record whose seal differs
+    (:func:`require_sealed_spill_bound`), so a model that loads its experts
+    unpacked refuses rather than overrunning the sealed ceiling.
+    """
+    classifier = ProfileRoutedExpertClassifier(profile)
+    targets = {}
+    for name, shape in sorted(shapes.items()):
+        if (not isinstance(name, str) or not name or len(shape) != 2
+                or any(type(size) is not int or size <= 0 for size in shape)):
+            raise ValueError("a sealed spill target needs a named positive 2-D shape")
+        out_features, in_features = shape
+        match = classifier.classify(name)
+        if match is None:
+            targets[name] = SpillTarget(out_features, in_features)
+            continue
+        parts = name.rsplit(".", 2)
+        if len(parts) != 3 or not parts[1].isdigit() or not match.regex_declared:
+            raise ValueError(f"routed expert {name} has no declared per-expert view")
+        parent = profile.packed_expert_parent_for_projection(match.projection_name)
+        if not isinstance(parent, str) or not parent:
+            raise ValueError(f"routed expert {name} names no packed parent parameter")
+        targets[name] = SpillTarget(out_features, in_features,
+                                    (parts[0], parent, parts[2], int(parts[1])))
+    return targets
 
 
 @dataclass(frozen=True)
@@ -264,20 +347,21 @@ def spill_geometry(linears, window_names, *, pending, batch_tokens, n_probes,
             if name not in pending:
                 continue
             targets += 1
-            module = linears[name]
-            out_features, in_features = (int(size) for size in module.weight.shape)
+            target = spill_target(linears[name])
+            out_features, in_features = target.out_features, target.in_features
             widest = max(widest, out_features, in_features)
-            if isinstance(module, PackedExpertProjection):
-                key = (module.module_qname, module.param_name)
+            if target.packed is not None:
+                module_qname, param_name, projection_name, expert_id = target.packed
+                key = (module_qname, param_name)
                 width, experts = packed_in.setdefault(key, [in_features, set()])
                 if width != in_features:
                     raise RuntimeError(f"packed parameter input width differs for {name}")
-                experts.add(int(module.expert_id))
-                role = (key, module.projection_name)
+                experts.add(expert_id)
+                role = (key, projection_name)
                 width, experts = packed_out.setdefault(role, [out_features, set()])
                 if width != out_features:
                     raise RuntimeError(f"packed projection output width differs for {name}")
-                experts.add(int(module.expert_id))
+                experts.add(expert_id)
             else:
                 x_width += in_features
                 g_width += out_features
@@ -318,6 +402,138 @@ def spill_geometry(linears, window_names, *, pending, batch_tokens, n_probes,
         batch_bytes=(layer_x + layer_g) * widest_batch * element_size,
         largest_tensor_bytes=widest * widest_batch * element_size,
         max_parts=(n_probes + 1) * targets * len(batch_tokens))
+
+
+def spill_capture_batch_tokens(n_samples, seqlen, *, probe_microbatch, capture_batch):
+    """Tokens per capture group, grouped exactly as the quantum groups them.
+
+    The quantum stores ``probe_microbatch`` rows per batch (all rows when it
+    is 0) and captures ``capture_batch`` consecutive batches per pass, the
+    last group ragged. Every row holds ``seqlen`` tokens: the calibration
+    draw is refused unless it is exactly ``n_samples`` by ``seqlen``.
+    """
+    for label, value in (("sample count", n_samples), ("sequence length", seqlen),
+                         ("capture batch", capture_batch)):
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"Stage B spill {label} must be a positive integer")
+    if type(probe_microbatch) is not int or probe_microbatch < 0:
+        raise ValueError("Stage B spill probe microbatch must be a nonnegative integer")
+    batch_rows = min(probe_microbatch or n_samples, n_samples)
+    batches = [min(batch_rows, n_samples - start) * seqlen
+               for start in range(0, n_samples, batch_rows)]
+    return [sum(batches[start:start + capture_batch])
+            for start in range(0, len(batches), capture_batch)]
+
+
+def spill_reservation_bytes(total_bytes, max_parts, *, block):
+    """The spill file's reservation for a geometry on a ``block`` grid.
+
+    The one sizing rule (``StageBSpillScratch.reservation_bytes``) with the
+    spill's own slot padding: each part sits fewer than ``ADDRESS_ALIGNMENT``
+    bytes into a slot that ends on the next grid boundary. The scratch
+    reserves this; the record builder seals it as the row's ceiling, which
+    is also PrismaBuild's ``spool_gb`` charge.
+    """
+    from .perturbed_x_cache import StageBSpillScratch
+
+    if type(block) is not int or block < ADDRESS_ALIGNMENT or block & (block - 1):
+        raise ValueError(f"Stage B spill grid must be a power of two of at least "
+                         f"{ADDRESS_ALIGNMENT} bytes, not {block!r}")
+    return StageBSpillScratch.reservation_bytes(
+        total_bytes, parts=max_parts, part_padding=ADDRESS_ALIGNMENT, block=block)
+
+
+class SpillBoundRefused(RuntimeError):
+    """A sealed spill bound that is malformed or does not match its quantum."""
+
+
+_SPILL_BOUND_KEYS = frozenset(
+    {"schema", "block", "capture_batch", "element_dtype", "geometry",
+     "reservation_bytes"})
+
+
+def seal_spill_bound(geometry, *, block, capture_batch, element_dtype):
+    """The ``executable_readset.spill_bound`` block for one layer quantum.
+
+    ``geometry`` is the layer's full-roster :class:`SpillGeometry`: a fresh
+    run spills every target, and a resume spills a subset, which reserves
+    no more. ``reservation_bytes`` is :func:`spill_reservation_bytes` on the
+    ``block`` grid; the dispatcher sets the row's ceiling to it.
+    """
+    if not isinstance(geometry, SpillGeometry):
+        raise ValueError("a spill bound seals a SpillGeometry")
+    bound = {"schema": SPILL_BOUND_SCHEMA, "block": block,
+             "capture_batch": capture_batch, "element_dtype": element_dtype,
+             "geometry": geometry.as_dict(),
+             "reservation_bytes": spill_reservation_bytes(
+                 geometry.total_bytes, geometry.max_parts, block=block)}
+    check_spill_bound(bound)
+    return bound
+
+
+def check_spill_bound(bound):
+    """Validate a sealed spill bound and return its reservation in bytes.
+
+    The reservation must be what :func:`spill_reservation_bytes` computes
+    from the sealed geometry and grid: a bound whose ceiling was edited, or
+    computed by another rule, refuses.
+    """
+    if not isinstance(bound, Mapping) or set(bound) != _SPILL_BOUND_KEYS:
+        raise SpillBoundRefused(
+            f"a spill bound carries exactly {sorted(_SPILL_BOUND_KEYS)}")
+    if bound["schema"] != SPILL_BOUND_SCHEMA:
+        raise SpillBoundRefused(f"a spill bound has a foreign schema {bound['schema']!r}")
+    if type(bound["capture_batch"]) is not int or bound["capture_batch"] <= 0:
+        raise SpillBoundRefused("a spill bound seals no positive capture batch")
+    if bound["element_dtype"] not in {str(dtype).removeprefix("torch.")
+                                      for dtype in SPILL_DTYPES}:
+        raise SpillBoundRefused(
+            f"a spill bound seals no 16-bit dtype, but {bound['element_dtype']!r}")
+    geometry = bound["geometry"]
+    if not isinstance(geometry, Mapping):
+        raise SpillBoundRefused("a spill bound seals no geometry")
+    for key in ("total_bytes", "max_parts"):
+        if type(geometry.get(key)) is not int or geometry[key] < 0:
+            raise SpillBoundRefused(f"a spill bound's geometry seals no {key}")
+    try:
+        reservation = spill_reservation_bytes(
+            geometry["total_bytes"], geometry["max_parts"], block=bound["block"])
+    except ValueError as exc:
+        raise SpillBoundRefused(str(exc)) from exc
+    if bound["reservation_bytes"] != reservation:
+        raise SpillBoundRefused(
+            f"a spill bound seals a {bound['reservation_bytes']!r}-byte reservation, "
+            f"but its geometry needs {reservation} bytes on its "
+            f"{bound['block']}-byte grid")
+    return reservation
+
+
+def require_sealed_spill_bound(bound, geometry, *, capture_batch, element_dtype,
+                               ceiling):
+    """Refuse a launch whose spill differs from what its record sealed.
+
+    ``geometry`` is the quantum's own full-roster geometry from its live
+    modules and calibration draw. It, the capture batch and the dtype must
+    equal the sealed ones, and the declared ceiling must be the sealed
+    reservation (the dispatcher sets it so). Returns the sealed grid, the
+    coarsest the scratch may take (``StageBSpillScratch(max_block=...)``).
+    """
+    reservation = check_spill_bound(bound)
+    if not isinstance(geometry, SpillGeometry):
+        raise SpillBoundRefused("a spill bound is checked against a SpillGeometry")
+    live = {"capture_batch": capture_batch, "element_dtype": element_dtype,
+            "geometry": geometry.as_dict()}
+    for key, value in live.items():
+        if bound[key] != value:
+            raise SpillBoundRefused(
+                f"the record seals spill {key} {bound[key]!r}, but this quantum "
+                f"measures {value!r}; regenerate its executable readset")
+    if ceiling != reservation:
+        raise SpillBoundRefused(
+            f"the spill ceiling is {ceiling} bytes, but the record seals "
+            f"{reservation}; dispatch the row with tools/dispatch_joint_quanta.py, "
+            "which sets the ceiling from the record")
+    return bound["block"]
 
 
 def _is_dense(tensor):
@@ -587,12 +803,13 @@ class StageBReplaySpill:
     ``window_names`` are the sealed retained windows in index order, already
     reduced to their pending targets. ``threads`` runs the NVMe writer and
     the window read-ahead on their own threads; ``False`` does the same I/O
-    inline. ``None`` takes ``DEFAULT_THREADS``.
+    inline. ``None`` takes ``DEFAULT_THREADS``. ``max_block`` is the grid a
+    sealed ceiling was sized on (:func:`require_sealed_spill_bound`).
     """
 
     def __init__(self, *, root, max_bytes, geometry, window_names, n_probes,
                  dtype, device, threads=None, accumulation=PER_INVOCATION,
-                 chunk_rows=None):
+                 chunk_rows=None, max_block=None):
         from .perturbed_x_cache import StageBSpillScratch
 
         regime = normalize_replay_regime({"accumulation": accumulation,
@@ -631,7 +848,7 @@ class StageBReplaySpill:
         self._scratch = StageBSpillScratch(
             directory=root, max_bytes=max_bytes, nbytes=geometry.total_bytes,
             parts=geometry.max_parts, part_padding=ADDRESS_ALIGNMENT,
-            alignment=ADDRESS_ALIGNMENT)
+            alignment=ADDRESS_ALIGNMENT, max_block=max_block)
         self._block = block = self._scratch.block
         # A tensor's slot: its residue ahead of it, the grid's tail after it.
         pair = 2 * (geometry.largest_tensor_bytes + ADDRESS_ALIGNMENT + block)

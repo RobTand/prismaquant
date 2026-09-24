@@ -21,6 +21,7 @@ from pathlib import Path
 
 from prismaquant.joint_catalog_extension import (
     create_extension, extension_campaign_identity, require_extension)
+from prismaquant.joint_replay_regime import REPLAY_REGIME_ENV
 from prismaquant.stage_b_prep_io import (
     PreparationPublicationRefused, PreparationReadRefused, bind_preparation_publication,
     bind_staged_reads, publish_files, read_input)
@@ -343,6 +344,11 @@ def prepare(args):
         '--head-slices',
         # PQ #1011: the read plan is sealed for the spec's replay mode.
         '--replay-mode', replay_mode]
+    regime = (spec.get('env') or {}).get(REPLAY_REGIME_ENV)
+    if replay_mode == 'spill' and regime is not None:
+        # The spill bound counts parts per capture group, so each layer's
+        # seal takes the regime the spec launches every quantum in.
+        generator += ['--replay-regime', str(regime)]
     if publication is not None:
         # The generator files its groups under this action's publication.
         generator.append('--produced-output')

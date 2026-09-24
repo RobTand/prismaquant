@@ -740,11 +740,14 @@ def _check_event_order(events, manifest, *, layer, chain,
 
 
 def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
-                   replay_mode=None):
+                   replay_mode=None, spill_bound_edit=None, spill_ceiling=None):
     """One real run_layer_quantum_core with instrumented seams.
 
     ``replay_mode`` is the mode the executable plan is sealed for (PQ
-    #1011); the launch mode is the spill environment the caller set.
+    #1011); the launch mode is the spill environment the caller set. A
+    spill-sealed plan also seals the layer's spill bound, and a spill launch
+    takes its ceiling from it, as the dispatcher sets it; ``spill_bound_edit``
+    rewrites the sealed bound and ``spill_ceiling`` replaces that ceiling.
     """
     import contextlib
 
@@ -888,6 +891,38 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
         n_probes=n_probes, calib=dict(calib),
         render_prerequisite=dict(setup["render_prerequisite"]),
         replay_mode=replay_mode)
+    spill_bound = None
+    if replay_mode == "spill":
+        # The record builder seals the bound offline, from verified render
+        # shapes and the profile's packed-expert declaration
+        # (sealed_spill_targets). This fixture's routed experts are unpacked
+        # Linears, which only the live model shows, so the harness seals
+        # from the live targets (spill_target); the offline seal's equality
+        # with the live geometry is tested on a packed fixture
+        # (test_stage_b_spill_ceiling_sealed).
+        from prismaquant.joint_replay_spill import (
+            SPILL_ENV, SPILL_SEAL_BLOCK_BYTES, SPILL_SEAL_DTYPE,
+            experts_per_token, seal_spill_bound, spill_capture_batch_tokens,
+            spill_geometry, spill_target)
+        rows = torch.load(setup["calib_path"])
+        spill_bound = seal_spill_bound(spill_geometry(
+            {name: spill_target(roster.linears[name]) for name in roster.names},
+            [tuple(window["names"]) for window in resolved],
+            pending=set(roster.names),
+            batch_tokens=spill_capture_batch_tokens(
+                len(rows), int(rows.shape[1]),
+                probe_microbatch=int(execution.get("probe_microbatch", 0)),
+                capture_batch=1),
+            n_probes=n_probes, element_size=2,
+            experts_per_token=experts_per_token(runner.model)),
+            block=SPILL_SEAL_BLOCK_BYTES, capture_batch=1,
+            element_dtype=SPILL_SEAL_DTYPE)
+        if spill_bound_edit is not None:
+            spill_bound = spill_bound_edit(spill_bound)
+        if os.environ.get(SPILL_ENV[0]):
+            monkeypatch.setenv(SPILL_ENV[1], str(
+                spill_bound["reservation_bytes"] if spill_ceiling is None
+                else spill_ceiling))
     # Bind the executable block exactly as the post-capture regen does,
     # and run the bound generation: the hooks follow the block.
     from prismaquant.joint_layer_quanta import bind_quantum_executable
@@ -904,7 +939,7 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
         n_probes=n_probes,
         calib=dict(calib),
         render_prerequisite=dict(setup["render_prerequisite"]),
-        replay_mode=replay_mode)
+        replay_mode=replay_mode, spill_bound=spill_bound)
     monkeypatch.setenv(
         "PRISMABUILD_ACTION_PROGRESS_PHASES",
         json.dumps([p["name"] for p in manifest["read_plan"]["phases"]]))

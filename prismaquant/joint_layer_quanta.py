@@ -2848,7 +2848,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             prepared_inputs: Mapping | None = None,
                             head_slice: Mapping | None = None,
                             replay_mode: str | None = None,
-                            head_source: Mapping | None = None) -> dict:
+                            head_source: Mapping | None = None,
+                            spill_bound: Mapping | None = None) -> dict:
     """Bind a sealed executable read manifest to a NEW record generation.
 
     Returns a deep copy of ``record`` carrying an ``executable_readset``
@@ -2868,6 +2869,12 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     head slice's path, digest, size and schema, which is how the quantum
     finds its head. With ``replay_mode="spill"`` (PQ #1011) the block
     carries ``replay_mode``, which the quantum compares with its launch.
+    ``spill_bound`` (a spill row only) is the layer's sealed spill bound
+    (``joint_cost_quantum.derive_layer_spill_bound``): the dispatcher sets
+    the row's spill ceiling, and so its PrismaBuild ``spool_gb`` charge,
+    from its reservation, and the quantum recomputes its geometry. It is
+    not a manifest annotation, so the read plan and its digest are the
+    same with or without it.
     """
     import copy
     import os
@@ -2986,6 +2993,17 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     sealed_mode = manifest.get("annotations", {}).get("replay_mode")
     if sealed_mode is not None:
         fresh["executable_readset"]["replay_mode"] = sealed_mode
+    if spill_bound is not None:
+        if sealed_mode != "spill":
+            raise ValueError("a spill bound seals only a spill-mode readset: "
+                             "refusing")
+        from .joint_replay_spill import SpillBoundRefused, check_spill_bound
+        try:
+            check_spill_bound(spill_bound)
+        except SpillBoundRefused as exc:
+            raise ValueError(f"{exc}: refusing") from exc
+        fresh["executable_readset"]["spill_bound"] = copy.deepcopy(
+            dict(spill_bound))
     head_source_sealed = manifest.get("annotations", {}).get("head_source")
     if head_source_sealed is not None:
         # The loader compares its own head selection with these tensors
@@ -3010,7 +3028,8 @@ def emit_quantum_executable_readsets(
         prepared_inputs: Mapping | None = None,
         head_slice: Mapping | None = None,
         replay_mode: str | None = None,
-        head_source: Mapping | None = None) -> list[dict]:
+        head_source: Mapping | None = None,
+        spill_bound: Mapping | None = None) -> list[dict]:
     """The post-capture generation path for executable read manifests.
 
     For every record, derives the executable manifest, seals it, and binds
@@ -3022,7 +3041,8 @@ def emit_quantum_executable_readsets(
     quantum, in record order. Emits nothing to disk and mutates nothing:
     the post-capture regen writes the returned bytes and adopts the
     returned records. Duplicate quantum ids or manifest paths refuse whole
-    rather than binding half a campaign.
+    rather than binding half a campaign. ``spill_bound`` is the records'
+    layer's sealed spill bound (:func:`bind_quantum_executable`).
     """
     rows = list(records)
     if not rows:
@@ -3062,7 +3082,8 @@ def emit_quantum_executable_readsets(
                 layer_source_spans=layer_source_spans,
                 source_model_root=source_model_root,
                 prepared_inputs=prepared_inputs, head_slice=head_slice,
-                replay_mode=replay_mode, head_source=head_source),
+                replay_mode=replay_mode, head_source=head_source,
+                spill_bound=spill_bound),
             "manifest": manifest,
             "manifest_path": manifest_path,
             "manifest_sha256": manifest_sha256,

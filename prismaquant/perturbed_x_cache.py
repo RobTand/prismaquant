@@ -1091,6 +1091,10 @@ class ExactCotangentScratch:
         self._written.clear()
 
 
+class SpillGridRefused(RuntimeError):
+    """The live direct-I/O grid is coarser than the grid a ceiling was sealed on."""
+
+
 class StageBSpillScratch:
     """One job-local spill file for Stage B's one-pass replay (PQ #994).
 
@@ -1152,8 +1156,27 @@ class StageBSpillScratch:
                 "and overlay are refused)")
         return resolved
 
+    @staticmethod
+    def reservation_bytes(nbytes, *, parts, part_padding, block):
+        """The file bytes ``__init__`` reserves on a ``block`` grid.
+
+        ``nbytes`` of payload, then ``parts * (part_padding + block)`` of slot
+        padding, rounded up to the grid. This is the one sizing rule for the
+        spill: the scratch reserves it, and the record builder seals it as the
+        row's ceiling and PrismaBuild demand
+        (``joint_replay_spill.spill_reservation_bytes``).
+        """
+        for label, value in (("payload", nbytes), ("parts", parts),
+                             ("part padding", part_padding)):
+            if type(value) is not int or value < 0:
+                raise ValueError(f"Stage B spill {label} must be a nonnegative integer")
+        if type(block) is not int or block <= 0 or block & (block - 1):
+            raise ValueError("Stage B spill grid must be a power of two")
+        capacity = nbytes + parts * (part_padding + block)
+        return capacity + (-capacity % block)
+
     def __init__(self, *, directory, max_bytes, nbytes, parts=0, part_padding=0,
-                 alignment=1):
+                 alignment=1, max_block=None):
         """Reserve ``nbytes`` of payload plus the padding ``parts`` slots may need.
 
         ``block`` is the grid every offset, length and buffer address must
@@ -1165,7 +1188,12 @@ class StageBSpillScratch:
         ``parts`` slots starts on a ``block`` boundary, is placed fewer than
         ``part_padding`` bytes into it, and ends on the next boundary, so the
         file reserves ``parts * (part_padding + block)`` bytes beyond the
-        payload. The ceiling covers the whole reservation.
+        payload (:meth:`reservation_bytes`). The ceiling covers the whole
+        reservation.
+
+        ``max_block`` is the grid a sealed ceiling was sized on. A coarser
+        live grid refuses with :class:`SpillGridRefused` before the file is
+        allocated: its reservation would exceed the sealed one.
         """
         import tempfile
         self._file = None
@@ -1178,6 +1206,9 @@ class StageBSpillScratch:
             raise ValueError("Stage B spill slot bound must be nonnegative integers")
         if type(alignment) is not int or alignment <= 0 or alignment & (alignment - 1):
             raise ValueError("Stage B spill alignment must be a power of two")
+        if max_block is not None and (type(max_block) is not int or max_block <= 0
+                                      or max_block & (max_block - 1)):
+            raise ValueError("Stage B spill sealed grid must be a power of two")
         if nbytes > max_bytes:
             # The payload alone is over: refuse before a file exists.
             raise RuntimeError(
@@ -1194,8 +1225,13 @@ class StageBSpillScratch:
                 raise RuntimeError(
                     f"Stage B spill filesystem block {filesystem} is not a power of two")
             self.block = max(_direct_io_block(fd), filesystem, alignment)
-            capacity = nbytes + parts * (part_padding + self.block)
-            capacity += -capacity % self.block
+            if max_block is not None and self.block > max_block:
+                raise SpillGridRefused(
+                    f"Stage B spill direct-I/O grid is {self.block} bytes on {root}, "
+                    f"coarser than the {max_block}-byte grid its ceiling was "
+                    "sealed on")
+            capacity = self.reservation_bytes(
+                nbytes, parts=parts, part_padding=part_padding, block=self.block)
             if capacity > max_bytes:
                 raise RuntimeError(
                     f"Stage B spill needs {capacity} bytes for this layer "
