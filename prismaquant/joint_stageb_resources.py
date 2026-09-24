@@ -45,14 +45,67 @@ def capture_policy(capture):
     return batch, {name: capture[name] for name in MEASURED_BUDGET_FIELDS}
 
 
+def chain_policy(chain):
+    """A policy's ``chain`` block, checked: the regime and each shape's owner.
+
+    ``{"chain_regime": {"batch_size", "probe_fusion"}, "shapes": {name: owner}}``
+    (PQ #1163). Each owner is ``{layers, bytes, device_resident_bytes,
+    host_committed_bytes, regime, source, basis}``, with a ``receipt`` when
+    ``source`` is ``measured``; ``declared`` owners carry none and say so.
+    The derivation checks each owner (``joint_retained_window_plan._chain_owners``).
+    """
+    _require(isinstance(chain, dict) and set(chain) == {"chain_regime", "shapes"},
+             "chain block needs exactly chain_regime and shapes")
+    return copy.deepcopy(chain["chain_regime"]), copy.deepcopy(chain["shapes"])
+
+
+def chain_owner_from_receipt(path, *, action_key, layer, layers, basis=None):
+    """The measured chain owner a ``--stop-after-chain`` receipt states for ``layer``.
+
+    Reads the receipt once, here. The roll of ``layer`` must be complete; its
+    workspace and resident bytes come from the roll's own readings
+    (:func:`prismaquant.stage_b_workspace_profile.chain_roll_owner_bytes`),
+    and the receipt's sha256 goes into the owner. ``layers`` are the layers of
+    the same shape the owner prices.
+    """
+    from .stage_b_workspace_profile import CHAIN_SCHEMA, chain_roll_owner_bytes
+
+    path = Path(path).absolute()
+    raw = path.read_bytes()
+    profile = json.loads(raw)
+    _require(profile.get("schema") == CHAIN_SCHEMA, f"{path} is not a chain workspace profile")
+    rolls = [roll for roll in profile["rolls"] if roll["layer"] == int(layer)]
+    _require(len(rolls) <= 1, f"{path} records more than one chain roll of layer {layer}")
+    _require(bool(rolls), f"{path} measured no chain roll of layer {layer}")
+    _require(rolls[0]["failure"] is None,
+             f"{path} records an incomplete roll of layer {layer}; a lower bound prices nothing")
+    try:
+        owned = chain_roll_owner_bytes(rolls[0])
+    except ValueError as exc:
+        raise ValueError(f"Stage B resources: {path}: {exc}") from exc
+    _require(owned["bytes"] > 0, f"{path} measured no workspace for layer {layer}")
+    return {"layers": sorted(int(value) for value in layers), **owned,
+            "regime": dict(profile["identity"]["chain_regime"]), "source": "measured",
+            "receipt": {"action_key": action_key, "path": str(path),
+                        "sha256": hashlib.sha256(raw).hexdigest()},
+            "basis": basis or (
+                f"layer {int(layer)}'s chain roll: workspace = max(allocated delta, reserved "
+                "delta) over the reading after its admission released the cache; "
+                "device_resident_bytes = the CUDA reservation that admission read; "
+                "host_committed_bytes = the larger of the cgroup committed bytes at that "
+                "admission and at the roll's cgroup peak")}
+
+
 def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_bytes=72 * GIB, candidate_files=None,
-                  capture=None):
+                  capture=None, chain=None):
     """Use the existing statistics planner and retained-window budget owner.
 
     ``capture`` (PQ #1151, see :func:`capture_policy`) replaces the original
     plan's declared ``workspace_reserve_bytes`` with a measured one and plans
-    the capture pass at its ``capture_batch``. Without it the policy is the one
-    before #1151, byte for byte.
+    the capture pass at its ``capture_batch``. ``chain`` (PQ #1163, see
+    :func:`chain_policy`) plans the chain phase per chain layer shape, against
+    the policy's device ceiling ``gpu_bytes`` and its physical bound. Without
+    either the policy is the one before #1151, byte for byte.
     """
     import torch
     from . import format_registry as fr
@@ -149,6 +202,11 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
     capture_batch = measured = None
     if capture is not None:
         capture_batch, measured = capture_policy(capture)
+    chain_kwargs = {}
+    if chain is not None:
+        regime, shapes = chain_policy(chain)
+        chain_kwargs = {"chain_regime": regime, "chain_workspace": shapes,
+                        "chain_device_limit_bytes": gpu_bytes}
     declared = {key: getattr(old_budget, key) for key in DECLARED_BUDGET_FIELDS
                 if measured is None or key not in MEASURED_BUDGET_FIELDS}
     declared["physical_limit_bytes"] = physical_bytes
@@ -156,7 +214,7 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
         source_bytes=retained["source_reserve_bytes"],
         prefetch_workers=plan["execution"]["operator_windows"]["prefetch_workers"],
         host_cap_bytes=host_bytes, footprint_scope="pwc_serialized_upper_bound",
-        measured=measured, capture_batch=capture_batch)
+        measured=measured, capture_batch=capture_batch, **chain_kwargs)
     policy = {"schema": SCHEMA, "inputs": copy.deepcopy(inputs),
         "limits": {"host_bytes": host_bytes, "physical_bytes": physical_bytes, "gpu_bytes": gpu_bytes},
         "budget": budget.as_dict(), "derivation": derivation,
@@ -164,6 +222,8 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
         "semantics": "resource_geometry_only; original_qualification_and_BF16_capture_unchanged"}
     if capture is not None:
         policy["capture"] = copy.deepcopy(capture)
+    if chain is not None:
+        policy["chain"] = copy.deepcopy(chain)
     return policy
 
 
@@ -184,7 +244,8 @@ def verify_policy(bound, *, verify_files=False):
     _require(before[0] == key, "resource policy changed while read")
     _require(policy == derive_policy(policy["inputs"], **policy["limits"],
         candidate_files=None if verify_files else policy["candidate_files"],
-        capture=policy.get("capture")), "independent resource derivation differs")
+        capture=policy.get("capture"), chain=policy.get("chain")),
+        "independent resource derivation differs")
     _require(before == tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies),
              "resource metadata changed during derivation")
     # Policy creation observes actual sizes; workers independently rederive
@@ -283,6 +344,8 @@ def main(argv=None):
                         help="a stage_b_workspace_profile receipt whose measured per-batch "
                              "workspace replaces the declared one")
     parser.add_argument("--workspace-action-key", help="the PrismaBuild action that wrote the receipt")
+    parser.add_argument("--chain", help="a JSON file holding the policy's chain block (PQ #1163): "
+                                        "the chain regime and each chain layer shape's owner")
     args = parser.parse_args(argv)
     capture = None
     if (args.capture_batch, args.workspace_receipt, args.workspace_action_key).count(None) not in (0, 3):
@@ -291,15 +354,17 @@ def main(argv=None):
         capture = {"capture_batch": args.capture_batch,
                    "workspace_reserve_bytes": workspace_from_receipt(
                        args.workspace_receipt, action_key=args.workspace_action_key)}
+    chain = None if args.chain is None else json.loads(Path(args.chain).read_bytes())
     policy = derive_policy(json.loads(Path(args.inputs).read_bytes()), host_bytes=args.host_bytes,
                            physical_bytes=args.physical_bytes, gpu_bytes=args.gpu_bytes,
-                           capture=capture)
+                           capture=capture, chain=chain)
     raw = (json.dumps(policy, sort_keys=True) + "\n").encode()
     _require(publish_new_bytes(Path(args.out), raw), "policy output already exists")
     print(json.dumps({"status": "resource_geometry_derived", "out": args.out,
         "sha256": hashlib.sha256(raw).hexdigest(),
         "limits": policy["limits"], "budget": policy["budget"],
         "capture": policy["derivation"].get("capture"),
+        "chain": policy["derivation"].get("chain"),
         "peak_planned_bytes": policy["derivation"]["peak_planned_bytes"],
         "windows_by_layer": policy["derivation"]["windows_by_layer"]}, sort_keys=True))
 

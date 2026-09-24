@@ -185,3 +185,87 @@ def test_the_receipt_is_read_once_for_its_bytes_and_digest(tmp_path):
     write_profile(incomplete, {**profile, 'ladder_complete': False})
     with pytest.raises(ValueError, match='incomplete ladder'):
         workspace_from_receipt(incomplete, action_key='e' * 64)
+
+
+#: The fixture's Stage A chain regime, and a chain block pricing layer 9's
+#: shape (the fixture's two layers share one) at it (PQ #1163).
+CHAIN_REGIME = {'batch_size': 4, 'probe_fusion': True}
+
+
+def _chain(workspace, *, source='measured'):
+    owner = {'layers': [9], 'bytes': workspace, 'device_resident_bytes': 1 << 20,
+             'host_committed_bytes': 1 << 20, 'regime': dict(CHAIN_REGIME),
+             'source': source, 'basis': 'test'}
+    if source == 'measured':
+        owner['receipt'] = dict(CAPTURE_RECEIPT)
+    return {'chain_regime': dict(CHAIN_REGIME), 'shapes': {'routed': owner}}
+
+
+def test_a_priced_chain_rides_the_policy_and_its_rederivation(resource_fixture, tmp_path):
+    """PQ #1163: the chain phase is planned per shape and re-derived."""
+    inputs, _original, _extended, _binding, legacy = resource_fixture
+    assert 'chain' not in legacy and 'chain' not in legacy['derivation']
+    assert not any(key.startswith('chain_') for key in legacy['budget'])
+    limits = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+    policy = derive_policy(inputs, **limits, chain=_chain(2 << 20))
+    assert policy['chain'] == _chain(2 << 20)
+    assert policy['budget']['chain_workspace_reserve_bytes'] == 2 << 20
+    assert policy['budget']['chain_layers'] == [9]
+    chain = policy['derivation']['chain']
+    # The policy's device ceiling is the envelope the chain is checked against.
+    assert chain['device_limit_bytes'] == policy['budget']['chain_device_limit_bytes'] == 48 << 20
+    assert chain['device_margin_bytes'] == (48 << 20) - (3 << 20)
+    assert chain['shapes']['routed']['receipt'] == CAPTURE_RECEIPT
+    assert policy['derivation']['peak_planned_bytes'] >= chain['peak_planned_bytes']
+    assert verify_policy(bound(tmp_path / 'chain.json', policy)) == policy
+    forged = copy.deepcopy(policy)
+    forged['chain']['shapes']['routed']['bytes'] = 1 << 20
+    with pytest.raises(ValueError, match='independent resource derivation'):
+        verify_policy(bound(tmp_path / 'forged-chain.json', forged))
+    # A declared owner states itself and carries no receipt.
+    declared = derive_policy(inputs, **limits, chain=_chain(2 << 20, source='declared'))
+    assert declared['derivation']['chain']['shapes']['routed']['source'] == 'declared'
+    assert 'receipt' not in declared['derivation']['chain']['shapes']['routed']
+
+
+def test_a_chain_that_does_not_fit_refuses_the_policy(resource_fixture):
+    inputs, *_ = resource_fixture
+    limits = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+    with pytest.raises(RuntimeError, match="chain layer shape 'routed' at batch 4 .* device"):
+        derive_policy(inputs, **limits, chain=_chain((47 << 20) + 1))
+
+
+def _roll(layer, *, failure=None, admission=True):
+    return {'layer': layer, 'failure': failure,
+            'allocated_delta_bytes': 4 << 20, 'reserved_delta_bytes': 5 << 20,
+            'admission': ({'cuda_reserved_bytes': 3 << 20, 'cgroup_committed_bytes': 2 << 20}
+                          if admission else None),
+            'host': {'peak_current_bytes': 12 << 20,
+                     'peak_stat_all': {'anon': 1 << 20, 'file': 8 << 20, 'shmem': 0,
+                                       'file_dirty': 0, 'file_writeback': 0}}}
+
+
+def test_the_chain_receipt_is_read_once_for_a_complete_roll(tmp_path):
+    from prismaquant.joint_stageb_resources import chain_owner_from_receipt
+    from prismaquant.stage_b_workspace_profile import CHAIN_SCHEMA, write_profile
+
+    path = tmp_path / 'chain.json'
+    profile = {'schema': CHAIN_SCHEMA, 'identity': {'chain_regime': dict(CHAIN_REGIME)},
+               'rolls': [_roll(44), _roll(43, failure='MemoryError: roll failed'),
+                         _roll(41, admission=False)]}
+    digest = write_profile(path, profile)
+    owner = chain_owner_from_receipt(path, action_key='e' * 64, layer=44, layers=[44, 4])
+    basis = owner.pop('basis')
+    # The host side is the larger of the admission's committed bytes (2 MiB)
+    # and the committed bytes at the roll's cgroup peak (12 - 8 MiB of clean file).
+    assert owner == {'layers': [4, 44], 'bytes': 5 << 20, 'device_resident_bytes': 3 << 20,
+                     'host_committed_bytes': 4 << 20, 'regime': CHAIN_REGIME,
+                     'source': 'measured',
+                     'receipt': {'action_key': 'e' * 64, 'path': str(path), 'sha256': digest}}
+    assert basis.startswith("layer 44's chain roll: workspace = max(allocated delta")
+    with pytest.raises(ValueError, match='incomplete roll of layer 43'):
+        chain_owner_from_receipt(path, action_key='e' * 64, layer=43, layers=[43])
+    with pytest.raises(ValueError, match='no chain roll of layer 42'):
+        chain_owner_from_receipt(path, action_key='e' * 64, layer=42, layers=[42])
+    with pytest.raises(ValueError, match='no admission reading'):
+        chain_owner_from_receipt(path, action_key='e' * 64, layer=41, layers=[41])

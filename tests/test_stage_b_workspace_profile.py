@@ -196,3 +196,98 @@ def test_tool_moves_only_the_output_space(tmp_path):
     assert moved["adjoint"] == record["adjoint"]
     assert moved["output_space"]["root"] == str(tmp_path / "layer-044")
     assert moved["output_space"]["counters"] == str(tmp_path / "layer-044" / "counters.json")
+
+
+CHAIN_IDENTITY = {"quantum_id": "q", "layer": 42, "chain_layers": [44, 43],
+                  "chain_regime": {"batch_size": 4, "probe_fusion": True}}
+
+
+def test_the_chain_profile_is_opt_in_and_names_an_absolute_receipt(tmp_path):
+    kwargs = dict(guard=None, device="cpu", identity=CHAIN_IDENTITY)
+    assert profile.ChainRollProfile.requested(environ={}, **kwargs) is None
+    with pytest.raises(ValueError, match="absolute"):
+        profile.ChainRollProfile.requested(environ={profile.CHAIN_PROFILE_ENV: "x.json"}, **kwargs)
+    owner = {"bytes": 7, "source": "declared"}
+    requested = profile.ChainRollProfile.requested(
+        environ={profile.CHAIN_PROFILE_ENV: str(tmp_path / "chain.json"),
+                 profile.CHAIN_OWNER_ENV: json.dumps(owner)}, **kwargs)
+    assert requested.path == tmp_path / "chain.json" and requested.owner == owner
+    assert requested.identity == CHAIN_IDENTITY
+
+
+def test_the_chain_profile_measures_each_roll_and_stops_after_the_chain(tmp_path):
+    """PQ #1163: one roll's workspace, its wall time and the box's floor."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("the chain profile reads the CUDA allocator")
+    from prismaquant.joint_stageb_resources import chain_owner_from_receipt
+
+    from types import SimpleNamespace
+
+    device = torch.device("cuda")
+    nbytes = 64 << 20
+    # A cgroup whose committed bytes are 40 MiB: 100 MiB charged, 60 MiB of
+    # it clean file cache.
+    scope = tmp_path / "cgroup"
+    scope.mkdir()
+    (scope / "memory.current").write_text(f"{100 << 20}\n")
+    (scope / "memory.stat").write_text(
+        f"anon {30 << 20}\nfile {60 << 20}\nshmem 0\nfile_dirty 0\nfile_writeback 0\n")
+    guard = SimpleNamespace(scope=scope, cap_bytes=1 << 30, margin_bytes=0,
+                            device_bytes=1 << 40)
+    chain = profile.ChainRollProfile(tmp_path / "chain.json", guard=guard, device=device,
+                                     identity=CHAIN_IDENTITY)
+    kept = []
+
+    def roll():
+        kept.append(torch.empty(nbytes, dtype=torch.uint8, device=device))
+        return 3
+
+    admission = {"cuda_reserved_bytes": torch.cuda.memory_reserved(device),
+                 "cgroup_committed_bytes": 10 << 20}
+    assert chain.measure(44, roll, admission=admission, reserve_device_bytes=nbytes) == 3
+    record = chain.rolls[0]
+    assert record["allocated_delta_bytes"] >= nbytes
+    assert record["reserve_device_bytes"] == nbytes and record["failure"] is None
+    assert record["wall_s"] >= 0 and record["mem_available_min"]["bytes"] > 0
+    kept.clear()
+    with pytest.raises(profile.ChainWorkspaceProfiled) as stopped:
+        chain.finish()
+    written = json.loads((tmp_path / "chain.json").read_text())
+    assert stopped.value.path == str(tmp_path / "chain.json")
+    assert written["identity"] == CHAIN_IDENTITY
+    assert written["released_after_chain"]["released_bytes"] >= 0
+    measured = written["measured"]["workspace_bytes_by_layer"]["44"]
+    assert measured["complete"] is True and measured["workspace_bytes"] >= nbytes
+    owners = written["measured"]["owners_by_layer"]["44"]
+    assert owners == {"bytes": measured["workspace_bytes"],
+                      "device_resident_bytes": admission["cuda_reserved_bytes"],
+                      "host_committed_bytes": 40 << 20, "complete": True}
+    owner = chain_owner_from_receipt(tmp_path / "chain.json", action_key="f" * 64,
+                                     layer=44, layers=[44])
+    assert {key: owner[key] for key in ("bytes", "device_resident_bytes",
+                                        "host_committed_bytes")} == {
+        key: owners[key] for key in ("bytes", "device_resident_bytes", "host_committed_bytes")}
+    assert owner["regime"] == CHAIN_IDENTITY["chain_regime"]
+
+
+def test_a_failed_chain_roll_writes_its_lower_bound_and_still_fails(tmp_path):
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("the chain profile reads the CUDA allocator")
+    device = torch.device("cuda")
+    chain = profile.ChainRollProfile(tmp_path / "chain.json", guard=None, device=device,
+                                     identity=CHAIN_IDENTITY)
+
+    def roll():
+        held = torch.empty(1 << 20, dtype=torch.uint8, device=device)
+        raise MemoryError(f"roll failed holding {held.numel()} bytes")
+
+    with pytest.raises(MemoryError, match="roll failed"):
+        chain.measure(43, roll, admission=None, reserve_device_bytes=None)
+    written = json.loads((tmp_path / "chain.json").read_text())
+    # The failed roll's receipt names the quantum and its regime.
+    assert written["identity"] == dict(CHAIN_IDENTITY, layer_failed=43)
+    entry = written["measured"]["workspace_bytes_by_layer"]["43"]
+    assert entry["complete"] is False
+    assert written["rolls"][0]["failure"].startswith("MemoryError")

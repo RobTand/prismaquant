@@ -1,5 +1,82 @@
 # PrismaQuant Architecture
 
+Stage B plans and admits its chain phase (2026-09-24,
+`fix/1163-chain-phase-admission`, PQ #1163). A chain-mode quantum rolls each
+chain layer from its checkpoint down to `layer + 1` before its retained
+reverse step. Each roll is a batched backward at Stage A's chain regime
+(`render_free_layer_roll`), and under probe fusion it keeps the forward graph
+across the probes' backwards. Nothing planned or admitted it: the derivation
+had no chain term, the guard was built after the chain, and the roll's
+free-UMA floor read `execution.get("min_free_gib", 0.0)` while the plan keeps
+`min_free_gib` at its top level, so the floor was 0 in production. Three
+changes:
+
+- The plan. `derive_retained_window_budget` takes `chain_regime`,
+  `chain_workspace` and `chain_device_limit_bytes`, all three or none.
+  `chain_workspace` maps each chain layer shape to its owner: the layers it
+  covers; the device workspace one roll holds at the regime (`bytes`); and
+  the owners resident while it rolls, split the way the guard reads them
+  (`device_resident_bytes`, the CUDA reservation at the roll's admission, and
+  `host_committed_bytes`, the cgroup's committed bytes). Each owner is
+  `measured`, with its PrismaBuild receipt, or `declared` and stated as such.
+  During a roll no window, render, statistics lease, capture, load buffer or
+  candidate delta is open. What is resident is the metadata, the runtime, the
+  installed chain layer and its successor's read (#1166), the shared-state
+  auxiliary owner and the boundary window, so the roll is priced by those at
+  their measured sizes, not at the caps the replay phase needs. Each shape is
+  checked as the guard checks it: resident reservation plus workspace against
+  the device envelope, then that plus the host committed bytes against the
+  physical budget less its margin. A shape that does not fit either refuses
+  at derivation. The record keeps every shape's peaks and margins under
+  `chain`, and `peak_planned_bytes` becomes the largest of the window, capture
+  and chain peaks. The budget carries the regime, the largest workspace and
+  resident bytes over the shapes, the device envelope and the covered layers
+  as `ChainRetainedWindowBudget`, and checks them together as one roll
+  (`require_chain_fits`, also run by `normalize_retained_execution`). A
+  budget without them loads and serializes exactly as before. The Stage B
+  resource policy carries the owners as its `chain` block
+  (`joint_stageb_resources --chain FILE.json`) against its `gpu_bytes`, and
+  `verify_policy` re-derives them. `chain_owner_from_receipt` reads a
+  measured owner from a complete roll in a `--stop-after-chain` receipt.
+- The admission. The quantum builds its guard before the chain and admits
+  `before_chain_layer_roll:<layer>` before each roll, with
+  `ChainRetainedWindowBudget.chain_workspace_bytes(batch_size, fused=...)` on
+  the device side (`reserve_device_bytes`, #1157). A guarded chain whose
+  budget prices no chain phase, prices another regime or does not price the
+  shape of one of its chain layers refuses before its first roll.
+  `before_layer_quantum_replay` still follows the chain.
+- The floor. `quantum_runtime_execution` carries the plan's top-level
+  `min_free_gib` into the core's execution, and the core refuses an
+  execution that declares none. The roll's `_chain_free_floor` stays as a
+  second check.
+
+The measurement is `experiments/stage_b_capture_workspace_profile.py
+--stop-after-chain` (`ChainRollProfile`, opt-in through
+`PRISMAQUANT_STAGE_B_CHAIN_PROFILE`). It records each roll's admission
+reading, its CUDA allocated and reserved peaks over the reading right after
+that admission, its wall time, the cgroup peak and the box's lowest
+MemAvailable, then stops after the chain. Every receipt it writes, a failed
+roll's too, names the quantum and its chain regime. A plan that prices no
+chain is admitted there under a declared owner: the largest workspace the
+chain phase's resident owners leave at their declared caps
+(`RetainedWindowBudget.declared_chain_residents`). On R13 at batch 4 with
+probe fusion (PB `1b6bc9e5d2be`, layer 42's chain), the KDA routed-MoE roll
+of layer 44 held a 54,425,288,704 B workspace beside a 17,913,872,384 B
+reservation, 0.68 GB under the 68 GiB device envelope. The workspace includes
+the successor source bytes that land during the roll: at most layer 43's
+source, which the row's readset declares as 14,800,247,264 B. The
+sparse-MLA routed-MoE roll of layer 43 held 31,092,375,552 B beside a
+17,985,175,552 B reservation. Derived from that receipt at 28/96/68 GiB, the
+budget charges the largest workspace and residents together: a
+72,410,464,256 B device peak (0.60 GB margin) and an 86,944,190,464 B chain
+peak against 100,931,731,456 B of physical budget less margin. The capture
+peak (100,869,739,827 B) stays the plan's `peak_planned_bytes`, so every row
+of bands 040 and 045 fits. Dense layers 1 and 2 have no priced shape, so
+rows 0 and 1, whose chains roll them, refuse. Gates:
+`tests/test_stage_b_chain_pricing.py` and the chain tests in
+`tests/test_stageb_one_pass_spill.py`. This adds an admission and a
+derivation refusal. No format, pipeline stage, default or ship gate changes.
+
 A band-serial producer captures at its slice's chain batch size (2026-09-24,
 `fix/b2-band-serial-regime`, PQ #994, #996, #997). Both band-serial refusals
 compared their side with the constant 1: `handoff_regime_refusal` refused any
@@ -64,9 +141,10 @@ declared for 494 s of it, and py-spy found the main thread in that settle.
 The chain step now leaves that prefetch in flight, so the read overlaps the
 chain roll (`_install_with_settlement(settle_successors=False)`). After the
 quantum reports `own-LLL-source`, `_await_own_source` waits for the read,
-before the operator guard's first observation, which still sees no pending
-owner and no loader temporaries. The roll takes no guard observation and no
-residency snapshot. Its only memory check is the `min_free_gib` floor. Gate:
+before the replay's first observation (`before_layer_quantum_replay`), which
+still sees no pending owner and no loader temporaries. The roll takes no
+residency snapshot. Since #1163 each roll is admitted by the guard with the
+planned chain workspace, and the `min_free_gib` floor is a second check. Gate:
 `tests/test_staged_wait_phase_1166.py`. It drives the real quantum, windowed
 and spill, and records every consumer wait: a source install, a prefetch
 settle, or an exact boundary or checkpoint read. It checks that the first
@@ -2061,8 +2139,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-rd/1152-cotangent-scratch`.
+As of: 2026-09-24 · `fix/1163-chain-phase-admission`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `fix/1163-chain-phase-admission`) for **the Stage B
+plan pricing the chain phase per chain layer shape by the owners resident
+while it rolls, on the device and aggregate sides the guard checks, the guard
+admitting each chain roll with the planned workspace, and the plan's free-UMA
+floor reaching the chain roll** (PQ #1163). See the entry at the top. No
+format, pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-rd/1152-cotangent-scratch`) for **the cotangent
 scratch's direct I/O** (PQ #1152): on grid-sized slots the scratch writes and

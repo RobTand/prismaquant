@@ -27,7 +27,8 @@ import prismaquant.joint_replay_spill as spill_mod
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.joint_adjoint_checkpoints import chain_layers_for
-from prismaquant.joint_adjoint_slices import adjoint_slice_sha256, stage_a_slice
+from prismaquant.joint_adjoint_slices import (
+    DEFAULT_CHAIN_REGIME, adjoint_slice_sha256, stage_a_slice)
 from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
@@ -278,7 +279,12 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
     execution = _execution(campaign.root / "exec")
     if regime is not None:
         execution["replay_regime"] = regime
-    retained = quantum_retained_state(execution)
+    try:
+        # The plan's retained budget is read here, as ``run_layer_quantum``
+        # reads it, so a plan the runtime refuses is the run's error.
+        retained = quantum_retained_state(execution)
+    except (ValueError, RuntimeError) as exc:
+        return None, SimpleNamespace(error=exc)
     roster = quantum_layer_roster(runner, campaign.formats_by_qname, layer)
     resolved = resolve_quantum_windows(
         record, layer=layer, names=roster.names, linears=roster.linears,
@@ -368,6 +374,50 @@ def test_layer_quantum_charges_each_phase_to_its_guard(campaign, monkeypatch):
         assert label in labels
 
 
+#: Stage A's chain regime the chain tests stamp: two stored batches per roll,
+#: with the forward graph kept across the probes' backwards.
+CHAIN_REGIME = {"batch_size": 2, "probe_fusion": True}
+ROLL_MARKER = "render_free_layer_roll"
+
+
+def _chain_priced(retained, *, workspace_bytes, regime=CHAIN_REGIME, layers=(1,)):
+    """``retained`` with a budget that plans the chain at ``regime`` (PQ #1163).
+
+    ``layers`` are the chain layers whose shape the plan priced; the fixture's
+    only chain layer is layer 1 (layer 0's chain from boundary 2). The
+    fixture's rolls have nothing else resident, and the device envelope is
+    the physical bound.
+    """
+    budget = retained["budget"]
+    return dict(retained, budget={
+        **budget, "chain_batch_size": regime["batch_size"],
+        "chain_probe_fusion": regime["probe_fusion"],
+        "chain_workspace_reserve_bytes": workspace_bytes,
+        "chain_device_resident_bytes": 0, "chain_host_committed_bytes": 0,
+        "chain_device_limit_bytes": budget["physical_limit_bytes"],
+        "chain_layers": list(layers)})
+
+
+def _stamp_chain_regime(monkeypatch, regime=CHAIN_REGIME):
+    """The quantum reads ``regime`` as its Stage A slice's chain regime."""
+    import prismaquant.joint_cost_quantum as quantum_mod
+
+    monkeypatch.setattr(quantum_mod, "chain_regime_of", lambda _identity: dict(regime))
+
+
+def _mark_rolls(monkeypatch, guard):
+    """Append a marker to ``guard.admissions`` as each chain roll starts."""
+    import prismaquant.joint_adjoint_checkpoints as checkpoints
+
+    original = checkpoints.render_free_layer_roll
+
+    def marked(runner, **kwargs):
+        guard.admissions.append((f"{ROLL_MARKER}:{int(kwargs['layer'])}", 0, 0))
+        return original(runner, **kwargs)
+
+    monkeypatch.setattr(checkpoints, "render_free_layer_roll", marked)
+
+
 class _DeviceRecordingGuard(_RecordingGuard):
     """A recording guard with a declared device envelope, as Stage B's has.
 
@@ -382,6 +432,170 @@ class _DeviceRecordingGuard(_RecordingGuard):
         self.admissions.append((label, reserve_bytes, reserve_device_bytes))
         return {"conservative_cgroup_plus_cuda_reserved_bytes": 0,
                 "committed_cgroup_plus_cuda_reserved_bytes": 0}
+
+
+def test_chain_roll_is_admitted_with_its_planned_workspace_before_it_runs(
+        campaign, monkeypatch):
+    """The guard exists before the chain and charges each roll (PQ #1163).
+
+    Layer 0 rolls chain layer 1 from its checkpoint at boundary 2. Its roll
+    is a batched backward at Stage A's chain regime, so it is admitted before
+    it runs, on the device side, with the chain workspace the plan priced.
+    Before #1163 the guard was built after the chain, so the chain's first
+    admission was ``before_layer_quantum_replay``, after the roll.
+    """
+    layer = 0
+    assert campaign.records[layer]["adjoint"]["chain_layers"] == [1]
+    policy, budget, retained = _policy_budget()
+    workspace = 3 * budget.workspace_reserve_bytes
+    priced = _chain_priced(retained, workspace_bytes=workspace)
+    monkeypatch.setitem(globals(), "_policy_budget", lambda: (policy, budget, priced))
+    _stamp_chain_regime(monkeypatch)
+    guard = _DeviceRecordingGuard(campaign.device)
+    _mark_rolls(monkeypatch, guard)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard)
+    assert payload is not None, _chain(state.error)
+    labels = [entry[0] for entry in guard.admissions]
+    roll = labels.index(f"{ROLL_MARKER}:1")
+    assert "before_chain_layer_roll:1" in labels[:roll], labels
+    admission = guard.admissions[labels.index("before_chain_layer_roll:1")]
+    from prismaquant.joint_retained_window_plan import RetainedWindowBudget
+
+    planned = RetainedWindowBudget.from_dict(priced["budget"])
+    assert admission[1:] == (0, planned.chain_workspace_bytes(2, fused=True)) == (0, workspace)
+    # The replay's own first observation still follows the chain.
+    assert labels.index("before_layer_quantum_replay") > roll
+
+
+def test_a_chain_layer_whose_shape_the_plan_did_not_price_refuses_before_its_roll(
+        campaign, monkeypatch):
+    """A chain priced for other layer shapes does not admit this one (PQ #1163).
+
+    The plan prices layer 2's shape only; layer 0's chain rolls layer 1, so
+    the quantum refuses before the roll and names the layer.
+    """
+    layer = 0
+    policy, budget, retained = _policy_budget()
+    priced = _chain_priced(retained, workspace_bytes=budget.workspace_reserve_bytes, layers=(2,))
+    monkeypatch.setitem(globals(), "_policy_budget", lambda: (policy, budget, priced))
+    _stamp_chain_regime(monkeypatch)
+    guard = _DeviceRecordingGuard(campaign.device)
+    _mark_rolls(monkeypatch, guard)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard)
+    labels = [entry[0] for entry in guard.admissions]
+    assert f"{ROLL_MARKER}:1" not in labels, labels
+    assert payload is None
+    assert "chain layer 1 has no priced chain layer shape" in str(state.error), _chain(state.error)
+
+
+def test_a_chain_its_plan_does_not_price_refuses_before_its_roll(campaign, monkeypatch):
+    """A guarded chain roll with no planned workspace refuses (PQ #1163).
+
+    The fixture's own budget plans no chain phase, so there is no workspace
+    to admit the roll with; the quantum refuses before the roll instead of
+    running an unpriced batched backward.
+    """
+    layer = 0
+    guard = _DeviceRecordingGuard(campaign.device)
+    _mark_rolls(monkeypatch, guard)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard)
+    labels = [entry[0] for entry in guard.admissions]
+    assert f"{ROLL_MARKER}:1" not in labels, labels
+    assert payload is None
+    assert "chain" in str(state.error), _chain(state.error)
+
+
+def test_a_quantum_whose_execution_declares_no_free_memory_floor_refuses(
+        campaign, monkeypatch):
+    """A missing free-UMA floor is not a zero floor (PQ #1163).
+
+    The chain roll and the retained replay check a free-UMA floor. Before
+    #1163 the core read ``execution.get("min_free_gib", 0.0)`` while the plan
+    keeps ``min_free_gib`` at its top level, so every production floor was 0.
+    """
+    layer = 1
+    original = _execution
+
+    def floorless(root):
+        execution = original(root)
+        del execution["min_free_gib"]
+        return execution
+
+    monkeypatch.setitem(globals(), "_execution", floorless)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer)
+    assert payload is None, "a quantum ran with no declared free-UMA floor"
+    assert "min_free_gib" in str(state.error), _chain(state.error)
+
+
+def test_the_launcher_hands_the_core_the_plan_free_memory_floor():
+    """``run_layer_quantum`` carries the plan's ``min_free_gib`` (PQ #1163)."""
+    import prismaquant.joint_cost_quantum as quantum_mod
+
+    build = getattr(quantum_mod, "quantum_runtime_execution", None)
+    assert build is not None, "no one place builds the quantum's runtime execution"
+    config = {"min_free_gib": 8.0, "max_gpu_bytes": 73014444032,
+              "execution": {"n_probes": 4}}
+    execution = build(config, replay_regime={"capture_batch": 1})
+    assert execution["min_free_gib"] == 8.0
+    assert execution["device_envelope_bytes"] == 73014444032
+    assert execution["replay_regime"] == {"capture_batch": 1}
+    assert config["execution"] == {"n_probes": 4}
+
+
+def test_a_band_serial_producer_admits_each_roll_before_its_capture_and_handoff(
+        campaign, monkeypatch, tmp_path):
+    """A producer that rolls a chain is admitted per roll (PQ #1163).
+
+    Under band-serial dispatch (PQ #996, #1194) only a consumer, which loads
+    its producer's handoff, skips the chain. A producer with no handoff to
+    load, such as R13 row 42 (chain [44, 43]), rolls its chain, captures at
+    the chain's batch size and emits its handoff. Layer 0 (chain [1]) stands
+    in for it with a stand-in emitter, since layer 0 has no successor. The
+    guard admits the roll before it runs, with the planned chain workspace,
+    and the capture and the handoff follow the roll.
+    """
+    import prismaquant.joint_cost_quantum as quantum_mod
+
+    layer = 0
+    policy, budget, retained = _policy_budget()
+    workspace = 3 * budget.workspace_reserve_bytes
+    priced = _chain_priced(retained, workspace_bytes=workspace)
+    monkeypatch.setitem(globals(), "_policy_budget", lambda: (policy, budget, priced))
+    _stamp_chain_regime(monkeypatch)
+    guard = _DeviceRecordingGuard(campaign.device)
+    _mark_rolls(monkeypatch, guard)
+    emitted = []
+
+    def emit(**kwargs):
+        guard.admissions.append(("handoff_emit", 0, 0))
+        emitted.append(sorted(kwargs))
+        return {}
+
+    emitter = SimpleNamespace(capture_batch=CHAIN_REGIME["batch_size"], emit=emit,
+                              published={})
+    original = quantum_mod.run_layer_quantum_core
+    monkeypatch.setattr(quantum_mod, "run_layer_quantum_core",
+                        lambda *args, **kwargs: original(
+                            *args, handoff_emitter=emitter, **kwargs))
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                              regime=f"capture_batch={CHAIN_REGIME['batch_size']}")
+    assert payload is not None, _chain(state.error)
+    assert emitted, "the producer never emitted its handoff"
+    labels = [entry[0] for entry in guard.admissions]
+    roll = labels.index(f"{ROLL_MARKER}:1")
+    admitted = labels.index("before_chain_layer_roll:1")
+    assert admitted < roll, labels
+    assert guard.admissions[admitted][1:] == (0, workspace)
+    captures = [index for index, label in enumerate(labels)
+                if label == "before_joint_window_backward"]
+    assert captures and roll < captures[0], labels
+    assert captures[-1] < labels.index("handoff_emit"), labels
 
 
 def _record_capture_sides(monkeypatch):
@@ -416,7 +630,12 @@ def test_capture_pass_charges_its_cuda_allocations_to_the_device_side(campaign, 
     """
     regime, batch = "capture_batch=2", 2
     layer = 0
-    _policy, budget, _retained = _policy_budget()
+    policy, budget, retained = _policy_budget()
+    # Layer 0 walks chain [1], which the guard admits only when the plan
+    # prices it (PQ #1163): the fixture's Stage A ran the default regime.
+    priced = _chain_priced(retained, workspace_bytes=budget.workspace_reserve_bytes,
+                           regime=DEFAULT_CHAIN_REGIME)
+    monkeypatch.setitem(globals(), "_policy_budget", lambda: (policy, budget, priced))
     sides = _record_capture_sides(monkeypatch)
     guard = _DeviceRecordingGuard(campaign.device)
     _clear_output(campaign, layer)
@@ -1121,7 +1340,9 @@ def test_capture_pass_charges_the_planned_workspace_per_stored_batch(campaign, m
     layer = 0
     policy, budget, retained = _policy_budget()
     wide = dict(policy, workspace_reserve_bytes=5 * budget.workspace_reserve_bytes)
-    monkeypatch.setitem(globals(), "_policy_budget", lambda: (wide, budget, retained))
+    priced = _chain_priced(retained, workspace_bytes=budget.workspace_reserve_bytes,
+                           regime=DEFAULT_CHAIN_REGIME)
+    monkeypatch.setitem(globals(), "_policy_budget", lambda: (wide, budget, priced))
     sides = _record_capture_sides(monkeypatch)
     guard = _DeviceRecordingGuard(campaign.device)
     _clear_output(campaign, layer)

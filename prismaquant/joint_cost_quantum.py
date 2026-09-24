@@ -890,6 +890,23 @@ def resolve_quantum_windows(
 # --------------------------------------------------------------------------
 
 
+def quantum_runtime_execution(config, *, replay_regime):
+    """The execution block a launched quantum's core runs under.
+
+    The plan's ``execution`` block, plus the settings the plan keeps at its
+    top level: the device envelope (``max_gpu_bytes``) and the free-UMA floor
+    (``min_free_gib``), which the chain roll and the retained replay check.
+    Before PQ #1163 the floor was not carried, so the core read 0. The
+    replay regime is the launch setting ``run_layer_quantum`` resolved.
+    """
+    execution = dict(config["execution"])
+    execution.setdefault("device_envelope_bytes", config.get("max_gpu_bytes"))
+    if "min_free_gib" in config:
+        execution.setdefault("min_free_gib", config["min_free_gib"])
+    execution["replay_regime"] = replay_regime
+    return execution
+
+
 def quantum_retained_state(execution):
     """The sealed retained budget, operator policy and source cap (§6).
 
@@ -1484,7 +1501,16 @@ def run_layer_quantum_core(
     token_scope = "all"
     temperature = 1.0
     probe_microbatch = int(execution.get("probe_microbatch", 0))
-    min_free_gib = float(execution.get("min_free_gib", 0.0))
+    # The free-UMA floor the chain roll and the retained replay check. A
+    # missing floor is not a zero floor (PQ #1163): the plan keeps
+    # ``min_free_gib`` at its top level, and ``quantum_runtime_execution``
+    # carries it here.
+    if (type(execution.get("min_free_gib")) not in (int, float)
+            or not execution["min_free_gib"] >= 0):
+        raise QuantumIdentityRefused(
+            f"quantum {quantum_id}: its execution declares no nonnegative min_free_gib; "
+            "the chain roll and the retained replay would run with no free-UMA floor")
+    min_free_gib = float(execution["min_free_gib"])
     # The Stage B replay regime (#994): the capture batch and the statistics
     # accumulation. The default stamps nothing and replays bitwise; any other
     # regime changes the arithmetic, so it is stamped into the statistics
@@ -1953,6 +1979,38 @@ def run_layer_quantum_core(
                 raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
 
         # ---- the render-free chain: stage A's arithmetic, reused ---------
+        # The guard exists before the chain (PQ #1163): each roll is a
+        # batched backward at Stage A's chain regime, admitted before it
+        # runs with the workspace the plan priced for that regime.
+        guard = operator_window_guard(
+            runner.device,
+            device_bytes=execution.get("device_envelope_bytes"))
+        if guard is not None:
+            retained_budget.require_physical_guard(guard)
+        # Every roll's planned workspace, before the first one runs: a chain
+        # layer whose shape the plan did not price refuses here.
+        chain_workspace_bytes = {}
+        if chain_layers and guard is not None:
+            try:
+                chain_workspace_bytes = {
+                    int(chain_layer): retained_budget.chain_workspace_bytes(
+                        chain_regime["batch_size"], fused=chain_regime["probe_fusion"],
+                        layer=int(chain_layer))
+                    for chain_layer in chain_layers}
+            except RuntimeError as exc:
+                raise QuantumIdentityRefused(
+                    f"quantum {quantum_id}: chain {chain_layers} cannot be admitted: "
+                    f"{exc}") from exc
+        from .stage_b_workspace_profile import ChainRollProfile
+        chain_profile = ChainRollProfile.requested(
+            guard=guard, device=runner.device,
+            identity={"quantum_id": quantum_id,
+                      "record_identity_sha256": record.get("identity_sha256"),
+                      "layer": int(layer), "chain_layers": list(chain_layers),
+                      "chain_regime": dict(chain_regime), "n_probes": n_probes,
+                      "n_batches": len(batches), "min_free_gib": min_free_gib,
+                      "chain_workspace_bytes_by_layer": {
+                          str(key): value for key, value in chain_workspace_bytes.items()}})
         chain_started = time.time()
         chain_backwards = 0
         chain_kernel = _stage_b_kernel_profiler()
@@ -1971,16 +2029,36 @@ def run_layer_quantum_core(
                         if executable:
                             progress.enter_read_phase(
                                 executable_bound_phase_name(chain_layer))
-                        backwards = render_free_layer_roll(
-                            runner, storage=storage, batches=batches, layer=chain_layer,
-                            cotangents=cotangent_owners, n_probes=n_probes,
-                            incoming_entries=None,
-                            incoming_tensor=lambda probe, batch: grad_plane[(probe, batch)],
-                            roll=lambda tensor, batch, probe: grad_plane.__setitem__(
-                                (probe, batch), tensor),
-                            min_free_gib=min_free_gib,
-                            batch_size=chain_regime["batch_size"],
-                            probe_fusion=chain_regime["probe_fusion"])
+                        if guard is not None:
+                            # The free-UMA floor inside the roll stays as a
+                            # second check (``_chain_free_floor``).
+                            chain_admission = check_operator_allocation(
+                                guard, f"before_chain_layer_roll:{int(chain_layer)}",
+                                reserve_bytes=0,
+                                reserve_device_bytes=chain_workspace_bytes[int(chain_layer)])
+                        else:
+                            chain_admission = None
+
+                        def roll_chain_layer(chain_layer=chain_layer):
+                            return render_free_layer_roll(
+                                runner, storage=storage, batches=batches, layer=chain_layer,
+                                cotangents=cotangent_owners, n_probes=n_probes,
+                                incoming_entries=None,
+                                incoming_tensor=lambda probe, batch: grad_plane[(probe, batch)],
+                                roll=lambda tensor, batch, probe: grad_plane.__setitem__(
+                                    (probe, batch), tensor),
+                                min_free_gib=min_free_gib,
+                                batch_size=chain_regime["batch_size"],
+                                probe_fusion=chain_regime["probe_fusion"])
+
+                        if chain_profile is None:
+                            backwards = roll_chain_layer()
+                        else:
+                            backwards = chain_profile.measure(
+                                int(chain_layer), roll_chain_layer,
+                                admission=chain_admission,
+                                reserve_device_bytes=chain_workspace_bytes.get(
+                                    int(chain_layer)))
                         chain_backwards += backwards
                     finally:
                         runner.context.unload(chain_layer)
@@ -1992,6 +2070,10 @@ def run_layer_quantum_core(
                             wall_s=time.time() - chain_started,
                             kernel_active_s=(None if chain_kernel.error
                                              else chain_kernel.kernel_active_s))
+        if chain_profile is not None:
+            # A measurement of the chain phase (PQ #1163) stops here, before
+            # the retained reverse step, with its receipt written.
+            chain_profile.finish()
 
         # ---- layer L: the single run's retained reverse step --------------
         def retained_source_phase(stage_label):
@@ -2028,19 +2110,15 @@ def run_layer_quantum_core(
         with counters.io.span("own-source", layer=int(layer)):
             # The chain step left this layer's read in flight during the
             # roll. The consumer waits for it here, under the phase that
-            # stages it, before the guard's first observation (PQ #1166).
+            # stages it, before the replay's first observation (PQ #1166).
             _await_own_source(runner, layer, operator_windows=operator_windows)
-            guard = operator_window_guard(
-                runner.device,
-                device_bytes=execution.get("device_envelope_bytes"))
             if guard is not None:
-                # An observation before any phase is admitted: it releases
-                # retired blocks and charges no future allocation.
+                # An observation before any replay phase is admitted: it
+                # releases the chain's retired blocks and charges no future
+                # allocation.
                 check_operator_allocation(guard, "before_layer_quantum_replay",
                                           reserve_bytes=0)
             production_cache.enable_lru(retained_budget.retained_render_cap_bytes)
-            if guard is not None:
-                retained_budget.require_physical_guard(guard)
             retained_source_phase("source_loading")
             _install_with_settlement(runner, layer, operator_windows=operator_windows,
                                      order=source_order)
@@ -3082,9 +3160,7 @@ def run_layer_quantum(
         result.update(source_model_identity=source,
                       units=head_units, measured_cells=head_cells)
 
-        execution_runtime = dict(execution)
-        execution_runtime.setdefault("device_envelope_bytes", config.get("max_gpu_bytes"))
-        execution_runtime["replay_regime"] = replay_regime
+        execution_runtime = quantum_runtime_execution(config, replay_regime=replay_regime)
         # D2 handshake, before any GPU work or progress: the record seals
         # window indices only, so membership and footprints are recomputed
         # from the sealed budget and handshook here. The chunk frontier,
