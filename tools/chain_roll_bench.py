@@ -63,6 +63,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -523,6 +524,45 @@ def _profile_shares(path: Path) -> dict:
                            for (label, leaf), n in leaves.most_common(12)] if total else []}
 
 
+#: Netdata charts read over each roll window: the GPU's power and the host's
+#: CPU, local disk and NFS client load. The stage and RAM tiers are NFS mounts
+#: from the file server, so their reads appear on ``nfs.proc4`` and the
+#: high-speed links, not on the local disk.
+NETDATA_CHARTS = ("system.cpu", "system.io", "disk.nvme0n1", "nfs.proc4",
+                  "net.enP2p1s0f0np0", "net.enP2p1s0f1np1",
+                  "system.memory_full_pressure")
+
+
+def _netdata_window(base: str, chart: str, after: float, before: float,
+                    group: str = "average") -> dict:
+    url = (f"{base}/api/v1/data?chart={chart}&after={int(after)}&before={int(before)}"
+           f"&points=1&group={group}&format=json&options=abs")
+    try:
+        with urllib.request.urlopen(url, timeout=20) as reply:
+            doc = json.load(reply)
+    except Exception as exc:  # noqa: BLE001 - a missing series is reported, not fatal
+        return {"error": str(exc)[:160]}
+    labels, data = doc.get("labels", []), doc.get("data", [])
+    if not data:
+        return {}
+    return {label: round(value, 3) for label, value in zip(labels[1:], data[0][1:])
+            if value is not None}
+
+
+def _netdata(base: str, power_chart: str, envelope_w: float, after: float,
+             before: float) -> dict:
+    power = _netdata_window(base, power_chart, after, before)
+    peak = _netdata_window(base, power_chart, after, before, group="max")
+    watts = next(iter(power.values()), None) if "error" not in power else None
+    row = {"window_s": round(before - after, 1), "gpu_power_w_mean": watts,
+           "gpu_power_w_max": next(iter(peak.values()), None) if "error" not in peak else None,
+           "gpu_power_envelope_fraction": (round(watts / envelope_w, 4)
+                                           if watts is not None else None)}
+    for chart in NETDATA_CHARTS:
+        row[chart] = _netdata_window(base, chart, after, before)
+    return row
+
+
 def cmd_analyze(args) -> int:
     out = Path(args.out)
     drive = json.loads((out / "drive.json").read_text())
@@ -557,6 +597,13 @@ def cmd_analyze(args) -> int:
                         for r in records],
             "top_leaves": [r["profile"]["top_leaves"] for r in records if r["profile"]],
         }
+        if args.netdata:
+            host = [_netdata(args.netdata, args.power_chart, args.envelope_w,
+                             r["roll_started_unix"], r["roll_ended_unix"]) for r in records]
+            report["arms"][arm]["netdata"] = host
+            watts = [h["gpu_power_w_mean"] for h in host if h["gpu_power_w_mean"] is not None]
+            report["arms"][arm]["gpu_power_w_mean"] = (round(sum(watts) / len(watts), 2)
+                                                       if watts else None)
         report["planes"][arm] = sorted({r["plane_sha256"] for r in records})
     planes = {p for values in report["planes"].values() for p in values}
     report["payloads_identical_across_arms_and_repeats"] = len(planes) == 1
@@ -564,7 +611,9 @@ def cmd_analyze(args) -> int:
     for arm, row in report["arms"].items():
         print(f"{arm}: roll_s {row['roll_s']} (median {row['roll_s_median']}); "
               f"outside backward+gpu_wait {row['outside_backward_and_gpu_wait']}; "
-              f"shares {row['main_thread_shares']}")
+              f"shares {row['main_thread_shares']}"
+              + (f"; GPU {row['gpu_power_w_mean']} W of {args.envelope_w:g} W"
+                 if args.netdata else ""))
     print("payloads identical:", report["payloads_identical_across_arms_and_repeats"])
     return 0
 
@@ -625,6 +674,11 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("analyze")
     p.add_argument("--out", required=True)
+    p.add_argument("--netdata", default=None,
+                   help="the measured box's Netdata, e.g. http://sparky:19999")
+    p.add_argument("--power-chart", default=(
+        "nvidia_smi.gpu_gpu-e76c7efc-c157-b1f4-1348-83e4eb5092f4_power_draw"))
+    p.add_argument("--envelope-w", type=float, default=140.0)
 
     args = parser.parse_args(argv)
     if args.command == "host":
