@@ -14,6 +14,13 @@ is one load of one ``(name, fmt)`` in one window.
 """
 from __future__ import annotations
 
+import pickle
+import shutil
+from pathlib import Path
+
+import pytest
+import torch
+
 import prismaquant.production_weight_cache as pwc
 
 import test_joint_cost_quantum_runtime as runtime
@@ -80,3 +87,152 @@ def test_each_resident_render_is_hashed_once_per_load(tmp_path, monkeypatch):
     assert all(count == 1 for count in counts.values()), (
         f"each resident render must be hashed once per load; hashes per "
         f"(name, fmt) load: {counts}")
+
+
+# --------------------------------------------------------------------------
+# The memo's lifetime is the resident load's
+# --------------------------------------------------------------------------
+
+FMT = "FP8_E4M3"
+
+
+def _file_cache(tmp_path, count=2):
+    paths = {}
+    for index in range(count):
+        key = (f"unit{index}", FMT)
+        paths[key] = tmp_path / f"unit{index}.pt"
+        torch.save(torch.arange(64, dtype=torch.bfloat16).reshape(8, 8) + index,
+                   paths[key])
+    cache = pwc.ProductionWeightCache(
+        weights={key: str(path) for key, path in paths.items()}, levers={})
+    cache.enable_lru(1 << 20)
+    return cache, paths
+
+
+def _window(cache, keys):
+    return cache.retained_window(list(keys), max_resident_bytes=1 << 20,
+                                 max_workers=1, max_load_buffer_bytes=1 << 20,
+                                 release_file_pages=False)
+
+
+def _counting(monkeypatch):
+    hashed = []
+    identity = pwc._cb_cache_tensor_identity
+
+    def counted(tensor):
+        hashed.append(tensor)
+        return identity(tensor)
+
+    monkeypatch.setattr(pwc, "_cb_cache_tensor_identity", counted)
+    return hashed, identity
+
+
+def test_the_identity_is_hashed_once_and_dies_with_the_window(tmp_path, monkeypatch):
+    cache, paths = _file_cache(tmp_path)
+    hashed, identity = _counting(monkeypatch)
+    key = next(iter(paths))
+    with _window(cache, paths):
+        first = cache.get_resident(*key)
+        served = cache.resident_render_identity(*key, first)
+        # A caller that edits its copy cannot edit what the next probe reads.
+        served["shape"].append(0)
+        served["content_sha256"] = "0" * 64
+        again = cache.resident_render_identity(*key, first)
+        assert again == identity(first)
+        assert [value is first for value in hashed] == [True]
+    # The window released the tensor, and the identity with its receipt.
+    assert isinstance(cache.weights[key], str)
+    with pytest.raises(RuntimeError, match="no matching resident load"):
+        cache.resident_render_identity(*key, first)
+    # The next window's load is a new object and is hashed again.
+    with _window(cache, paths):
+        second = cache.get_resident(*key)
+        assert second is not first
+        cache.resident_render_identity(*key, second)
+        cache.resident_render_identity(*key, second)
+    assert [value is second for value in hashed] == [False, True]
+
+
+def test_the_identity_refuses_a_tensor_changed_or_replaced_after_its_load(tmp_path):
+    cache, paths = _file_cache(tmp_path)
+    key, other = paths
+    with _window(cache, paths):
+        tensor = cache.get_resident(*key)
+        cache.resident_render_identity(*key, tensor)
+        # Another key's tensor, or a tensor this cache did not load, has no
+        # receipt for this key.
+        with pytest.raises(RuntimeError, match="no matching resident load"):
+            cache.resident_render_identity(*key, cache.get_resident(*other))
+        with pytest.raises(RuntimeError, match="no matching resident load"):
+            cache.resident_render_identity(*key, tensor.clone())
+        # An in-place write moves the version counter the load recorded.
+        tensor[0, 0] += 1
+        with pytest.raises(RuntimeError, match="changed after its load"):
+            cache.resident_render_identity(*key, tensor)
+        tensor = None
+
+
+def test_an_lru_eviction_drops_the_identity(tmp_path):
+    cache, paths = _file_cache(tmp_path)
+    first, second = paths
+    size = 8 * 8 * 2
+    cache.enable_lru(size)
+    cache.enable_file_load_receipts(max_file_bytes=max(
+        path.stat().st_size for path in paths.values()))
+    old = cache.get(*first)
+    cache.resident_render_identity(*first, old)
+    cache.get(*second)
+    assert isinstance(cache.weights[first], str)
+    with pytest.raises(RuntimeError, match="no matching resident load"):
+        cache.resident_render_identity(*first, old)
+    new = cache.get(*first)
+    assert new is not old and torch.equal(new, old)
+    assert cache.resident_render_identity(*first, new) == \
+        pwc._cb_cache_tensor_identity(new)
+
+
+# --------------------------------------------------------------------------
+# Payload and evidence are byte-identical with and without the change
+# --------------------------------------------------------------------------
+
+def _output_bytes(record):
+    root = Path(record["output_space"]["root"])
+    return {str(path.relative_to(root)): path.read_bytes()
+            for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def _arm(tmp_path, monkeypatch, campaign, patches):
+    """One quantum under ``patches``; its pickled payload and output files.
+
+    Every arm runs in the same directories, so paths in the payload agree,
+    and starts from an empty output space, not a resume.
+    """
+    single, receipt, output_root = campaign
+    with monkeypatch.context() as patch:
+        for target, attribute, value in patches:
+            patch.setattr(target, attribute, value)
+        payload, record, _counters = runtime._run_quantum(
+            tmp_path, monkeypatch, single=single, layer=1,
+            receipt=receipt, output_root=output_root,
+            plan_sha=runtime._hex("d"), prepared_sha=runtime._hex("e"))
+    files = _output_bytes(record)
+    shutil.rmtree(record["output_space"]["root"])
+    return pickle.dumps(payload), files, payload
+
+
+def _rehash_every_read(self, name, fmt, tensor):
+    """Main's behaviour before PQ #1192: hash the render on every read."""
+    return pwc._cb_cache_tensor_identity(tensor)
+
+
+def test_the_payload_and_evidence_are_byte_identical_with_and_without_the_memo(
+        tmp_path, monkeypatch):
+    campaign = _campaign(tmp_path, monkeypatch)
+    before, before_files, payload = _arm(tmp_path, monkeypatch, campaign, [
+        (pwc.ProductionWeightCache, "resident_render_identity", _rehash_every_read)])
+    after, after_files, _ = _arm(tmp_path, monkeypatch, campaign, [])
+    assert payload["costs"] and payload["provenance"]["joint_operator_windows"]
+    assert before_files and set(before_files) == set(after_files)
+    for path in before_files:
+        assert before_files[path] == after_files[path], path
+    assert before == after
