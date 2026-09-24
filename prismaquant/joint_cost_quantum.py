@@ -711,7 +711,7 @@ def _render_proof_sides(value, source, *, side: str) -> str:
 
 
 def _install_with_settlement(runner, layer: int, *, operator_windows,
-                             order) -> None:
+                             order, settle_successors: bool = True) -> None:
     """Install one layer of the quantum's own walk, then prefetch its next.
 
     ``order`` is the quantum's install order
@@ -722,13 +722,20 @@ def _install_with_settlement(runner, layer: int, *, operator_windows,
     refuses a layer that is neither resident nor in flight, and nothing
     before the walk's first layer prefetches it; for any later layer the
     call hands back the read already in flight, or owns the resident entry
-    until the install claims it (PQ #1124). After the install, the next ``prefetch_lookahead`` layers
-    of the order are prefetched, and never a layer the quantum does not
-    install. The single run's reverse walk prefetches ``layer - 1`` after
-    every layer; here that read would be the next quantum's source, which
-    this readset does not declare and the strict reader refuses. The
-    context's own top-up is off for the same reason. Under operator windows
-    the prefetched layers settle before the next step, as before.
+    until the install claims it (PQ #1124). After the install, the next
+    ``prefetch_lookahead`` layers of the order are prefetched, and never a
+    layer the quantum does not install. The single run's reverse walk
+    prefetches ``layer - 1`` after every layer; here that read would be the
+    next quantum's source, which this readset does not declare and the
+    strict reader refuses. The context's own top-up is off for the same
+    reason.
+
+    Under operator windows, ``settle_successors`` waits for the prefetched
+    layers before returning. A chain step passes ``False``: its successors'
+    reads overlap the chain roll, and the consumer waits for each one only
+    under the phase that stages it, when it installs a chain layer or in
+    :func:`_await_own_source` (PQ #1166). The own layer's call settles an
+    empty window, which refuses any prefetch still in flight.
     """
     order = tuple(order)
     position = order.index(layer)
@@ -741,14 +748,35 @@ def _install_with_settlement(runner, layer: int, *, operator_windows,
     successors = chain_prefetch_window(order, position, runner.prefetch_lookahead)
     for successor in successors:
         runner.context.schedule_prefetch(successor)
-    if operator_windows is None:
+    if operator_windows is None or not settle_successors:
         return
+    _settle_sources(runner, successors)
+
+
+def _settle_sources(runner, layers) -> None:
+    """Wait for the prefetches of ``layers``; refuse any other in flight."""
     settle = getattr(runner.context, "settle_prefetched_layers", None)
     if callable(settle):
-        settle(successors)
+        settle(tuple(layers))
     elif torch.device(runner.device).type == "cuda":
         raise RuntimeError(
             "joint operator replay requires source prefetch settlement")
+
+
+def _await_own_source(runner, layer: int, *, operator_windows) -> None:
+    """Wait for the quantum's own layer source under its source phase.
+
+    The chain step prefetches the own layer and leaves the read in flight
+    while the chain rolls (PQ #1166). The caller has reported
+    ``own-LLL-source``, the phase that stages the layer, and calls this
+    before the layer step's first memory observation, which must see no
+    pending owner and no loader temporaries. With no chain, nothing has
+    prefetched the layer yet, and this starts its read.
+    """
+    runner.context.schedule_prefetch(layer)
+    if operator_windows is None:
+        return
+    _settle_sources(runner, (layer,))
 
 
 def _rebuild_batches(runner, *, partitions, shared_pass):
@@ -1906,7 +1934,8 @@ def run_layer_quantum_core(
                                 executable_source_phase_name(chain_layer))
                         _install_with_settlement(runner, chain_layer,
                                                  operator_windows=operator_windows,
-                                                 order=source_order)
+                                                 order=source_order,
+                                                 settle_successors=False)
                         if executable:
                             progress.enter_read_phase(
                                 executable_bound_phase_name(chain_layer))
@@ -1933,15 +1962,6 @@ def run_layer_quantum_core(
                                              else chain_kernel.kernel_active_s))
 
         # ---- layer L: the single run's retained reverse step --------------
-        guard = operator_window_guard(
-            runner.device,
-            device_bytes=execution.get("device_envelope_bytes"))
-        if guard is not None:
-            # An observation before any phase is admitted: it releases
-            # retired blocks and charges no future allocation.
-            check_operator_allocation(guard, "before_layer_quantum_replay",
-                                      reserve_bytes=0)
-
         def retained_source_phase(stage_label):
             snapshot = runner.context.source_residency_snapshot(
                 range(runner.num_layers), include_head=True)
@@ -1970,15 +1990,26 @@ def run_layer_quantum_core(
                                    + retained_operator_windows[
                                        "source_loading_reserve_bytes"]))
 
-        production_cache.enable_lru(retained_budget.retained_render_cap_bytes)
-        if guard is not None:
-            retained_budget.require_physical_guard(guard)
-        retained_source_phase("source_loading")
-
         if executable:
             progress.enter_read_phase(
                 executable_own_source_phase_name(layer))
         with counters.io.span("own-source", layer=int(layer)):
+            # The chain step left this layer's read in flight during the
+            # roll. The consumer waits for it here, under the phase that
+            # stages it, before the guard's first observation (PQ #1166).
+            _await_own_source(runner, layer, operator_windows=operator_windows)
+            guard = operator_window_guard(
+                runner.device,
+                device_bytes=execution.get("device_envelope_bytes"))
+            if guard is not None:
+                # An observation before any phase is admitted: it releases
+                # retired blocks and charges no future allocation.
+                check_operator_allocation(guard, "before_layer_quantum_replay",
+                                          reserve_bytes=0)
+            production_cache.enable_lru(retained_budget.retained_render_cap_bytes)
+            if guard is not None:
+                retained_budget.require_physical_guard(guard)
+            retained_source_phase("source_loading")
             _install_with_settlement(runner, layer, operator_windows=operator_windows,
                                      order=source_order)
         if packed_members:

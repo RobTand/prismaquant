@@ -1,5 +1,26 @@
 # PrismaQuant Architecture
 
+A chain quantum waits for its own layer's source under `own-LLL-source`
+(2026-09-24, `fix/1166-settle-in-owner-phase`, PQ #1166). Under operator
+windows, the chain step used to settle the prefetch of the next layer of the
+install order before it reported `chain-NNN-bound`. For the last chain layer,
+that next layer is the quantum's own layer, which `own-LLL-source` stages two
+phases later. So the consumer blocked under `chain-NNN-source` on bytes
+PrismaBuild stages after `chain-NNN-bound`. On R13 layer 043
+(PB `93247fc2…`), `chain-044-source` lasted 502 s. A staged wait stood
+declared for 494 s of it, and py-spy found the main thread in that settle.
+The chain step now leaves that prefetch in flight, so the read overlaps the
+chain roll (`_install_with_settlement(settle_successors=False)`). After the
+quantum reports `own-LLL-source`, `_await_own_source` waits for the read,
+before the operator guard's first observation, which still sees no pending
+owner and no loader temporaries. The roll takes no guard observation and no
+residency snapshot. Its only memory check is the `min_free_gib` floor. Gate:
+`tests/test_staged_wait_phase_1166.py`. It drives the real quantum, windowed
+and spill, and records every consumer wait: a source install, a prefetch
+settle, or an exact boundary or checkpoint read. It checks that the first
+phase staging each wait's ranges is the current phase or an earlier one. No
+format, default, pipeline stage, record identity or ship gate changes.
+
 The joint dispatcher checks projection shapes before a row runs (2026-09-24,
 `fix/1175-projection-shape-check`, PQ #1175). The R13 Stage B plan selects
 the fused projection kernel `fused_fp32_v1`, whose packaged qualification
@@ -364,8 +385,10 @@ term, and the stamp names each field that differs. `--compute-ceiling FILE`
 layer-044 row, `spill-pP` is 300 + 137 + 4393 + 1800 = 6630 s and
 `render-NN` is 300 + 95 + 1800 = 2195 s. For layer 043, `chain-044-bound` is
 300 + 137 + 1686 = 2123 s. Source phases and read-only render phases keep
-900 s. A source phase also settles the next layer's source (PQ #1166), so a
-byte-derived source grace would have to count those bytes too.
+900 s. Until PQ #1166 a source phase also settled the next layer's source,
+so a byte-derived source grace would have had to count those bytes too. A
+source phase now waits only for its own layer's source (see the entry at the
+top).
 
 Each compute stamp (`prismaquant.compute_phase_grace.v1`) rides
 `--progress-grace-derivation` beside the load stamps. One basis entry per row
@@ -851,7 +874,8 @@ compared the declaration with the reads before the GPU was admitted.
   quantum's install order (`joint_layer_quanta.quantum_source_layer_order`,
   `source_read_plan.chain_prefetch_window`). It no longer prefetches
   `layer - 1`, the next quantum's source, which its readset does not
-  declare.
+  declare. A chain step does not wait for those prefetches; the consumer
+  waits for each layer under its own source phase (PQ #1166).
 - **A coverage check before submission.** `prismaquant/readset_coverage.py`
   lists, in one pass and without a GPU, every source read a manifest does
   not stage whole in the phase that reads it: resident head tensors, layer
@@ -1966,8 +1990,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `fix/1172-resume-capture-phase`.
+As of: 2026-09-24 · `fix/1166-settle-in-owner-phase`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `fix/1166-settle-in-owner-phase`) for **a chain
+quantum's wait for its own layer's source** (PQ #1166): the chain step no
+longer settles its successors' prefetches, and the quantum waits for its own
+layer's source after it reports `own-LLL-source`. A runtime order changes; no
+phase list, sealed manifest, grace, format, pipeline stage, lane or ship gate
+changes.
 
 Re-stamped (2026-09-24, `fix/1172-resume-capture-phase`) for **a resumed
 spill row's captures** (PQ #1172): a resume whose first active window is 1 or
