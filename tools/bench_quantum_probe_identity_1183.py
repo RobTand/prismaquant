@@ -12,10 +12,13 @@ Arm ``main`` passes the plain probe identity everywhere, as main does. Arm
 once, builds and checks every row through it, stores the ordinary dict in
 the row, and hashes the ordinary dict once at the end. Both arms also take
 the provenance digest once. Both run in one process on the same bytes;
-cProfile gives each arm's top functions. The two arms' rows must pickle to
-identical bytes.
+cProfile gives each arm's top functions. The two arms' rows must restore to
+the same data. Their pickle bytes differ in one known way: the fix gives every
+row the same digest string object, which pickle writes once. With those
+strings copied apart again, the bytes must be identical.
 """
 import cProfile
+import hashlib
 import io
 import json
 import pickle
@@ -93,16 +96,39 @@ def row_bytes(rows):
     return pickle.dumps(rows, protocol=pickle.HIGHEST_PROTOCOL)
 
 
+def restored_sha256(rows):
+    restored = pickle.loads(row_bytes(rows))
+    return hashlib.sha256(json.dumps(restored, sort_keys=True, separators=(",", ":"),
+                                     allow_nan=False).encode()).hexdigest()
+
+
+def digests_unshared(rows):
+    """The same rows, with each digest string its own object, as main makes them."""
+    copied = []
+    for row in rows:
+        row = dict(row)
+        row["probe_identity_sha256"] = row["probe_identity_sha256"].encode().decode()
+        operator = dict(row["joint_operator_identity"])
+        operator["probe_identity_sha256"] = operator["probe_identity_sha256"].encode().decode()
+        row["joint_operator_identity"] = operator
+        copied.append(row)
+    return copied
+
+
 def main():
     rows = load_rows()
     plain = next(iter(rows.values()))["probe_identity"]
     size = len(json.dumps(plain, sort_keys=True, separators=(",", ":")))
     before, made_before = profiled("main", rows, plain, arm_main)
     after, made_after = profiled("fix", rows, plain, arm_fix)
-    same = row_bytes(made_before) == row_bytes(made_after)
+    same = restored_sha256(made_before) == restored_sha256(made_after)
+    raw = row_bytes(made_before) == row_bytes(made_after)
+    unshared = row_bytes(digests_unshared(made_before)) == row_bytes(digests_unshared(made_after))
     print(json.dumps({"qname": QNAME, "formats": len(rows), "units": UNITS,
                       "probe_identity_json_bytes": size,
-                      "rows_pickle_byte_identical": same,
+                      "rows_equal_after_pickle": same,
+                      "rows_pickle_byte_identical": raw,
+                      "byte_identical_once_digests_unshared": unshared,
                       "main": {k: v for k, v in before.items() if k != "top"},
                       "fix": {k: v for k, v in after.items() if k != "top"},
                       "speedup": round(before["wall_s"] / max(after["wall_s"], 1e-9), 1)},
@@ -110,7 +136,7 @@ def main():
     for result in (before, after):
         print(f"--- cProfile, arm {result['arm']} (cumulative) ---")
         print("\n".join(result["top"]))
-    return 0 if same else 1
+    return 0 if same and unshared else 1
 
 
 if __name__ == "__main__":
