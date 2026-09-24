@@ -335,7 +335,8 @@ class _RecordingGuard:
 
     def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
         self.admissions.append((label, reserve_bytes))
-        return {"conservative_cgroup_plus_cuda_reserved_bytes": 0}
+        return {"conservative_cgroup_plus_cuda_reserved_bytes": 0,
+                "committed_cgroup_plus_cuda_reserved_bytes": 0}
 
 
 def test_layer_quantum_charges_each_phase_to_its_guard(campaign, monkeypatch):
@@ -360,6 +361,76 @@ def test_layer_quantum_charges_each_phase_to_its_guard(campaign, monkeypatch):
                   "before_joint_retained_candidate_load",
                   "before_joint_retained_statistics_probe"):
         assert label in labels
+
+
+class _DeviceRecordingGuard(_RecordingGuard):
+    """A recording guard with a declared device envelope, as Stage B's has.
+
+    ``check_operator_allocation`` routes a device reservation to
+    ``reserve_device_bytes`` only for a guard with a device envelope; this one
+    records both sides of every admission.
+    """
+
+    device_bytes = 1 << 61
+
+    def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
+        self.admissions.append((label, reserve_bytes, reserve_device_bytes))
+        return {"conservative_cgroup_plus_cuda_reserved_bytes": 0,
+                "committed_cgroup_plus_cuda_reserved_bytes": 0}
+
+
+def _record_capture_sides(monkeypatch):
+    """Record every read of the spill's host and device capture reserves.
+
+    Returns ``{"capture_reserve_host_bytes": [...],
+    "capture_reserve_device_bytes": [...]}``, filled in read order.
+    """
+    sides = {"capture_reserve_host_bytes": [], "capture_reserve_device_bytes": []}
+
+    def recording(name, original):
+        def read(self):
+            sides[name].append(original.fget(self))
+            return sides[name][-1]
+        return property(read)
+
+    for name in sides:
+        monkeypatch.setattr(spill_mod.StageBReplaySpill, name,
+                            recording(name, getattr(spill_mod.StageBReplaySpill, name)))
+    return sides
+
+
+def test_capture_pass_charges_its_cuda_allocations_to_the_device_side(campaign, monkeypatch,
+                                                                     tmp_path):
+    """The capture's workspace and held inputs are device charges (PQ #1157).
+
+    Every stored batch's backward workspace and every target input the spill
+    holds until its backward are CUDA allocations, so the capture admission
+    charges them to the device side, where the guard also holds them against
+    the device envelope. Only the spill's pinned host arenas stay on the host
+    side. Before #1157 the whole sum rode ``reserve_bytes``.
+    """
+    regime, batch = "capture_batch=2", 2
+    layer = 0
+    _policy, budget, _retained = _policy_budget()
+    sides = _record_capture_sides(monkeypatch)
+    guard = _DeviceRecordingGuard(campaign.device)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                              regime=regime)
+    assert payload is not None, _chain(state.error)
+    captures = [(host, device) for label, host, device in guard.admissions
+                if label == "before_joint_window_backward"]
+    hosts = sides["capture_reserve_host_bytes"]
+    devices = sides["capture_reserve_device_bytes"]
+    assert len(captures) == N_PROBES == len(hosts) == len(devices)
+    assert captures == [(host, budget.capture_workspace_bytes(batch) + device)
+                        for host, device in zip(hosts, devices)]
+    # ``spill.capture`` allocates the pinned arenas as it opens, before this
+    # admission, so their host charge is already in the guard's reading and
+    # the host side reserves nothing more here.
+    assert hosts == [0] * N_PROBES
+    assert all(device > 0 for device in devices)
 
 
 @pytest.mark.parametrize("spilled", [False, True], ids=["windowed", "spill"])
@@ -943,34 +1014,31 @@ def test_capture_pass_charges_the_planned_workspace_per_stored_batch(campaign, m
     budget's. The retained budget is what the derivation plans the capture
     pass with (``RetainedWindowBudget.capture_peak_bytes``), so every capture
     admission must be the budget's reserve times the capture batch, plus the
-    spill's own pinned reserve. Before #1151 the guard multiplied the operator
-    windows' reserve instead, a quantity no plan priced.
+    spill's own capture reserve on its two sides. Before #1151 the guard
+    multiplied the operator windows' reserve instead, a quantity no plan
+    priced.
     """
     regime, batch = "capture_batch=2", 2
     layer = 0
     policy, budget, retained = _policy_budget()
     wide = dict(policy, workspace_reserve_bytes=5 * budget.workspace_reserve_bytes)
     monkeypatch.setitem(globals(), "_policy_budget", lambda: (wide, budget, retained))
-    spill_reserves = []
-    reserve = spill_mod.StageBReplaySpill.capture_reserve_bytes
-
-    def recording(self):
-        spill_reserves.append(reserve.fget(self))
-        return spill_reserves[-1]
-
-    monkeypatch.setattr(spill_mod.StageBReplaySpill, "capture_reserve_bytes",
-                        property(recording))
-    guard = _RecordingGuard(campaign.device)
+    sides = _record_capture_sides(monkeypatch)
+    guard = _DeviceRecordingGuard(campaign.device)
     _clear_output(campaign, layer)
     payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard,
                               spill_root=_spill_root(tmp_path), ceiling=1 << 30,
                               regime=regime)
     assert payload is not None, _chain(state.error)
-    captures = [charged for label, charged in guard.admissions
+    captures = [(host, device) for label, host, device in guard.admissions
                 if label == "before_joint_window_backward"]
-    assert len(captures) == N_PROBES == len(spill_reserves)
-    assert captures == [batch * budget.workspace_reserve_bytes + spill_reserve
-                        for spill_reserve in spill_reserves]
+    hosts = sides["capture_reserve_host_bytes"]
+    devices = sides["capture_reserve_device_bytes"]
+    assert len(captures) == N_PROBES == len(hosts) == len(devices)
+    # The workspace rides the device side with the spill's held inputs
+    # (PQ #1157); the spill's pinned arenas are the only host charge.
+    assert captures == [(host, batch * budget.workspace_reserve_bytes + device)
+                        for host, device in zip(hosts, devices)]
     assert budget.capture_workspace_bytes(batch) == batch * budget.workspace_reserve_bytes
 
 

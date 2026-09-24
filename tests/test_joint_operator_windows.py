@@ -206,6 +206,7 @@ def test_guarded_operator_phases_release_inactive_allocator_reservation(tmp_path
     cap = 4*1024**3
     (scope/'memory.max').write_text(str(cap))
     (scope/'memory.current').write_text(str(1024**3))
+    (scope/'memory.stat').write_text("anon 0\nfile 0\nshmem 0\nfile_dirty 0\nfile_writeback 0\n")  # no page cache (PQ #1157)
     membership = tmp_path/'membership'; membership.write_text('0::/job\n')
     guard = memory.CaptureMemoryGuard('cuda:0', cgroup_root=tmp_path, membership=membership)
     state = {'inactive': 2*1024**3, 'releases': 0}

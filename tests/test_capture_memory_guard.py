@@ -40,6 +40,8 @@ def _cgroup(tmp_path: Path, *, cap_bytes: int, current_bytes: int) -> dict:
     scope.mkdir(parents=True)
     (scope / "memory.max").write_text(str(cap_bytes))
     (scope / "memory.current").write_text(str(current_bytes))
+    # No page cache: the committed bytes are memory.current (PQ #1157).
+    (scope / "memory.stat").write_text("anon 0\nfile 0\nshmem 0\nfile_dirty 0\nfile_writeback 0\n")
     membership = tmp_path / "self.cgroup"
     membership.write_text("0::/scope\n")
     return {"cgroup_root": root, "membership": membership}

@@ -1,5 +1,44 @@
 # PrismaQuant Architecture
 
+The capture guard counts committed memory, not page cache (2026-09-24,
+`ws-sb4/1157-committed-memory`, PQ #1157, part of #1141). One definition,
+`memory_management.committed_cgroup_bytes`, now feeds every admission in
+`CaptureMemoryGuard._check` and the retained plan's
+`require_observed_baseline`: `memory.current` less the clean file pages,
+where clean is `file - shmem - file_dirty - file_writeback` from the same
+cgroup's `memory.stat`. Anon, shmem, kernel memory, dirty and writeback
+pages, and any charge not listed stay committed. The kernel drops clean cache
+before it refuses an allocation at `memory.max`, so counting it refused rows
+for memory they did not hold: the R13 layer-044 profile on sparklina (PQ
+#1151, attempt 1) was refused at `before_quantum_reverse:44` with 44.56 GB
+observed against 43.13 GB declared, while the own-source read had left about
+21.8 GB of clean NFS cache beside 4.7 GB of anon. The guard reads
+`memory.stat` before `memory.current` and never reports less than the stat's
+anon, shmem, dirty and writeback, so a race between the two reads errs toward
+committed. A `memory.stat` that lacks one of the five keys refuses and
+latches. The reading keeps the raw `cgroup_current_bytes` and
+`conservative_cgroup_plus_cuda_reserved_bytes` and adds
+`cgroup_committed_bytes`, `cgroup_clean_file_bytes` and
+`committed_cgroup_plus_cuda_reserved_bytes`, the key both baseline callers
+read (`joint_retained_window_plan.OBSERVED_BASELINE_KEY`). `baseline_bytes()`
+and `peak_conservative_bytes` stay raw, because the Tessera lane subtracts the
+baseline from its cap; `baseline.committed_bytes` and `peak_committed_bytes`
+are recorded beside them. The margins do not change: 2 GiB under the cgroup
+cap and the 8 GiB host floor (#1158 tracks that floor against the 8.5 GiB
+MemAvailable of the 2026-09-14 hang). The device split:
+`check_operator_allocation` takes `reserve_device_bytes`, and the Stage B
+window backward and spill capture charge their CUDA allocations there (the
+retained budget's backward workspace, PQ #1151, times the stored batches, the
+lease's statistics, and the target inputs the spill holds), so an aggregate
+guard also holds them against the device envelope. Only the spill's pinned host arenas stay on the host
+side (`StageBReplaySpill.capture_reserve_host_bytes`). A guard without a
+device envelope takes the sum, as before. Gates:
+`tests/test_committed_memory_1157.py`, which carries the row's own
+`memory.stat` from sparky (attempt 2), and
+`test_capture_pass_charges_its_cuda_allocations_to_the_device_side` in
+`tests/test_stageb_one_pass_spill.py`. This changes a guard's admission
+arithmetic. No format, pipeline stage, default or ship gate changes.
+
 Stage B plans the capture pass it charges (2026-09-24,
 `ws-sb4/1151-capture-workspace`, PQ #1151). The capture guard charges
 `workspace_reserve_bytes` once per stored batch a pass carries, so a capture
@@ -41,10 +80,11 @@ The live guard admits each step, charged on the device side: B=1 under the
 declared reserve, each later step under the previous step's measured peak
 times the batch ratio. It writes a JSON receipt of the device peak deltas and
 the cgroup `memory.stat` at each group's host peak, then stops the quantum.
-Two charges stay outside the shared quantity: the spill's own pinned reserve
-(`StageBReplaySpill.capture_reserve_bytes`), which the plan cannot see, and
-the spill window replay, which still charges the operator windows' declared
-reserve. Gates: `tests/test_stage_b_capture_pricing.py`,
+Two charges stay outside the shared quantity: the spill's own capture
+reserve, which the plan cannot see (since PQ #1157 its pinned host arenas,
+`StageBReplaySpill.capture_reserve_host_bytes`, and its held target inputs,
+`capture_reserve_device_bytes`), and the spill window replay, which still
+charges the operator windows' declared reserve. Gates: `tests/test_stage_b_capture_pricing.py`,
 `tests/test_stageb_one_pass_spill.py`
 (`test_capture_pass_charges_the_planned_workspace_per_stored_batch`),
 `tests/test_joint_stageb_resources.py`,
@@ -1691,8 +1731,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-sb4/1151-capture-workspace`.
+As of: 2026-09-24 · `ws-sb4/1157-committed-memory`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-sb4/1157-committed-memory`) for **the capture
+guard and the retained plan's baseline check admitting on committed memory,
+not page cache, and the Stage B capture charging its CUDA allocations to the
+device side** (PQ #1157, part of #1141). See the entry at the top. No format,
+pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-sb4/1151-capture-workspace`) for **the Stage B
 plan pricing the capture pass the guard charges, the measured capture
@@ -4798,8 +4844,9 @@ Renders are bounded twice because they are host-resident --
 `ProductionWeightCache._load_file_tensor` reads every candidate with
 `map_location="cpu"` and the retained window holds those CPU tensors for the
 window's whole life, while the fp32 delta and the statistics matrices are
-built on the device -- and `CaptureMemoryGuard._check` holds `memory.current`
-against `cap - margin` on its own even in aggregate mode, because the kernel
+built on the device -- and `CaptureMemoryGuard._check` holds the cgroup's
+committed bytes (PQ #1157) against `cap - margin` on its own even in aggregate
+mode, because the kernel
 enforces the container's cgroup cap whatever the aggregate says.
 `RetainedWindowBudget` states one `physical_limit_bytes` and cannot say which
 side an owner lands on, so `HOST_RESIDENT_BUDGET_FIELDS` names the host-side
