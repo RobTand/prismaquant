@@ -129,3 +129,59 @@ def test_worker_resource_verification_uses_sealed_geometry_without_render_stats(
         return original(path)
     monkeypatch.setattr(resources, '_bound_stat_fence', metadata_only)
     assert resources.verify_policy(binding) == policy
+
+
+CAPTURE_RECEIPT = {'action_key': 'c' * 64, 'path': '/receipts/profile.json', 'sha256': 'd' * 64}
+
+
+def _capture(batch, workspace):
+    return {'capture_batch': batch, 'workspace_reserve_bytes': {
+        'bytes': workspace, 'receipt': dict(CAPTURE_RECEIPT), 'basis': 'test'}}
+
+
+def test_a_measured_capture_rides_the_policy_and_its_rederivation(resource_fixture, tmp_path):
+    """PQ #1151: the workspace is measured, named by its receipt, and re-derived."""
+    inputs, _original, _extended, _binding, legacy = resource_fixture
+    assert 'capture' not in legacy and 'capture' not in legacy['derivation']
+    assert 'workspace_reserve_bytes' in legacy['derivation']['declared']
+    limits = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+    policy = derive_policy(inputs, **limits, capture=_capture(4, 2 << 20))
+    assert policy['capture'] == _capture(4, 2 << 20)
+    assert policy['budget']['workspace_reserve_bytes'] == 2 << 20
+    derivation = policy['derivation']
+    assert 'workspace_reserve_bytes' not in derivation['declared']
+    assert derivation['measured']['workspace_reserve_bytes']['receipt'] == CAPTURE_RECEIPT
+    assert derivation['capture']['workspace_bytes'] == 4 * (2 << 20)
+    assert derivation['peak_planned_bytes'] >= derivation['capture']['peak_planned_bytes']
+    assert verify_policy(bound(tmp_path / 'measured.json', policy)) == policy
+    # A policy whose capture block was edited no longer re-derives.
+    forged = copy.deepcopy(policy)
+    forged['capture']['workspace_reserve_bytes']['bytes'] = 1 << 20
+    with pytest.raises(ValueError, match='independent resource derivation'):
+        verify_policy(bound(tmp_path / 'forged-capture.json', forged))
+
+
+def test_a_capture_that_does_not_fit_refuses_the_policy(resource_fixture):
+    inputs, *_ = resource_fixture
+    limits = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+    with pytest.raises(RuntimeError, match='capture pass at capture_batch 4 plans'):
+        derive_policy(inputs, **limits, capture=_capture(4, 16 << 20))
+
+
+def test_the_receipt_is_read_once_for_its_bytes_and_digest(tmp_path):
+    import hashlib
+    from prismaquant.joint_stageb_resources import workspace_from_receipt
+    from prismaquant.stage_b_workspace_profile import SCHEMA, write_profile
+
+    path = tmp_path / 'profile.json'
+    profile = {'schema': SCHEMA, 'ladder_complete': True,
+               'measured': {'workspace_per_batch_bytes': 3 << 20, 'basis': 'device peak'}}
+    digest = write_profile(path, profile)
+    owner = workspace_from_receipt(path, action_key='e' * 64)
+    assert owner == {'bytes': 3 << 20, 'basis': 'device peak',
+                     'receipt': {'action_key': 'e' * 64, 'path': str(path), 'sha256': digest}}
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+    incomplete = tmp_path / 'incomplete.json'
+    write_profile(incomplete, {**profile, 'ladder_complete': False})
+    with pytest.raises(ValueError, match='incomplete ladder'):
+        workspace_from_receipt(incomplete, action_key='e' * 64)

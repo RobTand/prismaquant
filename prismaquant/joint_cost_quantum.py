@@ -1468,6 +1468,9 @@ def run_layer_quantum_core(
         raise QuantumIdentityRefused(
             f"quantum {quantum_id}: {handoff_regime_refusal(replay_regime)}")
     capture_batch = replay_regime["capture_batch"]
+    # PQ #1151: an opt-in measurement of the capture workspace, read once.
+    from .stage_b_workspace_profile import profile_capture_workspace, profile_request
+    workspace_profile = profile_request()
     # PQ #1011: an executable read plan is sealed for one replay mode, and a
     # launch in the other mode would stage reads this quantum never makes.
     sealed_spill = False
@@ -2107,7 +2110,10 @@ def run_layer_quantum_core(
                          _chain_group_batch(runner, batches, indices, capture_group_cache))
                 out = runner.isolated_layer(batch, layer, x_in, pass_state={})
                 torch.autograd.backward([out], [incoming_grad])
-                observer.end_batch()
+                if observer is not None:
+                    # None only under the workspace profile's window backward
+                    # (PQ #1151): the same pass with no spill hooks installed.
+                    observer.end_batch()
                 if not torch.equal(cpu_rng, torch.get_rng_state()) or (
                         cuda_rng is not None and not torch.equal(
                             cuda_rng, torch.cuda.get_rng_state(runner.device))):
@@ -2156,12 +2162,14 @@ def run_layer_quantum_core(
             # contract states: it synchronizes, empties the allocator cache
             # and charges the guard, which is too much work per sample. The
             # lease is fresh, so its whole statistics capacity is still to
-            # come; the per-sample floors below stay.
+            # come; the per-sample floors below stay. The workspace is the
+            # retained budget's, the same quantity its derivation planned the
+            # capture pass with (PQ #1151): one reserve per stored batch.
             if guard is not None:
                 check_operator_allocation(
                     guard, "before_joint_window_backward", reserve_bytes=(
-                        operator_windows["workspace_reserve_bytes"]
-                        * (1 if observer is None else capture_batch)
+                        retained_budget.capture_workspace_bytes(
+                            1 if observer is None else capture_batch)
                         + (0 if lease is None
                            else lease.statistics_capacity_bytes
                            - lease.resident_statistics_bytes)
@@ -2365,6 +2373,26 @@ def run_layer_quantum_core(
             spill_specs = {name: {fmt: fr.get_format(fmt) for fmt in render_formats[name]}
                            for name in spill_modules}
 
+            def spill_observer(probe_index):
+                return spill.capture(
+                    probe_index, spill_modules, spill_specs,
+                    activation_max_abs=joint_activation_maxima(production_cache),
+                    projection_backend=projection_backend)
+
+            def profile_group(group, observer):
+                # capture_group replaces each batch's incoming cotangent with
+                # the layer input's, and the ladder passes the same batches
+                # again, so every pass gets the incoming cotangent back
+                # (PQ #1151). A read of the scratch is already a fresh copy.
+                keys = [(0, int(item[0])) for item in group]
+                saved = {key: grad_plane[key] for key in keys}
+                try:
+                    capture_group(group, 0, observer)
+                finally:
+                    for key, tensor in saved.items():
+                        grad_plane[key] = tensor
+                    saved = None
+
             def spill_capture(probe_index):
                 # The probe's one pass reads its boundaries under its spill
                 # phase, where the spill-sealed read plan stages them (PQ
@@ -2373,11 +2401,31 @@ def run_layer_quantum_core(
                 if executable:
                     progress.enter_read_phase(
                         executable_spill_phase_name(probe_index))
+                if workspace_profile is not None and int(probe_index) == 0:
+                    # PQ #1151: measure the capture workspace where the
+                    # production pass would run, then stop the quantum.
+                    with counters.io.span("workspace-profile", probe=int(probe_index)):
+                        profile_capture_workspace(
+                            workspace_profile, storage=storage, batches=batches,
+                            layer=layer,
+                            run_group=profile_group,
+                            observed=lambda: spill_observer(probe_index),
+                            guard=guard,
+                            declared_workspace_bytes=(
+                                retained_budget.workspace_reserve_bytes),
+                            capture_reserve_bytes=spill.capture_reserve_bytes,
+                            capture_batch=capture_batch, device=runner.device,
+                            identity={
+                                "quantum_id": quantum_id, "layer": layer,
+                                "record_identity_sha256": record.get("identity_sha256"),
+                                "replay_regime": dict(replay_regime),
+                                "probe_microbatch": probe_microbatch,
+                                "stored_batches": len(batches),
+                                "device_envelope_bytes": execution.get(
+                                    "device_envelope_bytes"),
+                                "git_commit": _checkpoint_git_commit()})
                 with counters.io.span("spill-capture", probe=int(probe_index)), \
-                        spill.capture(
-                            probe_index, spill_modules, spill_specs,
-                            activation_max_abs=joint_activation_maxima(production_cache),
-                            projection_backend=projection_backend) as observer:
+                        spill_observer(probe_index) as observer:
                     replay_backward(final=True, lease=None, probe=probe_index,
                                     observer=observer)
 
