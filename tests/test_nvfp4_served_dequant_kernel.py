@@ -188,8 +188,14 @@ def test_group_abs_max_is_the_torch_maximum_bit_for_bit():
         slots = flat[::17][: special.numel()]                # spread over groups
         flat[::17][: special.numel()] = special.cuda()[: slots.numel()]
         x[-1, :G16] = -0.0                                   # a negative-zero group
+        if rows > 1:
+            # A whole group of the smallest bf16 subnormal, so a subnormal
+            # IS a group maximum: a flush to zero would show here.
+            x[0, :G16] = 2.0 ** -133
         got = kernels.group_abs_max(x)
         want = x.float().reshape(rows, width // G16, G16).abs().amax(-1)
+        if rows > 1:
+            assert want[0, 0].item() == 2.0 ** -133            # the row is what it claims
         assert torch.equal(torch.isnan(got), torch.isnan(want))
         finite = ~torch.isnan(want)
         assert torch.equal(_bits(got[finite]), _bits(want[finite]))
@@ -235,6 +241,55 @@ def test_dequantize_codes_is_the_torch_composition_bit_for_bit(dtype, g):
     want = owner._nvfp4_dequantize_registered_codes(codes, stored, g).to(dtype)
     _assert_bit_identical(got, want)
     assert torch.equal(got, want)
+
+
+#: Edge rows for the code-to-value step, each an (amax, G) the shared scale
+#: rule turns into a known stored and used scale (fable review D1, D2):
+#: ``6 * 2**-135`` at ``G = 2**126`` gives stored ``2**-9`` (the smallest
+#: e4m3 subnormal) and used ``2**-135``, so the used scale and every nonzero
+#: product are FP32 subnormals; ``2**20`` at ``G = 1/64`` clamps to stored
+#: 448 and used 28672, so code 7 gives 172032, past the fp16 maximum.
+EDGE_ROWS = {
+    "fp32_subnormal": (6.0 * 2.0 ** -135, 2.0 ** 126, 2.0 ** -9, 2.0 ** -135),
+    "fp16_overflow": (2.0 ** 20, 1.0 / 64.0, 448.0, 28672.0),
+}
+
+
+@needs_cuda_triton
+@pytest.mark.parametrize("dtype", (torch.bfloat16, torch.float16, torch.float32))
+@pytest.mark.parametrize("row", sorted(EDGE_ROWS))
+def test_dequantize_codes_edge_rows_are_the_torch_composition_bit_for_bit(dtype, row):
+    """Every code under a stored scale the rule puts at an FP32 edge."""
+    from prismaquant.kernels import nvfp4_served_dequant as kernels
+
+    amax_value, g, stored_value, used_value = EDGE_ROWS[row]
+    rows, width = 3, 512
+    # Every byte value, so every code appears in both nibbles.
+    packed = (torch.arange(rows * width // 2, device="cuda") % 256).to(
+        torch.uint8).reshape(rows, width // 2)
+    amax = torch.full((rows, width // G16), amax_value, device="cuda")
+    amax[1, ::3] = 0.0                                        # zero-scale groups
+    stored = owner.nvfp4_stored_scale_from_amax(amax, g).float()
+    used = stored / g
+    live = amax != 0
+    # The rule lands where the row claims, before any comparison.
+    assert torch.all(stored[live] == stored_value)
+    assert torch.all(used[live] == used_value)
+    if row == "fp32_subnormal":
+        tiny = torch.finfo(torch.float32).tiny
+        assert 0.0 < used_value < tiny and 6.0 * used_value < tiny
+
+    got = kernels.dequantize_codes(packed, stored, used,
+                                   owner._e2m1_positive_table(packed.device), dtype)
+    codes = torch.stack((packed & 0xF, packed >> 4), dim=-1).reshape(rows, width)
+    want = owner._nvfp4_dequantize_registered_codes(codes, stored, g).to(dtype)
+    _assert_bit_identical(got, want)
+    if row == "fp16_overflow" and dtype == torch.float16:
+        assert torch.isinf(want).any() and torch.isinf(got).any()
+    if row == "fp32_subnormal" and dtype == torch.float32:
+        nonzero = want != 0
+        assert nonzero.any()
+        assert torch.all(want[nonzero].abs() < torch.finfo(torch.float32).tiny)
 
 
 @needs_cuda_triton
@@ -302,6 +357,33 @@ def test_real_operator_fused_leg_is_the_torch_leg_bit_for_bit(width):
             _assert_bit_identical(
                 owner._nvfp4_activation_qdq_registered_op(x, g),
                 owner._nvfp4_activation_qdq_registered_op_unfused(x, g))
+
+
+@real_operator
+def test_real_operator_edge_rows_are_bit_identical():
+    """The real operator's codes on activations that reach the D1/D2 edges.
+
+    A group of the smallest bf16 subnormal at ``G = 2**126`` has stored
+    ``2**-9`` and used ``2**-135``, an FP32 subnormal; an fp16 group of
+    65504 at ``G = 1/64`` rounds (as bf16) to 65536, a stored scale of 176
+    and a used scale of 11264, so code 7 overflows fp16.
+    """
+    x = activation(4, 512, seed=4)
+    x[1, :G16] = 2.0 ** -133
+    x[2, 16:32] = -(2.0 ** -133)
+    got = owner._nvfp4_activation_qdq_registered_op(x, 2.0 ** 126)
+    want = owner._nvfp4_activation_qdq_registered_op_unfused(x, 2.0 ** 126)
+    _assert_bit_identical(got, want)
+    edge = want[1, :G16].float()                               # the row reached the edge
+    assert (edge != 0).all() and (edge.abs() < torch.finfo(torch.float32).tiny).all()
+
+    half = activation(4, 512, seed=5, dtype=torch.float16)
+    half[1, :G16] = 65504.0
+    half[2, 16:32] = -65504.0
+    got = owner._nvfp4_activation_qdq_registered_op(half, 1.0 / 64.0)
+    want = owner._nvfp4_activation_qdq_registered_op_unfused(half, 1.0 / 64.0)
+    _assert_bit_identical(got, want)
+    assert torch.isinf(want[1, :G16]).all() and torch.isinf(want[2, 16:32]).all()
 
 
 @real_operator
