@@ -79,10 +79,16 @@ def test_a_band_serial_handoff_is_written_under_its_own_span(tmp_path, monkeypat
     calls = []
 
     def emitter(record, adjoint_slice, execution):
+        from prismaquant.joint_replay_regime import normalize_replay_regime
+
         def emit(**kwargs):
             calls.append(sorted(kwargs))
             return {}
-        return SimpleNamespace(emit=emit, published={})
+        # The core refuses an emitter built for another capture batch, so the
+        # stub carries the launch regime's, as HandoffEmitter does.
+        capture_batch = normalize_replay_regime(
+            execution.get("replay_regime"))["capture_batch"]
+        return SimpleNamespace(emit=emit, published={}, capture_batch=capture_batch)
 
     _payload, _record, block = _quantum(tmp_path, monkeypatch, handoff_emitter=emitter)
     assert calls, "the fixture emitter was never called"
