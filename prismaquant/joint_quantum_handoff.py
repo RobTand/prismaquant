@@ -492,8 +492,10 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     members are deserialized.
     """
     from .cost_streaming import _state_storage_bytes
+    from .io_spans import ReadRateReporter
     from .joint_adjoint_checkpoints import (
         _await_checkpoint_entry,
+        _entry_bytes,
         _read_shared_state_payload,
         read_exact_entry_tensors,
         read_shared_state_pack,
@@ -524,12 +526,18 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                              "shape": entry["shape"], "dtype": entry["dtype"],
                              "tensor_bytes": entry["tensor_bytes"]})
     plane = {} if cotangent_factory is None else cotangent_factory(scratch_rows)
+    # The rate and ETA lines of the checkpoint loader; no PrismaBuild units.
+    rate = ReadRateReporter(
+        "handoff-load", total_entries=len(entries),
+        total_bytes=sum(_entry_bytes(entry) for entry in entries))
     for entry in entries:
         probe, batch, _at = _plane_coordinates(entry)
         _await_checkpoint_entry(entry, deadline=deadline)
         tensors = read_exact_entry_tensors([entry], expected_session=handoff["session"])
         plane[(probe, batch)] = tensors.pop(entry["name"])
         del tensors
+        rate.entry(_entry_bytes(entry))
+    rate.done()
 
     def staged(path, entry, label):
         _await_checkpoint_entry(entry, deadline=deadline)

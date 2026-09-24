@@ -245,7 +245,8 @@ def campaign(tmp_path_factory):
 
 
 def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
-             resume=False, label=None, regime=None, emit_handoff=False):
+             resume=False, label=None, regime=None, emit_handoff=False,
+             guard=None):
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress, quantum_layer_roster,
         quantum_retained_state, resolve_quantum_windows, run_layer_quantum_core)
@@ -258,9 +259,16 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
         monkeypatch.setenv(spill_mod.SPILL_ENV[0], str(spill_root))
     if ceiling is not None:
         monkeypatch.setenv(spill_mod.SPILL_ENV[1], str(ceiling))
-    if campaign.device.type == "cuda":
+    if guard is not None:
+        # A caller-supplied guard stands in for the capture guard on any
+        # device, so every phase admission the quantum makes reaches it.
+        import prismaquant.joint_statistics_replay as replay
+        monkeypatch.setattr(replay, "operator_window_guard", lambda *a, **k: guard)
+    elif campaign.device.type == "cuda":
         # The fixture's budget is far below a real capture guard's physical
         # floor; the guard charges admissions and never touches arithmetic.
+        # test_layer_quantum_charges_each_phase_to_its_guard drives the
+        # guarded path with a recording guard instead.
         import prismaquant.joint_statistics_replay as replay
         monkeypatch.setattr(replay, "operator_window_guard", lambda *a, **k: None)
     model, context, runner = _runner(campaign.state, campaign.device)
@@ -308,6 +316,93 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
     if emit_handoff:
         state.handoff = band["handoff_emitter"].published
     return payload, state
+
+
+class _RecordingGuard:
+    """The capture guard's admission contract, admitting everything.
+
+    ``check`` takes the same keyword-only arguments as
+    ``CaptureMemoryGuard.check`` and records each admission. The physical
+    cap and margin admit any fixture plan, so the quantum runs its guarded
+    path end to end on either device.
+    """
+
+    def __init__(self, device):
+        self.device = device
+        self.physical_cap_bytes = 1 << 62
+        self.margin_bytes = 0
+        self.admissions = []
+
+    def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
+        self.admissions.append((label, reserve_bytes))
+        return {"conservative_cgroup_plus_cuda_reserved_bytes": 0}
+
+
+def test_layer_quantum_charges_each_phase_to_its_guard(campaign, monkeypatch):
+    """Every guarded admission of a layer quantum reaches its guard.
+
+    Every CUDA quantum builds a capture guard, and the other tests here
+    replace it with None, so this test is the only one that runs the
+    guarded path.
+    """
+    layer = 1
+    guard = _RecordingGuard(campaign.device)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard)
+    assert payload is not None, _chain(state.error)
+    labels = [label for label, _reserve in guard.admissions]
+    assert labels[0] == "before_layer_quantum_replay"
+    assert guard.admissions[0][1] == 0
+    for label in (f"before_quantum_source_loading:{layer}",
+                  f"admit_quantum_source_loading:{layer}",
+                  f"before_quantum_reverse:{layer}",
+                  f"admit_quantum_reverse:{layer}",
+                  "before_joint_retained_candidate_load",
+                  "before_joint_retained_statistics_probe"):
+        assert label in labels
+
+
+@pytest.mark.parametrize("spilled", [False, True], ids=["windowed", "spill"])
+def test_layer_quantum_opens_one_io_span_per_phase(campaign, monkeypatch, tmp_path,
+                                                   capsys, spilled):
+    """Every phase of a quantum has its ``/proc/self/io`` span, in counters.json.
+
+    The v6 IO baseline reads these: checkpoint-load, each chain layer, the
+    own-source install, each window, each (window, probe) replay and each
+    probe's spill capture. The checkpoint loader also prints rate lines.
+    """
+    from prismaquant.io_spans import PROC_IO_FIELDS, READ_RATE_MARKER
+
+    layer = 1
+    _clear_output(campaign, layer)
+    kwargs = ({"spill_root": _spill_root(tmp_path), "ceiling": 1 << 30}
+              if spilled else {})
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, **kwargs)
+    assert payload is not None, _chain(state.error)
+    spans = state.counters_block["io_spans"]
+    windows = len(campaign.preflight[layer])
+    chain = [int(c) for c in campaign.records[layer]["adjoint"]["chain_layers"]]
+    assert [s["span"] for s in spans].count("checkpoint-load") == 1
+    assert [s["layer"] for s in spans if s["span"] == "chain-layer"] == chain
+    assert [s["layer"] for s in spans if s["span"] == "own-source"] == [layer]
+    assert [s["window"] for s in spans if s["span"] == "window"] == list(range(windows))
+    replays = [s for s in spans if s["span"] == "replay"]
+    assert sorted((s["window"], s["probe"]) for s in replays) == [
+        (w, p) for w in range(windows) for p in range(N_PROBES)]
+    assert {s["mode"] for s in replays} == {"spill" if spilled else "window"}
+    assert {s["parent"] for s in replays} == {"window"}
+    captures = [s["probe"] for s in spans if s["span"] == "spill-capture"]
+    assert captures == (list(range(N_PROBES)) if spilled else [])
+    assert {s["outcome"] for s in spans} == {"ok"}
+    assert all(set(PROC_IO_FIELDS) <= set(s["proc_io"]) for s in spans)
+    assert {s["scope"] for s in spans} == {campaign.records[layer]["quantum_id"]}
+    rates = [json.loads(line[len(READ_RATE_MARKER) + 1:])
+             for line in capsys.readouterr().out.splitlines()
+             if line.startswith(READ_RATE_MARKER + " {")]
+    final = [r for r in rates if r["final"]]
+    assert [r["label"] for r in final] == ["checkpoint-load"]
+    assert final[0]["entries"] == final[0]["entries_total"] > 0
+    assert final[0]["bytes"] == final[0]["bytes_total"] > 0
 
 
 def _checkpoint_dir(campaign, layer):

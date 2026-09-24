@@ -37,6 +37,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import math
 import subprocess
 import sys
 import time
@@ -100,8 +101,65 @@ STAGED_ALLOWED_TIERS = "ram,ssd"
 CHUNK_PROGRESS_GRACE_S = 900
 #: The head phase's stall allowance. Not pinned by the contract (only the
 #: chunk grace is); the sealed default below is overridable via
-#: --head-grace-s and pinned by the dispatcher's own tests.
+#: --head-grace-s and pinned by the dispatcher's own tests. It is also the
+#: blanket grace a load phase takes when no floor applies (below).
 HEAD_PROGRESS_GRACE_S = 1800
+
+#: checkpoint-load and handoff-load commit no progress units: a read into a
+#: disposable scratch is not durable work (PB #480). Their grace is therefore
+#: the phase's whole time budget, derived per row as W + ceil(bytes / floor):
+#:
+#: * W is the spec's ``PRISMAQUANT_STAGED_RANGE_WAIT_S``, read with the
+#:   reader's own rules. The reader sets one deadline, start + W, for every
+#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1705 in
+#:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:519 in
+#:   load_handoff_inputs). Without a PrismaBuild landing record the phase
+#:   waits at most W in total; with one (PB #989) its waits are declared and
+#:   exempt from the no-progress clock.
+#: * bytes is the phase's byte count in the row's staged read plan, and at
+#:   the floor rate or faster the transfer takes at most ceil(bytes / floor).
+#:
+#: So W + ceil(bytes / floor) bounds the phase's non-exempt time, and
+#: :func:`require_staged_wait_below_grace` holds for any phase with bytes.
+LOAD_PHASE_GRACE_SCHEMA = "prismaquant.load_phase_grace.v1"
+LOAD_PHASE_FLOOR_SCHEMA = "prismaquant.load_phase_floor.v1"
+LOAD_PHASE_BOUND = (
+    "grace = W + ceil(bytes / floor). The reader sets one deadline, start + W, "
+    "for every staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py"
+    ":1705 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:519 "
+    "load_handoff_inputs), so without a PrismaBuild landing record the phase "
+    "waits at most W in total, and with one (PB #989) the waits are declared "
+    "and exempt. At or above the floor rate the transfer takes at most "
+    "ceil(bytes / floor).")
+#: Who counts as a reader of the link, for every stamp.
+LINK_READERS_SCOPE = (
+    "this dispatch's own rows only: readers from other workloads on the same "
+    "link, and rows an earlier dispatch published, are not counted")
+#: The measured floor for one reader on the dl380g10 link: the slowest 30 s
+#: window of the reading process's ``read_bytes`` over its checkpoint-load
+#: phase, from the host samplers of the two R13 layer-044 gates on sparky
+#: (``/home/rob/tmp/ws-sb4/out/<key12>/io.tsv``, 10 s samples). v4 read into
+#: a host dict under memory pressure; v5 read into the cotangent scratch.
+#: Measured with ONE reader: it does not apply at any other concurrency.
+LOAD_PHASE_FLOOR_ONE_READER = {
+    "schema": LOAD_PHASE_FLOOR_SCHEMA,
+    "floor_bytes_per_s": 62_954_973,
+    "readers": 1,
+    "scope": "one reader on the dl380g10 link",
+    "method": ("slowest 30 s window of the reading process's /proc read_bytes "
+               "over its checkpoint-load phase, 10 s host samples"),
+    "sources": [
+        {"action_key": "70e7baeb6e96564ed5fd05b8eb90f1f709a550dcc213298a3dff5db5dd5dea8b",
+         "gate": "R13 layer-044 v4", "host": "sparky",
+         "window_start_utc": "2026-09-24T03:18:35Z", "bytes_per_s": 62_954_973},
+        {"action_key": "2dc145299e0eebfef1b3fbc159307e07c4a5a2ca0cf394c187018a1e9d907e86",
+         "gate": "R13 layer-044 v5", "host": "sparky",
+         "window_start_utc": "2026-09-24T03:43:30Z", "bytes_per_s": 77_212_876},
+    ],
+}
+#: The payload flag that carries a row's load-phase grace stamps into the
+#: quantum, which copies them into results.json and counters.json.
+PROGRESS_GRACE_FLAG = "--progress-grace-derivation"
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 ADJOINT_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
@@ -438,7 +496,7 @@ def _stage_manifest_binding(adjoint_manifest: Path, campaign: Mapping) -> dict:
 
 
 def _executable_row_parts(record: dict, *, output_root: Path,
-                            head_grace_s: int):
+                            head_grace_s: int, load_grace=None):
     """Pure executable-row construction from sealed inputs (no gate).
 
     Resolves the row's executable manifest, verifies its wire bytes hash to
@@ -448,6 +506,10 @@ def _executable_row_parts(record: dict, *, output_root: Path,
     executable row with :class:`ExecutableBindingUnsupported` before
     reaching here. Tests exercise manifest/phase propagation through this
     helper directly.
+
+    ``load_grace(name, phase_bytes)`` returns the checkpoint-load grace from
+    the phase's byte count in this manifest (:func:`load_phase_grace`).
+    Without it the phase takes the blanket :data:`HEAD_PROGRESS_GRACE_S`.
     """
     quantum_id = record["quantum_id"]
     executable = record.get("executable_readset")
@@ -461,12 +523,19 @@ def _executable_row_parts(record: dict, *, output_root: Path,
             type(name) is not str or not name for name in phases):
         raise DispatchRefused(
             f"quantum {quantum_id!r} seals no executable phase list")
+    # The wire just hashed to the sealed digest above; its read plan names
+    # each phase's bytes.
+    phase_bytes = (_manifest_phase_bytes(manifest, quantum_id=quantum_id)
+                   if load_grace is not None else {})
     progress = [("head", head_grace_s)]
     for name in phases:
         if name == "head":
             continue
-        grace = (HEAD_PROGRESS_GRACE_S if name == "checkpoint-load"
-                 else CHUNK_PROGRESS_GRACE_S)
+        if name == "checkpoint-load":
+            grace = (HEAD_PROGRESS_GRACE_S if load_grace is None
+                     else load_grace(name, phase_bytes.get(name)))
+        else:
+            grace = CHUNK_PROGRESS_GRACE_S
         progress.append((name, grace))
     return manifest, staged_sha256, progress
 
@@ -892,6 +961,148 @@ def _plan_output_root(campaign: Mapping) -> Path:
     return Path(plan["output_root"])
 
 
+def load_phase_floor(document: object) -> dict:
+    """A validated load-phase floor document, or :class:`DispatchRefused`.
+
+    The built-in :data:`LOAD_PHASE_FLOOR_ONE_READER` and any document given
+    with ``--checkpoint-load-floor`` take the same shape: the floor in bytes
+    per second, the number of concurrent link readers it was measured at, a
+    scope, a method and the action keys it came from.
+    """
+    def refuse(why):
+        raise DispatchRefused(f"load-phase floor document: {why}")
+
+    if not isinstance(document, Mapping):
+        raise DispatchRefused("load-phase floor document: not a JSON object")
+    if document.get("schema") != LOAD_PHASE_FLOOR_SCHEMA:
+        refuse(f"schema is not {LOAD_PHASE_FLOOR_SCHEMA}")
+    floor = document.get("floor_bytes_per_s")
+    if type(floor) is not int or floor <= 0:
+        refuse("floor_bytes_per_s must be a positive integer")
+    readers = document.get("readers")
+    if type(readers) is not int or readers <= 0:
+        refuse("readers must be a positive integer")
+    for key in ("scope", "method"):
+        if not isinstance(document.get(key), str) or not document[key]:
+            refuse(f"{key} must be a non-empty string")
+    sources = document.get("sources")
+    if not isinstance(sources, list) or not sources or not all(
+            isinstance(source, Mapping) and _is_hex64(source.get("action_key"))
+            for source in sources):
+        refuse("sources must list the measurements, each with its 64-hex "
+               "action_key")
+    return dict(document)
+
+
+def link_readers(*, rows: int, declared: int | None = None,
+                 floor_document: object = None) -> dict:
+    """How many of this dispatch's rows can share the link, and their floor.
+
+    ``rows`` is the number of quantum rows the dispatch publishes, the most
+    of its own readers that can read the link at once; ``declared``
+    (``--link-readers``) replaces it. A floor document must be measured at
+    exactly that many readers. Without one, the built-in floor applies to
+    one reader only, and any other count takes the blanket grace.
+    """
+    readers = int(rows if declared is None else declared)
+    if readers < 0 or (declared is not None and readers < 1):
+        raise DispatchRefused(f"--link-readers must be at least 1, not {readers}")
+    source = ("--link-readers" if declared is not None
+              else "the quantum rows this dispatch publishes")
+    if readers == 0:
+        return {"readers": 0, "readers_source": source, "floor": None}
+    if floor_document is not None:
+        floor = load_phase_floor(floor_document)
+        if floor["readers"] != readers:
+            raise DispatchRefused(
+                f"the load-phase floor was measured at {floor['readers']} "
+                f"link reader(s), but this dispatch has {readers} ({source}); "
+                "a floor applies only at the concurrency it was measured at")
+    elif readers == LOAD_PHASE_FLOOR_ONE_READER["readers"]:
+        floor = load_phase_floor(LOAD_PHASE_FLOOR_ONE_READER)
+    else:
+        floor = None
+    return {"readers": readers, "readers_source": source, "floor": floor}
+
+
+def load_phase_grace(name: str, *, phase_bytes: int, staged_wait_s: float,
+                     link: Mapping | None) -> dict:
+    """The stall allowance of one load phase, with the stamp that explains it.
+
+    ``mode`` is ``derived`` (W + ceil(bytes / floor), see
+    :data:`LOAD_PHASE_BOUND`) when a floor measured at this dispatch's
+    reader count applies, and ``blanket`` (:data:`HEAD_PROGRESS_GRACE_S`)
+    otherwise, with the reason. No concurrency discount is ever applied.
+    """
+    counted = type(phase_bytes) is int and phase_bytes >= 0
+    stamp = {"schema": LOAD_PHASE_GRACE_SCHEMA, "phase": str(name),
+             "phase_bytes": phase_bytes if counted else None,
+             "staged_wait_s": staged_wait_s,
+             "readers": None if link is None else link["readers"],
+             "readers_source": None if link is None else link["readers_source"],
+             "readers_scope": LINK_READERS_SCOPE}
+    blanket = {**stamp, "mode": "blanket", "grace_s": HEAD_PROGRESS_GRACE_S}
+    if link is None:
+        return {**blanket,
+                "reason": "the row was built without a link-reader count"}
+    floor = link.get("floor")
+    if floor is None:
+        return {**blanket,
+                "reason": (f"no floor measured at {link['readers']} link "
+                           "readers; the built-in floor is for one reader")}
+    if not counted:
+        return {**blanket,
+                "reason": "the read plan declares no byte count for this phase"}
+    if phase_bytes == 0:
+        # W + 0 would equal the reader's own deadline, and the no-progress
+        # clock would race it (require_staged_wait_below_grace).
+        return {**blanket, "reason": "the read plan declares 0 bytes for this "
+                                     "phase, so there is no transfer to bound"}
+    transfer = -(-phase_bytes // int(floor["floor_bytes_per_s"]))
+    return {**stamp, "mode": "derived",
+            "grace_s": math.ceil(staged_wait_s) + transfer,
+            "transfer_s": transfer,
+            "floor_bytes_per_s": int(floor["floor_bytes_per_s"]),
+            "floor_readers": int(floor["readers"]),
+            "floor_scope": floor["scope"], "floor_method": floor["method"],
+            "floor_sources": [dict(source) for source in floor["sources"]],
+            # The --checkpoint-load-floor file (path, sha256); None for the
+            # built-in one-reader floor.
+            "floor_document": floor.get("document"),
+            "bound": LOAD_PHASE_BOUND}
+
+
+def _manifest_phase_bytes(path: Path, *, quantum_id) -> dict:
+    """Each read-plan phase's byte count, from the row's manifest wire.
+
+    The caller has verified the wire against the row's digest
+    (:func:`_executable_manifest_digest`); this reads the plan only.
+    """
+    try:
+        wire = Path(path).read_bytes()
+    except OSError as exc:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} executable manifest unreadable at "
+            f"{path}: {exc}") from exc
+    return _read_plan_phase_bytes(wire, where=f"quantum {quantum_id!r} {path}")
+
+
+def _read_plan_phase_bytes(wire: bytes, *, where: str) -> dict:
+    try:
+        phases = json.loads(gzip.decompress(wire))["read_plan"]["phases"]
+    except (OSError, EOFError, ValueError, KeyError, TypeError) as exc:
+        raise DispatchRefused(f"{where}: no readable read plan: {exc}") from exc
+    return {phase["name"]: phase.get("bytes") for phase in phases
+            if isinstance(phase, Mapping) and "name" in phase}
+
+
+def progress_grace_of(argv: Sequence[str]) -> list | None:
+    """The load-phase grace stamps a row's payload carries, if any."""
+    if PROGRESS_GRACE_FLAG not in argv:
+        return None
+    return json.loads(argv[list(argv).index(PROGRESS_GRACE_FLAG) + 1])
+
+
 def require_staged_wait_below_grace(spec: Mapping,
                                     progress: Sequence[tuple[str, int]]) -> None:
     """Refuse a row whose fallback staged-range wait could outlast a phase grace.
@@ -1022,7 +1233,8 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                     progress: Sequence[tuple[str, int]],
                     resource_policy=None,
                     spool_max_bytes: int | None = None,
-                    spill_bound: Mapping | None = None) -> tuple[list[str], str | None]:
+                    spill_bound: Mapping | None = None,
+                    spec: dict | None = None) -> tuple[list[str], str | None]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -1062,8 +1274,13 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     the pair (PB #911) are the sealed need, not a spec literal. A spec that
     declares no spill, or launches another capture batch than the bound
     counts parts for, refuses.
+
+    ``spec`` is the caller's one parse of ``spec_path``, when the caller had
+    to read it first (the quantum row derives its load grace from the
+    spec's staged wait); the wrapper then seals that parse and reads nothing.
     """
-    spec = json.loads(Path(spec_path).read_text())
+    spec = (json.loads(Path(spec_path).read_text()) if spec is None
+            else json.loads(json.dumps(spec)))
     if spill_bound is not None:
         env = spec.get("env", {})
         if not env.get(STAGE_B_SPILL_ENV[0]):
@@ -1166,7 +1383,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S,
                  consumer_tags: Sequence[str] = CONSUMER_TAGS,
-                 band: Mapping | None = None) -> list[str]:
+                 band: Mapping | None = None,
+                 link: Mapping | None = None) -> list[str]:
     """The exact §5.2 submission argv for one quantum. Pinned by tests: a
     drift here breaks placement.  ``consumer_tags`` is the effective §5.1
     placement policy, a conjunction PB matches against a worker's offered
@@ -1204,6 +1422,12 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     row a producer: the payload gains ``--emit-adjoint-handoff`` and the
     envelope declares the handoff's produced-output template. Without a
     band the argv is the chain-mode one, byte for byte.
+
+    ``link`` (:func:`link_readers`) is how many of this dispatch's rows can
+    share the link, and the floor measured at that count. It sets the
+    checkpoint-load or handoff-load grace (:func:`load_phase_grace`); the
+    stamps ride the payload as ``--progress-grace-derivation``. Without it
+    a load phase takes the blanket grace and says so.
     """
     quantum_id = record["quantum_id"]
     handoff = (band or {}).get("handoff")
@@ -1220,6 +1444,26 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             "--produced-output-template")
     resource_policy = None
     executable = record.get("executable_readset")
+    # At most one parse of the campaign spec, made when a load phase first
+    # needs its staged wait; _container_wrap then seals that same parse.
+    spec_parse: dict = {}
+    grace_stamps: list[dict] = []
+
+    def load_grace(name, phase_bytes):
+        from prismaquant.residency_shard_reader import staged_range_wait_from_env
+
+        if "spec" not in spec_parse:
+            spec_parse["spec"] = json.loads(Path(SPEC_PATH).read_text())
+        try:
+            staged_wait = staged_range_wait_from_env(
+                spec_parse["spec"].get("env") or {})
+        except ValueError as exc:
+            raise DispatchRefused(f"campaign spec: {exc}") from exc
+        stamp = load_phase_grace(name, phase_bytes=phase_bytes,
+                                 staged_wait_s=staged_wait, link=link)
+        grace_stamps.append(stamp)
+        return stamp["grace_s"]
+
     if record.get("catalog_extension") is not None and executable is None:
         raise DispatchRefused("catalog extension requires executable prepared-input readsets before publication")
     if executable is not None:
@@ -1231,17 +1475,22 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         # refuses below with the typed refusal; manifest/phase propagation
         # stays exercised through _executable_row_parts directly.
         _executable_prepared_input(record, output_root=output_root)
-        manifest, staged_sha256, progress = _executable_row_parts(
-            record, output_root=output_root, head_grace_s=head_grace_s)
         if handoff is not None:
-            # The sealed chain manifest passed its gate above; the row stages
+            # The sealed chain manifest passes its gate here; the row stages
             # the readset derived from it and this handoff.
+            _executable_row_parts(record, output_root=output_root,
+                                  head_grace_s=head_grace_s)
             manifest = Path(handoff["manifest_path"])
             staged_sha256 = handoff["manifest_sha256"]
+            phase_bytes = handoff.get("phase_bytes") or {}
             progress = [("head", head_grace_s)] + [
-                (name, HEAD_PROGRESS_GRACE_S if name == HANDOFF_LOAD_PHASE
-                 else CHUNK_PROGRESS_GRACE_S)
+                (name, load_grace(name, phase_bytes.get(name))
+                 if name == HANDOFF_LOAD_PHASE else CHUNK_PROGRESS_GRACE_S)
                 for name in handoff["phases"] if name != "head"]
+        else:
+            manifest, staged_sha256, progress = _executable_row_parts(
+                record, output_root=output_root, head_grace_s=head_grace_s,
+                load_grace=load_grace)
     else:
         manifest = Path(record["read_set"]["manifest_path"])
         if not manifest.is_absolute():
@@ -1299,6 +1548,10 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                          "--adjoint-handoff-sha256", str(handoff["sha256"])]
     if emit_template is not None:
         band_payload.append("--emit-adjoint-handoff")
+    if grace_stamps:
+        band_payload += [PROGRESS_GRACE_FLAG,
+                         json.dumps(grace_stamps, sort_keys=True,
+                                    separators=(",", ":"), allow_nan=False)]
     wrapped, container_image = _container_wrap(SPEC_PATH, [
         "python3", "-m", "prismaquant.joint_cost_quantum",
         "--quantum", str(record_path),
@@ -1313,7 +1566,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
         "--output-root", str(output_root), *band_payload], progress=progress,
-        resource_policy=resource_policy, spill_bound=_sealed_spill_bound(record))
+        resource_policy=resource_policy, spill_bound=_sealed_spill_bound(record),
+        spec=spec_parse.get("spec"))
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
         argv += ["--tag", str(tag)]
@@ -1815,7 +2069,10 @@ def bind_consumer_handoff(record: Mapping, *, path: str, sha256: str,
     return {"path": str(path), "sha256": str(sha256), "producer": str(producer),
             "handoff_sha256": handoff["handoff_sha256"],
             "manifest_path": str(manifest_path),
-            "manifest_sha256": _sha_bytes(wire), "phases": phases}
+            "manifest_sha256": _sha_bytes(wire), "phases": phases,
+            # The load grace reads the handoff-load phase's bytes from here.
+            "phase_bytes": _read_plan_phase_bytes(
+                wire, where=f"quantum {quantum_id!r} band-serial readset")}
 
 
 def _producer_handoff(producer: Mapping, *, key: str | None,
@@ -2126,6 +2383,24 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                              "--band-serial")
     parser.add_argument("--spec", default=None,
                         help="campaign spec for the container wrapper (default: the joint-panel dev spec)")
+    parser.add_argument("--quantum", action="append", default=[],
+                        metavar="QUANTUM_ID",
+                        help="publish only this quantum's row (repeatable). "
+                             "The link-reader count is then the rows named "
+                             "and publishable, not every row of the records "
+                             "directory. An id no record carries refuses")
+    parser.add_argument("--link-readers", type=int, default=None,
+                        help="how many of this dispatch's rows can read the "
+                             "storage link at once. Default: the number of "
+                             "quantum rows this dispatch publishes. The "
+                             "built-in load-phase floor applies to 1 reader "
+                             "only")
+    parser.add_argument("--checkpoint-load-floor", type=Path, default=None,
+                        help="a load-phase floor document "
+                             f"({LOAD_PHASE_FLOOR_SCHEMA}) measured at this "
+                             "dispatch's link-reader count; without one, any "
+                             "count other than 1 takes the blanket "
+                             f"{HEAD_PROGRESS_GRACE_S} s load grace")
     parser.add_argument("--state", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -2142,6 +2417,24 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
         block = _plan_block(Path(args.plan) if args.plan else None)
         tags = plan_consumer_tags(block)
         records = load_records(records_dir)
+        wanted = set(args.quantum)
+        unknown = sorted(wanted - {record["quantum_id"] for _, record in records})
+        if unknown:
+            raise DispatchRefused(
+                f"--quantum names {unknown}, which no record in {records_dir} "
+                "carries")
+        floor_document = None
+        if args.checkpoint_load_floor is not None:
+            try:
+                raw = args.checkpoint_load_floor.read_bytes()
+                floor_document = json.loads(raw)
+            except (OSError, ValueError) as exc:
+                raise DispatchRefused(
+                    f"--checkpoint-load-floor {args.checkpoint_load_floor}: "
+                    f"{exc}") from exc
+            floor_document = {**load_phase_floor(floor_document),
+                              "document": {"path": str(args.checkpoint_load_floor),
+                                           "sha256": _sha_bytes(raw)}}
     except DispatchRefused as exc:
         print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
         return EXIT_PRECONDITION_REFUSED
@@ -2212,9 +2505,14 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                                                   args.stage_a_produced_output_template),
                                               binding=stage_a_binding)})
         if receipt_ok:
+            # Pass 1: the quantum rows this dispatch publishes. Their count
+            # is the most of its own readers that can share the link.
+            publishing = []
             for record_path, record in records:
                 quantum_id = record["quantum_id"]
                 if quantum_id not in publishable:
+                    continue
+                if wanted and quantum_id not in wanted:
                     continue
                 key = submitted_keys.get(quantum_id)
                 if key is not None and gateway.is_terminal_executed(key):
@@ -2234,11 +2532,27 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                         band_pending.append({"quantum_id": quantum_id,
                                              "reason": waiting})
                         continue
+                publishing.append((record_path, record, band))
+            fresh_link = link_readers(rows=len(publishing),
+                                      declared=args.link_readers,
+                                      floor_document=floor_document)
+            # Pass 2: the rows. A resubmitted row keeps the link count it was
+            # first submitted with, as it keeps its band role: the same row
+            # must stay the same sealed action whatever else this run holds.
+            for record_path, record, band in publishing:
+                quantum_id = record["quantum_id"]
+                recorded = (last_submission.get(quantum_id) or {}).get("link")
+                link = recorded if isinstance(recorded, dict) else fresh_link
                 handoff = (band or {}).get("handoff")
                 template = (band or {}).get("emit_template")
                 if record.get("executable_readset") is not None:
                     coverage_rows.append(_coverage_row(
                         record, output_root=output_root, band=band))
+                argv = quantum_argv(
+                    record, record_path=record_path,
+                    output_root=output_root, priority=priority,
+                    head_grace_s=args.head_grace_s,
+                    consumer_tags=tags, band=band, link=link)
                 rows.append({"kind": "quantum", "quantum_id": quantum_id,
                              "identity_sha256": record["identity_sha256"],
                              "manifest_sha256": (
@@ -2247,11 +2561,9 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                              "cotangent_source": _cotangent_source(band),
                              "handoff_template": (
                                  None if template is None else str(template)),
-                             "argv": quantum_argv(
-                                 record, record_path=record_path,
-                                 output_root=output_root, priority=priority,
-                                 head_grace_s=args.head_grace_s,
-                                 consumer_tags=tags, band=band)})
+                             "link": link,
+                             "progress_grace": progress_grace_of(argv),
+                             "argv": argv})
         check_source_coverage(coverage_rows, coverage=_coverage)
     except DispatchRefused as exc:
         print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
@@ -2270,7 +2582,9 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                                     "identity_sha256": row.get("identity_sha256"),
                                     "manifest_sha256": row.get("manifest_sha256"),
                                     **({"cotangent_source": row["cotangent_source"],
-                                        "handoff_template": row["handoff_template"]}
+                                        "handoff_template": row["handoff_template"],
+                                        "link": row["link"],
+                                        "progress_grace": row["progress_grace"]}
                                        if row["kind"] == "quantum" else {}),
                                     **({"slice_sha256": publishable[row["quantum_id"]],
                                         **{key: by_id[row["quantum_id"]]["adjoint"][key]
@@ -2310,6 +2624,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                                "data_manifest_sha256": row.get("manifest_sha256"),
                                "cotangent_source": row["cotangent_source"],
                                "handoff_template": row["handoff_template"],
+                               "link": row["link"],
+                               "progress_grace": row["progress_grace"],
                                "action_key": answer["action_key"]})
             print(json.dumps({"published": row.get("quantum_id", "stage-a"),
                               "action_key": answer["action_key"],

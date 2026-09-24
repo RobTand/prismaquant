@@ -34,6 +34,7 @@ from .cost_stage_checkpoint import (
     canonical_json_sha256,
     publish_new_bytes,
 )
+from .io_spans import ReadRateReporter
 
 from .joint_adjoint_slices import (  # noqa: F401 -- re-exported: one spelling
     ADJOINT_BAND_SCHEMA,
@@ -1683,6 +1684,11 @@ def load_checkpoint_shared_states(
         stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
 
 
+def _entry_bytes(entry) -> int:
+    """An entry's file bytes, for rate lines only: never a reason to refuse."""
+    return int(entry.get("file_bytes") or entry.get("tensor_bytes") or 0)
+
+
 def load_adjoint_checkpoint(
     space: str | os.PathLike, record: dict, *, cotangent_factory=None,
     shared_state_max_bytes=None,
@@ -1717,11 +1723,18 @@ def load_adjoint_checkpoint(
     cotangents = ({} if cotangent_factory is None
                   else cotangent_factory(workspace_rows))
     by_name = {row["name"]: key for key, row in plane.items()}
+    # A rate and ETA line every 64 entries or 30 s; no PrismaBuild units,
+    # because a read into a disposable scratch is not durable work (#480).
+    rate = ReadRateReporter(
+        "checkpoint-load", total_entries=len(entries),
+        total_bytes=sum(_entry_bytes(entry) for entry in entries))
     for entry in entries:
         _await_checkpoint_entry(entry, deadline=deadline)
         tensors = read_exact_entry_tensors([entry], expected_session=session)
         cotangents[by_name[entry["name"]]] = tensors.pop(entry["name"])
         del tensors
+        rate.entry(_entry_bytes(entry))
+    rate.done()
     shared_adjoint, shared_pass = _load_checkpoint_shared_states(
         stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
     return cotangents, shared_adjoint, shared_pass
