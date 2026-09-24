@@ -1547,15 +1547,23 @@ def _enter_group_lease(entry_resolver, members, live_windows):
     return assignments
 
 
-def _exact_entry_prechecks(ref, *, expected_session, session_for_reference):
-    """The declared-file fences every read runs first: ``(path, stat, signature)``."""
+def _exact_entry_prechecks(ref, *, expected_session, session_for_reference, path=None):
+    """The declared-file fences every read runs first: ``(path, stat, signature)``.
+
+    ``path`` is the file the read opens when it is not ``ref.path``: the
+    owner's local copy of its own entry (PQ #1110). The session is always
+    bound through ``ref``, the reference the owner recorded. A copy of it
+    re-pointed at the local file is a reference the owner never recorded,
+    so an owner that checks sessions itself (a resumed or forward-recovered
+    run) refuses it as stale.
+    """
     metadata = json.loads(ref.metadata_json)
     bound_session = (expected_session if session_for_reference is None
                      else session_for_reference(ref))
     if (metadata.get("schema") != EXACT_ACTIVATION_SCHEMA
             or metadata.get("identity", {}).get("session") != bound_session):
         raise RuntimeError("exact activation reference has a different session identity")
-    path = Path(ref.path)
+    path = Path(ref.path if path is None else path)
     prefetched_stat = path.lstat()
     signature = _activation_file_signature(path)
     if signature[2] != ref.file_bytes:
@@ -1678,8 +1686,9 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
 
     def read_local(ref):
         """The owner's own copy on this box: the same fences, on that file."""
-        local = _dataclass_replace(ref, path=str(local_paths[ref]))
-        path, prefetched_stat, signature = _exact_entry_prechecks(local, **prechecks)
+        path, prefetched_stat, signature = _exact_entry_prechecks(
+            ref, path=local_paths[ref], **prechecks)
+        local = _dataclass_replace(ref, path=str(path))
         window._tensors[ref] = _read_exact_entry(
             local, path=path, signature=signature, source=path,
             source_before=prefetched_stat, lease_fd=None, owned=owned,
