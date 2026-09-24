@@ -20,6 +20,12 @@ DECLARED_BUDGET_FIELDS = ('physical_limit_bytes', 'safety_margin_bytes',
                           'metadata_reserve_bytes', 'runtime_reserve_bytes',
                           'workspace_reserve_bytes', 'boundary_reserve_bytes',
                           'auxiliary_reserve_bytes', 'read_page_reserve_bytes')
+#: The declared owners a policy may take from a measurement instead
+#: (PQ #1151). A measured owner carries its bytes and the receipt they came
+#: from; the receipt is a reference for readers, and nothing compares it at
+#: run time.
+MEASURED_BUDGET_FIELDS = ('workspace_reserve_bytes',)
+_RECEIPT_FIELDS = ('action_key', 'path', 'sha256')
 #: The caps that are a function of the roster the budget must admit. Every one
 #: of these is a maximum over declared bytes, so none of them is a judgement
 #: call and none of them belongs in a hand-written plan.
@@ -42,6 +48,40 @@ def _integer(value, name, *, positive=False):
     if type(value) is not int or value < (1 if positive else 0):
         raise ValueError(f'{name} must be an exact {"positive" if positive else "nonnegative"} integer')
     return value
+
+
+def capture_workspace_bytes(workspace_reserve_bytes, capture_batch):
+    """The device workspace one Stage B pass holds: one reserve per stored batch.
+
+    The one quantity both sides price (PQ #1151): the guard charges it before
+    every window backward and capture pass (``joint_cost_quantum``), and the
+    derivation plans the capture pass with it
+    (:meth:`RetainedWindowBudget.capture_peak_bytes`). A pass without the
+    spill observer carries one stored batch; a capture pass carries the
+    replay regime's ``capture_batch``.
+    """
+    _integer(workspace_reserve_bytes, 'workspace_reserve_bytes', positive=True)
+    _integer(capture_batch, 'capture_batch', positive=True)
+    return workspace_reserve_bytes * capture_batch
+
+
+def _measured_owner(name, value):
+    """A measured owner: exact positive bytes and the receipt they came from."""
+    if (not isinstance(value, Mapping) or set(value) != {'bytes', 'receipt', 'basis'}
+            or not isinstance(value['basis'], str) or not value['basis']):
+        raise ValueError(f'measured {name} needs exactly bytes, receipt and basis')
+    _integer(value['bytes'], name, positive=True)
+    receipt = value['receipt']
+    if not isinstance(receipt, Mapping) or set(receipt) != set(_RECEIPT_FIELDS):
+        raise ValueError(f'measured {name} receipt needs exactly {list(_RECEIPT_FIELDS)}')
+    for field in ('action_key', 'sha256'):
+        digest = receipt[field]
+        if (not isinstance(digest, str) or len(digest) != 64
+                or any(char not in '0123456789abcdef' for char in digest)):
+            raise ValueError(f'measured {name} receipt {field} must be 64 lowercase hex')
+    if not isinstance(receipt['path'], str) or not receipt['path'].startswith('/'):
+        raise ValueError(f'measured {name} receipt path must be absolute')
+    return value['bytes']
 
 
 @dataclass(frozen=True)
@@ -85,6 +125,21 @@ class RetainedWindowBudget:
         return (self.source_baseline_limit(source_bytes) + self.workspace_reserve_bytes
                 + self.boundary_reserve_bytes + self.load_buffer_bytes
                 + self.read_page_reserve_bytes + self.candidate_delta_bytes)
+
+    def capture_workspace_bytes(self, capture_batch):
+        return capture_workspace_bytes(self.workspace_reserve_bytes, capture_batch)
+
+    def capture_peak_bytes(self, source_bytes, *, capture_batch, render_bytes):
+        """The planned peak of one capture pass (PQ #1151).
+
+        A capture runs inside a retained window with that window's renders
+        resident and no statistics lease open, so its peak is the fixed
+        owners with the one workspace reserve they hold replaced by the
+        pass's :func:`capture_workspace_bytes`, plus the window's renders.
+        """
+        _integer(render_bytes, 'render_bytes')
+        return (self.fixed_bytes(source_bytes) - self.workspace_reserve_bytes
+                + self.capture_workspace_bytes(capture_batch) + render_bytes)
 
     def available_window_bytes(self, source_bytes):
         available = self.physical_limit_bytes - self.safety_margin_bytes - self.fixed_bytes(source_bytes)
@@ -275,7 +330,8 @@ def _roster_maximum(targets, field):
 
 def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
                                   prefetch_workers, host_cap_bytes,
-                                  footprint_scope='pwc_serialized_upper_bound'):
+                                  footprint_scope='pwc_serialized_upper_bound',
+                                  measured=None, capture_batch=None):
     """Derive every demand-driven cap from the roster the budget must admit.
 
     An operator declares the physical bound and the reserves that belong to
@@ -314,16 +370,35 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
       sealed packing still stops -- but it is no longer free headroom, and the
       replay multiplier it implies is recorded so the cost is visible.
 
+    ``measured`` (PQ #1151) takes the owners in ``MEASURED_BUDGET_FIELDS``
+    from a measurement instead of ``declared``: each is ``{bytes, receipt,
+    basis}``, and the receipt names the action key, path and sha256 of the
+    measurement it came from. ``capture_batch`` plans the Stage B capture pass
+    too: :meth:`RetainedWindowBudget.capture_peak_bytes` beside the largest
+    window's renders, since a resumed quantum captures in whichever window
+    is its first active one. A capture that does not fit refuses here, before
+    any run pays for finding it. With neither, the derivation and its record
+    are exactly the ones before #1151.
+
     Returns ``(budget, derivation_record)``. The record is data for a plan's
     top level; it is deliberately not a field of the budget, whose ``from_dict``
     admits exactly its own keys.
     """
-    if (not isinstance(declared, Mapping)
-            or set(declared) != set(DECLARED_BUDGET_FIELDS)):
+    expected = set(DECLARED_BUDGET_FIELDS) - (set() if measured is None
+                                              else set(MEASURED_BUDGET_FIELDS))
+    if not isinstance(declared, Mapping) or set(declared) != expected:
         raise ValueError('retained budget derivation requires exactly the declared owners')
-    for name in DECLARED_BUDGET_FIELDS:
+    for name in sorted(expected):
         _integer(declared[name], name,
                  positive=name not in ('boundary_reserve_bytes', 'auxiliary_reserve_bytes'))
+    owners = dict(declared)
+    if measured is not None:
+        if not isinstance(measured, Mapping) or set(measured) != set(MEASURED_BUDGET_FIELDS):
+            raise ValueError('retained budget derivation requires exactly the measured owners')
+        owners.update({name: _measured_owner(name, measured[name])
+                       for name in MEASURED_BUDGET_FIELDS})
+    if capture_batch is not None:
+        _integer(capture_batch, 'capture_batch', positive=True)
     _integer(source_bytes, 'source_bytes')
     _integer(prefetch_workers, 'prefetch_workers', positive=True)
     _integer(host_cap_bytes, 'host_cap_bytes', positive=True)
@@ -344,7 +419,7 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
     # Neither window cap enters ``fixed_bytes``, so the window space is settled
     # once the two per-quantum owners above are.
     probe = RetainedWindowBudget(
-        **declared, load_buffer_bytes=load_buffer_bytes,
+        **owners, load_buffer_bytes=load_buffer_bytes,
         candidate_delta_bytes=candidate_delta_bytes, statistics_cap_bytes=1,
         retained_render_cap_bytes=1, max_windows_per_layer=1)
     available = probe.available_window_bytes(source_bytes)
@@ -370,12 +445,34 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
                for layer, targets in sorted(targets_by_layer.items())}
     if any(settled[layer].windows != plan.windows for layer, plan in plans.items()):
         raise RuntimeError('retained budget derivation did not reach a fixed point')
+    window_peak = max(window.peak_planned_bytes
+                      for plan in settled.values() for window in plan.windows)
+    capture = None
+    if capture_batch is not None:
+        capture_peak = budget.capture_peak_bytes(
+            source_bytes, capture_batch=capture_batch,
+            render_bytes=budget.retained_render_cap_bytes)
+        bound = budget.physical_limit_bytes - budget.safety_margin_bytes
+        if capture_peak > bound:
+            raise RuntimeError(
+                f'retained COST capture pass at capture_batch {capture_batch} plans '
+                f'{capture_peak} bytes ({budget.capture_workspace_bytes(capture_batch)} '
+                f'workspace beside {budget.retained_render_cap_bytes} of renders) against '
+                f'{bound} bytes of physical budget less margin')
+        capture = {'capture_batch': capture_batch,
+                   'workspace_bytes': budget.capture_workspace_bytes(capture_batch),
+                   'render_bytes': budget.retained_render_cap_bytes,
+                   'peak_planned_bytes': capture_peak,
+                   'basis': 'fixed owners with workspace_reserve_bytes times capture_batch '
+                            'in place of one reserve, beside the largest window renders; '
+                            'no statistics lease is open during a capture'}
 
     record = {
         'schema': DERIVATION_SCHEMA,
         'footprint_scope': footprint_scope,
         'source_bytes': source_bytes,
-        'declared': {name: declared[name] for name in DECLARED_BUDGET_FIELDS},
+        'declared': {name: declared[name] for name in DECLARED_BUDGET_FIELDS
+                     if name in declared},
         'prefetch_workers': prefetch_workers,
         'host_cap_bytes': host_cap_bytes,
         'host_render_bound_bytes': host_render_bound,
@@ -409,10 +506,17 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
         'fixed_bytes': budget.fixed_bytes(source_bytes),
         'available_window_bytes': budget.available_window_bytes(source_bytes),
         'windows_by_layer': {str(layer): len(plan.windows) for layer, plan in sorted(settled.items())},
-        'peak_planned_bytes': max(window.peak_planned_bytes
-                                  for plan in settled.values() for window in plan.windows),
+        'peak_planned_bytes': (window_peak if capture is None
+                               else max(window_peak, capture['peak_planned_bytes'])),
         'retained_window_replay_multiplier': (sum(len(plan.windows) for plan in settled.values())
                                               / len(settled)),
         'budget': budget.as_dict(),
     }
+    if measured is not None:
+        record['measured'] = {name: {'bytes': measured[name]['bytes'],
+                                     'receipt': dict(measured[name]['receipt']),
+                                     'basis': measured[name]['basis']}
+                              for name in MEASURED_BUDGET_FIELDS}
+    if capture is not None:
+        record['capture'] = capture
     return budget, record

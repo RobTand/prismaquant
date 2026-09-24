@@ -935,6 +935,45 @@ def test_batched_spill_capture_is_stamped_and_reruns_bitwise(campaign, monkeypat
         "route_moves": sum(abs(batched[name] - single[name]) for name in single)})
 
 
+def test_capture_pass_charges_the_planned_workspace_per_stored_batch(campaign, monkeypatch,
+                                                                     tmp_path):
+    """The guard charges the capture the quantity the plan priced (PQ #1151).
+
+    The operator windows here declare a workspace five times the retained
+    budget's. The retained budget is what the derivation plans the capture
+    pass with (``RetainedWindowBudget.capture_peak_bytes``), so every capture
+    admission must be the budget's reserve times the capture batch, plus the
+    spill's own pinned reserve. Before #1151 the guard multiplied the operator
+    windows' reserve instead, a quantity no plan priced.
+    """
+    regime, batch = "capture_batch=2", 2
+    layer = 0
+    policy, budget, retained = _policy_budget()
+    wide = dict(policy, workspace_reserve_bytes=5 * budget.workspace_reserve_bytes)
+    monkeypatch.setitem(globals(), "_policy_budget", lambda: (wide, budget, retained))
+    spill_reserves = []
+    reserve = spill_mod.StageBReplaySpill.capture_reserve_bytes
+
+    def recording(self):
+        spill_reserves.append(reserve.fget(self))
+        return spill_reserves[-1]
+
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "capture_reserve_bytes",
+                        property(recording))
+    guard = _RecordingGuard(campaign.device)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                              regime=regime)
+    assert payload is not None, _chain(state.error)
+    captures = [charged for label, charged in guard.admissions
+                if label == "before_joint_window_backward"]
+    assert len(captures) == N_PROBES == len(spill_reserves)
+    assert captures == [batch * budget.workspace_reserve_bytes + spill_reserve
+                        for spill_reserve in spill_reserves]
+    assert budget.capture_workspace_bytes(batch) == batch * budget.workspace_reserve_bytes
+
+
 def _operator_snapshots(monkeypatch):
     """Record every window lease's FP32 statistics matrices, in order."""
     import prismaquant.joint_aura as joint

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import pickle
@@ -21,14 +22,44 @@ def _require(ok, message):
         raise ValueError("Stage B resources: " + message)
 
 
-def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_bytes=72 * GIB, candidate_files=None):
-    """Use the existing statistics planner and retained-window budget owner."""
+def capture_policy(capture):
+    """A policy's ``capture`` block, checked: the batch and the measured workspace.
+
+    ``{"capture_batch": B, "workspace_reserve_bytes": {"bytes", "receipt",
+    "basis"}}`` (PQ #1151). The workspace is the measured bytes one stored
+    batch's pass holds on the device, and the receipt names the measurement
+    (action key, path, sha256). The receipt is a reference for readers: the
+    derivation does not reread it, and nothing compares it at run time.
+    """
+    from .joint_retained_window_plan import MEASURED_BUDGET_FIELDS, _measured_owner
+
+    _require(isinstance(capture, dict) and set(capture) == {"capture_batch", *MEASURED_BUDGET_FIELDS},
+             "capture block needs exactly capture_batch and the measured owners")
+    batch = capture["capture_batch"]
+    _require(type(batch) is int and batch >= 1, "capture_batch must be a positive integer")
+    try:
+        for name in MEASURED_BUDGET_FIELDS:
+            _measured_owner(name, capture[name])
+    except ValueError as exc:
+        raise ValueError("Stage B resources: " + str(exc)) from exc
+    return batch, {name: capture[name] for name in MEASURED_BUDGET_FIELDS}
+
+
+def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_bytes=72 * GIB, candidate_files=None,
+                  capture=None):
+    """Use the existing statistics planner and retained-window budget owner.
+
+    ``capture`` (PQ #1151, see :func:`capture_policy`) replaces the original
+    plan's declared ``workspace_reserve_bytes`` with a measured one and plans
+    the capture pass at its ``capture_batch``. Without it the policy is the one
+    before #1151, byte for byte.
+    """
     import torch
     from . import format_registry as fr
     from .aura_cost import _ZERO_COST_FORMATS
     from .joint_layer_quanta import qname_layer
-    from .joint_retained_window_plan import (DECLARED_BUDGET_FIELDS, RetainedWindowBudget,
-        derive_retained_window_budget, targets_from_statistics_plan)
+    from .joint_retained_window_plan import (DECLARED_BUDGET_FIELDS, MEASURED_BUDGET_FIELDS,
+        RetainedWindowBudget, derive_retained_window_budget, targets_from_statistics_plan)
     from .joint_statistics_plan import plan_joint_statistics_target_windows
     from .joint_served_activation import FORMAT, FORMAT_MAXIMA_KEY, verify_policy as verify_activation
 
@@ -115,17 +146,25 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
         keys = {n: tuple((n, fmt) for fmt in formats[n]) for n in names}
         layer_costs = {key: key_costs[key] for values in keys.values() for key in values}
         targets[layer] = targets_from_statistics_plan(statistics, keys, layer_costs)
-    declared = {key: getattr(old_budget, key) for key in DECLARED_BUDGET_FIELDS}
+    capture_batch = measured = None
+    if capture is not None:
+        capture_batch, measured = capture_policy(capture)
+    declared = {key: getattr(old_budget, key) for key in DECLARED_BUDGET_FIELDS
+                if measured is None or key not in MEASURED_BUDGET_FIELDS}
     declared["physical_limit_bytes"] = physical_bytes
     budget, derivation = derive_retained_window_budget(targets, declared=declared,
         source_bytes=retained["source_reserve_bytes"],
         prefetch_workers=plan["execution"]["operator_windows"]["prefetch_workers"],
-        host_cap_bytes=host_bytes, footprint_scope="pwc_serialized_upper_bound")
-    return {"schema": SCHEMA, "inputs": copy.deepcopy(inputs),
+        host_cap_bytes=host_bytes, footprint_scope="pwc_serialized_upper_bound",
+        measured=measured, capture_batch=capture_batch)
+    policy = {"schema": SCHEMA, "inputs": copy.deepcopy(inputs),
         "limits": {"host_bytes": host_bytes, "physical_bytes": physical_bytes, "gpu_bytes": gpu_bytes},
         "budget": budget.as_dict(), "derivation": derivation,
         "candidate_files": file_rows, "candidate_files_sha256": canonical_json_sha256(file_rows, where="resource candidate files"),
         "semantics": "resource_geometry_only; original_qualification_and_BF16_capture_unchanged"}
+    if capture is not None:
+        policy["capture"] = copy.deepcopy(capture)
+    return policy
 
 
 def verify_policy(bound, *, verify_files=False):
@@ -144,7 +183,8 @@ def verify_policy(bound, *, verify_files=False):
     before = tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies)
     _require(before[0] == key, "resource policy changed while read")
     _require(policy == derive_policy(policy["inputs"], **policy["limits"],
-        candidate_files=None if verify_files else policy["candidate_files"]), "independent resource derivation differs")
+        candidate_files=None if verify_files else policy["candidate_files"],
+        capture=policy.get("capture")), "independent resource derivation differs")
     _require(before == tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies),
              "resource metadata changed during derivation")
     # Policy creation observes actual sizes; workers independently rederive
@@ -194,16 +234,59 @@ def enforce_device_policy(config, *, verified_limits=None):
     return {**observed, "policy": dict(bound), "limits": dict(limits)}
 
 
+def workspace_from_receipt(path, *, action_key):
+    """The measured workspace owner a #1151 profile receipt states.
+
+    Reads the receipt once, here, to take its measured per-batch bytes and its
+    sha256; the policy then carries both, and nothing rereads the receipt.
+    """
+    from .stage_b_workspace_profile import SCHEMA as PROFILE_SCHEMA
+
+    path = Path(path).absolute()
+    raw = path.read_bytes()
+    profile = json.loads(raw)
+    _require(profile.get("schema") == PROFILE_SCHEMA, f"{path} is not a capture workspace profile")
+    _require(profile.get("ladder_complete") is True,
+             f"{path} records an incomplete ladder; a refused or stopped step prices nothing")
+    per_batch = profile["measured"]["workspace_per_batch_bytes"]
+    _require(type(per_batch) is int and per_batch > 0, f"{path} measured no workspace")
+    return {"bytes": per_batch,
+            "receipt": {"action_key": action_key, "path": str(path),
+                        "sha256": hashlib.sha256(raw).hexdigest()},
+            "basis": profile["measured"]["basis"]}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inputs", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--host-bytes", type=int, default=28 * GIB)
+    parser.add_argument("--physical-bytes", type=int, default=100 * GIB)
+    parser.add_argument("--gpu-bytes", type=int, default=72 * GIB)
+    parser.add_argument("--capture-batch", type=int,
+                        help="plan the capture pass at this batch (PQ #1151); needs --workspace-receipt")
+    parser.add_argument("--workspace-receipt",
+                        help="a stage_b_workspace_profile receipt whose measured per-batch "
+                             "workspace replaces the declared one")
+    parser.add_argument("--workspace-action-key", help="the PrismaBuild action that wrote the receipt")
     args = parser.parse_args(argv)
-    policy = derive_policy(json.loads(Path(args.inputs).read_bytes()))
+    capture = None
+    if (args.capture_batch, args.workspace_receipt, args.workspace_action_key).count(None) not in (0, 3):
+        parser.error("--capture-batch, --workspace-receipt and --workspace-action-key go together")
+    if args.capture_batch is not None:
+        capture = {"capture_batch": args.capture_batch,
+                   "workspace_reserve_bytes": workspace_from_receipt(
+                       args.workspace_receipt, action_key=args.workspace_action_key)}
+    policy = derive_policy(json.loads(Path(args.inputs).read_bytes()), host_bytes=args.host_bytes,
+                           physical_bytes=args.physical_bytes, gpu_bytes=args.gpu_bytes,
+                           capture=capture)
     raw = (json.dumps(policy, sort_keys=True) + "\n").encode()
     _require(publish_new_bytes(Path(args.out), raw), "policy output already exists")
     print(json.dumps({"status": "resource_geometry_derived", "out": args.out,
+        "sha256": hashlib.sha256(raw).hexdigest(),
         "limits": policy["limits"], "budget": policy["budget"],
+        "capture": policy["derivation"].get("capture"),
+        "peak_planned_bytes": policy["derivation"]["peak_planned_bytes"],
         "windows_by_layer": policy["derivation"]["windows_by_layer"]}, sort_keys=True))
 
 

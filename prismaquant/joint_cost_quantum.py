@@ -2162,12 +2162,14 @@ def run_layer_quantum_core(
             # contract states: it synchronizes, empties the allocator cache
             # and charges the guard, which is too much work per sample. The
             # lease is fresh, so its whole statistics capacity is still to
-            # come; the per-sample floors below stay.
+            # come; the per-sample floors below stay. The workspace is the
+            # retained budget's, the same quantity its derivation planned the
+            # capture pass with (PQ #1151): one reserve per stored batch.
             if guard is not None:
                 check_operator_allocation(
                     guard, "before_joint_window_backward", reserve_bytes=(
-                        operator_windows["workspace_reserve_bytes"]
-                        * (1 if observer is None else capture_batch)
+                        retained_budget.capture_workspace_bytes(
+                            1 if observer is None else capture_batch)
                         + (0 if lease is None
                            else lease.statistics_capacity_bytes
                            - lease.resident_statistics_bytes)
@@ -2409,8 +2411,8 @@ def run_layer_quantum_core(
                             run_group=profile_group,
                             observed=lambda: spill_observer(probe_index),
                             guard=guard,
-                            declared_workspace_bytes=operator_windows[
-                                "workspace_reserve_bytes"],
+                            declared_workspace_bytes=(
+                                retained_budget.workspace_reserve_bytes),
                             capture_reserve_bytes=spill.capture_reserve_bytes,
                             capture_batch=capture_batch, device=runner.device,
                             identity={

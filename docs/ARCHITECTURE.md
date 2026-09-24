@@ -1,5 +1,56 @@
 # PrismaQuant Architecture
 
+Stage B plans the capture pass it charges (2026-09-24,
+`ws-sb4/1151-capture-workspace`, PQ #1151). The capture guard charges
+`workspace_reserve_bytes` once per stored batch a pass carries, so a capture
+at `capture_batch=4` charges four reserves. The retained budget's derivation
+held one reserve in `fixed_bytes` and never planned the capture. The R13
+layer-044 v6 gate (PB `d39b475a…`) therefore planned a 93.1 GB peak, and the
+guard refused its first capture pass with 69.0 GB of reserve. Both sides now
+price one quantity, `joint_retained_window_plan.capture_workspace_bytes`: the
+reserve times the stored batches. The guard (`joint_cost_quantum`,
+`replay_backward`) takes the reserve from the retained budget, the budget the
+derivation planned, instead of from the operator windows. With
+`capture_batch=B`, `derive_retained_window_budget` plans the capture pass as
+`RetainedWindowBudget.capture_peak_bytes`: the fixed owners with the one
+reserve replaced by B reserves, beside the largest window's renders, since a
+resumed quantum captures in its first active window and no statistics lease
+is open during a capture. A capture that does not fit the physical budget
+less its margin refuses at derivation. The derivation records it under
+`capture`, and `peak_planned_bytes` becomes the larger of the window peaks
+and the capture peak.
+
+The workspace reserve can be measured instead of declared.
+`derive_retained_window_budget(measured=...)` and the resource policy's
+`capture` block (`joint_stageb_resources.capture_policy`) take
+`workspace_reserve_bytes` as `{bytes, receipt, basis}`. The receipt names the
+PrismaBuild action key, path and sha256 of the measurement. It is a reference
+for readers: nothing rereads it or compares it at run time.
+`python -m prismaquant.joint_stageb_resources --capture-batch B
+--workspace-receipt FILE --workspace-action-key KEY` reads the receipt once
+and writes the policy, and `--host-bytes`, `--physical-bytes` and
+`--gpu-bytes` set its limits. A policy without a `capture` block derives byte
+for byte as before, and so does its re-derivation. The measurement is
+`experiments/stage_b_capture_workspace_profile.py`
+(`prismaquant/stage_b_workspace_profile.py`, opt-in through
+`PRISMAQUANT_STAGE_B_WORKSPACE_PROFILE`). It runs a real layer quantum with
+the row's own arguments, moves the record's output space out of the
+campaign, and at probe 0's spill capture runs the window backward without
+the observer at B=1 and at the row's batch, then the capture at B=1, 2 and 4.
+The live guard admits each step, charged on the device side: B=1 under the
+declared reserve, each later step under the previous step's measured peak
+times the batch ratio. It writes a JSON receipt of the device peak deltas and
+the cgroup `memory.stat` at each group's host peak, then stops the quantum.
+Two charges stay outside the shared quantity: the spill's own pinned reserve
+(`StageBReplaySpill.capture_reserve_bytes`), which the plan cannot see, and
+the spill window replay, which still charges the operator windows' declared
+reserve. Gates: `tests/test_stage_b_capture_pricing.py`,
+`tests/test_stageb_one_pass_spill.py`
+(`test_capture_pass_charges_the_planned_workspace_per_stored_batch`),
+`tests/test_joint_stageb_resources.py`,
+`tests/test_stage_b_workspace_profile.py`. No format, pipeline default or
+ship gate changes.
+
 Checkpoint planes stream in leased windows (2026-09-24,
 `ws-rd/1142-grouped-reads`, PQ #1142). Stage B checkpoint-load and
 handoff-load, the Stage A seed comparison and `checkpoint_plane_distance`
@@ -1640,8 +1691,13 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-rd/1142-grouped-reads`.
+As of: 2026-09-24 · `ws-sb4/1151-capture-workspace`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-sb4/1151-capture-workspace`) for **the Stage B
+plan pricing the capture pass the guard charges, the measured capture
+workspace owner and its measurement tool** (PQ #1151). See the entry at the
+top. No format, pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-rd/1142-grouped-reads`) for **checkpoint planes
 streamed in leased windows** (PQ #1142): one lease per budget window, one
