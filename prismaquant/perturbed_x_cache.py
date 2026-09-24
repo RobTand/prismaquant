@@ -1519,6 +1519,9 @@ def _exact_read_pool(threads):
         return _EXACT_READ_POOL
 
 
+_NOT_STARTED = object()
+
+
 def _run_in_order(pool, calls):
     """Run ``calls`` on ``pool``; their results, in call order.
 
@@ -1531,7 +1534,25 @@ def _run_in_order(pool, calls):
     """
     if pool is None or len(calls) < 2:
         return [call() for call in calls]
-    futures = [pool.submit(call) for call in calls]
+    # The lowest index that has failed so far. A worker checks it before it
+    # starts a call, so a call queued after a failure never starts, even
+    # when the pool picks it up before this thread sees the failure. Calls
+    # below that index still run: a serial loop would have run them first.
+    first_failure = [len(calls)]
+    lock = threading.Lock()
+
+    def guarded(index, call):
+        with lock:
+            if index > first_failure[0]:
+                return _NOT_STARTED
+        try:
+            return call()
+        except BaseException:
+            with lock:
+                first_failure[0] = min(first_failure[0], index)
+            raise
+
+    futures = [pool.submit(guarded, index, call) for index, call in enumerate(calls)]
     try:
         remaining = set(futures)
         while remaining:
