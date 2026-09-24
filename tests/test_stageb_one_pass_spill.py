@@ -245,7 +245,8 @@ def campaign(tmp_path_factory):
 
 
 def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
-             resume=False, label=None, regime=None, emit_handoff=False):
+             resume=False, label=None, regime=None, emit_handoff=False,
+             guard=None):
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress, quantum_layer_roster,
         quantum_retained_state, resolve_quantum_windows, run_layer_quantum_core)
@@ -258,9 +259,16 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
         monkeypatch.setenv(spill_mod.SPILL_ENV[0], str(spill_root))
     if ceiling is not None:
         monkeypatch.setenv(spill_mod.SPILL_ENV[1], str(ceiling))
-    if campaign.device.type == "cuda":
+    if guard is not None:
+        # A caller-supplied guard stands in for the capture guard on any
+        # device, so every phase admission the quantum makes reaches it.
+        import prismaquant.joint_statistics_replay as replay
+        monkeypatch.setattr(replay, "operator_window_guard", lambda *a, **k: guard)
+    elif campaign.device.type == "cuda":
         # The fixture's budget is far below a real capture guard's physical
         # floor; the guard charges admissions and never touches arithmetic.
+        # test_layer_quantum_charges_each_phase_to_its_guard drives the
+        # guarded path with a recording guard instead.
         import prismaquant.joint_statistics_replay as replay
         monkeypatch.setattr(replay, "operator_window_guard", lambda *a, **k: None)
     model, context, runner = _runner(campaign.state, campaign.device)
@@ -308,6 +316,50 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
     if emit_handoff:
         state.handoff = band["handoff_emitter"].published
     return payload, state
+
+
+class _RecordingGuard:
+    """The capture guard's admission contract, admitting everything.
+
+    ``check`` takes the same keyword-only arguments as
+    ``CaptureMemoryGuard.check`` and records each admission. The physical
+    cap and margin admit any fixture plan, so the quantum runs its guarded
+    path end to end on either device.
+    """
+
+    def __init__(self, device):
+        self.device = device
+        self.physical_cap_bytes = 1 << 62
+        self.margin_bytes = 0
+        self.admissions = []
+
+    def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
+        self.admissions.append((label, reserve_bytes))
+        return {"conservative_cgroup_plus_cuda_reserved_bytes": 0}
+
+
+def test_layer_quantum_charges_each_phase_to_its_guard(campaign, monkeypatch):
+    """Every guarded admission of a layer quantum reaches its guard.
+
+    Every CUDA quantum builds a capture guard, and the other tests here
+    replace it with None, so this test is the only one that runs the
+    guarded path.
+    """
+    layer = 1
+    guard = _RecordingGuard(campaign.device)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, guard=guard)
+    assert payload is not None, _chain(state.error)
+    labels = [label for label, _reserve in guard.admissions]
+    assert labels[0] == "before_layer_quantum_replay"
+    assert guard.admissions[0][1] == 0
+    for label in (f"before_quantum_source_loading:{layer}",
+                  f"admit_quantum_source_loading:{layer}",
+                  f"before_quantum_reverse:{layer}",
+                  f"admit_quantum_reverse:{layer}",
+                  "before_joint_retained_candidate_load",
+                  "before_joint_retained_statistics_probe"):
+        assert label in labels
 
 
 def _checkpoint_dir(campaign, layer):

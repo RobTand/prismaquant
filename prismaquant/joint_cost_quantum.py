@@ -1893,7 +1893,10 @@ def run_layer_quantum_core(
             runner.device,
             device_bytes=execution.get("device_envelope_bytes"))
         if guard is not None:
-            check_operator_allocation(guard, "before_layer_quantum_replay")
+            # An observation before any phase is admitted: it releases
+            # retired blocks and charges no future allocation.
+            check_operator_allocation(guard, "before_layer_quantum_replay",
+                                      reserve_bytes=0)
 
         def retained_source_phase(stage_label):
             snapshot = runner.context.source_residency_snapshot(
