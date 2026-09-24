@@ -191,3 +191,21 @@ def test_a_quantum_that_fails_in_its_head_writes_its_counters(failing_head, tmp_
     # Only the counters: the success path owns status.json and cost.pkl.
     written = sorted(p.name for p in Path(run.record["output_space"]["root"]).iterdir())
     assert "status.json" not in written and "cost.pkl" not in written
+
+
+def test_failure_counters_carry_the_dispatcher_grace_stamps(failing_head, tmp_path):
+    """The load-phase grace a row ran under is in its counters, pass or fail."""
+    run = failing_head
+    stamp = {"schema": "prismaquant.load_phase_grace.v1", "phase": "checkpoint-load",
+             "mode": "derived", "grace_s": 846}
+    config = {"model": "fixture", "inputs": {},
+              "execution": {"production_act_scales": "0"}}
+    with pytest.raises(_Stop):
+        run.quantum.run_layer_quantum(
+            config, record=run.record, adjoint_slice={}, plan_sha256="c" * 64,
+            prepared={"path": str(run.prepared),
+                      "sha256": hashlib.sha256(run.prepared.read_bytes()).hexdigest()},
+            output_root=tmp_path, progress_grace=[stamp])
+    document = json.loads(Path(run.record["output_space"]["counters"]).read_text())
+    assert document["progress_grace"] == [stamp]
+    assert document["outcome"]["status"] == "failed"

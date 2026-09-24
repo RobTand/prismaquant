@@ -2493,15 +2493,16 @@ def _resolved_units(resolved_windows) -> int:
 
 
 def write_failure_counters(record, *, counters, io_spans, sampler, error,
-                           units_total=0) -> Path | None:
+                           units_total=0, stamps=None) -> Path | None:
     """Write a failed run's counters to its counters path, and return it.
 
     The document is the success document with ``units`` done as ``None``
     and an ``outcome`` block naming the error and the spans it interrupted.
     Spans still open close as ``interrupted``. Before the quantum built its
     counters (a failure in the head), the document carries the spans, the
-    GPU power and the outcome only. Nothing else is written: ``status.json``
-    and ``cost.pkl`` stay the success path's.
+    GPU power and the outcome only. ``stamps`` are merged in as they are
+    (the dispatcher's load-phase grace). Nothing else is written:
+    ``status.json`` and ``cost.pkl`` stay the success path's.
 
     Never raises: a failure here is printed, and the run's own error is the
     one that propagates.
@@ -2529,6 +2530,7 @@ def write_failure_counters(record, *, counters, io_spans, sampler, error,
             }
             if "sampler_error" in gpu:
                 document["gpu_sampler_error"] = gpu["sampler_error"]
+        document.update(stamps or {})
         document["outcome"] = outcome
         space = record.get("output_space") or {}
         target = space.get("counters") or (
@@ -2606,13 +2608,15 @@ def publish_quantum_outputs(record, *, payload, result, counters,
 def run_layer_quantum(
     config, *, record, adjoint_slice, plan_sha256, prepared, output_root,
     data_manifest_sha256=None, resume=False, adjoint_handoff=None,
-    emit_handoff=False,
+    emit_handoff=False, progress_grace=None,
 ) -> dict:
     """Load the head phase and execute one quantum (§6.2 steps 2-6).
 
     ``adjoint_handoff`` is a bound handoff from quantum ``layer + 1``
     (band-serial, PQ #996); ``emit_handoff`` publishes this quantum's own for
     ``layer - 1``. Both are chosen by the dispatcher; neither falls back.
+    ``progress_grace`` is the dispatcher's load-phase grace stamps: stamped
+    into results.json and counters.json as ``progress_grace``, never read.
     """
     import torch
 
@@ -2716,6 +2720,9 @@ def run_layer_quantum(
         "phases": [], "passed": False,
     }
     result["env"]["container_content_sha256"] = executing_image()
+    stamps = ({} if progress_grace is None
+              else {"progress_grace": list(progress_grace)})
+    result.update(stamps)
     result["device_envelope"] = device_envelope
     # Band-serial mode is a fact about this execution, never about the
     # record or the payload: both are the chain-mode bytes (PQ #996).
@@ -2941,7 +2948,8 @@ def run_layer_quantum(
         # of where it failed. This covers exceptions, not SIGKILL.
         write_failure_counters(record, counters=counters, io_spans=io_spans,
                                sampler=power, error=error,
-                               units_total=_resolved_units(resolved_windows))
+                               units_total=_resolved_units(resolved_windows),
+                               stamps=stamps)
         raise
     finally:
         if runner is not None:
@@ -2958,9 +2966,9 @@ def run_layer_quantum(
     # ---- writes: only under layer-quanta/layer-NNN/ (§6.4) ---------------
     units_total = _resolved_units(resolved_windows)
     records_span = io_spans.open("records-out")
-    counters_done = counters.finish(
+    counters_done = {**counters.finish(
         units_done=len(payload["costs"]) if payload else 0,
-        units_total=units_total)
+        units_total=units_total), **stamps}
     try:
         status_record = publish_quantum_outputs(
             record, payload=payload, result=result, counters=counters_done,
@@ -2972,6 +2980,26 @@ def run_layer_quantum(
     io_spans.close(records_span)
     result["passed"] = status_record["status"] == "complete"
     return result
+
+
+def progress_grace_stamps(raw: str | None) -> list | None:
+    """The dispatcher's load-phase grace stamps, as the run records them.
+
+    The stamps explain the grace PrismaBuild enforces; the quantum reads
+    nothing from them. A value that is not a JSON list of objects is kept
+    as it came, under ``unparsed``, and the run continues.
+    """
+    if raw is None:
+        return None
+    try:
+        stamps = json.loads(raw)
+    except ValueError:
+        stamps = None
+    if isinstance(stamps, list) and all(isinstance(s, dict) for s in stamps):
+        return stamps
+    print("[joint-quantum] --progress-grace-derivation is not a JSON list of "
+          "objects; recording it unparsed", flush=True)
+    return [{"unparsed": raw}]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3004,6 +3032,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "handoff.json; replaces the checkpoint load and "
                              "the render-free chain")
     parser.add_argument("--adjoint-handoff-sha256", default=None)
+    parser.add_argument("--progress-grace-derivation", default=None,
+                        help="the dispatcher's load-phase grace stamps (JSON "
+                             "list): copied into results.json and "
+                             "counters.json, never read as a setting")
     parser.add_argument("--emit-adjoint-handoff", action="store_true",
                         help="band-serial (PQ #996): publish this quantum's "
                              "final input cotangent and owner states for "
@@ -3022,6 +3054,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.device != "cuda":
         parser.error("layer quanta are a GPU hot path; --device must be cuda")
+    progress_grace = progress_grace_stamps(args.progress_grace_derivation)
     try:
         require_dev_mode("joint_cost_quantum")
         record, adjoint_slice = verify_quantum_identity(
@@ -3081,7 +3114,8 @@ def main(argv=None) -> int:
             output_root=args.output_root,
             data_manifest_sha256=args.data_manifest_sha256, resume=args.resume,
             adjoint_handoff=adjoint_handoff,
-            emit_handoff=args.emit_adjoint_handoff)
+            emit_handoff=args.emit_adjoint_handoff,
+            progress_grace=progress_grace)
     except QuantumIdentityRefused as exc:
         # The D2 window handshake or the producer campaign check refused a
         # stale record after the digest gate passed: same exit 3, nothing

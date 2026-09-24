@@ -1,5 +1,44 @@
 # PrismaQuant Architecture
 
+The dispatcher derives Stage B's load-phase grace (2026-09-24,
+`ws-sb4/stage-io-baseline`, PB #480). `checkpoint-load` and `handoff-load`
+commit no progress units, so their grace is the phase's whole time budget.
+It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
+row as W + ceil(bytes / floor). W is the spec's
+`PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
+for every staged wait in the phase
+(`prismaquant/joint_adjoint_checkpoints.py:1705`,
+`prismaquant/joint_quantum_handoff.py:519`), so the phase waits at most W in
+total outside a PrismaBuild landing record. The bytes are the phase's count
+in the row's read plan. The built-in floor, 62,954,973 B/s, is the slowest
+30 s read window of the R13 layer-044 v4 and v5 gates (action keys
+`70e7baeb…`, `2dc14529…`), measured with one reader on the dl380g10 link.
+For layer 44 the grace is 300 + 546 = 846 s.
+
+The floor applies only at the concurrency it was measured at. The link-reader
+count is the number of quantum rows the dispatch publishes, never a silent 1.
+`--quantum ID` (repeatable) publishes only the named rows, and an unknown ID
+refuses. `--link-readers N` replaces the count. The built-in floor applies
+only when the count is 1. At any other count, the row needs a
+`--checkpoint-load-floor` document measured at that count. Without one, it
+takes the blanket 1800 s. A document measured at another count refuses. No
+concurrency discount is applied. Readers from other workloads on the same
+link, and rows published by an earlier dispatch, are not counted. A
+resubmitted row keeps the link count recorded in its first
+`quantum-submitted` event, even when `--quantum` or `--link-readers` gives
+this dispatch another count, so it stays the same action. A phase whose plan declares no bytes, or 0 bytes, also
+takes the blanket grace.
+
+Each row's stamps (mode, grace, W, bytes, reader count and its source,
+scope, and the floor with its source keys, or the reason for the blanket
+grace) ride the payload as `--progress-grace-derivation`. They also go into
+the dry-run row and the `quantum-submitted` state event. The quantum copies
+them into `results.json` and `counters.json`, including the failure
+counters, and reads nothing from them. Gates: `tests/test_load_phase_grace.py`,
+`tests/test_quantum_failure_counters.py`. This changes a dispatcher default
+(the load-phase grace) and adds three dispatcher options. No format,
+pipeline stage or ship gate changes.
+
 A failed Stage B quantum writes its counters (2026-09-24,
 `ws-sb4/stage-io-baseline`). `counters.json` was written only after the layer
 core returned, so the v4 and v5 gate failures left no record of their own
