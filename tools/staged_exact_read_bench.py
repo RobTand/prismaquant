@@ -624,7 +624,7 @@ def _sink_variant(base, variant, *, window_bytes):
             copies = 0
             direct_calls = 0
 
-            def _direct(self):
+            def _direct_fd(self):
                 if getattr(self, "_dfd", None) is None:
                     from prismaquant.perturbed_x_cache import _direct_io_block
                     self._dfd = os.open(f"/proc/self/fd/{self._file.fileno()}",
@@ -642,7 +642,7 @@ def _sink_variant(base, variant, *, window_bytes):
 
             def __setitem__(self, key, tensor):
                 offset, size, view = checked_view(self, key, tensor)
-                fd = self._direct()
+                fd = self._direct_fd()
                 if offset % self._grid or size % self._grid:
                     raise RuntimeError("direct scratch bench needs grid-sized slots")
                 try:
@@ -661,7 +661,7 @@ def _sink_variant(base, variant, *, window_bytes):
                 if self._file is None or key not in self._written:
                     raise RuntimeError("cotangent scratch slot is not ready")
                 offset, size, shape, dtype = self._slots[key]
-                fd = self._direct()
+                fd = self._direct_fd()
                 tensor = torch.empty(shape, dtype=dtype, device='cpu')
                 out = memoryview(tensor.view(torch.uint8).reshape(-1).numpy())
                 try:
@@ -772,8 +772,11 @@ def child_stage_b(args, slice_doc) -> dict:
 def _scratch_mode(arena):
     """Which path a scratch took: the tree's ``_direct`` grid when it has one."""
     direct = getattr(arena, "_direct", "absent")
-    return {"direct": list(direct) if isinstance(direct, tuple) else direct,
-            "class": type(arena).__name__}
+    if isinstance(direct, tuple):
+        direct = list(direct)
+    elif direct is not None and not isinstance(direct, str):
+        direct = repr(direct)
+    return {"direct": direct, "class": type(arena).__name__}
 
 
 def child_sink_feed(args, slice_doc) -> dict:
