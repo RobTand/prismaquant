@@ -638,7 +638,54 @@ def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):
     return max(storages.values(), default=0) if device == 'meta' else sum(storages.values())
 
 
-def _acquire_bulk_window(path, expected_sha256, *, resolver=None):
+def _await_entry_landing(resolver, entries, *, deadline=None) -> bool:
+    """Wait for whole-file entries the map does not hold yet (PQ #1204).
+
+    ``entries`` is ``[(declared path, file bytes), ...]``: entries a strict
+    reader looked up and did not find. This is the landing-record wait the
+    shard reader and the checkpoint loader use,
+    ``residency_shard_reader.await_staged_spans``, over one whole-file span
+    per entry, with the same proof check (``stage_cover_is_published``, and
+    the batched form for a window). One call covers every entry, so a
+    window waits once, however many of its entries are missing. Returns
+    ``True`` when every entry landed and the caller may look it up again,
+    ``False`` when the caller refuses as before.
+
+    It waits only where waiting can end in a landing. The resolver must
+    carry the sealed readset, and that readset must be bound: an unbound
+    readset cannot tell a declared entry from an undeclared one, so it
+    does not wait, as ``layer_streaming._await_layer_readset`` does not. A
+    span the bound readset does not declare, a covering entry that failed
+    a hard check, and every refusal of PrismaBuild's landing record return
+    at once. ``deadline`` (``time.monotonic()``) bounds the wait only
+    where no landing record covers the entries; ``None`` starts the
+    configured bound here (``PRISMAQUANT_STAGED_RANGE_WAIT_S``).
+
+    Called only after a miss, so an entry the map already holds costs
+    nothing here.
+    """
+    if not entries:
+        return True
+    readset = getattr(resolver, "declared_readset", None)
+    if not callable(readset) or not callable(getattr(resolver, "staged_range_outcome", None)):
+        return False
+    if readset().get("state") != "bound":
+        return False
+    import time
+    from .residency_map import RANGE_HIT
+    from .residency_shard_reader import await_staged_spans, staged_range_wait_s
+    from .staged_lease import stage_cover_is_published, stage_covers_are_published
+    if deadline is None:
+        deadline = time.monotonic() + staged_range_wait_s()
+    verdict = await_staged_spans(
+        resolver, [(str(path), 0, size, size) for path, size in entries],
+        deadline=deadline, published=stage_cover_is_published,
+        published_batch=stage_covers_are_published)
+    return verdict == RANGE_HIT
+
+
+def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=None,
+                         deadline=None):
     """Strict-policy pinned window for a whole-file bulk input.
 
     Returns the entered ``(window, key, staged)``: the RAM leg refuses
@@ -648,6 +695,11 @@ def _acquire_bulk_window(path, expected_sha256, *, resolver=None):
     reads through held descriptors, verifies content against
     ``expected_sha256``, re-checks the declared file's binding, and exits
     the window (close-then-release) on every path.
+
+    An entry the map does not hold yet is waited on as
+    :func:`_await_entry_landing` describes, then looked up again (PQ
+    #1204). ``declared_size`` is the declared file's size when the caller
+    already holds it; otherwise a miss stats it.
 
     ``resolver`` defaults to the process's input-map resolver, which is
     what every sealed input, every read-only attached generation and every
@@ -662,6 +714,15 @@ def _acquire_bulk_window(path, expected_sha256, *, resolver=None):
     if resolver is None:
         raise LeaseRefused("readset-not-staged", kind="availability")
     staged = resolver.staged_read(path, expected_sha256=expected_sha256)
+    if staged is None:
+        if declared_size is None:
+            try:
+                declared_size = os.lstat(path).st_size
+            except OSError:
+                declared_size = None
+        if declared_size is not None and _await_entry_landing(
+                resolver, [(path, declared_size)], deadline=deadline):
+            staged = resolver.staged_read(path, expected_sha256=expected_sha256)
     if staged is None:
         raise LeaseRefused("staged-not-serving", kind="availability")
     # acquire_entry_window records its own acquire refusal; the LeaseRefused
@@ -753,7 +814,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     tier = None
     if strict:
         window, key, _staged, lease_resolver = _acquire_bulk_window(
-            path, expected_sha256)
+            path, expected_sha256, declared_size=before.st_size)
         descriptor, serving, tier = _enter_and_open_window(
             lease_resolver, window, key, path)
         source_signature = cache_file_stat_signature(os.fstat(descriptor))
@@ -1704,7 +1765,7 @@ def _declared_entry_resolver(resolver, ref):
     return entry_resolver if entry_resolver is not None else residency_resolver()
 
 
-def _strict_lease_groups(references, resolver):
+def _strict_lease_groups(references, resolver, *, deadline=None):
     """``[(entry resolver, [(ref, staged entry), ...]), ...]`` in read order.
 
     One group per resolver object: every entry of a group is vouched in one
@@ -1713,10 +1774,17 @@ def _strict_lease_groups(references, resolver):
     produced batches is therefore one group per batch. The staged entry is
     looked up here exactly as the single-entry path looks it up, and a miss
     refuses the same way, before anything is pinned.
+
+    A miss first waits for the entry's landing (PQ #1204): the entries of
+    one resolver that the map does not hold yet are awaited together in one
+    :func:`_await_entry_landing` call, under ``deadline``, and looked up
+    again. The window has one deadline, however many resolvers it spans. An
+    entry the map already holds costs one lookup, as before.
     """
     from .residency_map import residency_resolver
     from .staged_lease import LeaseRefused
-    groups: dict[int, tuple[object, list]] = {}
+    looked = []
+    missed: dict[int, tuple[object, list[int]]] = {}
     for ref in references:
         entry_resolver = resolver(ref) if callable(resolver) else resolver
         if entry_resolver is None:
@@ -1725,7 +1793,28 @@ def _strict_lease_groups(references, resolver):
             raise LeaseRefused("readset-not-staged", kind="availability")
         staged = entry_resolver.staged_read(Path(ref.path), expected_sha256=ref.sha256)
         if staged is None:
+            missed.setdefault(id(entry_resolver), (entry_resolver, []))[1].append(len(looked))
+        looked.append((ref, entry_resolver, staged))
+    if missed and deadline is None:
+        # One bound for the whole window, however many resolvers it spans,
+        # as ``await_staged_spans`` has one for the whole call.
+        import time
+        from .residency_shard_reader import staged_range_wait_s
+        deadline = time.monotonic() + staged_range_wait_s()
+    for entry_resolver, indices in missed.values():
+        if not _await_entry_landing(
+                entry_resolver,
+                [(looked[index][0].path, looked[index][0].file_bytes) for index in indices],
+                deadline=deadline):
             raise LeaseRefused("staged-not-serving", kind="availability")
+        for index in indices:
+            ref = looked[index][0]
+            staged = entry_resolver.staged_read(Path(ref.path), expected_sha256=ref.sha256)
+            if staged is None:
+                raise LeaseRefused("staged-not-serving", kind="availability")
+            looked[index] = (ref, entry_resolver, staged)
+    groups: dict[int, tuple[object, list]] = {}
+    for ref, entry_resolver, staged in looked:
         groups.setdefault(id(entry_resolver), (entry_resolver, []))[1].append((ref, staged))
     return list(groups.values())
 
@@ -1880,7 +1969,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                                             expected_session, residency_check=None,
                                             release_file_pages=True, scratch=None,
                                             resolver=None, session_for_reference=None,
-                                            local_paths=None):
+                                            local_paths=None, deadline=None):
     """Read/verify the entire bounded window before exposing any tensor.
 
     This is the existing activation artifact owner's exact-input read seam.
@@ -1914,6 +2003,14 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     name, metadata, shape, dtype and storage size of the loaded tensor
     against the reference the owner recorded. The window keys the tensor
     by that reference, so the caller cannot tell which copy served it.
+
+    Under the strict policy an entry the map does not hold yet is waited on
+    before the window pins anything, on PrismaBuild's landing record when
+    the sealed readset declares it (PQ #1204, :func:`_await_entry_landing`).
+    ``deadline`` (``time.monotonic()``) is the caller's bound for that wait
+    where no landing record covers the entries; ``None`` starts the
+    configured bound at the first miss. An undeclared entry, or any
+    terminal verdict of the wait, still refuses ``staged-not-serving``.
 
     The entries are read :func:`exact_read_threads` at a time (PQ #1142),
     each on its own buffer from ``scratch``, and each through every fence
@@ -1961,7 +2058,8 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         lease_window = lease_fd = None
         if strict:
             lease_window, lease_key, _staged, lease_resolver = (
-                _acquire_bulk_window(path, ref.sha256, resolver=lease_resolver))
+                _acquire_bulk_window(path, ref.sha256, resolver=lease_resolver,
+                                     declared_size=ref.file_bytes, deadline=deadline))
             live_windows.append(lease_window)
             try:
                 lease_fd, _serving, tier = _enter_and_open_window(
@@ -2057,7 +2155,8 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                              for ref in references if ref in local_paths])
         staged = tuple(ref for ref in references if ref not in local_paths)
         if strict:
-            for entry_resolver, members in _strict_lease_groups(staged, resolver):
+            for entry_resolver, members in _strict_lease_groups(
+                    staged, resolver, deadline=deadline):
                 read_group(entry_resolver, members)
         else:
             _run_in_order(pool, [partial(read_single, ref) for ref in staged])

@@ -1,5 +1,45 @@
 # PrismaQuant Architecture
 
+A strict exact-entry read waits for a declared entry's landing (2026-09-24,
+`fix/1204-strict-entry-landing-wait`, PQ #1204). Under the strict tier
+policy, `prefetch_exact_activation_cache_entries` looked each entry up in the
+residency map and refused `staged-not-serving` when the map did not hold it
+yet. The Stage B chain roll reads its boundary window through that reader, so
+a row failed whenever the roll reached an entry before PrismaBuild's mover
+landed it. Row 37 of band 040 (PB `0b0642250b51`) died that way, 197 s in,
+while the checkpoint loader in the same process had waited on the landing
+record and succeeded. The loader waits before it calls the reader
+(`joint_adjoint_checkpoints._await_checkpoint_entries`); the chain roll
+(`cost_streaming.StreamedBoundaryArtifacts.prefetch`) waits only for its
+forward inputs.
+
+- **The wait.** `perturbed_x_cache._await_entry_landing` runs
+  `residency_shard_reader.await_staged_spans` over one whole-file span per
+  missing entry, with the loader's proof check
+  (`stage_cover_is_published`, batched per window). It is the same wait: the
+  landing record governs it, the deadline applies only where no record covers
+  the entries, and it writes the same log lines and `record_range_wait`
+  counts.
+- **Where it runs.** `_strict_lease_groups` looks every entry up first, as
+  before. It awaits the entries of one resolver that missed in a single call,
+  looks them up again, and then groups the window for its one lease per tier
+  (PQ #997, #1142). `_acquire_bulk_window`, the single-entry strict reader
+  behind `load_verified_activation_cache_entry`, waits the same way. An entry
+  the map already holds costs one lookup, as before.
+- **What still refuses at once.** An unbound sealed readset does not wait, as
+  in `layer_streaming._await_layer_readset`. An entry the bound readset does
+  not declare, a covering entry that fails a hard check, and every refusal of
+  the landing record end the wait at once. Each refusal is still
+  `staged-not-serving`.
+- **One deadline.** A window has one bound, however many resolvers its
+  missing entries span. `prefetch_exact_activation_cache_entries` and
+  `read_exact_entry_tensors` take `deadline`, and
+  `stream_exact_entry_tensors` passes the loader's own, so a checkpoint entry
+  the reader waits for again does not start a second bound.
+
+Gates: the #1204 tests in `tests/test_strict_reader_tier_enforcement.py`. No
+format, pipeline default, stage or ship gate changes.
+
 Stage B plans and admits its chain phase (2026-09-24,
 `fix/1163-chain-phase-admission`, PQ #1163). A chain-mode quantum rolls each
 chain layer from its checkpoint down to `layer + 1` before its retained
@@ -2139,8 +2179,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `fix/1192-render-window-pipeline`.
+As of: 2026-09-24 · `fix/1204-strict-entry-landing-wait`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `fix/1204-strict-entry-landing-wait`) for **the
+strict exact-entry reader waiting on PrismaBuild's landing record for an entry
+the sealed readset declares and the map does not hold yet** (PQ #1204). See
+the entry at the top. No format, pipeline default, stage or ship gate
+changes.
 
 Re-stamped (2026-09-24, `fix/1192-render-window-pipeline`) for **a Stage B
 render window's load work on the loader pool** (PQ #1192, #1195). A retained
@@ -3323,7 +3369,8 @@ never reads payload and never refuses, so an unreachable range still fails
 from the same line with the same error. It is scoped by
 `policy_is_active()`, so a non-strict reader holding a map is untouched, and
 it is the layer path only — the production weight cache and the wire reader do
-not wait. Cost when everything is staged: one header parse per shard in the
+not wait. (Since PQ #1204 the strict exact-entry reader also waits, on the
+same wait; see the entry at the top.) Cost when everything is staged: one header parse per shard in the
 submitting thread, and no sleeps.
 
 **What this makes slower, honestly.** An *undeclared* range under a bound
