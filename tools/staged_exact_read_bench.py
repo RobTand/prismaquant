@@ -249,7 +249,7 @@ def child_ceiling(args, _slice_doc) -> dict:
     for tier in ("ram", "stage"):
         paths = [c["ram_path"] if tier == "ram" else c["stage_path"] for c in copies
                  if (c["ram_path"] if tier == "ram" else c["stage_path"])
-                 and c["bytes"] > (1 << 20)][:args.ceiling_files]
+                 and c["bytes"] > (1 << 20)][args.ceiling_skip:args.ceiling_skip + args.ceiling_files]
         if not paths:
             continue
         for mode in args.ceiling_modes:
@@ -577,6 +577,9 @@ def main(argv=None) -> int:
     parser.add_argument("--stage-a-windows", type=int, default=8)
     parser.add_argument("--copies", default=None)
     parser.add_argument("--ceiling-files", type=int, default=256)
+    parser.add_argument("--ceiling-skip", type=int, default=0,
+                        help="start the ceiling's files this many copies in, to read "
+                             "copies the file server's cache is less likely to hold")
     parser.add_argument("--ceiling-threads", type=lambda s: [int(x) for x in s.split(",") if x],
                         default=[])
     parser.add_argument("--ceiling-modes", type=lambda s: [x for x in s.split(",") if x],
@@ -618,6 +621,7 @@ def main(argv=None) -> int:
         "--stage-a-batches", str(args.stage_a_batches),
         "--stage-a-windows", str(args.stage_a_windows),
         "--ceiling-files", str(args.ceiling_files),
+        "--ceiling-skip", str(args.ceiling_skip),
         "--ceiling-threads", ",".join(str(t) for t in args.ceiling_threads),
         "--ceiling-modes", ",".join(args.ceiling_modes)]
     if args.scratch_root:
