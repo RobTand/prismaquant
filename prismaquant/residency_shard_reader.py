@@ -120,6 +120,12 @@ STAGED_RANGE_WAIT_S = 300.0
 #: Between polls. ``ResidencyResolver._read_map`` is identity-gated, so a poll
 #: that finds the map unchanged costs one ``lstat`` and no parse.
 STAGED_RANGE_POLL_S = 1.0
+#: The longest a staged-range wait goes without a log line (PQ #1167). A
+#: policy bound, not a derived threshold: no phase of a campaign may run two
+#: minutes with no output, and a line a minute meets that with room for a
+#: slow poll. The line also repeats at the first poll after the expectation
+#: it printed passes, so a wait that outlives its expectation says so.
+STAGED_WAIT_REPORT_S = 60.0
 
 
 #: One process can have several reads blocked at once (the layer gather's
@@ -254,14 +260,25 @@ def landing_verdict(resolver, rows):
     Each check is one ``lstat`` of the record (identity-cached) and one
     small read of the tier record.
     """
+    return _landing_verdict(resolver, rows)[:3]
+
+
+def _landing_verdict(resolver, rows):
+    """:func:`landing_verdict`, plus what PrismaBuild priced a wait on.
+
+    The fourth value is ``None`` unless the verdict is ``"wait"``. Then it
+    is ``{"expected_unix", "rate", "basis"}``: the expectation of the range
+    the detail describes, and the record's landing rate and its basis, each
+    ``None`` when the record does not carry it (PQ #1167).
+    """
     fetch = getattr(resolver, "landing_record", None)
     record = fetch() if callable(fetch) else None
     if record is None:
-        return "absent", "PrismaBuild published no landing record", ()
+        return "absent", "PrismaBuild published no landing record", (), None
     locate = getattr(resolver, "read_order_positions", None)
     age_of = getattr(resolver, "tier_record_age", None)
     if not callable(locate) or not callable(age_of):
-        return "absent", "this resolver cannot read a landing record", ()
+        return "absent", "this resolver cannot read a landing record", (), None
     now_unix = time.time()
     horizon = record.get("horizon")
     covering = []
@@ -272,18 +289,18 @@ def landing_verdict(resolver, rows):
             if _lists_every_leg(record) and callable(bound) and bound():
                 return ("refuse", f"{declared} [{start}, {end}) is not in the "
                         "bound read order: no leg of this consumer's plan "
-                        "covers it, so no mover will stage it", ())
+                        "covers it, so no mover will stage it", (), None)
             return ("absent", f"{declared} [{start}, {end}) is not in the bound "
-                    "read order", ())
+                    "read order", (), None)
         found = _landing_rows(record, positions)
         if not found:
             return ("absent", f"the landing record lists no pending range for "
-                    f"{declared} [{start}, {end})", ())
+                    f"{declared} [{start}, {end})", (), None)
         if all(row["state"] == "terminal-no-receipt" for row in found):
             return ("refuse", f"{declared} [{start}, {end}): "
                     + "; ".join(_describe_landing(row, now_unix, horizon)
                                 for row in found),
-                    ())
+                    (), None)
         covering.extend(row for row in found
                         if row["state"] != "terminal-no-receipt")
     liveness = float(record["tier_loop_liveness_s"])
@@ -297,8 +314,27 @@ def landing_verdict(resolver, rows):
         silent = ("the tier loop's record is unreadable" if age is None else
                   f"the tier loop last announced {record['tier_id']} {age:.0f} s ago")
         return ("refuse", f"{head}; {silent}, beyond PrismaBuild's "
-                f"{liveness:g} s liveness bound, so nothing will land it", ())
-    return "wait", head, tuple(sorted({row["mover_action_key"] for row in covering}))
+                f"{liveness:g} s liveness bound, so nothing will land it", (), None)
+    expected = covering[0].get("expected_landing_unix")
+    rate = record.get("landing_bytes_per_s")
+    basis = record.get("landing_basis")
+    priced = {
+        "expected_unix": float(expected) if type(expected) in (int, float) else None,
+        "rate": float(rate) if type(rate) in (int, float) and rate > 0 else None,
+        "basis": basis if isinstance(basis, str) and basis else None,
+    }
+    return ("wait", head, tuple(sorted({row["mover_action_key"] for row in covering})),
+            priced)
+
+
+def _priced_text(priced) -> str:
+    """The rate and basis behind a wait's expectation, for its log line."""
+    if not priced or priced["expected_unix"] is None or priced["rate"] is None:
+        return ""
+    text = f"; PrismaBuild priced it at {priced['rate'] / 1e6:.1f} MB/s"
+    if priced["basis"]:
+        text += f" (basis {priced['basis']})"
+    return text
 
 
 def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=None,
@@ -401,7 +437,12 @@ def _await_loop(resolver, pending, *, published, cancel, published_batch,
     detail = None
     absent_since = started
     waiting_since = None
+    # The last line printed: its (kind, first clause), when, and the
+    # expectation it named. A line repeats when the clause changes, when
+    # that expectation passes, or after STAGED_WAIT_REPORT_S (PQ #1167).
     said = None
+    said_unix = 0.0
+    said_expected = None
     while pending:
         if cancel is not None and cancel.is_set():
             raise CancelledError("staged-range wait cancelled")
@@ -447,7 +488,7 @@ def _await_loop(resolver, pending, *, published, cancel, published_batch,
             if not pending:
                 break
             now = time.monotonic()
-            kind, why, movers = landing_verdict(resolver, pending)
+            kind, why, movers, priced = _landing_verdict(resolver, pending)
             if kind == "refuse":
                 verdict = RANGE_UNCOVERED
                 detail = f"PrismaBuild's landing record refuses the wait: {why}"
@@ -458,6 +499,8 @@ def _await_loop(resolver, pending, *, published, cancel, published_batch,
                     waiting_since = time.time()
                 _staged_wait(token, waiting_since, movers)
                 pause = STAGED_RANGE_POLL_S
+                line = (f"following PrismaBuild's landing record: {why}"
+                        + _priced_text(priced))
             else:
                 waiting_since = None
                 _staged_wait(token, None, ())
@@ -475,12 +518,17 @@ def _await_loop(resolver, pending, *, published, cancel, published_batch,
                         f"({STAGED_RANGE_WAIT_ENV}) and ran out")
                     break
                 pause = min(STAGED_RANGE_POLL_S, remaining)
-            if (kind, why.split(",")[0]) != said:
-                said = (kind, why.split(",")[0])
-                print(f"[residency] staged-range wait: "
-                      + (f"following PrismaBuild's landing record: {why}"
-                         if kind == "wait" else
-                         f"{why}; bounded wait of {bound:g} s"), flush=True)
+                line = f"{why}; bounded wait of {bound:g} s, {remaining:.0f} s left"
+            now_unix = time.time()
+            clause = (kind, why.split(",")[0])
+            if (clause != said or now_unix - said_unix >= STAGED_WAIT_REPORT_S
+                    or (said_expected is not None
+                        and said_unix <= said_expected < now_unix)):
+                said, said_unix = clause, now_unix
+                said_expected = priced["expected_unix"] if priced else None
+                print("[residency] staged-range wait"
+                      + (f", {now - started:.0f} s so far" if polls else "")
+                      + f": {line}", flush=True)
             if cancel is None:
                 time.sleep(pause)
             else:
