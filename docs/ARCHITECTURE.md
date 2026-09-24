@@ -62,6 +62,7 @@ gate changes. Gates: `tests/test_sealing_off_1147.py`,
 `tests/test_stage_a_chain_seed.py`, `tests/test_stage_a_chain_split.py`,
 `tests/test_stage_b_head_slice.py`,
 `tests/test_stage_b_spill_ceiling_sealed.py`,
+`tests/test_stageb_one_pass_spill.py`,
 `tests/test_dev_mode_provenance_gates.py`,
 `tests/test_source_identity_portable_device.py`.
 
