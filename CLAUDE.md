@@ -521,8 +521,11 @@ INT4/INT8 and MXFP8_E5M2 (registry entries, no served path). **MXFP6 was
 removed from the registry entirely on 2026-09-01** — no hardware or runtime
 supports it (`docs/design/mxfp6_cb_feasibility.md`: FP6 rides Blackwell's 8-bit
 datapath, no separate rate, operands byte-padded).
-**E5M2** is only a valid *kv-cache* dtype. `prismaquant/kernels/` ships only
-`nvfp4_fused.py`.
+**E5M2** is only a valid *kv-cache* dtype. `prismaquant/kernels/` holds
+`nvfp4_fused.py` and two producer-side kernels, each with a packaged
+qualification file: `joint_projection_reduce` and the Stage B KDA capture
+kernel `kda_chunk.py` (`kda_gram_v1`, PQ #1199). None of them is a serving
+kernel; `docs/ARCHITECTURE.md` §10 describes them.
 
 **JSO (`joint_scale_opt`)** is the production NVFP4 implicit-clipping mechanism: it
 maps to the `joint_mse` scale rule whose per-group levels default to **{6,4}**
