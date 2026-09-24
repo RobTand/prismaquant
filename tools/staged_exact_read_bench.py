@@ -984,6 +984,21 @@ def driver_main(args) -> int:
         tree, _, sdk = rest.partition(":")
         arms.append({"name": name, "tree": str(Path(tree).resolve()),
                      "sdk_root": sdk or None, "head": _git_head(tree), "env": {}})
+    for arm in arms:
+        arm["workloads"] = list(args.workloads)
+        arm["repeats"] = args.repeats
+    for spec in args.arm_workloads:
+        name, _, workloads = spec.partition("=")
+        matched = [arm for arm in arms if arm["name"] == name]
+        if not matched or not workloads:
+            raise SystemExit(f"--arm-workloads {spec!r} names no arm or no workload")
+        matched[0]["workloads"] = [w for w in workloads.split(",") if w]
+    for spec in args.arm_repeats:
+        name, _, count = spec.partition("=")
+        matched = [arm for arm in arms if arm["name"] == name]
+        if not matched or not count.isdecimal():
+            raise SystemExit(f"--arm-repeats {spec!r} names no arm or no count")
+        matched[0]["repeats"] = int(count)
     for spec in args.arm_env:
         name, _, setting = spec.partition("=")
         key, _, value = setting.partition("=")
@@ -997,7 +1012,7 @@ def driver_main(args) -> int:
                   "PRISMABUILD_ACTION_KEY"), "arms": arms, "argv": sys.argv,
               "runs": []}
     # Local workloads read nothing staged, so they wait for no landing.
-    staged = [w for w in args.workloads if w not in LOCAL_WORKLOADS]
+    staged = [w for arm in arms for w in arm["workloads"] if w not in LOCAL_WORKLOADS]
     staged_files = []
     if staged or args.ceiling_threads:
         paths = run_child(args, "paths", tree=own_tree, sdk_root=None, out=out,
@@ -1020,10 +1035,12 @@ def driver_main(args) -> int:
             label="sink-ceiling", profile=False)
         report["sink_ceiling"]["started_unix"] = round(started_unix, 3)
         (out / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True))
-    for repeat in range(args.repeats):
+    for repeat in range(max(arm["repeats"] for arm in arms)):
         for workload in args.workloads:
             order = arms if repeat % 2 == 0 else list(reversed(arms))
             for arm in order:
+                if workload not in arm["workloads"] or repeat >= arm["repeats"]:
+                    continue
                 advised = drop_client_cache(staged_files) if staged_files else 0
                 label = f"r{repeat}-{workload}-{arm['name']}"
                 result = run_child(args, workload, tree=arm["tree"],
@@ -1076,6 +1093,11 @@ def main(argv=None) -> int:
     parser.add_argument("--arm-env", action="append", default=[],
                         help="NAME=VARIABLE=VALUE: set one environment variable "
                              "for one arm's children; repeatable")
+    parser.add_argument("--arm-workloads", action="append", default=[],
+                        help="NAME=W1,W2: the workloads one arm runs, from "
+                             "--workloads; repeatable")
+    parser.add_argument("--arm-repeats", action="append", default=[],
+                        help="NAME=N: repeats for one arm; repeatable")
     parser.add_argument("--workloads", type=lambda s: s.split(","),
                         default=["stage-b", "stage-a"])
     parser.add_argument("--repeats", type=int, default=2)
