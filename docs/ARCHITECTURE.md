@@ -481,10 +481,13 @@ said nothing about its own reads between the head and the records.
 - **Stage B's spans.** `run_layer_quantum` opens spans for the head (to the
   core), checkpoint-load or handoff-load, each chain layer, the own-source
   install, each window, each (window, probe) replay, each probe's spill
-  capture, and records out. `counters.json` gains `io_spans`, every span
-  closed before the counters are written. The power sampler now starts
-  before the head, so the counters' `wall_s` and `gpu_joules` include the
-  head.
+  capture, the tail after the last window (`payload`: the handoff write
+  under a `handoff-out` child, the payload assembly and the final check of
+  every row, with `units` and `rows`; PQ #1187), the runner `teardown`, and
+  records out. `counters.json` gains `io_spans`, every span closed before
+  the counters are written; on a failure `teardown` reaches the log only.
+  The power sampler now starts before the head, so the counters' `wall_s`
+  and `gpu_joules` include the head.
 - **What the counters see.** `/proc/self/io` covers the process's thread
   group, including prefetch threads, and no child process. `read_bytes` is
   storage-layer reads, and `rchar` includes page-cache hits. Neither names a
