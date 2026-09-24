@@ -87,13 +87,20 @@ from .staged_lease import LeaseRefused, acquire_entry_window
 #: publishes no landing record for it.
 #:
 #: Since PB #989 the tier loop writes ``<consumer>.landing.json`` beside the
-#: map: every pending in-horizon range with its mover, the mover's state and
-#: the tier's expectation of when it lands. Where that record covers the
-#: range, the reader waits on the mover's state instead of this bound (see
-#: :func:`landing_verdict`), and this constant does not apply. It remains the
-#: bound for a generation that writes no landing record, for a span the
-#: record does not cover, and for a read whose sealed read order is not
-#: bound here.
+#: map: pending ranges with their mover, the mover's state and the tier's
+#: expectation of when it lands. Since PB #1018 a record that carries a
+#: ``horizon`` key lists every leg the consumer has still to read while it
+#: has a refill horizon, a leg past the horizon with ``deferred_by``; an
+#: older record lists only the legs inside the horizon. Where the record
+#: covers the range, the reader waits on the mover's state instead of this
+#: bound (see :func:`landing_verdict`), and this constant does not apply.
+#: Under a record that lists every leg, a span outside the bound read order
+#: refuses at once, naming the span (PQ #1113), and this constant does not
+#: apply either. It remains the bound for a generation that writes no
+#: landing record, for a record without the ``horizon`` key, for a span the
+#: record does not list (before the consumer's first accepted progress,
+#: a leg past the window's one step of run-ahead has no row), and for a read
+#: whose sealed read order is not bound here.
 #:
 #: A policy bound, not a derived threshold: without the landing record the
 #: consumer cannot see PrismaBuild's mover queue, so nothing in this process
@@ -162,9 +169,28 @@ def _landing_rows(record, positions):
     return rows
 
 
-def _describe_landing(row, now_unix) -> str:
-    """One range's state, expectation and the numbers behind it, for a log."""
+def _describe_landing(row, now_unix, horizon=None) -> str:
+    """One range's state, expectation and the numbers behind it, for a log.
+
+    A leg PrismaBuild lists as deferred by the refill horizon (PB #1018)
+    says so, where the horizon ends and the consumption that moves it, from
+    the record's ``horizon`` block.
+    """
     text = f"mover {row['mover_action_key'][:12]} is {row['state']}"
+    deferred = row.get("deferred_by")
+    if deferred == "horizon":
+        text += ", deferred by the refill horizon"
+        if isinstance(horizon, dict):
+            end = horizon.get("end_bytes")
+            rate = horizon.get("consumption_bytes_per_s")
+            if type(end) is int:
+                text += f" at byte {end}"
+            if horizon.get("reading_phase"):
+                text += f" while the consumer reads {horizon['reading_phase']}"
+            if type(rate) in (int, float) and rate > 0:
+                text += f" at {rate / 1e6:.1f} MB/s"
+    elif deferred is not None:
+        text += f", deferred by {deferred}"
     expected = row.get("expected_landing_unix")
     if type(expected) in (int, float):
         delta = expected - now_unix
@@ -180,6 +206,16 @@ def _describe_landing(row, now_unix) -> str:
     if row.get("waiting_for"):
         text += f", waiting for {row['waiting_for']}"
     return text
+
+
+def _lists_every_leg(record) -> bool:
+    """Whether PrismaBuild's record answers for every leg (PB #1018).
+
+    Such a record carries the ``horizon`` key, ``null`` when the
+    consumer's horizon is undefined. An older record lists only the legs
+    inside the refill horizon, so a span it does not place says nothing.
+    """
+    return "horizon" in record
 
 
 def landing_verdict(resolver, rows):
@@ -198,9 +234,22 @@ def landing_verdict(resolver, rows):
       announced its tier within the bound the record names
       (``tier_loop_liveness_s``, PrismaBuild's own offer freshness bound,
       the judgment ``PoolQueue._tier_loop_alive`` makes).
-    * ``"absent"``: nothing published to wait on. No landing record, a span
-      outside the bound read order, or a range the record does not list.
-      The caller keeps its bounded wait.
+    * ``"absent"``: nothing published to wait on. No landing record, a
+      span when no read order is bound, a span outside the read order under
+      a record that lists only the legs inside the refill horizon (written
+      before PB #1018), or a range the record does not list. The caller
+      keeps its bounded wait.
+
+    A record that lists every leg (PB #1018) refuses a span outside the
+    bound read order at once, naming it (PQ #1113): no leg of the
+    consumer's plan covers it, so no mover will stage it. A leg PrismaBuild
+    defers past the refill horizon, or until the consumer's first accepted
+    progress, is ``unpublished``: it is waited on like any other while the
+    tier loop lives, and the detail says it is deferred and what moves it.
+    A span such a record does not list keeps the bounded wait: the tier
+    loop composes the map before it rewrites the record, so a range that
+    has just become resident can leave the record one poll before this
+    reader sees it in the map.
 
     Each check is one ``lstat`` of the record (identity-cached) and one
     small read of the tier record.
@@ -214,10 +263,16 @@ def landing_verdict(resolver, rows):
     if not callable(locate) or not callable(age_of):
         return "absent", "this resolver cannot read a landing record", ()
     now_unix = time.time()
+    horizon = record.get("horizon")
     covering = []
     for declared, start, end, _size in rows:
         positions = locate(declared, start, end)
         if not positions:
+            bound = getattr(resolver, "read_order_bound", None)
+            if _lists_every_leg(record) and callable(bound) and bound():
+                return ("refuse", f"{declared} [{start}, {end}) is not in the "
+                        "bound read order: no leg of this consumer's plan "
+                        "covers it, so no mover will stage it", ())
             return ("absent", f"{declared} [{start}, {end}) is not in the bound "
                     "read order", ())
         found = _landing_rows(record, positions)
@@ -226,13 +281,18 @@ def landing_verdict(resolver, rows):
                     f"{declared} [{start}, {end})", ())
         if all(row["state"] == "terminal-no-receipt" for row in found):
             return ("refuse", f"{declared} [{start}, {end}): "
-                    + "; ".join(_describe_landing(row, now_unix) for row in found),
+                    + "; ".join(_describe_landing(row, now_unix, horizon)
+                                for row in found),
                     ())
         covering.extend(row for row in found
                         if row["state"] != "terminal-no-receipt")
     liveness = float(record["tier_loop_liveness_s"])
     age = age_of(record["tier_id"])
-    head = _describe_landing(covering[0], now_unix)
+    head = _describe_landing(covering[0], now_unix, horizon)
+    deferred = sum(1 for row in covering if row.get("deferred_by"))
+    if len(covering) > 1 and deferred:
+        head += (f" ({deferred} of the {len(covering)} ranges waited on are "
+                 "deferred by PrismaBuild's window)")
     if age is None or age > liveness:
         silent = ("the tier loop's record is unreadable" if age is None else
                   f"the tier loop last announced {record['tier_id']} {age:.0f} s ago")
