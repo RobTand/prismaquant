@@ -27,10 +27,20 @@ fifteen full-size elementwise ops, including an int64 code tensor.
   still decides every code.
 - **Bit identity.** The Torch composition is kept as
   `_nvfp4_activation_qdq_registered_op_unfused`, never dispatched, and the
-  fused leg is compared against it as raw bits (signed zeros and NaN payloads
-  included) on GLM-5.3 widths, row counts off the 128-row tile, K/16 not a
-  multiple of 4, zero groups, NaN and inf activations, FP32-subnormal used
-  scales, bf16/fp16/fp32 outputs and the empty activation.
+  fused leg is compared against it as raw bits on GLM-5.3 widths, row counts
+  off the 128-row tile, K/16 not a multiple of 4, zero groups, NaN and inf
+  activations (the whole-leg output compared as raw bits, NaN payloads
+  included; the group maximum on its own compared as raw bits at finite
+  positions and by position for NaN), bf16/fp16/fp32 outputs and the empty
+  activation. Edge rows reach the three places a flush or a narrowing would
+  show: a whole bf16-subnormal group as a group maximum; an FP32-subnormal
+  used scale (`2**-135`, stored at the smallest e4m3 subnormal) with every
+  product subnormal, at bf16/fp16/fp32; and fp16 overflow to inf (used scale
+  28672, code 7). Each row asserts it reached its edge, and the real operator
+  runs both the subnormal and the fp16-overflow row. The emitted PTX for
+  sm_121a (Triton 3.7.1) has no `.ftz` instruction, narrows with
+  `cvt.rn.bf16.f32` and `cvt.rn.f16.f32`, and takes the group maximum with
+  `abs.bf16`/`max.bf16` before widening, which is exact.
 - **The execution contract.** `ServedQuantizerIdentity` gains
   `dequant_kernel`; resolution sets it to `SERVED_QUANTIZER_DEQUANT_KERNEL`
   (`prismaquant.triton_nvfp4_served_dequant.v1`) only when the kernel module
