@@ -414,3 +414,245 @@ def profile_capture_workspace(request, *, storage, batches, layer, run_group, ob
     }
     sha256 = write_profile(request["path"], profile)
     raise CaptureWorkspaceProfiled(request["path"], sha256)
+
+
+# ---------------------------------------------------------------- chain phase
+#: The receipt path of a chain-phase measurement (PQ #1163). Set, the quantum
+#: measures every chain roll in-process and stops after the chain.
+CHAIN_PROFILE_ENV = "PRISMAQUANT_STAGE_B_CHAIN_PROFILE"
+#: A JSON object describing the chain owner the measurement was admitted
+#: under, recorded verbatim in the receipt.
+CHAIN_OWNER_ENV = "PRISMAQUANT_STAGE_B_CHAIN_PROFILE_OWNER"
+CHAIN_SCHEMA = "prismaquant.stage_b_chain_workspace_profile.v1"
+MEMINFO_SAMPLE_INTERVAL_S = 0.1
+
+
+class ChainWorkspaceProfiled(CaptureWorkspaceProfiled):
+    """The chain measurement is written; the quantum stops after its chain."""
+
+    def __init__(self, path, sha256):
+        Exception.__init__(self, f"Stage B chain workspace profile written to {path} "
+                                 f"(sha256 {sha256})")
+        self.path = str(path)
+        self.sha256 = str(sha256)
+
+
+def _mem_available_bytes():
+    with open("/proc/meminfo") as handle:
+        for line in handle:
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    raise RuntimeError("/proc/meminfo has no MemAvailable")
+
+
+class _MemAvailableFloor:
+    """The box's lowest MemAvailable over a window, sampled on a thread.
+
+    On GB10 unified memory, device allocations are host memory, so
+    MemAvailable is the box-level reading of what a roll takes.
+    """
+
+    def __init__(self, interval_s=MEMINFO_SAMPLE_INTERVAL_S):
+        self.interval_s = float(interval_s)
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self.minimum = None
+        self.samples = 0
+        self._thread = threading.Thread(target=self._loop, name="stage-b-chain-meminfo",
+                                        daemon=True)
+
+    def _sample(self):
+        value, now = _mem_available_bytes(), time.time()
+        with self._lock:
+            self.samples += 1
+            if self.minimum is None or value < self.minimum["bytes"]:
+                self.minimum = {"bytes": value, "unix": now}
+
+    def _loop(self):
+        while not self._stop.is_set():
+            try:
+                self._sample()
+            except (OSError, RuntimeError):
+                pass
+            self._stop.wait(self.interval_s)
+
+    def __enter__(self):
+        self._sample()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc):
+        self._stop.set()
+        self._thread.join()
+        self._sample()
+
+
+def chain_roll_owner_bytes(roll):
+    """The owner bytes one measured chain roll states (PQ #1163).
+
+    ``bytes`` is the roll's device workspace: the larger of the allocated
+    and reserved deltas over the CUDA allocator's reading right after the
+    roll's admission released the cache, which is what the guard charges
+    before the roll. ``device_resident_bytes`` is the CUDA reservation that
+    admission read, and ``host_committed_bytes`` the larger of the cgroup's
+    committed bytes at that admission and at the roll's cgroup peak
+    (:func:`prismaquant.memory_management.committed_cgroup_bytes`). Together
+    they are every owner resident in the chain phase as the guard reads it.
+    The workspace includes the successor source bytes that land on the
+    device during the roll: the chain leaves that read in flight (PQ #1166).
+    """
+    from .memory_management import committed_cgroup_bytes
+
+    layer = roll["layer"]
+    admission, host = roll.get("admission"), roll.get("host")
+    if admission is None:
+        raise ValueError(f"chain roll of layer {layer} has no admission reading, so its "
+                         "resident owners were not measured")
+    if host is None:
+        raise ValueError(f"chain roll of layer {layer} has no cgroup reading, so its "
+                         "host committed bytes were not measured")
+    at_peak = committed_cgroup_bytes(int(host["peak_current_bytes"]), host["peak_stat_all"])
+    return {"bytes": max(int(roll["allocated_delta_bytes"]), int(roll["reserved_delta_bytes"])),
+            "device_resident_bytes": int(admission["cuda_reserved_bytes"]),
+            "host_committed_bytes": max(int(admission["cgroup_committed_bytes"]), at_peak)}
+
+
+class ChainRollProfile:
+    """Measures each chain roll of one quantum in-process (PQ #1163).
+
+    For every roll it records the CUDA allocator's allocated and reserved
+    peaks over the reading taken right after the roll's admission released
+    the cache, the roll's wall time, the cgroup's peak and the box's lowest
+    MemAvailable. :meth:`finish` writes the receipt, releases the cache the
+    chain left and records how much it held, then stops the quantum with
+    :class:`ChainWorkspaceProfiled`. A roll that fails writes the receipt
+    with its failure and the peaks it reached as lower bounds, then
+    re-raises, so the row still fails.
+    """
+
+    @classmethod
+    def requested(cls, *, guard, device, identity, environ=None):
+        environ = os.environ if environ is None else environ
+        raw = environ.get(CHAIN_PROFILE_ENV)
+        if not raw:
+            return None
+        path = Path(raw)
+        if not path.is_absolute():
+            raise ValueError(f"{CHAIN_PROFILE_ENV} must be an absolute path, got {raw!r}")
+        owner = environ.get(CHAIN_OWNER_ENV)
+        return cls(path, guard=guard, device=device, identity=identity,
+                   owner=None if not owner else json.loads(owner))
+
+    def __init__(self, path, *, guard, device, identity, owner=None):
+        self.path = Path(path)
+        # The quantum's identity, chain regime included, goes into every
+        # receipt this profile writes, a failed roll's too.
+        self.identity = dict(identity)
+        self.guard = guard
+        self.device = device
+        self.owner = owner
+        self.rolls = []
+        self.started = time.time()
+
+    def _profile(self, identity, *, released=None):
+        import torch
+
+        measured = {str(roll["layer"]): {
+            "workspace_bytes": max(roll["allocated_delta_bytes"], roll["reserved_delta_bytes"]),
+            "complete": roll["failure"] is None} for roll in self.rolls}
+        owners = {str(roll["layer"]): dict(chain_roll_owner_bytes(roll),
+                                           complete=roll["failure"] is None)
+                  for roll in self.rolls
+                  if roll.get("admission") is not None and roll.get("host") is not None}
+        return {
+            "schema": CHAIN_SCHEMA,
+            "identity": dict(identity),
+            "admitted_owner": self.owner,
+            "started_unix": self.started, "finished_unix": time.time(),
+            "device": {"name": torch.cuda.get_device_name(self.device),
+                       "torch": str(torch.__version__), "cuda": torch.version.cuda,
+                       "envelope_bytes": getattr(self.guard, "device_bytes", None)},
+            "cgroup": (None if self.guard is None else
+                       {"scope": str(self.guard.scope), "cap_bytes": int(self.guard.cap_bytes),
+                        "margin_bytes": int(self.guard.margin_bytes),
+                        "host_sample_interval_s": HOST_SAMPLE_INTERVAL_S}),
+            "meminfo_sample_interval_s": MEMINFO_SAMPLE_INTERVAL_S,
+            "rolls": self.rolls,
+            "released_after_chain": released,
+            "measured": {
+                "workspace_bytes_by_layer": measured,
+                "owners_by_layer": owners,
+                "basis": ("max(allocated delta, reserved delta) of one chain roll over the "
+                          "CUDA allocator's reading right after the roll's admission "
+                          "released the cache; this is the quantity the guard charges "
+                          "before the roll (reserve_device_bytes)"),
+            },
+        }
+
+    def _write(self, profile):
+        return write_profile(self.path, profile)
+
+    def measure(self, layer, run, *, admission, reserve_device_bytes):
+        import torch
+
+        torch.cuda.synchronize(self.device)
+        torch.cuda.reset_peak_memory_stats(self.device)
+        allocated = torch.cuda.memory_allocated(self.device)
+        reserved = torch.cuda.memory_reserved(self.device)
+        host = None if self.guard is None else HostPeakSampler(self.guard.scope)
+        failure, result = None, None
+        with (host if host is not None else _nullcontext()), _MemAvailableFloor() as floor:
+            if host is not None:
+                host.open()
+            started = time.time()
+            try:
+                result = run()
+                torch.cuda.synchronize(self.device)
+            except BaseException as exc:
+                failure = exc
+            finished = time.time()
+            host_peak = None if host is None else host.close()
+        peak_allocated = torch.cuda.max_memory_allocated(self.device)
+        peak_reserved = torch.cuda.max_memory_reserved(self.device)
+        self.rolls.append({
+            "layer": int(layer), "start_unix": started, "end_unix": finished,
+            "wall_s": finished - started, "backwards": result,
+            "admission": None if admission is None else dict(admission),
+            "reserve_device_bytes": reserve_device_bytes,
+            "allocated_before_bytes": allocated, "reserved_before_bytes": reserved,
+            "peak_allocated_bytes": peak_allocated, "peak_reserved_bytes": peak_reserved,
+            "allocated_delta_bytes": peak_allocated - allocated,
+            "reserved_delta_bytes": peak_reserved - reserved,
+            "host": host_peak, "mem_available_min": floor.minimum,
+            "mem_available_samples": floor.samples,
+            "failure": None if failure is None else f"{type(failure).__name__}: {failure}",
+        })
+        if failure is not None:
+            # The peaks bound the roll from below; the receipt is written
+            # and the row still fails with the roll's own error.
+            self._write(self._profile(dict(self.identity, layer_failed=int(layer))))
+            raise failure
+        return result
+
+    def finish(self):
+        import torch
+
+        torch.cuda.synchronize(self.device)
+        before = torch.cuda.memory_reserved(self.device)
+        mem_before = _mem_available_bytes()
+        torch.cuda.empty_cache()
+        after = torch.cuda.memory_reserved(self.device)
+        released = {"reserved_before_bytes": before, "reserved_after_bytes": after,
+                    "released_bytes": before - after,
+                    "mem_available_before_bytes": mem_before,
+                    "mem_available_after_bytes": _mem_available_bytes()}
+        sha256 = self._write(self._profile(self.identity, released=released))
+        raise ChainWorkspaceProfiled(self.path, sha256)
+
+
+class _nullcontext:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, *_exc):
+        return False

@@ -27,7 +27,8 @@ import prismaquant.joint_replay_spill as spill_mod
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.joint_adjoint_checkpoints import chain_layers_for
-from prismaquant.joint_adjoint_slices import adjoint_slice_sha256, stage_a_slice
+from prismaquant.joint_adjoint_slices import (
+    DEFAULT_CHAIN_REGIME, adjoint_slice_sha256, stage_a_slice)
 from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
@@ -577,7 +578,12 @@ def test_capture_pass_charges_its_cuda_allocations_to_the_device_side(campaign, 
     """
     regime, batch = "capture_batch=2", 2
     layer = 0
-    _policy, budget, _retained = _policy_budget()
+    policy, budget, retained = _policy_budget()
+    # Layer 0 walks chain [1], which the guard admits only when the plan
+    # prices it (PQ #1163): the fixture's Stage A ran the default regime.
+    priced = _chain_priced(retained, workspace_bytes=budget.workspace_reserve_bytes,
+                           regime=DEFAULT_CHAIN_REGIME)
+    monkeypatch.setitem(globals(), "_policy_budget", lambda: (policy, budget, priced))
     sides = _record_capture_sides(monkeypatch)
     guard = _DeviceRecordingGuard(campaign.device)
     _clear_output(campaign, layer)
@@ -1282,7 +1288,9 @@ def test_capture_pass_charges_the_planned_workspace_per_stored_batch(campaign, m
     layer = 0
     policy, budget, retained = _policy_budget()
     wide = dict(policy, workspace_reserve_bytes=5 * budget.workspace_reserve_bytes)
-    monkeypatch.setitem(globals(), "_policy_budget", lambda: (wide, budget, retained))
+    priced = _chain_priced(retained, workspace_bytes=budget.workspace_reserve_bytes,
+                           regime=DEFAULT_CHAIN_REGIME)
+    monkeypatch.setitem(globals(), "_policy_budget", lambda: (wide, budget, priced))
     sides = _record_capture_sides(monkeypatch)
     guard = _DeviceRecordingGuard(campaign.device)
     _clear_output(campaign, layer)

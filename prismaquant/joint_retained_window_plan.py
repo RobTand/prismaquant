@@ -44,6 +44,25 @@ HOST_RESIDENT_BUDGET_FIELDS = ('safety_margin_bytes', 'metadata_reserve_bytes',
                                'load_buffer_bytes', 'read_page_reserve_bytes')
 
 
+#: The chain phase a budget may plan (PQ #1163): Stage A's chain regime; the
+#: device workspace one chain roll holds at it; the owners resident while it
+#: rolls, split the way the guard reads them (the CUDA reservation and the
+#: cgroup's committed bytes); the device envelope the plan checked the roll
+#: against; and the layers whose shapes the plan priced. All seven or none; a
+#: budget without them is exactly the budget before #1163.
+CHAIN_BUDGET_FIELDS = ('chain_batch_size', 'chain_probe_fusion',
+                       'chain_workspace_reserve_bytes', 'chain_device_resident_bytes',
+                       'chain_host_committed_bytes', 'chain_device_limit_bytes',
+                       'chain_layers')
+#: The bytes every chain layer shape owner states: the roll's device
+#: workspace, the CUDA reservation resident when the roll is admitted, and
+#: the cgroup's committed bytes while it rolls.
+CHAIN_OWNER_BYTES = ('bytes', 'device_resident_bytes', 'host_committed_bytes')
+#: Where a chain owner's bytes come from. A measured owner names its receipt;
+#: a declared owner states that nothing measured it.
+CHAIN_OWNER_SOURCES = ('measured', 'declared')
+
+
 #: The capture-guard reading ``require_observed_baseline`` compares with the
 #: declared owners: committed cgroup memory plus the whole CUDA reservation
 #: (``memory_management.committed_cgroup_bytes``). One key, named once, so the
@@ -109,16 +128,30 @@ class RetainedWindowBudget:
     max_windows_per_layer: int
 
     def __post_init__(self):
-        for name, value in asdict(self).items():
-            _integer(value, name, positive=name not in ('boundary_reserve_bytes', 'auxiliary_reserve_bytes'))
+        for name in RetainedWindowBudget.__dataclass_fields__:
+            _integer(getattr(self, name), name,
+                     positive=name not in ('boundary_reserve_bytes', 'auxiliary_reserve_bytes'))
         if self.safety_margin_bytes >= self.physical_limit_bytes:
             raise ValueError('physical cap cannot hold its safety margin')
 
     @classmethod
     def from_dict(cls, value):
-        if not isinstance(value, dict) or value.get('schema') != SCHEMA or set(value) != {'schema', *cls.__dataclass_fields__}:
+        """The budget ``value`` states, with its chain phase when it plans one.
+
+        A budget without the ``CHAIN_BUDGET_FIELDS`` loads as this class, as
+        before PQ #1163; one with all of them loads as
+        :class:`ChainRetainedWindowBudget`. Any other key set refuses.
+        """
+        base = {'schema', *RetainedWindowBudget.__dataclass_fields__}
+        if not isinstance(value, dict) or value.get('schema') != SCHEMA:
             raise ValueError('complete versioned retained-window budget required')
-        return cls(**{name: value[name] for name in cls.__dataclass_fields__})
+        if set(value) == base:
+            return RetainedWindowBudget(
+                **{name: value[name] for name in RetainedWindowBudget.__dataclass_fields__})
+        if set(value) == base | set(CHAIN_BUDGET_FIELDS):
+            return ChainRetainedWindowBudget(
+                **{name: value[name] for name in ChainRetainedWindowBudget.__dataclass_fields__})
+        raise ValueError('complete versioned retained-window budget required')
 
     def as_dict(self):
         return {'schema': SCHEMA, **asdict(self)}
@@ -148,6 +181,38 @@ class RetainedWindowBudget:
         _integer(render_bytes, 'render_bytes')
         return (self.fixed_bytes(source_bytes) - self.workspace_reserve_bytes
                 + self.capture_workspace_bytes(capture_batch) + render_bytes)
+
+    def chain_workspace_bytes(self, batch_size, *, fused, layer=None):
+        """The device workspace one chain roll at ``(batch_size, fused)`` holds.
+
+        The quantity both sides price (PQ #1163): the derivation plans the
+        chain phase with it (:meth:`chain_peak_bytes`), and the guard charges
+        it before every ``render_free_layer_roll``. With ``layer``, that
+        layer's shape must be one the plan priced. A budget that plans no
+        chain phase has no such quantity, so it refuses.
+        """
+        raise RuntimeError('this retained budget prices no chain phase; derive the plan '
+                           'with a chain regime and its measured or declared owners (PQ #1163)')
+
+    def declared_chain_residents(self, source_bytes, *, loading_bytes):
+        """The owners resident during a chain roll, at their declared caps.
+
+        A chain roll runs before the retained reverse step, so no window,
+        render, statistics lease, capture, load buffer or candidate delta is
+        open (PQ #1163). What is resident is the metadata on the host side,
+        and on the device side the runtime, the source owners (the installed
+        chain layer and its successor's read, which the chain leaves in
+        flight, PQ #1166), their loading temporaries, the shared-state
+        auxiliary owner and the boundary read window. A chain owner with no
+        measurement may declare these caps as its resident bytes; a measured
+        owner states the bytes its roll actually had resident.
+        """
+        _integer(source_bytes, 'source_bytes')
+        _integer(loading_bytes, 'loading_bytes')
+        return {'device_resident_bytes': (self.runtime_reserve_bytes + source_bytes
+                                          + loading_bytes + self.auxiliary_reserve_bytes
+                                          + self.boundary_reserve_bytes),
+                'host_committed_bytes': self.metadata_reserve_bytes}
 
     def available_window_bytes(self, source_bytes):
         available = self.physical_limit_bytes - self.safety_margin_bytes - self.fixed_bytes(source_bytes)
@@ -191,6 +256,96 @@ class RetainedWindowBudget:
         if observed_bytes > limit:
             raise RuntimeError(f'{label}: committed cgroup-plus-CUDA baseline {observed_bytes} exceeds declared '
                                f'metadata/runtime/source/auxiliary owners {limit}; reseal an admitted plan')
+
+
+@dataclass(frozen=True)
+class ChainRetainedWindowBudget(RetainedWindowBudget):
+    """A retained budget that also plans the Stage B chain phase (PQ #1163).
+
+    ``chain_workspace_reserve_bytes`` is the largest chain layer shape's
+    workspace at the planned regime, which the guard charges before every
+    chain roll on the device side. ``chain_device_resident_bytes`` and
+    ``chain_host_committed_bytes`` are the largest resident bytes any shape's
+    roll had beside it, split as the guard reads them.
+    ``chain_device_limit_bytes`` is the device envelope the plan checked the
+    roll against. The per-shape owners and their receipts stay in the
+    derivation record.
+    """
+
+    chain_batch_size: int
+    chain_probe_fusion: bool
+    chain_workspace_reserve_bytes: int
+    chain_device_resident_bytes: int
+    chain_host_committed_bytes: int
+    chain_device_limit_bytes: int
+    chain_layers: tuple
+
+    def __post_init__(self):
+        super().__post_init__()
+        _integer(self.chain_batch_size, 'chain_batch_size', positive=True)
+        if type(self.chain_probe_fusion) is not bool:
+            raise ValueError('chain_probe_fusion must be a bool')
+        _integer(self.chain_workspace_reserve_bytes, 'chain_workspace_reserve_bytes',
+                 positive=True)
+        _integer(self.chain_device_resident_bytes, 'chain_device_resident_bytes')
+        _integer(self.chain_host_committed_bytes, 'chain_host_committed_bytes')
+        _integer(self.chain_device_limit_bytes, 'chain_device_limit_bytes', positive=True)
+        layers = self.chain_layers
+        if (not isinstance(layers, (list, tuple)) or not layers
+                or any(type(layer) is not int or layer < 0 for layer in layers)
+                or list(layers) != sorted(set(layers))):
+            raise ValueError('chain_layers must be sorted unique nonnegative layer indices')
+        # A JSON list loads as the same budget as the tuple it was written from.
+        object.__setattr__(self, 'chain_layers', tuple(layers))
+
+    def as_dict(self):
+        return {**super().as_dict(), 'chain_layers': list(self.chain_layers)}
+
+    def chain_device_peak_bytes(self):
+        """The CUDA reservation one chain roll plans: resident plus workspace.
+
+        This is the guard's device inequality (``reserved +
+        reserve_device_bytes <= device_bytes``) at the planned owners.
+        """
+        return self.chain_device_resident_bytes + self.chain_workspace_reserve_bytes
+
+    def chain_peak_bytes(self):
+        """The aggregate one chain roll plans: host committed plus device peak.
+
+        This is the guard's aggregate inequality (committed cgroup bytes plus
+        the CUDA reservation plus the roll's charge, against the physical
+        bound less its margin) at the planned owners.
+        """
+        return self.chain_host_committed_bytes + self.chain_device_peak_bytes()
+
+    def require_chain_fits(self):
+        """Refuse a chain phase the device envelope or physical bound cannot hold."""
+        device = self.chain_device_peak_bytes()
+        if device > self.chain_device_limit_bytes:
+            raise RuntimeError(
+                f'chain phase cannot fit the device envelope: {device} planned device bytes '
+                f'({self.chain_workspace_reserve_bytes} workspace beside '
+                f'{self.chain_device_resident_bytes} resident) against '
+                f'{self.chain_device_limit_bytes}')
+        bound = self.physical_limit_bytes - self.safety_margin_bytes
+        peak = self.chain_peak_bytes()
+        if peak > bound:
+            raise RuntimeError(
+                f'chain phase cannot fit the retained COST physical budget: {peak} planned '
+                f'bytes ({self.chain_host_committed_bytes} host committed beside {device} '
+                f'device) against {bound}')
+
+    def chain_workspace_bytes(self, batch_size, *, fused, layer=None):
+        if (batch_size, bool(fused)) != (self.chain_batch_size, self.chain_probe_fusion):
+            raise RuntimeError(
+                f'the chain regime (batch_size {batch_size}, probe_fusion {bool(fused)}) '
+                f'is not the one this budget planned (batch_size {self.chain_batch_size}, '
+                f'probe_fusion {self.chain_probe_fusion})')
+        if layer is not None and int(layer) not in self.chain_layers:
+            raise RuntimeError(
+                f'chain layer {int(layer)} has no priced chain layer shape; this budget '
+                f'prices the chain rolls of layers {list(self.chain_layers)}')
+        return self.chain_workspace_reserve_bytes
 
 
 @dataclass(frozen=True)
@@ -328,11 +483,19 @@ def normalize_retained_execution(value, *, operator_windows, boundary_storage):
         if operator_windows[field] < bound:
             raise RuntimeError(f'retained COST budget exceeds its operator owner {field}')
     budget.available_window_bytes(source)
-    # Loading and forward/adjoint work are separate phases: settled source
-    # prefetch prevents this allowance overlapping the graph workspace.
+    # In the retained reverse step loading and forward/adjoint work are
+    # separate phases: settled source prefetch prevents this allowance
+    # overlapping the graph workspace.
+    bound = budget.physical_limit_bytes - budget.safety_margin_bytes
     source_peak = (budget.source_baseline_limit(source) + budget.boundary_reserve_bytes + load)
-    if source_peak > budget.physical_limit_bytes - budget.safety_margin_bytes:
+    if source_peak > bound:
         raise RuntimeError('source-loading phase cannot fit the retained COST physical budget')
+    # The chain roll is the exception (PQ #1166): it leaves the successor's
+    # source read in flight during the roll. Its plan is the resident owners
+    # a roll had beside its workspace, on both sides the guard checks
+    # (PQ #1163).
+    if isinstance(budget, ChainRetainedWindowBudget):
+        budget.require_chain_fits()
     return {'schema': EXECUTION_SCHEMA, 'budget': budget.as_dict(),
             'source_reserve_bytes': source, 'source_loading_reserve_bytes': load}
 
@@ -343,10 +506,77 @@ def _roster_maximum(targets, field):
     return getattr(winner, field), winner.name
 
 
+def _chain_owners(chain_regime, chain_workspace):
+    """The chain regime and its per-shape owners, checked (PQ #1163).
+
+    ``chain_workspace`` maps a layer-shape name to ``{layers, bytes,
+    device_resident_bytes, host_committed_bytes, regime, source, basis}``,
+    plus ``receipt`` when ``source`` is ``measured``. ``layers`` are the
+    layers of that shape whose chain rolls the plan prices; the guard refuses
+    a roll of any other layer. ``bytes`` is the device workspace one roll of
+    that shape holds at ``regime``, which must be the plan's ``chain_regime``.
+    ``device_resident_bytes`` is the CUDA reservation resident when the roll
+    is admitted, and ``host_committed_bytes`` the cgroup's committed bytes
+    while it rolls: every owner resident in the chain phase, as the guard
+    reads it.
+    """
+    if (not isinstance(chain_regime, Mapping)
+            or set(chain_regime) != {'batch_size', 'probe_fusion'}
+            or type(chain_regime['probe_fusion']) is not bool):
+        raise ValueError('chain_regime needs exactly batch_size and a bool probe_fusion')
+    regime = {'batch_size': _integer(chain_regime['batch_size'], 'chain batch_size',
+                                     positive=True),
+              'probe_fusion': chain_regime['probe_fusion']}
+    if not isinstance(chain_workspace, Mapping) or not chain_workspace:
+        raise ValueError('a chain regime needs at least one chain layer shape owner')
+    owners, seen = {}, {}
+    for name, owner in sorted(chain_workspace.items()):
+        if not isinstance(name, str) or not name or not isinstance(owner, Mapping):
+            raise ValueError('a chain layer shape owner needs a name and a mapping')
+        source = owner.get('source')
+        if source not in CHAIN_OWNER_SOURCES:
+            raise ValueError(f'chain layer shape {name!r}: source must be one of '
+                             f'{list(CHAIN_OWNER_SOURCES)}')
+        expected = {'layers', *CHAIN_OWNER_BYTES, 'regime', 'source', 'basis'}
+        if source == 'measured':
+            expected.add('receipt')
+        if set(owner) != expected:
+            raise ValueError(f'{source} chain owner {name!r} needs exactly {sorted(expected)}')
+        if not isinstance(owner['basis'], str) or not owner['basis']:
+            raise ValueError(f'chain layer shape {name!r} needs a basis')
+        if not isinstance(owner['regime'], Mapping) or dict(owner['regime']) != regime:
+            raise ValueError(f'chain layer shape {name!r} is priced at another chain regime '
+                             f'{owner["regime"]!r} than the plan\'s {regime}')
+        if source == 'measured':
+            _measured_owner(f'chain workspace {name!r}',
+                            {'bytes': owner['bytes'], 'receipt': owner['receipt'],
+                             'basis': owner['basis']})
+        _integer(owner['bytes'], f'chain workspace {name!r}', positive=True)
+        for field in ('device_resident_bytes', 'host_committed_bytes'):
+            _integer(owner[field], f'chain layer shape {name!r} {field}')
+        layers = owner['layers']
+        if (not isinstance(layers, (list, tuple)) or not layers
+                or any(type(layer) is not int or layer < 0 for layer in layers)
+                or len(set(layers)) != len(layers)):
+            raise ValueError(f'chain layer shape {name!r} needs unique nonnegative layers')
+        for layer in layers:
+            if layer in seen:
+                raise ValueError(f'layer {layer} is in more than one chain layer shape '
+                                 f'({seen[layer]!r} and {name!r})')
+            seen[layer] = name
+        owners[name] = {'layers': sorted(layers),
+                        **{field: owner[field] for field in CHAIN_OWNER_BYTES},
+                        'source': source, 'basis': owner['basis'],
+                        **({'receipt': dict(owner['receipt'])} if source == 'measured' else {})}
+    return regime, owners
+
+
 def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
                                   prefetch_workers, host_cap_bytes,
                                   footprint_scope='pwc_serialized_upper_bound',
-                                  measured=None, capture_batch=None):
+                                  measured=None, capture_batch=None,
+                                  chain_regime=None, chain_workspace=None,
+                                  chain_device_limit_bytes=None):
     """Derive every demand-driven cap from the roster the budget must admit.
 
     An operator declares the physical bound and the reserves that belong to
@@ -395,6 +625,19 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
     any run pays for finding it. With neither, the derivation and its record
     are exactly the ones before #1151.
 
+    ``chain_regime``, ``chain_workspace`` and ``chain_device_limit_bytes``
+    (PQ #1163) plan the Stage B chain phase, all three or none. Each chain
+    layer shape's owner is measured (with its receipt) or declared as such,
+    and states the roll's workspace and the owners resident beside it
+    (:func:`_chain_owners`). Each shape's roll is checked as the guard checks
+    it: the resident CUDA reservation plus the workspace against the device
+    envelope, and that plus the host committed bytes against the physical
+    budget less its margin. A shape that does not fit refuses here. The
+    record keeps every shape's peaks and margins under ``chain``; the budget
+    carries the regime and the largest workspace and resident bytes over the
+    shapes (:class:`ChainRetainedWindowBudget`), and the guard charges that
+    workspace before each roll.
+
     Returns ``(budget, derivation_record)``. The record is data for a plan's
     top level; it is deliberately not a field of the budget, whose ``from_dict``
     admits exactly its own keys.
@@ -414,6 +657,13 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
                        for name in MEASURED_BUDGET_FIELDS})
     if capture_batch is not None:
         _integer(capture_batch, 'capture_batch', positive=True)
+    chain_given = (chain_regime, chain_workspace, chain_device_limit_bytes)
+    if chain_given.count(None) not in (0, 3):
+        raise ValueError('chain_regime, chain_workspace and chain_device_limit_bytes '
+                         'go together')
+    if chain_regime is not None:
+        regime, chain_owners = _chain_owners(chain_regime, chain_workspace)
+        _integer(chain_device_limit_bytes, 'chain_device_limit_bytes', positive=True)
     _integer(source_bytes, 'source_bytes')
     _integer(prefetch_workers, 'prefetch_workers', positive=True)
     _integer(host_cap_bytes, 'host_cap_bytes', positive=True)
@@ -482,6 +732,67 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
                             'in place of one reserve, beside the largest window renders; '
                             'no statistics lease is open during a capture'}
 
+    chain = None
+    if chain_regime is not None:
+        bound = budget.physical_limit_bytes - budget.safety_margin_bytes
+        where = (f'at batch {regime["batch_size"]} (probe_fusion {regime["probe_fusion"]})')
+        shapes = {}
+        for name, owner in chain_owners.items():
+            device_peak = owner['device_resident_bytes'] + owner['bytes']
+            if device_peak > chain_device_limit_bytes:
+                raise RuntimeError(
+                    f'retained COST chain layer shape {name!r} {where} plans {device_peak} '
+                    f'device bytes ({owner["bytes"]} {owner["source"]} workspace beside '
+                    f'{owner["device_resident_bytes"]} resident) against the '
+                    f'{chain_device_limit_bytes}-byte device envelope')
+            peak = owner['host_committed_bytes'] + device_peak
+            if peak > bound:
+                raise RuntimeError(
+                    f'retained COST chain layer shape {name!r} {where} plans {peak} bytes '
+                    f'({owner["host_committed_bytes"]} host committed beside {device_peak} '
+                    f'device) against {bound} bytes of physical budget less margin')
+            shapes[name] = {'layers': owner['layers'], 'workspace_bytes': owner['bytes'],
+                            'device_resident_bytes': owner['device_resident_bytes'],
+                            'host_committed_bytes': owner['host_committed_bytes'],
+                            'source': owner['source'], 'basis': owner['basis'],
+                            **({'receipt': owner['receipt']} if 'receipt' in owner else {}),
+                            'device_peak_bytes': device_peak,
+                            'device_margin_bytes': chain_device_limit_bytes - device_peak,
+                            'peak_planned_bytes': peak, 'slack_bytes': bound - peak}
+        largest = {field: max(owner[field] for owner in chain_owners.values())
+                   for field in CHAIN_OWNER_BYTES}
+        budget = ChainRetainedWindowBudget(
+            **{name: getattr(budget, name) for name in RetainedWindowBudget.__dataclass_fields__},
+            chain_batch_size=regime['batch_size'], chain_probe_fusion=regime['probe_fusion'],
+            chain_workspace_reserve_bytes=largest['bytes'],
+            chain_device_resident_bytes=largest['device_resident_bytes'],
+            chain_host_committed_bytes=largest['host_committed_bytes'],
+            chain_device_limit_bytes=chain_device_limit_bytes,
+            chain_layers=tuple(sorted(layer for owner in chain_owners.values()
+                                      for layer in owner['layers'])))
+        # Each shape fits on its own; the budget charges the largest of each
+        # owner together, so it is checked again as one roll.
+        budget.require_chain_fits()
+        chain = {'regime': regime, 'device_limit_bytes': chain_device_limit_bytes,
+                 'workspace_reserve_bytes': largest['bytes'],
+                 'device_resident_bytes': largest['device_resident_bytes'],
+                 'host_committed_bytes': largest['host_committed_bytes'],
+                 'device_peak_bytes': budget.chain_device_peak_bytes(),
+                 'device_margin_bytes': (chain_device_limit_bytes
+                                         - budget.chain_device_peak_bytes()),
+                 'shapes': shapes,
+                 'peak_planned_bytes': budget.chain_peak_bytes(),
+                 'basis': "one chain roll's device workspace beside the owners resident "
+                          'while it rolls, as the guard reads them: the CUDA reservation at '
+                          "the roll's admission and the cgroup's committed bytes; the "
+                          'budget charges the largest of each over the shapes; no window, '
+                          'render, statistics lease or capture is open during the chain'}
+    peaks = [window_peak]
+    if capture is not None:
+        peaks.append(capture['peak_planned_bytes'])
+    if chain is not None:
+        peaks.append(chain['peak_planned_bytes'])
+
     record = {
         'schema': DERIVATION_SCHEMA,
         'footprint_scope': footprint_scope,
@@ -521,8 +832,7 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
         'fixed_bytes': budget.fixed_bytes(source_bytes),
         'available_window_bytes': budget.available_window_bytes(source_bytes),
         'windows_by_layer': {str(layer): len(plan.windows) for layer, plan in sorted(settled.items())},
-        'peak_planned_bytes': (window_peak if capture is None
-                               else max(window_peak, capture['peak_planned_bytes'])),
+        'peak_planned_bytes': max(peaks),
         'retained_window_replay_multiplier': (sum(len(plan.windows) for plan in settled.values())
                                               / len(settled)),
         'budget': budget.as_dict(),
@@ -534,4 +844,6 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
                               for name in MEASURED_BUDGET_FIELDS}
     if capture is not None:
         record['capture'] = capture
+    if chain is not None:
+        record['chain'] = chain
     return budget, record

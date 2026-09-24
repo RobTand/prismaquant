@@ -15,6 +15,14 @@ Usage: the quantum's own argument list, plus ``--profile-root DIR``,
 ``--profile-out FILE.json`` and optionally ``--profile-groups N``. Submit it
 through PrismaBuild with the row's own residency, image and phases.
 
+``--stop-after-chain`` (PQ #1163) measures the chain phase instead: every
+chain roll is admitted, measured in-process (CUDA allocated and reserved
+peaks, wall time, cgroup peak, lowest MemAvailable) and the quantum stops
+after its chain with the receipt at ``--profile-out``. A plan whose retained
+budget prices no chain phase is admitted under an explicitly declared owner:
+the largest workspace the budget admits beside the chain's fixed owners,
+stated as declared in the receipt.
+
 Exit status 0 means the receipt was written; its path and sha256 are the last
 line of stdout.
 """
@@ -42,6 +50,66 @@ def moved_output_space(record, root):
     return moved
 
 
+def declare_chain_owner(config, adjoint_slice, chain_layers):
+    """Admit the chain under a declared owner when the plan prices none.
+
+    The owner is the largest chain workspace the plan's own retained budget
+    admits beside the chain phase's resident owners at their declared caps
+    (:meth:`RetainedWindowBudget.declared_chain_residents`): the smaller of
+    the device envelope less the device-side residents, and the physical
+    budget less its margin less every resident. It is recorded in the
+    receipt as declared. A plan that already prices the chain keeps its
+    owner.
+    """
+    from prismaquant.joint_adjoint_slices import chain_regime_of
+    from prismaquant.joint_retained_window_plan import (
+        ChainRetainedWindowBudget, RetainedWindowBudget)
+    from prismaquant.stage_b_workspace_profile import CHAIN_OWNER_ENV
+
+    retained = config["execution"]["retained_operator_windows"]
+    budget = RetainedWindowBudget.from_dict(retained["budget"])
+    regime = chain_regime_of(adjoint_slice["run_identity"])
+    if isinstance(budget, ChainRetainedWindowBudget):
+        owner = {"source": "plan", "chain_workspace_reserve_bytes":
+                 budget.chain_workspace_bytes(regime["batch_size"],
+                                              fused=regime["probe_fusion"]),
+                 "chain_layers": list(budget.chain_layers)}
+    else:
+        residents = budget.declared_chain_residents(
+            retained["source_reserve_bytes"],
+            loading_bytes=retained["source_loading_reserve_bytes"])
+        device_limit = config["max_gpu_bytes"]
+        bound = budget.physical_limit_bytes - budget.safety_margin_bytes
+        headroom = min(device_limit - residents["device_resident_bytes"],
+                       bound - residents["device_resident_bytes"]
+                       - residents["host_committed_bytes"])
+        if headroom <= 0:
+            raise SystemExit(f"the chain phase's declared resident owners {residents} leave "
+                             f"no workspace under the {device_limit}-byte device envelope "
+                             f"and {bound} bytes of physical budget less margin")
+        layers = sorted(int(layer) for layer in chain_layers)
+        planned = ChainRetainedWindowBudget(
+            **{name: getattr(budget, name) for name in RetainedWindowBudget.__dataclass_fields__},
+            chain_batch_size=regime["batch_size"], chain_probe_fusion=regime["probe_fusion"],
+            chain_workspace_reserve_bytes=headroom,
+            chain_device_resident_bytes=residents["device_resident_bytes"],
+            chain_host_committed_bytes=residents["host_committed_bytes"],
+            chain_device_limit_bytes=device_limit, chain_layers=tuple(layers))
+        planned.require_chain_fits()
+        retained["budget"] = planned.as_dict()
+        owner = {"source": "declared", "chain_workspace_reserve_bytes": headroom,
+                 "chain_layers": layers, "regime": dict(regime), **residents,
+                 "device_limit_bytes": device_limit, "bound_bytes": bound,
+                 "basis": ("the largest chain workspace the plan's retained budget admits "
+                           "beside the chain phase's resident owners at their declared "
+                           "caps: min(device envelope - device residents, physical_limit_bytes "
+                           "- safety_margin_bytes - device residents - host residents)")}
+    os.environ[CHAIN_OWNER_ENV] = json.dumps(owner, sort_keys=True)
+    print(f"[CHAIN-PROFILE] chain admitted under {json.dumps(owner, sort_keys=True)}",
+          flush=True)
+    return owner
+
+
 def main(argv=None) -> int:
     from prismaquant import joint_cost_quantum as quantum
     from prismaquant.stage_b_workspace_profile import (
@@ -53,6 +121,8 @@ def main(argv=None) -> int:
     parser.add_argument("--profile-out", required=True,
                         help="absolute path of the JSON receipt")
     parser.add_argument("--profile-groups", type=int, default=DEFAULT_GROUPS)
+    parser.add_argument("--stop-after-chain", action="store_true",
+                        help="measure every chain roll and stop after the chain (PQ #1163)")
     args = parser.parse_args(argv)
     if args.device != "cuda":
         parser.error("the profile measures the GPU hot path; --device must be cuda")
@@ -65,8 +135,12 @@ def main(argv=None) -> int:
     campaign_root = Path(args.output_root).resolve()
     if root.resolve() == campaign_root or campaign_root in root.resolve().parents:
         parser.error("--profile-root must lie outside the campaign's output root")
-    os.environ[PROFILE_ENV] = str(out)
-    os.environ[GROUPS_ENV] = str(args.profile_groups)
+    if args.stop_after_chain:
+        from prismaquant.stage_b_workspace_profile import CHAIN_PROFILE_ENV
+        os.environ[CHAIN_PROFILE_ENV] = str(out)
+    else:
+        os.environ[PROFILE_ENV] = str(out)
+        os.environ[GROUPS_ENV] = str(args.profile_groups)
 
     quantum.require_dev_mode("stage_b_capture_workspace_profile")
     try:
@@ -90,6 +164,10 @@ def main(argv=None) -> int:
         return quantum.EXIT_IDENTITY_REFUSED
     allowed = activate_staged_tier_policy(args.allowed_tiers)
     print(f"[STAGED-TIER] bulk inputs serve from {','.join(sorted(allowed))}", flush=True)
+    if args.stop_after_chain:
+        if not record["adjoint"]["chain_layers"]:
+            parser.error("--stop-after-chain needs a quantum whose record walks a chain")
+        declare_chain_owner(config, adjoint_slice, record["adjoint"]["chain_layers"])
     record = moved_output_space(record, root)
     print(f"[WORKSPACE-PROFILE] output space {record['output_space']['root']}; "
           f"receipt {out}", flush=True)
@@ -112,8 +190,7 @@ def main(argv=None) -> int:
         print(json.dumps({"status": "profiled", "profile": done.path,
                           "sha256": done.sha256}), flush=True)
         return 0
-    print("the quantum ended without reaching probe 0's spill capture; no receipt",
-          flush=True)
+    print("the quantum ended without reaching its measurement; no receipt", flush=True)
     return 1
 
 

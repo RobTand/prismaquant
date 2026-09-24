@@ -147,3 +147,128 @@ def test_a_roll_past_the_device_margin_or_the_physical_bound_refuses():
     # exact-fit workspace refuses.
     with pytest.raises(RuntimeError, match='chain phase cannot fit the device envelope'):
         _derive(**_chain({'kda': _kda(exact), 'dsa': _dsa()}))
+
+
+def test_a_chain_owner_is_measured_with_its_receipt_or_declared_as_such():
+    measured_without_receipt = _kda()
+    measured_without_receipt.pop('receipt')
+    declared_with_receipt = dict(_dsa(source='declared'), receipt=dict(RECEIPT))
+    no_resident = _kda()
+    no_resident.pop('device_resident_bytes')
+    other_regime = _kda(regime={'batch_size': 4, 'probe_fusion': False})
+    for owners, match in (
+            ({'kda': measured_without_receipt}, 'measured chain owner'),
+            ({'kda': _kda(), 'dsa': declared_with_receipt}, 'declared chain owner'),
+            ({'kda': no_resident}, 'measured chain owner'),
+            ({'kda': other_regime}, 'another chain regime'),
+            ({'kda': _kda(), 'dsa': dict(_dsa(), layers=[43, 44])},
+             'more than one chain layer shape'),
+            ({}, 'at least one chain layer shape')):
+        with pytest.raises(ValueError, match=match):
+            _derive(**_chain(owners))
+    # A declared owner states itself and carries no receipt.
+    _budget, record = _derive(**_chain({'kda': _kda(), 'dsa': _dsa(source='declared')}))
+    assert record['chain']['shapes']['dsa']['source'] == 'declared'
+    assert 'receipt' not in record['chain']['shapes']['dsa']
+    # The regime, the owners and the device envelope go together.
+    with pytest.raises(ValueError, match='together'):
+        _derive(chain_regime=dict(REGIME), chain_workspace={'kda': _kda()})
+
+
+def test_without_a_chain_the_budget_and_record_are_the_ones_before():
+    budget, record = _derive()
+    assert 'chain' not in record
+    assert not any(key.startswith('chain_') for key in budget.as_dict())
+    with pytest.raises(RuntimeError, match='prices no chain phase'):
+        budget.chain_workspace_bytes(4, fused=True)
+
+
+def test_the_budget_carries_the_priced_chain_layers_and_refuses_any_other():
+    from prismaquant.joint_retained_window_plan import ChainRetainedWindowBudget
+
+    budget, record = _derive(**_chain({'kda': _kda(), 'dsa': _dsa()}))
+    assert budget.chain_layers == (3, 4, 5, 6, 7, 43, 44)
+    assert record['chain']['shapes']['kda']['layers'] == [4, 5, 6, 44]
+    # The largest shape's workspace is what every priced roll is charged.
+    for layer in budget.chain_layers:
+        assert budget.chain_workspace_bytes(4, fused=True, layer=layer) == KDA_44[0]
+    with pytest.raises(RuntimeError, match='chain layer 2 has no priced chain layer shape'):
+        budget.chain_workspace_bytes(4, fused=True, layer=2)
+    # A JSON round trip loads the same budget.
+    loaded = RetainedWindowBudget.from_dict(json.loads(json.dumps(budget.as_dict())))
+    assert loaded == budget and isinstance(loaded, ChainRetainedWindowBudget)
+    # All seven chain fields or none.
+    partial = {k: v for k, v in budget.as_dict().items() if k != 'chain_device_limit_bytes'}
+    with pytest.raises(ValueError, match='complete versioned'):
+        RetainedWindowBudget.from_dict(partial)
+
+
+def test_the_retained_execution_refuses_a_chain_that_does_not_fit():
+    budget, _record = _derive(**_chain({'kda': _kda(), 'dsa': _dsa()}))
+    execution = {'schema': EXECUTION_SCHEMA, 'budget': budget.as_dict(),
+                 'source_reserve_bytes': R13_SOURCE_BYTES,
+                 'source_loading_reserve_bytes': LOADING}
+    operator = {'max_statistics_bytes': budget.statistics_cap_bytes,
+                'max_candidate_bytes': budget.candidate_delta_bytes,
+                'max_load_buffer_bytes': budget.load_buffer_bytes}
+    boundary = {'capture_order': 'layer_major',
+                'max_resident_bytes': budget.boundary_reserve_bytes,
+                'max_auxiliary_bytes': budget.auxiliary_reserve_bytes}
+    normalized = normalize_retained_execution(
+        execution, operator_windows=operator, boundary_storage=boundary)
+    assert normalized['budget'] == budget.as_dict()
+    margin = DEVICE - budget.chain_device_peak_bytes()
+    wide = dict(execution, budget=dict(
+        budget.as_dict(), chain_workspace_reserve_bytes=budget.chain_workspace_reserve_bytes
+        + margin + 1))
+    with pytest.raises(RuntimeError, match='chain phase cannot fit the device envelope'):
+        normalize_retained_execution(wide, operator_windows=operator, boundary_storage=boundary)
+    heavy = dict(execution, budget=dict(
+        budget.as_dict(), chain_host_committed_bytes=BOUND - budget.chain_device_peak_bytes()
+        + 1))
+    with pytest.raises(RuntimeError, match='chain phase cannot fit the retained COST physical'):
+        normalize_retained_execution(heavy, operator_windows=operator, boundary_storage=boundary)
+
+
+def test_the_measurement_tool_declares_the_headroom_owner_when_the_plan_prices_none(
+        monkeypatch):
+    """``--stop-after-chain`` on an unpriced plan admits under a declared owner.
+
+    The owner is the largest workspace the chain phase's resident owners, at
+    their declared caps, leave under the device envelope and the physical
+    bound, recorded as declared; a plan that already prices the chain keeps
+    its own owner.
+    """
+    import os
+
+    import prismaquant.joint_adjoint_slices as slices
+    from experiments.stage_b_capture_workspace_profile import declare_chain_owner
+    from prismaquant.joint_retained_window_plan import ChainRetainedWindowBudget
+    from prismaquant.stage_b_workspace_profile import CHAIN_OWNER_ENV
+
+    monkeypatch.setattr(slices, 'chain_regime_of', lambda _identity: dict(REGIME))
+    monkeypatch.setenv(CHAIN_OWNER_ENV, '')
+    budget, _record = _derive()
+    retained = {'budget': budget.as_dict(), 'source_reserve_bytes': R13_SOURCE_BYTES,
+                'source_loading_reserve_bytes': LOADING}
+    config = {'execution': {'retained_operator_windows': retained}, 'max_gpu_bytes': DEVICE}
+    owner = declare_chain_owner(config, {'run_identity': {}}, [44, 43])
+    residents = budget.declared_chain_residents(R13_SOURCE_BYTES, loading_bytes=LOADING)
+    assert residents == {
+        'device_resident_bytes': (budget.runtime_reserve_bytes + R13_SOURCE_BYTES + LOADING
+                                  + budget.auxiliary_reserve_bytes
+                                  + budget.boundary_reserve_bytes),
+        'host_committed_bytes': budget.metadata_reserve_bytes}
+    headroom = DEVICE - residents['device_resident_bytes']
+    assert headroom < BOUND - sum(residents.values())
+    assert owner['source'] == 'declared'
+    assert owner['chain_workspace_reserve_bytes'] == headroom
+    assert owner['chain_layers'] == [43, 44] and owner['regime'] == REGIME
+    assert json.loads(os.environ[CHAIN_OWNER_ENV]) == owner
+    planned = RetainedWindowBudget.from_dict(retained['budget'])
+    assert isinstance(planned, ChainRetainedWindowBudget)
+    assert planned.chain_layers == (43, 44)
+    assert planned.chain_workspace_bytes(4, fused=True, layer=43) == headroom
+    assert planned.chain_device_peak_bytes() == DEVICE
+    assert declare_chain_owner(config, {'run_identity': {}}, [44, 43]) == {
+        'source': 'plan', 'chain_workspace_reserve_bytes': headroom, 'chain_layers': [43, 44]}
