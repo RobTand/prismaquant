@@ -67,6 +67,7 @@ MODULES = (
     "prismaquant/joint_stageb_resources.py",
     "prismaquant/joint_statistics_replay.py",
     "prismaquant/memory_management.py",
+    "prismaquant/readset_coverage.py",
     "prismaquant/stage_b_workspace_profile.py",
     "prismaquant/stage_a_chain_resume.py",
     "prismaquant/stage_a_chain_seed.py",
@@ -192,6 +193,8 @@ ALLOWLIST = {
         "receipt)"),
     ("prismaquant/joint_quanta_join.py", "_preserve_allocation_payload"): (
         1, WALL, "quanta joined into one table share their probe and measurement shape"),
+    ("prismaquant/readset_coverage.py", "_read_verified"): (
+        1, INTEGRITY, "a row's read manifest against the digest its readset seals"),
     ("prismaquant/stage_a_chain_resume.py", "load_chain_state"): (
         2, INTEGRITY, "chain state bytes against the pinned digest and its own seal"),
     ("prismaquant/stage_a_chain_resume.py", "read_chain_state"): (

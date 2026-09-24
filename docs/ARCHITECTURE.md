@@ -11,8 +11,10 @@ itself.
 One helper, `prismaquant.dev_mode.seal_check`, now runs every run-gate seal on
 the campaign path: the Stage A chain resume, seed, capsule binding and prepared
 source identity; the Stage B quantum record, head slice, resource and
-activation policies and spill bound; the join; both dispatchers; the catalog
-extension; and the projection-backend runtime qualification. In certified mode
+activation policies and spill bound; the join; both dispatchers, including the
+joint dispatcher's source coverage check, which reads a re-declared plan or
+prepared completion by its on-disk bytes (`readset_coverage.quantum_rows_gaps`);
+the catalog extension; and the projection-backend runtime qualification. In certified mode
 it raises the site's original exception, with the same type and message. In
 dev mode it prints one `[DEV-MODE]` line that names the first differing field
 and both values, and the run continues.
