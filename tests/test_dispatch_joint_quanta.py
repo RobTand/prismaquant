@@ -1471,6 +1471,29 @@ def test_the_bf16_reduction_setting_is_validated_and_sealed_in_the_spec(
     assert sealed['env'].get(BF16_REDUCTION_ENV) == value
 
 
+@pytest.mark.parametrize('value,message', [
+    (None, None), ('kda_gram_v1', None),
+    ('kda_gram_fp32_v1', 'names no known capture kernel'), ('', 'names no known capture kernel')])
+def test_the_kda_capture_kernel_setting_is_validated_and_sealed_in_the_spec(
+        tmp_path, value, message):
+    """The PQ #1199 launch setting rides the one spec every row shares, like the flag."""
+    import dispatch_joint_quanta as dispatch
+    from prismaquant.glm_kda_capture_kernel import KDA_KERNEL_ENV
+    spec = {'container': {'image': 'sha256:' + '0' * 64, 'mounts': []},
+            'env': {} if value is None else {KDA_KERNEL_ENV: value}}
+    path = tmp_path / 'spec.json'
+    path.write_text(json.dumps(spec))
+    payload = ['python3', '-m', 'prismaquant.joint_cost_quantum', '--quantum', 'q.json']
+    head_only = [('head', dispatch.HEAD_PROGRESS_GRACE_S)]
+    if message is not None:
+        with pytest.raises(dispatch.DispatchRefused, match=message):
+            dispatch._container_wrap(path, payload, progress=head_only)
+        return
+    argv, _image = dispatch._container_wrap(path, payload, progress=head_only)
+    sealed = json.loads(argv[argv.index('--spec') + 1])
+    assert sealed['env'].get(KDA_KERNEL_ENV) == value
+
+
 @pytest.mark.parametrize('regime,chain_batch_size,refused', [
     ('capture_batch=2', 1, True),
     ('capture_batch=2,accumulation=operator_gemm,chunk_rows=65536', 1, True),

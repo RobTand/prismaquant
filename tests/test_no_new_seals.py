@@ -49,6 +49,7 @@ MODULES = (
     "prismaquant/cost_currency.py",
     "prismaquant/cost_streaming.py",
     "prismaquant/dev_mode.py",
+    "prismaquant/glm_kda_capture_kernel.py",
     "prismaquant/joint_adjoint_band.py",
     "prismaquant/joint_adjoint_checkpoints.py",
     "prismaquant/joint_catalog_extension.py",
