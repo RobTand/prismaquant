@@ -325,3 +325,77 @@ def test_an_unlaunched_process_cannot_claim_the_qualified_image(monkeypatch):
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
     with pytest.raises(RuntimeError, match='executing in image unidentified'):
         backend.require_qualified_environment()
+
+
+class _RecordingBinary:
+    """Stands in for the loaded fused binary and records the shapes it ran."""
+
+    def __init__(self):
+        self.shapes = []
+
+    def mul_sum(self, left, right):
+        self.shapes.append(tuple(left.shape))
+        return (left * right).sum()
+
+
+def _fused_on_cpu(binary, shapes=((2, 2),)):
+    return backend._FusedProjection(binary, torch.device('cpu'),
+                                    {'qualified_shapes': [list(shape) for shape in shapes]},
+                                    seal=backend._PREWARM_SEAL)
+
+
+def test_dev_mode_runs_an_unqualified_shape_on_the_reference_arithmetic(monkeypatch, capsys):
+    # PQ #1176: the packaged qualification is a seal. It certifies that the
+    # binary equals (left * right).sum() bit for bit on the shapes it lists.
+    # With sealing off, an unlisted shape runs that reference arithmetic,
+    # never the binary, and the difference is printed once per shape.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    monkeypatch.setattr(backend.kernel, 'fast_path_eligible', lambda left, right: True)
+    binary = _RecordingBinary()
+    fused = _fused_on_cpu(binary)
+    generator = torch.Generator().manual_seed(1176)
+    left, right = (torch.randn(3, 4, generator=generator) for _ in range(2))
+    square = torch.ones(2, 2)
+    with torch.no_grad():
+        results = [fused.product_sum(left, right) for _ in range(2)]
+        fused.product_sum(square, square)
+    reference = (left * right).sum()
+    assert all(torch.equal(result, reference) for result in results)
+    assert binary.shapes == [(2, 2)]
+    printed = [line for line in capsys.readouterr().out.splitlines()
+               if line.startswith('[DEV-MODE]')]
+    assert len(printed) == 1
+    assert '(3, 4)' in printed[0] and '(2, 2)' in printed[0]
+
+
+def test_certified_mode_refuses_an_unqualified_shape_that_dev_mode_recorded(monkeypatch):
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    fused = _fused_on_cpu(_RecordingBinary())
+    operand = torch.ones(3, 4)
+    with torch.no_grad():
+        fused.product_sum(operand, operand)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
+    with pytest.raises(RuntimeError, match='outside the packaged qualification'), torch.no_grad():
+        fused.product_sum(operand, operand)
+
+
+def test_certified_mode_refuses_an_unqualified_shape():
+    fused = _fused_on_cpu(_RecordingBinary())
+    operand = torch.ones(3, 4)
+    with pytest.raises(RuntimeError, match='outside the packaged qualification'), torch.no_grad():
+        fused.product_sum(operand, operand)
+
+
+def test_dev_mode_still_refuses_operands_of_different_shapes(monkeypatch):
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    fused = _fused_on_cpu(_RecordingBinary())
+    with pytest.raises(RuntimeError, match='outside the packaged qualification'), torch.no_grad():
+        fused.product_sum(torch.ones(2, 2), torch.ones(4, 1))
+
+
+def test_dev_mode_reference_path_keeps_the_autograd_refusal(monkeypatch):
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    fused = _fused_on_cpu(_RecordingBinary())
+    operand = torch.ones(3, 4, requires_grad=True)
+    with pytest.raises(RuntimeError, match='no autograd registration'):
+        fused.product_sum(operand, operand)
