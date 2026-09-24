@@ -244,11 +244,17 @@ def test_launcher_reads_the_regime_from_the_environment_only(monkeypatch):
     monkeypatch.setenv(REPLAY_REGIME_ENV, "capture_batch=x")
     with pytest.raises(QuantumIdentityRefused, match="canonical integer"):
         run_layer_quantum({"execution": {}}, **arguments)
-    # A band-serial producer (#996) refuses a batched capture before it binds
-    # its handoff publication.
+    # A band-serial producer (#996) captures at its slice's chain batch size
+    # (PQ #997), and refuses before it binds its handoff publication: a slice
+    # without a run identity has no chain regime to compare with, and an
+    # unstamped identity rolls at batch 1.
     monkeypatch.setenv(REPLAY_REGIME_ENV, "capture_batch=2")
-    with pytest.raises(QuantumIdentityRefused, match="batch-1 plane"):
+    with pytest.raises(QuantumIdentityRefused, match="chain regime"):
         run_layer_quantum({"execution": {}}, emit_handoff=True, **arguments)
+    batch_one = dict(arguments, adjoint_slice={"run_identity": {}})
+    with pytest.raises(QuantumIdentityRefused,
+                       match="capture_batch=2 .* batch size 1; .* capture at batch 1"):
+        run_layer_quantum({"execution": {}}, emit_handoff=True, **batch_one)
 
 
 def test_the_container_forwards_the_sealed_regime_verbatim():
@@ -266,16 +272,32 @@ def test_the_container_forwards_the_sealed_regime_verbatim():
     assert f"{REPLAY_REGIME_ENV}={regime}" in argv
 
 
-@pytest.mark.parametrize("regime,refused", [
-    (None, False),
-    ("accumulation=operator_gemm,chunk_rows=65536", False),
-    ("capture_batch=2", True),
-    ({"capture_batch": 16, "accumulation": "operator_gemm", "chunk_rows": 7}, True),
+@pytest.mark.parametrize("regime,chain_batch_size,refused", [
+    (None, 1, False),
+    ("accumulation=operator_gemm,chunk_rows=65536", 1, False),
+    ("capture_batch=2", 1, True),
+    ({"capture_batch": 16, "accumulation": "operator_gemm", "chunk_rows": 7}, 1, True),
+    # The campaign: capture batch 4 under R13's batch-4 chain regime.
+    ("capture_batch=4,accumulation=operator_gemm,chunk_rows=65536", 4, False),
+    ("capture_batch=4,accumulation=operator_gemm,chunk_rows=65536", 2, True),
+    (None, 4, True),
+    ({"capture_batch": 16, "accumulation": "operator_gemm", "chunk_rows": 7}, 16, False),
 ])
-def test_a_band_serial_producer_admits_only_a_batch_one_capture(regime, refused):
-    from prismaquant.joint_replay_regime import handoff_regime_refusal
+def test_a_band_serial_producer_admits_only_the_chains_batch_size(
+        regime, chain_batch_size, refused):
+    """The handed-off plane is the chain's plane exactly when the capture
+    batch equals the slice's chain batch size (PQ #994, #996, #997)."""
+    from prismaquant.joint_replay_regime import (
+        ReplayRegimeRefused, handoff_regime_refusal, normalize_replay_regime)
 
-    reason = handoff_regime_refusal(regime)
+    reason = handoff_regime_refusal(regime, chain_batch_size=chain_batch_size)
     assert (reason is not None) is refused
     if refused:
-        assert "batch-1 plane" in reason
+        batch = normalize_replay_regime(regime)["capture_batch"]
+        assert f"capture_batch={batch}" in reason
+        assert f"batch size {chain_batch_size}" in reason
+        assert f"capture at batch {chain_batch_size}" in reason
+    with pytest.raises(ReplayRegimeRefused, match="chain batch size"):
+        handoff_regime_refusal(regime, chain_batch_size=0)
+    with pytest.raises(TypeError):
+        handoff_regime_refusal(regime)  # the chain batch size is never implied

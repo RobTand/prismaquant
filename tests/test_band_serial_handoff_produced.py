@@ -159,7 +159,8 @@ def emit_handoff(producer, storage, publication):
     owners = [[_Owner({"scale": float(p + b)}) for b in range(N_BATCHES)]
               for p in range(N_PROBES)]
     emitter = HandoffEmitter(record=producer, adjoint_slice=_adjoint_slice(producer),
-                             boundary_storage=storage, publication=publication)
+                             boundary_storage=storage, capture_batch=1,
+                             publication=publication)
     published = emitter.emit(grad_plane=plane, cotangent_owners=owners,
                              n_probes=N_PROBES, n_batches=N_BATCHES)
     return published, plane
@@ -302,7 +303,8 @@ def test_a_read_back_handoff_template_is_refused(tmp_path, monkeypatch):
                                  env={"PRISMABUILD_ACTION_KEY": "0" * 64})
     with pytest.raises(QuantumHandoffRefused, match="not write-only"):
         HandoffEmitter(record=producer, adjoint_slice=_adjoint_slice(producer),
-                       boundary_storage=storage, publication=ReadBack())
+                       boundary_storage=storage, capture_batch=1,
+                       publication=ReadBack())
 
 
 def test_a_write_only_owner_names_its_lifetime_and_never_reads_back(

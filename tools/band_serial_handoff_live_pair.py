@@ -288,8 +288,16 @@ def producer_role(root: Path, data_manifest_sha256: str) -> int:
     n_probes, n_batches = pair["n_probes"], pair["n_batches"]
     owners = [[_Owner({"scale": float(p + b)}) for b in range(n_batches)]
               for p in range(n_probes)]
+    # The plane here is synthetic, but the handoff's contract is the real
+    # one: it is captured at the launch regime's batch, which must be the
+    # slice's chain batch size (PQ #994, #997).
+    from prismaquant.joint_replay_regime import (
+        normalize_replay_regime, replay_regime_from_environment)
+    capture_batch = normalize_replay_regime(
+        replay_regime_from_environment(os.environ))["capture_batch"]
     emitter = HandoffEmitter(record=producer, adjoint_slice=adjoint_slice,
-                             boundary_storage=pair["storage"], publication=publication)
+                             boundary_storage=pair["storage"],
+                             capture_batch=capture_batch, publication=publication)
     published = emitter.emit(grad_plane=plane, cotangent_owners=owners,
                              n_probes=n_probes, n_batches=n_batches)
     out["published"] = published

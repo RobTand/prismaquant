@@ -296,12 +296,17 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
     # keyword is passed only when asked, so a wrapper that adds its own
     # emitter (tests/test_band_serial_spill.py) sees the call unchanged.
     band = {}
-    if emit_handoff:
-        from prismaquant.joint_quantum_handoff import HandoffEmitter
-        band["handoff_emitter"] = HandoffEmitter(
-            record=record, adjoint_slice=campaign.slices[layer],
-            boundary_storage=execution["boundary_storage"])
     try:
+        if emit_handoff:
+            # The emitter refuses a capture batch off the slice's chain batch
+            # size at construction, before the core: that refusal lands in
+            # ``state.error`` as ``run_layer_quantum``'s own would.
+            from prismaquant.joint_quantum_handoff import HandoffEmitter
+            from prismaquant.joint_replay_regime import normalize_replay_regime
+            band["handoff_emitter"] = HandoffEmitter(
+                record=record, adjoint_slice=campaign.slices[layer],
+                boundary_storage=execution["boundary_storage"],
+                capture_batch=normalize_replay_regime(regime)["capture_batch"])
         payload = run_layer_quantum_core(
             runner, cache, _calibration(), campaign.formats_by_qname,
             record=record, adjoint_slice=campaign.slices[layer], execution=execution,
@@ -1267,12 +1272,14 @@ def _published_plane(handoff):
     "capture_batch=2,accumulation=operator_gemm,chunk_rows=7",
     "accumulation=operator_gemm,chunk_rows=5",
 ])
-def test_a_band_serial_producer_runs_only_a_batch_one_capture(campaign, monkeypatch,
-                                                            tmp_path, regime):
+def test_a_band_serial_producer_captures_at_the_chains_batch_size(campaign, monkeypatch,
+                                                                tmp_path, regime):
     """A band-serial producer (PQ #996) hands off the plane its capture wrote.
 
-    The handoff must equal the plane the consumer's chain rebuild ends on, a
-    batch-1 backward, so a capture batch above 1 refuses before any GPU work.
+    The handoff must equal the plane the consumer's chain rebuild ends on,
+    which rolls at the Stage A slice's chain batch size (PQ #997): batch 1 on
+    this fixture, so a capture batch above 1 refuses before any GPU work
+    (``tests/test_band_serial_batched_regime.py`` runs the batch-4 case).
     One GEMM per operator changes only the statistics: its producer hands off
     the default spill's plane, sha256-equal entry by entry.
     """
@@ -1284,7 +1291,8 @@ def test_a_band_serial_producer_runs_only_a_batch_one_capture(campaign, monkeypa
         payload, state = _quantum(campaign, monkeypatch, layer=1, spill_root=spill_root,
                                   ceiling=1 << 30, regime=regime, emit_handoff=True)
         assert payload is None
-        assert "band-serial handoff must equal the batch-1 plane" in _chain(state.error)
+        assert ("chain regime has batch size 1, and the handoff plane is captured "
+                "at batch 2") in _chain(state.error)
         assert state.context.install_calls == 0
         assert state.counters.replay["layer_passes"] == 0
         return

@@ -1,5 +1,41 @@
 # PrismaQuant Architecture
 
+A band-serial producer captures at its slice's chain batch size (2026-09-24,
+`fix/b2-band-serial-regime`, PQ #994, #996, #997). Both band-serial refusals
+compared their side with the constant 1: `handoff_regime_refusal` refused any
+`capture_batch` above 1, and `handoff_chain_regime_refusal` refused any Stage
+A chain regime above batch 1. The GLM campaign launches
+`capture_batch=4,accumulation=operator_gemm,chunk_rows=65536` on a Stage A run
+whose chain regime is batch 4 with probe fusion, so no row could run
+band-serial and every row of band 045 rebuilt its chain (one linear-attention
+roll measured at 907 s and 35 W on layer 043). The plane a producer hands off
+is written by `capture_group` (`prismaquant/joint_cost_quantum.py`), and the
+plane a consumer's chain rebuild ends on by `_roll_group` or
+`_render_free_fused_passes` (`prismaquant/joint_adjoint_checkpoints.py`): the
+same group of consecutive stored batches, the same `_chain_group_batch`, the
+same `isolated_layer` on the same stacked boundary and cotangent, one
+`torch.autograd.backward([out], [incoming_grad])`, the input cotangent split
+back per stored batch. The spill observer's hooks call the original
+`F.linear` and `F.grouped_mm` and observe their results (`joint_aura.py`
+`_install_packed_observer`). So the two planes are the same bytes exactly
+when the capture batch equals the chain batch size, fusion on or off, and
+the refusals now compare those two numbers: `handoff_regime_refusal(regime,
+chain_batch_size=)` and `handoff_chain_regime_refusal(run_identity,
+capture_batch=)`. The emitter takes the launch regime's `capture_batch` and
+stamps it into the handoff's sealed `producer` block; the consumer refuses a
+handoff captured at any other batch than its slice's chain batch size, and a
+handoff that records none. The dispatcher reads the spec's capture batch for
+its band-serial roles and names each producer row's slice chain batch size
+to the regime check. Gate: `tests/test_band_serial_batched_regime.py`, the
+GPU witness on an eight-sample bf16 packed-expert fixture in windows of
+four: with both refusals stood down, a producer at `capture_batch=4` emits a
+plane sha256-equal, entry by entry, to the plane its consumer's batch-4
+fused chain rebuild ends on, and the band-serial consumer pickles to the
+chain-mode payload; the batch-1 control holds unpatched; the same scenario
+unpatched now runs. The record, the journal identity and the cost payload
+stay the chain-mode bytes. No format, default, pipeline stage, record
+identity or ship gate changes.
+
 The Stage B cotangent scratch writes with `O_DIRECT` (2026-09-24,
 `ws-rd/1152-cotangent-scratch`, PQ #1152). After #1142, Stage B
 checkpoint-load was bound by its local scratch, not by reading:
@@ -1487,11 +1523,22 @@ backward invocation. It shares the upcasts, QDQ and accumulation with the
 invocation path (`_observe_rows`), and it counts the same observed tokens and
 calls. The `contraction_order` field is unchanged: operators are still summed
 before each signed component is projected. A band-serial producer (#996)
-hands off the plane its capture pass wrote, which must equal the batch-1
-plane of the consumer's chain rebuild, so it refuses a capture batch above 1
-(`joint_replay_regime.handoff_regime_refusal`): the dispatcher refuses the
-producer row, and the quantum refuses before any GPU work. It admits
-`operator_gemm` at batch 1, which changes only the statistics. Gates:
+hands off the plane its capture pass wrote, which must equal the plane of
+the consumer's chain rebuild. That rebuild runs the Stage A slice's chain
+regime (#997), and the capture pass at batch B groups the same B consecutive
+stored batches through the same `_chain_group_batch`, `isolated_layer` and
+backward as the chain's `_roll_group`, so the two planes are the same bytes
+exactly when the capture batch equals the chain batch size. The producer is
+admitted at that batch size and refused at any other
+(`joint_replay_regime.handoff_regime_refusal(regime, chain_batch_size=)`,
+`joint_quantum_handoff.handoff_chain_regime_refusal(run_identity,
+capture_batch=)`): the dispatcher refuses the producer row, and the quantum
+refuses before any GPU work. The handoff stamps the capture batch in its
+`producer` block, and the consumer refuses a handoff captured at any batch
+but its own slice's chain batch size. `operator_gemm` is admitted at every
+batch; it changes only the statistics. Gates:
+`tests/test_band_serial_batched_regime.py` (the GPU witness at capture
+batch 4 under a batch-4 fused chain, and the batch-1 control),
 `tests/test_stageb_replay_regime.py`, `tests/test_stageb_one_pass_spill.py`,
 `tests/test_dispatch_joint_quanta.py`. No format, default, stage or ship gate
 changes.
@@ -23972,10 +24019,11 @@ capture is the same `replay_backward(final=True)` pass that writes it. A
 spill producer and a windowed producer emit the same plane, and a
 band-serial consumer under either replay mode matches its chain-mode bytes
 (`tests/test_band_serial_spill.py`, on the spill suite's bf16
-packed-expert fixture). A spill capture batch above 1 (#994's replay
-regimes) would change the plane, so a producer refuses one; one GEMM per
-operator at batch 1 hands off the same plane
-(`test_a_band_serial_producer_runs_only_a_batch_one_capture`).
+packed-expert fixture). A spill capture batch (#994's replay regimes) off
+the slice's chain batch size (#997) would change the plane, so a producer
+refuses one; one GEMM per operator at the chain's batch hands off the same
+plane (`test_a_band_serial_producer_captures_at_the_chains_batch_size`,
+`tests/test_band_serial_batched_regime.py`).
 
 **The handoff.** `joint_quantum_handoff.HandoffEmitter` writes one
 generation under `{output_space.root}/handoff/{generation}/`: the plane as
