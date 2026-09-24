@@ -227,9 +227,23 @@ def enforce_device_policy(config, *, verified_limits=None):
         _require(verified_limits is None, "verified limits without a resource policy")
         return None
     from .memory_management import enforce_device_envelope
-    limits = (verify_policy(bound)["limits"] if verified_limits is None
-              else verified_limits)
-    _require(config["max_gpu_bytes"] == limits["gpu_bytes"], "device limit differs from policy")
+    if verified_limits is None:
+        limits = verify_policy(bound)["limits"]
+        _require(config["max_gpu_bytes"] == limits["gpu_bytes"], "device limit differs from policy")
+    else:
+        # The slice's limits were sealed under the policy it was prepared
+        # with; a plan re-declared from a measurement names another device
+        # ceiling. That is a run seal (PQ #1147): dev mode prints both and
+        # applies the plan's ceiling; certified mode refuses as before.
+        from .dev_mode import seal_check
+
+        limits = dict(verified_limits)
+        if not seal_check(
+                "Stage B device limit", limits["gpu_bytes"], config["max_gpu_bytes"],
+                where="head slice limits against the plan's max_gpu_bytes",
+                refusal=lambda: ValueError(
+                    "Stage B resources: device limit differs from policy")):
+            limits["gpu_bytes"] = config["max_gpu_bytes"]
     observed = enforce_device_envelope("cuda", limits["gpu_bytes"], where="Stage B device envelope")
     return {**observed, "policy": dict(bound), "limits": dict(limits)}
 

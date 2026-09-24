@@ -32,7 +32,10 @@ These still refuse in both modes:
   partway (`running` or `failed`). A `complete`, `attached` or `retained`
   generation belongs to another reader or owner and refuses.
 - Resource guards. The spill bound admits another recorded geometry in dev
-  mode, but a live spill over the admitted ceiling still refuses.
+  mode, but a live spill over the admitted ceiling still refuses. A Stage B
+  head slice's sealed device limit is a seal: when the plan names another
+  `max_gpu_bytes`, dev mode prints both and applies the plan's
+  (`joint_stageb_resources.enforce_device_policy`).
 
 `tests/test_no_new_seals.py` scans the campaign modules for identity
 `if`-then-`raise` sites and fails on any site that is not on its allowlist.
@@ -22424,7 +22427,9 @@ bound to another preparation or plan input, or bytes that do not hash to the
 record's digest. The producer's implementation digest must equal the
 executing package's (dev mode records a difference, as it does for the
 prepared completion), because the policy re-derivations ran under the
-producer's package. It applies the slice's verified device limits, reads the
+producer's package. It applies the slice's verified device limits (a plan
+that names another `max_gpu_bytes` is a run seal: dev mode applies the
+plan's, PQ #1147), reads the
 prepared completion, calibration, production pickle, served policy and
 identity cache as declared head entries (staged under an active tier
 policy), compares its installed encoder seal with the slice's under the
