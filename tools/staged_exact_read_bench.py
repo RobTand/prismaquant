@@ -234,7 +234,16 @@ def child_paths(args, slice_doc) -> dict:
 
 
 def child_ceiling(args, _slice_doc) -> dict:
-    """Raw threaded reads of the staged copies: no hash, no lease, no load."""
+    """Raw threaded reads of the staged copies: no hash, no lease, no load.
+
+    Two modes per thread count. ``buffered`` reads through the page cache in
+    4 MiB calls, as the reader does, so the mount's readahead window bounds
+    how many READs one stream keeps in flight. ``direct`` opens with
+    ``O_DIRECT`` and reads a whole 16 MiB block per call, so the client issues
+    every READ of the block at once: the rate the link and the tier give when
+    no readahead window stands between them and the reader.
+    """
+    import mmap
     copies = json.loads(Path(args.copies).read_text())
     results = []
     for tier in ("ram", "stage"):
@@ -243,44 +252,59 @@ def child_ceiling(args, _slice_doc) -> dict:
                  and c["bytes"] > (1 << 20)][:args.ceiling_files]
         if not paths:
             continue
-        for threads in args.ceiling_threads:
-            drop_client_cache(paths)
-            before = mountstats()
-            lock = threading.Lock()
-            cursor = [0]
-            total = [0]
+        for mode in args.ceiling_modes:
+            for threads in args.ceiling_threads:
+                drop_client_cache(paths)
+                before = mountstats()
+                lock = threading.Lock()
+                cursor = [0]
+                total = [0]
+                errors = []
 
-            def work():
-                buf = bytearray(1 << 22)
-                view = memoryview(buf)
-                while True:
-                    with lock:
-                        if cursor[0] >= len(paths):
-                            return
-                        path = paths[cursor[0]]
-                        cursor[0] += 1
-                    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+                def work():
+                    block = (1 << 24) if mode == "direct" else (1 << 22)
+                    buf = mmap.mmap(-1, block)
+                    view = memoryview(buf)
+                    flags = os.O_RDONLY | os.O_CLOEXEC
+                    if mode == "direct":
+                        flags |= os.O_DIRECT
                     try:
                         while True:
-                            got = os.readv(fd, [view])
-                            if not got:
-                                break
                             with lock:
-                                total[0] += got
+                                if cursor[0] >= len(paths) or errors:
+                                    return
+                                path = paths[cursor[0]]
+                                cursor[0] += 1
+                            fd = os.open(path, flags)
+                            try:
+                                while True:
+                                    got = os.readv(fd, [view])
+                                    if not got:
+                                        break
+                                    with lock:
+                                        total[0] += got
+                            finally:
+                                os.close(fd)
+                    except OSError as exc:
+                        with lock:
+                            errors.append(f"{type(exc).__name__}: {exc}")
                     finally:
-                        os.close(fd)
+                        view.release()
+                        buf.close()
 
-            started = time.monotonic()
-            pool = [threading.Thread(target=work) for _ in range(threads)]
-            for thread in pool:
-                thread.start()
-            for thread in pool:
-                thread.join()
-            wall = time.monotonic() - started
-            results.append({"tier": tier, "threads": threads, "files": len(paths),
-                            "bytes": total[0], "wall_s": round(wall, 4),
-                            "gb_s": round(total[0] / wall / 1e9, 3),
-                            "nfs": mountstats_delta(before, mountstats())})
+                started = time.monotonic()
+                pool = [threading.Thread(target=work) for _ in range(threads)]
+                for thread in pool:
+                    thread.start()
+                for thread in pool:
+                    thread.join()
+                wall = time.monotonic() - started
+                results.append({"tier": tier, "mode": mode, "threads": threads,
+                                "files": len(paths), "bytes": total[0],
+                                "wall_s": round(wall, 4),
+                                "gb_s": round(total[0] / wall / 1e9, 3),
+                                "errors": errors[:3],
+                                "nfs": mountstats_delta(before, mountstats())})
     return {"ceiling": results}
 
 
@@ -555,6 +579,8 @@ def main(argv=None) -> int:
     parser.add_argument("--ceiling-files", type=int, default=256)
     parser.add_argument("--ceiling-threads", type=lambda s: [int(x) for x in s.split(",") if x],
                         default=[])
+    parser.add_argument("--ceiling-modes", type=lambda s: [x for x in s.split(",") if x],
+                        default=["buffered", "direct"])
     # driver only
     parser.add_argument("--arm", action="append", default=[],
                         help="NAME=TREE[:SDK_ROOT]; repeatable")
@@ -592,7 +618,8 @@ def main(argv=None) -> int:
         "--stage-a-batches", str(args.stage_a_batches),
         "--stage-a-windows", str(args.stage_a_windows),
         "--ceiling-files", str(args.ceiling_files),
-        "--ceiling-threads", ",".join(str(t) for t in args.ceiling_threads)]
+        "--ceiling-threads", ",".join(str(t) for t in args.ceiling_threads),
+        "--ceiling-modes", ",".join(args.ceiling_modes)]
     if args.scratch_root:
         args.child_argv += ["--scratch-root", args.scratch_root]
     return driver_main(args)
