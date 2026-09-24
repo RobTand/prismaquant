@@ -95,6 +95,21 @@ def prepare_joint_aura_identities(cost_data):
             row["probe_identity"] = prepared[key][1]
 
 
+def validated_probe_identity(probe) -> Mapping:
+    """``probe`` validated and hashed once, for a producer that publishes many rows.
+
+    The result is the type :func:`identity_sha256` and
+    :func:`validate_joint_aura_entry` recognize: its digest was computed and
+    its source model identity validated once, here, not again for every row
+    checked through it. It is not JSON data and compares equal only to its
+    own type, so a published row carries the ordinary ``probe`` instead. The
+    producer then owns the proof that ``probe`` still hashes to this digest.
+    """
+    if type(probe) is _ValidatedProbeIdentity:
+        return probe
+    return _ValidatedProbeIdentity(probe)
+
+
 def identity_sha256(value) -> str:
     if type(value) is _ValidatedProbeIdentity:
         return value._sha256
