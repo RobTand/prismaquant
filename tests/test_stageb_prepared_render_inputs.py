@@ -114,7 +114,34 @@ def _rebound_record_receipt(record, receipt):
     return record, receipt
 
 
-def _bind_prepared(tmp_path, root, *, replay_mode=None):
+#: The spill root a spill-sealed fixture row's spec declares.
+SPILL_ROOT = "/home/rob/pb-scratch/stage-b-spill"
+
+
+def _fixture_spill_bound():
+    """A small, valid sealed spill bound (one dense target, batch 1)."""
+    from prismaquant.joint_replay_spill import (
+        SpillTarget, seal_spill_bound, spill_geometry)
+    return seal_spill_bound(
+        spill_geometry({"t": SpillTarget(8, 16)}, [("t",)], pending={"t"},
+                       batch_tokens=[4], n_probes=N_PROBES, element_size=2,
+                       experts_per_token=None),
+        block=4096, capture_batch=1, element_dtype="bfloat16")
+
+
+def _spill_spec(ceiling, *, regime=None):
+    """A container spec declaring the Stage B spill with a spec ceiling."""
+    env = {"PRISMAQUANT_STAGE_B_SPILL_ROOT": SPILL_ROOT,
+           "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES": str(ceiling)}
+    if regime is not None:
+        env["PRISMAQUANT_STAGE_B_REPLAY_REGIME"] = regime
+    return {"container": {"image": "sha256:" + "0" * 64,
+                          "mounts": [{"source": SPILL_ROOT, "target": SPILL_ROOT,
+                                      "readonly": False}]},
+            "env": env}
+
+
+def _bind_prepared(tmp_path, root, *, replay_mode=None, spill_bound=None):
     """Real builder + real binder prepared-input sealing (no hand-seal)."""
     record, receipt, parent, kwargs = _bound_inputs(tmp_path, root=root)
     record, receipt = _rebound_record_receipt(record, receipt)
@@ -135,20 +162,31 @@ def _bind_prepared(tmp_path, root, *, replay_mode=None):
         manifest_sha256=hashlib.sha256(wire).hexdigest(),
         output_root=root, strided_boundaries=STRIDED, n_probes=N_PROBES,
         calib=dict(CALIB), render_prerequisite=dict(RENDER_PREREQ),
-        prepared_inputs=prepared, replay_mode=replay_mode)
+        prepared_inputs=prepared, replay_mode=replay_mode,
+        spill_bound=spill_bound)
     return bound, receipt, parent, manifest, files, prepared
 
 
-def _dispatch_prepared(tmp_path, monkeypatch, *, replay_mode=None):
-    """Normal-CLI dispatch layout around the binder-sealed row."""
+def _dispatch_prepared(tmp_path, monkeypatch, *, replay_mode=None,
+                       spill_bound=None):
+    """Normal-CLI dispatch layout around the binder-sealed row.
+
+    A spill-sealed row seals ``spill_bound`` (a small valid one by default)
+    under a spec that declares the spill, as the dispatcher requires.
+    """
     import dispatch_joint_quanta as dispatch
     spec = tmp_path / "spec.json"
-    spec.write_text(json.dumps(
-        {"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
+    if replay_mode == "spill":
+        if spill_bound is None:
+            spill_bound = _fixture_spill_bound()
+        spec.write_text(json.dumps(_spill_spec(1 << 30)))
+    else:
+        spec.write_text(json.dumps(
+            {"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
     monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
     root = str(tmp_path / "run")
     bound, receipt, parent, manifest, files, prepared = _bind_prepared(
-        tmp_path, root, replay_mode=replay_mode)
+        tmp_path, root, replay_mode=replay_mode, spill_bound=spill_bound)
     records = tmp_path / "records"
     records.mkdir(parents=True)
     (records / "layer-002.json").write_text(json.dumps(bound))

@@ -671,6 +671,25 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
                               resume=False)
     assert not constructed
     shutil.rmtree(record0["output_space"]["root"], ignore_errors=True)
+
+    # The sealed spill bound: a geometry the live modules do not reproduce,
+    # and a ceiling other than the sealed reservation, refuse before the
+    # scratch exists.
+    def other_geometry(bound):
+        bound = json.loads(json.dumps(bound))
+        bound["geometry"]["x_bytes"] += 2
+        return bound
+
+    with pytest.raises(QuantumIdentityRefused, match="seals spill geometry"):
+        phases._drive_quantum(tmp_path, monkeypatch, setup, layer=0, resume=False,
+                              replay_mode="spill", spill_bound_edit=other_geometry)
+    shutil.rmtree(record0["output_space"]["root"], ignore_errors=True)
+    with pytest.raises(QuantumIdentityRefused, match="the spill ceiling is 1073741824"):
+        phases._drive_quantum(tmp_path, monkeypatch, setup, layer=0, resume=False,
+                              replay_mode="spill", spill_ceiling=1 << 30)
+    assert not constructed
+    assert os.listdir(spill_root) == [] and not _open_under(spill_root)
+    shutil.rmtree(record0["output_space"]["root"], ignore_errors=True)
     events_s, manifest_s, payload_s, _ = phases._drive_quantum(
         tmp_path, monkeypatch, setup, layer=0, resume=False,
         replay_mode="spill")

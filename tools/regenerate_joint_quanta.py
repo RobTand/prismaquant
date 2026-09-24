@@ -880,6 +880,16 @@ def main(argv=None) -> int:
                          "the own boundary run once per probe for the "
                          "one-pass spill; the quantum refuses a launch in "
                          "the other mode. Default %(default)s")
+    ap.add_argument("--replay-regime", default=None,
+                    help="with --replay-mode spill: the campaign spec's "
+                         "PRISMAQUANT_STAGE_B_REPLAY_REGIME (unset: the "
+                         "default regime). Its capture batch sets the spill "
+                         "parts each layer's sealed spill bound counts")
+    ap.add_argument("--spill-block-bytes", type=int, default=None,
+                    help="with --replay-mode spill: the direct-I/O grid the "
+                         "sealed spill bound is sized on (default: "
+                         "joint_replay_spill.SPILL_SEAL_BLOCK_BYTES). The "
+                         "quantum refuses a coarser live grid")
     ap.add_argument("--source-layers-prefix", default=None,
                     help="with --executable-readsets: complete the head "
                          "phase and each chain/own source phase from the "
@@ -897,6 +907,10 @@ def main(argv=None) -> int:
         return _fail("--head-slices needs --executable-readsets")
     if args.replay_mode != "windowed" and not args.executable_readsets:
         return _fail("--replay-mode needs --executable-readsets")
+    if args.replay_mode != "spill" and (args.replay_regime is not None
+                                        or args.spill_block_bytes is not None):
+        return _fail("--replay-regime and --spill-block-bytes need "
+                     "--replay-mode spill")
     if args.source_layers_prefix is not None and (
             not args.executable_readsets or not args.source_layers_prefix):
         return _fail("--source-layers-prefix needs --executable-readsets "
@@ -1248,6 +1262,48 @@ def main(argv=None) -> int:
                         if refusal is None:
                             raise
                         raise refusal from exc
+                # The spill bound: the layer's full-roster spill
+                # geometry and its reservation, which the dispatcher sets as
+                # the row's spill ceiling and PrismaBuild charges.
+                spill_by_layer = {}
+                if args.replay_mode == "spill":
+                    from prismaquant.joint_cost_quantum import (
+                        derive_layer_spill_bound,
+                    )
+                    from prismaquant.joint_replay_spill import (
+                        SPILL_SEAL_BLOCK_BYTES,
+                    )
+                    from prismaquant.model_profiles import detect_profile
+                    # The config is a declared header read of the source
+                    # plan (``streaming_source_plan``); under strict reads
+                    # it comes off the stage like the checkpoint index.
+                    config_path = os.path.normpath(
+                        os.path.join(source_model_root, "config.json"))
+                    reads = staged_reads()
+                    model_config = json.loads(
+                        Path(config_path).read_bytes() if reads is None
+                        else reads.whole(config_path, where="source config"))
+                    try:
+                        profile = detect_profile(source_model_root)
+                    except RuntimeError as exc:
+                        raise ValueError(f"spill bound profile: {exc}") from exc
+                    block = (SPILL_SEAL_BLOCK_BYTES
+                             if args.spill_block_bytes is None
+                             else args.spill_block_bytes)
+                    for layer in sorted(by_layer):
+                        bound = derive_layer_spill_bound(
+                            prepared_by_layer[layer],
+                            execution=plan.get("execution", {}),
+                            production_cache=production_cache,
+                            profile=profile, model_config=model_config,
+                            replay_regime=args.replay_regime, block=block)
+                        spill_by_layer[layer] = bound
+                        geometry = bound["geometry"]
+                        print(f"spill bound: layer {layer} payload "
+                              f"{geometry['total_bytes']} bytes, "
+                              f"{geometry['max_parts']} parts, reservation "
+                              f"{bound['reservation_bytes']} bytes on a "
+                              f"{bound['block']}-byte grid")
                 if args.head_slices:
                     head_slices = _build_head_slices(
                         plan, plan_sha256=args.plan_sha256,
@@ -1286,7 +1342,8 @@ def main(argv=None) -> int:
                             head_slice=(head_slices[layer]["binding"]
                                         if head_slices else None),
                             replay_mode=args.replay_mode,
-                            head_source=head_source):
+                            head_source=head_source,
+                            spill_bound=spill_by_layer.get(layer)):
                         emitted.append(row)
                 produced["records"] = [row["record"] for row in emitted]
                 bound_manifests.extend(

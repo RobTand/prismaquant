@@ -1,5 +1,62 @@
 # PrismaQuant Architecture
 
+A Stage B row's spill ceiling is now the need its record seals (2026-09-24,
+`ws-sb4/spill-ceiling`). PB action `6f4f058751e6` (R13 layer 44, sparklina)
+refused 60 s into its head phase: the spill needed 199,051,640,832 bytes,
+196,494,753,792 of payload and slot padding for 554,880 parts on the
+4096-byte direct-I/O grid, but its ceiling was the spec's hand-set
+`PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES` of 183 GiB. PrismaBuild charged the
+same literal to the box's `spool_gb`. The slot padding that #1060 added to
+the file's reservation was never in that literal.
+
+- **One sizing rule.** `StageBSpillScratch.reservation_bytes` is the payload
+  plus parts x (512 + grid) bytes, rounded up to the grid. The scratch
+  reserves it, and `joint_replay_spill.spill_reservation_bytes` applies it to
+  a geometry for the seal.
+- **Sealed.** With `--replay-mode spill`, `tools/regenerate_joint_quanta.py`
+  seals each layer's `executable_readset.spill_bound`
+  (`joint_cost_quantum.derive_layer_spill_bound`): the layer's full-roster
+  `spill_geometry`, its grid, capture batch and dtype, and its reservation.
+  Every input comes from what the record already seals: the prepared windows
+  and members, each unit's verified render shape, the profile's packed-expert
+  roles (`joint_replay_spill.sealed_spill_targets`), the plan's probe count,
+  calibration shape and probe microbatch, the source `config.json`'s top-k,
+  and the capture batch of the spec's replay regime, which
+  `prepare_extended_joint_quanta` passes as `--replay-regime`. The bound is
+  not a manifest annotation, so the read plan and its digest are unchanged;
+  the record identity changes.
+- **Grid.** The reservation is sized on a 4 KiB grid
+  (`SPILL_SEAL_BLOCK_BYTES`: the page size and the ext4 block of the
+  campaign's spill roots), the one input the plan does not carry. A finer
+  live grid reserves less. A coarser one refuses before the file is
+  allocated (`perturbed_x_cache.SpillGridRefused`).
+- **Dispatch.** `dispatch_joint_quanta` replaces the spec's ceiling with the
+  sealed reservation in the one spec parse it seals, so the container's
+  ceiling and PrismaBuild's `spool_gb` charge (PB #911, rounded up to whole
+  GiB) are the sealed need. It refuses a spill-sealed row with no bound, a
+  bound on any other row, a spec that declares no spill, and a spec whose
+  regime launches another capture batch. The spec still declares a ceiling,
+  which the container validates, but it no longer reaches a spill-sealed
+  executable row; rows without an executable readset keep it.
+- **Quantum.** Where the old ceiling check ran (after the head intake,
+  before the checkpoint load, the chain and every replay), the quantum
+  recomputes the full-roster geometry from its live modules and calibration
+  draw. It refuses, with exit 3, a sealed geometry, capture batch or dtype
+  it does not reproduce, a ceiling other than the sealed reservation, and a
+  coarser live grid. A resume spills a subset of the roster, which reserves
+  no more.
+- **Limit.** The offline seal takes a profile-classified routed expert to be
+  a view of its declared packed parameter. A model whose routed experts load
+  as unpacked Linears computes another geometry, so its quantum refuses;
+  sealing that representation is not implemented.
+
+Read-only through the seal path on sparklina, layer 44 gives payload
+196,494,753,792 bytes, 554,880 parts and a 199,051,640,832-byte reservation,
+a 186 GiB `spool_gb` demand (PB `8873aa998924`). Gate:
+`tests/test_stage_b_spill_ceiling_sealed.py`, plus the executable spill run in
+`tests/test_stageb_one_pass_spill.py`. No format, pipeline default, stage or
+ship gate changes.
+
 The Stage A compute thread no longer polls PrismaBuild exports on every
 write (2026-09-23, `ws-pl/1128-io-overlap`, PQ #1128). Since #1110, each
 `StreamedBoundaryArtifacts.write` asked PrismaBuild about every live export
@@ -516,7 +573,10 @@ reads ran 6.9 GB/s (PB `f6733604db33`, `b55e4305076c`). An empty tensor takes
 no slot and no run. The file reserves slot padding for at most
 `SpillGeometry.max_parts` tensors, (probes + 1) x targets x samples, each at
 most 512 bytes plus one grid block; the ceiling covers the reservation, and a
-payload over the ceiling refuses before the file is opened. On GLM-5.3-Flash
+payload over the ceiling refuses before the file is opened. Since
+`ws-sb4/spill-ceiling` a spill-sealed row's ceiling is that reservation
+itself, sealed by the record builder and set by the dispatcher; see the
+entry at the top. On GLM-5.3-Flash
 every Stage B target is 2048, 4096 or 12288 wide, so every spilled tensor is a
 whole number of 4 KiB blocks and one at residue 0 needs no padding. Records,
 identity and the resource policy are unchanged. The
@@ -954,7 +1014,9 @@ The spill refuses a non-dense input, a measurement dtype that is not 16-bit,
 and non-contiguous shared-state cotangent accumulators.
 `joint_replay_spill.spill_geometry` bounds the layer's bytes from shapes and
 token counts, and the whole bound is allocated before the checkpoint load, so
-a missing or undersized ceiling or disk refuses before any GPU work. A routed
+a missing or undersized ceiling or disk refuses before any GPU work. A
+spill-sealed executable row takes its ceiling from its record's sealed spill
+bound, not from the spec (`ws-sb4/spill-ceiling`, entry at the top). A routed
 parameter is bounded by top-k rows per token across the whole layer, not per
 window, so the bound does not grow with the window count. For GLM-5.3-Flash
 (512 samples of 512 tokens, 4 probes) it is 185.76 GB per sparse layer and
@@ -1382,8 +1444,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `ws-pl/1128-io-overlap`.
+As of: 2026-09-24 · `ws-sb4/spill-ceiling`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-sb4/spill-ceiling`) for **a Stage B spill
+ceiling sealed from the layer's need**: the record builder seals each spill
+row's full-roster geometry and its reservation on a 4 KiB grid, the
+dispatcher sets the row's ceiling and PrismaBuild demand from it, and the
+quantum recomputes the geometry and refuses a mismatch or a coarser grid.
+See the entry at the top. A new Stage B record field and refusal; no format,
+pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-pl/1128-io-overlap`) for **a Stage A compute
 thread that polls no export per write** (PQ #1128): the stager makes one

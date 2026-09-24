@@ -47,6 +47,7 @@ from pathlib import Path, PurePosixPath
 if __package__:
     from tools.tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
+        STAGE_B_SPILL_ENV,
         container_cache_environment,
         admission_image_reference,
         local_scratch_environment,
@@ -61,6 +62,7 @@ else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
+        STAGE_B_SPILL_ENV,
         container_cache_environment,
         admission_image_reference,
         local_scratch_environment,
@@ -1019,7 +1021,8 @@ def _warn_overlay_caches(spec: dict, scratch: dict) -> None:
 def _container_wrap(spec_path: Path, payload: list[str], *,
                     progress: Sequence[tuple[str, int]],
                     resource_policy=None,
-                    spool_max_bytes: int | None = None) -> tuple[list[str], str | None]:
+                    spool_max_bytes: int | None = None,
+                    spill_bound: Mapping | None = None) -> tuple[list[str], str | None]:
     """Run a payload inside the qualified campaign container.
 
     The projection backend's runtime identity check (and the workload's own
@@ -1051,8 +1054,35 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     and two rows cannot together overrun one box's spool disk (PQ #1120). A
     spec that declares the opt-in off refuses: the row reads its planes
     back from the spool, and an uncharged window is refused only at bind.
+
+    ``spill_bound`` is the row's sealed Stage B spill bound
+    (:func:`_sealed_spill_bound`). Its reservation replaces the spec's
+    ``PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES`` in the same one parse, so the
+    ceiling the quantum checks and the ``spool_gb`` PrismaBuild charges for
+    the pair (PB #911) are the sealed need, not a spec literal. A spec that
+    declares no spill, or launches another capture batch than the bound
+    counts parts for, refuses.
     """
     spec = json.loads(Path(spec_path).read_text())
+    if spill_bound is not None:
+        env = spec.get("env", {})
+        if not env.get(STAGE_B_SPILL_ENV[0]):
+            raise DispatchRefused(
+                "this row seals a Stage B spill bound, but the spec declares "
+                f"no {STAGE_B_SPILL_ENV[0]}")
+        from prismaquant.joint_replay_regime import (
+            ReplayRegimeRefused, normalize_replay_regime, replay_regime_from_environment)
+        try:
+            capture_batch = normalize_replay_regime(
+                replay_regime_from_environment(env))["capture_batch"]
+        except ReplayRegimeRefused as exc:
+            raise DispatchRefused(str(exc)) from exc
+        if capture_batch != spill_bound["capture_batch"]:
+            raise DispatchRefused(
+                f"the spec launches capture batch {capture_batch}, but the row's "
+                f"spill bound counts parts for {spill_bound['capture_batch']}; "
+                "regenerate the executable readsets with the spec's regime")
+        spec["env"] = {**env, STAGE_B_SPILL_ENV[1]: str(int(spill_bound["reservation_bytes"]))}
     declared = spec.get("env", {}).get(PRODUCED_SPOOL_MAX_ENV)
     if (spool_max_bytes is not None
             and PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})
@@ -1100,6 +1130,37 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                 or not _is_hex64(spec.get("container", {}).get("content_sha256"))):
             raise DispatchRefused("explicit portable image admission requires content SHA and inspected scientific image identity")
     return argv, admission or default_admission
+
+def _sealed_spill_bound(record: Mapping) -> Mapping | None:
+    """The row's validated spill bound, or ``None`` for a row that does not spill.
+
+    An executable row sealed for the spill replay must seal its bound: the
+    row's spill ceiling is set from it, never from the spec. A bound on any
+    other row refuses. Rows without an executable readset keep the spec's
+    ceiling (the legacy slice path).
+    """
+    quantum_id = record.get("quantum_id")
+    block = record.get("executable_readset")
+    if not isinstance(block, Mapping):
+        return None
+    bound = block.get("spill_bound")
+    if block.get("replay_mode") != "spill":
+        if bound is not None:
+            raise DispatchRefused(
+                f"quantum {quantum_id!r} seals a spill bound on a readset that is "
+                "not sealed for the spill replay")
+        return None
+    if bound is None:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r} is sealed for the spill replay but seals no "
+            "spill bound; regenerate its executable readset")
+    from prismaquant.joint_replay_spill import SpillBoundRefused, check_spill_bound
+    try:
+        check_spill_bound(bound)
+    except SpillBoundRefused as exc:
+        raise DispatchRefused(f"quantum {quantum_id!r}: {exc}") from exc
+    return bound
+
 
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
@@ -1252,7 +1313,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--allowed-tiers", STAGED_ALLOWED_TIERS,
         "--resume",
         "--output-root", str(output_root), *band_payload], progress=progress,
-        resource_policy=resource_policy)
+        resource_policy=resource_policy, spill_bound=_sealed_spill_bound(record))
     argv = [sys.executable, str(PBRUN)]
     for tag in consumer_tags:
         argv += ["--tag", str(tag)]
