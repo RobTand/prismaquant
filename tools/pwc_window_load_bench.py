@@ -30,9 +30,13 @@ Modes:
   render at ``--batch`` rows instead. Window 0's loaded tensors, file-load
   receipts and render identities are digested.
 * ``quantum``: runs the layer-1 joint quantum on the CPU stub campaign from
-  ``tests/test_joint_cost_quantum_runtime.py`` and digests its pickled
-  payload and every file it writes, as
-  ``tests/test_render_identity_once_1192.py`` does.
+  ``tests/test_joint_cost_quantum_runtime.py`` and digests its payload and
+  every file it writes, leaf by leaf: tensors and arrays by their bytes,
+  floats by ``float.hex``. Two runs of one tree differ in wall times and run
+  ids, so the host runs the fix tree twice and compares base with fix on
+  every leaf those two runs agree on.
+* ``identity``: only the ``quantum`` comparison, written to
+  ``identity.json``; exits non-zero when base and fix differ.
 
 The fixture's lease root holds one consumer, while production's holds every
 action's, so the per-file lease cost it shows is a lower bound. The compute
@@ -281,11 +285,79 @@ def run_quantum(args):
     root = Path(record['output_space']['root'])
     files = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
              for path in sorted(root.rglob('*')) if path.is_file()}
+    # Whole-object digests also cover wall times and run ids, which differ
+    # between two runs of one tree. Leaf digests let the host tell those
+    # fields apart from the numbers: a leaf that differs between two runs of
+    # the fix tree is run-varying; every other leaf must match the base.
+    leaves = _leaves(payload, 'payload')
+    for path in sorted(root.rglob('*')):
+        if not path.is_file():
+            continue
+        name = f'file:{path.relative_to(root)}'
+        if path.suffix == '.pkl':
+            with path.open('rb') as handle:
+                _leaves(pickle.load(handle), name, leaves)
+        elif path.suffix == '.json':
+            _leaves(json.loads(path.read_text()), name, leaves)
+        else:
+            leaves[name] = hashlib.sha256(path.read_bytes()).hexdigest()
     import prismaquant
     Path(args.out_json).write_text(json.dumps({
         'payload_sha256': hashlib.sha256(pickle.dumps(payload)).hexdigest(),
-        'costs': len(payload['costs']), 'files': files,
+        'costs': len(payload['costs']), 'files': files, 'leaves': leaves,
         'package': str(Path(prismaquant.__file__).parent)}, indent=1))
+
+
+def _leaves(obj, path: str, out: dict | None = None) -> dict:
+    """``{path: value}`` for every leaf of ``obj``; tensors and arrays by digest."""
+    import numpy as np
+    import torch
+    out = {} if out is None else out
+    if isinstance(obj, torch.Tensor):
+        flat = obj.detach().cpu().contiguous().reshape(-1)
+        digest = hashlib.sha256(f'{obj.dtype}|{tuple(obj.shape)}|'.encode())
+        digest.update(flat.view(torch.uint8).numpy().tobytes())
+        out[path] = f'tensor:{digest.hexdigest()}'
+    elif isinstance(obj, np.ndarray):
+        array = np.ascontiguousarray(obj)
+        digest = hashlib.sha256(f'{array.dtype}|{array.shape}|'.encode())
+        digest.update(array.tobytes())
+        out[path] = f'array:{digest.hexdigest()}'
+    elif isinstance(obj, dict):
+        for key in sorted(obj, key=repr):
+            _leaves(obj[key], f'{path}/{key}', out)
+    elif isinstance(obj, (list, tuple)):
+        for index, value in enumerate(obj):
+            _leaves(value, f'{path}[{index}]', out)
+    elif isinstance(obj, float):
+        out[path] = f'float:{obj.hex()}'
+    else:
+        text = repr(obj)
+        out[path] = text if len(text) <= 160 else (
+            f'{type(obj).__name__}:{hashlib.sha256(text.encode()).hexdigest()}')
+    return out
+
+
+def _compare_leaves(quantum: dict) -> dict:
+    """Base against fix, leaf by leaf, excluding leaves two fix runs disagree on."""
+    base, fix, control = (quantum[arm]['leaves'] for arm in ('base', 'fix', 'fix-control'))
+    varying = sorted(key for key in set(fix) | set(control) if fix.get(key) != control.get(key))
+    varying_set = set(varying)
+    compared = sorted((set(base) | set(fix)) - varying_set)
+    differing = [key for key in compared if base.get(key) != fix.get(key)]
+    numeric = [key for key in compared if str(fix.get(key, base.get(key))).startswith(
+        ('tensor:', 'array:', 'float:'))]
+    return {
+        'leaves_compared': len(compared),
+        'numeric_leaves_compared': len(numeric),
+        'numeric_leaves_identical': all(base.get(key) == fix.get(key) for key in numeric),
+        'differing': [{'leaf': key, 'base': base.get(key), 'fix': fix.get(key)}
+                      for key in differing],
+        'run_varying': [{'leaf': key, 'fix': fix.get(key), 'fix-control': control.get(key)}
+                        for key in varying],
+        'run_varying_numeric': [key for key in varying if str(fix.get(key, control.get(key)))
+                                .startswith(('tensor:', 'array:', 'float:'))],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -379,18 +451,17 @@ def _classify(raw_path: Path):
             if loader_total else {})
 
 
-def run_ab(args):
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
+def _trees(args, out: Path):
     trees = {'fix': REPO, 'base': _materialize_base(args.base_ref, out / 'base-tree')}
     commits = {'fix': subprocess.run(['git', '-C', str(REPO), 'rev-parse', 'HEAD'],
                                      capture_output=True, text=True).stdout.strip(),
                'base': (trees['base'] / 'COMMIT').read_text().strip()}
     _log(f"trees: {commits}")
-    me = [sys.executable, str(Path(__file__).resolve())]
-    summary = {'commits': commits, 'host': os.uname().nodename, 'args': vars(args)}
+    return trees, commits
 
-    # Joint quantum payload and files, each tree; the fix tree twice as a control.
+
+def _quantum_identity(out: Path, trees: dict, me: list) -> dict:
+    """The joint quantum on each tree; the fix tree twice, as a run-to-run control."""
     quantum = {}
     for arm in ('base', 'fix', 'fix-control'):
         tree = trees['fix' if arm.startswith('fix') else 'base']
@@ -400,15 +471,46 @@ def run_ab(args):
                        env=_child_env(tree, cuda=False), check=True, cwd=str(tree))
         quantum[arm] = json.loads(target.read_text())
         _log(f"quantum {arm}: payload {quantum[arm]['payload_sha256'][:16]}, "
-             f"{len(quantum[arm]['files'])} files")
+             f"{len(quantum[arm]['files'])} files, {len(quantum[arm]['leaves'])} leaves")
     shutil.rmtree(out / 'quantum-scratch', ignore_errors=True)
-    summary['quantum'] = {
+    result = {
         'payload_identical': len({q['payload_sha256'] for q in quantum.values()}) == 1,
         'files_identical': len({json.dumps(q['files'], sort_keys=True)
                                 for q in quantum.values()}) == 1,
+        'leaves': _compare_leaves(quantum),
         **{arm: {'payload_sha256': q['payload_sha256'], 'costs': q['costs'],
                  'files': len(q['files']), 'package': q['package']}
            for arm, q in quantum.items()}}
+    leaves = result['leaves']
+    _log(f"quantum leaves: {leaves['leaves_compared']} compared "
+         f"({leaves['numeric_leaves_compared']} numeric, identical: "
+         f"{leaves['numeric_leaves_identical']}); {len(leaves['differing'])} differ; "
+         f"{len(leaves['run_varying'])} vary run to run "
+         f"({len(leaves['run_varying_numeric'])} numeric)")
+    return result
+
+
+def run_identity(args):
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    trees, commits = _trees(args, out)
+    me = [sys.executable, str(Path(__file__).resolve())]
+    summary = {'commits': commits, 'host': os.uname().nodename,
+               'quantum': _quantum_identity(out, trees, me)}
+    (out / 'identity.json').write_text(json.dumps(summary, indent=1, default=str))
+    leaves = summary['quantum']['leaves']
+    if leaves['differing'] or not leaves['numeric_leaves_identical']:
+        raise SystemExit('the joint quantum differs between base and fix')
+
+
+def run_ab(args):
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    trees, commits = _trees(args, out)
+    me = [sys.executable, str(Path(__file__).resolve())]
+    summary = {'commits': commits, 'host': os.uname().nodename, 'args': vars(args)}
+
+    summary['quantum'] = _quantum_identity(out, trees, me)
 
     fixture_json = out / 'fixture.json'
     subprocess.run(me + ['setup', '--fixture', args.fixture, '--fixture-json', str(fixture_json),
@@ -517,8 +619,9 @@ def run_ab(args):
         'load_s_median', 'compute_s_median', 'wall_s_median', 'load_share_of_wall_median',
         'gpu_power_w_mean')} for name, arm in summary['arms'].items()}, indent=1))
     _log(f"loaded bytes identical: {summary['loaded_bytes_identical']}; quantum "
-         f"payload identical: {summary['quantum']['payload_identical']}, files identical: "
-         f"{summary['quantum']['files_identical']}")
+         f"numeric leaves identical: "
+         f"{summary['quantum']['leaves']['numeric_leaves_identical']}, "
+         f"differing leaves: {len(summary['quantum']['leaves']['differing'])}")
     if not args.keep_fixture:
         shutil.rmtree(args.fixture, ignore_errors=True)
 
@@ -561,12 +664,15 @@ def main(argv=None):
     window.add_argument('--consumer', choices=('sleep', 'gpu'), required=True)
     window.add_argument('--compute-s', type=float, required=True)
     window.add_argument('--load-buffer-bytes', type=int, required=True)
+    identity = sub.add_parser('identity')
+    identity.add_argument('--base-ref', required=True)
+    identity.add_argument('--out', required=True)
     quantum = sub.add_parser('quantum')
     quantum.add_argument('--scratch', required=True)
     quantum.add_argument('--out-json', required=True)
     args = parser.parse_args(argv)
     {'ab': run_ab, 'setup': run_setup, 'window': run_window,
-     'quantum': run_quantum}[args.mode](args)
+     'quantum': run_quantum, 'identity': run_identity}[args.mode](args)
 
 
 if __name__ == '__main__':
