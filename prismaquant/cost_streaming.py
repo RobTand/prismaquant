@@ -4858,7 +4858,7 @@ def fused_window_batches(storage, batches, boundary_index, incoming, *, batch_si
 
 @contextmanager
 def prefetched_fused_boundary_windows(storage, batches, boundary_index, incoming=None,
-                                      *, window_batches, then=None):
+                                      *, window_batches, then=None, window_end=None):
     """Sample-major windows for the fused roll (RobTand/prismaquant#997).
 
     Each window reads ``window_batches`` boundary entries and, beside them,
@@ -4874,6 +4874,11 @@ def prefetched_fused_boundary_windows(storage, batches, boundary_index, incoming
     names the pass read after this one, ``(boundary_index, incoming)`` with
     ``incoming`` one list per probe; its first window is asked for from this
     pass's last window.
+
+    ``window_end`` is called inside each window once the caller asks for
+    the next one, before the window closes: work the caller deferred on the
+    window's tensors finishes there, before any later window is asked for
+    (RobTand/prismaquant#1162). It is not called when the caller stops early.
     """
 
     window_batches = int(window_batches)
@@ -4893,6 +4898,8 @@ def prefetched_fused_boundary_windows(storage, batches, boundary_index, incoming
                        lambda index: batches[index].activations_cpu[boundary_index],
                        lambda probe, index: (None if incoming is None
                                              else incoming[probe][index]))
+                if window_end is not None:
+                    window_end()
                 continue
             references = _fused_window_references(
                 batches, boundary_index, incoming, indices)
@@ -4923,6 +4930,8 @@ def prefetched_fused_boundary_windows(storage, batches, boundary_index, incoming
                     return storage.get(window, incoming[probe][index])
 
                 yield indices, boundary, incoming_of
+                if window_end is not None:
+                    window_end()
     iterator = iterate()
     try:
         yield iterator
@@ -4936,7 +4945,7 @@ def prefetched_fused_boundary_windows(storage, batches, boundary_index, incoming
 
 @contextmanager
 def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None,
-                                then=None):
+                                then=None, window_end=None):
     """Preserve original batch order while leasing exact tensors in windows.
 
     A storage that stages its reads through PrismaBuild is asked, as soon as
@@ -4945,6 +4954,9 @@ def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None,
     names the pass read after this one, as ``(boundary_index, incoming)``:
     its first window is asked for from this pass's last window. Staging
     only: the order, the reads and the tensors are unchanged.
+
+    ``window_end`` is called inside each window after its last batch, as in
+    ``prefetched_fused_boundary_windows``.
     """
     def iterate():
         size = len(batches) if storage is None else storage.config["prefetch_batches"]
@@ -4956,6 +4968,8 @@ def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None,
                 for index in indices:
                     yield index, batches[index], batches[index].activations_cpu[boundary_index], (
                         None if incoming is None else incoming[index])
+                if window_end is not None:
+                    window_end()
             else:
                 references = _boundary_window_references(
                     batches, boundary_index, incoming, indices)
@@ -4977,6 +4991,8 @@ def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None,
                     for index in indices:
                         yield index, batches[index], storage.get(window, batches[index].activations_cpu[boundary_index]), (
                             None if incoming is None else storage.get(window, incoming[index]))
+                    if window_end is not None:
+                        window_end()
     iterator = iterate()
     try:
         yield iterator

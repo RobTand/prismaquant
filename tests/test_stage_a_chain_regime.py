@@ -155,8 +155,13 @@ def _legacy_render_free_probe_passes(
     return backwards
 
 
-def _legacy_roll_in_the_core(runner, *, batch_size, probe_fusion, **kwargs):
-    """The oracle as the current core calls it: the default regime only."""
+def _legacy_roll_in_the_core(runner, *, batch_size, probe_fusion, roll_may_keep=True,
+                             **kwargs):
+    """The oracle as the current core calls it: the default regime only.
+
+    ``roll_may_keep`` (PQ #1162) picks pinned or pageable rows on CUDA. This
+    fixture runs on the CPU, where the rows are the gradient's either way.
+    """
     assert (batch_size, probe_fusion) == (1, False)
     return _legacy_render_free_layer_roll(runner, **kwargs)
 

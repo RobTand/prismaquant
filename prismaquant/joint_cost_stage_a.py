@@ -1770,7 +1770,10 @@ def run_adjoint_capture_core(
                     then=((layer - 1, grad_outs if chain_regime["probe_fusion"]
                            else grad_outs[0]) if layer > chain_bottom else None),
                     batch_size=chain_regime["batch_size"],
-                    probe_fusion=chain_regime["probe_fusion"])
+                    probe_fusion=chain_regime["probe_fusion"],
+                    # ``roll`` writes each row and keeps none, so on CUDA it
+                    # takes each row's pinned buffer (PQ #1162).
+                    roll_may_keep=False)
                 seal_s = None
                 if attempt is not None:
                     sealed = time.time()
