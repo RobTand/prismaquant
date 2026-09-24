@@ -473,11 +473,14 @@ def _bound_generation(tmp_path):
 def test_rebind_stamps_a_byte_ceiling_difference(tmp_path, unset, monkeypatch, field, value):
     from prismaquant.cost_streaming import StreamedBoundaryArtifacts
 
-    config, session = _bound_generation(tmp_path)
+    config, session = _bound_generation(tmp_path / "dev")
     owner = StreamedBoundaryArtifacts({**config, field: value})
     owner.rebind(session, identity={"source_model": "fixture"}, n_probes=2)
     assert f"[DEV-MODE] seal boundary storage policy differs at {field}" in unset()
     assert owner.session == session
+    # The dev rebind republished the generation under its own ceilings, so
+    # certified mode is shown on a generation of its own.
+    config, session = _bound_generation(tmp_path / "certified")
     monkeypatch.setenv(ENV, "0")
     with pytest.raises(RuntimeError, match="another boundary storage policy"):
         StreamedBoundaryArtifacts({**config, field: value}).rebind(
