@@ -493,9 +493,12 @@ def cmd_child(args) -> int:
 
 #: Main-thread leaf classes, first match from the leaf up. The base tree
 #: copies out in ``_roll_rows``; the head tree waits on the copy's event in
-#: ``_deliver``.
+#: ``_deliver``. ``find_packed_sequence_indices`` line 754 (transformers
+#: 5.16.1, the campaign image) tests ``(...).all()`` of a CUDA tensor as a
+#: Python bool: a host sync on the device queue, so it is GPU wait too.
 CLASSES = (
-    ("gpu_wait", re.compile(r"^(_roll_rows|synchronize) ")),
+    ("gpu_wait", re.compile(r"^(_roll_rows|synchronize) |^find_packed_sequence_indices "
+                            r"\(transformers/masking_utils\.py:754\)")),
     ("backward", re.compile(r"^(backward|_engine_run_backward) \(torch/autograd/")),
     ("forward", re.compile(r"^isolated_layer ")),
     ("stage", re.compile(r"^(_stack_to_device|_stage_to_device) ")),
@@ -509,7 +512,7 @@ def _classify(frames):
     for frame in reversed(frames):
         name = frame.split(" (", 1)[0] + " "
         for label, pattern in CLASSES:
-            if pattern.match(frame if label == "backward" else name):
+            if pattern.match(frame if label in ("backward", "gpu_wait") else name):
                 return label
     return "other"
 
@@ -604,11 +607,20 @@ def cmd_analyze(args) -> int:
         rolls = sorted(r["roll_s"] for r in records)
         merged = Counter()
         samples = 0
+        seconds = defaultdict(list)
+        undersampled = []
         for r in records:
-            if r["profile"]:
-                samples += r["profile"]["samples"]
-                for label, share in r["profile"]["shares"].items():
-                    merged[label] += share * r["profile"]["samples"]
+            if not r["profile"]:
+                continue
+            expected = r["roll_s"] * args.py_spy_rate
+            if r["profile"]["samples"] < args.min_sample_fraction * expected:
+                # py-spy fell behind: its shares are not a fair sample.
+                undersampled.append((r["label"], r["profile"]["samples"], round(expected)))
+                continue
+            samples += r["profile"]["samples"]
+            for label, share in r["profile"]["shares"].items():
+                merged[label] += share * r["profile"]["samples"]
+                seconds[label].append(share * r["roll_s"])
         shares = {k: round(v / samples, 4) for k, v in merged.most_common()} if samples else {}
         outside = (round(1 - shares.get("backward", 0) - shares.get("gpu_wait", 0), 4)
                    if shares else None)
@@ -616,6 +628,9 @@ def cmd_analyze(args) -> int:
             "repeats": len(records), "roll_s": rolls,
             "roll_s_median": rolls[len(rolls) // 2],
             "main_thread_shares": shares, "outside_backward_and_gpu_wait": outside,
+            "main_thread_seconds_mean": {label: round(sum(v) / len(v), 2)
+                                         for label, v in seconds.items()},
+            "undersampled_profiles": undersampled,
             "memory": [r["memory"] for r in records],
             "windows": [(r["label"], r["roll_started_unix"], r["roll_ended_unix"])
                         for r in records],
@@ -701,6 +716,10 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("analyze")
     p.add_argument("--out", required=True)
+    p.add_argument("--py-spy-rate", type=int, default=100)
+    p.add_argument("--min-sample-fraction", type=float, default=0.5,
+                   help="a profile with fewer main-thread samples than this fraction "
+                        "of rate x roll_s is reported and left out of the shares")
     p.add_argument("--netdata", default=None,
                    help="the measured box's Netdata, e.g. http://sparky:19999")
     p.add_argument("--power-chart", default=(
