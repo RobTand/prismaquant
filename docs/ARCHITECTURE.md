@@ -14,7 +14,12 @@ source identity; the Stage B quantum record, head slice, resource and
 activation policies and spill bound; the join; both dispatchers, including the
 joint dispatcher's source coverage check, which reads a re-declared plan or
 prepared completion by its on-disk bytes (`readset_coverage.quantum_rows_gaps`);
-the catalog extension; and the projection-backend runtime qualification. In certified mode
+the catalog extension; and the projection-backend runtime qualification. In
+dev mode the joint dispatcher also names the plan and prepared files in each
+row's argv by the digests of their bytes on disk, so the quantum's own byte
+check passes on a re-declared file; certified mode names the record's
+digests, as before, and the quantum refuses a re-declared file
+(`dispatch_joint_quanta._argv_file_sha256`). In certified mode
 it raises the site's original exception, with the same type and message. In
 dev mode it prints one `[DEV-MODE]` line that names the first differing field
 and both values, and the run continues.

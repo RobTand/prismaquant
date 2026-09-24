@@ -964,6 +964,34 @@ def stage_a_spool_window_bytes(campaign: Mapping,
         max_entry_tensor_bytes=tensor_bytes)
 
 
+def _argv_file_sha256(campaign: Mapping, key: str, *, where: str,
+                      raw: bytes | None = None) -> str:
+    """The digest a row's argv names for the campaign's plan or prepared file.
+
+    The record seals the digest of each file it was cut from, and the worker
+    checks the file against the digest its argv names. In dev mode that
+    record digest is a run seal (PQ #1147): the argv names the file on disk
+    by the digest of its bytes, and ``seal_check`` prints the difference, so
+    a re-declared file runs instead of dispatching only to refuse. A file dev
+    mode cannot read keeps the record's digest, and the worker reports it.
+    """
+    from prismaquant.dev_mode import dev_mode_enabled, seal_check
+
+    sealed = str(campaign[f"{key}_sha256"])
+    # Certified mode names the record's digest, byte-identical to main; a
+    # re-declared file refuses at the worker (joint_cost_quantum.py:229).
+    if not dev_mode_enabled():
+        return sealed
+    if raw is None:
+        try:
+            raw = Path(campaign[f"{key}_path"]).read_bytes()
+        except OSError:
+            return sealed
+    actual = hashlib.sha256(raw).hexdigest()
+    seal_check(f"record {key}", sealed, actual, where=f"{where} argv")
+    return actual
+
+
 def _plan_output_root(campaign: Mapping) -> Path:
     """The plan's sealed output_root: the only root the stage-A capture will
     write into (its identity guard refuses any other --output-root), and the
@@ -1525,8 +1553,13 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         plan = json.loads(plan_raw)
     except (OSError, ValueError) as exc:
         raise DispatchRefused(f"quantum {quantum_id!r} source plan is unreadable: {exc}") from exc
-    plan_sha256 = str(campaign["plan_sha256"])
-    if plan.get("stage_b_resource_policy") is not None:
+    resource_bound = plan.get("stage_b_resource_policy") is not None
+    if not resource_bound:
+        plan_sha256 = _argv_file_sha256(campaign, "plan", raw=plan_raw,
+                                        where=f"quantum {quantum_id!r}")
+    prepared_sha256 = _argv_file_sha256(campaign, "prepared",
+                                        where=f"quantum {quantum_id!r}")
+    if resource_bound:
         # The record's plan digest is a run seal (PQ #1147): dev mode prints a
         # re-declared plan and dispatches under the plan on disk, by the
         # digest of the bytes just read. Certified mode refuses unless the
@@ -1580,7 +1613,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--plan", str(campaign["plan_path"]),
         "--plan-sha256", plan_sha256,
         "--prepared", str(campaign["prepared_path"]),
-        "--prepared-sha256", str(campaign["prepared_sha256"]),
+        "--prepared-sha256", prepared_sha256,
         "--adjoint-slice", str(slice_path),
         "--adjoint-slice-sha256", slice_sha256,
         "--data-manifest-sha256", staged_sha256,
@@ -1738,9 +1771,9 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     payload = [
         "python3", "-m", "prismaquant.joint_adjoint_capture",
         "--plan", str(campaign["plan_path"]),
-        "--plan-sha256", str(campaign["plan_sha256"]),
+        "--plan-sha256", _argv_file_sha256(campaign, "plan", where="stage-A"),
         "--prepared", str(campaign["prepared_path"]),
-        "--prepared-sha256", str(campaign["prepared_sha256"]),
+        "--prepared-sha256", _argv_file_sha256(campaign, "prepared", where="stage-A"),
         "--data-manifest-sha256", binding["data_manifest_sha256"],
         "--read-manifest-sha256", binding["read_manifest_sha256"],
         "--allowed-tiers", STAGED_ALLOWED_TIERS,

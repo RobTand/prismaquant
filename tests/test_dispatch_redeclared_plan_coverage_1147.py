@@ -70,8 +70,11 @@ def _campaign(tmp_path, *, resource_bound):
         f"model.layers.{layer}.mlp.gate_proj": {} for layer in _layers()}},
         sort_keys=True))
     parent = _tiny_parent()
+    # The records are cut from the fixture parent, whose layer entries sit
+    # under /fixture/model; the plan file names the real model the coverage
+    # check reads. The record binds the plan file by digest, not its model.
     records = jl.layer_quanta(
-        plan, json.loads(prepared_path.read_text()), parent,
+        {**plan, "model": "/fixture/model"}, json.loads(prepared_path.read_text()), parent,
         chunk_target_bytes=200, stride=2, output_root=root,
         plan_path=str(plan_path), plan_sha256=_sha(plan_path),
         prepared_path=str(prepared_path), prepared_sha256=_sha(prepared_path),
@@ -105,8 +108,9 @@ def _campaign(tmp_path, *, resource_bound):
     receipt_path.write_text(json.dumps(receipt))
     out = tmp_path / "out"
     out.mkdir()
-    return plan_path, ["--records", str(records_dir), "--output-root", str(out),
-                       "--adjoint-receipt", str(receipt_path), "--dry-run"]
+    return plan_path, prepared_path, [
+        "--records", str(records_dir), "--output-root", str(out),
+        "--adjoint-receipt", str(receipt_path), "--dry-run"]
 
 
 @pytest.fixture
@@ -132,7 +136,7 @@ def _main(dispatch, argv, capsys):
                          ids=["resource-plan", "plain-plan"])
 def test_dev_mode_dry_run_reads_a_re_declared_plan(
         tmp_path, dispatch, monkeypatch, capsys, resource_bound):
-    plan_path, argv = _campaign(tmp_path, resource_bound=resource_bound)
+    plan_path, prepared_path, argv = _campaign(tmp_path, resource_bound=resource_bound)
     # The fixture itself is covered and sealed: certified mode publishes it.
     code, _out, err = _main(dispatch, argv, capsys)
     assert code == 0, err
@@ -143,16 +147,26 @@ def test_dev_mode_dry_run_reads_a_re_declared_plan(
     code, out, err = _main(dispatch, argv, capsys)
     assert code == 0, err
     assert f"[DEV-MODE] seal campaign plan differs (readset coverage at {plan_path})" in out
+    # quantum_argv stamps the plan once: the resource-bound seal, or the
+    # record digest it replaces in a plain plan's argv.
     assert ("[DEV-MODE] seal resource-bound plan differs" in out) is resource_bound
+    assert ("[DEV-MODE] seal record plan differs (quantum 'layer-002' argv)"
+            in out) is not resource_bound
     rows = json.loads(out[out.index("{\n"):])["rows"]
     assert [row["quantum_id"] for row in rows] == ["layer-002"]
+    # The row names the files on disk by their digests, which is what the
+    # quantum's byte check (joint_cost_quantum.verify_quantum_identity)
+    # compares them with.
+    payload = rows[0]["argv"]
+    assert payload[payload.index("--plan-sha256") + 1] == _sha(plan_path)
+    assert payload[payload.index("--prepared-sha256") + 1] == _sha(prepared_path)
 
 
 @pytest.mark.parametrize("resource_bound", [True, False],
                          ids=["resource-plan", "plain-plan"])
 def test_certified_mode_refuses_a_re_declared_plan(
         tmp_path, dispatch, capsys, resource_bound):
-    plan_path, argv = _campaign(tmp_path, resource_bound=resource_bound)
+    plan_path, _prepared_path, argv = _campaign(tmp_path, resource_bound=resource_bound)
     plan_path.write_text(json.dumps(json.loads(plan_path.read_text()), indent=2))
     code, out, err = _main(dispatch, argv, capsys)
     assert code == dispatch.EXIT_PRECONDITION_REFUSED
@@ -161,7 +175,9 @@ def test_certified_mode_refuses_a_re_declared_plan(
         # The row's own seal refuses first, as before #1147.
         assert "resource-bound plan differs from its quantum seal" in err
     else:
-        # The coverage gap is the one main's check reported before #1147.
+        # quantum_argv names the record's digest in certified mode, as on
+        # main, and leaves the file to the quantum's byte check; the coverage
+        # gap is the one main's check reported before #1147.
         assert (f"campaign inputs: plan at {plan_path} does not hash to its "
                 "sealed digest") in err
         assert "1 source read(s) of 1 row(s) are not declared" in err
