@@ -284,6 +284,18 @@ def cmd_child(args) -> int:
 # host: all arms, interleaved
 # --------------------------------------------------------------------------
 
+def _cpu_parts() -> dict:
+    """The CPUs this action may run on, by core part (GB10: X925 0xd85, A725 0xd87)."""
+    parts, cpu = {}, None
+    for line in Path("/proc/cpuinfo").read_text().splitlines():
+        if line.startswith("processor"):
+            cpu = int(line.split(":")[1])
+        elif line.startswith("CPU part") and cpu is not None:
+            parts[cpu] = line.split(":")[1].strip()
+    allowed = sorted(os.sched_getaffinity(0))
+    return {"allowed": allowed, "parts": [parts.get(cpu) for cpu in allowed]}
+
+
 def _py_spy(explicit):
     for candidate in (explicit, shutil.which("py-spy"), "/usr/local/bin/py-spy",
                       str(Path.home() / ".local/bin/py-spy")):
@@ -329,7 +341,9 @@ def cmd_host(args) -> int:
                     handle.write(block)
             _drop_cache(ballast)
     print(MARKER + json.dumps({"py_spy": spy, "perf": perf, "arms": arms,
-                               "cgroup": str(_cgroup_dir())}), flush=True)
+                               "cgroup": str(_cgroup_dir()), "host": os.uname().nodename,
+                               "cpus": _cpu_parts(), "loadavg": os.getloadavg()}),
+          flush=True)
     records = []
     for repeat in range(args.repeats):
         order = arms[repeat % len(arms):] + arms[:repeat % len(arms)]
@@ -380,6 +394,13 @@ def cmd_host(args) -> int:
                 _drop_cache(ballast)
             records.append(record)
             print(MARKER + json.dumps(_summary(record)), flush=True)
+            for key in ("perf_top", "pyspy_main_leaf"):
+                if key in record:
+                    print(MARKER + json.dumps({"arm": arm, "repeat": repeat,
+                                               key: record[key]}), flush=True)
+            if proc.returncode:
+                print(MARKER + json.dumps({"arm": arm, "repeat": repeat,
+                                           "stderr_tail": record["stderr_tail"]}), flush=True)
     (out / "records.json").write_text(json.dumps(records, indent=1, sort_keys=True))
     print(MARKER + json.dumps({"analysis": _analyze(records)}, indent=1), flush=True)
     return 0 if all(record["returncode"] == 0 for record in records) else 1
