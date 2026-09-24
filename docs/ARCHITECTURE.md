@@ -1,5 +1,23 @@
 # PrismaQuant Architecture
 
+The chain roll's host side overlaps the GPU (2026-09-24,
+`ws-rd/1162-chain-roll-overlap`, PQ #1162). `render_free_layer_roll` used
+to copy each backward's input cotangent to the host with a blocking copy,
+write it through `roll`, and stage the next operand with another blocking
+copy, all while the GPU waited. Now `_RollPipeline` queues the copy of each
+backward's cotangent with no host wait and rolls the previous backward's
+rows while the GPU runs the current one. Each read window rolls its last
+rows before it closes (the iterators' `window_end` hook), so `roll` makes
+the same calls in the same order and no later read or staging names an
+unrolled row. Everything stays on the compute thread. The next operand is
+staged through a pinned buffer (`_stage_to_device`). On CUDA, a `roll` that
+keeps no row (`roll_may_keep=False`, Stage A's) receives each row in its own
+pinned buffer, and the exact writer serializes a compact host tensor without
+its second copy (`_is_compact_host_tensor`). Every written byte and digest
+is unchanged. Gates: `tests/test_chain_roll_overlap.py`,
+`tests/test_stage_a_chain_regime.py`, `tests/test_stage_a_chain_split.py`.
+No format, default, stage or ship gate changes.
+
 Sealing is off by default (2026-09-24, `ws-1147/sealing-off`, PQ #1147).
 Rob, 2026-09-24: "All sealing should be disabled until further notice."
 `PRISMAQUANT_DEV_MODE` now selects dev mode unless it is exactly `0`: unset,
@@ -1889,8 +1907,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `fix/1176-devmode-reference-projection`.
+As of: 2026-09-24 · `ws-rd/1162-chain-roll-overlap`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-rd/1162-chain-roll-overlap`) for **the chain
+roll's host side overlapping the GPU** (PQ #1162): cotangent copies with no
+host wait, `roll` one backward late with a drain at every window's end, and
+pinned staging. See the entry at the top. No format, default, stage or ship
+gate changes.
 
 Re-stamped (2026-09-24, `fix/1176-devmode-reference-projection`) for the
 **qualified projection shapes as a seal** (PQ #1176): in dev mode a matrix
@@ -22775,6 +22799,20 @@ share is what remains. The groups the next window of the same pass reads
 again stay staged across the exit (`retain_produced_reads`), and the
 read-ahead gives up groups by the layer that reads them next
 (`_produced_sample_major_surrender_order`). Probe-major runs are unchanged.
+
+**Host overlap (#1162).** In every regime, `roll` runs one backward late on
+the compute thread (`_RollPipeline`). Each backward's input cotangent is
+copied to the host with `non_blocking=True` on the compute stream, and the
+previous backward's rows are rolled while the current one runs. A read
+window's iterator calls `window_end` inside the window after its last item,
+which rolls the rows still waiting, so the next window and the next layer's
+staged first window name only rolled entries. A failure raises where it
+happens; the row still waiting then is never rolled. `roll` stays on the
+compute thread because it writes through the boundary owner, whose
+bookkeeping belongs to that thread. A caller that counts written rows passes
+`on_durable`: it is called with `(layer, probe, batch)` right after `roll`
+returns for that row, never for a row whose `roll` raised (PQ #1165). The end
+of a backward is not that point, since the row rolls one backward later.
 
 Measured claims about the regime's speed and energy live in the PR and the
 PQ #997 record, not here; this section states only the contract.

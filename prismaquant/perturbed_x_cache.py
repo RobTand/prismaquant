@@ -905,6 +905,25 @@ def _activation_file_signature(path):
     return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
 
 
+def _is_compact_host_tensor(tensor, nbytes):
+    """Whether ``tensor`` is exactly one standard-strided host storage.
+
+    Such a tensor serializes to the bytes its compact copy would: the same
+    storage bytes, offset 0, and the strides ``contiguous_format`` gives,
+    including on size-1 dimensions, where ``is_contiguous`` ignores them.
+    """
+    if (tensor.device.type != "cpu" or tensor.storage_offset() != 0
+            or tensor.is_conj() or tensor.is_neg()
+            or tensor.untyped_storage().nbytes() != nbytes):
+        return False
+    expected = 1
+    for size, stride in zip(reversed(tensor.shape), reversed(tensor.stride())):
+        if stride != expected:
+            return False
+        expected *= size
+    return True
+
+
 def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
                                        max_tensor_bytes, max_file_bytes,
                                        release_file_pages=True, preallocate=False):
@@ -912,7 +931,10 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
 
     The caller reserves the one compact CPU copy before entering. No dtype,
     row selection or shape change is allowed. Compact copying also prevents a
-    narrow view from serializing its entire source backing storage.
+    narrow view from serializing its entire source backing storage. A tensor
+    that already is one compact host storage (``_is_compact_host_tensor``)
+    is serialized as it is: the copy would be the same bytes
+    (RobTand/prismaquant#1162).
     """
     if not isinstance(inputs, torch.Tensor) or inputs.layout != torch.strided or inputs.is_meta:
         raise TypeError("exact activation entry requires a materialized strided Tensor")
@@ -928,8 +950,9 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
     compact = None
     digest = None
     try:
-        compact = inputs.detach().to(device="cpu", copy=True,
-            memory_format=torch.contiguous_format)
+        compact = (inputs.detach() if _is_compact_host_tensor(inputs, nbytes)
+                   else inputs.detach().to(device="cpu", copy=True,
+                                           memory_format=torch.contiguous_format))
         digest = SerializedEntryDigest(max_bytes=max_file_bytes if preallocate else None)
         path = write_activation_cache_entry(cache_dir, name, compact,
             source="exact_activation", durable=True, exact=metadata,

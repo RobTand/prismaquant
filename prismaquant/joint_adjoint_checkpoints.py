@@ -1929,6 +1929,7 @@ def render_free_layer_roll(
     runner, *, storage, batches, layer, cotangents, n_probes,
     incoming_entries, incoming_tensor, roll, min_free_gib: float = 0.0,
     then=None, batch_size: int = 1, probe_fusion: bool = False,
+    roll_may_keep: bool = True, on_durable=None,
 ) -> int:
     """Roll the cotangent through one layer with no renders and no projection.
 
@@ -1978,6 +1979,25 @@ def render_free_layer_roll(
     when fused. Its first window is staged during the roll's last window.
     Staging only. Returns the number of per-sample cotangents rolled, which
     is the number of backwards at B = 1.
+
+    ``roll`` runs one backward late, on this thread (``_RollPipeline``,
+    RobTand/prismaquant#1162): each backward's input cotangent is copied out
+    without a host wait, and the previous backward's rows are rolled while
+    this one runs on the GPU. Every read window rolls its last rows before
+    it closes, so ``roll`` sees the same calls in the same order, and a read
+    or staging that follows names only rolled rows. ``roll_may_keep=False``
+    says ``roll`` keeps no row after it returns; on CUDA it then receives
+    each row in its own pinned buffer instead of a pageable copy.
+
+    ``on_durable(key)`` is called once per row, right after ``roll`` has
+    returned for it, with ``key = (layer, probe_index, batch_index)`` in
+    ``roll``'s own coordinates (RobTand/prismaquant#1165). Because ``roll``
+    runs one backward late, this, not the end of a backward, is when the row
+    exists: Stage A's exact entry has been renamed from ``.pt.tmp`` into
+    place. The row is exactly as durable as ``roll`` made it, and a ``roll``
+    that only stores the row in memory reports a row in memory. A row whose
+    ``roll`` raised, and a row still waiting when the roll fails, is never
+    reported. ``None`` (the default) reports nothing.
     """
     regime = normalize_chain_regime(batch_size, probe_fusion)
     # Staging only, never order: every probe pass below re-reads this
@@ -1991,22 +2011,38 @@ def render_free_layer_roll(
     stage_ahead = getattr(storage, "stage_produced_boundary_ahead", None)
     if stage_ahead is not None and int(layer) > 0:
         stage_ahead(int(layer) - 1)
-    if regime["probe_fusion"]:
-        return _render_free_fused_passes(
-            runner, storage=storage, batches=batches, layer=layer,
-            cotangents=cotangents, n_probes=n_probes,
-            incoming_entries=incoming_entries,
-            incoming_tensor=incoming_tensor, roll=roll,
-            min_free_gib=min_free_gib, then=then,
-            batch_size=regime["batch_size"])
-    with (retain(int(layer)) if retain is not None else nullcontext()):
-        backwards = _render_free_probe_passes(
-            runner, storage=storage, batches=batches, layer=layer,
-            cotangents=cotangents, n_probes=n_probes,
-            incoming_entries=incoming_entries,
-            incoming_tensor=incoming_tensor, roll=roll,
-            min_free_gib=min_free_gib, then=then,
-            batch_size=regime["batch_size"])
+    pipeline = _RollPipeline(
+        roll, device=runner.device, roll_may_keep=roll_may_keep,
+        on_durable=(None if on_durable is None else
+                    lambda batch, probe: on_durable((int(layer), int(probe), int(batch)))))
+    try:
+        if regime["probe_fusion"]:
+            backwards = _render_free_fused_passes(
+                runner, storage=storage, batches=batches, layer=layer,
+                cotangents=cotangents, n_probes=n_probes,
+                incoming_entries=incoming_entries,
+                incoming_tensor=incoming_tensor, pipeline=pipeline,
+                min_free_gib=min_free_gib, then=then,
+                batch_size=regime["batch_size"])
+        else:
+            with (retain(int(layer)) if retain is not None else nullcontext()):
+                backwards = _render_free_probe_passes(
+                    runner, storage=storage, batches=batches, layer=layer,
+                    cotangents=cotangents, n_probes=n_probes,
+                    incoming_entries=incoming_entries,
+                    incoming_tensor=incoming_tensor, pipeline=pipeline,
+                    min_free_gib=min_free_gib, then=then,
+                    batch_size=regime["batch_size"])
+        # Every window drained its own rows; nothing waits here.
+        pipeline.drain()
+    except BaseException as failure:
+        # The failure that stopped the roll is the one raised. The row still
+        # waiting is never rolled; its copy is allowed to land first.
+        try:
+            pipeline.abandon()
+        except BaseException as cleanup:
+            failure.add_note(f"chain roll cleanup also failed: {cleanup!r}")
+        raise
     return backwards
 
 
@@ -2082,19 +2118,128 @@ def _chain_group_batch(runner, batches, indices, cache):
     return group
 
 
-def _roll_rows(roll, gradient, indices, probe_index):
-    """Hand each sample's input cotangent to ``roll``, batch ascending."""
-    cpu = gradient.detach().to("cpu")
-    if len(indices) == 1:
-        roll(cpu, indices[0], probe_index)
-        return
-    for row, index in enumerate(indices):
-        roll(cpu[row:row + 1], index, probe_index)
+def _stage_to_device(tensors, *, device, dtype=None):
+    """``_stack_to_device`` without a host wait on CUDA (RobTand/prismaquant#1162).
+
+    A blocking copy from pageable memory synchronizes the stream, so the
+    host waited for the running backward before it could stage the next
+    operand. Staged through a pinned buffer and copied with
+    ``non_blocking=True``, the copy queues behind that backward on the same
+    stream instead. The bytes are the same: the same concatenation of the
+    same contiguous tensors, copied without a conversion. A dtype change, a
+    non-contiguous or non-host tensor, and every non-CUDA device take the
+    blocking path unchanged, so any conversion runs where it always ran.
+    """
+    target = torch.device(device)
+    source = tensors[0].dtype
+    if (target.type != "cuda" or (dtype is not None and dtype != source)
+            or any(tensor.device.type != "cpu" or tensor.dtype != source
+                   or not tensor.is_contiguous() for tensor in tensors)):
+        return _stack_to_device(tensors, device=device, dtype=dtype)
+    if len(tensors) == 1:
+        staged = torch.empty(tensors[0].shape, dtype=source, pin_memory=True)
+        staged.copy_(tensors[0])
+    else:
+        rows = sum(int(tensor.shape[0]) for tensor in tensors)
+        staged = torch.empty((rows, *tensors[0].shape[1:]), dtype=source,
+                             pin_memory=True)
+        torch.cat(tensors, dim=0, out=staged)
+    # The caching host allocator records this copy on the stream and does not
+    # reuse the pinned block until it lands, so ``staged`` may be dropped now.
+    return staged.to(target, non_blocking=True)
+
+
+class _RollPipeline:
+    """Hand each backward's input cotangent to ``roll`` one backward late.
+
+    ``submit`` queues the copy of this backward's gradient to host memory
+    with no host wait, then rolls the previous backward's rows, whose copy
+    was queued ahead of this backward: the host writes them while the GPU
+    runs this one (RobTand/prismaquant#1162). ``drain`` rolls the rows still
+    waiting; the read windows call it inside each window after its last
+    item, so every row is rolled before a later window, or the next layer's
+    staging, names it. At most one backward's rows wait.
+
+    Everything runs on the calling thread. ``roll`` writes through a
+    boundary owner whose bookkeeping belongs to the compute thread (its
+    stager contract), and a failure raises where it happens. The calls, their
+    order and their bytes are the ones the roll made before.
+
+    On CUDA each row is copied into its own pinned buffer on the compute
+    stream, so the gradient's block is reused only after the copy, in stream
+    order. A row is its own storage, which the exact writer serializes
+    without a second copy. A ``roll`` that may keep a row receives a pageable
+    copy of it instead, so a plane kept in memory never holds pinned pages.
+    Off CUDA the rows are the gradient's, exactly as before.
+
+    ``on_durable(batch_index, probe_index)``, when given, is called after
+    ``roll`` returns for each row, and never for a row whose ``roll`` raised.
+    """
+
+    def __init__(self, roll, *, device, roll_may_keep=True, on_durable=None):
+        self._roll = roll
+        self._on_durable = on_durable
+        self._device = torch.device(device)
+        self._cuda = self._device.type == "cuda"
+        self._keep = bool(roll_may_keep)
+        self._waiting = None
+
+    def submit(self, gradient, indices, probe_index):
+        step = self._copy_out(gradient.detach(), list(indices), int(probe_index))
+        waiting, self._waiting = self._waiting, step
+        if waiting is not None:
+            self._deliver(waiting)
+
+    def drain(self):
+        waiting, self._waiting = self._waiting, None
+        if waiting is not None:
+            self._deliver(waiting)
+
+    def abandon(self):
+        """Drop the waiting rows unrolled, once their copy has landed."""
+        waiting, self._waiting = self._waiting, None
+        if waiting is not None and waiting[0] is not None:
+            waiting[0].synchronize()
+
+    def _copy_out(self, gradient, indices, probe_index):
+        if not self._cuda:
+            cpu = gradient.to("cpu")
+            rows = ([cpu] if len(indices) == 1
+                    else [cpu[row:row + 1] for row in range(len(indices))])
+            return None, rows, indices, probe_index
+        rows = []
+        for row in range(len(indices)):
+            source = gradient if len(indices) == 1 else gradient[row:row + 1]
+            host = torch.empty(source.shape, dtype=source.dtype, pin_memory=True)
+            host.copy_(source, non_blocking=True)
+            rows.append(host)
+        # The device gradient may be freed before its copy lands: the CUDA
+        # caching allocator reuses its block only in this stream's order,
+        # after the queued copy. The pinned rows are held until delivery.
+        copied = torch.cuda.Event()
+        copied.record(torch.cuda.current_stream(self._device))
+        return copied, rows, indices, probe_index
+
+    def _deliver(self, step):
+        copied, rows, indices, probe_index = step
+        if copied is not None:
+            copied.synchronize()
+        for position, index in enumerate(indices):
+            row = rows[position]
+            if copied is not None and self._keep:
+                kept = torch.empty(row.shape, dtype=row.dtype)
+                kept.copy_(row)
+                row = kept
+            rows[position] = None
+            self._roll(row, index, probe_index)
+            row = None
+            if self._on_durable is not None:
+                self._on_durable(index, probe_index)
 
 
 def _render_free_probe_passes(
     runner, *, storage, batches, layer, cotangents, n_probes,
-    incoming_entries, incoming_tensor, roll, min_free_gib, then=None,
+    incoming_entries, incoming_tensor, pipeline, min_free_gib, then=None,
     batch_size=1,
 ) -> int:
     """The probe passes of :func:`render_free_layer_roll`, probe-major.
@@ -2122,14 +2267,14 @@ def _render_free_probe_passes(
                          else incoming_entries[probe_index + 1])
         with prefetched_boundary_batches(
                 storage, batches, int(layer), incoming=entries,
-                then=following) as windows:
+                then=following, window_end=pipeline.drain) as windows:
             pending = []
             for item in windows:
                 if batch_size == 1:
                     backwards += _roll_one(
                         runner, item, layer=layer, probe_index=probe_index,
                         cotangents=cotangents, entries=entries,
-                        incoming_tensor=incoming_tensor, roll=roll,
+                        incoming_tensor=incoming_tensor, pipeline=pipeline,
                         min_free_gib=min_free_gib)
                     # The window's tensors are dropped here, as the
                     # pre-#997 loop dropped them in its ``finally``.
@@ -2144,14 +2289,14 @@ def _render_free_probe_passes(
                         runner, group, batches=batches, layer=layer,
                         probe_index=probe_index, cotangents=cotangents,
                         entries=entries, incoming_tensor=incoming_tensor,
-                        roll=roll, min_free_gib=min_free_gib, cache=groups)
+                        pipeline=pipeline, min_free_gib=min_free_gib, cache=groups)
                 finally:
                     group = None
     return backwards
 
 
 def _roll_one(runner, item, *, layer, probe_index, cotangents, entries,
-              incoming_tensor, roll, min_free_gib) -> int:
+              incoming_tensor, pipeline, min_free_gib) -> int:
     """One (probe, batch) backward: the roll as it ran before #997."""
     profile = runner.profile
     device, dtype = runner.device, runner.dtype
@@ -2162,9 +2307,9 @@ def _roll_one(runner, item, *, layer, probe_index, cotangents, entries,
         saved = _chain_rng_state(device)
         if entries is None:
             incoming_cpu = incoming_tensor(probe_index, batch_index)
-        incoming_grad = incoming_cpu.to(device)
-        x_in = boundary_cpu.to(
-            device=device, dtype=dtype).detach().requires_grad_(True)
+        incoming_grad = _stage_to_device([incoming_cpu], device=device)
+        x_in = _stage_to_device(
+            [boundary_cpu], device=device, dtype=dtype).detach().requires_grad_(True)
         isolated = profile.isolated_layer_pass_state(
             batch.shared_pass_state, runner.layers[layer])
         isolated = owner.graft(isolated)
@@ -2176,7 +2321,7 @@ def _roll_one(runner, item, *, layer, probe_index, cotangents, entries,
         if x_in.grad is None:
             raise RuntimeError(
                 f"render-free chain layer {layer} produced no input cotangent")
-        roll(x_in.grad.detach().to("cpu"), batch_index, probe_index)
+        pipeline.submit(x_in.grad, [batch_index], probe_index)
         return 1
     finally:
         item = boundary_cpu = incoming_cpu = None
@@ -2184,13 +2329,14 @@ def _roll_one(runner, item, *, layer, probe_index, cotangents, entries,
 
 
 def _roll_group(runner, group, *, batches, layer, probe_index, cotangents,
-                entries, incoming_tensor, roll, min_free_gib, cache) -> int:
+                entries, incoming_tensor, pipeline, min_free_gib, cache) -> int:
     """One probe's backward for a batch group (B > 1), split back per batch."""
     if len(group) == 1:
         return _roll_one(
             runner, group[0], layer=layer, probe_index=probe_index,
             cotangents=cotangents, entries=entries,
-            incoming_tensor=incoming_tensor, roll=roll, min_free_gib=min_free_gib)
+            incoming_tensor=incoming_tensor, pipeline=pipeline,
+            min_free_gib=min_free_gib)
     device, dtype = runner.device, runner.dtype
     indices = [item[0] for item in group]
     _require_per_sample_state(
@@ -2201,9 +2347,9 @@ def _roll_group(runner, group, *, batches, layer, probe_index, cotangents,
         saved = _chain_rng_state(device)
         incoming = [incoming_tensor(probe_index, index) if entries is None else item[3]
                     for index, item in zip(indices, group)]
-        incoming_grad = _stack_to_device(incoming, device=device)
+        incoming_grad = _stage_to_device(incoming, device=device)
         incoming = None
-        x_in = _stack_to_device([item[2] for item in group], device=device,
+        x_in = _stage_to_device([item[2] for item in group], device=device,
                                 dtype=dtype).detach().requires_grad_(True)
         batch = _chain_group_batch(runner, batches, indices, cache)
         out = runner.isolated_layer(batch, layer, x_in, pass_state={})
@@ -2212,7 +2358,7 @@ def _roll_group(runner, group, *, batches, layer, probe_index, cotangents,
         if x_in.grad is None:
             raise RuntimeError(
                 f"render-free chain layer {layer} produced no input cotangent")
-        _roll_rows(roll, x_in.grad, indices, probe_index)
+        pipeline.submit(x_in.grad, indices, probe_index)
         return len(indices)
     finally:
         group = incoming = None
@@ -2221,7 +2367,7 @@ def _roll_group(runner, group, *, batches, layer, probe_index, cotangents,
 
 def _render_free_fused_passes(
     runner, *, storage, batches, layer, cotangents, n_probes,
-    incoming_entries, incoming_tensor, roll, min_free_gib, then=None,
+    incoming_entries, incoming_tensor, pipeline, min_free_gib, then=None,
     batch_size=1,
 ) -> int:
     """The fused roll: one forward per batch group, one backward per probe.
@@ -2245,7 +2391,8 @@ def _render_free_fused_passes(
     backwards = 0
     with prefetched_fused_boundary_windows(
             storage, batches, int(layer), incoming=incoming_entries,
-            window_batches=window, then=then) as windows:
+            window_batches=window, then=then,
+            window_end=pipeline.drain) as windows:
         for indices, boundary_of, incoming_of in windows:
             for start in range(0, len(indices), batch_size):
                 members = list(indices[start:start + batch_size])
@@ -2258,7 +2405,7 @@ def _render_free_fused_passes(
                     _chain_free_floor(min_free_gib, layer, "fused probes")
                     saved = _chain_rng_state(device)
                     boundary = [boundary_of(index) for index in members]
-                    x_in = _stack_to_device(boundary, device=device,
+                    x_in = _stage_to_device(boundary, device=device,
                                             dtype=dtype).detach().requires_grad_(True)
                     boundary = None
                     batch = (batches[members[0]] if len(members) == 1
@@ -2269,7 +2416,7 @@ def _render_free_fused_passes(
                                     if incoming_entries is None
                                     else incoming_of(probe_index, index)
                                     for index in members]
-                        incoming_grad = _stack_to_device(incoming, device=device)
+                        incoming_grad = _stage_to_device(incoming, device=device)
                         incoming = None
                         x_in.grad = None
                         torch.autograd.backward(
@@ -2279,7 +2426,7 @@ def _render_free_fused_passes(
                             raise RuntimeError(
                                 f"render-free chain layer {layer} produced no "
                                 "input cotangent")
-                        _roll_rows(roll, x_in.grad, members, probe_index)
+                        pipeline.submit(x_in.grad, members, probe_index)
                         incoming_grad = None
                         backwards += len(members)
                     _chain_rng_fence(saved, device)
