@@ -22,10 +22,18 @@ Two fixtures, each written to ``<directory>``:
 * ``capture.json``: ``test_stage_a_chain_resume``'s five-layer Stage A
   capture at stride 2 through ``run_adjoint_capture_core``: the sha256 of
   every file under its root by relative path, with JSON documents hashed
-  after dropping their ``telemetry`` (timings, not bytes the run decides).
+  after dropping their ``telemetry`` (timings, not bytes the run decides)
+  and with the run root written as ``<run>``, so a path is compared relative
+  to the run root and not to pytest's temporary directory.
   That covers every entry, checkpoint manifest, the chain state and the
   receipt. The capture runs twice into one path and says whether the two
   agree, so a difference between base and head is not run-to-run noise.
+  The first run's tree is kept as ``capture-run/``, so ``compare`` can name
+  the fields in which a JSON document differs. A checkpoint manifest's
+  ``cotangent_sha256`` and the chain state's seal hash records that hold
+  absolute entry paths, so run the base and the head with the same
+  ``PQ_IO_BENCH_RUN_ROOT``: the capture then runs at that one path and those
+  digests compare byte for byte.
 
 The session id is pinned in both, so a file's bytes are comparable across
 runs. Compare the two runs' manifests with ``compare`` below.
@@ -57,6 +65,8 @@ from test_stage_a_produced_boundary_chain import (  # noqa: F401
 pytestmark = pytest.mark.own_process
 
 OUT_ENV = "PQ_IO_BENCH_OUT"
+#: Where the capture runs; the same path at the base and the head.
+RUN_ROOT_ENV = "PQ_IO_BENCH_RUN_ROOT"
 GROUP_SIZE = chain.GROUP_SIZE
 N_BATCHES = 4 * GROUP_SIZE
 N_PROBES = 2
@@ -320,9 +330,14 @@ def _capture_tree(root: Path):
             except ValueError:
                 pass
             else:
-                raw = json.dumps(_without_telemetry(document), sort_keys=True).encode()
+                raw = _relative_json(_without_telemetry(document), root).encode()
         tree[str(path.relative_to(root))] = hashlib.sha256(raw).hexdigest()
     return tree
+
+
+def _relative_json(document, root) -> str:
+    """A JSON document's text with the run root written as ``<run>``."""
+    return json.dumps(document, sort_keys=True).replace(str(root), "<run>")
 
 
 def test_capture_manifest(tmp_path, monkeypatch):
@@ -331,15 +346,18 @@ def test_capture_manifest(tmp_path, monkeypatch):
     out = _out()
     from prismaquant.staged_tier_policy import deactivate_staged_tier_policy_for_tests
     deactivate_staged_tier_policy_for_tests()
-    root = tmp_path / "run"
+    root = Path(os.environ.get(RUN_ROOT_ENV) or tmp_path / "run")
     trees = []
     for _attempt in range(2):
         if root.exists():
             shutil.rmtree(root)
         capture._run(root, monkeypatch)
         trees.append(_capture_tree(root))
+        if not (out / "capture-run").exists():
+            shutil.copytree(root, out / "capture-run")
     record = {"schema": "pq1128.bench.capture.v1",
               "repeat_identical": trees[0] == trees[1],
+              "root": str(root),
               "files": trees[0]}
     (out / "capture.json").write_text(json.dumps(record, indent=1, sort_keys=True))
 
@@ -356,4 +374,43 @@ def compare(base: Path, head: Path) -> dict:
             b = right.get("manifest", right)[key]
             if a != b:
                 differences[f"{name}:{key}"] = {"base": len(a), "head": len(b)}
+    left = json.loads((base / "capture.json").read_text())
+    right = json.loads((head / "capture.json").read_text())
+
+    def document(run, record, relative):
+        value = _without_telemetry(json.loads((run / "capture-run" / relative).read_text()))
+        return json.loads(_relative_json(value, record["root"]))
+
+    for relative in sorted(set(left["files"]) | set(right["files"])):
+        if left["files"].get(relative) == right["files"].get(relative):
+            continue
+        row = differences.setdefault("capture.json:files:" + relative, {})
+        if (relative.endswith(".json") and relative in left["files"]
+                and relative in right["files"]):
+            row["fields"] = _json_differences(document(base, left, relative),
+                                              document(head, right, relative))
     return differences
+
+
+def _json_differences(left, right, where=""):
+    """The dotted paths at which two JSON values differ, with both values."""
+    if isinstance(left, dict) and isinstance(right, dict):
+        found = {}
+        for key in sorted(set(left) | set(right)):
+            found.update(_json_differences(left.get(key), right.get(key),
+                                           f"{where}.{key}" if where else str(key)))
+        return found
+    if (isinstance(left, list) and isinstance(right, list)
+            and len(left) == len(right)):
+        found = {}
+        for index, (a, b) in enumerate(zip(left, right)):
+            found.update(_json_differences(a, b, f"{where}[{index}]"))
+        return found
+    return {} if left == right else {where: {"base": left, "head": right}}
+
+
+if __name__ == "__main__":
+    import sys
+
+    print(json.dumps(compare(Path(sys.argv[1]), Path(sys.argv[2])), indent=1,
+                     sort_keys=True))
