@@ -157,21 +157,32 @@ def replay_regime_of(arithmetic: Mapping) -> dict:
     return regime
 
 
-def handoff_regime_refusal(regime) -> str | None:
+def handoff_regime_refusal(regime, *, chain_batch_size: int) -> str | None:
     """Why a band-serial producer (PQ #996) cannot run ``regime``, or ``None``.
 
     A producer hands off the boundary plane its capture pass wrote, and the
-    handoff must equal the plane the consumer's chain rebuild ends on, which
-    a batch-1 backward writes. A capture batch above 1 writes the plane
-    through a batched backward. The accumulation mode is admitted: it changes
-    only the statistics, never the plane.
+    handoff must equal the plane the consumer's chain rebuild ends on. The
+    chain rebuild runs the Stage A slice's chain regime (PQ #997), whose
+    ``batch_size`` sets the GEMM shapes and so the rounding; the capture pass
+    writes the plane through one backward per ``capture_batch`` stored
+    batches, grouped as the chain groups them (``joint_cost_quantum.
+    capture_group``, ``joint_adjoint_checkpoints._roll_group``). The two
+    planes are the same arithmetic exactly when the two batch sizes are
+    equal, so a producer is admitted at the chain's batch size and refused
+    at any other. The accumulation mode is admitted: it changes only the
+    statistics, never the plane.
     """
     batch = normalize_replay_regime(regime)["capture_batch"]
-    if batch == 1:
+    if type(chain_batch_size) is not int or chain_batch_size < 1:
+        raise ReplayRegimeRefused(
+            f"chain batch size must be a positive integer, got {chain_batch_size!r}")
+    if batch == chain_batch_size:
         return None
-    return (f"capture_batch={batch} writes the boundary plane through a batched "
-            "backward, and a band-serial handoff must equal the batch-1 plane the "
-            "consumer's chain rebuild ends on; emit no handoff, or capture at batch 1")
+    return (f"capture_batch={batch} writes the boundary plane through one backward "
+            f"per {batch} stored batches, and the consumer's chain rebuild runs the "
+            f"Stage A chain regime at batch size {chain_batch_size}; a band-serial "
+            "handoff must equal the plane that rebuild ends on, so emit no handoff, "
+            f"or capture at batch {chain_batch_size}")
 
 
 def replay_regime_from_environment(environ: Mapping) -> dict | None:

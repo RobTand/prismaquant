@@ -1471,18 +1471,23 @@ def test_the_bf16_reduction_setting_is_validated_and_sealed_in_the_spec(
     assert sealed['env'].get(BF16_REDUCTION_ENV) == value
 
 
-@pytest.mark.parametrize('regime,refused', [
-    ('capture_batch=2', True),
-    ('capture_batch=2,accumulation=operator_gemm,chunk_rows=65536', True),
-    ('accumulation=operator_gemm,chunk_rows=65536', False),
+@pytest.mark.parametrize('regime,chain_batch_size,refused', [
+    ('capture_batch=2', 1, True),
+    ('capture_batch=2,accumulation=operator_gemm,chunk_rows=65536', 1, True),
+    ('accumulation=operator_gemm,chunk_rows=65536', 1, False),
+    # The campaign regime under R13's batch-4 chain regime, and off it.
+    ('capture_batch=4,accumulation=operator_gemm,chunk_rows=65536', 4, False),
+    ('capture_batch=4,accumulation=operator_gemm,chunk_rows=65536', 1, True),
+    ('accumulation=operator_gemm,chunk_rows=65536', 4, True),
 ])
-def test_a_band_serial_producer_refuses_a_batched_capture_at_dispatch(
-        tmp_path, regime, refused):
-    """A #996 producer row runs only a batch-1 capture (#994).
+def test_a_band_serial_producer_captures_at_the_chains_batch_size_at_dispatch(
+        tmp_path, regime, chain_batch_size, refused):
+    """A #996 producer row captures at its slice's chain batch size (#994, #997).
 
     The row's payload carries ``--emit-adjoint-handoff``; the one spec every
-    row shares carries the regime. The same spec wraps a row that emits no
-    handoff.
+    row shares carries the regime, and the row names the batch size its
+    slice rolls the chain at. The same spec wraps a row that emits no
+    handoff, at any chain batch size.
     """
     import dispatch_joint_quanta as dispatch
     from prismaquant.joint_replay_regime import REPLAY_REGIME_ENV
@@ -1498,10 +1503,17 @@ def test_a_band_serial_producer_refuses_a_batched_capture_at_dispatch(
     argv, _image = dispatch._container_wrap(path, payload, progress=head_only)
     assert argv[-len(payload):] == payload
     producer = [*payload, '--emit-adjoint-handoff']
+    # A producer row that names no chain batch size refuses outright.
+    with pytest.raises(dispatch.DispatchRefused, match='names the chain batch size'):
+        dispatch._container_wrap(path, producer, progress=head_only)
     if refused:
         with pytest.raises(dispatch.DispatchRefused,
-                           match='band-serial handoff must equal the batch-1 plane'):
-            dispatch._container_wrap(path, producer, progress=head_only)
+                           match=f'batch size {chain_batch_size}; a band-serial '
+                                 'handoff must equal the plane that rebuild ends on'):
+            dispatch._container_wrap(path, producer, progress=head_only,
+                                     handoff_chain_batch_size=chain_batch_size)
     else:
-        argv, _image = dispatch._container_wrap(path, producer, progress=head_only)
+        argv, _image = dispatch._container_wrap(
+            path, producer, progress=head_only,
+            handoff_chain_batch_size=chain_batch_size)
         assert argv[-len(producer):] == producer

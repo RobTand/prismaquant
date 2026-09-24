@@ -184,8 +184,11 @@ def campaign1(tmp_path_factory):
 
 def _emitter(record, adjoint_slice, execution, regime):
     """A producer's emitter, built as ``run_layer_quantum`` builds it."""
+    from prismaquant.joint_replay_regime import normalize_replay_regime
+
     return HandoffEmitter(record=record, adjoint_slice=adjoint_slice,
-                          boundary_storage=execution["boundary_storage"])
+                          boundary_storage=execution["boundary_storage"],
+                          capture_batch=normalize_replay_regime(regime)["capture_batch"])
 
 
 def _run(campaign, monkeypatch, *, layer, regime, spill_root, handoff=None,
@@ -384,3 +387,91 @@ def test_a_band_serial_producer_runs_the_campaign_regime(campaign4, monkeypatch,
     """
     _witness(campaign4, monkeypatch, tmp_path, capsys, regime=CAMPAIGN_REGIME,
              stand_down=False, label="regime-b4")
+
+
+# -- the refusals, once the predicate compares the two batch sizes ------------
+
+
+def _tampered(handoff, mutate, label):
+    """A copy of ``handoff`` with ``mutate(document)`` applied and re-sealed."""
+    from prismaquant.joint_quantum_handoff import (
+        HANDOFF_RECORD_NAME, handoff_record_bytes, handoff_seal_sha256)
+
+    path = Path(handoff["path"])
+    document = json.loads(path.read_bytes())
+    mutate(document)
+    document["handoff_sha256"] = handoff_seal_sha256(document)
+    payload = handoff_record_bytes(document)
+    twin = path.parent.parent / f"{path.parent.name}-{label}" / HANDOFF_RECORD_NAME
+    twin.parent.mkdir()
+    twin.write_bytes(payload)
+    document["session"]["generation"] = twin.parent.name
+    document["handoff_sha256"] = handoff_seal_sha256(document)
+    payload = handoff_record_bytes(document)
+    twin.write_bytes(payload)
+    return {"path": str(twin), "sha256": hashlib.sha256(payload).hexdigest()}
+
+
+def test_a_capture_off_the_chains_batch_size_refuses_before_any_gpu_work(
+        campaign4, monkeypatch, tmp_path):
+    """Under a batch-4 chain regime a batch-1 producer refuses at its head."""
+    from prismaquant.joint_quantum_handoff import QuantumHandoffRefused
+
+    with pytest.raises(QuantumHandoffRefused, match="batch size 4.*captured at batch 1"):
+        _emitter(campaign4.records[1], campaign4.slices[1],
+                 _execution(campaign4.root / "exec"), None)
+    with pytest.raises(QuantumHandoffRefused, match="batch size 4.*captured at batch 2"):
+        _emitter(campaign4.records[1], campaign4.slices[1],
+                 _execution(campaign4.root / "exec"), "capture_batch=2")
+    # The core's own check, for an emitter that slipped past the head.
+    emitter = _emitter(campaign4.records[1], campaign4.slices[1],
+                       _execution(campaign4.root / "exec"), CAMPAIGN_REGIME)
+    with monkeypatch.context() as patch:
+        patch.setattr(handoff_module, "handoff_chain_regime_refusal",
+                      lambda *args, **kwargs: None)
+        patch.setattr(spill_tests, "_calibration", _calibration)
+        patch.setattr(spill_tests, "_execution", _execution)
+        original = core.run_layer_quantum_core
+
+        def with_emitter(*args, **kwargs):
+            return original(*args, handoff_emitter=emitter, **kwargs)
+
+        patch.setattr(core, "run_layer_quantum_core", with_emitter)
+        _clear_output(campaign4, 1)
+        payload, state = spill_tests._quantum(
+            campaign4, monkeypatch, layer=1, spill_root=_spill_root(tmp_path),
+            ceiling=1 << 30, regime="capture_batch=2")
+    assert payload is None
+    assert "capture_batch=2" in _chain(state.error)
+    assert "batch size 4" in _chain(state.error)
+    assert state.context.install_calls == 0
+
+
+def test_a_consumer_refuses_a_handoff_captured_at_another_batch(
+        campaign4, monkeypatch, tmp_path, capsys):
+    """The stamped capture batch is checked against the consumer's slice."""
+    from prismaquant.joint_quantum_handoff import QuantumHandoffRefused
+
+    handoff, _chain_state = _witness(campaign4, monkeypatch, tmp_path, capsys,
+                                     regime=CAMPAIGN_REGIME, stand_down=False,
+                                     label="consumer-refusals-b4")
+    document = json.loads(Path(handoff["path"]).read_bytes())
+    assert document["producer"]["capture_batch"] == 4
+    record, adjoint_slice = campaign4.records[0], campaign4.slices[0]
+    load_quantum_handoff(handoff["path"], handoff["sha256"], record=record,
+                         adjoint_slice=adjoint_slice)
+
+    def at_batch_one(document):
+        document["producer"]["capture_batch"] = 1
+
+    def unstamped(document):
+        del document["producer"]["capture_batch"]
+
+    with pytest.raises(QuantumHandoffRefused, match="batch size 4.*captured at batch 1"):
+        twin = _tampered(handoff, at_batch_one, "batch-one")
+        load_quantum_handoff(twin["path"], twin["sha256"], record=record,
+                             adjoint_slice=adjoint_slice)
+    with pytest.raises(QuantumHandoffRefused, match="records no capture batch"):
+        twin = _tampered(handoff, unstamped, "unstamped")
+        load_quantum_handoff(twin["path"], twin["sha256"], record=record,
+                             adjoint_slice=adjoint_slice)
