@@ -3039,3 +3039,270 @@ def test_declared_reads_without_a_map_count_nothing(tmp_path, monkeypatch):
         assert torch.equal(got[ref], tensor)
     assert residency_resolver() is None
 
+
+
+# -- plane streams (PQ #1142) ------------------------------------------------
+
+
+def _write_plane_checkpoint(tmp_path, *, probes=2, batches=2):
+    from prismaquant.joint_adjoint_checkpoints import (
+        adjoint_space, write_adjoint_checkpoint)
+    from prismaquant.sensitivity_probe import SharedStateCotangents
+    tensors = {(probe, batch): torch.arange(12, dtype=torch.float32).reshape(3, 4)
+               + 100 * probe + 10 * batch
+               for probe in range(probes) for batch in range(batches)}
+    state = SharedStateCotangents().state_dict()
+    record = write_adjoint_checkpoint(
+        adjoint_space(tmp_path), boundary=5,
+        session={"generation": "g" * 32, "kind": "adjoint_checkpoint"},
+        cotangents=tensors,
+        shared_adjoint={key: state for key in tensors},
+        shared_pass={batch: {"captured": None} for batch in range(batches)})
+    return record, tensors
+
+
+def _load_plane(tmp_path, record, **kwargs):
+    from prismaquant.joint_adjoint_checkpoints import adjoint_space, load_adjoint_checkpoint
+    cotangents, _shared_adjoint, _shared_pass = load_adjoint_checkpoint(
+        adjoint_space(tmp_path), record, **kwargs)
+    return cotangents
+
+
+def test_a_checkpoint_plane_streams_in_windows_with_one_lease_each(tmp_path, monkeypatch):
+    """A budgeted plane load leases a window of entries at a time, not each entry.
+
+    Four entries under a budget that holds two windows of two: two plane
+    leases and two cover lookups for the waits, where the per-entry load
+    takes four of each. The bytes are the same either way, nothing is read
+    from the pool, the charges never exceed the budget and all come back,
+    and no pin outlives the load.
+    """
+    from prismaquant.perturbed_x_cache import exact_lease_counters
+    record, tensors = _write_plane_checkpoint(tmp_path)
+    resolver, consumer, _paths = _stage_checkpoint_entries(tmp_path, monkeypatch, record)
+    calls = _count_sdk_calls(monkeypatch, _pb()[0])
+    entry_bytes = int(record["activation_entries"][0]["tensor_bytes"])
+
+    before = exact_lease_counters()
+    single = _load_plane(tmp_path, record)
+    single_calls = dict(calls)
+    assert _lease_deltas(before) == {"windows_batched": 0, "entries_batched": 0,
+                                     "entries_single": 4, "batch_fallbacks": 0}
+
+    for key in calls:
+        calls[key] = 0
+    held, peak = [0], [0]
+
+    def charge(delta):
+        held[0] += delta
+        peak[0] = max(peak[0], held[0])
+
+    budget = 4 * entry_bytes
+    before = exact_lease_counters()
+    streamed = _load_plane(tmp_path, record, max_resident_bytes=budget,
+                           residency_check=charge)
+    assert _lease_deltas(before) == {"windows_batched": 2, "entries_batched": 4,
+                                     "entries_single": 0, "batch_fallbacks": 0}
+    # The manifest and shared-state reads are the same in both loads, so
+    # the difference is the plane's: 4 entry leases became 2 window leases,
+    # and 4 + 4 cover lookups (one wait, one lease per entry) became 2 + 2.
+    assert single_calls["acquire_for"] - calls["acquire_for"] == 4 - 2, (single_calls, calls)
+    assert single_calls["release"] - calls["release"] == 4 - 2, (single_calls, calls)
+    assert single_calls["covers_for_keys"] - calls["covers_for_keys"] == 8 - 4, (
+        single_calls, calls)
+    assert held == [0] and 0 < peak[0] <= budget
+    for key, tensor in tensors.items():
+        assert torch.equal(streamed[key], tensor)
+        assert torch.equal(single[key], tensor)
+    assert resolver.report()['bytes_from_pool'] == 0
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_changed_staged_copy_in_a_window_refuses_with_the_per_entry_kind(
+        tmp_path, monkeypatch):
+    """A window whose third staged copy changed refuses as one entry would.
+
+    The batched lease refuses, the window is re-read one entry at a time,
+    and the changed entry's lease refuses ``integrity`` -- the refusal and
+    kind the per-entry load raises. Every charge comes back and no pin is
+    left.
+    """
+    monkeypatch.setenv("PRISMAQUANT_LAYER_READ_THREADS", "4")
+    record, _tensors = _write_plane_checkpoint(tmp_path)
+    _resolver, consumer, _paths = _stage_checkpoint_entries(tmp_path, monkeypatch, record)
+    victim = Path(record["activation_entries"][2]["path"])
+    staged = tmp_path / 'stage' / 'prewarm' / victim.name
+    blob = staged.read_bytes()
+    staged.write_bytes(blob[:-1] + bytes([blob[-1] ^ 0xFF]))
+    held = [0]
+
+    def charge(delta):
+        held[0] += delta
+
+    entry_bytes = int(record["activation_entries"][0]["tensor_bytes"])
+    with pytest.raises(LeaseRefused) as streamed:
+        _load_plane(tmp_path, record, max_resident_bytes=8 * entry_bytes,
+                    residency_check=charge)
+    assert streamed.value.kind == "integrity"
+    assert held == [0]
+    assert _pins_live(tmp_path, consumer) == []
+    with pytest.raises(LeaseRefused) as single:
+        _load_plane(tmp_path, record)
+    assert single.value.kind == "integrity"
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_a_failed_read_in_a_parallel_window_exposes_nothing_and_strands_no_pin(
+        tmp_path, monkeypatch):
+    """A read that fails under a window's pin, on a reader thread, cleans up.
+
+    Four reader threads read one pinned window of four, and the third
+    entry's read raises. The load raises that error, gives every charge
+    back, and releases the window only after the other reads returned.
+    """
+    import prismaquant.perturbed_x_cache as pxc
+    monkeypatch.setenv("PRISMAQUANT_LAYER_READ_THREADS", "4")
+    record, _tensors = _write_plane_checkpoint(tmp_path)
+    _resolver, consumer, _paths = _stage_checkpoint_entries(tmp_path, monkeypatch, record)
+    victim = record["activation_entries"][2]["name"]
+    real = pxc._read_exact_entry
+    open_reads = [0]
+    lock = threading.Lock()
+
+    def failing(ref, **kwargs):
+        with lock:
+            open_reads[0] += 1
+        try:
+            if ref.name == victim:
+                raise RuntimeError("exact activation entry checksum changed")
+            time.sleep(0.05)
+            return real(ref, **kwargs)
+        finally:
+            with lock:
+                open_reads[0] -= 1
+
+    released_with_reads_open = []
+    real_exit = pxc._run_in_order
+
+    def watching(pool, calls):
+        try:
+            return real_exit(pool, calls)
+        finally:
+            released_with_reads_open.append(open_reads[0])
+
+    monkeypatch.setattr(pxc, "_read_exact_entry", failing)
+    monkeypatch.setattr(pxc, "_run_in_order", watching)
+    held = [0]
+
+    def charge(delta):
+        held[0] += delta
+
+    entry_bytes = int(record["activation_entries"][0]["tensor_bytes"])
+    with pytest.raises(RuntimeError, match="checksum changed"):
+        _load_plane(tmp_path, record, max_resident_bytes=8 * entry_bytes,
+                    residency_check=charge)
+    assert released_with_reads_open and set(released_with_reads_open) == {0}
+    assert held == [0]
+    assert _pins_live(tmp_path, consumer) == []
+
+
+def test_parallel_reads_raise_the_first_failure_in_window_order():
+    """The lowest-indexed failure is raised even when a later one fails first."""
+    from prismaquant.perturbed_x_cache import _exact_read_pool, _run_in_order
+    pool = _exact_read_pool(4)
+    started, released = [], threading.Event()
+
+    def ok(index):
+        started.append(index)
+        return index
+
+    def slow_failure():
+        started.append(1)
+        assert released.wait(10)
+        raise ValueError("entry 1")
+
+    def fast_failure():
+        started.append(2)
+        released.set()
+        raise ValueError("entry 2")
+
+    with pytest.raises(ValueError, match="entry 1"):
+        _run_in_order(pool, [lambda: ok(0), slow_failure, fast_failure])
+    assert _run_in_order(pool, [lambda i=i: ok(i) for i in range(6)]) == list(range(6))
+    assert _run_in_order(None, [lambda: ok(7)]) == [7]
+
+
+def test_calls_after_a_failure_that_have_not_started_never_start():
+    from concurrent.futures import ThreadPoolExecutor
+    from prismaquant.perturbed_x_cache import _run_in_order
+    pool = ThreadPoolExecutor(max_workers=1)
+    ran = []
+
+    def fail():
+        ran.append("fail")
+        raise ValueError("first")
+
+    try:
+        with pytest.raises(ValueError, match="first"):
+            _run_in_order(pool, [fail] + [lambda i=i: ran.append(i) for i in range(4)])
+    finally:
+        pool.shutdown(wait=True)
+    assert ran[0] == "fail" and len(ran) <= 2, ran
+
+
+def test_concurrent_readers_borrow_distinct_buffers_and_release_frees_them():
+    from prismaquant.perturbed_x_cache import EntryReadScratch
+    scratch = EntryReadScratch()
+    with scratch.lend() as first:
+        assert first is scratch
+        with scratch.lend() as second:
+            assert second is not first
+            assert first.buffer(16) is not second.buffer(16)
+    with scratch.lend() as again:
+        assert again is scratch or again is second
+    assert len(scratch._extra) == 1
+    scratch.release()
+    assert len(scratch.buffer(0)) == 0 and scratch._extra == []
+
+
+def test_exact_entry_windows_follow_the_budget():
+    from prismaquant.joint_adjoint_checkpoints import exact_entry_windows
+    records = [{"name": f"e{i}", "tensor_bytes": 10} for i in range(5)]
+    windows, ahead = exact_entry_windows(records, max_resident_bytes=None)
+    assert [len(w) for w in windows] == [1] * 5 and ahead is False
+    windows, ahead = exact_entry_windows(records, max_resident_bytes=40)
+    assert [len(w) for w in windows] == [2, 2, 1] and ahead is True
+    windows, ahead = exact_entry_windows(records, max_resident_bytes=15)
+    assert [len(w) for w in windows] == [1] * 5 and ahead is False
+    with pytest.raises(RuntimeError, match="exceeds the stream's resident budget"):
+        exact_entry_windows(records, max_resident_bytes=9)
+    with pytest.raises(ValueError):
+        exact_entry_windows(records, max_resident_bytes=0)
+    assert exact_entry_windows([], max_resident_bytes=40) == ([], False)
+
+
+def test_closing_a_stream_early_releases_every_charge(tmp_path):
+    from contextlib import closing
+    from prismaquant.joint_adjoint_checkpoints import stream_exact_entry_tensors
+    record, tensors = _write_plane_checkpoint(tmp_path, probes=3, batches=2)
+    entries = record["activation_entries"]
+    entry_bytes = int(entries[0]["tensor_bytes"])
+    held, peak = [0], [0]
+
+    def charge(delta):
+        held[0] += delta
+        peak[0] = max(peak[0], held[0])
+
+    from prismaquant.joint_adjoint_checkpoints import checkpoint_entry_session
+    with closing(stream_exact_entry_tensors(
+            entries, expected_session=checkpoint_entry_session(record),
+            max_resident_bytes=2 * entry_bytes, residency_check=charge)) as stream:
+        first, tensor = next(stream)
+        assert first["name"] == entries[0]["name"]
+        assert held[0] == 2 * entry_bytes  # this window and the next, read ahead
+    assert held == [0] and peak[0] <= 2 * entry_bytes
+    with closing(stream_exact_entry_tensors(
+            entries, expected_session=checkpoint_entry_session(record),
+            max_resident_bytes=2 * entry_bytes, residency_check=charge)) as stream:
+        names = [entry["name"] for entry, _tensor in stream]
+    assert names == [entry["name"] for entry in entries] and held == [0]
