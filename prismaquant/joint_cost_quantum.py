@@ -2085,7 +2085,15 @@ def run_layer_quantum_core(
         def _record_joint_operator(name, fmt, source, rendered):
             scales = pricing_maxima or {}
             activation = activation_identity(fr.get_format(fmt), scales, name)
-            rendered_identity = _cb_cache_tensor_identity(rendered)
+            if fmt in render_formats[name]:
+                # A measured render is the window's resident PWC tensor,
+                # read by every probe: hash it once per load (PQ #1192). The
+                # comparison below still runs on every probe.
+                rendered_identity = production_cache.resident_render_identity(
+                    name, fmt, rendered)
+            else:
+                # A zero-cost row carries its source as its render, once.
+                rendered_identity = _cb_cache_tensor_identity(rendered)
             if fmt in render_formats[name]:
                 if (rendered_identity != joint_cache_renders[name][fmt]
                         or activation != joint_run_identity[

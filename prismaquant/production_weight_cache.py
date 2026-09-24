@@ -1502,7 +1502,46 @@ class ProductionWeightCache:
             if self._file_load_receipts is None:
                 self._file_load_receipts = {}
             # This is the same resident object, released with its LRU entry.
-            self._file_load_receipts[key] = (tensor, observed)
+            # The third slot holds what is derived from this one load, such
+            # as its render identity, and is dropped with the receipt.
+            self._file_load_receipts[key] = (tensor, observed, {})
+
+    def resident_render_identity(self, name: str, fmt: str, tensor) -> dict:
+        """Return the content identity of one resident render, hashed once per load.
+
+        The identity is ``_cb_cache_tensor_identity`` of the tensor: its
+        shape, dtype, logical bytes and the SHA-256 of its bytes. A Stage B
+        window reads each resident render once per probe, and hashing it on
+        every read repeated the same work (PQ #1192).
+
+        The identity is kept in the file-load receipt of the exact tensor
+        object this cache loaded, so it lives exactly as long as that
+        receipt. Every path that ends a resident lifetime drops the receipt
+        and the identity with it: ``release_resident_tensors`` (a retained
+        window's exit), an LRU eviction, ``enable_lru``,
+        ``compact_for_pickle`` and a failed ``file_load_receipt``. A later
+        load of the same key is a new object with a new receipt, and it is
+        hashed again. The identity is served only while ``tensor`` is still
+        this key's resident object and its guard (version counter, storage
+        pointer, offset, shape, stride, dtype and device) equals the guard
+        taken when its bytes were loaded; otherwise the call refuses. A
+        tensor this cache did not load through a receipt refuses too, so a
+        caller holding one hashes it itself.
+        """
+        key = self.resolve_key(name, fmt)
+        entry = None if key is None else (self._file_load_receipts or {}).get(key)
+        if (entry is None or entry[0] is not tensor
+                or self.weights.get(key) is not tensor):
+            raise RuntimeError(
+                f"PWC render identity has no matching resident load: {name}@{fmt}")
+        if self._file_tensor_guard(tensor) != entry[1][2]:
+            raise RuntimeError(f"PWC resident render changed after its load: {name}@{fmt}")
+        derived = entry[2]
+        if "rendered_identity" not in derived:
+            derived["rendered_identity"] = _cb_cache_tensor_identity(tensor)
+        identity = derived["rendered_identity"]
+        # A copy, so a caller that edits its record cannot edit the memo.
+        return {**identity, "shape": list(identity["shape"])}
 
     def file_load_receipt(self, key, tensor) -> dict:
         """Return a detached receipt for this exact resident tensor lifetime."""
