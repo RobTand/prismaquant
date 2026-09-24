@@ -4,7 +4,8 @@ These tests pin, one behavior each, what the compute thread no longer does:
 
 * it makes no export poll per write: the stager looks at the oldest live
   export once per write, and progress still advances only for acknowledged
-  entries;
+  entries; a refusal the stager reads surfaces at the owner's next call and
+  is recorded once;
 
 The owner, the writer, the spool adapter, the queue and the fleet are the
 real ones; only PrismaBuild's asynchronous exporter is replaced by a
@@ -79,3 +80,35 @@ def test_the_compute_thread_polls_no_export_per_write(tmp_path, closing):
             backend.acknowledge(batch_id)
     storage.settle_local_output()
     assert len(progress) == 2 * GROUP_SIZE
+
+
+def test_a_refusal_the_stager_reads_surfaces_at_the_next_call_once(
+        tmp_path, closing):
+    """RED on the parent: the next write itself polled and raised it.
+
+    The write after an export failed asks PrismaBuild nothing and returns.
+    The stager's look reads the refusal and keeps it; the owner raises it at
+    its next call. The capture's end asks again and refuses again, and the
+    report still holds one record for the one refusal.
+    """
+
+    from prismaquant.produced_output_spool import ProducedExportRefused
+
+    storage, _pub, _q, _env, _pb, backend = readback._spool_owner(
+        tmp_path, backend_type=readback.FailingExport, staging_timeout_s=2.0)
+    closing(storage)
+    _cotangent_groups(storage, 1)
+    assert storage.drain_produced_stager(60.0)
+    (batch_id,) = [batch for batch, group in backend.groups.items()
+                   if group["entries"]]
+    backend.groups[batch_id]["failure"] = "export-failed-without-ack"
+    storage.write(readback._tail(0, GROUP_SIZE), batch_index=GROUP_SIZE,
+                  boundary_index=TOP, probe_index=0)
+    with pytest.raises(ProducedExportRefused) as refused:
+        storage.drain_produced_stager(60.0)
+    assert refused.value.batch_id == batch_id
+    with pytest.raises(ProducedExportRefused):
+        storage.settle_local_output()
+    records = storage.produced_output_report()["local_spool"]["refusals"]
+    assert [(r["batch_id"], r["state"]) for r in records] == [
+        (batch_id, "export-failed-without-ack")], records
