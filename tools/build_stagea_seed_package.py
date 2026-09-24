@@ -134,6 +134,25 @@ def seed_manifest(original, *, spec, spec_entry, checkpoint, compare=None) -> di
         cmp_manifest, _, cmp_plane = _checkpoint_files(compare)
         add(names[-1], [*cmp_manifest, *cmp_plane])
 
+    try:
+        assemble_phases(manifest, by_name, names, added)
+    except ValueError as exc:
+        raise SeedPackageRefused(f"a seed input {exc}") from exc
+    manifest["annotations"]["chain_seed"] = {"path": spec_entry["path"],
+                                             "sha256": spec_entry["sha256"]}
+    return manifest
+
+
+def assemble_phases(manifest, by_name, names, added) -> dict:
+    """Keep ``names``' source phases, each extended by its ``added`` entries.
+
+    ``manifest`` is a copy of the source manifest whose ``entries`` already
+    end with the added entries; ``added`` maps a phase name to their
+    indices. Entries no kept phase reads are dropped and the rest
+    renumbered, and each phase's bytes and running total are recomputed.
+    Raises ``ValueError`` when an added entry repeats a kept one.
+    """
+    entries = manifest["entries"]
     phases = []
     for name in names:
         phase = copy.deepcopy(by_name[name])
@@ -142,7 +161,7 @@ def seed_manifest(original, *, spec, spec_entry, checkpoint, compare=None) -> di
     used = sorted({index for phase in phases for index in phase["entry_indices"]})
     paths = [(entries[index]["path"], entries[index]["offset"]) for index in used]
     if len(set(paths)) != len(paths):
-        raise SeedPackageRefused("a seed input is already a source-manifest entry")
+        raise ValueError("is already a source-manifest entry")
     remap = {old: new for new, old in enumerate(used)}
     entries = [entries[index] for index in used]
     cumulative = 0
@@ -154,8 +173,6 @@ def seed_manifest(original, *, spec, spec_entry, checkpoint, compare=None) -> di
     manifest.update(entries=entries, entry_count=len(entries),
                     total_bytes=sum(entry["bytes"] for entry in entries))
     manifest["read_plan"] = {"phases": phases, "read_bytes": cumulative}
-    manifest["annotations"]["chain_seed"] = {"path": spec_entry["path"],
-                                             "sha256": spec_entry["sha256"]}
     return manifest
 
 
