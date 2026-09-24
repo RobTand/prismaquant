@@ -1323,8 +1323,10 @@ def compute_phase_work(name: str, *, replay_mode: str, entries,
     ``joint_statistics_replay.observe_and_project_retained_windows``: a spill
     row captures each probe under ``spill-pP`` and replays the first window
     for that probe under the same phase, and replays every later window under
-    its ``render-NN`` phase. ``render-00`` of a spill row, and every
-    ``render-NN`` of a windowed row, only read.
+    its ``render-NN`` phase. A resume that has committed window 0 still
+    captures under ``spill-pP`` and replays nothing there (PQ #1172), so the
+    replay term of ``spill-pP`` is an upper bound for it. ``render-00`` of a
+    spill row, and every ``render-NN`` of a windowed row, only read.
     """
     def counted(*values):
         return all(type(value) is int and value > 0 for value in values)

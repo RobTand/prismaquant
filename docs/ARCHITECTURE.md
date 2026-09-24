@@ -179,10 +179,12 @@ reserve times the stored batches. The guard (`joint_cost_quantum`,
 derivation planned, instead of from the operator windows. With
 `capture_batch=B`, `derive_retained_window_budget` plans the capture pass as
 `RetainedWindowBudget.capture_peak_bytes`: the fixed owners with the one
-reserve replaced by B reserves, beside the largest window's renders, since a
-resumed quantum captures in its first active window and no statistics lease
-is open during a capture. A capture that does not fit the physical budget
-less its margin refuses at derivation. The derivation records it under
+reserve replaced by B reserves, beside the largest window's renders, an upper
+bound on window 0's: a fresh quantum captures inside window 0's retained
+lifetime, a resume that has committed window 0 captures with no renders
+resident (PQ #1172), and no statistics lease is open during a capture. A
+capture that does not fit the physical budget less its margin refuses at
+derivation. The derivation records it under
 `capture`, and `peak_planned_bytes` becomes the larger of the window peaks
 and the capture peak.
 
@@ -375,10 +377,36 @@ prices. This changes a dispatcher default (the compute-phase grace) and adds
 one dispatcher option. No format, pipeline stage, record identity or ship
 gate changes.
 
-A resumed spill row whose first active window is not window 0 runs its
+A resumed spill row whose first active window is not window 0 ran its
 captures under that window's `render-NN` phase, because progress phases only
-move forward. That grace has no capture term. This change does not cover that
-case.
+move forward, and that grace has no capture term. PQ #1172 moves those
+captures under their `spill-pP` phases (see below).
+
+A resumed spill row captures under its spill phases (2026-09-24,
+`fix/1172-resume-capture-phase`, PQ #1172). A resume whose first active
+window k is 1 or later captures every probe again, because the spill scratch
+is an `O_TMPFILE`. `observe_and_project_retained_windows` ran those captures
+after window k's `before_window` had entered `render-k`, whose grace prices
+only window k's replays. The row could not report `spill-pP` again, because
+progress phases only move forward, so PrismaBuild ended it as `no_progress`
+on every retry. The captures now run in window 0's slot, where the sealed
+order puts the `spill-pP` phases: right after window 0's `before_window`
+enters `render-00`, before any later window's. A fresh run is unchanged: its
+captures still run inside window 0's retained lifetime, each just before that
+probe's window-0 replay. On a resume no retained window is open during the
+captures. A capture reads source weights and the own boundary, never a render,
+so nothing it needs is missing, and it holds less than on a fresh run. The
+own boundary is staged in the `spill-pP` phases, so each capture now reads it
+under the phase that stages it, as a fresh run does. Window k then replays
+from the spill under `render-k`, as the dispatcher prices it. The window
+profiler of a skipped window now closes when the next window opens, so the
+captures' kernel time is counted. The phase list and every sealed manifest are
+unchanged; so are the dispatcher's graces. Gate:
+`tests/test_resume_capture_phase_1172.py`. It drives the real quantum with
+the prepared-render phases a production row seals, commits window 0 and
+resumes, and checks that each capture runs under `spill-pP` and that every
+unit runs under a phase whose dispatcher pricing names it, in the priced
+count. No format, pipeline stage, record identity or ship gate changes.
 
 Dev mode runs an unqualified projection shape on the reference arithmetic
 (2026-09-24, `fix/1176-devmode-reference-projection`, PQ #1176). The packaged
@@ -1284,8 +1312,9 @@ sealed for the other mode than its launch, and the dispatcher accepts
 put every spill phase before `render-00`; the runtime opens window 0's
 retained renders before the first capture, so that order would have reported
 the captures under `render-00`. A spill resume whose first pending window is
-not window 0 reports its captures under that window's render phase, because
-progress phases only move forward. Gates:
+not window 0 reported its captures under that window's render phase, because
+progress phases only move forward; since PQ #1172 it captures under the
+`spill-pP` phases, before any later window's render phase. Gates:
 `tests/test_spill_phase_plan_1011.py`,
 `tests/test_stageb_one_pass_spill.py`. No format, pipeline default or ship
 gate changes.
@@ -1937,8 +1966,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `fix/1175-projection-shape-check`.
+As of: 2026-09-24 · `fix/1172-resume-capture-phase`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `fix/1172-resume-capture-phase`) for **a resumed
+spill row's captures** (PQ #1172): a resume whose first active window is 1 or
+later captures every probe under its sealed `spill-pP` phase, right after
+window 0's `before_window`, instead of under the first active window's
+`render-NN`. A runtime order changes; no phase list, sealed manifest, grace,
+format, pipeline stage, lane or ship gate changes.
 
 Re-stamped (2026-09-24, `fix/1175-projection-shape-check`) for **the
 projection shape check before the row** (PQ #1175): the joint dispatcher

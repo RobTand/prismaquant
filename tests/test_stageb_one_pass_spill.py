@@ -865,7 +865,9 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     the target layer's boundaries are read once per probe instead of once
     per (window, probe), the read plan counts them once per probe, and the
     cost rows equal the windowed run's. A plan sealed for one mode refuses
-    a launch in the other before any GPU work.
+    a launch in the other before any GPU work. A resume that has committed
+    window zero captures under the same phases with no retained window
+    open, before the first active window opens (PQ #1172).
     """
     import test_quantum_executable_readset as phases
 
@@ -962,7 +964,9 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     assert rows(payload_s) == rows(payload_w)
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
 
-    # Partial resume in spill mode: windows 1+ recapture and replay.
+    # Partial resume in spill mode: window 0 is committed, so every probe is
+    # captured in window zero's slot with no retained window open, and
+    # windows 1+ then open and replay from the spill (PQ #1172).
     from prismaquant.aura_cost import _aura_unit_checkpoint_path
     checkpoint_dir = Path(record0["output_space"]["checkpoint_dir"])
     for name in (n for window in resolved[1:] for n in window["names"]):
@@ -973,7 +977,14 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     assert len(constructed) == 2
     assert constructed[1]["x_bytes"] < constructed[0]["x_bytes"]
     phases._assert_acceptance_run(events_p, manifest_p, record0, tmp_path,
-                                  expect_replay_windows=set())
+                                  expect_replay_windows=set(),
+                                  require_window=False)
+    opens = [i for i, event in enumerate(events_p) if event[0] == "window-open"]
+    captures = [i for i, event in enumerate(events_p)
+                if event[0] == "boundary-open" and event[1] == 0]
+    assert len(opens) == n_windows - 1
+    assert captures and max(captures) < min(opens), (captures, opens)
+    assert target_reads(events_p) == target_reads(events_s)
     assert rows(payload_p) == rows(payload_w)
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
     _report("executable-readset-spill", {
