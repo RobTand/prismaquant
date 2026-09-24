@@ -272,7 +272,12 @@ def test_each_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkeypatch):
                    chain_resume=_resume(root, declaration={"from": ONE, "to": TWO},
                                         resume_from=4),
                    chain_split={"role": "prep", "through": 2, "ranges": RANGES})
-    _write_split_receipt(space, receipt)
+    paths = _write_split_receipt(space, receipt)
+    # The capture writes its results and counters beside the prep's receipt
+    # (``resume-NNN.results.json``, ``resume-NNN.counters.json``). Neither is
+    # a receipt, and both sort after it.
+    _json(Path(paths["results"]), {"schema": "results"})
+    _json(Path(paths["counters"]), {"schema": "counters"})
     go(*labels)
     with pytest.raises(SplitDispatchRefused, match="has not finished"):
         go("join-002")
