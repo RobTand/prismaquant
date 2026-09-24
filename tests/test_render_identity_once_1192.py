@@ -14,10 +14,10 @@ is one load of one ``(name, fmt)`` in one window.
 
 The rest of the window's main-thread load work moves to the PWC loader
 pool: each loader hashes the render it loaded before the tensor is handed
-out, and the window preflight's archive-directory scans (14% of row 43's
-main thread, one cold read per candidate) run on the same bounded pool.
-The payload and the files the quantum writes are byte-identical with and
-without each change.
+out, and each file's archive directory is parsed on its loader, on the bytes
+it read (14% of row 43's main thread was the preflight's cold scan of every
+candidate; PQ #1210 dropped that scan). The payload and the files the
+quantum writes are byte-identical with and without each change.
 """
 from __future__ import annotations
 
@@ -236,9 +236,7 @@ def _rehash_every_read(self, name, fmt, tensor):
 
 MAIN = [(pwc.ProductionWeightCache, "resident_render_identity", _rehash_every_read),
         (pwc.ProductionWeightCache, "_loaded_render_identity",
-         lambda self, tensor, observed: None),
-        (pwc.ProductionWeightCache, "_prefill_window_archive_memo",
-         lambda self, keys, max_workers: None)]
+         lambda self, tensor, observed: None)]
 # The memo alone: hashed lazily, on the main thread, once per load.
 MEMO = MAIN[1:]
 
@@ -264,7 +262,11 @@ def test_the_payload_and_evidence_are_byte_identical_with_and_without_each_chang
 # --------------------------------------------------------------------------
 
 def _threaded_counts(monkeypatch, *, core_only=False):
-    """Record the thread of every render hash and every file archive scan.
+    """Record the thread of every render hash and every archive scan.
+
+    A scan is recorded as ``(source, on the main thread)``, where ``source``
+    is the file's path for a scan that opens the file and ``"bytes"`` for a
+    scan of a buffer already read.
 
     With ``core_only``, only calls made while the quantum core runs count,
     on any thread: the single run and Stage A the fixture runs first are
@@ -284,8 +286,9 @@ def _threaded_counts(monkeypatch, *, core_only=False):
         return identity(tensor)
 
     def counted_scan(source):
-        if active and isinstance(source, (str, Path)):
-            calls["scan"].append((str(source), on_main()))
+        if active:
+            calls["scan"].append((str(source) if isinstance(source, (str, Path))
+                                  else "bytes", on_main()))
         return scan(source)
 
     monkeypatch.setattr(pwc, "_cb_cache_tensor_identity", counted_identity)
@@ -316,10 +319,11 @@ def test_the_quantum_main_thread_neither_hashes_a_render_nor_scans_an_archive(
     assert len(render_hashes) == len(loads)
     assert not [main for _tensor, main in render_hashes if main], (
         "a render was hashed on the main thread")
-    # Every render file's archive directory was scanned, and none of the
-    # scans ran on the main thread.
-    assert calls["scan"]
-    assert not [path for path, main in calls["scan"] if main], calls["scan"]
+    # Every loaded render's archive directory was parsed once, on the bytes
+    # its loader read, and none of the parses ran on the main thread.
+    assert len(calls["scan"]) == len(loads)
+    assert {source for source, _main in calls["scan"]} == {"bytes"}
+    assert not [source for source, main in calls["scan"] if main], calls["scan"]
 
 
 def test_the_loaders_hash_only_when_the_window_asks(tmp_path, monkeypatch):
@@ -363,31 +367,45 @@ def test_the_archive_scans_run_off_the_main_thread_once_per_file(tmp_path, monke
     with cache.retained_window(list(paths), max_resident_bytes=1 << 20,
                                max_workers=2, max_load_buffer_bytes=1 << 20):
         pass
-    scanned = sorted(path for path, _main in calls["scan"])
-    assert scanned == sorted(str(path.absolute()) for path in paths.values())
-    assert not [main for _path, main in calls["scan"] if main]
+    # One parse per file, on the bytes its loader read (PQ #1210): the
+    # declared file is never opened a second time to read its directory.
+    assert [source for source, _main in calls["scan"]] == ["bytes"] * len(paths)
+    assert not [main for _source, main in calls["scan"] if main]
 
 
 @pytest.mark.parametrize("damage", ["not-a-zip", "missing"])
-def test_a_bad_file_refuses_as_it_did_before_the_parallel_scan(tmp_path, monkeypatch, damage):
-    """The pool only warms the memo; the serial preflight still refuses."""
-    errors = {}
-    for arm in ("serial", "pool"):
-        cache, paths = _file_cache(tmp_path / arm, count=3)
-        target = list(paths.values())[1]
-        if damage == "not-a-zip":
-            target.write_bytes(b"not a torch archive")
-        else:
-            target.unlink()
-        with monkeypatch.context() as patch:
-            if arm == "serial":
-                patch.setattr(pwc.ProductionWeightCache, "_prefill_window_archive_memo",
-                              lambda self, keys, max_workers: None)
-            with pytest.raises(Exception) as caught:
-                with cache.retained_window(list(paths), max_resident_bytes=1 << 20,
-                                           max_workers=2, max_load_buffer_bytes=1 << 20):
-                    pass
-        errors[arm] = (type(caught.value), str(caught.value).replace(arm, "ARM"))
-        assert getattr(cache, "_resident_window_files", None) is None
-        assert all(isinstance(value, str) for value in cache.weights.values())
-    assert errors["pool"] == errors["serial"]
+def test_a_bad_file_refuses_its_window_and_leaves_nothing_resident(tmp_path, damage):
+    """A missing file refuses at preflight; a bad archive at its own read.
+
+    The retained window charges each file its length before the first load
+    (PQ #1210), so a file that is not an ordinary uncompressed Torch archive
+    is refused when its loader parses the bytes it read, before they are
+    deserialized, with the same error the preflight scan raised.
+    """
+    cache, paths = _file_cache(tmp_path, count=3)
+    target = list(paths.values())[1]
+    if damage == "not-a-zip":
+        target.write_bytes(b"not a torch archive")
+        expected = (RuntimeError, "PWC window has an unaccountable Torch archive")
+    else:
+        target.unlink()
+        expected = (FileNotFoundError, str(target.absolute()))
+    loads = []
+    original = torch.load
+
+    def counted_load(*args, **kwargs):
+        loads.append(True)
+        return original(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(torch, "load", counted_load)
+        with pytest.raises(expected[0]) as caught:
+            with cache.retained_window(list(paths), max_resident_bytes=1 << 20,
+                                       max_workers=1, max_load_buffer_bytes=1 << 20):
+                pytest.fail("a window with a bad file was exposed")
+    assert expected[1] in str(caught.value)
+    # One loader: the first file loaded, and the bad one was never
+    # deserialized; a missing file refused before any load.
+    assert len(loads) == (1 if damage == "not-a-zip" else 0)
+    assert getattr(cache, "_resident_window_files", None) is None
+    assert all(isinstance(value, str) for value in cache.weights.values())

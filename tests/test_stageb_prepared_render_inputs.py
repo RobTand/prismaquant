@@ -513,10 +513,10 @@ def test_strict_pwc_serves_two_windows_with_phase_order(
     current = {"phase": "none"}
     real_prefetch = cache.prefetch
 
-    def recording_prefetch(keys=None, max_workers=1):
+    def recording_prefetch(keys=None, max_workers=1, **kwargs):
         for key in (keys or ()):
             order.append(f"open:{current['phase']}:{key[0]}")
-        return real_prefetch(keys, max_workers=max_workers)
+        return real_prefetch(keys, max_workers=max_workers, **kwargs)
 
     cache.prefetch = recording_prefetch
 

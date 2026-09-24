@@ -546,9 +546,9 @@ def test_generator_dispatch_waits_for_delayed_leased_render(shared_bridge_path, 
                            for row in layout["files"].values()))
     real_prefetch = cache.prefetch
 
-    def prefetch(keys=None, max_workers=1):
+    def prefetch(keys=None, max_workers=1, **kwargs):
         order.append(f"open:{progress._phase}")
-        return real_prefetch(keys, max_workers=max_workers)
+        return real_prefetch(keys, max_workers=max_workers, **kwargs)
 
     monkeypatch.setattr(cache, "prefetch", prefetch)
     failures = []

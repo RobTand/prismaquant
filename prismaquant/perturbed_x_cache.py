@@ -1819,7 +1819,7 @@ def _strict_lease_groups(references, resolver, *, deadline=None):
     return list(groups.values())
 
 
-def _enter_group_lease(entry_resolver, members, live_windows):
+def _enter_group_lease(entry_resolver, members, live_windows, counters=None):
     """Pin one group in at most two windows (RAM, then SSD), or ``None``.
 
     The group-granular form of ``acquire_entry_window``'s RAM-first rule.
@@ -1840,8 +1840,15 @@ def _enter_group_lease(entry_resolver, members, live_windows):
     batched proof alone: the SDK re-verifies every key under the ownership
     lock at acquire, and every key is still opened through the SDK under
     the pin.
+
+    ``members`` is ``[(ref, staged entry), ...]`` where ``ref.path`` is the
+    declared file. ``counters`` is the report this call adds to
+    (:data:`EXACT_LEASE_COUNTERS` unless the caller keeps its own, as the
+    PWC retained window does).
     """
     from .staged_lease import LeaseRefused, acquire_entries_window
+    if counters is None:
+        counters = EXACT_LEASE_COUNTERS
     from .staged_tier_policy import tier_is_allowed
     ram = ([member for member in members if member[1].get("ram_path") is not None]
            if tier_is_allowed("ram") else [])
@@ -1880,10 +1887,10 @@ def _enter_group_lease(entry_resolver, members, live_windows):
         for lease_window in entered:
             lease_window.__exit__(None, None, None)
             live_windows.remove(lease_window)
-        EXACT_LEASE_COUNTERS["batch_fallbacks"] += 1
+        counters["batch_fallbacks"] += 1
         return None
-    EXACT_LEASE_COUNTERS["windows_batched"] += len(entered)
-    EXACT_LEASE_COUNTERS["entries_batched"] += len(members)
+    counters["windows_batched"] += len(entered)
+    counters["entries_batched"] += len(members)
     return assignments
 
 

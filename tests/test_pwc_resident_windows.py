@@ -32,6 +32,20 @@ def workers():
     return max(1, min(FIXTURE_WINDOW_WORKERS, len(os.sched_getaffinity(0))))
 
 
+def _retained_cache(tmp_path, count):
+    """``make_cache`` with an LRU that holds ``count`` whole files.
+
+    A retained window charges each file its length, the bound the sealed
+    plan charges (PQ #1210), so its budgets are counted in file lengths; the
+    fixture's tensors store 32 bytes each in equal-length archives.
+    """
+    cache, paths, tensors = make_cache(tmp_path, count, budget=1)
+    each = max(path.stat().st_size for path in paths.values())
+    assert all(path.stat().st_size == each for path in paths.values())
+    cache.enable_lru(count * each)
+    return cache, paths, tensors, each
+
+
 def test_plan_resolves_aliases_and_bounds_existing_prefetch(tmp_path, monkeypatch, workers):
     cache, paths, expected = make_cache(tmp_path, 5, budget=100000)
     keys = tuple(paths)
@@ -363,9 +377,8 @@ def test_selected_release_does_not_adopt_same_named_unverified_file(tmp_path):
 
 
 def test_retained_window_keeps_more_keys_than_workers_for_repeated_passes(tmp_path, monkeypatch, workers):
-    cache, paths, expected = make_cache(tmp_path, 5, budget=5 * 32)
+    cache, paths, expected, file_size = _retained_cache(tmp_path, 5)
     keys = tuple(paths)
-    file_size = max(path.stat().st_size for path in paths.values())
     # A resident window is still ONE quantum: it refuses a key set its budgets
     # cannot hold at once. What no longer bounds it is the loader count, so the
     # contrast with a retained lifetime is the budget, not the CPU count (#693).
@@ -377,13 +390,13 @@ def test_retained_window_keeps_more_keys_than_workers_for_repeated_passes(tmp_pa
     cache.enable_file_load_receipts(max_file_bytes=file_size)
     original_prefetch, original_load = cache.prefetch, cache._load_file_tensor
     quanta, reads = [], []
-    def bounded_prefetch(selected, max_workers):
+    def bounded_prefetch(selected, max_workers, **kwargs):
         quanta.append(tuple(selected))
         # A retained load quantum IS bounded by the loader count, and by the
         # serialized buffer budget: unlike a resident window (#693).
         assert len(selected) <= max_workers == workers
         assert sum(paths[key].stat().st_size for key in selected) <= 2 * file_size
-        return original_prefetch(selected, max_workers=max_workers)
+        return original_prefetch(selected, max_workers=max_workers, **kwargs)
     def counted_load(value, key=None):
         reads.append(str(value))
         return original_load(value, key)
@@ -391,13 +404,13 @@ def test_retained_window_keeps_more_keys_than_workers_for_repeated_passes(tmp_pa
     monkeypatch.setattr(cache, '_load_file_tensor', counted_load)
     aliases = [(name + '.weight', fmt) for name, fmt in keys]
     planned = cache.plan_retained_window(aliases + [aliases[0]],
-        max_resident_bytes=5 * 32, max_workers=workers,
+        max_resident_bytes=5 * file_size, max_workers=workers,
         max_load_buffer_bytes=2 * file_size)
     # Both bounds allow `workers` keys per quantum: two keys fit the buffer.
     assert planned == tuple(keys[start:start + workers]
                             for start in range(0, len(keys), workers))
     with cache.retained_window(aliases + [aliases[0]],
-            max_resident_bytes=5 * 32, max_workers=workers,
+            max_resident_bytes=5 * file_size, max_workers=workers,
             max_load_buffer_bytes=2 * file_size) as receipt:
         assert receipt['keys'] == keys and receipt['loaded'] == len(keys)
         assert receipt['load_quanta'] == planned == tuple(quanta)
@@ -416,68 +429,94 @@ def test_retained_window_keeps_more_keys_than_workers_for_repeated_passes(tmp_pa
 
 
 def test_retained_window_preflights_all_keys_and_serialized_quanta(tmp_path, monkeypatch, workers):
-    cache, paths, _ = make_cache(tmp_path, 3, budget=3 * 32)
+    cache, paths, _, size = _retained_cache(tmp_path, 3)
     keys = tuple(paths)
-    size = max(path.stat().st_size for path in paths.values())
     monkeypatch.setattr(cache, '_load_file_tensor', lambda *args: pytest.fail('preflight loaded a tensor'))
     with pytest.raises(RuntimeError, match='missing'):
         with cache.retained_window(keys + (('missing', keys[0][1]),),
-                max_resident_bytes=3 * 32, max_workers=workers,
+                max_resident_bytes=3 * size, max_workers=workers,
                 max_load_buffer_bytes=size):
             pytest.fail('incomplete roster admitted')
     with pytest.raises(RuntimeError, match='resident storage'):
-        with cache.retained_window(keys, max_resident_bytes=3 * 32 - 1,
+        with cache.retained_window(keys, max_resident_bytes=3 * size - 1,
                 max_workers=workers, max_load_buffer_bytes=size):
             pytest.fail('oversized roster admitted')
     with pytest.raises(RuntimeError, match='serialized'):
-        with cache.retained_window(keys, max_resident_bytes=3 * 32,
+        with cache.retained_window(keys, max_resident_bytes=3 * size,
                 max_workers=workers, max_load_buffer_bytes=size - 1):
             pytest.fail('oversized read admitted')
-    assert cache.plan_retained_window(keys, max_resident_bytes=3 * 32,
+    assert cache.plan_retained_window(keys, max_resident_bytes=3 * size,
         max_workers=workers, max_load_buffer_bytes=size) == tuple((key,) for key in keys)
 
 
-@pytest.mark.parametrize('kind', ['symlink', 'compressed'])
-def test_retained_window_refuses_late_unaccountable_file_before_any_load(
-        tmp_path, monkeypatch, kind):
-    cache, paths, _ = make_cache(tmp_path, 3, budget=3 * 32)
+def test_retained_window_refuses_late_symlink_before_any_load(tmp_path, monkeypatch):
+    cache, paths, _, size = _retained_cache(tmp_path, 3)
     keys = tuple(paths)
     path = paths[keys[-1]]
-    if kind == 'symlink':
-        target = path.with_suffix('.original')
-        path.rename(target)
-        path.symlink_to(target)
-    else:
-        with zipfile.ZipFile(path) as archive:
-            entries = {name: archive.read(name) for name in archive.namelist()}
-        with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-            for name, value in entries.items():
-                archive.writestr(name, value)
+    target = path.with_suffix('.original')
+    path.rename(target)
+    path.symlink_to(target)
     monkeypatch.setattr(cache, '_load_file_tensor',
                         lambda *args: pytest.fail('first file loaded before late refusal'))
-    with pytest.raises(RuntimeError, match='regular|archive'):
-        with cache.retained_window(keys, max_resident_bytes=3 * 32,
+    with pytest.raises(RuntimeError, match='regular'):
+        with cache.retained_window(keys, max_resident_bytes=3 * size,
                 max_workers=1, max_load_buffer_bytes=10000):
             pytest.fail('unaccountable file admitted')
 
 
-def test_retained_window_rechecks_late_file_and_releases_failed_load(tmp_path, monkeypatch):
-    cache, paths, _ = make_cache(tmp_path, 3, budget=3 * 32)
+def test_retained_window_refuses_compressed_archive_before_deserializing_it(
+        tmp_path, monkeypatch):
+    """A compressed archive refuses at its own read, never deserialized.
+
+    The window charges each file its length before the first load, which
+    bounds any uncompressed archive's storage, and parses each archive once,
+    on the bytes its loader read (PQ #1210). A compressed archive is not an
+    accountable load, so it refuses there, before ``torch.load``, and the
+    window releases the files it had already loaded.
+    """
+    cache, paths, _, _size = _retained_cache(tmp_path, 3)
     keys = tuple(paths)
-    size = max(path.stat().st_size for path in paths.values())
+    path = paths[keys[-1]]
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, value in entries.items():
+            archive.writestr(name, value)
+    cache.enable_lru(sum(p.stat().st_size for p in paths.values()))
+    budget = sum(p.stat().st_size for p in paths.values())
+    loads = []
+    original = torch.load
+    def counted_load(*args, **kwargs):
+        loads.append(True)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(torch, 'load', counted_load)
+    with pytest.raises(RuntimeError, match='uncompressed Torch archive'):
+        with cache.retained_window(keys, max_resident_bytes=budget,
+                max_workers=1, max_load_buffer_bytes=10000):
+            pytest.fail('unaccountable file admitted')
+    # One loader, one key per quantum: the first two loaded, the third never
+    # reached ``torch.load``.
+    assert len(loads) == 2
+    assert all(isinstance(cache.weights[key], str) for key in keys)
+    assert cache._lru_bytes == 0 and cache._resident_window_files is None
+
+
+def test_retained_window_rechecks_late_file_and_releases_failed_load(tmp_path, monkeypatch):
+    cache, paths, _, size = _retained_cache(tmp_path, 3)
+    keys = tuple(paths)
     cache.enable_file_load_receipts(max_file_bytes=size)
     original = cache.prefetch
     calls = 0
-    def changed_late(selected, max_workers):
+    def changed_late(selected, max_workers, **kwargs):
         nonlocal calls
         calls += 1
         if calls == 2:
             before = paths[keys[1]].stat()
             os.utime(paths[keys[1]], ns=(before.st_atime_ns, before.st_mtime_ns + 1))
-        return original(selected, max_workers=max_workers)
+        return original(selected, max_workers=max_workers, **kwargs)
     monkeypatch.setattr(cache, 'prefetch', changed_late)
     with pytest.raises(RuntimeError, match='changed'):
-        with cache.retained_window(keys, max_resident_bytes=3 * 32,
+        with cache.retained_window(keys, max_resident_bytes=3 * size,
                 max_workers=1, max_load_buffer_bytes=size):
             pytest.fail('partially loaded roster exposed')
     assert all(isinstance(cache.weights[key], str) for key in keys)
@@ -486,22 +525,23 @@ def test_retained_window_rechecks_late_file_and_releases_failed_load(tmp_path, m
 
 
 def test_retained_window_keeps_unrelated_owners_and_refuses_nested(tmp_path):
-    cache, paths, _ = make_cache(tmp_path, 3, budget=3 * 32)
+    cache, paths, _, size = _retained_cache(tmp_path, 3)
     a, b, c = paths
     outside = cache.get(*a)
-    size = max(path.stat().st_size for path in paths.values())
-    with cache.retained_window((b, c), max_resident_bytes=3 * 32,
+    # The unrelated owner's 32 stored bytes plus the window's two files.
+    held = 32 + 2 * size
+    with cache.retained_window((b, c), max_resident_bytes=held,
             max_workers=1, max_load_buffer_bytes=size):
         with pytest.raises(RuntimeError, match='nested'):
-            with cache.resident_window([a], max_resident_bytes=3 * 32,
+            with cache.resident_window([a], max_resident_bytes=held,
                     max_workers=1):
                 pytest.fail('nested window')
         assert cache.get_resident(*a) is outside
     assert cache.get_resident(*a) is outside
     assert isinstance(cache.weights[b], str) and isinstance(cache.weights[c], str)
-    cache._lru_max_bytes = 64
+    cache._lru_max_bytes = held - 1
     with pytest.raises(RuntimeError, match='LRU budget'):
-        with cache.retained_window((b, c), max_resident_bytes=3 * 32,
+        with cache.retained_window((b, c), max_resident_bytes=held,
                 max_workers=1, max_load_buffer_bytes=size):
             pytest.fail('unrelated LRU owner evicted')
 
@@ -513,7 +553,9 @@ def test_retained_key_costs_price_only_selected_entries(tmp_path):
     aliases = [(name + '.weight', fmt) for name, fmt in (a, b)]
     costs = cache.retained_key_costs(aliases)
     assert tuple(costs) == (a, b)
-    assert costs[a] == {'incoming_storage_bytes': 32,
+    # Charged as the retained window and the sealed plan charge it: its
+    # length, which bounds its 32 stored bytes (PQ #1210).
+    assert costs[a] == {'incoming_storage_bytes': paths[a].stat().st_size,
                         'serialized_bytes': paths[a].stat().st_size}
     cache.get(*a)
     assert cache.retained_key_costs([a])[a] == {
@@ -522,17 +564,16 @@ def test_retained_key_costs_price_only_selected_entries(tmp_path):
 
 def test_retained_window_advices_each_quantum_before_next_admission(tmp_path, monkeypatch):
     from prismaquant import perturbed_x_cache
-    cache, paths, _ = make_cache(tmp_path, 3, budget=3 * 32)
+    cache, paths, _, size = _retained_cache(tmp_path, 3)
     keys = tuple(paths)
-    size = max(path.stat().st_size for path in paths.values())
     cache.enable_file_load_receipts(max_file_bytes=size)
     original_prefetch = cache.prefetch
     events = []
     def before_load(state):
         events.append(('guard', dict(state)))
-    def prefetch(selected, max_workers):
+    def prefetch(selected, max_workers, **kwargs):
         events.append(('load', selected[0]))
-        return original_prefetch(selected, max_workers=max_workers)
+        return original_prefetch(selected, max_workers=max_workers, **kwargs)
     def advice(path, *, expected_stat):
         key = next(key for key, candidate in paths.items() if str(candidate) == path)
         tensor = cache.get_resident(*key)
@@ -540,26 +581,27 @@ def test_retained_window_advices_each_quantum_before_next_admission(tmp_path, mo
         events.append(('advice', key))
     monkeypatch.setattr(cache, 'prefetch', prefetch)
     monkeypatch.setattr(perturbed_x_cache, 'release_activation_cache_file_pages', advice)
-    with cache.retained_window(keys, max_resident_bytes=3 * 32,
+    with cache.retained_window(keys, max_resident_bytes=3 * size,
             max_workers=1, max_load_buffer_bytes=size,
             release_file_pages=True, before_load_quantum=before_load) as receipt:
         assert receipt['file_pages_advised'] == 3
     assert [kind for kind, _ in events] == ['guard', 'load', 'advice'] * 3
+    # Resident bytes are what is stored; the remaining incoming charge is
+    # the files' lengths, as the sealed plan charges them (PQ #1210).
     assert [value for kind, value in events if kind == 'guard'] == [
-        {'resident_bytes': 0, 'remaining_incoming_storage_bytes': 96,
+        {'resident_bytes': 0, 'remaining_incoming_storage_bytes': 3 * size,
          'next_serialized_bytes': paths[keys[0]].stat().st_size},
-        {'resident_bytes': 32, 'remaining_incoming_storage_bytes': 64,
+        {'resident_bytes': 32, 'remaining_incoming_storage_bytes': 2 * size,
          'next_serialized_bytes': paths[keys[1]].stat().st_size},
-        {'resident_bytes': 64, 'remaining_incoming_storage_bytes': 32,
+        {'resident_bytes': 64, 'remaining_incoming_storage_bytes': size,
          'next_serialized_bytes': paths[keys[2]].stat().st_size},
     ]
 
 
 def test_retained_window_midload_guard_refusal_releases_selected_owners(tmp_path, monkeypatch):
     from prismaquant import perturbed_x_cache
-    cache, paths, _ = make_cache(tmp_path, 3, budget=3 * 32)
+    cache, paths, _, size = _retained_cache(tmp_path, 3)
     keys = tuple(paths)
-    size = max(path.stat().st_size for path in paths.values())
     cache.enable_file_load_receipts(max_file_bytes=size)
     original_load = cache._load_file_tensor
     reads, advice, guards = [], [], []
@@ -575,7 +617,7 @@ def test_retained_window_midload_guard_refusal_releases_selected_owners(tmp_path
     monkeypatch.setattr(cache, '_load_file_tensor', load)
     monkeypatch.setattr(perturbed_x_cache, 'release_activation_cache_file_pages', advise)
     with pytest.raises(RuntimeError, match='host reserve refused'):
-        with cache.retained_window(keys, max_resident_bytes=3 * 32,
+        with cache.retained_window(keys, max_resident_bytes=3 * size,
                 max_workers=1, max_load_buffer_bytes=size,
                 release_file_pages=True, before_load_quantum=guard):
             pytest.fail('guard refusal exposed a partial window')
@@ -589,15 +631,16 @@ def test_retained_window_midload_guard_refusal_releases_selected_owners(tmp_path
 
 def test_retained_window_advices_shared_file_once_after_last_read(tmp_path, monkeypatch):
     from prismaquant import perturbed_x_cache
-    cache, paths, _ = make_cache(tmp_path, 2, budget=3 * 32)
+    cache, paths, _, size = _retained_cache(tmp_path, 2)
     first, last = paths
     shared = ('shared', first[1])
     cache.weights[shared] = str(paths[first])
-    size = max(path.stat().st_size for path in paths.values())
+    # Two keys read the first file: each is charged its own load.
+    cache.enable_lru(3 * size)
     advice = []
     monkeypatch.setattr(perturbed_x_cache, 'release_activation_cache_file_pages',
                         lambda path, *, expected_stat: advice.append(path))
-    with cache.retained_window((first, shared, last), max_resident_bytes=3 * 32,
+    with cache.retained_window((first, shared, last), max_resident_bytes=3 * size,
             max_workers=1, max_load_buffer_bytes=size,
             release_file_pages=True) as receipt:
         assert receipt['file_pages_advised'] == 2

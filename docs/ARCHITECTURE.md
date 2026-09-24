@@ -1,5 +1,51 @@
 # PrismaQuant Architecture
 
+A retained PWC window loads its renders under one reader lease, on one loader
+pool, and parses each archive once (2026-09-24, `perf/1210-render-readahead`,
+PQ #1210). In GLM-5.3 Stage B row 041's render windows 01 to 14, the main
+thread spent 24.5% of its py-spy samples waiting on its own window's loads,
+and 63% of the loader threads' samples were per-file lease work:
+`LeaseWindow.__enter__` 47.1%, `acquire_entry_window` 10.6% and
+`LeaseWindow.__exit__` 5.3% (PB `4e1468a6d07e`). `ProductionWeightCache.
+retained_window` now does each of these once per window:
+
+- **One reader lease.** Under the strict tier policy, `_enter_window_leases`
+  pins every staged render that has a bound digest through
+  `perturbed_x_cache._enter_group_lease`, the batched lease the exact
+  activation cache uses (PQ #997): RAM copies share one lease window and the
+  rest share one SSD window. Each load still opens its file through the SDK
+  under that pin, reads the entry the pin was built from, and hashes the
+  bytes against the bound digest and the map's digest. The window releases
+  the pin when the last quantum's loads are done, before the consumer runs.
+  If the batched lease refuses, every load leases on its own, as before.
+  `PWC_WINDOW_LEASE_COUNTERS` counts both outcomes.
+- **One archive parse per file.** Preflight no longer opens each declared
+  file to read its ZIP central directory. It charges each file its length,
+  which is the bound the sealed plan already charges
+  (`retained_admission_targets`): an ordinary uncompressed Torch archive
+  stores every tensor byte inside the file. The loader parses the archive
+  once, on the bytes it read, before deserializing them. A compressed or
+  malformed archive refuses there, and the window releases what it had
+  loaded. `retained_key_costs` prices a file the same way, and the
+  `remaining_incoming_storage_bytes` that `before_load_quantum` receives is
+  the remaining files' lengths.
+- **One loader pool.** A single pool of `max_workers` threads
+  (`pwc-window-load`) serves every quantum. Each quantum is still a barrier
+  and is still charged to its own serialized-buffer cap.
+- **One cover lookup.** `prepare_retained_window_read` passes
+  `published_batch=stage_covers_are_published` to `await_staged_spans`.
+
+Loading the next window's renders while this window computes does not fit the
+sealed budget. `retained_render_cap_bytes` (6,023,929,799 bytes on the
+row-041 plan) is the largest window's renders, and the quantum sizes the PWC
+LRU to it, so a second window's renders would be unpriced.
+
+The loaded tensors, file-load receipts and render identities are
+byte-identical with and without the window lease. Gates:
+`tests/test_pwc_window_load_1210.py`, `tests/test_pwc_resident_windows.py`,
+`tests/test_render_identity_once_1192.py`. No format, pipeline default, stage
+or ship gate changes.
+
 A Stage B window spans its staged-render wait and its unit commit (2026-09-24,
 `perf/1207-unit-journal-overlap`, PQ #1207). The `window` span holds the
 staged-render wait in `before_window`, the replay and projections, and the
@@ -2206,8 +2252,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `perf/1207-unit-journal-overlap`.
+As of: 2026-09-24 · `perf/1210-render-readahead`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `perf/1210-render-readahead`) for **a retained PWC
+window's one reader lease, one loader pool and one archive parse per file**
+(PQ #1210). See the entry at the top. A retained window now charges each file
+its length instead of its parsed archive storage. No format, pipeline
+default, stage or ship gate changes.
 
 Re-stamped (2026-09-24, `perf/1207-unit-journal-overlap`) for **a Stage B
 window's `window-wait` and `commit` child spans** (PQ #1207). See the entry
@@ -4859,7 +4911,9 @@ roster the cache already holds a path for, and it is dropped when a window
 closes or the cache is compacted, which keeps it out of a pickled cache. The
 bytes-backed scan inside `_load_file_tensor` is a different call on the loader
 thread against an in-memory buffer and is never memoized, so the loaded
-archive is still priced against what preflight recorded. No default, stage,
+archive is still priced against what preflight recorded. (Since PQ #1210 a
+retained window does not scan at preflight; it charges file lengths and
+parses each archive once, on the loaded bytes.) No default, stage,
 format, lane, pin, plugin contract, ship gate or published byte changes.
 Gates: `tests/test_pwc_resident_windows.py`.
 
@@ -6349,7 +6403,8 @@ and the existing joint-window/allocation suites.
 Re-stamped (2026-09-13, `codex/pwc-retained-window-20260913`) for
 opt-in retained PWC candidate windows. `retained_key_costs` inspects only
 selected concrete keys and reports incoming uncompressed Torch archive storage
-and serialized file bytes without loading tensors. `plan_retained_window`
+and serialized file bytes without loading tensors. (Since PQ #1210 both are
+the file's length, which the retained window charges.) `plan_retained_window`
 preflights the complete selected roster, including unrelated resident backing
 storages and the LRU cap, then returns key-only prefetch quanta bounded by CPU
 workers and the concurrent serialized-buffer budget. `retained_window` repeats
