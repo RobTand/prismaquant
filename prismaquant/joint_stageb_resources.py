@@ -21,8 +21,37 @@ def _require(ok, message):
         raise ValueError("Stage B resources: " + message)
 
 
-def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_bytes=72 * GIB, candidate_files=None):
-    """Use the existing statistics planner and retained-window budget owner."""
+#: Where a quantum holds its cotangent plane: in host memory, or in the
+#: sealed local cotangent scratch (PRISMAQUANT_STAGE_B_COTANGENT_ROOT).
+COTANGENT_PLANE_PLACEMENTS = ("host", "scratch")
+
+
+def _cotangent_plane(value):
+    """Validate a declared cotangent plane owner, or pass ``None`` through."""
+    if value is None:
+        return None
+    _require(isinstance(value, dict) and set(value) == {"bytes", "placement"},
+             "cotangent plane declares exactly bytes and placement")
+    _require(type(value["bytes"]) is int and value["bytes"] > 0,
+             "cotangent plane bytes must be a positive integer")
+    _require(value["placement"] in COTANGENT_PLANE_PLACEMENTS,
+             "cotangent plane placement must be host or scratch")
+    return {"bytes": value["bytes"], "placement": value["placement"]}
+
+
+def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_bytes=72 * GIB,
+                  candidate_files=None, cotangent_plane=None):
+    """Use the existing statistics planner and retained-window budget owner.
+
+    ``cotangent_plane`` (PQ #1141) declares the quantum's cotangent plane as an
+    owner: ``{"bytes": N, "placement": "host" | "scratch"}``. A host plane is
+    resident from checkpoint-load to the end of the quantum, so it is charged
+    to both caps the planner holds renders against: the container's host cap
+    and the aggregate physical limit. A scratch plane lives on local disk and
+    charges neither. The declaration is recorded in ``limits`` and in the
+    derivation only when given, so a policy derived without one is unchanged.
+    """
+    plane = _cotangent_plane(cotangent_plane)
     import torch
     from . import format_registry as fr
     from .aura_cost import _ZERO_COST_FORMATS
@@ -115,14 +144,25 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
         keys = {n: tuple((n, fmt) for fmt in formats[n]) for n in names}
         layer_costs = {key: key_costs[key] for values in keys.values() for key in values}
         targets[layer] = targets_from_statistics_plan(statistics, keys, layer_costs)
+    host_plane = plane["bytes"] if plane is not None and plane["placement"] == "host" else 0
+    _require(host_plane < host_bytes, "cotangent plane on the host exceeds the host cap")
     declared = {key: getattr(old_budget, key) for key in DECLARED_BUDGET_FIELDS}
-    declared["physical_limit_bytes"] = physical_bytes
+    declared["physical_limit_bytes"] = physical_bytes - host_plane
     budget, derivation = derive_retained_window_budget(targets, declared=declared,
         source_bytes=retained["source_reserve_bytes"],
         prefetch_workers=plan["execution"]["operator_windows"]["prefetch_workers"],
-        host_cap_bytes=host_bytes, footprint_scope="pwc_serialized_upper_bound")
+        host_cap_bytes=host_bytes - host_plane, footprint_scope="pwc_serialized_upper_bound")
+    limits = {"host_bytes": host_bytes, "physical_bytes": physical_bytes, "gpu_bytes": gpu_bytes}
+    if plane is not None:
+        limits["cotangent_plane"] = plane
+        derivation["cotangent_plane"] = {
+            **plane, "host_bytes_charged": host_plane,
+            "peak_planned_bytes_with_plane": derivation["peak_planned_bytes"] + host_plane,
+            "basis": ("a host plane is resident for the whole quantum, so the host cap "
+                      "and the physical limit the windows are packed against are both "
+                      "reduced by it; a scratch plane is on local disk")}
     return {"schema": SCHEMA, "inputs": copy.deepcopy(inputs),
-        "limits": {"host_bytes": host_bytes, "physical_bytes": physical_bytes, "gpu_bytes": gpu_bytes},
+        "limits": limits,
         "budget": budget.as_dict(), "derivation": derivation,
         "candidate_files": file_rows, "candidate_files_sha256": canonical_json_sha256(file_rows, where="resource candidate files"),
         "semantics": "resource_geometry_only; original_qualification_and_BF16_capture_unchanged"}
@@ -198,8 +238,16 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inputs", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--cotangent-plane-bytes", type=int, default=None,
+                        help="the quantum's cotangent plane bytes (PQ #1141)")
+    parser.add_argument("--cotangent-plane-placement", choices=COTANGENT_PLANE_PLACEMENTS,
+                        default=None, help="where the quantum holds that plane")
     args = parser.parse_args(argv)
-    policy = derive_policy(json.loads(Path(args.inputs).read_bytes()))
+    if (args.cotangent_plane_bytes is None) != (args.cotangent_plane_placement is None):
+        parser.error("--cotangent-plane-bytes and --cotangent-plane-placement go together")
+    plane = (None if args.cotangent_plane_bytes is None else
+             {"bytes": args.cotangent_plane_bytes, "placement": args.cotangent_plane_placement})
+    policy = derive_policy(json.loads(Path(args.inputs).read_bytes()), cotangent_plane=plane)
     raw = (json.dumps(policy, sort_keys=True) + "\n").encode()
     _require(publish_new_bytes(Path(args.out), raw), "policy output already exists")
     print(json.dumps({"status": "resource_geometry_derived", "out": args.out,
