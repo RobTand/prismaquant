@@ -230,12 +230,20 @@ class ProducedOutputSpool:
         return None if value is None else Path(value)
 
     def _refuse(self, batch_id, answer, *, where):
-        """Record PB's refusal of an export, then raise it."""
+        """Record PB's refusal of an export, then raise it.
+
+        One record per group: the stager's poll and a barrier can both read
+        the same refusal (PQ #1128), and it is one refusal.
+        """
         exc = ProducedExportRefused(batch_id, answer, where=where)
-        self.refusals.append({"batch_id": exc.batch_id,
-                              "export_key": exc.export_key,
-                              "state": exc.state, "where": exc.where,
-                              "unix": time.time()})
+        group = self._groups.get(batch_id)
+        if group is None or not group.get("refused"):
+            self.refusals.append({"batch_id": exc.batch_id,
+                                  "export_key": exc.export_key,
+                                  "state": exc.state, "where": exc.where,
+                                  "unix": time.time()})
+            if group is not None:
+                group["refused"] = True
         raise exc
 
     def reserve(self, batch_id, ceiling_bytes, *, wait=True):
@@ -364,8 +372,16 @@ class ProducedOutputSpool:
         """Look once: True once the export is acknowledged. Never waits."""
         if not group["submitted"]:
             return False
+        answer = None if group["durable"] else self.backend.poll_group(batch_id)
+        return self._settle_poll_locked(batch_id, group, answer, where=where)
+
+    def _settle_poll_locked(self, batch_id, group, answer, *, where):
+        """Apply one ``poll_group`` answer; True once the export is acknowledged.
+
+        ``answer`` may have been read without the lock (``poll_oldest``), so
+        a group another thread already found durable is not advanced twice.
+        """
         if not group["durable"]:
-            answer = self.backend.poll_group(batch_id)
             if not answer.get("ok"):
                 self._refuse(batch_id, answer, where=where)
             if answer.get("complete") is not True:
@@ -414,11 +430,39 @@ class ProducedOutputSpool:
         return [batch_id for batch_id in self._pending
                 if not self._groups[batch_id]["durable"]]
 
-    def _poll_all_locked(self):
-        # Only bounded in-flight exports are examined at a write boundary;
-        # completed historical groups do not multiply polling work.
-        for batch_id in tuple(self._pending):
-            self._poll_locked(batch_id, self._groups[batch_id])
+    def exporting(self):
+        """Is any submitted group's export still live? Looks at no export."""
+        with self._lock:
+            return bool(self._pending)
+
+    def poll_oldest(self, *, where="poll"):
+        """Look at live exports oldest first, until one is still live.
+
+        The oldest is the group reserved first. Each look is one
+        ``poll_group``, read without the lock so a read or a record on the
+        compute thread never waits on it (PQ #1128), and applied under it.
+        Stops at the first export PrismaBuild reports live, so a write pays
+        for one look however many exports are in flight; a younger export
+        that lands first is recorded when the ones before it have. Never
+        waits. Returns how many landed.
+        """
+        landed = 0
+        while True:
+            with self._lock:
+                live = [(self._groups[batch_id]["sequence"], batch_id)
+                        for batch_id in self._pending
+                        if not self._groups[batch_id]["durable"]]
+                if not live:
+                    return landed
+                batch_id = min(live)[1]
+            answer = self.backend.poll_group(batch_id)
+            with self._lock:
+                # A group is never forgotten, and one another thread found
+                # durable meanwhile is not advanced twice.
+                if not self._settle_poll_locked(
+                        batch_id, self._groups[batch_id], answer, where=where):
+                    return landed
+            landed += 1
 
     def _make_room_locked(self, *, where, evict=True):
         """Release what can go; return how many groups went.
@@ -595,9 +639,14 @@ class ProducedOutputSpool:
         return answer
 
     def durable_entries(self):
-        """Drain newly acknowledged references on the compute thread only."""
+        """The references acknowledged since the last call. Polls nothing.
+
+        The polls that find them run where the owner puts them: the stager's
+        ``poll_oldest`` after a write, or any wait (PQ #1128). Before #1128
+        this polled every live export, twice per write, on the compute
+        thread.
+        """
         with self._lock:
-            self._poll_all_locked()
             committed, self._durable_progress = self._durable_progress, []
             return committed
 
