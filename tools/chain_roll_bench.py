@@ -637,8 +637,9 @@ def cmd_analyze(args) -> int:
             "top_leaves": [r["profile"]["top_leaves"] for r in records if r["profile"]],
         }
         if args.netdata:
-            host = [_netdata(args.netdata, args.power_chart, args.envelope_w,
-                             r["roll_started_unix"], r["roll_ended_unix"]) for r in records]
+            host = [{"label": r["label"], **_netdata(
+                        args.netdata, args.power_chart, args.envelope_w,
+                        r["roll_started_unix"], r["roll_ended_unix"])} for r in records]
             report["arms"][arm]["netdata"] = host
             watts = [h["gpu_power_w_mean"] for h in host if h["gpu_power_w_mean"] is not None]
             report["arms"][arm]["gpu_power_w_mean"] = (round(sum(watts) / len(watts), 2)
