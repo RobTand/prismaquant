@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+A failed Stage B quantum writes its counters (2026-09-24,
+`ws-sb4/stage-io-baseline`). `counters.json` was written only after the layer
+core returned, so the v4 and v5 gate failures left no record of their own
+phases. `run_layer_quantum` now calls `write_failure_counters` when an
+exception leaves the head or the core, before the runner's teardown. It
+closes every open span as `interrupted` and writes the counters with `units`
+done as `null`. An `outcome` block names the error type, the message and
+the spans it interrupted. A failure before the counters exist, in the head,
+writes the spans and the GPU power only. `status.json` and `cost.pkl` stay
+the success path's, and a success document now carries
+`outcome: {status: complete | gapped}`. The write never raises over the
+run's own error. It covers exceptions, not a SIGKILL: the host sampler
+remains the instrument for an out-of-memory kill. Gates:
+`tests/test_quantum_failure_counters.py`. No format, pipeline default, stage
+or ship gate changes.
+
 Stage B records its IO per phase, and the checkpoint loaders print a read
 rate (2026-09-24, `ws-sb4/stage-io-baseline`). The v6 gate is the IO baseline
 that later IO work (PQ #1142, #1143) measures against, and until now a quantum

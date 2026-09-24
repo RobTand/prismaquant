@@ -40,7 +40,7 @@ from types import SimpleNamespace
 import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
-from .io_spans import IoSpanLog, read_proc_io, stage_span_log
+from .io_spans import IoSpanLog, failure_outcome, read_proc_io, stage_span_log
 from .joint_adjoint_checkpoints import (
     QUANTUM_COUNTERS_SCHEMA,
     QUANTUM_RECORD_SCHEMA,
@@ -636,7 +636,8 @@ class QuantumCounters:
         if profiler.error and self._kernel_error is None:
             self._kernel_error = profiler.error
 
-    def finish(self, *, units_done: int, units_total: int) -> dict:
+    def finish(self, *, units_done: int | None, units_total: int) -> dict:
+        """The counters document. ``units_done`` is ``None`` for a failed run."""
         gpu = self.sampler.stop()
         wall_s = time.time() - self.started
         kernel_active_s = (self.total_kernel_active_s
@@ -647,7 +648,8 @@ class QuantumCounters:
             "schema": QUANTUM_COUNTERS_SCHEMA,
             "quantum_id": self.quantum_id,
             "identity_sha256": self.identity_sha256,
-            "units": [int(units_done), int(units_total)],
+            "units": [None if units_done is None else int(units_done),
+                      int(units_total)],
             "wall_s": wall_s,
             "kernel_active_s": kernel_active_s,
             "kernel_active_ratio": (
@@ -661,7 +663,8 @@ class QuantumCounters:
             "gpu_power_envelope_w": 140.0,
             "work_per_joule": {
                 "units_per_kwh": (
-                    units_done / (joules / 3.6e6) if joules else None),
+                    units_done / (joules / 3.6e6)
+                    if joules and units_done is not None else None),
             },
             "chain": dict(self.chain),
             "replay": dict(self.replay),
@@ -2489,6 +2492,65 @@ def _resolved_units(resolved_windows) -> int:
             if resolved_windows is not None else 0)
 
 
+def write_failure_counters(record, *, counters, io_spans, sampler, error,
+                           units_total=0) -> Path | None:
+    """Write a failed run's counters to its counters path, and return it.
+
+    The document is the success document with ``units`` done as ``None``
+    and an ``outcome`` block naming the error and the spans it interrupted.
+    Spans still open close as ``interrupted``. Before the quantum built its
+    counters (a failure in the head), the document carries the spans, the
+    GPU power and the outcome only. Nothing else is written: ``status.json``
+    and ``cost.pkl`` stay the success path's.
+
+    Never raises: a failure here is printed, and the run's own error is the
+    one that propagates.
+    """
+    try:
+        open_names = io_spans.open_names
+        io_spans.close_open(error=error)
+        outcome = failure_outcome(error, open_spans=open_names)
+        if counters is not None:
+            document = counters.finish(units_done=None, units_total=units_total)
+        else:
+            gpu = sampler.stop()
+            document = {
+                "schema": QUANTUM_COUNTERS_SCHEMA,
+                "quantum_id": record.get("quantum_id"),
+                "identity_sha256": record.get("identity_sha256"),
+                "units": [None, int(units_total)],
+                "gpu_joules": gpu.get("gpu_joules"),
+                "gpu_power_w_p50": gpu.get("gpu_power_w_p50"),
+                "gpu_power_w_p95": gpu.get("gpu_power_w_p95"),
+                "gpu_power_w_max": gpu.get("gpu_power_w_max"),
+                "gpu_sampler_samples": gpu.get("sample_count"),
+                "gpu_power_envelope_w": 140.0,
+                "io_spans": list(io_spans.records),
+            }
+            if "sampler_error" in gpu:
+                document["gpu_sampler_error"] = gpu["sampler_error"]
+        document["outcome"] = outcome
+        space = record.get("output_space") or {}
+        target = space.get("counters") or (
+            str(Path(space["root"]) / "counters.json") if space.get("root") else None)
+        if target is None:
+            print("quantum counters: no output space to write the failure "
+                  "counters into", flush=True)
+            return None
+        path = Path(target)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(
+            path, (json.dumps(document, sort_keys=True, indent=2,
+                              allow_nan=False, default=str) + "\n").encode())
+        print(f"quantum counters: wrote the failed run's counters to {path} "
+              f"(open spans {open_names})", flush=True)
+        return path
+    except Exception as exc:  # noqa: BLE001 -- never mask the run's error
+        print(f"quantum counters: could not write the failure counters: "
+              f"{type(exc).__name__}: {exc}", flush=True)
+        return None
+
+
 def publish_quantum_outputs(record, *, payload, result, counters,
                             units_total=None) -> dict:
     """Write the quantum's outputs (§6.4), only under its output space.
@@ -2518,6 +2580,7 @@ def publish_quantum_outputs(record, *, payload, result, counters,
     result["units_done"] = units_done
     result["units_total"] = units_total
     result["passed"] = status == "complete"
+    counters = {**counters, "outcome": {"status": status}}
     atomic_write_bytes(
         Path(record["output_space"]["counters"]),
         (json.dumps(counters, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
@@ -2676,7 +2739,7 @@ def run_layer_quantum(
     started, before_io = time.time(), _io_counters()
     # The power sampler and the span log start before the head, so the head
     # has a span and its watts, and the counters' joules and wall time cover
-    # the same interval.
+    # the same interval. A failure writes what they hold (PQ #1144 follow-up).
     power = GpuPowerSampler().start()
     io_spans = quantum_io_spans(record["quantum_id"], power)
     runner = None
@@ -2872,6 +2935,14 @@ def run_layer_quantum(
         result["peak_gpu_reserved_bytes"] = torch.cuda.max_memory_reserved()
         if result["peak_gpu_bytes"] > config["max_gpu_bytes"]:
             raise RuntimeError("observed GPU allocation exceeds declared budget")
+    except BaseException as error:
+        # Before the runner's teardown, which can take the box down with it
+        # (Stage A, PQ #899): the counters of a failed run are the evidence
+        # of where it failed. This covers exceptions, not SIGKILL.
+        write_failure_counters(record, counters=counters, io_spans=io_spans,
+                               sampler=power, error=error,
+                               units_total=_resolved_units(resolved_windows))
+        raise
     finally:
         if runner is not None:
             completed, runner = runner, None
