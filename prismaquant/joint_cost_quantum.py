@@ -448,6 +448,7 @@ class QuantumProgress:
         self._phase = None
         self._phase_index = -1
         self._frontier = frontier
+        self._undeclared: set[str] = set()
         self.commits = 0
 
     def _enter(self, name: str) -> None:
@@ -456,8 +457,16 @@ class QuantumProgress:
         try:
             index = self._phases.index(str(name))
         except ValueError:
-            self._log(f"quantum progress: phase {name!r} was not declared; "
-                      f"committing nothing under it")
+            # Chunk names are not staging phases on an executable row
+            # (joint_layer_quanta.quantum_executable_phase_names), so this
+            # fires once per chunk there. commit() keeps reporting under the
+            # phase already entered; say that, once per name (PQ #1187).
+            if str(name) not in self._undeclared:
+                self._undeclared.add(str(name))
+                where = (f"units commit under {self._phase!r}" if self._phase
+                         else "nothing commits until a declared phase is entered")
+                self._log(f"quantum progress: phase {name!r} is not one this "
+                          f"action declared; {where}")
             return
         if index > self._phase_index:
             self._phase_index = index
@@ -2548,14 +2557,25 @@ def run_layer_quantum_core(
                 window_kernel = None
             runner.context.unload(layer)
 
+        # ---- the tail after the last window (PQ #1187) ---------------------
+        # One top-level span from here to the return: the handoff write, the
+        # payload assembly and the final check of every row. It commits no
+        # units (nothing here is journalled; the rows are written under
+        # ``records-out``), so it runs under the last window's render phase
+        # and its stall allowance. A failure leaves it open, and the failure
+        # path closes it as interrupted, as it does a window's.
+        payload_span = counters.io.open(
+            "payload", units=len(joint_rows),
+            rows=sum(len(rows) for rows in joint_rows.values()))
         # ---- band-serial handoff for layer - 1 (PQ #996) ------------------
         # The final pass above wrote the boundary-``layer`` plane and
         # harvested every owner; both stay readable until ``storage`` closes
         # (the plane may live in its cotangent scratch).
         if handoff_emitter is not None:
-            handoff_emitter.emit(grad_plane=grad_plane,
-                                 cotangent_owners=cotangent_owners,
-                                 n_probes=n_probes, n_batches=len(row_offsets))
+            with counters.io.span("handoff-out"):
+                handoff_emitter.emit(grad_plane=grad_plane,
+                                     cotangent_owners=cotangent_owners,
+                                     n_probes=n_probes, n_batches=len(row_offsets))
 
     # ---- payload (§6.4 cost.pkl) -----------------------------------------
     payload = _assemble_streamed_aura_payload(
@@ -2605,6 +2625,7 @@ def run_layer_quantum_core(
         for fmt, row in rows.items():
             if not validate_row(row):
                 raise RuntimeError(f"invalid measured joint cost for {name}@{fmt}")
+    counters.io.close(payload_span)
     return payload
 
 
@@ -3092,16 +3113,19 @@ def run_layer_quantum(
                                stamps=stamps)
         raise
     finally:
-        if runner is not None:
-            completed, runner = runner, None
-            completed.shutdown()
-        result["env"]["finished_epoch"] = time.time()
-        result["phases"].append({"phase": "layer-quantum", "start_epoch": started,
-                                 "end_epoch": result["env"]["finished_epoch"]})
-        result["io_before"], result["io_after"] = before_io, _io_counters()
-        residency = residency_report()
-        if residency is not None:
-            result["residency"] = residency
+        # Between the core and ``records-out`` (PQ #1187). On a failure the
+        # counters were written above, so this span reaches the log only.
+        with io_spans.span("teardown"):
+            if runner is not None:
+                completed, runner = runner, None
+                completed.shutdown()
+            result["env"]["finished_epoch"] = time.time()
+            result["phases"].append({"phase": "layer-quantum", "start_epoch": started,
+                                     "end_epoch": result["env"]["finished_epoch"]})
+            result["io_before"], result["io_after"] = before_io, _io_counters()
+            residency = residency_report()
+            if residency is not None:
+                result["residency"] = residency
 
     # ---- writes: only under layer-quanta/layer-NNN/ (§6.4) ---------------
     units_total = _resolved_units(resolved_windows)

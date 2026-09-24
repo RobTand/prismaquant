@@ -239,8 +239,12 @@ class JointRunProgress:
         except ValueError:
             if name not in self._undeclared:
                 self._undeclared.add(str(name))
+                # enter() keeps the phase already entered, and the count
+                # commits under it; say so (PQ #1187).
+                where = (f"units commit under {self._phase!r}" if self._phase
+                         else "nothing commits until a declared phase is entered")
                 self._log(f"progress: phase {name!r} is not one this action "
-                          f"declared; committing nothing under it")
+                          f"declared; {where}")
             return
         if index > self._phase_index:
             self._phase_index = index
