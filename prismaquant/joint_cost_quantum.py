@@ -2689,8 +2689,9 @@ def run_layer_quantum(
     ``adjoint_handoff`` is a bound handoff from quantum ``layer + 1``
     (band-serial, PQ #996); ``emit_handoff`` publishes this quantum's own for
     ``layer - 1``. Both are chosen by the dispatcher; neither falls back.
-    ``progress_grace`` is the dispatcher's load-phase grace stamps: stamped
-    into results.json and counters.json as ``progress_grace``, never read.
+    ``progress_grace`` is the dispatcher's grace stamps (load and compute
+    phases): stamped into results.json and counters.json as
+    ``progress_grace``, never read.
     """
     import torch
 
@@ -3066,7 +3067,7 @@ def run_layer_quantum(
 
 
 def progress_grace_stamps(raw: str | None) -> list | None:
-    """The dispatcher's load-phase grace stamps, as the run records them.
+    """The dispatcher's grace stamps (load and compute phases), as recorded.
 
     The stamps explain the grace PrismaBuild enforces; the quantum reads
     nothing from them. A value that is not a JSON list of objects is kept

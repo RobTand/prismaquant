@@ -272,6 +272,67 @@ counters, and reads nothing from them. Gates: `tests/test_load_phase_grace.py`,
 (the load-phase grace) and adds three dispatcher options. No format,
 pipeline stage or ship gate changes.
 
+The dispatcher derives Stage B's compute-phase grace (2026-09-24,
+`ws-prog/1165-compute-phase-progress`, PQ #1165). Four phases run a whole
+pass: `chain-NNN-bound` rolls a chain layer's backward, `spill-pP` captures
+one probe into the spill and replays the first window for it, a spill row's
+`render-NN` (NN >= 1) replays its window from the spill, and a windowed row's
+`replay-NN-pP` replays one probe. Each pass writes only disposable scratch:
+rolled rows go to the cotangent scratch and spilled rows to the `O_TMPFILE`
+spill, and a resume recomputes both. So no unit is durable, none commits
+inside the pass, and PrismaBuild's no-progress clock runs for the whole pass.
+These phases took `CHUNK_PROGRESS_GRACE_S`, the legacy chunk lane's flat
+900 s from contract §5.2, which bounds no pass: R13's layer-043 row was ended
+as `no_progress` 967 s into a 2048-row `chain-044-bound` roll (PB
+`93247fc2…`). Only `checkpoint-load` and `handoff-load` had a derived grace.
+
+`tools/dispatch_joint_quanta.py` now derives each compute phase's grace as
+the read term plus each compute term (`COMPUTE_PHASE_BOUND`). The read term
+is W + ceil(bytes / floor), counted once. Here the staged waits are covered
+by PrismaBuild landing records (PB #989), because the one-deadline property
+is shown only for the two load functions. A measured term is
+ceil(units x unit_s), where unit_s is the slowest window of at least 30 s on
+the same regime and device class. An unmeasured term takes the blanket
+1800 s. There are two built-in measurements, both from sparky (GB10):
+
+- `spill-capture`: 34.316 s per capture group, from the slowest `capture-b4`
+  group of the #1151 workspace profile on layer 44 (PB `8f5422dc…`). Its
+  scope is the `gb10` tag, the replay regime
+  `capture_batch=4,accumulation=operator_gemm,chunk_rows=65536`, and the
+  sealed spill bound's per-batch fields. A row that spills no more bytes per
+  batch than layer 44 is in scope; that is an assumption, stated in the
+  measurement.
+- `chain-roll`: 0.8231 s per rolled row, from the slowest 30 s window of the
+  roll's write rate in `chain-044-bound` (PB `93247fc2…`). Its scope is the
+  `gb10` tag, chain regime batch 4 with probe fusion, 4 probes and 16,779,369
+  B rows.
+
+The spill replays are not measured yet. They take the blanket, and the stamp
+names the counter that will measure them (`replay_wall_s`, each window's
+`wall_s`). A row outside a measurement's scope takes the blanket for that
+term, and the stamp names each field that differs. `--compute-ceiling FILE`
+(repeatable) replaces the built-in measurement of its kind. For the R13
+layer-044 row, `spill-pP` is 300 + 137 + 4393 + 1800 = 6630 s and
+`render-NN` is 300 + 95 + 1800 = 2195 s. For layer 043, `chain-044-bound` is
+300 + 137 + 1686 = 2123 s. Source phases and read-only render phases keep
+900 s. A source phase also settles the next layer's source (PQ #1166), so a
+byte-derived source grace would have to count those bytes too.
+
+Each compute stamp (`prismaquant.compute_phase_grace.v1`) rides
+`--progress-grace-derivation` beside the load stamps. One basis entry per row
+carries the bound, the floor and every measurement the stamps name. Gate:
+`tests/test_compute_phase_grace_1165.py`. It also drives the real quantum and
+checks two things: no report lands between a pass's first and last unit, and
+the units the quantum runs under each phase equal the units the dispatcher
+prices. This changes a dispatcher default (the compute-phase grace) and adds
+one dispatcher option. No format, pipeline stage, record identity or ship
+gate changes.
+
+A resumed spill row whose first active window is not window 0 runs its
+captures under that window's `render-NN` phase, because progress phases only
+move forward. That grace has no capture term. This change does not cover that
+case.
+
 A failed Stage B quantum writes its counters (2026-09-24,
 `ws-sb4/stage-io-baseline`). `counters.json` was written only after the layer
 core returned, so the v4 and v5 gate failures left no record of their own
@@ -1811,8 +1872,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-1147/sealing-off`.
+As of: 2026-09-24 · `ws-prog/1165-compute-phase-progress`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-prog/1165-compute-phase-progress`) for the
+**compute-phase grace** (PQ #1165): the joint dispatcher derives the grace of
+`chain-NNN-bound`, `spill-pP`, spill-row `render-NN` (NN >= 1) and
+`replay-NN-pP` from the read term plus the pass's measured or blanket compute,
+in place of the flat 900 s. It adds `--compute-ceiling`. A dispatcher default
+changes; no format, pipeline stage, lane or ship gate changes.
 
 Re-stamped (2026-09-24, `ws-1147/sealing-off`) for **sealing off by default**
 (PQ #1147): `PRISMAQUANT_DEV_MODE` means dev mode unless it is `0`, and every

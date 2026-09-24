@@ -178,6 +178,12 @@ def _stamps(argv):
     return json.loads(inner[inner.index(PROGRESS_GRACE_FLAG) + 1])
 
 
+def _load_stamps(argv):
+    """The load-phase stamps; compute phases stamp their own (PQ #1165)."""
+    return [stamp for stamp in _stamps(argv)
+            if stamp.get("schema") == dispatch.LOAD_PHASE_GRACE_SCHEMA]
+
+
 def _checkpoint_bytes(record):
     wire = Path(record["executable_readset"]["manifest_path"]).read_bytes()
     phases = json.loads(gzip.decompress(wire))["read_plan"]["phases"]
@@ -200,14 +206,14 @@ def test_a_filtered_dispatch_counts_only_its_own_rows(tmp_path, monkeypatch):
     assert phase_bytes > 0
     expected = 300 + -(-phase_bytes // FLOOR)
     assert _graces(argv)["checkpoint-load"] == expected
-    (stamp,) = _stamps(argv)
+    (stamp,) = _load_stamps(argv)
     assert (stamp["mode"], stamp["readers"], stamp["grace_s"]) == (
         "derived", 1, expected)
     assert stamp["readers_source"] == "the quantum rows this dispatch publishes"
     (event,) = [e for e in _events(out) if e.get("event") == "quantum-submitted"]
     assert event["quantum_id"] == "layer-003"
     assert event["link"]["readers"] == 1
-    assert event["progress_grace"] == [stamp]
+    assert event["progress_grace"] == _stamps(argv)
 
 
 def test_an_unfiltered_dispatch_counts_every_row_it_publishes(tmp_path, monkeypatch):
@@ -223,7 +229,7 @@ def test_an_unfiltered_dispatch_counts_every_row_it_publishes(tmp_path, monkeypa
             continue
         loads += 1
         assert graces["checkpoint-load"] == HEAD_PROGRESS_GRACE_S
-        (stamp,) = _stamps(row["argv"])
+        (stamp,) = _load_stamps(row["argv"])
         assert (stamp["mode"], stamp["readers"]) == ("blanket", len(bound))
     assert loads > 0
 
@@ -249,7 +255,7 @@ def test_a_resubmitted_row_keeps_the_link_it_was_first_submitted_with(
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--quantum", "layer-003") == 0
     assert _by_id(gateway)["layer-003"]["argv"] == first
-    assert _stamps(first)[0]["readers"] == 4
+    assert _load_stamps(first)[0]["readers"] == 4
 
 
 def test_a_floor_document_at_the_dispatch_count_derives_every_row(
@@ -261,7 +267,7 @@ def test_a_floor_document_at_the_dispatch_count_derives_every_row(
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--checkpoint-load-floor", str(floor)) == 0
     stamps = [stamp for row in _by_id(gateway).values()
-              for stamp in _stamps(row["argv"])]
+              for stamp in _load_stamps(row["argv"])]
     assert stamps and {s["mode"] for s in stamps} == {"derived"}
     assert {s["floor_document"]["path"] for s in stamps} == {str(floor)}
 

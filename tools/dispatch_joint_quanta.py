@@ -38,6 +38,7 @@ import gzip
 import hashlib
 import json
 import math
+import re
 import subprocess
 import sys
 import time
@@ -98,6 +99,9 @@ DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE=1"
 STAGED_ALLOWED_TIERS = "ram,ssd"
 
 #: §5.2: each chunk's progress phase seals a 900-second stall allowance.
+#: An executable row's phases inherited it; its compute phases now derive
+#: their own (COMPUTE_PHASE_BOUND, PQ #1165), and its source and
+#: read-only render phases keep it.
 CHUNK_PROGRESS_GRACE_S = 900
 #: The head phase's stall allowance. Not pinned by the contract (only the
 #: chunk grace is); the sealed default below is overridable via
@@ -157,9 +161,137 @@ LOAD_PHASE_FLOOR_ONE_READER = {
          "window_start_utc": "2026-09-24T03:43:30Z", "bytes_per_s": 77_212_876},
     ],
 }
-#: The payload flag that carries a row's load-phase grace stamps into the
-#: quantum, which copies them into results.json and counters.json.
+#: The payload flag that carries a row's grace stamps (load phases and
+#: compute phases) into the quantum, which copies them into results.json and
+#: counters.json.
 PROGRESS_GRACE_FLAG = "--progress-grace-derivation"
+
+#: Stage B's compute phases (PQ #1165). A chain layer's backward roll
+#: (``chain-NNN-bound``), a probe's spill capture (``spill-pP``), a spill
+#: window's replay (``render-NN`` for NN >= 1 in a spill row) and a windowed
+#: replay (``replay-NN-pP``) run one pass whose work lands in disposable
+#: scratch: rolled rows in the cotangent scratch, spilled rows in the
+#: ``O_TMPFILE`` spill. A resume recomputes both, so the pass has no durable
+#: unit to commit (PB #480) and PrismaBuild sees no progress until the next
+#: phase. Its grace is therefore the pass's whole time budget: the read term
+#: plus each compute term, with each term's derivation in the stamp.
+#: Before #1165 these phases took CHUNK_PROGRESS_GRACE_S, the legacy chunk
+#: lane's allowance, which bounds no pass.
+COMPUTE_CEILING_SCHEMA = "prismaquant.compute_unit_ceiling.v1"
+COMPUTE_PHASE_GRACE_SCHEMA = "prismaquant.compute_phase_grace.v1"
+COMPUTE_PHASE_BOUND = (
+    "grace = read + the sum of the compute terms. read is W + ceil(bytes / "
+    "floor) with W counted once. The one-deadline property of the load-phase "
+    "bound is shown only for load_adjoint_checkpoint and load_handoff_inputs; "
+    "in a compute phase the staged waits are covered because PrismaBuild "
+    "landing records (PB #989) declare them and exempt them from the "
+    "no-progress clock. More than one undeclared wait is not covered. A "
+    "measured compute term is ceil(units x unit_s), where unit_s is the "
+    "slowest window of at least 30 s of a pass on the same regime and device "
+    "class. An unmeasured term takes the blanket HEAD_PROGRESS_GRACE_S. The "
+    "pass commits no unit (nothing in it is durable), so the grace is its "
+    "whole time budget.")
+#: What each compute kind counts, and where an unmeasured kind's time will
+#: come from once a run records it.
+COMPUTE_KINDS = {
+    "chain-roll": {
+        "unit": "one rolled cotangent row, a (probe, stored batch) of the "
+                "chain layer's backward roll",
+        "measured_by": "io.tsv write_bytes over the chain-NNN-bound phase"},
+    "spill-capture": {
+        "unit": "one capture group, capture_batch stored batches of one "
+                "probe's spill capture",
+        "measured_by": "the #1151 workspace profile's capture-b<N> groups; "
+                       "counters.json spill telemetry capture_wall_s"},
+    "spill-replay": {
+        "unit": "one probe's replay of one window from the spill",
+        "measured_by": "counters.json spill telemetry replay_wall_s and each "
+                       "window's wall_s"},
+    "windowed-replay": {
+        "unit": "one stored batch's replay backward, with statistics hooks, "
+                "for one probe",
+        "measured_by": "counters.json each window's wall_s"},
+}
+#: The per-row entry that carries the bound and the ceiling documents once,
+#: so each compute stamp names its ceiling by kind and the payload stays
+#: small.
+COMPUTE_GRACE_BASIS_SCHEMA = "prismaquant.compute_phase_grace_basis.v1"
+#: The measured unit ceilings the dispatcher applies when a row is in their
+#: scope. ``scope.equal`` fields must match the row exactly and
+#: ``scope.at_most`` fields must not exceed the measured value; ``basis`` says
+#: why a row in scope takes no longer per unit. Any other row takes the
+#: blanket for that term and the stamp names the field that differs.
+#: ``--compute-ceiling FILE`` replaces the built-in document of its kind.
+SPILL_CAPTURE_CEILING_GB10 = {
+    "schema": COMPUTE_CEILING_SCHEMA,
+    "kind": "spill-capture",
+    "unit_s": 34.316,
+    "method": ("slowest window of at least 30 s over the pass's own capture "
+               "groups, in seconds per group; one group took 34.316 s, so it "
+               "is its own window"),
+    "samples": {"groups": 16, "median_s": 10.301, "mean_s": 13.025,
+                "max_s": 34.316},
+    "scope": {
+        "consumer_tag": "gb10",
+        "equal": {"replay_regime.capture_batch": 4,
+                  "replay_regime.accumulation": "operator_gemm",
+                  "replay_regime.chunk_rows": 65536,
+                  "spill.capture_batch": 4, "spill.element_dtype": "bfloat16",
+                  "spill.block": 4096, "spill.geometry.element_size": 2,
+                  "spill.geometry.experts_per_token": 8,
+                  "spill.geometry.max_batch_tokens": 2048,
+                  "spill.geometry.largest_tensor_bytes": 16777216,
+                  "spill.geometry.n_probes": 4},
+        "at_most": {"spill.geometry.batch_bytes": 629145600,
+                    "spill.geometry.batch_x_bytes": 327155712},
+        "basis": ("GLM-5.3's routed layers share one shape, so a group's "
+                  "forward and backward is the same work at the same tokens "
+                  "per batch and routing fan-out; the spill writes per group "
+                  "scale with batch_bytes. Measured on layer 44 only; the "
+                  "at_most fields are an assumption this measurement does "
+                  "not test"),
+    },
+    "sources": [{
+        "action_key": "8f5422dc1d1b243e5d5756c9416ba827be905e35393f703b1ee6e3ab54e69f61",
+        "receipt": ("/mnt/shared/tessera-measurements/glm-campaign-takeover-"
+                    "20260913/ws-sb4-1151/20260924T060449Z-ec053c1ab79b/"
+                    "profile.json"),
+        "receipt_sha256": "fe42262bff4c5a14888e37bb67bbab93cfcae33843fcceceb7fbcdb923f31e0e",
+        "setting": "capture-b4", "quantum_id": "layer-044",
+        "record_identity_sha256": "51087d963d723f2f5ae928415b98d9b42491019f5a9bcf7238e4a73856393ef9",
+        "host": "sparky", "device": "NVIDIA GB10",
+        "git_commit": "7595bd350c34abbcd71d50a24bee77f806e27e33"}],
+}
+CHAIN_ROLL_CEILING_GB10 = {
+    "schema": COMPUTE_CEILING_SCHEMA,
+    "kind": "chain-roll",
+    "unit_s": 0.8231,
+    "method": ("slowest window of at least 30 s of the rolling process's "
+               "/proc write_bytes over its chain-NNN-bound phase, 10 s host "
+               "samples, as seconds per row of entry_bytes (16779369 B at "
+               "20386452 B/s, rounded up)"),
+    "samples": {"rows": 1585, "phase_s": 964, "mean_s": 0.608},
+    "scope": {
+        "consumer_tag": "gb10",
+        "equal": {"chain_regime.batch_size": 4,
+                  "chain_regime.probe_fusion": True, "n_probes": 4,
+                  "entry_bytes": 16779369},
+        "basis": ("a row is one probe's cotangent for one stored batch of "
+                  "entry_bytes; at one chain regime and row size each row is "
+                  "the same backward work. Measured on chain layer 44 only; "
+                  "the scope does not tell a dense chain layer from a routed "
+                  "one"),
+    },
+    "sources": [{
+        "action_key": "93247fc291c0996013ce2606728df0f19b705199444637c360e57d7f619f43df",
+        "samples": "/home/rob/tmp/ws-sb4/out/93247fc291c0/io.tsv",
+        "samples_sha256": "d7368bc7e5d34b88ffa8341006639c1a533eb83e196e4c33ec431fb743dbeaa8",
+        "quantum_id": "layer-043", "phase": "chain-044-bound",
+        "window_unix": [1790237681, 1790237712], "host": "sparky",
+        "device": "NVIDIA GB10",
+        "git_commit": "b7ae25d091c0d2b89b205fa8b9e4d08867468ded"}],
+}
+COMPUTE_UNIT_CEILINGS = (SPILL_CAPTURE_CEILING_GB10, CHAIN_ROLL_CEILING_GB10)
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 ADJOINT_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
@@ -496,7 +628,8 @@ def _stage_manifest_binding(adjoint_manifest: Path, campaign: Mapping) -> dict:
 
 
 def _executable_row_parts(record: dict, *, output_root: Path,
-                            head_grace_s: int, load_grace=None):
+                            head_grace_s: int, load_grace=None,
+                            compute_grace=None):
     """Pure executable-row construction from sealed inputs (no gate).
 
     Resolves the row's executable manifest, verifies its wire bytes hash to
@@ -510,6 +643,10 @@ def _executable_row_parts(record: dict, *, output_root: Path,
     ``load_grace(name, phase_bytes)`` returns the checkpoint-load grace from
     the phase's byte count in this manifest (:func:`load_phase_grace`).
     Without it the phase takes the blanket :data:`HEAD_PROGRESS_GRACE_S`.
+    ``compute_grace(name, facts, annotations)`` returns a compute phase's
+    grace (:func:`compute_phase_grace`), or ``None`` for a phase that runs no
+    compute; every other phase, and every phase without it, takes
+    :data:`CHUNK_PROGRESS_GRACE_S`.
     """
     quantum_id = record["quantum_id"]
     executable = record.get("executable_readset")
@@ -524,18 +661,23 @@ def _executable_row_parts(record: dict, *, output_root: Path,
         raise DispatchRefused(
             f"quantum {quantum_id!r} seals no executable phase list")
     # The wire just hashed to the sealed digest above; its read plan names
-    # each phase's bytes.
-    phase_bytes = (_manifest_phase_bytes(manifest, quantum_id=quantum_id)
-                   if load_grace is not None else {})
+    # each phase's bytes and entries.
+    facts, annotations = (
+        _manifest_phase_facts(manifest, quantum_id=quantum_id)
+        if load_grace is not None or compute_grace is not None else ({}, {}))
     progress = [("head", head_grace_s)]
     for name in phases:
         if name == "head":
             continue
+        fact = facts.get(name) or {}
         if name == "checkpoint-load":
             grace = (HEAD_PROGRESS_GRACE_S if load_grace is None
-                     else load_grace(name, phase_bytes.get(name)))
+                     else load_grace(name, fact.get("bytes")))
         else:
-            grace = CHUNK_PROGRESS_GRACE_S
+            grace = (None if compute_grace is None
+                     else compute_grace(name, fact, annotations))
+            if grace is None:
+                grace = CHUNK_PROGRESS_GRACE_S
         progress.append((name, grace))
     return manifest, staged_sha256, progress
 
@@ -1112,11 +1254,242 @@ def load_phase_grace(name: str, *, phase_bytes: int, staged_wait_s: float,
             "bound": LOAD_PHASE_BOUND}
 
 
-def _manifest_phase_bytes(path: Path, *, quantum_id) -> dict:
-    """Each read-plan phase's byte count, from the row's manifest wire.
+def compute_unit_ceiling(document: object) -> dict:
+    """A validated compute ceiling document, or :class:`DispatchRefused`.
+
+    The built-in documents in :data:`COMPUTE_UNIT_CEILINGS` and any document
+    given with ``--compute-ceiling`` take the same shape: a kind from
+    :data:`COMPUTE_KINDS`, the measured seconds per unit, the method, the
+    scope the measurement covers, and the action keys it came from.
+    """
+    def refuse(why):
+        raise DispatchRefused(f"compute ceiling document: {why}")
+
+    if not isinstance(document, Mapping):
+        raise DispatchRefused("compute ceiling document: not a JSON object")
+    if document.get("schema") != COMPUTE_CEILING_SCHEMA:
+        refuse(f"schema is not {COMPUTE_CEILING_SCHEMA}")
+    if document.get("kind") not in COMPUTE_KINDS:
+        refuse(f"kind must be one of {sorted(COMPUTE_KINDS)}")
+    unit_s = document.get("unit_s")
+    if (type(unit_s) not in (int, float) or not math.isfinite(unit_s)
+            or unit_s <= 0):
+        refuse("unit_s must be a positive number of seconds")
+    if not isinstance(document.get("method"), str) or not document["method"]:
+        refuse("method must be a non-empty string")
+    scope = document.get("scope")
+    if not isinstance(scope, Mapping):
+        refuse("scope must be an object")
+    if not isinstance(scope.get("consumer_tag"), str) or not scope["consumer_tag"]:
+        refuse("scope.consumer_tag must name the device class it was measured on")
+    if not isinstance(scope.get("basis"), str) or not scope["basis"]:
+        refuse("scope.basis must say why a row in scope takes no longer per unit")
+    for key in ("equal", "at_most"):
+        if not isinstance(scope.get(key, {}), Mapping):
+            refuse(f"scope.{key} must be an object")
+    if any(type(value) not in (int, float) or isinstance(value, bool)
+           for value in scope.get("at_most", {}).values()):
+        refuse("scope.at_most values must be numbers")
+    sources = document.get("sources")
+    if not isinstance(sources, list) or not sources or not all(
+            isinstance(source, Mapping) and _is_hex64(source.get("action_key"))
+            for source in sources):
+        refuse("sources must list the measurements, each with its 64-hex "
+               "action_key")
+    return dict(document)
+
+
+def compute_ceilings(documents: Sequence[Mapping] = ()) -> dict:
+    """The ceiling per kind: the built-ins, each replaced by a given document."""
+    by_kind = {}
+    for document in (*COMPUTE_UNIT_CEILINGS, *documents):
+        checked = compute_unit_ceiling(document)
+        by_kind[checked["kind"]] = checked
+    return by_kind
+
+
+_CHAIN_BOUND_PHASE = re.compile(r"chain-(\d{3,})-bound")
+_SPILL_PHASE = re.compile(r"spill-p(\d+)")
+_RENDER_PHASE = re.compile(r"render-(\d{2,})")
+_REPLAY_PHASE = re.compile(r"replay-(\d{2,})-p(\d+)")
+
+
+def compute_phase_work(name: str, *, replay_mode: str, entries,
+                       n_probes, capture_batch) -> list[dict] | None:
+    """The compute one phase's pass runs, or ``None`` for a phase with none.
+
+    Each term is ``{"kind", "units", "work"}``; ``units`` is ``None`` when
+    the read plan or the row does not count them. The order follows
+    ``joint_statistics_replay.observe_and_project_retained_windows``: a spill
+    row captures each probe under ``spill-pP`` and replays the first window
+    for that probe under the same phase, and replays every later window under
+    its ``render-NN`` phase. ``render-00`` of a spill row, and every
+    ``render-NN`` of a windowed row, only read.
+    """
+    def counted(*values):
+        return all(type(value) is int and value > 0 for value in values)
+
+    match = _CHAIN_BOUND_PHASE.fullmatch(name)
+    if match:
+        return [{"kind": "chain-roll",
+                 "units": entries * n_probes if counted(entries, n_probes) else None,
+                 "work": (f"chain layer {int(match.group(1))}'s backward roll: "
+                          "one row per probe and stored batch")}]
+    match = _SPILL_PHASE.fullmatch(name)
+    if match and replay_mode == "spill":
+        probe = int(match.group(1))
+        return [{"kind": "spill-capture",
+                 "units": (-(-entries // capture_batch)
+                           if counted(entries, capture_batch) else None),
+                 "work": (f"probe {probe}'s spill capture: one group per "
+                          "capture_batch stored batches")},
+                {"kind": "spill-replay", "units": 1,
+                 "work": f"the first window's spill replay for probe {probe}"}]
+    match = _RENDER_PHASE.fullmatch(name)
+    if match and replay_mode == "spill" and int(match.group(1)) >= 1:
+        return [{"kind": "spill-replay",
+                 "units": n_probes if counted(n_probes) else None,
+                 "work": (f"window {int(match.group(1))}'s spill replay for "
+                          "each probe")}]
+    match = _REPLAY_PHASE.fullmatch(name)
+    if match and replay_mode == "windowed":
+        return [{"kind": "windowed-replay",
+                 "units": entries if counted(entries) else None,
+                 "work": (f"window {int(match.group(1))}'s replay for probe "
+                          f"{int(match.group(2))}: one backward per stored "
+                          "batch")}]
+    return None
+
+
+def _scope_misses(scope: Mapping, context: Mapping) -> list[str]:
+    """Why a row is outside a measurement's scope; empty when it is inside."""
+    misses = []
+    tags = list(context.get("consumer_tags") or ())
+    if scope["consumer_tag"] not in tags:
+        misses.append(f"the row's consumer tags {tags} do not include the "
+                      f"measured device class {scope['consumer_tag']!r}")
+    for key, want in sorted(scope.get("equal", {}).items()):
+        have = context.get(key)
+        if type(have) is not type(want) or have != want:
+            misses.append(f"{key} is {have!r}, measured at {want!r}")
+    for key, most in sorted(scope.get("at_most", {}).items()):
+        have = context.get(key)
+        if type(have) not in (int, float) or isinstance(have, bool) or have > most:
+            misses.append(f"{key} is {have!r}, above the measured {most!r}")
+    return misses
+
+
+def compute_phase_grace(name: str, *, work: Sequence[Mapping], phase_bytes,
+                        staged_wait_s: float, link: Mapping | None,
+                        context: Mapping, ceilings: Mapping) -> dict:
+    """The stall allowance of one compute phase, with the stamp that explains it.
+
+    ``grace_s`` is the read term (:func:`load_phase_grace` for the phase's
+    bytes) plus each compute term: ``ceil(units x unit_s)`` from the ceiling
+    of its kind when the row is in that ceiling's scope, and the blanket
+    :data:`HEAD_PROGRESS_GRACE_S` otherwise, with the reason. ``mode`` is
+    ``derived`` only when every term is. See :data:`COMPUTE_PHASE_BOUND`.
+    """
+    read = load_phase_grace(name, phase_bytes=phase_bytes,
+                            staged_wait_s=staged_wait_s, link=link)
+    read_term = {key: read[key] for key in (
+        "mode", "grace_s", "phase_bytes", "staged_wait_s", "transfer_s",
+        "floor_bytes_per_s", "readers", "reason") if key in read}
+    terms = []
+    for item in work:
+        kind = item["kind"]
+        term = {"kind": kind, "work": item["work"], "units": item["units"],
+                "unit": COMPUTE_KINDS[kind]["unit"]}
+        ceiling = ceilings.get(kind)
+        misses = [] if ceiling is None else _scope_misses(ceiling["scope"], context)
+        if ceiling is None:
+            reason = (f"no measurement of {kind} on this regime; "
+                      f"{COMPUTE_KINDS[kind]['measured_by']} will measure it")
+        elif item["units"] is None:
+            reason = "the read plan and the row do not count this term's units"
+        elif misses:
+            reason = "outside the measurement's scope: " + "; ".join(misses)
+        else:
+            reason = None
+        if reason is not None:
+            terms.append({**term, "mode": "blanket",
+                          "grace_s": HEAD_PROGRESS_GRACE_S, "reason": reason})
+            continue
+        terms.append({**term, "mode": "derived",
+                      "grace_s": math.ceil(item["units"] * ceiling["unit_s"]),
+                      "unit_s": ceiling["unit_s"], "ceiling": kind})
+    derived = read["mode"] == "derived" and all(
+        term["mode"] == "derived" for term in terms)
+    return {"schema": COMPUTE_PHASE_GRACE_SCHEMA, "phase": str(name),
+            "mode": "derived" if derived else "blanket",
+            "grace_s": read["grace_s"] + sum(term["grace_s"] for term in terms),
+            "read": read_term, "compute": terms}
+
+
+def compute_grace_basis(stamps: Sequence[Mapping], *, ceilings: Mapping,
+                        link: Mapping | None) -> dict:
+    """The row's one entry carrying the bound, the floor and every ceiling
+    its compute stamps name, so no stamp repeats them."""
+    named = sorted({term["ceiling"] for stamp in stamps
+                    for term in stamp.get("compute", ())
+                    if term.get("ceiling") is not None})
+    floor = None if link is None else link.get("floor")
+    return {"schema": COMPUTE_GRACE_BASIS_SCHEMA, "bound": COMPUTE_PHASE_BOUND,
+            "load_bound": LOAD_PHASE_BOUND, "readers_scope": LINK_READERS_SCOPE,
+            "floor": None if floor is None else dict(floor),
+            "ceilings": {kind: ceilings[kind] for kind in named}}
+
+
+def _row_compute_context(record: Mapping, *, spec: Mapping,
+                         consumer_tags: Sequence[str],
+                         annotations: Mapping) -> dict:
+    """The fields a compute ceiling's scope is checked against, for one row.
+
+    It refuses nothing: a spec regime, spill bound or slice this cannot read
+    leaves its fields out, the terms that need them take the blanket, and
+    the row's own checks in :func:`quantum_argv` refuse it as before.
+    """
+    from prismaquant.joint_adjoint_slices import (
+        AdjointSliceRefused, chain_regime_of)
+    from prismaquant.joint_replay_regime import (
+        ReplayRegimeRefused, normalize_replay_regime,
+        replay_regime_from_environment)
+
+    context: dict = {"consumer_tags": [str(tag) for tag in consumer_tags],
+                     "n_probes": annotations.get("n_probes")}
+    try:
+        regime = normalize_replay_regime(
+            replay_regime_from_environment(spec.get("env") or {}))
+    except ReplayRegimeRefused:
+        regime = {}
+    context.update({f"replay_regime.{key}": value
+                    for key, value in regime.items()})
+    try:
+        spill = _sealed_spill_bound(record)
+    except DispatchRefused:
+        spill = None
+    if spill is not None:
+        context.update({f"spill.{key}": spill.get(key)
+                        for key in ("capture_batch", "element_dtype", "block")})
+        context.update({f"spill.geometry.{key}": value for key, value
+                        in (spill.get("geometry") or {}).items()})
+    try:
+        run_identity = _read_bound_slice(record).get("run_identity")
+        chain = (chain_regime_of(dict(run_identity))
+                 if isinstance(run_identity, Mapping) else {})
+    except (DispatchRefused, AdjointSliceRefused, ValueError, AttributeError):
+        chain = {}
+    context.update({f"chain_regime.{key}": value
+                    for key, value in chain.items()})
+    return context
+
+
+def _manifest_phase_facts(path: Path, *, quantum_id) -> tuple[dict, dict]:
+    """Each read-plan phase's bytes and entries, and the manifest annotations.
 
     The caller has verified the wire against the row's digest
-    (:func:`_executable_manifest_digest`); this reads the plan only.
+    (:func:`_executable_manifest_digest`), or published it in this dispatch
+    (:func:`bind_consumer_handoff`); this reads the plan only.
     """
     try:
         wire = Path(path).read_bytes()
@@ -1124,7 +1497,41 @@ def _manifest_phase_bytes(path: Path, *, quantum_id) -> dict:
         raise DispatchRefused(
             f"quantum {quantum_id!r} executable manifest unreadable at "
             f"{path}: {exc}") from exc
-    return _read_plan_phase_bytes(wire, where=f"quantum {quantum_id!r} {path}")
+    return _read_plan_phase_facts(wire, where=f"quantum {quantum_id!r} {path}")
+
+
+def _read_plan_phase_facts(wire: bytes, *, where: str) -> tuple[dict, dict]:
+    """``({phase: {"bytes", "entries", "entry_bytes"}}, annotations)``.
+
+    ``entries`` is the phase's entry count and ``entry_bytes`` the one size
+    its entries share (``None`` when they differ).
+    """
+    try:
+        body = json.loads(gzip.decompress(wire))
+        phases = body["read_plan"]["phases"]
+    except (OSError, EOFError, ValueError, KeyError, TypeError) as exc:
+        raise DispatchRefused(f"{where}: no readable read plan: {exc}") from exc
+    entries = body.get("entries")
+    entries = entries if isinstance(entries, list) else []
+    facts = {}
+    for phase in phases:
+        if not isinstance(phase, Mapping) or "name" not in phase:
+            continue
+        indices = phase.get("entry_indices")
+        sizes = set()
+        if isinstance(indices, list):
+            for index in indices:
+                entry = (entries[index] if type(index) is int
+                         and 0 <= index < len(entries) else None)
+                sizes.add(entry.get("bytes") if isinstance(entry, Mapping)
+                          else None)
+        facts[phase["name"]] = {
+            "bytes": phase.get("bytes"),
+            "entries": len(indices) if isinstance(indices, list) else None,
+            "entry_bytes": (next(iter(sizes)) if len(sizes) == 1
+                            and type(next(iter(sizes))) is int else None)}
+    annotations = body.get("annotations")
+    return facts, dict(annotations) if isinstance(annotations, Mapping) else {}
 
 
 def _read_plan_phase_bytes(wire: bytes, *, where: str) -> dict:
@@ -1137,7 +1544,7 @@ def _read_plan_phase_bytes(wire: bytes, *, where: str) -> dict:
 
 
 def progress_grace_of(argv: Sequence[str]) -> list | None:
-    """The load-phase grace stamps a row's payload carries, if any."""
+    """The grace stamps (load and compute phases) a row's payload carries, if any."""
     if PROGRESS_GRACE_FLAG not in argv:
         return None
     return json.loads(argv[list(argv).index(PROGRESS_GRACE_FLAG) + 1])
@@ -1424,7 +1831,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S,
                  consumer_tags: Sequence[str] = CONSUMER_TAGS,
                  band: Mapping | None = None,
-                 link: Mapping | None = None) -> list[str]:
+                 link: Mapping | None = None,
+                 ceilings: Mapping | None = None) -> list[str]:
     """The exact §5.2 submission argv for one quantum. Pinned by tests: a
     drift here breaks placement.  ``consumer_tags`` is the effective §5.1
     placement policy, a conjunction PB matches against a worker's offered
@@ -1468,6 +1876,12 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     checkpoint-load or handoff-load grace (:func:`load_phase_grace`); the
     stamps ride the payload as ``--progress-grace-derivation``. Without it
     a load phase takes the blanket grace and says so.
+
+    ``ceilings`` (:func:`compute_ceilings`; default the built-in
+    :data:`COMPUTE_UNIT_CEILINGS`) sets each compute phase's grace, the read
+    term plus the pass's compute (:func:`compute_phase_grace`, PQ #1165).
+    Its stamps ride the same flag, with one basis entry
+    (:func:`compute_grace_basis`) that carries the bound and the ceilings.
     """
     quantum_id = record["quantum_id"]
     handoff = (band or {}).get("handoff")
@@ -1488,20 +1902,51 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     # needs its staged wait; _container_wrap then seals that same parse.
     spec_parse: dict = {}
     grace_stamps: list[dict] = []
+    compute_stamps: list[dict] = []
+    ceiling_docs = compute_ceilings() if ceilings is None else dict(ceilings)
 
-    def load_grace(name, phase_bytes):
-        from prismaquant.residency_shard_reader import staged_range_wait_from_env
-
+    def parsed_spec():
         if "spec" not in spec_parse:
             spec_parse["spec"] = json.loads(Path(SPEC_PATH).read_text())
+        return spec_parse["spec"]
+
+    def staged_wait():
+        from prismaquant.residency_shard_reader import staged_range_wait_from_env
+
         try:
-            staged_wait = staged_range_wait_from_env(
-                spec_parse["spec"].get("env") or {})
+            return staged_range_wait_from_env(parsed_spec().get("env") or {})
         except ValueError as exc:
             raise DispatchRefused(f"campaign spec: {exc}") from exc
+
+    def load_grace(name, phase_bytes):
         stamp = load_phase_grace(name, phase_bytes=phase_bytes,
-                                 staged_wait_s=staged_wait, link=link)
+                                 staged_wait_s=staged_wait(), link=link)
         grace_stamps.append(stamp)
+        return stamp["grace_s"]
+
+    row_context: dict = {}
+
+    def compute_grace(name, fact, annotations):
+        from prismaquant.joint_layer_quanta import normalize_replay_mode
+
+        if "context" not in row_context:
+            row_context["context"] = _row_compute_context(
+                record, spec=parsed_spec(), consumer_tags=consumer_tags,
+                annotations=annotations)
+        context = row_context["context"]
+        work = compute_phase_work(
+            name, replay_mode=normalize_replay_mode(
+                (executable or {}).get("replay_mode")),
+            entries=fact.get("entries"), n_probes=context.get("n_probes"),
+            capture_batch=context.get("replay_regime.capture_batch"))
+        if work is None:
+            return None
+        stamp = compute_phase_grace(
+            name, work=work, phase_bytes=fact.get("bytes"),
+            staged_wait_s=staged_wait(), link=link,
+            context={**context, "entry_bytes": fact.get("entry_bytes")},
+            ceilings=ceiling_docs)
+        compute_stamps.append(stamp)
         return stamp["grace_s"]
 
     if record.get("catalog_extension") is not None and executable is None:
@@ -1523,14 +1968,32 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             manifest = Path(handoff["manifest_path"])
             staged_sha256 = handoff["manifest_sha256"]
             phase_bytes = handoff.get("phase_bytes") or {}
-            progress = [("head", head_grace_s)] + [
-                (name, load_grace(name, phase_bytes.get(name))
-                 if name == HANDOFF_LOAD_PHASE else CHUNK_PROGRESS_GRACE_S)
-                for name in handoff["phases"] if name != "head"]
+            try:
+                facts, annotations = _manifest_phase_facts(
+                    manifest, quantum_id=quantum_id)
+            except DispatchRefused:
+                # Grace derivation only: the terms take the blanket, and
+                # the row's staging checks stay what they were.
+                facts, annotations = {}, {}
+            progress = [("head", head_grace_s)]
+            for name in handoff["phases"]:
+                if name == "head":
+                    continue
+                if name == HANDOFF_LOAD_PHASE:
+                    grace = load_grace(name, phase_bytes.get(name))
+                else:
+                    grace = compute_grace(name, facts.get(name) or {},
+                                          annotations)
+                progress.append((name, CHUNK_PROGRESS_GRACE_S
+                                 if grace is None else grace))
         else:
             manifest, staged_sha256, progress = _executable_row_parts(
                 record, output_root=output_root, head_grace_s=head_grace_s,
-                load_grace=load_grace)
+                load_grace=load_grace, compute_grace=compute_grace)
+        if compute_stamps:
+            grace_stamps.extend(compute_stamps)
+            grace_stamps.append(compute_grace_basis(
+                compute_stamps, ceilings=ceiling_docs, link=link))
     else:
         manifest = Path(record["read_set"]["manifest_path"])
         if not manifest.is_absolute():
@@ -2460,6 +2923,14 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                              "dispatch's link-reader count; without one, any "
                              "count other than 1 takes the blanket "
                              f"{HEAD_PROGRESS_GRACE_S} s load grace")
+    parser.add_argument("--compute-ceiling", type=Path, action="append",
+                        default=[], metavar="FILE",
+                        help="a compute ceiling document "
+                             f"({COMPUTE_CEILING_SCHEMA}) that replaces the "
+                             "built-in ceiling of its kind (repeatable). A "
+                             "compute phase outside every ceiling's scope "
+                             f"takes the blanket {HEAD_PROGRESS_GRACE_S} s "
+                             "for that term")
     parser.add_argument("--state", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -2494,6 +2965,17 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
             floor_document = {**load_phase_floor(floor_document),
                               "document": {"path": str(args.checkpoint_load_floor),
                                            "sha256": _sha_bytes(raw)}}
+        ceiling_documents = []
+        for path in args.compute_ceiling:
+            try:
+                raw = path.read_bytes()
+                document = json.loads(raw)
+            except (OSError, ValueError) as exc:
+                raise DispatchRefused(f"--compute-ceiling {path}: {exc}") from exc
+            ceiling_documents.append(
+                {**compute_unit_ceiling(document),
+                 "document": {"path": str(path), "sha256": _sha_bytes(raw)}})
+        ceilings = compute_ceilings(ceiling_documents)
     except DispatchRefused as exc:
         print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
         return EXIT_PRECONDITION_REFUSED
@@ -2611,7 +3093,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                     record, record_path=record_path,
                     output_root=output_root, priority=priority,
                     head_grace_s=args.head_grace_s,
-                    consumer_tags=tags, band=band, link=link)
+                    consumer_tags=tags, band=band, link=link,
+                    ceilings=ceilings)
                 rows.append({"kind": "quantum", "quantum_id": quantum_id,
                              "identity_sha256": record["identity_sha256"],
                              "manifest_sha256": (
