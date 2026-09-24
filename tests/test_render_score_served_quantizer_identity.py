@@ -39,7 +39,8 @@ def _registered_identity(**overrides) -> owner.ServedQuantizerIdentity:
     fields = {"backend": owner.SERVED_QUANTIZER_BACKEND_REGISTERED_OP,
               "op": owner.SERVED_QUANTIZER_OP, "platform": "sm_121",
               "torch": "2.13.0+cu130", "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
-              "vllm": "0.1.dev20073+g8e685d198", "image_content_sha256": "d" * 64}
+              "vllm": "0.1.dev20073+g8e685d198", "image_content_sha256": "d" * 64,
+              "dequant_kernel": owner.SERVED_QUANTIZER_DEQUANT_KERNEL}
     fields.update(overrides)
     return owner.ServedQuantizerIdentity(**fields)
 
