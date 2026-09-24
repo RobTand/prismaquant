@@ -11,11 +11,19 @@ The counter below sees every call to the module's tensor-identity function
 made while the quantum core runs, on any thread, and matches each call to
 the resident render objects ``get_resident`` handed out. One resident object
 is one load of one ``(name, fmt)`` in one window.
+
+The rest of the window's main-thread load work moves to the PWC loader
+pool: each loader hashes the render it loaded before the tensor is handed
+out, and the window preflight's archive-directory scans (14% of row 43's
+main thread, one cold read per candidate) run on the same bounded pool.
+The payload and the files the quantum writes are byte-identical with and
+without each change.
 """
 from __future__ import annotations
 
 import pickle
 import shutil
+import threading
 from pathlib import Path
 
 import pytest
@@ -97,6 +105,7 @@ FMT = "FP8_E4M3"
 
 
 def _file_cache(tmp_path, count=2):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     paths = {}
     for index in range(count):
         key = (f"unit{index}", FMT)
@@ -225,14 +234,160 @@ def _rehash_every_read(self, name, fmt, tensor):
     return pwc._cb_cache_tensor_identity(tensor)
 
 
-def test_the_payload_and_evidence_are_byte_identical_with_and_without_the_memo(
+MAIN = [(pwc.ProductionWeightCache, "resident_render_identity", _rehash_every_read),
+        (pwc.ProductionWeightCache, "_loaded_render_identity",
+         lambda self, tensor, observed: None),
+        (pwc.ProductionWeightCache, "_prefill_window_archive_memo",
+         lambda self, keys, max_workers: None)]
+# The memo alone: hashed lazily, on the main thread, once per load.
+MEMO = MAIN[1:]
+
+
+def test_the_payload_and_evidence_are_byte_identical_with_and_without_each_change(
         tmp_path, monkeypatch):
     campaign = _campaign(tmp_path, monkeypatch)
-    before, before_files, payload = _arm(tmp_path, monkeypatch, campaign, [
-        (pwc.ProductionWeightCache, "resident_render_identity", _rehash_every_read)])
-    after, after_files, _ = _arm(tmp_path, monkeypatch, campaign, [])
+    arms = {name: _arm(tmp_path, monkeypatch, campaign, patches)
+            for name, patches in (("main", MAIN), ("memo", MEMO), ("head", []))}
+    reference, reference_files, payload = arms["main"]
     assert payload["costs"] and payload["provenance"]["joint_operator_windows"]
-    assert before_files and set(before_files) == set(after_files)
-    for path in before_files:
-        assert before_files[path] == after_files[path], path
-    assert before == after
+    assert reference_files
+    for name in ("memo", "head"):
+        pickled, files, _payload = arms[name]
+        assert set(files) == set(reference_files), name
+        for path in reference_files:
+            assert files[path] == reference_files[path], (name, path)
+        assert pickled == reference, name
+
+
+# --------------------------------------------------------------------------
+# The window's load work runs on the loader pool, not the main thread
+# --------------------------------------------------------------------------
+
+def _threaded_counts(monkeypatch, *, core_only=False):
+    """Record the thread of every render hash and every file archive scan.
+
+    With ``core_only``, only calls made while the quantum core runs count,
+    on any thread: the single run and Stage A the fixture runs first are
+    not the code under test.
+    """
+    calls = {"hash": [], "scan": []}
+    active = [] if core_only else [True]
+    identity = pwc._cb_cache_tensor_identity
+    scan = pwc.ProductionWeightCache._window_archive_storage_bytes
+
+    def on_main():
+        return threading.current_thread() is threading.main_thread()
+
+    def counted_identity(tensor):
+        if active:
+            calls["hash"].append((tensor, on_main()))
+        return identity(tensor)
+
+    def counted_scan(source):
+        if active and isinstance(source, (str, Path)):
+            calls["scan"].append((str(source), on_main()))
+        return scan(source)
+
+    monkeypatch.setattr(pwc, "_cb_cache_tensor_identity", counted_identity)
+    monkeypatch.setattr(pwc.ProductionWeightCache, "_window_archive_storage_bytes",
+                        staticmethod(counted_scan))
+    if core_only:
+        core = runtime.run_layer_quantum_core
+
+        def counted_core(*args, **kwargs):
+            active.append(True)
+            try:
+                return core(*args, **kwargs)
+            finally:
+                active.pop()
+
+        monkeypatch.setattr(runtime, "run_layer_quantum_core", counted_core)
+    return calls
+
+
+def test_the_quantum_main_thread_neither_hashes_a_render_nor_scans_an_archive(
+        tmp_path, monkeypatch):
+    calls = _threaded_counts(monkeypatch, core_only=True)
+    payload, _record, served, _hashed = _counted_quantum(tmp_path, monkeypatch)
+    loads = _loads(served)
+    assert payload["costs"] and loads
+    render_hashes = [(tensor, main) for tensor, main in calls["hash"]
+                     if any(tensor is loaded for _pair, loaded in loads)]
+    assert len(render_hashes) == len(loads)
+    assert not [main for _tensor, main in render_hashes if main], (
+        "a render was hashed on the main thread")
+    # Every render file's archive directory was scanned, and none of the
+    # scans ran on the main thread.
+    assert calls["scan"]
+    assert not [path for path, main in calls["scan"] if main], calls["scan"]
+
+
+def test_the_loaders_hash_only_when_the_window_asks(tmp_path, monkeypatch):
+    cache, paths = _file_cache(tmp_path, count=3)
+    unpatched = pwc._cb_cache_tensor_identity
+    calls = _threaded_counts(monkeypatch)
+    with _window(cache, paths):
+        assert calls["hash"] == []
+    with cache.retained_window(list(paths), max_resident_bytes=1 << 20,
+                               max_workers=2, max_load_buffer_bytes=1 << 20,
+                               render_identities=True):
+        tensors = {key: cache.get_resident(*key) for key in paths}
+        assert len(calls["hash"]) == 3
+        assert not [main for _tensor, main in calls["hash"] if main]
+        for key, tensor in tensors.items():
+            assert cache.resident_render_identity(*key, tensor) == unpatched(tensor)
+        # Served from the loaders' hashes: no second hash of any render.
+        assert len(calls["hash"]) == 3
+        tensors = tensor = None
+    with pytest.raises(ValueError, match="render identities must be boolean"):
+        with cache.retained_window(list(paths), max_resident_bytes=1 << 20,
+                                   max_workers=1, render_identities=1):
+            pass
+
+
+def test_the_loader_hash_equals_the_main_thread_hash(tmp_path):
+    cache, paths = _file_cache(tmp_path, count=2)
+    with cache.retained_window(list(paths), max_resident_bytes=1 << 20,
+                               max_workers=2, max_load_buffer_bytes=1 << 20,
+                               render_identities=True):
+        for key in paths:
+            tensor = cache.get_resident(*key)
+            assert cache.resident_render_identity(*key, tensor) == \
+                pwc._cb_cache_tensor_identity(tensor)
+        tensor = None
+
+
+def test_the_archive_scans_run_off_the_main_thread_once_per_file(tmp_path, monkeypatch):
+    cache, paths = _file_cache(tmp_path, count=4)
+    calls = _threaded_counts(monkeypatch)
+    with cache.retained_window(list(paths), max_resident_bytes=1 << 20,
+                               max_workers=2, max_load_buffer_bytes=1 << 20):
+        pass
+    scanned = sorted(path for path, _main in calls["scan"])
+    assert scanned == sorted(str(path.absolute()) for path in paths.values())
+    assert not [main for _path, main in calls["scan"] if main]
+
+
+@pytest.mark.parametrize("damage", ["not-a-zip", "missing"])
+def test_a_bad_file_refuses_as_it_did_before_the_parallel_scan(tmp_path, monkeypatch, damage):
+    """The pool only warms the memo; the serial preflight still refuses."""
+    errors = {}
+    for arm in ("serial", "pool"):
+        cache, paths = _file_cache(tmp_path / arm, count=3)
+        target = list(paths.values())[1]
+        if damage == "not-a-zip":
+            target.write_bytes(b"not a torch archive")
+        else:
+            target.unlink()
+        with monkeypatch.context() as patch:
+            if arm == "serial":
+                patch.setattr(pwc.ProductionWeightCache, "_prefill_window_archive_memo",
+                              lambda self, keys, max_workers: None)
+            with pytest.raises(Exception) as caught:
+                with cache.retained_window(list(paths), max_resident_bytes=1 << 20,
+                                           max_workers=2, max_load_buffer_bytes=1 << 20):
+                    pass
+        errors[arm] = (type(caught.value), str(caught.value).replace(arm, "ARM"))
+        assert getattr(cache, "_resident_window_files", None) is None
+        assert all(isinstance(value, str) for value in cache.weights.values())
+    assert errors["pool"] == errors["serial"]

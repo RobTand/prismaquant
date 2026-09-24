@@ -2139,8 +2139,21 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `fix/1163-chain-phase-admission`.
+As of: 2026-09-24 · `fix/1192-render-window-pipeline`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `fix/1192-render-window-pipeline`) for **a Stage B
+render window's load work on the loader pool** (PQ #1192, #1195). A retained
+window opened with `render_identities=True`, which `run_layer_quantum_core`
+passes, has each prefetch loader thread hash the render it loads.
+`ProductionWeightCache.resident_render_identity` serves that hash while the
+same tensor stays resident with its load-time guard unchanged, and refuses
+otherwise; `_record_joint_operator` still compares it with the prepared
+identity on every probe. The window preflight's archive scans (#693's memo)
+run on at most `max_workers` threads before the serial preflight, which
+re-checks each file's stat signature and repeats a failed scan, so it
+refuses as before. The scans still read the declared file. No format,
+default, pipeline stage, budget, record identity, lane or ship gate changes.
 
 Re-stamped (2026-09-24, `fix/1163-chain-phase-admission`) for **the Stage B
 plan pricing the chain phase per chain layer shape by the owners resident
