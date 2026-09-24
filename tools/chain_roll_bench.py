@@ -248,16 +248,23 @@ def cmd_drive(args) -> int:
     if not args.fused:
         child_args += ["--probe-major"]
     names = list(arms)
+    keep = set(args.keep_arm or ())
+    unknown = keep - set(names)
+    if unknown:
+        raise SystemExit(f"--keep-arm names no arm: {sorted(unknown)}")
     runs = []
     for repeat in range(args.repeats):
-        order = names if repeat % 2 == 0 else names[::-1]
+        # Two arms alternate; more rotate, so each arm runs in each position.
+        order = ((names if repeat % 2 == 0 else names[::-1]) if len(names) <= 2
+                 else names[repeat % len(names):] + names[:repeat % len(names)])
         for arm in order:
             label = f"{arm}-r{repeat}"
             env = {**os.environ,
                    "PYTHONPATH": ":".join([arms[arm], *[p for p in os.environ.get(
                        "PYTHONPATH", "").split(":") if p and p != "/workspace"]])}
             command = [sys.executable, "/workspace/tools/chain_roll_bench.py", "child",
-                       *child_args, "--arm", arm, "--label", label,
+                       *child_args, *(["--roll-may-keep"] if arm in keep else []),
+                       "--arm", arm, "--label", label,
                        "--scratch", str(Path(args.scratch) / label),
                        "--result", str(out / f"{label}.json")]
             if args.py_spy and Path(args.py_spy).exists():
@@ -436,7 +443,12 @@ def cmd_child(args) -> int:
                 tensor, batch_index=batch_index, boundary_index=args.layer,
                 probe_index=probe_index, previous=grad_outs[probe_index][batch_index])
 
-        kwargs = {"roll_may_keep": False} if keeps else {}
+        # Stage A's setting is False (its roll keeps no row); --roll-may-keep
+        # measures the pageable-row path on the same tree.
+        kwargs = {"roll_may_keep": bool(args.roll_may_keep)} if keeps else {}
+        if args.roll_may_keep and not keeps:
+            raise SystemExit("--roll-may-keep needs a tree whose roll takes roll_may_keep")
+        result["roll_may_keep"] = kwargs.get("roll_may_keep")
         torch.cuda.synchronize()
         result["roll_started_unix"] = time.time()
         roll_started = time.perf_counter()
@@ -533,31 +545,43 @@ NETDATA_CHARTS = ("system.cpu", "system.io", "disk.nvme0n1", "nfs.proc4",
                   "system.memory_full_pressure")
 
 
-def _netdata_window(base: str, chart: str, after: float, before: float,
-                    group: str = "average") -> dict:
+def _netdata_window(base: str, chart: str, after: float, before: float) -> dict:
+    """Mean and max of each dimension over the chart's own points in the window.
+
+    The points are read at the chart's native interval (``points=0``) and
+    averaged here. A one-point server-side average is not used: on a chart
+    collected every 10 s (the GPU power chart) it can land on a partial slot
+    and report a mean far from every sample in the window.
+    """
     url = (f"{base}/api/v1/data?chart={chart}&after={int(after)}&before={int(before)}"
-           f"&points=1&group={group}&format=json&options=abs")
+           f"&points=0&group=average&format=json&options=abs")
     try:
         with urllib.request.urlopen(url, timeout=20) as reply:
             doc = json.load(reply)
     except Exception as exc:  # noqa: BLE001 - a missing series is reported, not fatal
         return {"error": str(exc)[:160]}
     labels, data = doc.get("labels", []), doc.get("data", [])
-    if not data:
-        return {}
-    return {label: round(value, 3) for label, value in zip(labels[1:], data[0][1:])
-            if value is not None}
+    out = {}
+    for column, label in enumerate(labels[1:], start=1):
+        values = [row[column] for row in data if row[column] is not None]
+        if values:
+            out[label] = {"mean": round(sum(values) / len(values), 3),
+                          "max": round(max(values), 3), "points": len(values)}
+    return out
 
 
 def _netdata(base: str, power_chart: str, envelope_w: float, after: float,
              before: float) -> dict:
     power = _netdata_window(base, power_chart, after, before)
-    peak = _netdata_window(base, power_chart, after, before, group="max")
-    watts = next(iter(power.values()), None) if "error" not in power else None
+    series = next(iter(power.values()), None) if "error" not in power else None
+    watts = series["mean"] if series else None
     row = {"window_s": round(before - after, 1), "gpu_power_w_mean": watts,
-           "gpu_power_w_max": next(iter(peak.values()), None) if "error" not in peak else None,
+           "gpu_power_w_max": series["max"] if series else None,
+           "gpu_power_points": series["points"] if series else 0,
            "gpu_power_envelope_fraction": (round(watts / envelope_w, 4)
-                                           if watts is not None else None)}
+                                           if watts is not None else None),
+           "gpu_joules": (round(watts * (before - after), 1)
+                          if watts is not None else None)}
     for chart in NETDATA_CHARTS:
         row[chart] = _netdata_window(base, chart, after, before)
     return row
@@ -666,8 +690,11 @@ def main(argv=None) -> int:
             p.add_argument("--fused", action=argparse.BooleanOptionalAction, default=True)
             p.add_argument("--py-spy", default="/opt/bench/py-spy")
             p.add_argument("--py-spy-rate", type=int, default=100)
+            p.add_argument("--keep-arm", action="append",
+                           help="an arm that runs with roll_may_keep=True (pageable rows)")
         else:
             p.add_argument("--probe-major", action="store_true")
+            p.add_argument("--roll-may-keep", action="store_true")
             p.add_argument("--arm", required=True)
             p.add_argument("--label", required=True)
             p.add_argument("--result", required=True)
