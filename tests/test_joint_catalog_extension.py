@@ -142,10 +142,6 @@ def _pair(tmp_path, campaign, probe, *, scoped=False, identity=None):
         common['calibration_input']['artifact_sha256'] = bindings['calibration_input']['sha256']
     newplan = {**copy.deepcopy(oldplan), 'inputs': {'fixture': 'new'},
                'output_root': str(tmp_path / 'new-output')}
-    if scoped:
-        # The prepare flow's launch recipe embeds the extended plan's policy.
-        newplan['stage_b_resource_policy'] = _write(tmp_path, 'resource-policy.json',
-                                                    {'fixture': 'policy'})
     inputs = {'original_plan': _write(tmp_path, 'old-plan.json', oldplan),
               'extended_plan': _write(tmp_path, 'new-plan.json', newplan)}
     for label, weights, cells, plan in [('original', old_weights, old_cells, oldplan),

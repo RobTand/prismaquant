@@ -193,6 +193,17 @@ def test_prepare_reaches_the_generator_with_the_scope_the_proofs_seal(tmp_path, 
             adjoint_receipts=[band], catalog_extension=extension, stride=8)
         return 0
 
+    real_load = pe._load_json
+
+    def load(path, *, digest, where):
+        document = real_load(path, digest=digest, where=where)
+        if where == 'extended plan':
+            # The launch recipe embeds the extended plan's resource policy;
+            # the fixture plan binds none (its budget check is stubbed below).
+            document['stage_b_resource_policy'] = {'fixture': 'policy'}
+        return document
+
+    monkeypatch.setattr(pe, '_load_json', load)
     monkeypatch.setattr(pe, 'regenerate', generator)
     monkeypatch.setattr(pe, 'metadata_entries', lambda *a, **k: [])
     monkeypatch.setattr(pe, 'check_stage_b_spec', lambda *a, **k: None)
