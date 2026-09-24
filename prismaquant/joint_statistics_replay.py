@@ -325,9 +325,18 @@ def observe_and_project_retained_windows(
     ``spill`` selects the one-pass replay (PQ #994): an object whose
     ``capture(probe_index)`` runs the probe's single forward/backward and
     whose ``replay(window_index=, probe_index=, lease=)`` feeds a lease from
-    it. Captures run inside the first active window's retained lifetime,
-    before that probe's lease exists, so no statistics hook fires during
-    them; every window, the first included, is then fed from the spill.
+    it. Captures run where the sealed spill order puts them, after window
+    zero's ``before_window`` and before any later window's
+    (``joint_layer_quanta.quantum_executable_phase_names``), and before a
+    probe's lease exists, so no statistics hook fires during them; every
+    active window is then fed from the spill. When window zero is active,
+    each probe's capture runs inside its retained lifetime, just before that
+    probe's replay of it. When a resume has already committed window zero,
+    every probe is captured right after window zero's ``before_window``,
+    with no retained window open: a capture reads source weights and
+    boundaries, never renders. It would otherwise run after the first active
+    window k's ``before_window``, under a progress phase that prices no
+    capture, which the row cannot leave (PQ #1172).
     ``backward`` is not called for an active window in this mode.
 
     ``source_bytes`` is the caller's declared, separately checked source-owner
@@ -405,11 +414,18 @@ def observe_and_project_retained_windows(
                       if set(window.names) - completed_names]
     first_active = active_indices[0] if active_indices else None
     last_active = active_indices[-1] if active_indices else None
+    # Window zero's slot holds the captures (PQ #1172). A resume that has
+    # committed window zero captures there too, outside any retained window.
+    capture_ahead = spill is not None and first_active is not None and first_active > 0
     candidate_receipts = []
     for window_index, window in enumerate(retained_plan.windows):
         if before_window is not None:
             before_window(window_index, window.names)
         require_sources()
+        if capture_ahead and window_index == 0:
+            for probe_index in range(n_probes):
+                spill.capture(probe_index)
+                require_sources()
         names = tuple(name for name in window.names if name not in completed_names)
         if not names:
             continue
@@ -443,7 +459,7 @@ def observe_and_project_retained_windows(
                 ) as candidate_receipt:
             for probe_index in range(n_probes):
                 require_sources()
-                if spill is not None and window_index == first_active:
+                if spill is not None and window_index == first_active == 0:
                     spill.capture(probe_index)
                     require_sources()
                 if guard is not None:

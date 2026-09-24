@@ -2318,7 +2318,14 @@ def run_layer_quantum_core(
         window_span = None
 
         def close_skipped_window():
-            nonlocal window_span
+            nonlocal window_span, window_kernel
+            if window_kernel is not None:
+                # A skipped window's profiler ends here, not at an
+                # after_window. On a resume it holds the spill captures
+                # (PQ #1172), so its kernel time is counted.
+                window_kernel.__exit__(None, None, None)
+                counters.kernel_block(window_kernel)
+                window_kernel = None
             if window_span is not None and not window_span.closed:
                 counters.io.close(window_span, outcome="skipped")
             window_span = None
