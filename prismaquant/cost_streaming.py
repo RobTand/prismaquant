@@ -758,10 +758,26 @@ class StreamedBoundaryArtifacts:
             (json.dumps(data, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
 
     def checkpoint_cotangent_sink(self, records):
-        """Optional sealed local workspace for one quantum's cotangent plane."""
+        """Optional sealed local workspace for one quantum's cotangent plane.
+
+        Without the scratch pair the plane is a host dict the quantum holds
+        from checkpoint-load to its end. A plane that cannot fit the
+        container's cgroup cap is refused here, before the first entry is
+        read, with the plane bytes and the cap (PQ #1141); otherwise the
+        kernel kills the container once the reads fill it.
+        """
         root = os.environ.get("PRISMAQUANT_STAGE_B_COTANGENT_ROOT")
         ceiling = os.environ.get("PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
         if root is None and ceiling is None:
+            from .memory_management import require_cgroup_room
+            sizes = [row.get("tensor_bytes") for row in records]
+            if any(type(size) is not int or size <= 0 for size in sizes):
+                raise ValueError("cotangent plane row carries no positive tensor_bytes")
+            plane = sum(sizes)
+            require_cgroup_room(
+                plane, owner="cotangent plane without a scratch",
+                remedy=("declare PRISMAQUANT_STAGE_B_COTANGENT_ROOT and "
+                        f"PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES >= {plane}"))
             return {}
         if not root or not ceiling or not ceiling.isdecimal() or int(ceiling) <= 0:
             raise ValueError("cotangent scratch requires explicit root and positive max bytes")

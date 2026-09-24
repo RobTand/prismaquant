@@ -134,6 +134,78 @@ def enforce_device_envelope(device, device_bytes, *, where="joint capture"):
                                        else None)}
 
 
+def cgroup_memory_cap(*, cgroup_root=Path('/sys/fs/cgroup'),
+                      membership=Path('/proc/self/cgroup')):
+    """The tightest finite cgroup v2 ``memory.max`` over this process's scope.
+
+    Walks the process's cgroup and its ancestors up to ``cgroup_root`` and
+    returns ``(cap_bytes, scope)``: the smallest finite limit and the cgroup
+    directory that sets it, whose ``memory.current`` is what the kernel
+    holds against that limit. Returns ``None`` when every level is ``max``.
+    Refuses a process that is not in exactly one cgroup v2 scope, or whose
+    ancestors cannot be inspected. :class:`CaptureMemoryGuard` takes its cap
+    from here.
+    """
+    root = Path(cgroup_root)
+    entries = [line.split(':', 2)[2] for line in Path(membership).read_text().splitlines()
+               if line.startswith('0::')]
+    if len(entries) != 1 or not entries[0].startswith('/') or '..' in Path(entries[0]).parts:
+        raise RuntimeError('capture memory guard requires a cgroup v2 membership')
+    current = root/entries[0].lstrip('/')
+    limits = []
+    for scope in [current, *current.parents]:
+        if scope != root and root not in scope.parents:
+            break
+        limit_path = scope/'memory.max'
+        if not limit_path.is_file():
+            if scope == root:
+                break  # The host's root cgroup has no configurable limit.
+            raise RuntimeError('capture memory guard cannot inspect its cgroup ancestors')
+        raw = limit_path.read_text().strip()
+        if raw != 'max':
+            limits.append((int(raw), scope))
+        if scope == root:
+            break
+    if not limits:
+        return None
+    return min(limits, key=lambda pair: pair[0])
+
+
+def require_cgroup_room(nbytes, *, owner, remedy, cgroup_root=Path('/sys/fs/cgroup'),
+                        membership=Path('/proc/self/cgroup')):
+    """Refuse at once when ``nbytes`` more host memory cannot fit the cgroup cap.
+
+    For an owner that is about to hold ``nbytes`` in host memory for a long
+    time: the kernel kills the container when its cgroup reaches the cap, so
+    an owner that cannot fit should fail now, with the numbers, rather than
+    after the reads that fill it. The test is the one
+    :meth:`CaptureMemoryGuard._check` applies, ``memory.current`` plus the
+    new bytes against the cap less ``CaptureMemoryGuard.MARGIN_BYTES``.
+
+    Returns the cap and the charged bytes it compared against, or ``None``
+    when there is no finite cap to hold (every level ``max``, or no cgroup
+    v2 membership to inspect). The kernel then enforces nothing here either.
+    """
+    if type(nbytes) is not int or nbytes < 0:
+        raise ValueError(f'{owner}: host bytes must be a nonnegative integer')
+    try:
+        found = cgroup_memory_cap(cgroup_root=cgroup_root, membership=membership)
+    except (OSError, RuntimeError):
+        return None
+    if found is None:
+        return None
+    cap, scope = found
+    current = int((scope/'memory.current').read_text())
+    margin = CaptureMemoryGuard.MARGIN_BYTES
+    if current + nbytes > cap - margin:
+        raise RuntimeError(
+            f'{owner}: {nbytes} bytes in host memory would take the cgroup to '
+            f'{current + nbytes} bytes against its {cap}-byte cap ({current} bytes '
+            f'already charged, {margin} bytes held back as margin, scope {scope}); '
+            f'{remedy}')
+    return {'cap_bytes': cap, 'current_bytes': current, 'margin_bytes': margin}
+
+
 class CaptureMemoryGuard:
     """Fail closed on the conservative cgroup-plus-CUDA capture footprint.
 
@@ -236,29 +308,10 @@ class CaptureMemoryGuard:
                 'without one there is nothing to add to the cgroup cap')
         self.device_bytes = device_bytes
         self.aggregate_envelope = bool(aggregate_envelope)
-        root = Path(cgroup_root)
-        entries = [line.split(':', 2)[2] for line in Path(membership).read_text().splitlines()
-                   if line.startswith('0::')]
-        if len(entries) != 1 or not entries[0].startswith('/') or '..' in Path(entries[0]).parts:
-            raise RuntimeError('capture memory guard requires a cgroup v2 membership')
-        current = root/entries[0].lstrip('/')
-        limits = []
-        for scope in [current, *current.parents]:
-            if scope != root and root not in scope.parents:
-                break
-            limit_path = scope/'memory.max'
-            if not limit_path.is_file():
-                if scope == root:
-                    break  # The host's root cgroup has no configurable limit.
-                raise RuntimeError('capture memory guard cannot inspect its cgroup ancestors')
-            raw = limit_path.read_text().strip()
-            if raw != 'max':
-                limits.append((int(raw), scope))
-            if scope == root:
-                break
-        if not limits:
+        found = cgroup_memory_cap(cgroup_root=cgroup_root, membership=membership)
+        if found is None:
             raise RuntimeError('bounded capture requires a finite cgroup memory budget')
-        self.cap_bytes, self.scope = min(limits, key=lambda pair: pair[0])
+        self.cap_bytes, self.scope = found
         self.cpu_cap_bytes = self.cap_bytes
         self.margin_bytes = self.MARGIN_BYTES
         self.host_floor_bytes = host_floor_bytes
