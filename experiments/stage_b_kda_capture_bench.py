@@ -21,13 +21,21 @@ The spill hooks are not installed: they write about the same bytes on both
 layer types (PQ #1199), so the difference this bench reports is the layer's
 own forward and backward.
 
+``--kda-kernel`` adds, for a KDA layer, the same arms with the Stage B
+capture kernel (``prismaquant.kernels.kda_chunk``) in place of the image's
+fallback, and compares each arm's input cotangent with its fallback arm's.
+The bench swaps the module global for the length of each kernel arm's
+forward. It does not use the quantum's ``CaptureKernelDispatch``, which needs
+a whole bound model.
+
 Outputs, under ``--out``: ``summary.json`` (wall, peak memory, kernel time by
-name, kernel launches, GPU-idle gaps, power) and one Chrome trace per layer.
+name, kernel launches, GPU-idle gaps, power) and one Chrome trace per arm.
 Run it inside the GLM derivative image, through PrismaBuild.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import subprocess
@@ -140,6 +148,26 @@ def build_layer(config, layer_index, device, dtype, seed):
     return layer
 
 
+@contextlib.contextmanager
+def kda_kernel_dispatch():
+    """The capture kernel in place of the image's fallback, for one block."""
+    from transformers.models.glm5_next import modeling_glm5_next as modeling
+    from prismaquant.kernels import kda_chunk
+    original = modeling.chunk_kimi_delta_attention
+    modeling.chunk_kimi_delta_attention = kda_chunk.chunk_kimi_delta_attention
+    try:
+        yield
+    finally:
+        modeling.chunk_kimi_delta_attention = original
+
+
+def with_kda_kernel(call):
+    def wrapped(layer, x_in):
+        with kda_kernel_dispatch():
+            return call(layer, x_in)
+    return wrapped
+
+
 def run_group(layer, call, x_host, grad_host, device, dtype):
     x_in = x_host.to(device, dtype).detach().requires_grad_(True)
     incoming = grad_host.to(device, dtype)
@@ -166,6 +194,10 @@ def main(argv=None) -> int:
                              "chunk_size kwargs (prices a non-bit-exact option)")
     parser.add_argument("--attention-only", action="store_true",
                         help="also time the layer's self_attn sublayer alone")
+    parser.add_argument("--kda-kernel", action="store_true",
+                        help="also time each KDA arm with the Stage B capture kernel")
+    parser.add_argument("--skip-fallback", action="store_true",
+                        help="with --kda-kernel, time only the kernel arms")
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
 
@@ -231,9 +263,14 @@ def main(argv=None) -> int:
             layer_type = config.layer_types[layer_index]
             layer = build_layer(config, layer_index, device, dtype, seed=layer_index)
             record = {"layer_type": layer_type}
-            arms = [("layer", call, x_host, grad_host)]
-            if args.attention_only:
+            arms = [] if args.skip_fallback else [("layer", call, x_host, grad_host)]
+            if args.attention_only and not args.skip_fallback:
                 arms.append(("self_attn", attention_call, x_attn, g_attn))
+            if layer_type == "linear_attention" and args.kda_kernel:
+                arms.append(("layer_kernel", with_kda_kernel(call), x_host, grad_host))
+                if args.attention_only:
+                    arms.append(("self_attn_kernel", with_kda_kernel(attention_call),
+                                 x_attn, g_attn))
             if layer_type == "linear_attention" and args.kda_chunk_sizes:
                 for size in [int(v) for v in args.kda_chunk_sizes.split(",")]:
                     arms.append((f"self_attn_chunk{size}",
@@ -276,6 +313,8 @@ def main(argv=None) -> int:
                                   "trace": str(trace)}
                 reference = record.get("_reference_grad")
                 gradient = run_group(layer, fn, xh, gh, device, dtype)
+                if arm in ("self_attn", "layer"):
+                    record.setdefault("_reference_grads", {})[arm] = gradient
                 if arm == "self_attn":
                     record["_reference_grad"] = gradient
                 elif reference is not None and arm.startswith("self_attn_chunk"):
@@ -285,7 +324,20 @@ def main(argv=None) -> int:
                         "max_abs": float(diff.max()),
                         "mean_abs": float(diff.mean()),
                         "reference_mean_abs": float(reference.float().abs().mean())}
-                if arm == "self_attn":
+                fallback_grad = record.get("_reference_grads", {}).get(
+                    arm[:-len("_kernel")] if arm.endswith("_kernel") else None)
+                if fallback_grad is not None:
+                    reference64 = fallback_grad.double()
+                    diff = (gradient.double() - reference64).abs()
+                    row["input_grad_vs_fallback"] = {
+                        "bit_equal": bool(torch.equal(gradient, fallback_grad)),
+                        "differing_elements": int((gradient != fallback_grad).sum()),
+                        "elements": int(gradient.numel()),
+                        "max_abs": float(diff.max()),
+                        "mean_abs": float(diff.mean()),
+                        "rel_fro": float(diff.norm() / reference64.norm()),
+                        "reference_mean_abs": float(reference64.abs().mean())}
+                if arm in ("self_attn", "self_attn_kernel", "layer_kernel"):
                     again = run_group(layer, fn, xh, gh, device, dtype)
                     row["repeat_bit_equal"] = bool(torch.equal(again, gradient))
                 record[arm] = row
@@ -299,6 +351,7 @@ def main(argv=None) -> int:
                       flush=True)
                 del prof
             record.pop("_reference_grad", None)
+            record.pop("_reference_grads", None)
             summary["layers"][str(layer_index)] = record
             del layer
             torch.cuda.empty_cache()
@@ -306,6 +359,12 @@ def main(argv=None) -> int:
         stop.set()
         sampler.join(timeout=5)
     summary["power_samples_total"] = len(samples)
+    if args.kda_kernel:
+        from prismaquant.kernels import kda_chunk
+        summary["kda_kernel"] = {"name": kda_chunk.NAME,
+                                 "source_sha256": kda_chunk.source_sha256(),
+                                 "compiled": kda_chunk.compiled_kernels(),
+                                 "counts": kda_chunk.counts()}
     target = out_dir / "summary.json"
     target.write_text(json.dumps(summary, indent=1))
     print(f"summary {target}", flush=True)

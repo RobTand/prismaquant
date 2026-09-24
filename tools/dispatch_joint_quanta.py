@@ -1819,6 +1819,10 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
         # uniform across every quantum of the dispatch (PQ #1028).
         from prismaquant.matmul_arithmetic import bf16_reduction_from_environment
         bf16_reduction_from_environment(spec.get("env", {}))
+        # So is the KDA capture kernel (PQ #1199); each quantum admits it for
+        # its own target layer.
+        from prismaquant.glm_kda_capture_kernel import kda_capture_kernel_from_environment
+        kda_capture_kernel_from_environment(spec.get("env", {}))
     except (ValueError, RuntimeError) as exc:
         raise DispatchRefused(str(exc)) from exc
     if resource_policy is not None:
