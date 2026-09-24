@@ -59,6 +59,7 @@ import re
 from collections.abc import Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
+from .dev_mode import seal_check
 
 
 LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
@@ -1224,17 +1225,31 @@ def check_quantum_for_campaign(record: Mapping, campaign: Mapping) -> None:
         expected = campaign.get(field)
         if expected is None:
             raise ValueError(f"the campaign binding names no {field}: refusing")
-        if bound.get(field) != _hex(expected, field):
-            raise ValueError(
-                f"quantum {record.get('quantum_id')!r} was sealed for another "
-                f"{field}: refusing")
+        refusal = ValueError(
+            f"quantum {record.get('quantum_id')!r} was sealed for another "
+            f"{field}: refusing")
+        if field == "unit_roster_sha256":
+            # The roster is what the record measured, not how it was run.
+            if bound.get(field) != _hex(expected, field):
+                raise refusal
+            continue
+        # The plan, prepared and read-manifest digests are run seals
+        # (PQ #1147): dev mode prints a mismatch and admits the record.
+        seal_check(field, _hex(expected, field), bound.get(field),
+                   where=f"quantum {record.get('quantum_id')!r}", refusal=refusal)
     expected_scope = campaign.get("campaign_scope")
+    scope_where = f"quantum {record.get('quantum_id')!r}"
     if not isinstance(expected_scope, dict):
-        raise ValueError("the campaign binding names no campaign_scope: refusing")
-    if canonical_bytes(bound.get("campaign_scope")) != canonical_bytes(expected_scope):
-        raise ValueError(
-            f"quantum {record.get('quantum_id')!r} was sealed for another scope: "
-            f"refusing")
+        seal_check("campaign_scope", expected_scope, bound.get("campaign_scope"),
+                   where=scope_where, same=False, refusal=ValueError(
+                       "the campaign binding names no campaign_scope: refusing"))
+    else:
+        seal_check("campaign_scope", expected_scope, bound.get("campaign_scope"),
+                   where=scope_where,
+                   same=canonical_bytes(bound.get("campaign_scope")) == canonical_bytes(expected_scope),
+                   refusal=lambda: ValueError(
+                       f"quantum {record.get('quantum_id')!r} was sealed for another scope: "
+                       f"refusing"))
     adjoint = record.get("adjoint", {})
     if "receipt_sha256" in adjoint and adjoint["receipt_sha256"] is not None:
         raise ValueError(
@@ -1314,11 +1329,15 @@ def check_adjoint_run_identity(header: Mapping, *, plan_sha256: str,
     """
     if not isinstance(header, dict) or not isinstance(header.get("run_identity"), dict):
         raise ValueError("a stage-A run header must carry a run identity: refusing")
-    # An unset scope never admits anything: a run that sealed no scope
-    # (R13, PQ #1126) does not answer for a campaign that names none, so
-    # null is never compared with null.
-    if not isinstance(scope, dict) or not scope:
-        raise ValueError("the campaign scope is unset: refusing")
+    # An unset scope never admits anything in certified mode: a run that
+    # sealed no scope (R13, PQ #1126) does not answer for a campaign that
+    # names none, so null is never compared with null. Dev mode prints it and
+    # continues (PQ #1147).
+    scope_set = isinstance(scope, dict) and bool(scope)
+    if not scope_set:
+        seal_check("campaign_scope", scope, header["run_identity"].get("campaign_scope"),
+                   where="stage-A run header", same=False,
+                   refusal=ValueError("the campaign scope is unset: refusing"))
     identity = header["run_identity"]
     if catalog_extension is not None:
         # The effective identity: the sealed one, or, for a v3 extension over
@@ -1330,10 +1349,14 @@ def check_adjoint_run_identity(header: Mapping, *, plan_sha256: str,
     else:
         for field, expected in (("plan_sha256", plan_sha256),
                                 ("prepared_sha256", prepared_sha256)):
-            if identity.get(field) != expected:
-                raise ValueError(f"the stage-A run answers for another {field}: refusing")
-    if canonical_bytes(identity.get("campaign_scope")) != canonical_bytes(scope):
-        raise ValueError("the stage-A run answers for another scope: refusing")
+            seal_check(field, expected, identity.get(field), where="stage-A run header",
+                       refusal=ValueError(
+                           f"the stage-A run answers for another {field}: refusing"))
+    if scope_set:
+        seal_check("campaign_scope", scope, identity.get("campaign_scope"),
+                   where="stage-A run header",
+                   same=canonical_bytes(identity.get("campaign_scope")) == canonical_bytes(scope),
+                   refusal=ValueError("the stage-A run answers for another scope: refusing"))
 
 
 def _proof_slices(proof: Mapping, layers: Sequence[int]) -> dict[int, dict]:

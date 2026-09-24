@@ -48,6 +48,7 @@ from pathlib import Path
 import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
+from .dev_mode import NOT_COMPUTED, dev_mode_enabled, seal_check
 from .joint_adjoint_checkpoints import (
     ADJOINT_CAPTURE_ENTRY_POINT,
     ADJOINT_RECEIPT_SCHEMA,
@@ -1253,8 +1254,12 @@ def run_adjoint_capture_core(
     header_implementation = (implementation_sha256 if chain_state is None
                              else chain_state["run_identity"]["implementation_sha256"])
     bind_identity = {
-        "source_model": validate_streamed_model_identity(
-            source_model_identity, where="adjoint capture"),
+        # A dev-mode chain resume does not compute the source identity it
+        # would only compare (PQ #1147); the stored one is adopted below.
+        "source_model": (
+            NOT_COMPUTED if chain_state is not None and source_model_identity == NOT_COMPUTED
+            else validate_streamed_model_identity(
+                source_model_identity, where="adjoint capture")),
         "producer_source_sha256": header_implementation,
         "calibration_sha256": hashlib.sha256(
             calib_ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
@@ -1303,6 +1308,15 @@ def run_adjoint_capture_core(
                 resume_from=chain_resume.get("resume_from"))
         except ChainResumeRefused as exc:
             raise AdjointIdentityRefused(f"chain resume refused: {exc}") from exc
+        # The resume continues under the stored identities. Certified mode
+        # refused any difference above; in dev mode the only differences left
+        # are the run seals plan_chain_resume stamped (PQ #1147).
+        if canonical_json(bind_identity, where="Stage A chain resume") != chain_state[
+                "bind_identity"]:
+            bind_identity = chain_state["bind_identity"]
+        if canonical_json(run_identity, where="Stage A chain resume") != chain_state[
+                "run_identity"]:
+            run_identity = chain_state["run_identity"]
     split_marks = ()
     batch_offset = 0
     samples = None
@@ -1441,12 +1455,17 @@ def run_adjoint_capture_core(
         if recovery is not None:
             log(f"verified forward recovery through boundary {recovery.frontier}, "
                 f"{recovery.n_batches} complete calibration partitions")
-        if resume_plan is not None and (
-                (None if recovery is None else recovery.receipt_binding)
-                != resume_plan.document["boundary_storage"].get("forward_recovery")):
-            raise AdjointIdentityRefused(
-                "chain resume refused: the relaunch binds another forward-recovery "
-                "capsule than the run its chain state seals")
+        if resume_plan is not None:
+            # A run seal (PQ #1147): the rows the resumed chain reads are
+            # still checked entry by entry.
+            seal_check(
+                "forward-recovery capsule",
+                resume_plan.document["boundary_storage"].get("forward_recovery"),
+                None if recovery is None else recovery.receipt_binding,
+                where="Stage A chain resume",
+                refusal=AdjointIdentityRefused(
+                    "chain resume refused: the relaunch binds another forward-recovery "
+                    "capsule than the run its chain state seals"))
 
         def open_checkpoint(boundary: int):
             # Reserved before the pass that produces the plane, which writes
@@ -2404,10 +2423,19 @@ def run_adjoint_capture(
         require_capture_compatibility(config.get("source_capture_compatibility"),
                                       capture=config["canonical_capture"],
                                       model=runner.model)
-        source = build_streamed_model_identity(runner, config["model"],
-                                               identity_cache_path=identity_cache_path)
-        _same(completion.get("source_model_identity"), source,
-              "prepared source identity")
+        if chain_resume is not None and dev_mode_enabled():
+            # A chain resume only compares the source identity with the one
+            # its chain state records: dev mode does not compute it and
+            # records NOT_COMPUTED (PQ #1147).
+            source = NOT_COMPUTED
+        else:
+            source = build_streamed_model_identity(runner, config["model"],
+                                                   identity_cache_path=identity_cache_path)
+        # A run seal (PQ #1147): dev mode stamps a source other than the
+        # prepared one and continues.
+        seal_check("prepared source identity", completion.get("source_model_identity"),
+                   source, where="prepared completion versus the running source",
+                   refusal=lambda: ValueError("prepared source identity: identity mismatch"))
         result.update(source_model_identity=source, units=head.units,
                       measured_cells=head.measured_cells)
         # A seed's capsule names the campaign the way a recovery capsule does.
@@ -2686,7 +2714,9 @@ def main(argv=None) -> int:
                         help="dev mode only: declare that the relaunch continues "
                              "a chain sealed by implementation FROM under "
                              "implementation TO. Recorded in the receipt and in "
-                             "every band sealed below the switch; never inferred")
+                             "every band sealed below the switch. Dev mode (the "
+                             "default, PQ #1147) resumes across implementations "
+                             "without it and records the switch as undeclared")
     parser.add_argument("--chain-seed", type=Path, default=None,
                         help="dev mode only: a prismaquant.stage_a.chain_seed.v1 "
                              "spec. Continues the plan's own run's sealed "

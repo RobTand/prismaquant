@@ -397,7 +397,7 @@ def test_a_completion_prepared_under_another_plan_refuses(tmp_path, monkeypatch,
     if dev:
         monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     else:
-        monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     with pytest.raises(ValueError, match="prepared plan"):
         _capture(campaign, tmp_path / "run", monkeypatch, plan_sha256="9" * 64)
     assert not (adjoint_space(tmp_path / "run") / "checkpoints").exists()

@@ -769,7 +769,10 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
 
     # The sealed spill bound: a geometry the live modules do not reproduce,
     # and a ceiling other than the sealed reservation, refuse before the
-    # scratch exists.
+    # scratch exists. Both are run seals (PQ #1147): certified mode refuses
+    # them; dev mode stamps them (tests/test_stage_b_spill_ceiling_sealed.py).
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+
     def other_geometry(bound):
         bound = json.loads(json.dumps(bound))
         bound["geometry"]["x_bytes"] += 2
@@ -785,6 +788,7 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     assert not constructed
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
     shutil.rmtree(record0["output_space"]["root"], ignore_errors=True)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     events_s, manifest_s, payload_s, _ = phases._drive_quantum(
         tmp_path, monkeypatch, setup, layer=0, resume=False,
         replay_mode="spill")

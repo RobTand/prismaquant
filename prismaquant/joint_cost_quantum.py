@@ -40,6 +40,7 @@ from types import SimpleNamespace
 import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
+from .dev_mode import seal_check
 from .io_spans import IoSpanLog, failure_outcome, read_proc_io, stage_span_log
 from .joint_adjoint_checkpoints import (
     QUANTUM_COUNTERS_SCHEMA,
@@ -226,10 +227,13 @@ def verify_quantum_identity(
             _require_hex(supplied, f"--{label}-sha256")
             if _digest_of(path) != supplied:
                 raise QuantumIdentityRefused(f"{label} digest mismatch at {path}")
-            if campaign.get(f"{label}_sha256") != supplied:
-                raise QuantumIdentityRefused(
-                    f"quantum record binds another {label}: "
-                    f"record={campaign.get(f'{label}_sha256')!r} argv={supplied}")
+            # A run seal (PQ #1147): dev mode prints the record's binding and
+            # runs under the supplied, digest-checked file.
+            seal_check(f"quantum record {label}", campaign.get(f"{label}_sha256"), supplied,
+                       where=str(quantum_path),
+                       refusal=QuantumIdentityRefused(
+                           f"quantum record binds another {label}: "
+                           f"record={campaign.get(f'{label}_sha256')!r} argv={supplied}"))
         _require_hex(campaign.get("read_manifest_sha256"),
                      "record read_manifest_sha256")
         adjoint = record["adjoint"]
@@ -1690,9 +1694,14 @@ def run_layer_quantum_core(
                 if not validate_joint_aura_entry(row):
                     raise ValueError("not a joint row")
                 operator = row["joint_operator_identity"]
-                if (row["probe_identity"] != joint_probe_identity
-                        or operator["qname"] != name or operator["format"] != fmt):
+                if operator["qname"] != name or operator["format"] != fmt:
                     raise ValueError("probe/operator alignment mismatch")
+                # The probe identity binds the producer source and the Stage
+                # B resource policy (PQ #1147): a run seal. Dev mode prints a
+                # difference and reuses the checkpointed row.
+                seal_check("joint probe identity", joint_probe_identity,
+                           row["probe_identity"], where=f"joint AURA checkpoint {name}@{fmt}",
+                           refusal=lambda: ValueError("probe/operator alignment mismatch"))
                 if fmt in render_formats[name]:
                     if operator["rendered_weight"] != joint_cache_renders[name][fmt]:
                         raise ValueError("actual rendered-weight identity mismatch")
@@ -2895,12 +2904,18 @@ def run_layer_quantum(
             if not isinstance(cache, ProductionWeightCache):
                 raise RuntimeError("prepared cache is not ProductionWeightCache")
             _same(cache.metadata["inputs"], data.inputs, "prepared source bindings")
-            _same(completion.get("stage_b_resource_policy"), config.get("stage_b_resource_policy"),
-                  "prepared Stage B resource policy")
+            # The two policies are run seals (PQ #1147): dev mode prints a
+            # difference and runs under the plan's own policy.
+            seal_check("prepared Stage B resource policy", config.get("stage_b_resource_policy"),
+                       completion.get("stage_b_resource_policy"), where="Stage B quantum",
+                       refusal=lambda: ValueError(
+                           "prepared Stage B resource policy: identity mismatch"))
             if config.get("stage_b_resource_policy") is not None:
                 cache._joint_stage_b_resource_policy = dict(config["stage_b_resource_policy"])
-            _same(completion.get("served_activation_policy"), config.get("served_activation_policy"),
-                  "prepared served activation policy")
+            seal_check("prepared served activation policy", config.get("served_activation_policy"),
+                       completion.get("served_activation_policy"), where="Stage B quantum",
+                       refusal=lambda: ValueError(
+                           "prepared served activation policy: identity mismatch"))
             if config.get("served_activation_policy") is not None:
                 if record.get("catalog_extension") is None:
                     raise RuntimeError("served activation policy requires an explicit catalog extension")
@@ -2932,8 +2947,11 @@ def run_layer_quantum(
                                  .get("head_source") or {}).get("tensors"))
 
         source = build_streamed_model_identity(runner, config["model"], **identity_cache)
-        _same(completion.get("source_model_identity"), source,
-              "prepared source identity")
+        # A run seal (PQ #1147): dev mode stamps a source other than the
+        # prepared one and continues.
+        seal_check("prepared source identity", completion.get("source_model_identity"),
+                   source, where="prepared completion versus the running source",
+                   refusal=lambda: ValueError("prepared source identity: identity mismatch"))
         result.update(source_model_identity=source,
                       units=head_units, measured_cells=head_cells)
 

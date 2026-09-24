@@ -14,21 +14,30 @@ A chain resume relaunches that run from ``b``:
   identity, the arithmetic stamp and every forward boundary entry record.
   A resume reads that file under a pinned digest and never reconstructs
   them from anywhere else.
-* It **refuses** whenever anything that decides the chain's bytes differs:
-  the chain regime (batch size, probe fusion), the arithmetic stamp, the
-  plan, the preparation, the capsule, the stride, the read manifest, the
-  calibration draw or the boundary storage policy.
+* It **refuses** in both modes when the chain's layout or data differs: the
+  stride, the partition and layer counts, the chain regime (batch size, probe
+  fusion), the calibration draw, the probes or the unit roster.
+* Its **run seals** go through ``seal_check`` (PQ #1147): the arithmetic
+  stamp, the plan, the preparation, the read manifest, the implementation,
+  the campaign scope, the source model, the artifact budget, the boundary
+  storage policy, the capsule binding and the generation status. Certified
+  mode (``PRISMAQUANT_DEV_MODE=0``) refuses on each as before. Dev mode prints
+  one ``[DEV-MODE]`` line per difference and continues with the stored chain.
+  A relaunch may pass ``NOT_COMPUTED`` for a seal input it would derive only
+  to compare it.
 
 **Same implementation.** A resume under the implementation that sealed
 checkpoint ``b`` is a plain bitwise continuation: the receipt, every
 checkpoint and every band slice are the bytes the uninterrupted run writes.
 
-**Different implementation.** Allowed in dev mode only, and only under an
-explicit declaration the operator puts on the command line
-(``--resume-implementation-compatibility FROM:TO``); it is never inferred.
-The header keeps the original ``implementation_sha256``. The declaration --
-both implementations and the checkpoint where the switch happened -- is
-recorded outside the header digest: in the receipt and in every band sealed
+**Different implementation.** Allowed in dev mode only. Since PQ #1147 dev
+mode is the default and needs no declaration: ``seal_check`` prints both
+implementations and the resume continues. An operator may still declare the
+switch (``--resume-implementation-compatibility FROM:TO``); certified mode
+(``PRISMAQUANT_DEV_MODE=0``) refuses the switch either way. The header keeps
+the original ``implementation_sha256``. The switch -- both implementations,
+the checkpoint where it happened and, when undeclared, ``declared: false`` --
+is recorded outside the header digest: in the receipt and in every band sealed
 below the switch, under ``resume_compatibility``. The precedent is the
 forward-recovery capsule's ``implementation_compatibility``.
 
@@ -55,7 +64,9 @@ from pathlib import Path
 import re
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
+from .dev_mode import NOT_COMPUTED, seal_check
 from .joint_adjoint_slices import checkpoint_cotangent_plane, checkpoint_is_referenced
+from .matmul_arithmetic import BF16_REDUCTION_FIELD
 
 CHAIN_STATE_SCHEMA = "prismaquant.stage_a.chain_state.v1"
 CHAIN_ARITHMETIC_SCHEMA = "prismaquant.stage_a.chain_arithmetic.v1"
@@ -121,6 +132,38 @@ def chain_arithmetic_stamp(runner, extra=None) -> dict:
             raise ValueError(f"arithmetic stamp field {key!r} is the runner's own")
         stamp[key] = value
     return canonical_json(stamp, where="Stage A arithmetic stamp")
+
+
+#: Chain-state fields that fix how many checkpoints, partitions and layers
+#: the stored chain holds: a relaunch that differs in one cannot continue it,
+#: so they stay walls in both modes (PQ #1147).
+_LAYOUT_FIELDS = frozenset({"stride", "n_batches", "num_layers"})
+#: The keys of ``run_identity`` and ``bind_identity`` that name a recorded run
+#: identity: run seals (PQ #1147). Every other key names the data the chain
+#: was computed from (calibration, probes, seed, token scope, partition,
+#: roster, chain regime) and stays a wall. ``arithmetic`` and
+#: ``artifact_budget_override`` are run seals as a whole: the arithmetic
+#: stamp names the device, the build, the image and the projection backend,
+#: which a human judges from the ``[DEV-MODE]`` line (the numerics exception).
+_SEAL_KEYS = {
+    "run_identity": frozenset({
+        "plan_sha256", "prepared_sha256", "read_manifest_sha256",
+        "implementation_sha256", "campaign_scope", BF16_REDUCTION_FIELD}),
+    "bind_identity": frozenset({"source_model", "producer_source_sha256"}),
+}
+
+
+def _chain_wall(name, recorded, recomputed) -> bool:
+    """Whether a differing chain-state field refuses in dev mode too."""
+    if name in _LAYOUT_FIELDS:
+        return True
+    seal_keys = _SEAL_KEYS.get(name)
+    if seal_keys is None or (isinstance(recomputed, str) and recomputed == NOT_COMPUTED):
+        return False
+    if not isinstance(recorded, dict) or not isinstance(recomputed, dict):
+        return True
+    return any(recorded.get(key) != recomputed.get(key)
+               for key in set(recorded) | set(recomputed) if key not in seal_keys)
 
 
 def _seal(document: dict) -> dict:
@@ -332,12 +375,20 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
             "chain left to resume")
     differing = [name for name in _COMPARED if recomputed.get(name) != document[name]]
     if differing:
-        raise ChainResumeRefused(
+        refusal = ChainResumeRefused(
             "the relaunch is not the run its chain state seals; it differs in "
             + ", ".join(differing))
+        if any(_chain_wall(name, document[name], recomputed.get(name)) for name in differing):
+            raise refusal
+        # Only run seals differ (PQ #1147). A relaunch may pass NOT_COMPUTED
+        # for an input it would derive only to compare it here.
+        for name in differing:
+            seal_check(f"chain state {name}", document[name], recomputed.get(name),
+                       where="Stage A chain resume", refusal=refusal)
     storage = document["boundary_storage"]
-    if recomputed.get("boundary_policy") != storage["policy"]:
-        raise ChainResumeRefused("the relaunch runs another boundary storage policy")
+    seal_check("boundary storage policy", storage["policy"], recomputed.get("boundary_policy"),
+               where="Stage A chain resume",
+               refusal=ChainResumeRefused("the relaunch runs another boundary storage policy"))
     if recomputed.get("boundary_directory") != storage["directory"]:
         raise ChainResumeRefused("the relaunch writes another boundary directory")
     session = storage["session"]
@@ -376,24 +427,33 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
                 f"checkpoint {boundary} was sealed by the running implementation")
     else:
         if declaration is None:
-            raise ChainResumeRefused(
-                f"checkpoint {boundary} was sealed by implementation {sealed_by} and "
-                f"this relaunch runs {running}: resuming across implementations needs "
-                "an explicit --resume-implementation-compatibility declaration")
-        try:
-            require_dev_mode("a Stage A chain resume under an implementation declaration")
-        except RuntimeError as exc:
-            raise ChainResumeRefused(str(exc)) from exc
-        if declaration != {"from": sealed_by, "to": running}:
-            raise ChainResumeRefused(
-                f"the declaration {declaration['from']}:{declaration['to']} is not the "
-                f"switch this relaunch makes, {sealed_by}:{running}")
+            # The implementation binding is a run seal (PQ #1147). Dev mode
+            # resumes across implementations without a declaration; the switch
+            # is still recorded below, so a human can decide whether it
+            # changed stored numerics.
+            seal_check(
+                "implementation", sealed_by, running,
+                where=f"Stage A chain resume at checkpoint {boundary}",
+                refusal=ChainResumeRefused(
+                    f"checkpoint {boundary} was sealed by implementation {sealed_by} and "
+                    f"this relaunch runs {running}: resuming across implementations needs "
+                    "an explicit --resume-implementation-compatibility declaration"))
+        else:
+            try:
+                require_dev_mode("a Stage A chain resume under an implementation declaration")
+            except RuntimeError as exc:
+                raise ChainResumeRefused(str(exc)) from exc
+            if declaration != {"from": sealed_by, "to": running}:
+                raise ChainResumeRefused(
+                    f"the declaration {declaration['from']}:{declaration['to']} is not the "
+                    f"switch this relaunch makes, {sealed_by}:{running}")
         compatibility = {
             "schema": RESUME_COMPATIBILITY_SCHEMA,
             "scope": RESUME_COMPATIBILITY_SCOPE,
             "from_implementation_sha256": sealed_by,
             "to_implementation_sha256": running,
             "switch_checkpoint": boundary,
+            **({} if declaration is not None else {"declared": False}),
         }
 
     generation = _generation_directory(document)
@@ -403,10 +463,12 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
         raise ChainResumeRefused(f"the run's generation has no status file: {exc}") from exc
     if status.get("session") != session:
         raise ChainResumeRefused("the run's generation names another session")
-    if status.get("status") not in ("running", "failed"):
-        raise ChainResumeRefused(
-            f"the run's generation status is {status.get('status')!r}; only an "
-            "interrupted run resumes")
+    seal_check("generation status", "running or failed", status.get("status"),
+               where="Stage A chain resume",
+               same=status.get("status") in ("running", "failed"),
+               refusal=ChainResumeRefused(
+                   f"the run's generation status is {status.get('status')!r}; only an "
+                   "interrupted run resumes"))
     for producer in [document["producer"], *(record["producer"] for record in records)]:
         if producer is not None:
             require_producer_contained(producer)

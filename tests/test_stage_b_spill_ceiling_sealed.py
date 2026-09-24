@@ -276,6 +276,26 @@ def test_a_sealed_bound_refuses_edits_and_foreign_launches():
         spill_mod.require_sealed_spill_bound(bound, geometry, **{**live, "ceiling": 183 * GIB})
 
 
+
+def test_dev_mode_stamps_the_spill_identity_and_keeps_the_capacity_bound(
+        monkeypatch, capsys):
+    """PQ #1147: the sealed spill identity stamps; the ceiling still bounds."""
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    geometry = _layer44_geometry()
+    bound = _sealed_bound()
+    live = dict(capture_batch=4, element_dtype="bfloat16", ceiling=NEED)
+    capsys.readouterr()
+    assert spill_mod.require_sealed_spill_bound(
+        bound, geometry, **{**live, "capture_batch": 1}) == BLOCK
+    assert "[DEV-MODE] seal spill capture_batch differs" in capsys.readouterr().out
+    # A ceiling above the sealed reservation is room, not a refusal.
+    assert spill_mod.require_sealed_spill_bound(
+        bound, geometry, **{**live, "ceiling": NEED + GIB}) == BLOCK
+    assert "[DEV-MODE] seal spill ceiling differs" in capsys.readouterr().out
+    # The live geometry's scratch must still fit the admitted ceiling.
+    with pytest.raises(spill_mod.SpillBoundRefused, match="over the admitted ceiling"):
+        spill_mod.require_sealed_spill_bound(bound, geometry, **{**live, "ceiling": 183 * GIB})
+
 def test_the_binder_seals_a_bound_only_on_a_spill_readset(tmp_path):
     bound = _fixture_spill_bound()
     sealed, *_ = _bind_prepared(tmp_path, str(tmp_path / "run"), replay_mode="spill",

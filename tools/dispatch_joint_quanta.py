@@ -1525,9 +1525,18 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         plan = json.loads(plan_raw)
     except (OSError, ValueError) as exc:
         raise DispatchRefused(f"quantum {quantum_id!r} source plan is unreadable: {exc}") from exc
+    plan_sha256 = str(campaign["plan_sha256"])
     if plan.get("stage_b_resource_policy") is not None:
-        if hashlib.sha256(plan_raw).hexdigest() != campaign["plan_sha256"]:
-            raise DispatchRefused("resource-bound plan differs from its quantum seal")
+        # The record's plan digest is a run seal (PQ #1147): dev mode prints a
+        # re-declared plan and dispatches under the plan on disk, by the
+        # digest of the bytes just read. Certified mode refuses unless the
+        # two are equal, so its argv is unchanged.
+        from prismaquant.dev_mode import seal_check
+        plan_sha256 = hashlib.sha256(plan_raw).hexdigest()
+        seal_check("resource-bound plan", campaign["plan_sha256"], plan_sha256,
+                   where=f"quantum {quantum_id!r}",
+                   refusal=lambda: DispatchRefused(
+                       "resource-bound plan differs from its quantum seal"))
         from prismaquant.joint_stageb_resources import verify_policy
         try:
             resource_policy = verify_policy(plan["stage_b_resource_policy"])
@@ -1569,7 +1578,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         "--quantum", str(record_path),
         "--quantum-sha256", record_sha256,
         "--plan", str(campaign["plan_path"]),
-        "--plan-sha256", str(campaign["plan_sha256"]),
+        "--plan-sha256", plan_sha256,
         "--prepared", str(campaign["prepared_path"]),
         "--prepared-sha256", str(campaign["prepared_sha256"]),
         "--adjoint-slice", str(slice_path),

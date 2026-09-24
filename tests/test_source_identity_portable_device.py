@@ -38,7 +38,7 @@ def _dev_on(monkeypatch):
 
 
 def _dev_off(monkeypatch):
-    monkeypatch.delenv(DEV_ENV, raising=False)
+    monkeypatch.setenv(DEV_ENV, "0")
 
 
 # -- the shared predicate ------------------------------------------------

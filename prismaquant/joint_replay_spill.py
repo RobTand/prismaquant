@@ -70,6 +70,7 @@ import time
 
 import torch
 
+from .dev_mode import dev_mode_enabled, seal_check
 from .joint_aura import (
     JointOperatorStatisticsLease,
     SignedJointProjectionLease,
@@ -523,16 +524,32 @@ def require_sealed_spill_bound(bound, geometry, *, capture_batch, element_dtype,
         raise SpillBoundRefused("a spill bound is checked against a SpillGeometry")
     live = {"capture_batch": capture_batch, "element_dtype": element_dtype,
             "geometry": geometry.as_dict()}
+    # The sealed spill identity is a run seal (PQ #1147): dev mode prints a
+    # difference and runs on the live geometry.
     for key, value in live.items():
-        if bound[key] != value:
+        seal_check(f"spill {key}", bound[key], value, where="Stage B spill bound",
+                   refusal=SpillBoundRefused(
+                       f"the record seals spill {key} {bound[key]!r}, but this quantum "
+                       f"measures {value!r}; regenerate its executable readset"))
+    if dev_mode_enabled():
+        # The capacity half is a resource bound and refuses in both modes:
+        # the scratch the live geometry needs must fit the admitted ceiling.
+        # Certified mode checks it through the equalities around it.
+        try:
+            needed = spill_reservation_bytes(
+                live["geometry"]["total_bytes"], live["geometry"]["max_parts"],
+                block=bound["block"])
+        except ValueError as exc:
+            raise SpillBoundRefused(str(exc)) from exc
+        if needed > ceiling:
             raise SpillBoundRefused(
-                f"the record seals spill {key} {bound[key]!r}, but this quantum "
-                f"measures {value!r}; regenerate its executable readset")
-    if ceiling != reservation:
-        raise SpillBoundRefused(
-            f"the spill ceiling is {ceiling} bytes, but the record seals "
-            f"{reservation}; dispatch the row with tools/dispatch_joint_quanta.py, "
-            "which sets the ceiling from the record")
+                f"this quantum's spill needs {needed} bytes on its {bound['block']}-byte "
+                f"grid, over the admitted ceiling of {ceiling} bytes")
+    seal_check("spill ceiling", reservation, ceiling, where="Stage B spill bound",
+               refusal=SpillBoundRefused(
+                   f"the spill ceiling is {ceiling} bytes, but the record seals "
+                   f"{reservation}; dispatch the row with tools/dispatch_joint_quanta.py, "
+                   "which sets the ceiling from the record"))
     return bound["block"]
 
 

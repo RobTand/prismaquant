@@ -48,7 +48,7 @@ def launcher(monkeypatch):
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *a, **k: None)
     monkeypatch.delenv(REPLAY_REGIME_ENV, raising=False)
     monkeypatch.delenv(BF16_REDUCTION_ENV, raising=False)
-    monkeypatch.delenv(DEV_MODE_ENV, raising=False)
+    monkeypatch.setenv(DEV_MODE_ENV, "0")
     yield monkeypatch
     (MATMUL.allow_bf16_reduced_precision_reduction,
      MATMUL.allow_fp16_reduced_precision_reduction, MATMUL.allow_tf32) = saved
@@ -126,7 +126,7 @@ def test_a_malformed_stamp_refuses_in_either_mode(monkeypatch, identity):
         if dev:
             monkeypatch.setenv(DEV_MODE_ENV, "1")
         else:
-            monkeypatch.delenv(DEV_MODE_ENV, raising=False)
+            monkeypatch.setenv(DEV_MODE_ENV, "0")
         with pytest.raises(QuantumIdentityRefused, match="bf16 reduction stamp"):
             require_slice_bf16_reduction({"run_identity": identity}, True, where="q")
 

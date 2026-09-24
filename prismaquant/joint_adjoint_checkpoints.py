@@ -2294,9 +2294,8 @@ def _render_free_fused_passes(
 # --------------------------------------------------------------------------
 
 
-def dev_mode_enabled(environ=None) -> bool:
-    return dict(environ if environ is not None else os.environ).get(
-        "PRISMAQUANT_DEV_MODE") == "1"
+# The one definition lives in dev_mode (PQ #1147); re-exported for callers.
+from .dev_mode import dev_mode_enabled  # noqa: E402,F401
 
 
 def require_dev_mode(where: str) -> None:

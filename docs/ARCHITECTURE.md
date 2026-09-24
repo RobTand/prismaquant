@@ -1,5 +1,57 @@
 # PrismaQuant Architecture
 
+Sealing is off by default (2026-09-24, `ws-1147/sealing-off`, PQ #1147).
+Rob, 2026-09-24: "All sealing should be disabled until further notice."
+`PRISMAQUANT_DEV_MODE` now selects dev mode unless it is exactly `0`: unset,
+`1` or any other value is dev mode, and `0` is certified mode. The one
+definition is `prismaquant.dev_mode.dev_mode_enabled`. `tests/conftest.py`
+sets `0` for every test, so a test that pins the default unsets the variable
+itself.
+
+One helper, `prismaquant.dev_mode.seal_check`, now runs every run-gate seal on
+the campaign path: the Stage A chain resume, seed, capsule binding and prepared
+source identity; the Stage B quantum record, head slice, resource and
+activation policies and spill bound; the join; both dispatchers; the catalog
+extension; and the projection-backend runtime qualification. In certified mode
+it raises the site's original exception, with the same type and message. In
+dev mode it prints one `[DEV-MODE]` line that names the first differing field
+and both values, and the run continues.
+
+These still refuse in both modes:
+
+- Byte integrity: bytes that do not hash to their stored digest, a record that
+  does not reproduce its own seal, and a missing unit.
+- Layout and data identities: the stride, the batch and layer counts, the
+  unit roster, the calibration draw, the probes, the seed, the chain regime
+  and the token scope.
+- Resource guards. The spill bound admits another recorded geometry in dev
+  mode, but a live spill over the admitted ceiling still refuses.
+
+`tests/test_no_new_seals.py` scans the campaign modules for identity
+`if`-then-`raise` sites and fails on any site that is not on its allowlist.
+Each allowlist entry names its kind (integrity, structure, wall or ambiguous)
+and its reason.
+
+Dev mode also skips work that only a seal needed. A chain resume does not
+rebuild the source model identity; it records `not computed`. The catalog
+extension does not re-derive the original campaign scope, which re-hashed the
+merged checkpoint (302.653 s measured under #833). AURA reuses stored
+checkpoint rows from another producer instead of archiving the lineage and
+recomputing it. A resume adopts the chain state's stored run and bind
+identities, so the run it continues keeps its own records.
+
+A certified submitter (`PRISMAQUANT_DEV_MODE=0`) now seals `0` into the
+container spec env, because unset in the container now means dev mode. This
+changes a certified submission's argv and action key.
+`tools/dispatch_joint_quanta.py` still seals `PRISMAQUANT_DEV_MODE=1` into
+every campaign quantum, as before. This changes a runtime default: the meaning
+of an unset `PRISMAQUANT_DEV_MODE`. No format, pipeline stage, lane or ship
+gate changes. Gates: `tests/test_sealing_off_1147.py`,
+`tests/test_no_new_seals.py`, `tests/test_stage_a_chain_resume.py`,
+`tests/test_stage_a_chain_seed.py`, `tests/test_stage_b_head_slice.py`,
+`tests/test_stage_b_spill_ceiling_sealed.py`,
+`tests/test_dev_mode_provenance_gates.py`.
+
 Stage B plans the capture pass it charges (2026-09-24,
 `ws-sb4/1151-capture-workspace`, PQ #1151). The capture guard charges
 `workspace_reserve_bytes` once per stored batch a pass carries, so a capture
@@ -1691,8 +1743,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `ws-sb4/1151-capture-workspace`.
+As of: 2026-09-24 · `ws-1147/sealing-off`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `ws-1147/sealing-off`) for **sealing off by default**
+(PQ #1147): `PRISMAQUANT_DEV_MODE` means dev mode unless it is `0`, and every
+run-gate seal on the campaign path goes through `dev_mode.seal_check`, which
+prints a `[DEV-MODE]` line and continues in dev mode. Byte integrity, layout
+and data identities, and resource guards still refuse. See the entry at the
+top and §3.4. A runtime default changes; no format, pipeline stage, lane or
+ship gate changes.
 
 Re-stamped (2026-09-24, `ws-sb4/1151-capture-workspace`) for **the Stage B
 plan pricing the capture pass the guard charges, the measured capture
@@ -13877,26 +13937,52 @@ semantics; §4 owns the cost-mode semantics; §5 owns the lever semantics.
 
 ### 3.4 Reuse guards and the silent-reuse class
 
-**`PRISMAQUANT_DEV_MODE=1` suspends the run-gate half of this class, never
-the reuse half (2026-09-19, #771).** The identity guards below exist so a
-certified artifact is reproducible; before enterprise certification has a
-consumer, iterating under them is tax. Under dev mode the joint pass's
-source-proof family, the prepared-record digest comparisons and the
-checkpoint-lineage identity mismatch become stamps — loudly recorded, never
-silently reused: a mismatched checkpoint lineage is archived
-(`<dir>.dev-archived-<iso>`) and recomputed fresh, and every dev run carries a
-top-level `dev_uncertified` stamp in `results.json` — always; per-progress-record
-stamps are opt-in via `PRISMAQUANT_DEV_PROGRESS_STAMP=1`, so the default
-durable-unit commit is the certified six-field record and runs no source hash
-(#828). The merged campaign checkpoint's canonical seal is skipped rather than
-recomputed: the loader binds the walk to the manifest's declared
-`identity_sha256` after a 64-hex syntactic check and prints the `[DEV-MODE]`
-record (measured 302.653 s of a 765.6 s profile on action `282c61140ba7`,
-2026-09-20), while every per-unit envelope fence still refuses a mismatch. The
-raw checkpoint file keeps its `_bound` SHA-256 check above the gate, and the
-declared seal itself is recorded, not verified.
-With the variable unset, every one of these guards refuses exactly as before
-(`tests/test_dev_mode_provenance_gates.py`). See the 2026-09-20 stamps above.
+**Dev mode is the default and suspends the run-gate half of this class, never
+the integrity half (2026-09-19, #771; the default since 2026-09-24, #1147).**
+The identity guards below exist so a certified artifact is reproducible.
+Before enterprise certification has a consumer, iterating under them is tax.
+Rob, 2026-09-24: "All sealing should be disabled until further notice."
+
+- **The switch.** `prismaquant.dev_mode.dev_mode_enabled` is the one
+  definition: dev mode unless `PRISMAQUANT_DEV_MODE` is exactly `0`.
+  Certified mode (`0`) refuses at every seal exactly as before the switch.
+- **One helper.** Every run-gate seal on the campaign path calls
+  `seal_check(kind, expected, actual, where=..., refusal=...)`. Certified mode
+  raises the site's own exception. Dev mode prints `[DEV-MODE] seal <kind>
+  differs at <field> (<where>): recorded ..., running ...` and continues.
+  `tests/test_no_new_seals.py` refuses any new identity `if`-then-`raise` site
+  on those modules that is not on its allowlist; every entry gives its reason.
+- **What stays a refusal in both modes.** Byte integrity: bytes that do not
+  hash to their stored digest, a record that does not reproduce its own seal,
+  a missing unit. Layout and data identities: the stride, the batch and layer
+  counts, the roster, the calibration draw, the probes, the seed, the chain
+  regime, the token scope. Resource guards, including the spill bound's
+  capacity half. A digest that covers calibration and cannot be split into
+  fields (the seed's and the rebind's bind-identity digests) stays a
+  refusal; a dev resume compares the identity key by key first and then
+  rebinds the stored one.
+- **Reuse, not recompute.** A mismatched AURA checkpoint lineage is reused
+  with a `[DEV-MODE]` line, not archived and recomputed; corrupt checkpoints
+  still refuse. A chain resume adopts the chain state's stored run and bind
+  identities and does not rebuild the source model identity only to compare
+  it (it records `not computed`). The catalog extension does not re-derive
+  the original campaign scope.
+- **Stamps.** Every dev run carries a top-level `dev_uncertified` stamp in
+  `results.json`. Per-progress-record stamps are opt-in via
+  `PRISMAQUANT_DEV_PROGRESS_STAMP=1`, so the default durable-unit commit is
+  the certified six-field record and runs no source hash (#828). The merged
+  campaign checkpoint's canonical seal is skipped rather than recomputed: the
+  loader binds the walk to the manifest's declared `identity_sha256` after a
+  64-hex syntactic check and prints the `[DEV-MODE]` record (measured
+  302.653 s of a 765.6 s profile on action `282c61140ba7`, 2026-09-20), while
+  every per-unit envelope fence still refuses a mismatch. The raw checkpoint
+  file keeps its `_bound` SHA-256 check above the gate, and the declared seal
+  itself is recorded, not verified.
+
+With `PRISMAQUANT_DEV_MODE=0`, every one of these guards refuses exactly as
+before (`tests/test_dev_mode_provenance_gates.py`,
+`tests/test_sealing_off_1147.py`). See the 2026-09-20 and 2026-09-24 stamps
+above.
 
 **The key set is `pipeline.py`'s job; the values are the shell's.** `STAGE_SETTINGS_KEYS`
 (`pipeline.py`) declares, per artifact, which settings that artifact's identity depends on.
@@ -22820,10 +22906,21 @@ digest and the projection backend identity.
 
 **The relaunch.** The Stage A CLI takes `--resume-chain-state-sha256` (the
 digest of `chain-state.json`), optionally `--resume-from-checkpoint b` and, in
-dev mode only, `--resume-implementation-compatibility FROM:TO`. Stage A takes
-its head from the prepared completion (#1051), so a relaunch has no head walk
-to resume. Before anything is removed,
-`plan_chain_resume` checks, and refuses on any failure:
+`--resume-implementation-compatibility FROM:TO`. Stage A takes its head from
+the prepared completion (#1051), so a relaunch has no head walk to resume.
+Before anything is removed, `plan_chain_resume` checks the list below. Since
+PQ #1147 the run seals in it go through `seal_check`: certified mode
+(`PRISMAQUANT_DEV_MODE=0`) refuses on each, and dev mode (the default) prints
+a `[DEV-MODE]` line and continues with the stored chain. The run seals are the
+arithmetic stamp, the artifact budget override, the storage policy, the
+generation status, the capsule binding, and these identity fields: the plan,
+the preparation, the read manifest, the implementation, the campaign scope,
+the bf16 reduction, the source model and the producer source. Every other
+difference refuses in both modes: the stride, the batch and layer counts, the
+roster, the calibration, the probes, the seed, the chain regime, the boundary
+directory and the checkpoint checks. In dev mode a relaunch does not rebuild
+the source model identity only to compare it; the check prints `not computed`,
+and the resume adopts the chain state's stored run and bind identities.
 
 - the run has no receipt, and its generation status is `running` (killed) or
   `failed`;
@@ -22866,8 +22963,10 @@ quantum rebuilds them (`joint_cost_quantum._rebuild_batches`).
 or the header's if the run was never resumed. A relaunch under that
 implementation is a plain bitwise continuation, and a declaration there
 refuses because it names no switch. A relaunch under another implementation
-refuses unless dev mode is on and the operator declares exactly that switch;
-the declaration is never inferred. The header keeps the original
+refuses in certified mode. In dev mode it continues: a declaration, when
+given, must name exactly that switch and is never inferred; without one,
+`seal_check` prints both implementations and the switch is recorded with
+`declared: false`. The header keeps the original
 `implementation_sha256`. The declaration
 (`prismaquant.stage_a.resume_compatibility.v1`: scope
 `stage-a-chain-continuation`, both implementations and `switch_checkpoint`)

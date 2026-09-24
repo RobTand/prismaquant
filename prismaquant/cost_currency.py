@@ -260,8 +260,15 @@ def _require_joint_run_currency(cost_data, costs, *, sampled_research=False):
             if operator["qname"] != unit or operator["format"] != fmt:
                 raise ValueError("operator identity differs from its cost-table key")
             current = entry["probe_identity_sha256"]
-            if probe_identity is not None and current != probe_identity:
-                raise ValueError("rows do not share one probe/calibration identity")
+            if probe_identity is not None:
+                # A run seal (PQ #1147): the digest binds the producer source
+                # and the Stage B resource policy with the probe draw, so dev
+                # mode prints a difference and ranks the rows.
+                from .dev_mode import seal_check
+                seal_check("probe identity", probe_identity, current,
+                           where=f"joint AURA cost row {unit}/{fmt}",
+                           refusal=lambda: ValueError(
+                               "rows do not share one probe/calibration identity"))
             probe_identity = current
             tessera_count += parse_tessera_format_name(fmt) is not None
         except (ValueError, TypeError, KeyError) as exc:

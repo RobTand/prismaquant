@@ -256,7 +256,7 @@ def test_refuses_a_slice_produced_by_another_implementation(tmp_path, monkeypatc
     """The producer re-derived the policies under its own package."""
     from prismaquant.aura_cost import _aura_source_sha256
 
-    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     campaign = _campaign(tmp_path)
     slices, bindings = _produce(campaign)
     foreign = copy.deepcopy(slices[0])
@@ -454,3 +454,41 @@ def test_regenerate_refuses_head_slices_without_executable_readsets(tmp_path, ca
             "--derivation", str(plan), "--head-slices"]
     assert main(argv) != 0
     assert "--head-slices needs --executable-readsets" in capsys.readouterr().err
+
+
+def test_dev_mode_runs_a_quantum_whose_resource_policy_differs(tmp_path, monkeypatch, capsys):
+    """PQ #1147: a policy re-declared from a measurement stamps by default.
+
+    The slice and the preparation were sealed under one Stage B resource
+    policy; the quantum's plan names another that differs only in
+    ``workspace_reserve_bytes``. Dev mode prints both and runs under the
+    plan's policy; certified mode refuses as before.
+    """
+    campaign = _campaign(tmp_path)
+    slices, bindings = _produce(campaign)
+    policies = {}
+    for name, reserve in (("sealed", 1 << 30), ("measured", 3 << 29)):
+        path = tmp_path / f"{name}-policy.json"
+        path.write_text(json.dumps({"budget": {"workspace_reserve_bytes": reserve}}))
+        policies[name] = {"path": str(path),
+                          "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    sealed = copy.deepcopy(slices[0])
+    sealed["resource_policy"] = {"binding": policies["sealed"],
+                                 "limits": {"gpu_bytes": 1 << 30}}
+    path = Path(bindings[0]["path"])
+    raw = head_slice_bytes(sealed)
+    path.write_bytes(raw)
+    binding = dict(bindings[0], sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+    campaign["config"]["stage_b_resource_policy"] = policies["measured"]
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    head = _consume(campaign, _record(0, binding))
+    out = capsys.readouterr().out
+    assert "[DEV-MODE] seal Stage B head slice resource policy differs" in out
+    assert "[DEV-MODE] seal prepared Stage B resource policy differs" in out
+    assert head.cache._joint_stage_b_resource_policy == policies["measured"]
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(HeadSliceRefused, match="resource policy"):
+        _consume(campaign, _record(0, binding))

@@ -38,6 +38,7 @@ import sys
 import time
 from pathlib import Path
 
+from prismaquant.dev_mode import seal_check
 from prismaquant.cost_stage_checkpoint import (
     atomic_write_bytes,
     canonical_json_bytes,
@@ -226,16 +227,20 @@ def _check_record(record: object, receipt: dict, campaign: dict, *,
     binding = record.get("campaign")
     if not isinstance(binding, dict):
         raise JoinRefused(f"{where}: record carries no campaign binding")
+    # Run-gate seals (PQ #1147): certified mode refuses as before; dev mode
+    # prints each mismatch and joins the record's data.
     for key in ("plan_sha256", "prepared_sha256"):
-        if binding.get(key) != campaign[key]:
-            raise JoinRefused(
-                f"{where}: record {key} {binding.get(key)!r} is not this "
-                f"campaign ({campaign[key]!r})")
-    if binding.get("read_manifest_sha256") != campaign["manifest_sha256"]:
-        raise JoinRefused(
-            f"{where}: record read-manifest digest is not this campaign's")
-    if binding.get("campaign_scope") != campaign["scope"]:
-        raise JoinRefused(f"{where}: record scope is not this campaign's scope")
+        seal_check(key, campaign[key], binding.get(key), where=where,
+                   refusal=lambda key=key: JoinRefused(
+                       f"{where}: record {key} {binding.get(key)!r} is not this "
+                       f"campaign ({campaign[key]!r})"))
+    seal_check("read_manifest_sha256", campaign["manifest_sha256"],
+               binding.get("read_manifest_sha256"), where=where,
+               refusal=lambda: JoinRefused(
+                   f"{where}: record read-manifest digest is not this campaign's"))
+    seal_check("campaign_scope", campaign["scope"], binding.get("campaign_scope"),
+               where=where, refusal=lambda: JoinRefused(
+                   f"{where}: record scope is not this campaign's scope"))
     # B1 (#787): the roster digest is the producer's #768 construction
     # (§3.1: "sha256 of the sorted qname roster, one per line") -- sorted,
     # no trailing newline -- imported from the producer so the joiner's
@@ -452,10 +457,16 @@ def _load_cost_payload(receipt: dict, record: dict, campaign: dict) -> dict:
         "unit_roster_sha256": roster_digest(campaign["roster"]),
     }
     for key in CAMPAIGN_BINDING_KEYS:
-        if binding.get(key) != expected_binding[key]:
-            raise JoinRefused(
-                f"{where}: payload campaign binding {key} is foreign to "
-                "this campaign")
+        refusal = JoinRefused(
+            f"{where}: payload campaign binding {key} is foreign to this campaign")
+        if key == "unit_roster_sha256":
+            # The roster names the units the payload holds: a wall.
+            if binding.get(key) != expected_binding[key]:
+                raise refusal
+            continue
+        # Run seals (PQ #1147): dev mode prints and joins the payload.
+        seal_check(f"payload {key}", expected_binding[key], binding.get(key),
+                   where=where, refusal=refusal)
     adjoint = record.get("adjoint", {})
     expected_identity = {
         "quantum_id": quantum_id,
@@ -794,8 +805,16 @@ def _preserve_allocation_payload(joined, payloads, records):
         identity["stage_b_resource_policy"] = payload["provenance"].get("stage_b_resource_policy")
         if not identity["probe_identity_sha256"]:
             raise JoinRefused(f"allocation {quantum}: complete joint currency required")
-        if shared is not None and identity != shared:
-            raise JoinRefused(f"allocation {quantum}: probe or measurement identity differs")
+        if shared is not None:
+            # schema, n_probes and token_scope are the measurement's shape and
+            # stay a wall; the probe identity digest and the two policies are
+            # run seals (PQ #1147): dev mode prints them and joins the rows.
+            shape = ("schema", "n_probes", "token_scope")
+            if any(identity[key] != shared[key] for key in shape):
+                raise JoinRefused(f"allocation {quantum}: probe or measurement identity differs")
+            seal_check("probe identity", shared, identity, where=f"allocation {quantum}",
+                       refusal=lambda: JoinRefused(
+                           f"allocation {quantum}: probe or measurement identity differs"))
         shared = identity
         for unit, stat in payload["stats"].items():
             if unit in stats:
@@ -804,9 +823,12 @@ def _preserve_allocation_payload(joined, payloads, records):
         provenance[quantum] = copy.deepcopy(payload["provenance"])
     bindings = {(record["campaign"]["prepared_path"],
                  record["campaign"]["prepared_sha256"]) for record in records.values()}
-    if len(bindings) != 1:
+    if not bindings:
         raise JoinRefused("allocation: quantum prepared bindings differ")
-    path, digest = next(iter(bindings))
+    ordered = sorted(bindings)
+    seal_check("quantum prepared binding", ordered[0], ordered[-1], where="allocation",
+               refusal=lambda: JoinRefused("allocation: quantum prepared bindings differ"))
+    path, digest = ordered[0]
     joined.update({key: shared[key] for key in ("schema", "n_probes", "token_scope")})
     joined["stats"] = dict(sorted(stats.items()))
     joined["formats"] = sorted({fmt for rows in joined["costs"].values() for fmt in rows})

@@ -188,7 +188,7 @@ def test_the_loader_admits_a_changed_package_under_dev_mode(sealed, monkeypatch,
     assert "receipt execution source" in out
     # The hot-path re-check refuses a post-admission change certified, records it dev.
     (sealed["package"] / "dependency.py").write_bytes(b"unchanged\n  ")
-    monkeypatch.delenv(DEV_ENV, raising=False)
+    monkeypatch.setenv(DEV_ENV, "0")  # certified is "0" since PQ #1147
     with pytest.raises(ValueError, match="package"):
         transition.require_verified_transition(
             cap, checkpoint_dir=sealed["checkpoints"], resume=True, joint_activation=True)
@@ -282,7 +282,7 @@ def test_prepared_non_digest_fields_still_wall_under_dev_mode(tmp_path, monkeypa
 
 
 # ----------------------------------------------------------------- gate 3: a
-# checkpoint-lineage identity mismatch archives and restarts under dev
+# checkpoint-lineage identity mismatch is reused under dev (PQ #1147)
 
 def _aura_run(tmp_path, monkeypatch, *, source_sha, resume):
     monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "7" * 40)
@@ -303,24 +303,22 @@ def test_checkpoint_identity_mismatch_still_refuses_without_dev_mode(tmp_path, m
         _aura_run(tmp_path, monkeypatch, source_sha="b" * 64, resume=True)
 
 
-def test_checkpoint_identity_mismatch_archives_the_lineage_under_dev_mode(
+def test_checkpoint_identity_mismatch_reuses_the_lineage_under_dev_mode(
         tmp_path, monkeypatch, capsys):
-    _aura_run(tmp_path, monkeypatch, source_sha="a" * 64, resume=False)
+    # PQ #1147: dev mode reuses a mismatched lineage with a stamp; it never
+    # archives and never recomputes (the 2026-09-19 archive did the work twice).
+    _, first = _aura_run(tmp_path, monkeypatch, source_sha="a" * 64, resume=False)
     root = tmp_path / "checkpoints"
     old_manifest = json.loads((root / "manifest.json").read_text())
     monkeypatch.setenv(DEV_ENV, "1")
     model, payload = _aura_run(tmp_path, monkeypatch, source_sha="b" * 64, resume=True)
     out = capsys.readouterr().out
-    assert "DEV-MODE" in out and "archived" in out
-    # The mismatched lineage was archived whole (the house rename), not deleted...
-    archived = sorted(root.parent.glob("checkpoints.dev-archived-*"))
-    assert len(archived) == 1
-    assert json.loads((archived[0] / "manifest.json").read_text()) == old_manifest
-    # ...and a fresh lineage carries the ACTUAL identity, with no silent reuse:
-    fresh = json.loads((root / "manifest.json").read_text())
-    assert fresh["identity"]["producer_source_sha256"] == "b" * 64
-    assert model.forward_calls > 0
-    assert payload["costs"]
+    assert "[DEV-MODE]" in out and "AURA checkpoint identity" in out
+    assert "a" * 64 in out and "b" * 64 in out  # both producer digests are named
+    assert not sorted(root.parent.glob("checkpoints.dev-archived-*"))
+    assert json.loads((root / "manifest.json").read_text()) == old_manifest
+    assert model.forward_calls == 0  # every unit was reused, none recomputed
+    assert repr(payload["costs"]) == repr(first["costs"])
 
 
 # ----------------------------------------------------------------- gates 4+5:
@@ -416,12 +414,15 @@ def test_dev_mode_env_reaches_the_container_and_the_spec_file_stays_sealed(
     dispatch, _fixture_, spec, argv = _joint_submission(scratch)
     from experiments import glm_data_manifests
     monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
-    monkeypatch.delenv(DEV_ENV, raising=False)
+    # Certified is "0" since PQ #1147 (unset is dev mode), and the certified
+    # submitter seals "0" so the container, which does not inherit this
+    # environment, stays certified.
+    monkeypatch.setenv(DEV_ENV, "0")
     assert dispatch.main(argv) == 0
     certified = _submitted_launcher_argv(capsys)
     assert "PRISMAQUANT_DEV_MODE=1" not in certified
     docker_env = _launch_container(monkeypatch, certified)
-    assert dev_mode.DEV_MODE_ENV not in docker_env
+    assert docker_env[dev_mode.DEV_MODE_ENV] == "0"
     original = spec.read_text()
 
     monkeypatch.setenv(DEV_ENV, "1")

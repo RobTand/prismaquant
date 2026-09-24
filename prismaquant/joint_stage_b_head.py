@@ -31,6 +31,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
+from .dev_mode import seal_check
 
 HEAD_SLICE_SCHEMA = "prismaquant.joint_stage_b_head_slice.v1"
 
@@ -61,6 +62,15 @@ def _refuse(condition, message):
 
 def _same(actual, expected, label):
     _refuse(actual == expected, f"{label}: {actual!r} != {expected!r}")
+
+
+def _seal(actual, expected, label, *, message=None):
+    """A run seal (PQ #1147): certified mode refuses exactly as ``_same`` (or
+    with ``message``); dev mode prints a ``[DEV-MODE]`` line and continues."""
+    seal_check(label, expected, actual, where="Stage B head slice",
+               refusal=lambda: HeadSliceRefused(
+                   message if message is not None
+                   else f"{label}: {actual!r} != {expected!r}"))
 
 
 def _hex64(value) -> bool:
@@ -246,21 +256,23 @@ def verify_head_slice(head_slice, *, layer, prepared_sha256, config,
     _refuse(head_slice.get("layer") == int(layer),
             f"{where} is for layer {head_slice.get('layer')!r}, not layer {layer}")
     campaign = head_slice.get("campaign") or {}
-    _refuse(campaign.get("prepared_sha256") == prepared_sha256,
-            f"{where} is bound to prepared {campaign.get('prepared_sha256')!r}, "
-            f"not the quantum's prepared {prepared_sha256}")
+    # The slice's campaign bindings are run seals (PQ #1147): dev mode prints
+    # each difference and reads the slice's own declared head files.
+    _seal(campaign.get("prepared_sha256"), prepared_sha256, f"{where} prepared",
+          message=f"{where} is bound to prepared {campaign.get('prepared_sha256')!r}, "
+                  f"not the quantum's prepared {prepared_sha256}")
     if plan_sha256 is not None:
-        _refuse(campaign.get("plan_sha256") == plan_sha256,
-                f"{where} is bound to plan {campaign.get('plan_sha256')!r}, "
-                f"not the quantum's plan {plan_sha256}")
-    _same(campaign.get("inputs_sha256"),
+        _seal(campaign.get("plan_sha256"), plan_sha256, f"{where} plan",
+              message=f"{where} is bound to plan {campaign.get('plan_sha256')!r}, "
+                      f"not the quantum's plan {plan_sha256}")
+    _seal(campaign.get("inputs_sha256"),
           canonical_json_sha256(dict(config["inputs"]), where="Stage B plan inputs"),
           f"{where} campaign inputs")
     files = {row.get("role"): row for row in head_slice.get("head_files") or []}
     _refuse(len(files) == len(head_slice.get("head_files") or [])
             and set(files) <= set(HEAD_FILE_ROLES),
             f"{where} head files repeat or name an unknown role")
-    _same(files.get("prepared", {}).get("sha256"), prepared_sha256,
+    _seal(files.get("prepared", {}).get("sha256"), prepared_sha256,
           f"{where} prepared head file")
     _same(files.get("production_cache", {}).get("sha256"),
           campaign.get("production_pkl_sha256"), f"{where} production pickle")
@@ -268,18 +280,18 @@ def verify_head_slice(head_slice, *, layer, prepared_sha256, config,
                       ("source_identity_cache", "source_identity_cache")):
         bound = config.get(key)
         row = files.get(role)
-        _same(None if row is None else {"path": row["path"], "sha256": row["sha256"]},
+        _seal(None if row is None else {"path": row["path"], "sha256": row["sha256"]},
               None if bound is None else {"path": str(Path(bound["path"])),
                                           "sha256": bound["sha256"]},
               f"{where} {role}")
     resource = head_slice.get("resource_policy")
-    _same(None if resource is None else resource.get("binding"),
+    _seal(None if resource is None else resource.get("binding"),
           config.get("stage_b_resource_policy"), f"{where} resource policy")
     served = head_slice.get("served_activation_policy")
-    _same(None if served is None else served.get("binding"),
+    _seal(None if served is None else served.get("binding"),
           config.get("served_activation_policy"), f"{where} served activation policy")
     intake = head_slice.get("intake") or {}
-    _same(intake.get("source_model"), config["model"], f"{where} source model")
+    _seal(intake.get("source_model"), config["model"], f"{where} source model")
     _same(intake.get("attention_implementation"), "eager", f"{where} source attention")
     _refuse(isinstance(intake.get("layer_formats"), dict) and intake["layer_formats"],
             f"{where} names no layer roster")
@@ -409,12 +421,14 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
                                         label="production-cache"))
     _refuse(isinstance(cache, ProductionWeightCache),
             "prepared cache is not ProductionWeightCache")
-    _same(cache.metadata["inputs"], dict(config["inputs"]), "prepared source bindings")
-    _same(completion.get("stage_b_resource_policy"),
+    # Run seals (PQ #1147): dev mode prints each and runs under the plan's
+    # own policies.
+    _seal(cache.metadata["inputs"], dict(config["inputs"]), "prepared source bindings")
+    _seal(completion.get("stage_b_resource_policy"),
           config.get("stage_b_resource_policy"), "prepared Stage B resource policy")
     if config.get("stage_b_resource_policy") is not None:
         cache._joint_stage_b_resource_policy = dict(config["stage_b_resource_policy"])
-    _same(completion.get("served_activation_policy"),
+    _seal(completion.get("served_activation_policy"),
           config.get("served_activation_policy"), "prepared served activation policy")
     if config.get("served_activation_policy") is not None:
         _refuse(record.get("catalog_extension") is not None,

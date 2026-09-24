@@ -48,6 +48,7 @@ from pathlib import Path
 import re
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
+from .dev_mode import seal_check
 
 SEED_SPEC_SCHEMA = "prismaquant.stage_a.chain_seed.v1"
 SEED_MARKER_SCHEMA = "prismaquant.stage_a.chain_seed_marker.v1"
@@ -301,16 +302,22 @@ def plan_chain_seed(space, output_root, spec, *, bind_identity, campaign_identit
     if declared is None:
         sealed_by = running
     else:
-        if declared["to"] != running:
-            raise ChainSeedRefused(
-                f"the seed declares implementation {declared['to']}, and this run is "
-                f"{running}")
+        # A run seal (PQ #1147): the switch is recorded in the seed binding.
+        seal_check("seed implementation", declared["to"], running,
+                   where="Stage A chain seed declaration",
+                   refusal=ChainSeedRefused(
+                       f"the seed declares implementation {declared['to']}, and this run is "
+                       f"{running}"))
         if declared["from"] == running:
             raise ChainSeedRefused(
                 "the seed's declaration names no switch: FROM is the running "
                 "implementation")
         sealed_by = declared["from"]
     source_identity = {**dict(bind_identity), "producer_source_sha256": sealed_by}
+    # A wall in dev mode too (PQ #1147): the session digest covers the
+    # calibration draw and the probes as well as the implementation, and the
+    # checkpoint records nothing finer, so a difference here cannot be told
+    # apart from another science.
     if canonical_json_sha256(source_identity, where="exact boundary source") != (
             record["session"]["run_identity_sha256"]):
         raise ChainSeedRefused(

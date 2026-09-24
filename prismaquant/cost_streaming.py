@@ -20,7 +20,7 @@ from typing import Any, Iterator
 import torch
 
 from prismaquant.memory_management import reserve_allocation
-from prismaquant.dev_mode import dev_mode_enabled, dev_warning
+from prismaquant.dev_mode import dev_mode_enabled, dev_warning, seal_check
 from prismaquant.layer_streaming import (
     _call_layer,
     _compute_attention_mask,
@@ -501,6 +501,9 @@ class StreamedBoundaryArtifacts:
 
         ``identity`` is the bind identity the relaunch recomputed; it must
         hash to the session's ``run_identity_sha256``, as it did at ``bind``.
+        The storage policy and the status are run seals (PQ #1147):
+        certified mode refuses on each, and dev mode prints a ``[DEV-MODE]``
+        line and reopens the generation.
 
         The rebound owner holds no entries yet. What the resumed chain reads
         is borrowed through :meth:`authorize_resume_inputs`.
@@ -517,6 +520,9 @@ class StreamedBoundaryArtifacts:
                 or set(session) != {"generation", "run_identity_sha256"}):
             raise RuntimeError("a chain resume names no exact boundary session")
         session = canonical_json(dict(session), where="resumed exact boundary session")
+        # A wall in dev mode too (PQ #1147): the digest covers the calibration
+        # draw as well as the run seals. A dev chain resume compares the bind
+        # identity key by key first and then rebinds the stored one.
         if canonical_json_sha256(identity, where="exact boundary source") != session[
                 "run_identity_sha256"]:
             raise RuntimeError(
@@ -532,13 +538,16 @@ class StreamedBoundaryArtifacts:
         if status.get("session") != session:
             raise RuntimeError(
                 f"{status_path} names another session than the chain resume")
-        if status.get("policy") != self.identity:
-            raise RuntimeError(
-                f"{status_path} was written under another boundary storage policy")
-        if status.get("status") not in ("running", "failed"):
-            raise RuntimeError(
-                f"the resumed generation's status is {status.get('status')!r}; "
-                "only an interrupted run (running or failed) resumes")
+        seal_check("boundary storage policy", status.get("policy"), self.identity,
+                   where=str(status_path),
+                   refusal=RuntimeError(
+                       f"{status_path} was written under another boundary storage policy"))
+        seal_check("generation status", "running or failed", status.get("status"),
+                   where=str(status_path),
+                   same=status.get("status") in ("running", "failed"),
+                   refusal=RuntimeError(
+                       f"the resumed generation's status is {status.get('status')!r}; "
+                       "only an interrupted run (running or failed) resumes"))
         if not (directory / "entries").is_dir():
             raise RuntimeError(f"the resumed generation has no entries at {directory}")
         if owner_label is not None:

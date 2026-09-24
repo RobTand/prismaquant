@@ -30,7 +30,7 @@ from .cost_stage_checkpoint import (
     prepare_journal, unit_path, write_unit,
     _drive_ordered_units as _drive_ordered_walk,
 )
-from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning
+from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning, seal_check
 from .interned_json import load_json_file
 from .joint_head_walk_quanta import check_quantum_for_roster
 from .residency_map import (
@@ -2344,11 +2344,11 @@ def _seed_source_identity_cache(config, root):
 
 #: The prepared-record bindings that name DIGESTS of things a dev iteration
 #: legitimately changes: which plan the prepare ran under, and which producer
-#: package made it. Under ``PRISMAQUANT_DEV_MODE=1`` these are records -- the
-#: run continues, loudly, stamped -- while every other prepared field (the
-#: model identity, calibration, roster, backend, reader) stays a wall even in
-#: dev mode: a stale record naming a different measurement is stale whatever
-#: the mode (Rob's 2026-09-19 decision: the seal returns at the artifact gate).
+#: package made it. In dev mode (the default since PQ #1147) these are
+#: records -- ``seal_check`` prints them and the run continues -- while every
+#: other prepared field (the model identity, calibration, roster, backend,
+#: reader) stays a wall even in dev mode: a stale record naming a different
+#: measurement is stale whatever the mode.
 _DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256")
 
 
@@ -2358,16 +2358,15 @@ def _prepared_digest_recorded(key, stored, expected):
     One reader for both prepared-equality sites (the startup preflight and the
     post-intake loop), so dev mode cannot admit a mismatch in one place that
     the other still refuses. Returns ``False`` in certified mode for every
-    field, which keeps the certified ``_same`` refusal byte-identical.
+    field, so each caller raises its own ``_same`` refusal, byte for byte.
+    Dev mode (the default since PQ #1147) prints the recorded keys through
+    ``seal_check`` and returns ``True``.
     """
-    if stored == expected:
+    if stored == expected or key not in _DEV_RECORDED_PREPARED_KEYS or not dev_mode_enabled():
         return False
-    if not dev_mode_enabled() or key not in _DEV_RECORDED_PREPARED_KEYS:
-        return False
-    dev_warning(
-        f"prepared {key} differs from the running pass; recorded, not gated "
-        f"(dev mode): prepared={stored!r} running={expected!r}")
-    return True
+    return not seal_check(f"prepared {key}", expected, stored,
+                          where="prepared completion versus the running pass",
+                          refusal=lambda: ValueError(f"prepared {key}: identity mismatch"))
 
 
 def require_prepared_digests(completion, *, plan_sha256, implementation_sha256):

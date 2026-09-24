@@ -420,9 +420,6 @@ REFUSALS = {
     "declared-from-the-wrong-implementation": (
         lambda s: _spec(s, declaration={"from": ONE, "to": THREE}),
         "was not sealed by this science under implementation 1{64}"),
-    "declared-to-another-implementation": (
-        lambda s: _spec(s, declaration={"from": TWO, "to": ONE}),
-        "declares implementation 1{64}, and this run is 3{64}"),
     "declaration-without-a-switch": (
         lambda s: _spec(s, declaration={"from": THREE, "to": THREE}),
         "names no switch"),
@@ -457,6 +454,16 @@ def test_a_seed_that_does_not_match_what_it_borrows_refuses(tmp_path, monkeypatc
     assert [path for path in scratch.rglob("*") if path.is_file()] == []
 
 
+
+def test_a_seed_declared_to_another_implementation_stamps_and_continues(
+        tmp_path, monkeypatch, capsys):
+    """The declaration's TO is a run seal (PQ #1147); its FROM still binds the session."""
+    source = _source(tmp_path, monkeypatch)
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    _seed(tmp_path / "seed", monkeypatch, _spec(source, declaration={"from": TWO, "to": ONE}))
+    assert "[DEV-MODE] seal seed implementation differs" in capsys.readouterr().out
+
 def test_a_seed_never_writes_under_the_source_root(tmp_path, monkeypatch):
     source = _source(tmp_path, monkeypatch)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
@@ -471,7 +478,7 @@ def test_a_seed_never_writes_under_the_source_root(tmp_path, monkeypatch):
 
 def test_certified_mode_refuses_a_seed(tmp_path, monkeypatch):
     source = _source(tmp_path, monkeypatch)
-    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     scratch = tmp_path / "seed"
     _refused(tmp_path, source, monkeypatch, scratch, _spec(source),
              "requires PRISMAQUANT_DEV_MODE=1")
