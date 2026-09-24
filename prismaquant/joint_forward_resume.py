@@ -17,6 +17,8 @@ from pathlib import Path
 import re
 import stat
 
+from .dev_mode import seal_check
+
 SCHEMA = 'prismaquant.joint_forward_recovery.v1'
 
 
@@ -137,6 +139,23 @@ def _checked_group(group, *, queue, instance, template, commitments, sdk):
     return manifest['entries']
 
 
+#: Keys of a bind identity and of a campaign identity that name a recorded
+#: run identity: run seals (PQ #1147). Every other key names the data the
+#: forward rows were computed from (calibration, probes, partition, roster)
+#: and stays a wall in both modes.
+_BIND_SEAL_KEYS = frozenset({'source_model', 'producer_source_sha256'})
+_CAMPAIGN_SEAL_KEYS = frozenset({
+    'plan_sha256', 'prepared_sha256', 'read_manifest_sha256', 'campaign_scope'})
+
+
+def _differs_outside(recorded, running, seal_keys):
+    """Whether two identities differ in a key that is not a run seal."""
+    if not isinstance(recorded, dict) or not isinstance(running, dict):
+        return recorded != running
+    return any(recorded.get(key) != running.get(key)
+               for key in set(recorded) | set(running) if key not in seal_keys)
+
+
 def validate_forward_state(document, *, bind_identity, campaign_identity):
     from .cost_stage_checkpoint import canonical_json_sha256
     if document.get('schema') != SCHEMA:
@@ -144,13 +163,25 @@ def validate_forward_state(document, *, bind_identity, campaign_identity):
     old = document['original_bind_identity']
     new = dict(bind_identity)
     compatibility = document['implementation_compatibility']
-    if compatibility != {'original': old['producer_source_sha256'],
-                          'recovery': new['producer_source_sha256'],
-                          'scope': 'forward-identical-memory-only'}:
-        raise ForwardRecoveryRefused('implementation compatibility is not explicitly bound')
+    seal_check('forward recovery implementation', compatibility,
+               {'original': old['producer_source_sha256'],
+                'recovery': new['producer_source_sha256'],
+                'scope': 'forward-identical-memory-only'},
+               where='forward recovery capsule',
+               refusal=ForwardRecoveryRefused(
+                   'implementation compatibility is not explicitly bound'))
     new['producer_source_sha256'] = old['producer_source_sha256']
-    if old != new or document.get('published_campaign_identity', document['campaign_identity']) != campaign_identity:
-        raise ForwardRecoveryRefused('forward source/calibration/execution/campaign identity differs')
+    campaign = document.get('published_campaign_identity', document['campaign_identity'])
+    if old != new or campaign != campaign_identity:
+        refusal = ForwardRecoveryRefused(
+            'forward source/calibration/execution/campaign identity differs')
+        if (_differs_outside(old, new, _BIND_SEAL_KEYS)
+                or _differs_outside(campaign, campaign_identity, _CAMPAIGN_SEAL_KEYS)):
+            raise refusal
+        seal_check('forward source and campaign identity',
+                   {'bind': old, 'campaign': campaign},
+                   {'bind': new, 'campaign': campaign_identity},
+                   where='forward recovery capsule', refusal=refusal)
     if document['session']['run_identity_sha256'] != canonical_json_sha256(
             old, where='exact boundary source'):
         raise ForwardRecoveryRefused('original forward session identity mismatch')
@@ -391,7 +422,11 @@ def require_published_campaign(document, *, bind_identity, campaign_identity):
         formats_by_qname=prepared['formats_by_qname'],
         calibration_shape=bind_identity['calibration_shape'])
     if resolved != campaign_identity:
-        raise ForwardRecoveryRefused('recovery campaign is not the sealed source campaign')
+        refusal = ForwardRecoveryRefused('recovery campaign is not the sealed source campaign')
+        if _differs_outside(resolved, campaign_identity, _CAMPAIGN_SEAL_KEYS):
+            raise refusal
+        seal_check('recovery campaign', resolved, campaign_identity,
+                   where='forward recovery capsule', refusal=refusal)
 
 
 def load_forward_recovery(bound, *, bind_identity, campaign_identity, runner, storage):

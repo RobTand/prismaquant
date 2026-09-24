@@ -1215,6 +1215,40 @@ def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, camp
         quantum_argv(record, **args)
 
 
+
+def test_dev_mode_dispatches_a_re_declared_resource_plan(tmp_path, campaign, monkeypatch, capsys):
+    """PQ #1147: a plan re-declared after the quantum was sealed stamps by default."""
+    import dispatch_joint_quanta as dispatch
+    from prismaquant import joint_stageb_resources as resources
+    policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30, "gpu_bytes": 72 << 30}}
+    monkeypatch.setattr(resources, 'verify_policy', lambda _: policy)
+    plan = {"stage_b_resource_policy": {"path": "/resource", "sha256": "0"*64},
+        "source_prefetch": {"prefetch_workers": 1}, "execution": {"operator_windows": {"prefetch_workers": 4}}}
+    raw = json.dumps(plan).encode(); Path(campaign['plan_path']).write_bytes(raw)
+    campaign['plan_sha256'] = hashlib.sha256(raw).hexdigest()
+    spec = {"container": {"image": "sha256:" + "0"*64, "content_sha256": "b"*64},
+        "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": 28,
+        "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10"}}
+    dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+                   tmp_path / 'adjoint-slices')
+    path = tmp_path/'record.json'; path.write_text(json.dumps(record))
+    # The plan is re-declared after the record sealed its digest.
+    plan["stage_b_resource_policy"]["sha256"] = "1"*64
+    Path(campaign['plan_path']).write_bytes(json.dumps(plan).encode())
+    args = dict(record_path=path, output_root=tmp_path/'out')
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    argv = quantum_argv(record, **args)
+    assert argv[argv.index('--demand')+1] == 'gpu=1,mem_gb=100'
+    assert "[DEV-MODE] seal resource-bound plan differs" in capsys.readouterr().out
+    # The row runs under the plan on disk, by the digest of its bytes.
+    on_disk = hashlib.sha256(Path(campaign['plan_path']).read_bytes()).hexdigest()
+    assert on_disk in " ".join(argv) and campaign['plan_sha256'] not in " ".join(argv)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(DispatchRefused, match='resource-bound plan differs'):
+        quantum_argv(record, **args)
+
 def test_portable_admission_does_not_skip_container_spec_validation(tmp_path):
     from dispatch_joint_quanta import _container_wrap
     path = tmp_path/'spec.json'

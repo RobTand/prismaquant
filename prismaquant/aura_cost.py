@@ -181,20 +181,29 @@ def _aura_unit_checkpoint_path(checkpoint_dir: Path, qname: str) -> Path:
     return checkpoint_dir / "units" / f"{digest}.pkl"
 
 
+def _checkpoint_identity_mismatch(
+    *,
+    field: str,
+    stored: object,
+    expected: object,
+) -> RuntimeError:
+    from prismaquant.production_weight_cache import identity_value_for_error
+
+    return RuntimeError(
+        f"AURA checkpoint identity mismatch at {field}: "
+        f"stored={identity_value_for_error(stored)} "
+        f"current={identity_value_for_error(expected)}; refusing reuse or "
+        "recompute"
+    )
+
+
 def _raise_checkpoint_identity_mismatch(
     *,
     field: str,
     stored: object,
     expected: object,
 ) -> None:
-    from prismaquant.production_weight_cache import identity_value_for_error
-
-    raise RuntimeError(
-        f"AURA checkpoint identity mismatch at {field}: "
-        f"stored={identity_value_for_error(stored)} "
-        f"current={identity_value_for_error(expected)}; refusing reuse or "
-        "recompute"
-    )
+    raise _checkpoint_identity_mismatch(field=field, stored=stored, expected=expected)
 
 
 def _write_aura_checkpoint_manifest(
@@ -234,21 +243,22 @@ def _write_aura_checkpoint_manifest(
 
 
 def _dev_archive_checkpoint_lineage(root: Path, reason: str) -> Path:
-    """Rename a mismatched checkpoint lineage aside and start a fresh one.
+    """Rename a checkpoint lineage aside and start a fresh one.
 
     The house pattern used manually on 2026-09-19 (Rob's dev-mode decision):
-    under ``PRISMAQUANT_DEV_MODE=1`` an identity-mismatched lineage is
-    archived whole -- renamed with a ``.dev-archived-<iso>`` suffix, never
-    deleted, never silently reused -- and a fresh lineage starts in its
-    place. Certified mode never calls this; it refuses reuse AND recompute,
-    which is the tax dev mode exists to suspend.
+    the lineage is archived whole -- renamed with a ``.dev-archived-<iso>``
+    suffix, never deleted, never silently reused -- and a fresh lineage
+    starts in its place. Since PQ #1147 only unit checkpoints that exist
+    without a manifest come here: they have no recorded identity to be
+    reused under. Certified mode never calls this; it refuses reuse AND
+    recompute.
     """
     from datetime import datetime, timezone
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     archived = root.with_name(f"{root.name}.dev-archived-{stamp}")
     suffix = 0
-    while archived.exists():  # two mismatches inside one second
+    while archived.exists():  # two archives inside one second
         suffix += 1
         archived = root.with_name(f"{root.name}.dev-archived-{stamp}-{suffix}")
     root.rename(archived)
@@ -256,8 +266,8 @@ def _dev_archive_checkpoint_lineage(root: Path, reason: str) -> Path:
     from prismaquant.dev_mode import dev_warning
 
     dev_warning(
-        f"archived mismatched AURA checkpoint lineage to {archived.name} and "
-        f"started a fresh one (dev mode): {reason}")
+        f"archived AURA checkpoint lineage to {archived.name} and started a "
+        f"fresh one (dev mode): {reason}")
     return archived
 
 
@@ -288,16 +298,22 @@ def _load_aura_checkpoint_manifest(
             expected=AURA_CHECKPOINT_MANIFEST_SCHEMA,
         )
     stored_identity = manifest.get("identity")
+    from prismaquant.dev_mode import seal_check
     from prismaquant.production_weight_cache import first_identity_difference
 
     difference = first_identity_difference(stored_identity, expected_identity)
     if difference is not None:
         field, stored, expected = difference
-        _raise_checkpoint_identity_mismatch(
-            field=field,
-            stored=stored,
-            expected=expected,
-        )
+        # The checkpoint identity binds the producer source and the run's
+        # inputs: a run seal (PQ #1147). Dev mode prints the difference and
+        # reuses the lineage under its own recorded identity -- no archive,
+        # no recompute -- so its unit envelopes still match their manifest.
+        if not seal_check(
+                "AURA checkpoint identity", expected_identity, stored_identity,
+                where=str(checkpoint_dir),
+                refusal=_checkpoint_identity_mismatch(
+                    field=field, stored=stored, expected=expected)):
+            expected_identity = stored_identity
     expected_digest = _canonical_json_sha256(
         expected_identity,
         where="AURA checkpoint identity",
@@ -355,7 +371,6 @@ def _load_aura_unit_checkpoint(
     for field, expected in (
         ("schema", AURA_CHECKPOINT_UNIT_SCHEMA),
         ("qname", str(qname)),
-        ("identity_sha256", str(identity_sha256)),
     ):
         if envelope.get(field) != expected:
             _raise_checkpoint_identity_mismatch(
@@ -363,6 +378,18 @@ def _load_aura_unit_checkpoint(
                 stored=envelope.get(field),
                 expected=expected,
             )
+    # The envelope's identity digest is the lineage seal (PQ #1147): dev mode
+    # prints a difference and reuses the unit. Its payload digest below is
+    # integrity and refuses in both modes.
+    from prismaquant.dev_mode import seal_check
+
+    seal_check(
+        "AURA unit checkpoint identity", str(identity_sha256), envelope.get("identity_sha256"),
+        where=str(path),
+        refusal=_checkpoint_identity_mismatch(
+            field=f"unit[{qname}].identity_sha256",
+            stored=envelope.get("identity_sha256"),
+            expected=str(identity_sha256)))
     payload = envelope.get("payload")
     if not isinstance(payload, bytes):
         raise RuntimeError(
@@ -397,7 +424,7 @@ def _prepare_aura_checkpoints(
     identity: Mapping[str, object],
     names: Sequence[str],
 ) -> tuple[Path, str, dict[str, dict[str, object]]]:
-    from prismaquant.dev_mode import dev_mode_enabled
+    from prismaquant.dev_mode import dev_mode_enabled, seal_check
 
     root = Path(checkpoint_dir)
     if root.exists() and not root.is_dir():
@@ -410,28 +437,17 @@ def _prepare_aura_checkpoints(
                 f"AURA checkpoint manifest already exists at {manifest_path}; "
                 "pass --resume to validate and reuse it"
             )
-        if dev_mode_enabled():
-            # The identity-mismatch family (2026-09-19's 752 s failure:
-            # "stored=... current=...; refusing reuse or recompute") archives
-            # the whole lineage and starts fresh under dev mode. Anything
-            # else -- a corrupt manifest JSON, a foreign schema -- still
-            # refuses: bit-rot is not iteration tax.
-            try:
-                identity_sha256 = _load_aura_checkpoint_manifest(root, identity)
-            except RuntimeError as exc:
-                if not str(exc).startswith("AURA checkpoint identity mismatch"):
-                    raise
-                _dev_archive_checkpoint_lineage(root, str(exc))
-                identity_sha256 = _write_aura_checkpoint_manifest(
-                    root, identity, names)
-        else:
-            identity_sha256 = _load_aura_checkpoint_manifest(root, identity)
+        # An identity mismatch is a run seal: dev mode reuses the lineage
+        # under its recorded identity (PQ #1147). A corrupt manifest or a
+        # foreign schema refuses in both modes: bit-rot is not a seal.
+        identity_sha256 = _load_aura_checkpoint_manifest(root, identity)
     else:
         existing_units = sorted((root / "units").glob("*.pkl"))
         if existing_units:
             if dev_mode_enabled():
-                # Units with no manifest are a mismatched lineage under dev
-                # mode (an interrupted transition), not a name-gated reuse.
+                # Units with no manifest have no recorded identity to reuse
+                # them under (an interrupted transition): dev mode archives
+                # them whole and recomputes, as before PQ #1147.
                 _dev_archive_checkpoint_lineage(
                     root,
                     f"{len(existing_units)} unit checkpoints exist without a manifest")
@@ -455,38 +471,24 @@ def _prepare_aura_checkpoints(
         if path not in expected_paths
     )
     if unexpected:
-        if dev_mode_enabled():
-            _dev_archive_checkpoint_lineage(
-                root,
-                f"units outside the expected roster: "
-                f"{[str(path.name) for path in unexpected[:8]]}")
-            identity_sha256 = _write_aura_checkpoint_manifest(root, identity, names)
-            return root, identity_sha256, {}
-        _raise_checkpoint_identity_mismatch(
-            field="units.unexpected",
-            stored=[str(path.name) for path in unexpected[:8]],
-            expected=[],
-        )
+        # A unit outside this run's roster is left where it is and not read
+        # in dev mode (PQ #1147); certified mode refuses the lineage.
+        seal_check(
+            "AURA checkpoint unit roster", [], [str(path.name) for path in unexpected[:8]],
+            where=str(root),
+            refusal=_checkpoint_identity_mismatch(
+                field="units.unexpected",
+                stored=[str(path.name) for path in unexpected[:8]],
+                expected=[]))
     completed: dict[str, dict[str, object]] = {}
     for path, name in expected_paths.items():
         if not path.is_file():
             continue
-        try:
-            completed[name] = _load_aura_unit_checkpoint(
-                path,
-                qname=name,
-                identity_sha256=identity_sha256,
-            )
-        except RuntimeError as exc:
-            if (dev_mode_enabled()
-                    and str(exc).startswith("AURA checkpoint identity mismatch")):
-                # A unit envelope from another identity is a mismatched
-                # lineage: archive it whole and recompute every unit, rather
-                # than reusing anything the manifest did not vouch for.
-                _dev_archive_checkpoint_lineage(root, str(exc))
-                identity_sha256 = _write_aura_checkpoint_manifest(root, identity, names)
-                return root, identity_sha256, {}
-            raise
+        completed[name] = _load_aura_unit_checkpoint(
+            path,
+            qname=name,
+            identity_sha256=identity_sha256,
+        )
     return root, identity_sha256, completed
 
 # Passthrough formats -> zero predicted_dloss. This is the *passthrough rule*

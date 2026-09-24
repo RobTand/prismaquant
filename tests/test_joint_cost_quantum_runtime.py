@@ -309,6 +309,44 @@ def test_identity_refusals_exit_3_nothing_written(identity_files, tamper, monkey
     assert not (identity_files["output_root"]).exists()
 
 
+
+def test_dev_mode_runs_a_record_under_a_re_declared_plan(identity_files, monkeypatch, capsys):
+    """PQ #1147: a plan re-declared after the record was sealed stamps by default.
+
+    A re-declared ``workspace_reserve_bytes`` moves the plan digest the record
+    and the stage-A header bind. The supplied plan's own bytes are still
+    checked against the supplied digest.
+    """
+    from prismaquant.joint_cost_quantum import QuantumIdentityRefused
+
+    record = _valid_record(identity_files)
+    record_path = identity_files["output_root"].parent / "record.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_text(json.dumps(record))
+    plan_path, plan_sha = _write(identity_files["plan"][0].parent / "plan-measured.json",
+                                 b"plan-fixture, workspace_reserve_bytes measured")
+    kwargs = dict(
+        quantum_path=record_path,
+        quantum_sha256=hashlib.sha256(record_path.read_bytes()).hexdigest(),
+        plan_path=plan_path, plan_sha256=plan_sha,
+        prepared_path=identity_files["prepared"][0],
+        prepared_sha256=identity_files["prepared"][1],
+        adjoint_path=identity_files["adjoint"][0],
+        adjoint_sha256=identity_files["adjoint"][1],
+        output_root=identity_files["output_root"])
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    verified, _slice = verify_quantum_identity(**kwargs)
+    assert verified == json.loads(json.dumps(record))
+    assert "[DEV-MODE] seal quantum record plan differs" in capsys.readouterr().out
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(QuantumIdentityRefused, match="binds another plan"):
+        verify_quantum_identity(**kwargs)
+    # The supplied file's bytes stay integrity in both modes.
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    with pytest.raises(QuantumIdentityRefused, match="plan digest mismatch"):
+        verify_quantum_identity(**{**kwargs, "plan_sha256": identity_files["plan"][1]})
+
 def test_cli_identity_refusal_is_exit_3(identity_files, monkeypatch, capsys):
     from prismaquant.joint_cost_quantum import main
 
@@ -1021,7 +1059,7 @@ def test_the_core_refuses_a_live_bf16_flag_the_slice_does_not_record(
     from prismaquant.joint_cost_quantum import QuantumIdentityRefused
     from prismaquant.matmul_arithmetic import BF16_REDUCTION_ENV, BF16_REDUCTION_FIELD
 
-    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     single_root = tmp_path / "single"
     single = _single_run(single_root, monkeypatch,
                          checkpoint=single_root / "checkpoints")
@@ -1458,7 +1496,7 @@ def test_comparison_tool_on_a_synthetic_pair(tmp_path):
 def test_quantum_requires_dev_mode(identity_files, monkeypatch):
     from prismaquant.joint_cost_quantum import main
 
-    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     record = _valid_record(identity_files)
     record_path = identity_files["output_root"].parent / "record.json"
     record_path.parent.mkdir(parents=True, exist_ok=True)

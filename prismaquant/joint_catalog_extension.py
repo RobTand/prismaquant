@@ -15,6 +15,7 @@ import stat as stat_module
 from pathlib import Path
 
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
+from .dev_mode import dev_mode_enabled, dev_warning, seal_check
 from .tessera_joint_allocation import _read_bound, _bound_stat_fence
 
 SCHEMA = "prismaquant.joint_catalog_extension.v2"
@@ -67,6 +68,14 @@ def _require(value, message):
 
 def _same(a, b, message):
     _require(a == b, message + " differs")
+
+
+def _seal(expected, actual, message, *, same=None):
+    """A run-gate seal (PQ #1147): certified mode refuses exactly as ``_same``
+    or ``_require`` would; dev mode prints both values and continues."""
+    return seal_check(message, expected, actual, where="joint catalog extension",
+                      same=same, refusal=lambda: ValueError(
+                          "joint catalog extension: " + message + (" differs" if same is None else "")))
 
 
 def _json(bound, label):
@@ -557,9 +566,11 @@ def _effective_run_identity(document, header, inputs, plan):
         _require(block is None, "the original run sealed its campaign scope; "
                  "a derived scope over a sealed one is refused")
         return identity
-    _require(document.get("schema") == SCHEMA_V3 and block is not None,
-             "the original run sealed no campaign scope and the extension derives none; "
-             "create it with the frozen campaign identity (--campaign-identity)")
+    if not _seal(None, identity.get("campaign_scope"),
+                 "the original run sealed no campaign scope and the extension derives none; "
+                 "create it with the frozen campaign identity (--campaign-identity)",
+                 same=document.get("schema") == SCHEMA_V3 and block is not None):
+        return identity
     return {**identity, "campaign_scope": _check_derived_scope(block, inputs, plan)}
 
 
@@ -586,7 +597,14 @@ def create_extension(*, inputs, adjoint_capture, output, publish=None, campaign_
     document = {"schema": SCHEMA, "inputs": inputs, "adjoint_run_header": header,
         "adjoint_run_header_sha256": canonical_json_sha256(header, where="original Stage A run header"),
         "evidence": evidence}
-    if header["run_identity"].get("campaign_scope") is None:
+    if header["run_identity"].get("campaign_scope") is None and dev_mode_enabled():
+        # Deriving the scope re-hashes every artifact it names, the merged
+        # checkpoint included, only to seal it: dev mode does no seal-only
+        # work (PQ #1147) and publishes the v2 bytes with the null scope.
+        dev_warning("the original run sealed no campaign scope (PQ #1126); the scope is "
+                    "not derived (sealing is off, PQ #1147) and the extension keeps "
+                    "the null scope")
+    elif header["run_identity"].get("campaign_scope") is None:
         _require(campaign_identity is not None,
                  "the original run sealed no campaign scope (PQ #1126); bind the frozen campaign "
                  "identity (--campaign-identity, --campaign-identity-sha256) so the scope is "
@@ -628,8 +646,8 @@ def require_extension(bound, *, run_header, plan_sha256, prepared_sha256):
     document = _json(bound, "catalog extension")
     _require(document.get("schema") in (SCHEMA, SCHEMA_V1, SCHEMA_V3), "extension schema differs")
     inputs = document["inputs"]
-    _same(inputs["extended_plan"]["sha256"], plan_sha256, "extended plan binding")
-    _same(inputs["extended_prepared"]["sha256"], prepared_sha256, "extended prepared binding")
+    _seal(plan_sha256, inputs["extended_plan"]["sha256"], "extended plan binding")
+    _seal(prepared_sha256, inputs["extended_prepared"]["sha256"], "extended prepared binding")
     if document["schema"] in (SCHEMA, SCHEMA_V3):
         header = document["adjoint_run_header"]
         _same(document["adjoint_run_header_sha256"],
@@ -645,7 +663,14 @@ def require_extension(bound, *, run_header, plan_sha256, prepared_sha256):
           "original Stage A run header")
     plan = _check_capture(header, inputs, _json(inputs["original_prepared"], "original prepared"))
     identity = _effective_run_identity(document, header, inputs, plan)
-    _same(document["evidence"], verify_catalog_pair(inputs), "independently recomputed extension evidence")
+    if dev_mode_enabled():
+        # Recomputing the evidence opens both production caches only to
+        # re-seal what the creator recorded: seal-only work (PQ #1147).
+        dev_warning("catalog extension evidence is not recomputed (sealing is off, "
+                    "PQ #1147); the recorded evidence is used")
+    else:
+        _same(document["evidence"], verify_catalog_pair(inputs),
+              "independently recomputed extension evidence")
     return identity
 
 

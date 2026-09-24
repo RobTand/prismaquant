@@ -699,6 +699,85 @@ def test_spill_resume_after_partial_completion_is_bitwise(campaign, monkeypatch,
              "spill_geometry": replay_block["spill_geometry"]})
 
 
+def _restamp_unit_probe(path, field, value):
+    """Rewrite a unit checkpoint's joint rows with ``probe_identity[field] = value``.
+
+    The row digests and the envelope's payload digest are recomputed, so the
+    unit's bytes stay intact: only the identity the rows record differs.
+    """
+    import pickle
+
+    from prismaquant.joint_aura import identity_sha256
+
+    envelope = pickle.loads(path.read_bytes())
+    state = pickle.loads(envelope["payload"])
+    for entry in state["joint_aura_rows"].values():
+        entry["probe_identity"][field] = value
+        operator = entry["joint_operator_identity"]
+        digest = identity_sha256(entry["probe_identity"])
+        entry["probe_identity_sha256"] = operator["probe_identity_sha256"] = digest
+        entry["joint_operator_identity_sha256"] = identity_sha256(operator)
+    envelope["payload"] = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
+    envelope["payload_sha256"] = hashlib.sha256(envelope["payload"]).hexdigest()
+    path.write_bytes(pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL))
+    return len(state["joint_aura_rows"])
+
+
+@pytest.mark.parametrize("field,wall", [("calibration_sha256", True),
+                                        ("producer_source_sha256", False)])
+def test_resume_splits_a_restored_row_probe_identity(campaign, monkeypatch, capsys,
+                                                     field, wall):
+    """PQ #1147: a restored row's calibration draw is a wall, its producer source a seal.
+
+    One committed unit's rows are rewritten to record another value of
+    ``field``. Another draw refuses the resume in dev mode too. Another
+    producer source prints a ``[DEV-MODE]`` line and the row is reused;
+    certified mode refuses it as main does.
+    """
+    from prismaquant.aura_cost import _aura_unit_checkpoint_path
+
+    layer = 1
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer)
+    assert payload is not None, _chain(state.error)
+    directory = _checkpoint_dir(campaign, layer)
+    for window in campaign.preflight[layer][1:]:
+        for name in window.original_full_target_names:
+            _aura_unit_checkpoint_path(directory, name).unlink()
+    restored = sorted(campaign.preflight[layer][0].original_full_target_names)[0]
+    assert _restamp_unit_probe(_aura_unit_checkpoint_path(directory, restored),
+                               field, "9" * 64) > 0
+
+    capsys.readouterr()
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, resume=True)
+    out = capsys.readouterr().out
+    if wall:
+        assert payload is None
+        assert f"joint AURA checkpoint identity mismatch for {restored}@" in _chain(state.error)
+        assert "probe/operator alignment mismatch" in _chain(state.error)
+        assert "[DEV-MODE] seal joint probe identity" not in out
+        return
+    assert payload is not None, _chain(state.error)
+    assert f"[DEV-MODE] seal joint probe identity differs at {field}" in out
+
+    # Certified at this site. The fixture was captured in dev mode, so only
+    # the quantum module's seal_check runs certified here.
+    import functools
+
+    import prismaquant.joint_cost_quantum as quantum_mod
+    from prismaquant.dev_mode import seal_check
+
+    for window in campaign.preflight[layer][1:]:
+        for name in window.original_full_target_names:
+            _aura_unit_checkpoint_path(directory, name).unlink()
+    monkeypatch.setattr(quantum_mod, "seal_check", functools.partial(
+        seal_check, environ={"PRISMAQUANT_DEV_MODE": "0"}))
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, resume=True)
+    assert payload is None
+    assert f"joint AURA checkpoint identity mismatch for {restored}@" in _chain(state.error)
+    assert "probe/operator alignment mismatch" in _chain(state.error)
+
+
 @pytest.mark.parametrize("probe", [1, N_PROBES - 1])
 def test_spill_refuses_an_input_that_differs_at_a_later_probe(campaign, monkeypatch,
                                                               tmp_path, probe):
@@ -840,7 +919,10 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
 
     # The sealed spill bound: a geometry the live modules do not reproduce,
     # and a ceiling other than the sealed reservation, refuse before the
-    # scratch exists.
+    # scratch exists. Both are run seals (PQ #1147): certified mode refuses
+    # them; dev mode stamps them (tests/test_stage_b_spill_ceiling_sealed.py).
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+
     def other_geometry(bound):
         bound = json.loads(json.dumps(bound))
         bound["geometry"]["x_bytes"] += 2
@@ -856,6 +938,7 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     assert not constructed
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
     shutil.rmtree(record0["output_space"]["root"], ignore_errors=True)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     events_s, manifest_s, payload_s, _ = phases._drive_quantum(
         tmp_path, monkeypatch, setup, layer=0, resume=False,
         replay_mode="spill")

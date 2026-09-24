@@ -36,7 +36,7 @@ def _completion(*, plan_sha256="a" * 64, implementation_sha256="b" * 64):
 
 
 def test_certified_mode_refuses_a_digest_mismatch(monkeypatch):
-    monkeypatch.delenv(DEV_ENV, raising=False)
+    monkeypatch.setenv(DEV_ENV, "0")
     with pytest.raises(ValueError, match="prepared implementation_sha256"):
         bridge.require_prepared_digests(_completion(), plan_sha256="a" * 64,
                                         implementation_sha256="d" * 64)
@@ -46,7 +46,7 @@ def test_certified_mode_refuses_a_digest_mismatch(monkeypatch):
 
 
 def test_certified_mode_admits_matching_digests(monkeypatch):
-    monkeypatch.delenv(DEV_ENV, raising=False)
+    monkeypatch.setenv(DEV_ENV, "0")
     bridge.require_prepared_digests(_completion(), plan_sha256="a" * 64,
                                     implementation_sha256="b" * 64)
 

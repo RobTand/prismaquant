@@ -21,6 +21,7 @@ import subprocess
 
 import torch
 
+from .dev_mode import seal_check
 from .kernels import joint_projection_reduce as kernel
 
 SCHEMA = 'prismaquant.joint_projection_backend.v1'
@@ -141,6 +142,12 @@ def _image_label(value):
 
 
 def _require_runtime(actual, expected):
+    """The qualification's runtime identity, compared as a run seal (PQ #1147).
+
+    Certified mode refuses any changed axis. Dev mode prints the difference
+    and runs the qualified binary in this runtime: a changed package revision
+    string is not a changed kernel.
+    """
     if actual != expected:
         changed = sorted(key for key in set(actual) | set(expected) if actual.get(key) != expected.get(key))
         detail = ''
@@ -150,7 +157,10 @@ def _require_runtime(actual, expected):
             # changed image looks like from inside the container.
             detail = '; qualified in image %s, executing in image %s' % (
                 _image_label(expected.get('image')), _image_label(actual.get('image')))
-        raise RuntimeError('joint projection unqualified runtime identity: ' + ', '.join(changed) + detail)
+        seal_check('joint projection runtime identity', expected, actual,
+                   where='joint projection qualification',
+                   refusal=RuntimeError('joint projection unqualified runtime identity: '
+                                        + ', '.join(changed) + detail))
 
 
 def require_qualified_environment():

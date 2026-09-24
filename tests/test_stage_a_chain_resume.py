@@ -540,9 +540,12 @@ def test_a_declared_implementation_switch_is_recorded_outside_the_header(
                  chain_resume=_resume(root, declaration=switch, resume_from=4),
                  interrupt=_at(1, 3, 3))
     # Checkpoint 2 was sealed by implementation 2: a relaunch under 1 is a
-    # switch back and needs its own declaration.
+    # switch back, which certified mode refuses without its own declaration
+    # (dev mode resumes it undeclared since PQ #1147).
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     with pytest.raises(AdjointIdentityRefused, match="explicit"):
         _run(root, monkeypatch, chain_resume=_resume(root))
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     resumed = _run(root, monkeypatch, implementation=TWO, writes=writes,
                    chain_resume=_resume(root, resume_from=2))
 
@@ -592,6 +595,8 @@ def _refusal_kwargs(root, name):
         "artifact-budget": dict(boundary_artifact_bytes=(1 << 24) - 256),
         "read-window": dict(execution={**execution, "boundary_storage": {
             **policy, "prefetch_batches": 1}}),
+        "resident-cap": dict(execution={**execution, "boundary_storage": {
+            **policy, "max_resident_bytes": CAP + 256}}),
         "calibration": dict(calib=other_draw),
         "probes": dict(execution={**execution, "n_probes": 3}),
         "seed": dict(execution={**execution, "seed_base": 7001}),
@@ -623,6 +628,7 @@ REFUSALS = {
     "stride": "differs in stride$",
     "artifact-budget": "another boundary storage policy",
     "read-window": "another boundary storage policy",
+    "resident-cap": "another boundary storage policy",
     "calibration": "differs in run_identity, bind_identity$",
     "probes": "differs in run_identity, bind_identity$",
     "seed": "differs in run_identity, bind_identity$",
@@ -660,7 +666,7 @@ def test_every_regime_difference_refuses_before_anything_is_removed(
     if dev_mode is True:
         monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     elif dev_mode is False:
-        monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     assert _refused_untouched(root, monkeypatch, REFUSALS[name], **kw) == "failed"
 
 
@@ -826,3 +832,144 @@ def test_the_resume_flags_need_the_chain_state_digest(capsys):
             stage_a._chain_resume_argument(args)
     args.resume_chain_state_sha256 = None
     assert stage_a._chain_resume_argument(args) is None
+
+
+# -- dev mode, the default since PQ #1147: run seals stamp and continue ---------
+
+#: Relaunches that differ from the interrupted run only in a run seal. With
+#: ``PRISMAQUANT_DEV_MODE`` unset each prints ``[DEV-MODE]`` and resumes. The
+#: boundary storage byte ceilings (``artifact-budget``, ``resident-cap``) are
+#: seals; the read window lays out the published groups and is a wall.
+DEV_SEALS = ("plan", "prepared", "read-manifest", "artifact-budget", "resident-cap",
+             "arithmetic", "implementation-undeclared")
+#: Relaunches that differ in the chain's layout or data: walls in dev mode too.
+DEV_WALLS = ("batch-size", "probe-fusion", "unit-roster", "stride", "calibration",
+             "probes", "seed", "read-window")
+
+
+def _dev_resume(root, monkeypatch, capsys, **kw):
+    """Resume the run at ``root`` with the switch unset; ``(receipt, stdout)``."""
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    receipt = _run(root, monkeypatch, **kw)
+    return receipt, capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", DEV_SEALS)
+def test_dev_mode_resumes_through_a_run_seal(tmp_path, monkeypatch, capsys, name):
+    # The baseline runs at the same root under the same generation id, then
+    # moves aside: a checkpoint's session names its root.
+    root = tmp_path / "run"
+    baseline_writes = []
+    baseline = _run(root, monkeypatch, writes=baseline_writes)
+    root.rename(tmp_path / "baseline")
+    writes = []
+    _interrupted(root, monkeypatch, writes=writes, interrupt=_at(3, 1, 2))
+    stored = json.loads(chain_state_path(adjoint_space(root)).read_text())
+    kw = _refusal_kwargs(root, name)
+    kw.setdefault("chain_resume", _resume(root))
+    resumed, out = _dev_resume(root, monkeypatch, capsys, writes=writes, **kw)
+    assert "[DEV-MODE] seal " in out
+    assert [c["boundary"] for c in resumed["checkpoints"]] == [5, 4, 2]
+    # The resume continues under the stored header, and the rolled planes
+    # are the uninterrupted run's.
+    assert resumed["run_identity"] == stored["run_identity"]
+    assert _merged(writes) == _merged(baseline_writes)
+    assert [c["cotangent_sha256"] for c in resumed["checkpoints"]] == [
+        c["cotangent_sha256"] for c in baseline["checkpoints"]]
+    if name == "implementation-undeclared":
+        [switch] = resumed[RESUME_COMPATIBILITY_KEY]
+        assert (switch["from_implementation_sha256"], switch["to_implementation_sha256"],
+                switch["declared"]) == (ONE, TWO, False)
+
+
+@pytest.mark.parametrize("name", DEV_WALLS)
+def test_dev_mode_still_refuses_a_layout_or_data_difference(tmp_path, monkeypatch, name):
+    root = tmp_path / "run"
+    _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
+    kw = _refusal_kwargs(root, name)
+    kw.setdefault("chain_resume", _resume(root))
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    assert _refused_untouched(root, monkeypatch, REFUSALS[name], **kw) == "failed"
+
+
+def test_dev_mode_resume_does_not_compute_the_source_identity(
+        tmp_path, monkeypatch, capsys):
+    """A dev resume may pass NOT_COMPUTED for the source it would only compare."""
+    import sys
+
+    from prismaquant.dev_mode import NOT_COMPUTED
+
+    module = sys.modules[__name__]
+    root = tmp_path / "run"
+    certified = tmp_path / "certified"
+    for interrupted in (root, certified):
+        _interrupted(interrupted, monkeypatch, interrupt=_at(3, 1, 2))
+    stored = json.loads(chain_state_path(adjoint_space(root)).read_text())
+    monkeypatch.setattr(module, "_model_identity", lambda _name: NOT_COMPUTED)
+    resumed, out = _dev_resume(root, monkeypatch, capsys, chain_resume=_resume(root))
+    assert "[DEV-MODE] seal chain state bind_identity at source_model not computed" in out
+    assert [c["boundary"] for c in resumed["checkpoints"]] == [5, 4, 2]
+    assert resumed["run_identity"] == stored["run_identity"]
+    # Certified mode never skips it: NOT_COMPUTED differs from every source.
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(AdjointIdentityRefused, match="differs in bind_identity$"):
+        _run(certified, monkeypatch, chain_resume=_resume(certified))
+
+
+@pytest.mark.parametrize("status_value", ["complete", "attached", "retained"])
+def test_dev_mode_refuses_a_generation_whose_status_is_not_interrupted(
+        tmp_path, monkeypatch, capsys, status_value):
+    """A finished, attached or retained generation belongs to another owner
+    or reader: a resume writing into it refuses in both modes (PQ #1147)."""
+    root = tmp_path / "run"
+    _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
+    generation = _generation(root)
+    status = json.loads(generation.read_text())
+    status["status"] = status_value
+    generation.write_text(json.dumps(status))
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    with pytest.raises(AdjointIdentityRefused, match=f"status is '{status_value}'"):
+        _run(root, monkeypatch, chain_resume=_resume(root))
+    assert "[DEV-MODE] seal generation status" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema", "prismaquant.aura.boundary_storage.v0"),
+    ("capture_order", "sample_major")])
+def test_a_boundary_storage_layout_difference_refuses_in_dev_mode(field, value):
+    """The schema, the capture order and the read window lay out the stored
+    entries; the byte ceilings bound one run's memory and disk."""
+    from prismaquant.cost_streaming import boundary_storage_layout_differs
+
+    stored = {"schema": "prismaquant.aura.boundary_storage.v2", "capture_order": "layer_major",
+              "max_resident_bytes": 1, "max_auxiliary_bytes": 2, "max_artifact_bytes": 3,
+              "prefetch_batches": 4}
+    assert boundary_storage_layout_differs(stored, {**stored, field: value})
+    assert boundary_storage_layout_differs(stored, {**stored, "prefetch_batches": 8})
+    assert boundary_storage_layout_differs(stored, {k: v for k, v in stored.items()
+                                                    if k != "capture_order"})
+    for ceiling in ("max_resident_bytes", "max_auxiliary_bytes", "max_artifact_bytes"):
+        assert not boundary_storage_layout_differs(stored, {**stored, ceiling: 99})
+
+
+def test_dev_mode_resumes_under_another_capsule_binding(tmp_path, monkeypatch, capsys):
+    from prismaquant import joint_forward_resume
+
+    root = tmp_path / "run"
+    _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
+    with monkeypatch.context() as patch:
+        patch.setattr(joint_forward_resume, "load_forward_recovery",
+                      lambda *a, **kw: SimpleNamespace(
+                          receipt_binding={"capsule": "another"}, frontier=0,
+                          n_batches=len(draw()), records={}))
+        monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+        capsys.readouterr()
+        try:
+            _run(root, monkeypatch, chain_resume=_resume(root))
+        except AdjointIdentityRefused as exc:
+            assert "another forward-recovery capsule" not in str(exc)
+    out = capsys.readouterr().out
+    assert "[DEV-MODE] seal forward-recovery capsule differs" in out
+    assert "another forward-recovery capsule" not in out

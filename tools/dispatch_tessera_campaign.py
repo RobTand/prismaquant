@@ -2429,21 +2429,17 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
     different one fails twenty seconds into an admitted action rather than
     here. Computing it costs one read of a file the submitter already has.
 
-    Under ``PRISMAQUANT_DEV_MODE=1`` (Rob, 2026-09-19) a declared digest is a
-    RECORD, not a gate: a mismatch warns loudly and the ACTUAL digest is
-    used. The pass's own gates -- not the submitter -- decide what runs, and
-    a dev submission's argv already names the environment it ran under.
+    In dev mode (the default; PQ #1147) a declared digest is a RECORD, not a
+    gate: ``seal_check`` prints the mismatch and the ACTUAL digest is used.
+    The pass's own gates -- not the submitter -- decide what runs, and a dev
+    submission's argv already names the environment it ran under.
     """
     actual = _sha256_of(path)
-    if declared is not None and declared != actual:
-        if os.environ.get(DEV_MODE_ENV) == "1":
-            from prismaquant.dev_mode import dev_warning
-            dev_warning(
-                f"{label}: {path} hashes to {actual}, not the declared "
-                f"{declared}; the declared digest is recorded, not gated (dev mode)")
-            return actual
-        raise RuntimeError(
-            f"{label}: {path} hashes to {actual}, not the declared {declared}")
+    if declared is not None:
+        from prismaquant.dev_mode import seal_check
+        seal_check(f"{label} declared digest", declared, actual, where=str(path),
+                   refusal=lambda: RuntimeError(
+                       f"{label}: {path} hashes to {actual}, not the declared {declared}"))
     return actual
 
 
@@ -2583,14 +2579,17 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         validate_container(container_spec, bounded=True)
         container_spec = {**container_spec,
                           "env": {**BOUNDED_CAPTURE_ENV, **container_spec.get("env", {})}}
-    # Dev mode (Rob, 2026-09-19): PRISMAQUANT_DEV_MODE travels to the
-    # container exactly the way PRISMAQUANT_LAYER_READ_THREADS does -- sealed
-    # in the spec env the launcher receives -- so the pass gates inside read
-    # the same switch this submitter read. The spec FILE is never rewritten;
-    # only the in-memory copy moves. This changes the submission's argv, and
-    # therefore its action key: a dev submission is a different action from a
-    # certified one over the same plan, by design.
-    if os.environ.get(DEV_MODE_ENV) == "1":
+    # Dev mode (Rob, 2026-09-19; the default since PQ #1147): the switch
+    # travels to the container exactly the way PRISMAQUANT_LAYER_READ_THREADS
+    # does -- sealed in the spec env the launcher receives -- so the pass
+    # gates inside read the same switch this submitter read. The spec FILE is
+    # never rewritten; only the in-memory copy moves. This changes the
+    # submission's argv, and therefore its action key: a dev submission is a
+    # different action from a certified one over the same plan, by design.
+    # A certified submitter (PRISMAQUANT_DEV_MODE=0) seals "0": the container
+    # does not inherit this environment, and unset there means dev mode.
+    from prismaquant.dev_mode import CERTIFIED_VALUE, dev_mode_enabled
+    if dev_mode_enabled():
         from prismaquant.dev_mode import dev_warning
         declared = (container_spec.get("env") or {}).get(DEV_MODE_ENV)
         if declared is not None and declared != "1":
@@ -2601,9 +2600,13 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
                           "env": {**(container_spec.get("env") or {}),
                                   DEV_MODE_ENV: "1"}}
         dev_warning(
-            "submitting under PRISMAQUANT_DEV_MODE=1: digest arguments are "
-            "records and the pass's provenance gates stamp instead of "
-            "refusing; every artifact this produces is dev-uncertified")
+            "submitting under dev mode (PRISMAQUANT_DEV_MODE is not 0): digest "
+            "arguments are records and the pass's provenance gates stamp instead "
+            "of refusing; every artifact this produces is dev-uncertified")
+    else:
+        container_spec = {**container_spec,
+                          "env": {**(container_spec.get("env") or {}),
+                                  DEV_MODE_ENV: CERTIFIED_VALUE}}
     manifest_path = _manifest_path(args, plan, entry_point=entry_point,
                                    command=command)
     manifest = build()

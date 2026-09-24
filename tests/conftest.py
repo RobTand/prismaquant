@@ -8,8 +8,9 @@ that declaration and the export tests that used it all went into
 ``archive/gridbook_lane_2026-09-02/`` when the Gridbook codebook serving lane
 was retired on 2026-09-02, so the fixture has no subject left.
 
-What is here now is one autouse fixture, which exists because profile
-detection is process-global (issue #197; see its docstring), and the
+What is here now is the autouse fixtures -- profile detection is
+process-global (issue #197; see its docstring), and the suite runs in
+certified mode unless a test asks for dev mode (PQ #1147) -- and the
 legacy-lane-grammar fixtures (``legacy_v4_contract``, ``legacy_v5_contract``,
 ``down_convert_lane_table``), which exist so a test about an OLDER Tessera
 lane grammar owns its fixture instead of asserting that the installed
@@ -320,6 +321,20 @@ def _no_staged_range_wait_unless_asked(monkeypatch):
     meaningful, and there are none under pytest.
     """
     monkeypatch.setenv("PRISMAQUANT_STAGED_RANGE_WAIT_S", "0")
+
+
+@pytest.fixture(autouse=True)
+def _certified_mode_unless_asked(monkeypatch):
+    """Tests run in certified mode unless they ask for dev mode.
+
+    Dev mode is the default outside the suite (PQ #1147): the gates refuse
+    only under ``PRISMAQUANT_DEV_MODE=0``. Every refusal test in this suite
+    was written against the certified default, so the suite-wide default is
+    ``0`` and those tests keep their meaning. A dev-mode test sets ``1`` (or
+    deletes the variable, to test the unset default) in its own body, which
+    runs after this fixture and wins.
+    """
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
 
 
 def pytest_sessionfinish(session, exitstatus):

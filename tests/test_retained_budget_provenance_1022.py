@@ -59,6 +59,21 @@ def test_prepare_refuses_a_budget_other_than_the_policys(resource_fixture):
         require_derived_budget(forged, plan_sha256="c" * 64)
 
 
+def test_dev_mode_prints_a_budget_other_than_the_policys_and_continues(
+        resource_fixture, monkeypatch, capsys):
+    """PQ #1147: with PRISMAQUANT_DEV_MODE unset the budget seal prints both
+    budgets and returns the policy instead of refusing."""
+    from tools.prepare_extended_joint_quanta import require_derived_budget
+    _, _, extended, _, policy = resource_fixture
+    forged = copy.deepcopy(extended)
+    forged["execution"]["retained_operator_windows"]["budget"][
+        "candidate_delta_bytes"] += 1
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE")
+    assert require_derived_budget(forged, plan_sha256="c" * 64) == policy
+    out = capsys.readouterr().out
+    assert "[DEV-MODE] seal retained budget differs at candidate_delta_bytes" in out
+
+
 def test_prepare_refuses_a_plan_without_retained_windows(resource_fixture):
     from tools.prepare_extended_joint_quanta import require_derived_budget
     _, _, extended, _, _ = resource_fixture

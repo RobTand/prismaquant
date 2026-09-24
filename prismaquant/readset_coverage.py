@@ -206,6 +206,27 @@ def _read_verified(path: str, sha256: str | None, *, where: str) -> bytes:
     return raw
 
 
+def _read_declared(path: str, sealed_sha256: str | None, *, where: str) -> bytes:
+    """A campaign input read by its on-disk bytes; the record's digest is a seal.
+
+    The record names the plan and the prepared completion it was cut from. A
+    campaign that re-declares either one (a resource plan re-derived from a
+    measurement) leaves the old digest in the record, so the comparison is a
+    run seal (PQ #1147): dev mode prints both digests and the check reads the
+    bytes on disk, as the dispatcher's own row does. Certified mode raises the
+    same ``ValueError`` as before, so the gap it becomes is unchanged.
+    """
+    raw = Path(path).read_bytes()
+    if sealed_sha256 is not None:
+        from .dev_mode import seal_check
+
+        seal_check(f"campaign {where}", sealed_sha256, hashlib.sha256(raw).hexdigest(),
+                   where=f"readset coverage at {path}",
+                   refusal=lambda: ValueError(
+                       f"{where} at {path} does not hash to its sealed digest"))
+    return raw
+
+
 def load_manifest(path: str, sha256: str | None = None) -> dict:
     """A (gzipped) manifest, checked against ``sha256`` when given."""
     raw = _read_verified(path, sha256, where="read manifest")
@@ -227,9 +248,9 @@ def quantum_rows_gaps(rows: Sequence[Mapping], *,
     gaps: list[dict] = []
     campaign = rows[0]["record"]["campaign"]
     try:
-        plan = json.loads(_read_verified(campaign["plan_path"],
-                                         campaign["plan_sha256"], where="plan"))
-        prepared = json.loads(_read_verified(
+        plan = json.loads(_read_declared(
+            campaign["plan_path"], campaign["plan_sha256"], where="plan"))
+        prepared = json.loads(_read_declared(
             campaign["prepared_path"], campaign["prepared_sha256"],
             where="prepared completion"))
         layers_prefix = roster_layers_prefix(prepared.get("formats_by_qname") or {})

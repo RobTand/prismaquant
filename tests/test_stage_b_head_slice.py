@@ -256,7 +256,7 @@ def test_refuses_a_slice_produced_by_another_implementation(tmp_path, monkeypatc
     """The producer re-derived the policies under its own package."""
     from prismaquant.aura_cost import _aura_source_sha256
 
-    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     campaign = _campaign(tmp_path)
     slices, bindings = _produce(campaign)
     foreign = copy.deepcopy(slices[0])
@@ -454,3 +454,136 @@ def test_regenerate_refuses_head_slices_without_executable_readsets(tmp_path, ca
             "--derivation", str(plan), "--head-slices"]
     assert main(argv) != 0
     assert "--head-slices needs --executable-readsets" in capsys.readouterr().err
+
+
+def test_dev_mode_runs_a_quantum_whose_resource_policy_differs(tmp_path, monkeypatch, capsys):
+    """PQ #1147: a policy re-declared from a measurement stamps by default.
+
+    The slice and the preparation were sealed under one Stage B resource
+    policy; the quantum's plan names another that differs only in
+    ``workspace_reserve_bytes``. Dev mode prints both and runs under the
+    plan's policy; certified mode refuses as before.
+    """
+    campaign = _campaign(tmp_path)
+    slices, bindings = _produce(campaign)
+    policies = {}
+    for name, reserve in (("sealed", 1 << 30), ("measured", 3 << 29)):
+        path = tmp_path / f"{name}-policy.json"
+        path.write_text(json.dumps({"budget": {"workspace_reserve_bytes": reserve}}))
+        policies[name] = {"path": str(path),
+                          "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    sealed = copy.deepcopy(slices[0])
+    sealed["resource_policy"] = {"binding": policies["sealed"],
+                                 "limits": {"gpu_bytes": 1 << 30}}
+    path = Path(bindings[0]["path"])
+    raw = head_slice_bytes(sealed)
+    path.write_bytes(raw)
+    binding = dict(bindings[0], sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+    campaign["config"]["stage_b_resource_policy"] = policies["measured"]
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    head = _consume(campaign, _record(0, binding))
+    out = capsys.readouterr().out
+    assert "[DEV-MODE] seal Stage B head slice resource policy differs" in out
+    assert "[DEV-MODE] seal prepared Stage B resource policy differs" in out
+    assert head.cache._joint_stage_b_resource_policy == policies["measured"]
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(HeadSliceRefused, match="resource policy"):
+        _consume(campaign, _record(0, binding))
+
+
+class _EnvelopeReached(Exception):
+    pass
+
+
+def _policy_binding(tmp_path, name, reserve):
+    path = tmp_path / f"{name}-policy.json"
+    path.write_text(json.dumps({"budget": {"workspace_reserve_bytes": reserve}}))
+    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def _slice_sealed_under(campaign, policy, gpu_bytes):
+    """A layer-0 head slice whose resource policy and device limit are these."""
+    slices, bindings = _produce(campaign)
+    sealed = copy.deepcopy(slices[0])
+    sealed["resource_policy"] = {"binding": policy, "limits": {"gpu_bytes": gpu_bytes}}
+    path = Path(bindings[0]["path"])
+    raw = head_slice_bytes(sealed)
+    path.write_bytes(raw)
+    return dict(bindings[0], sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+
+
+def _run_to_the_device_envelope(campaign, binding, monkeypatch):
+    """Drive ``run_layer_quantum`` through the head slice to its device envelope.
+
+    Returns the GPU ceiling the quantum applies. The envelope stops the run
+    there; nothing after it is under test.
+    """
+    import prismaquant.gpu_guard as gpu_guard
+    from prismaquant import memory_management, residency_map
+    from prismaquant.joint_cost_quantum import run_layer_quantum
+
+    applied = []
+
+    def envelope(device, limit, **_kwargs):
+        applied.append((device, limit))
+        raise _EnvelopeReached()
+
+    monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *a, **k: None)
+    monkeypatch.setattr(memory_management, "enforce_device_envelope", envelope)
+    monkeypatch.delenv(residency_map.ENV_VAR, raising=False)
+    residency_map.reset_residency_resolver_for_tests()
+    try:
+        with pytest.raises(_EnvelopeReached):
+            run_layer_quantum(
+                campaign["config"], record=_record(0, binding), adjoint_slice={},
+                plan_sha256=PLAN_SHA, prepared=campaign["prepared"],
+                output_root=Path(campaign["output_root"]), data_manifest_sha256="d" * 64)
+    finally:
+        residency_map.reset_residency_resolver_for_tests()
+    return applied
+
+
+def test_dev_mode_applies_the_plan_device_limit_over_the_slice(tmp_path, monkeypatch, capsys):
+    """PQ #1147 (v7): a slice sealed under a 1 GiB ceiling, a plan re-declared at 1.5 GiB.
+
+    The quantum's plan names a measured policy with another device ceiling
+    than the one the head slice was prepared under. Dev mode prints both
+    and applies the plan's ceiling.
+    """
+    campaign = _campaign(tmp_path)
+    sealed = _policy_binding(tmp_path, "sealed", 1 << 30)
+    binding = _slice_sealed_under(campaign, sealed, 1 << 30)
+    campaign["config"]["stage_b_resource_policy"] = _policy_binding(
+        tmp_path, "measured", 3 << 29)
+    campaign["config"]["max_gpu_bytes"] = 3 << 29
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    capsys.readouterr()
+    applied = _run_to_the_device_envelope(campaign, binding, monkeypatch)
+    out = capsys.readouterr().out
+    assert "[DEV-MODE] seal Stage B head slice resource policy differs" in out
+    assert "[DEV-MODE] seal Stage B device limit differs" in out
+    assert applied == [("cuda", 3 << 29)]
+
+
+def test_certified_mode_refuses_a_slice_device_limit_the_plan_does_not_name(
+        tmp_path, monkeypatch):
+    """The certified refusal at the device limit is unchanged (PQ #1147)."""
+    campaign = _campaign(tmp_path)
+    policy = _policy_binding(tmp_path, "sealed", 1 << 30)
+    binding = _slice_sealed_under(campaign, policy, 1 << 30)
+    campaign["config"]["stage_b_resource_policy"] = policy
+    campaign["config"]["max_gpu_bytes"] = 3 << 29
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(ValueError) as refused:
+        _run_to_the_device_envelope(campaign, binding, monkeypatch)
+    assert str(refused.value) == "Stage B resources: device limit differs from policy"
+
+    # At the sealed ceiling the same slice reaches the envelope.
+    campaign["config"]["max_gpu_bytes"] = 1 << 30
+    assert _run_to_the_device_envelope(campaign, binding, monkeypatch) == [
+        ("cuda", 1 << 30)]

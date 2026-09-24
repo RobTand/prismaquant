@@ -659,7 +659,9 @@ def _retained_budget_provenance(plan: dict, *, plan_sha256: str):
     A plan that binds ``stage_b_resource_policy`` must seal exactly the
     budget that policy derived from the roster: the policy is re-derived
     (``verify_policy``; cached in-process, so the head intake does not repeat
-    it) and a plan carrying any other budget refuses. A plan that binds no
+    it) and a plan carrying any other budget refuses in certified mode. In dev
+    mode ``seal_check`` prints both budgets and the plan's own is used
+    (PQ #1147). A plan that binds no
     policy seals an operator-declared budget; the caller then refuses it with
     :func:`_undelivered_budget_refusal` when the roster does not fit it.
     Returns the verified policy, or ``None`` for a declared budget.
@@ -670,12 +672,16 @@ def _retained_budget_provenance(plan: dict, *, plan_sha256: str):
         return None
     from prismaquant.joint_stageb_resources import verify_policy
 
+    from prismaquant.dev_mode import seal_check
+
     policy = verify_policy(binding)
-    if retained.get("budget") != policy["budget"]:
-        raise ValueError(
+    seal_check(
+        "retained budget", policy["budget"], retained.get("budget"),
+        where=f"plan {plan_sha256} under Stage B resource policy {binding.get('sha256')}",
+        refusal=lambda: ValueError(
             f"plan {plan_sha256} binds Stage B resource policy "
             f"{binding.get('sha256')} but seals a different retained budget: "
-            "refusing")
+            "refusing"))
     return policy
 
 
