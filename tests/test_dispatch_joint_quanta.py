@@ -1173,7 +1173,8 @@ def test_stage_a_argv_refuses_foreign_read_parent(tmp_path, campaign):
 def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, campaign, monkeypatch):
     import dispatch_joint_quanta as dispatch
     from prismaquant import joint_stageb_resources as resources
-    policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30, "gpu_bytes": 72 << 30}}
+    policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30, "gpu_bytes": 72 << 30},
+              "budget": dict(_R13_BUDGET)}
     monkeypatch.setattr(resources, 'verify_policy', lambda _: policy)
     plan = {"stage_b_resource_policy": {"path": "/resource", "sha256": "0"*64},
         "source_prefetch": {"prefetch_workers": 1}, "execution": {"operator_windows": {"prefetch_workers": 4}}}
@@ -1183,7 +1184,8 @@ def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, camp
         "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": 28,
         "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10"}}
     dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+    # A 4 KiB plane: well inside the policy's host room (PQ #1141).
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _plane_receipt(campaign, 1024),
                    tmp_path / 'adjoint-slices')
     path = tmp_path/'record.json'; path.write_text(json.dumps(record))
     args = dict(record_path=path, output_root=tmp_path/'out')
@@ -1218,7 +1220,8 @@ def _plane_receipt(campaign, tensor_bytes):
     receipt = _receipt(campaign)
     for checkpoint in receipt["checkpoints"]:
         for row in checkpoint["activation_entries"]:
-            row["tensor_bytes"] = tensor_bytes
+            if tensor_bytes is not None:
+                row["tensor_bytes"] = tensor_bytes
         checkpoint["cotangent_sha256"] = canonical_json_sha256(
             {key: checkpoint[key] for key in ("schema", "boundary", "session",
                                               "activation_entries", "shared_state_entries")},
@@ -1295,6 +1298,14 @@ def test_a_cotangent_scratch_that_holds_the_plane_admits_the_row(
                                    tensor_bytes=8 << 30, scratch_max_bytes=32 << 30)()
     outer = argv[:argv.index("--")]
     assert "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES=" + str(32 << 30) in outer
+
+
+def test_a_resource_bound_row_with_an_unsized_plane_is_refused(
+        tmp_path, campaign, monkeypatch):
+    """No tensor_bytes on the slice's cotangent rows: nothing to size, so refuse."""
+    argv = _resource_bound_quantum(tmp_path, campaign, monkeypatch, tensor_bytes=None)
+    with pytest.raises(DispatchRefused, match="cannot be sized"):
+        argv()
 
 
 def test_a_plane_that_fits_its_host_room_needs_no_scratch(

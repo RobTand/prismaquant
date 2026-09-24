@@ -47,8 +47,10 @@ from pathlib import Path, PurePosixPath
 if __package__:
     from tools.tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
+        COTANGENT_SCRATCH_ENV,
         STAGE_B_SPILL_ENV,
         container_cache_environment,
+        cotangent_scratch_environment,
         admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
@@ -62,8 +64,10 @@ else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
+        COTANGENT_SCRATCH_ENV,
         STAGE_B_SPILL_ENV,
         container_cache_environment,
+        cotangent_scratch_environment,
         admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
@@ -1162,6 +1166,80 @@ def _sealed_spill_bound(record: Mapping) -> Mapping | None:
     return bound
 
 
+def cotangent_plane_bytes(adjoint_slice: Mapping) -> int:
+    """The bytes of the cotangent plane a quantum loads from its slice.
+
+    The sum of ``tensor_bytes`` over the slice checkpoint's cotangent rows,
+    read through :func:`checkpoint_cotangent_plane`, the one reader of those
+    rows. A band-serial consumer loads the same probe-by-batch grid from its
+    handoff, so the slice sizes its plane too.
+    """
+    from prismaquant.joint_adjoint_slices import checkpoint_cotangent_plane
+    rows = checkpoint_cotangent_plane(adjoint_slice["checkpoint"]).values()
+    sizes = [row["tensor_bytes"] for row in rows]
+    if not sizes or any(type(size) is not int or size <= 0 for size in sizes):
+        raise ValueError("a cotangent row carries no positive integer tensor_bytes")
+    return sum(sizes)
+
+
+def cotangent_host_room(resource_policy: Mapping) -> int:
+    """Host bytes a resource-bound quantum has left for its cotangent plane.
+
+    The container cap (``limits.host_bytes``) less the budget's host-resident
+    owners and its retained render cap: the terms
+    ``derive_retained_window_budget`` charges to the same cap. Nothing else
+    is planned against it, so a plane larger than this has no room on the
+    host.
+    """
+    from prismaquant.joint_retained_window_plan import (
+        HOST_RESIDENT_BUDGET_FIELDS, RetainedWindowBudget)
+    budget = RetainedWindowBudget.from_dict(resource_policy["budget"])
+    return (int(resource_policy["limits"]["host_bytes"])
+            - sum(getattr(budget, name) for name in HOST_RESIDENT_BUDGET_FIELDS)
+            - budget.retained_render_cap_bytes)
+
+
+def require_cotangent_plane_room(resource_policy: Mapping, adjoint_slice: Mapping,
+                                 spec: Mapping, *, quantum_id: str) -> None:
+    """Refuse a resource-bound row whose cotangent plane has nowhere to live (PQ #1141).
+
+    Without a cotangent scratch the quantum holds its whole plane in host
+    memory from checkpoint-load to the end, so the plane must fit the host
+    room the policy leaves (:func:`cotangent_host_room`). With a scratch,
+    the sink allocates the whole plane on local disk and refuses a ceiling
+    below it, so the ceiling must hold the plane. Either shortfall refuses
+    here, before the row publishes, instead of as a memcg kill or a sink
+    refusal on the executing box.
+    """
+    try:
+        plane = cotangent_plane_bytes(adjoint_slice)
+        room = cotangent_host_room(resource_policy)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r}: its cotangent plane cannot be sized "
+            f"against its resource policy: {exc}") from exc
+    try:
+        scratch = cotangent_scratch_environment(dict(spec), spec.get("env", {}))
+    except (RuntimeError, ValueError) as exc:
+        raise DispatchRefused(str(exc)) from exc
+    if scratch:
+        ceiling = int(scratch[COTANGENT_SCRATCH_ENV[1]])
+        if ceiling < plane:
+            raise DispatchRefused(
+                f"quantum {quantum_id!r}: cotangent scratch ceiling {ceiling} "
+                f"bytes is below its {plane}-byte cotangent plane; the sink "
+                "allocates the whole plane")
+        return
+    if plane > room:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r}: cotangent plane of {plane} bytes exceeds "
+            f"the {room} bytes of host room its resource policy leaves "
+            f"(host cap {resource_policy['limits']['host_bytes']} bytes less "
+            "the host-resident owners and the retained render cap); declare a "
+            f"cotangent scratch ({COTANGENT_SCRATCH_ENV[0]}, "
+            f"{COTANGENT_SCRATCH_ENV[1]} >= {plane})")
+
+
 def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                  priority: int = SUBMISSION_PRIORITY,
                  head_grace_s: int = HEAD_PROGRESS_GRACE_S,
@@ -1285,7 +1363,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             f"quantum {quantum_id!r} is unbound (pre-A): regenerate it against "
             "its stage-A slice before publishing")
     try:
-        if _sha_bytes(Path(slice_path).read_bytes()) != slice_sha256:
+        slice_raw = Path(slice_path).read_bytes()
+        if _sha_bytes(slice_raw) != slice_sha256:
             raise DispatchRefused(
                 f"quantum {quantum_id!r} stage-A slice at {slice_path} does not "
                 "hash to the sealed digest")
@@ -1322,6 +1401,11 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     for name, grace in progress:
         argv += ["--progress-phase", f"{name}={grace}"]
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
+    if resource_policy is not None:
+        # The same slice bytes whose digest was checked above; no second read.
+        require_cotangent_plane_room(
+            resource_policy, json.loads(slice_raw), sealed_spec,
+            quantum_id=quantum_id)
     mem_gib, gpu_gib, cpus = "104", "80", 10
     if resource_policy is not None:
         limits = resource_policy["limits"]
