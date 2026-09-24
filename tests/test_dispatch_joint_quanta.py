@@ -1197,6 +1197,119 @@ def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, camp
         quantum_argv(record, **args)
 
 
+#: R13's Stage B resource policy (28 GiB host, 94 GiB aggregate, 66 GiB
+#: device), whose host-resident owners and retained render cap leave
+#: 15,854,285 bytes of host room for anything else (PQ #1141).
+_R13_LIMITS = {"host_bytes": 30064771072, "physical_bytes": 100931731456,
+               "gpu_bytes": 70866960384}
+_R13_BUDGET = {
+    "schema": "prismaquant.joint_retained_window_budget.v1",
+    "physical_limit_bytes": 100931731456, "safety_margin_bytes": 2147483648,
+    "metadata_reserve_bytes": 21474836480, "runtime_reserve_bytes": 4294967296,
+    "workspace_reserve_bytes": 17179869184, "boundary_reserve_bytes": 2281701376,
+    "auxiliary_reserve_bytes": 2147483648, "load_buffer_bytes": 402662764,
+    "read_page_reserve_bytes": 4096, "candidate_delta_bytes": 201326592,
+    "statistics_cap_bytes": 5939134464, "retained_render_cap_bytes": 6023929799,
+    "max_windows_per_layer": 25}
+
+
+def _plane_receipt(campaign, tensor_bytes):
+    """The fixture receipt with every checkpoint cotangent row sized."""
+    receipt = _receipt(campaign)
+    for checkpoint in receipt["checkpoints"]:
+        for row in checkpoint["activation_entries"]:
+            row["tensor_bytes"] = tensor_bytes
+        checkpoint["cotangent_sha256"] = canonical_json_sha256(
+            {key: checkpoint[key] for key in ("schema", "boundary", "session",
+                                              "activation_entries", "shared_state_entries")},
+            where="adjoint checkpoint")
+    return receipt
+
+
+def _resource_bound_quantum(tmp_path, campaign, monkeypatch, *, tensor_bytes,
+                            scratch_max_bytes=None, limits=None):
+    """A quantum row under R13's resource policy; returns its argv call.
+
+    Each call builds its row under its own ``tmp_path`` subdirectory, so one
+    test can dispatch two planes.
+    """
+    import dispatch_joint_quanta as dispatch
+    tmp_path = Path(tmp_path) / f"plane-{tensor_bytes}-{scratch_max_bytes}"
+    tmp_path.mkdir()
+    from prismaquant import joint_stageb_resources as resources
+    policy = {"limits": dict(_R13_LIMITS if limits is None else limits),
+              "budget": dict(_R13_BUDGET)}
+    monkeypatch.setattr(resources, "verify_policy", lambda _: policy)
+    plan = {"stage_b_resource_policy": {"path": "/resource", "sha256": "0" * 64},
+            "source_prefetch": {"prefetch_workers": 1},
+            "execution": {"operator_windows": {"prefetch_workers": 4}}}
+    raw = json.dumps(plan).encode(); Path(campaign["plan_path"]).write_bytes(raw)
+    campaign["plan_sha256"] = hashlib.sha256(raw).hexdigest()
+    root = "/home/rob/pb-scratch/stage-b-cotangent"
+    spec = {"container": {"image": "sha256:" + "0" * 64,
+                          "mounts": [{"source": root, "target": root}]},
+            "cpu_memory_gb": policy["limits"]["host_bytes"] / (1 << 30),
+            "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": str(policy["limits"]["gpu_bytes"] / (1 << 30)),
+                    "PRISMAQUANT_LAYER_READ_THREADS": "10"}}
+    if scratch_max_bytes is not None:
+        spec["env"].update({"PRISMAQUANT_STAGE_B_COTANGENT_ROOT": root,
+                            "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES": str(scratch_max_bytes)})
+    dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path),
+                   _plane_receipt(campaign, tensor_bytes), tmp_path / "adjoint-slices")
+    path = tmp_path / "record.json"; path.write_text(json.dumps(record))
+    return lambda: quantum_argv(record, record_path=path, output_root=tmp_path / "out")
+
+
+def test_a_row_whose_cotangent_plane_exceeds_its_host_room_needs_a_scratch(
+        tmp_path, campaign, monkeypatch):
+    """The layer-044 gate v4 shape: a 32 GiB plane, 15 MiB of host room (#1141).
+
+    Without a cotangent scratch the plane lives in host memory for the whole
+    quantum, and the 28 GiB container's memcg killed it after five minutes of
+    checkpoint reads. The dispatcher sizes the plane from the slice and
+    refuses the row before anything publishes.
+    """
+    # Two probes by two batches of 8 GiB rows: 32 GiB, as in layer 44.
+    argv = _resource_bound_quantum(tmp_path, campaign, monkeypatch,
+                                   tensor_bytes=8 << 30)
+    with pytest.raises(DispatchRefused, match="cotangent plane") as refused:
+        argv()
+    assert str(32 << 30) in str(refused.value)
+    assert "15854285" in str(refused.value)
+
+
+def test_a_cotangent_scratch_below_the_plane_is_refused_at_dispatch(
+        tmp_path, campaign, monkeypatch):
+    """A declared scratch must hold the whole plane; the sink allocates it all."""
+    argv = _resource_bound_quantum(tmp_path, campaign, monkeypatch,
+                                   tensor_bytes=8 << 30,
+                                   scratch_max_bytes=(32 << 30) - 1)
+    with pytest.raises(DispatchRefused, match="cotangent scratch"):
+        argv()
+
+
+def test_a_cotangent_scratch_that_holds_the_plane_admits_the_row(
+        tmp_path, campaign, monkeypatch):
+    argv = _resource_bound_quantum(tmp_path, campaign, monkeypatch,
+                                   tensor_bytes=8 << 30, scratch_max_bytes=32 << 30)()
+    outer = argv[:argv.index("--")]
+    assert "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES=" + str(32 << 30) in outer
+
+
+def test_a_plane_that_fits_its_host_room_needs_no_scratch(
+        tmp_path, campaign, monkeypatch):
+    """Host room is exact: a plane of exactly the room dispatches, one byte more refuses."""
+    room = 15854285
+    assert room % 4 == 1
+    argv = _resource_bound_quantum(tmp_path, campaign, monkeypatch,
+                                   tensor_bytes=room // 4)()
+    assert argv[argv.index("--demand") + 1] == "gpu=1,mem_gb=94"
+    with pytest.raises(DispatchRefused, match="cotangent plane"):
+        _resource_bound_quantum(tmp_path, campaign, monkeypatch,
+                                tensor_bytes=room // 4 + 1)()
+
+
 def test_portable_admission_does_not_skip_container_spec_validation(tmp_path):
     from dispatch_joint_quanta import _container_wrap
     path = tmp_path/'spec.json'
