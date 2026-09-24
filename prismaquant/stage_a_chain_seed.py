@@ -496,17 +496,17 @@ def checkpoint_plane_distance(reference, candidate, *, device="cpu",
     reduction settings. They must be sealed under one bind identity (the
     chain regime and the reduction flag are outside it), sit at one
     boundary, and list the same ``(probe, batch)`` entries,
-    each of one shape and dtype. Every entry is read digest-verified, one
-    pair at a time with a bounded read-ahead of ``read_ahead`` pairs, and
-    compared in fp32 with fp64 sums: ``relative_l2`` is
+    each of one shape and dtype. Every entry is read digest-verified, each
+    plane streamed in leased windows that hold at most ``read_ahead`` of its
+    entries (PQ #1142), and compared in fp32 with fp64 sums: ``relative_l2`` is
     ``||candidate - reference|| / ||reference||``, and ``max_abs`` the
     largest elementwise difference. Each batch of a Stage A plane is one
     calibration sample, so an entry is one (probe, sample).
     """
-    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import closing
     import torch
 
-    from .joint_adjoint_checkpoints import checkpoint_entry_session, read_exact_entry_tensors
+    from .joint_adjoint_checkpoints import checkpoint_entry_session, stream_exact_entry_tensors
 
     records = {"reference": load_pinned_checkpoint(reference, "reference checkpoint"),
                "candidate": load_pinned_checkpoint(candidate, "candidate checkpoint")}
@@ -530,26 +530,22 @@ def checkpoint_plane_distance(reference, candidate, *, device="cpu",
                 f"cotangent {key} is {row['dtype']} {row['shape']} in the reference and "
                 f"{other['dtype']} {other['shape']} in the candidate")
     if type(read_ahead) is not int or read_ahead < 1:
-        raise ValueError("read_ahead is a positive number of entry pairs")
-
-    def read(key):
-        return tuple(
-            read_exact_entry_tensors([planes[name][key]],
-                                     expected_session=checkpoint_entry_session(
-                                         records[name])).popitem()[1]
-            for name in ("reference", "candidate"))
+        raise ValueError("read_ahead is a positive number of entries per plane")
 
     keys = sorted(planes["reference"])
+    largest = max(int(planes[name][key]["tensor_bytes"])
+                  for name in planes for key in keys)
+
+    def stream(name):
+        return closing(stream_exact_entry_tensors(
+            [planes[name][key] for key in keys],
+            expected_session=checkpoint_entry_session(records[name]),
+            max_resident_bytes=read_ahead * largest))
+
     entries = []
-    with ThreadPoolExecutor(max_workers=read_ahead) as pool:
-        pending = {}
-        for index, key in enumerate(keys[:read_ahead]):
-            pending[index] = pool.submit(read, key)
-        for index, key in enumerate(keys):
-            ours, theirs = pending.pop(index).result()
-            following = index + read_ahead
-            if following < len(keys):
-                pending[following] = pool.submit(read, keys[following])
+    with stream("reference") as reference_plane, stream("candidate") as candidate_plane:
+        for key, (_ours_row, ours), (_theirs_row, theirs) in zip(
+                keys, reference_plane, candidate_plane):
             equal = tensor_payload_sha256(ours) == tensor_payload_sha256(theirs)
             ref = ours.to(device=device, dtype=torch.float32)
             diff = theirs.to(device=device, dtype=torch.float32) - ref

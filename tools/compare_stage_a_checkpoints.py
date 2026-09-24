@@ -39,7 +39,8 @@ def main(argv=None) -> int:
                         help="where the differences are computed (default: cuda "
                              "when available, else cpu)")
     parser.add_argument("--read-ahead", type=int, default=8,
-                        help="entry pairs read ahead of the one being compared")
+                        help="entries of each plane held at once: the window being "
+                             "compared and the one read ahead")
     args = parser.parse_args(argv)
     import torch
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
