@@ -46,7 +46,6 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 import hashlib
 import json
-import os
 import platform
 from pathlib import Path
 
@@ -220,8 +219,3 @@ def qualification_candidate(device) -> dict:
     return {"name": kda_chunk.NAME, "source_sha256": kda_chunk.source_sha256(),
             "compiled": kda_chunk.compiled_kernels(), "probe": probe,
             "runtime": _runtime_identity(device)}
-
-
-def environment_stamp() -> dict:
-    """The launch setting as the result records it."""
-    return {"env": KDA_KERNEL_ENV, "value": os.environ.get(KDA_KERNEL_ENV)}
