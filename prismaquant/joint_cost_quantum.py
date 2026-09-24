@@ -2210,7 +2210,7 @@ def run_layer_quantum_core(
         def commit_streamed_units(targets):
             targets = [name for name in targets if name not in completed_units]
             if not targets:
-                return
+                return 0
             if source_execution_identity(runner.model) != joint_probe_identity[
                     "source_execution"]:
                 raise RuntimeError(
@@ -2245,6 +2245,7 @@ def run_layer_quantum_core(
             progress.priced(len(completed_units))
             progress.commit()
             counters.mark_phase_units(len(completed_units))
+            return len(targets)
 
         noncontiguous_seeds: set[tuple[int, int]] = set()
         capture_group_cache: dict = {}
@@ -2487,16 +2488,20 @@ def run_layer_quantum_core(
             del window_names
             close_skipped_window()
             window_span = counters.io.open("window", window=int(window_index))
-            if executable:
-                # PQ #917: the production window-readiness body -- the
-                # render phase first, then the bounded staged-render
-                # wait over the window's exact sealed entries, before
-                # observe_and_project_retained_windows opens the PWC
-                # retained window. The retained load below still owns
-                # every lease check. Skipped/resumed windows still
-                # enter the phase: the sealed list never changes.
-                prepare_retained_window_read(
-                    window_index, record=record, progress=progress)
+            # The wait has its own child span, as the commit does, so a slow
+            # window names which of the two it spent (PQ #1207). Without an
+            # executable readset there is no wait, and the span says so.
+            with counters.io.span("window-wait", window=int(window_index)):
+                if executable:
+                    # PQ #917: the production window-readiness body -- the
+                    # render phase first, then the bounded staged-render
+                    # wait over the window's exact sealed entries, before
+                    # observe_and_project_retained_windows opens the PWC
+                    # retained window. The retained load below still owns
+                    # every lease check. Skipped/resumed windows still
+                    # enter the phase: the sealed list never changes.
+                    prepare_retained_window_read(
+                        window_index, record=record, progress=progress)
             replay_window = int(window_index)
             window_kernel = _stage_b_kernel_profiler()
             window_kernel.__enter__()
@@ -2539,7 +2544,8 @@ def run_layer_quantum_core(
             counters.close_window(window_index,
                                   kernel_active_s=kernel_active_s,
                                   wall_s=time.time() - window_started)
-            commit_streamed_units(window_names)
+            with counters.io.span("commit", window=int(window_index)) as commit_span:
+                commit_span.attrs["units"] = commit_streamed_units(window_names)
             progress.window_done(resolved_windows[window_index])
             counters.enter_phase()
             counters.mark_phase_units(len(completed_units))

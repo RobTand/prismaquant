@@ -1,5 +1,30 @@
 # PrismaQuant Architecture
 
+A Stage B window spans its staged-render wait and its unit commit (2026-09-24,
+`perf/1207-unit-journal-overlap`, PQ #1207). The `window` span holds the
+staged-render wait in `before_window`, the replay and projections, and the
+unit commit in `after_window`; `windows[i].wall_s` holds only the middle part.
+Their difference, the wait plus the commit, was 1.3 to 3.3 s per render
+window on rows 38, 39 and 43, 2.4 to 5.7 s on most of row 42's, and 18 to
+23 s on the two row-42 windows that a py-spy sample was taken over. Each part is now a child
+span of the window: `window-wait` around `prepare_retained_window_read`, and
+`commit` around `commit_streamed_units`, with the `units` it made durable.
+The commit itself is unchanged: its bytes, its order and the point at which a
+unit counts are as before.
+
+- **What the commit costs.** `tools/unit_journal_bench.py` runs the commit's
+  per-unit body on the real functions over a production unit checkpoint's
+  inputs (6.5 MB per unit, almost all of it the shared probe identity's
+  `source_model`). On one GB10 performance core it takes 1.0 to 5.2 s per
+  59-unit window, depending on the load on the box; about 60% of that is
+  pickling the unit state, about 25% the write and fsync, and about 7% the
+  SHA-256. There are no GPU tensors on this path: the unit state is Python
+  floats and lists. Holding the job's memory cgroup at `memory.max` on page
+  cache did not change it, and a blocking py-spy at 50 Hz added about 30%.
+
+Gates: `tests/test_stage_b_window_spans_1207.py`. No format, pipeline
+default, stage or ship gate changes.
+
 A strict exact-entry read waits for a declared entry's landing (2026-09-24,
 `fix/1204-strict-entry-landing-wait`, PQ #1204). Under the strict tier
 policy, `prefetch_exact_activation_cache_entries` looked each entry up in the
@@ -650,7 +675,9 @@ said nothing about its own reads between the head and the records.
   Stage A's split runs can open it unchanged.
 - **Stage B's spans.** `run_layer_quantum` opens spans for the head (to the
   core), checkpoint-load or handoff-load, each chain layer, the own-source
-  install, each window, each (window, probe) replay, each probe's spill
+  install, each window, each window's staged-render wait (`window-wait`) and
+  unit commit (`commit`, with the `units` it made durable), both children of
+  the window (PQ #1207), each (window, probe) replay, each probe's spill
   capture, the tail after the last window (`payload`: the handoff write
   under a `handoff-out` child, the payload assembly and the final check of
   every row, with `units` and `rows`; PQ #1187), the runner `teardown`, and
@@ -2179,8 +2206,12 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `fix/1204-strict-entry-landing-wait`.
+As of: 2026-09-24 · `perf/1207-unit-journal-overlap`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `perf/1207-unit-journal-overlap`) for **a Stage B
+window's `window-wait` and `commit` child spans** (PQ #1207). See the entry
+at the top. No format, pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-24, `fix/1204-strict-entry-landing-wait`) for **the
 strict exact-entry reader waiting on PrismaBuild's landing record for an entry
