@@ -58,6 +58,14 @@ SERVED_QUANTIZER_BACKEND_REGISTERED_OP = "registered_scaled_fp4_quant"
 #: The operator's registered name, spelled once.  Its home is the ``_C``
 #: namespace vLLM's extension registers into; nothing here imports Tessera.
 SERVED_QUANTIZER_OP = "scaled_fp4_quant"
+#: The implementation of the registered-operator leg's dequantisation: the
+#: operator decides the codes, and these two Triton kernels
+#: (``prismaquant/kernels/nvfp4_served_dequant.py``) take each group's maximum
+#: and dequantise the codes under the contract's scale rule.  Named in
+#: ``ServedQuantizerIdentity.dequant_kernel`` so a row states which
+#: implementation priced it; a process that cannot load the kernels cannot bind
+#: the registered-operator arithmetic (RobTand/prismaquant#1211).
+SERVED_QUANTIZER_DEQUANT_KERNEL = "prismaquant.triton_nvfp4_served_dequant.v1"
 SERVED_QUANTIZER_IDENTITY_SCHEMA = (
     "prismaquant.served_quantizer_identity.v1"
 )
@@ -1622,7 +1630,19 @@ def nvfp4_group_stored_scale(grouped: torch.Tensor, g) -> torch.Tensor:
     group at a time at a published global scale, the oracle a whole tensor at
     the unit's.
     """
-    amax = grouped.abs().amax(dim=-1, keepdim=True)
+    return nvfp4_stored_scale_from_amax(grouped.abs().amax(dim=-1, keepdim=True), g)
+
+
+def nvfp4_stored_scale_from_amax(amax: torch.Tensor, g) -> torch.Tensor:
+    """THE scale rule: ``e4m3(min(amax / 6 * G, 448))`` for a group maximum.
+
+    :func:`nvfp4_group_stored_scale` is this rule applied to a grouped
+    tensor's ``abs().amax(-1, keepdim=True)``; the served operator leg applies
+    it to the same maximum taken by a fused kernel
+    (:func:`prismaquant.kernels.nvfp4_served_dequant.group_abs_max`).  One
+    function, so the priced scale rule and the attested one cannot become two
+    objects (RobTand/prismaquant#1211).
+    """
     return (amax / FP4_E2M1_MAX * g).clamp(max=FP8_E4M3_MAX).to(
         torch.float8_e4m3fn)
 
@@ -1863,6 +1883,55 @@ def _nvfp4_registered_stored_plane(
     return nvfp4_group_stored_scale(groups.float(), input_global_scale).float()
 
 
+#: The operator's ``input_global_scale`` operand, one device scalar per
+#: ``(device, G)``.  Built with the same ``torch.tensor([g], dtype=float32)``
+#: expression the leg used per call, so the value is the same float32; only the
+#: first call at each G pays the pageable copy and its stream wait.  A process
+#: meets one G per priced unit, so the table is bounded by the unit roster.
+_SERVED_GLOBAL_SCALES: dict[tuple[torch.device, float], torch.Tensor] = {}
+_SERVED_DEQUANT_KERNELS = None
+
+
+def _served_global_scale(g: float, device: torch.device) -> torch.Tensor:
+    """The cached ``float32[1]`` device scalar the operator reads G from."""
+    key = (device, g)
+    scale = _SERVED_GLOBAL_SCALES.get(key)
+    if scale is None:
+        scale = torch.tensor([g], dtype=torch.float32, device=device)
+        _SERVED_GLOBAL_SCALES[key] = scale
+    return scale
+
+
+def _served_dequant_kernels():
+    """The declared dequantisation kernels, or a refusal by name.
+
+    Loaded once.  A module whose ``KERNEL_ID`` is not the one this contract
+    declares is refused too: the identity a row carries must name the code that
+    priced it.
+    """
+    global _SERVED_DEQUANT_KERNELS
+
+    module = _SERVED_DEQUANT_KERNELS
+    if module is None:
+        try:
+            from .kernels import nvfp4_served_dequant as module
+        except Exception as exc:
+            raise ServedQuantizerUnboundError(
+                f"the registered-operator leg dequantises with "
+                f"{SERVED_QUANTIZER_DEQUANT_KERNEL!r}, and this process cannot "
+                f"load it ({type(exc).__name__}: {exc}); refusing rather than "
+                "pricing with another implementation (RobTand/prismaquant#1211)"
+            ) from exc
+        if getattr(module, "KERNEL_ID", None) != SERVED_QUANTIZER_DEQUANT_KERNEL:
+            raise ServedQuantizerUnboundError(
+                f"prismaquant.kernels.nvfp4_served_dequant declares "
+                f"{getattr(module, 'KERNEL_ID', None)!r}, not the "
+                f"{SERVED_QUANTIZER_DEQUANT_KERNEL!r} this contract names"
+            )
+        _SERVED_DEQUANT_KERNELS = module
+    return module
+
+
 def _nvfp4_activation_qdq_registered_op(
     x: torch.Tensor,
     input_global_scale: float,
@@ -1873,11 +1942,25 @@ def _nvfp4_activation_qdq_registered_op(
     rather than this tree's.  The block scale is deliberately NOT read back out
     of the operator's returned plane: that plane's 128x4 permutation is the
     hardware's layout and this tree may not own a second copy of it.  The byte is
-    derived by :func:`nvfp4_group_stored_scale` -- the same function the
-    attestation gate compares against the published table, and the one the
-    retained 84-group differential measured identical on 10,752/10,752 blocks --
-    and the dequantisation is the contract's own ``rounded * used_scale`` with
-    ``used_scale = stored_scale / G``.
+    derived by :func:`nvfp4_stored_scale_from_amax` -- the rule inside
+    :func:`nvfp4_group_stored_scale`, the function the attestation gate compares
+    against the published table and the one the retained 84-group differential
+    measured identical on 10,752/10,752 blocks -- and the dequantisation is the
+    contract's own ``rounded * used_scale`` with ``used_scale = stored_scale / G``.
+
+    HOW IT RUNS (RobTand/prismaquant#1211).  The group maximum and the
+    dequantisation are the two Triton kernels in
+    :mod:`prismaquant.kernels.nvfp4_served_dequant`, declared as
+    :data:`SERVED_QUANTIZER_DEQUANT_KERNEL`; the scale rule and ``stored / G``
+    stay the Torch ops they were.  The output is bit-identical to the Torch
+    composition this replaced, which is kept as
+    :func:`_nvfp4_activation_qdq_registered_op_unfused` so the equality is
+    tested rather than asserted.  The operator's ``input_global_scale`` is a
+    device scalar cached per ``(device, G)`` (:func:`_served_global_scale`),
+    because building it per call was a pageable host-to-device copy that
+    blocked the host until the stream drained.  A process that cannot load the
+    kernels refuses (:class:`ServedQuantizerUnboundError`); it never falls back
+    to the Torch composition.
 
     The returned plane's shape is not asserted here; a real BF16 capture has to
     establish that layout (row padding in particular) before this leg is priced
@@ -1897,6 +1980,49 @@ def _nvfp4_activation_qdq_registered_op(
     itself, in the input's own shape, dtype and device.  The guards above run
     FIRST, so an empty tensor with a bad last dim, a bad ``G`` or a non-CUDA
     device is still refused by name.
+    """
+    if x.shape[-1] % FP4_GROUP_SIZE:
+        raise ValueError(
+            "the served NVFP4 quantiser needs a last dim divisible by "
+            f"{FP4_GROUP_SIZE}, got {tuple(x.shape)}"
+        )
+    g = float(input_global_scale)
+    if not math.isfinite(g) or g <= 0.0:
+        raise ValueError(f"input_global_scale must be finite and > 0, got {g!r}")
+    if x.device.type != "cuda":
+        raise ServedQuantizerUnboundError(
+            f"torch.ops._C.{SERVED_QUANTIZER_OP} is a CUDA operator; this tensor "
+            f"is on {x.device.type}"
+        )
+    original_shape, original_dtype = x.shape, x.dtype
+    if x.numel() == 0:
+        # ``new_empty`` preserves this tensor's dtype and device by torch's own
+        # contract, which is the answer the non-empty path returns too
+        # (``... .to(original_dtype)``).
+        return x.new_empty(original_shape)
+    kernels = _served_dequant_kernels()
+    rows = x.reshape(-1, x.shape[-1]).contiguous().to(torch.bfloat16)
+    packed, _scale_plane = torch.ops._C.scaled_fp4_quant(
+        rows, _served_global_scale(g, rows.device), True)
+    stored = nvfp4_stored_scale_from_amax(kernels.group_abs_max(rows), g).float()
+    # The same Torch op, on the same plane, as ``_nvfp4_dequantize_registered_codes``.
+    used = stored / g
+    output = kernels.dequantize_codes(
+        packed.view(torch.uint8).reshape(rows.shape[0], rows.shape[1] // 2),
+        stored, used, _e2m1_positive_table(rows.device), original_dtype)
+    return output.reshape(original_shape)
+
+
+def _nvfp4_activation_qdq_registered_op_unfused(
+    x: torch.Tensor,
+    input_global_scale: float,
+) -> torch.Tensor:
+    """The pre-#1211 Torch composition of the registered-operator leg.
+
+    Kept verbatim as the oracle the fused leg is tested bit-identical against
+    (``tests/test_nvfp4_served_dequant_kernel.py``) and as the A arm of
+    ``tools/nvfp4_served_qdq_bench.py``.  Never dispatched: no identity names
+    it, so no priced row can be produced by it.
     """
     if x.shape[-1] % FP4_GROUP_SIZE:
         raise ValueError(
@@ -1946,6 +2072,12 @@ class ServedQuantizerIdentity:
     extension's build, ``platform`` is the contract table's key, and
     ``image_content_sha256`` is the launcher-stamped executing-image identity the
     joint pass already refuses on (``joint_projection_backend.executing_image``).
+
+    ``dequant_kernel`` names the implementation of the registered-operator leg's
+    dequantisation (:data:`SERVED_QUANTIZER_DEQUANT_KERNEL`), so a row states
+    which code priced it.  It is recorded, not a reuse axis: the kernels are
+    tested bit-identical to the Torch composition they replaced, so a retained
+    cost priced by either is the same number (RobTand/prismaquant#1211).
     """
 
     backend: str
@@ -1955,6 +2087,7 @@ class ServedQuantizerIdentity:
     torch_git: str | None = None
     vllm: str | None = None
     image_content_sha256: str | None = None
+    dequant_kernel: str | None = None
     schema: str = SERVED_QUANTIZER_IDENTITY_SCHEMA
 
     def as_record(self) -> dict:
@@ -1968,6 +2101,7 @@ class ServedQuantizerIdentity:
             "torch_git": self.torch_git,
             "vllm": self.vllm,
             "image_content_sha256": self.image_content_sha256,
+            "dequant_kernel": self.dequant_kernel,
         }
 
 
@@ -2057,6 +2191,15 @@ def resolve_served_quantizer_identity(
             image = executing_image()
         except Exception:  # pragma: no cover - an unstamped launcher
             image = None
+        dequant_kernel = None
+        if registered:
+            try:
+                _served_dequant_kernels()
+                dequant_kernel = SERVED_QUANTIZER_DEQUANT_KERNEL
+            except ServedQuantizerUnboundError:
+                # Recorded as absent; ``require`` below and the binding
+                # validator both refuse a registered identity without it.
+                dequant_kernel = None
         resolved = ServedQuantizerIdentity(
             backend=(SERVED_QUANTIZER_BACKEND_REGISTERED_OP if registered
                      else SERVED_QUANTIZER_BACKEND_MODEL),
@@ -2066,6 +2209,7 @@ def resolve_served_quantizer_identity(
             torch_git=getattr(torch.version, "git_version", None),
             vllm=vllm_version,
             image_content_sha256=image,
+            dequant_kernel=dequant_kernel,
         )
         _RESOLVED_SERVED_QUANTIZER = resolved
 
@@ -2081,6 +2225,14 @@ def resolve_served_quantizer_identity(
             "(RobTand/prismaquant#567). Price in an image that registers the "
             "operator, or bind the model explicitly if this is a screen rather "
             "than a price."
+        )
+    if require and resolved.dequant_kernel != SERVED_QUANTIZER_DEQUANT_KERNEL:
+        raise ServedQuantizerUnboundError(
+            f"{context}: torch.ops._C.{SERVED_QUANTIZER_OP} is registered, but "
+            f"the leg's declared dequantisation kernel "
+            f"{SERVED_QUANTIZER_DEQUANT_KERNEL!r} cannot be loaded in this "
+            "process, so the registered-operator arithmetic cannot be run here "
+            "(RobTand/prismaquant#1211)."
         )
     return resolved
 
@@ -2159,11 +2311,18 @@ def _validate_served_quantizer_identity(
         ("op", identity.op), ("platform", identity.platform),
         ("torch", identity.torch), ("vllm", identity.vllm),
         ("image_content_sha256", identity.image_content_sha256),
+        ("dequant_kernel", identity.dequant_kernel),
     ) if not value]
     if identity.op != SERVED_QUANTIZER_OP:
         raise ServedQuantizerUnboundError(
             f"{context}: a served binding must name "
             f"{SERVED_QUANTIZER_OP!r}, got {identity.op!r}")
+    if identity.dequant_kernel is not None and (
+            identity.dequant_kernel != SERVED_QUANTIZER_DEQUANT_KERNEL):
+        raise ServedQuantizerUnboundError(
+            f"{context}: a served binding names dequantisation kernel "
+            f"{identity.dequant_kernel!r}; this build implements "
+            f"{SERVED_QUANTIZER_DEQUANT_KERNEL!r} and nothing else")
     if missing:
         raise ServedQuantizerUnboundError(
             f"{context}: a served binding is missing {', '.join(missing)}; an "
@@ -2208,6 +2367,24 @@ SERVED_QUANTIZER_REUSE_AXES = (
     "backend", "op", "platform", "torch", "torch_git", "vllm",
     "image_content_sha256",
 )
+
+
+def served_quantizer_reuse_differences(recorded, current) -> list[str]:
+    """The fields on which two served-quantiser identities price different numbers.
+
+    ``schema`` plus :data:`SERVED_QUANTIZER_REUSE_AXES`, in that order. Either
+    side is a record (a mapping, as ``as_record`` writes it) or a
+    :class:`ServedQuantizerIdentity`. Values are compared as written, never
+    through ``str``: ``None`` and the string ``'None'`` are different claims.
+    A field outside these, such as ``dequant_kernel`` (#1211), is recorded
+    and never compared: both implementations it names give bit-identical
+    output, so a cost priced by either is the same number.
+    """
+    def value(side, field):
+        return side.get(field) if isinstance(side, Mapping) else getattr(side, field)
+
+    return [field for field in ("schema", *SERVED_QUANTIZER_REUSE_AXES)
+            if value(recorded, field) != value(current, field)]
 
 
 def require_matching_served_quantizer(
@@ -2264,10 +2441,7 @@ def require_matching_served_quantizer(
         )
     # Compared as written, never through ``str``: ``None`` and the STRING
     # ``'None'`` are different claims about the operator.
-    differing = [
-        axis for axis in SERVED_QUANTIZER_REUSE_AXES
-        if recorded.get(axis) != getattr(current, axis)
-    ]
+    differing = served_quantizer_reuse_differences(recorded, current)
     if differing:
         raise ServedQuantizerUnboundError(
             f"{consumer}: {qname!r} was priced under "
@@ -2399,6 +2573,13 @@ class StaticActivationContract:
                 )
             return nvfp4_activation_qdq_served(x, input_global_scale)
         if identity.backend == SERVED_QUANTIZER_BACKEND_REGISTERED_OP:
+            if identity.dequant_kernel != SERVED_QUANTIZER_DEQUANT_KERNEL:
+                raise ServedQuantizerUnboundError(
+                    "a registered-operator binding reached the priced path naming "
+                    f"dequantisation kernel {identity.dequant_kernel!r}; this build "
+                    f"prices only with {SERVED_QUANTIZER_DEQUANT_KERNEL!r} "
+                    "(RobTand/prismaquant#1211)"
+                )
             return _nvfp4_activation_qdq_registered_op(x, input_global_scale)
         if identity.backend == SERVED_QUANTIZER_BACKEND_MODEL:
             return nvfp4_activation_qdq_served(x, input_global_scale)
@@ -2428,6 +2609,7 @@ __all__ = [
     "ServedQuantizerUnboundError",
     "SERVED_QUANTIZER_BACKEND_MODEL",
     "SERVED_QUANTIZER_BACKEND_REGISTERED_OP",
+    "SERVED_QUANTIZER_DEQUANT_KERNEL",
     "SERVED_QUANTIZER_IDENTITY_SCHEMA",
     "SERVED_QUANTIZER_OP",
     "active_served_quantizer_identity",

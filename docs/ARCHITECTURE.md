@@ -1,5 +1,90 @@
 # PrismaQuant Architecture
 
+The served NVFP4 activation leg dequantises with two declared Triton kernels
+and hands the operator a cached device scalar (2026-09-24,
+`perf/1211-nvfp4-qdq-fused`, PQ #1211). `_nvfp4_activation_qdq_registered_op`
+is the registered-operator arithmetic a Stage B render window prices every
+static-A4 activation term with. On GLM-5.3 row 041 (PB `4e1468a6d07e`) it held
+617 of 3,577 main-thread py-spy samples over the render windows, and 498 of
+those sat on one line: the per-call `torch.tensor([g], device=...)` that built
+the operator's global-scale operand, a pageable host-to-device copy that
+blocks the host until the stream drains. The rest was a Torch chain of about
+fifteen full-size elementwise ops, including an int64 code tensor.
+
+- **The operand.** One `float32[1]` device tensor per `(device, G)`
+  (`_served_global_scale`), built by the same `torch.tensor([g],
+  dtype=float32)` expression, so the value is the same float32 and only the
+  first call at a G pays the copy.
+- **The kernels** (`prismaquant/kernels/nvfp4_served_dequant.py`).
+  `group_abs_max` reads the bf16 rows once and writes each 16-element group's
+  `max(|x|)` in FP32; the scale rule applied to it is the shared
+  `nvfp4_stored_scale_from_amax`, the rule `nvfp4_group_stored_scale` (which
+  the attestation gate compares) now calls, so there is still one rule.
+  `used = stored / G` stays the Torch op it was. `dequantize_codes` reads the
+  operator's packed nibbles and both planes and writes
+  `where(stored != 0, +-e2m1 * used, 0)` straight into the output dtype, with
+  the E2M1 magnitudes read from the registry's device table. The operator
+  still decides every code.
+- **Bit identity.** The Torch composition is kept as
+  `_nvfp4_activation_qdq_registered_op_unfused`, never dispatched, and the
+  fused leg is compared against it as raw bits on GLM-5.3 widths, row counts
+  off the 128-row tile, K/16 not a multiple of 4, zero groups, NaN and inf
+  activations (the whole-leg output compared as raw bits, NaN payloads
+  included; the group maximum on its own compared as raw bits at finite
+  positions and by position for NaN), bf16/fp16/fp32 outputs and the empty
+  activation. Edge rows reach the three places a flush or a narrowing would
+  show: a whole bf16-subnormal group as a group maximum; an FP32-subnormal
+  used scale (`2**-135`, stored at the smallest e4m3 subnormal) with every
+  product subnormal, at bf16/fp16/fp32; and fp16 overflow to inf (used scale
+  28672, code 7). Each row asserts it reached its edge, and the real operator
+  runs both the subnormal and the fp16-overflow row. The emitted PTX for
+  sm_121a (Triton 3.7.1) has no `.ftz` instruction, narrows with
+  `cvt.rn.bf16.f32` and `cvt.rn.f16.f32`, and takes the group maximum with
+  `abs.bf16`/`max.bf16` before widening, which is exact.
+- **The execution contract.** `ServedQuantizerIdentity` gains
+  `dequant_kernel`; resolution sets it to `SERVED_QUANTIZER_DEQUANT_KERNEL`
+  (`prismaquant.triton_nvfp4_served_dequant.v1`) only when the kernel module
+  loads and declares that name. `require=True`, the binding validator and the
+  contract's dispatch each refuse a registered identity without it or naming
+  another, and the leg refuses if the module cannot load. There is no fallback
+  to the Torch composition. The field is recorded in every row's identity and
+  is not a reuse axis (`SERVED_QUANTIZER_REUSE_AXES` is unchanged), because a
+  cost priced by either implementation is the same number. Every comparison
+  of two served-quantiser records goes through one helper,
+  `served_quantizer_reuse_differences` (`schema` plus the reuse axes):
+  `require_matching_served_quantizer` for retained render scores, and
+  `native_execution_binding.require_reference_quantizer` for a native
+  reference against a joint row, which hashed the whole record before. A
+  native reference or a Stage B row recorded before the field existed
+  therefore still binds a row that carries it, while a difference on any
+  reuse axis still refuses.
+
+- **One Triton trap, caught by the raw-bit comparison.** Triton's unary minus
+  is `0 - x`, so `-(+0.0)` is `+0.0`, while Torch's `-magnitude` gives `-0.0`
+  for the negative-zero code. The first kernel matched under `torch.equal` and
+  differed in up to 6% of the output bits; the sign is now bit 3 of the code
+  moved onto the float's sign bit.
+- **Measured** (PB `1eb8d8882b0a`, sparklina, GB10, campaign image
+  `prismaquant-glm-derivative:causal-exp-v1-20260908`, torch 2.13, Triton
+  3.7.1, interleaved A/B in one process, 5 rounds, box otherwise idle). At the
+  campaign chunk, 65,536 x 4,096 bf16: the leg takes 11.8 ms per call instead
+  of 178.8 ms (15.1x), the host is back in 0.11 ms instead of 169.9 ms, and a
+  replay-shaped chunk (`g.T @ x`, the QDQ, `g.T @ dx`) takes 149 ms instead of
+  311 ms (2.09x). GPU power during the leg is 64 W (46% of the 140 W envelope)
+  instead of 41 W (29%), and the energy per call is 0.76 J instead of 7.27 J.
+  The torch profiler shows one `cudaStreamSynchronize` per call (714 ms over 5
+  calls) in the old leg and none in the new one, and 10.2 kernels per call
+  (15.5 ms of device time) instead of 29.2 (182.5 ms). Small shapes gain 2.5x
+  (37 x 512, 256 x 1,536) to 12x (1,024 x 2,048). The SHA-256 of both legs'
+  outputs is equal on all seven bench shapes. Not measured: a real Stage B
+  row window.
+
+Gates: `tests/test_nvfp4_served_qdq_no_sync.py` (red on the base) and
+`tests/test_nvfp4_served_dequant_kernel.py`. Bench:
+`tools/nvfp4_served_qdq_bench.py`, an interleaved A/B of both legs with the
+registered operator in the campaign image. No format, pipeline default, stage
+or ship gate changes; the arithmetic is unchanged.
+
 A Stage B window spans its staged-render wait and its unit commit (2026-09-24,
 `perf/1207-unit-journal-overlap`, PQ #1207). The `window` span holds the
 staged-render wait in `before_window`, the replay and projections, and the
@@ -2206,8 +2291,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `perf/1207-unit-journal-overlap`.
+As of: 2026-09-24 · `perf/1211-nvfp4-qdq-fused`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `perf/1211-nvfp4-qdq-fused`) for **the served NVFP4
+activation leg's declared dequantisation kernels and cached global-scale
+operand** (PQ #1211). See the entry at the top. `ServedQuantizerIdentity`
+gains `dequant_kernel`; no format, pipeline default, stage or ship gate
+changes.
 
 Re-stamped (2026-09-24, `perf/1207-unit-journal-overlap`) for **a Stage B
 window's `window-wait` and `commit` child spans** (PQ #1207). See the entry
@@ -22739,7 +22830,11 @@ contract rather than one approximation of the other.
 names the arithmetic (`registered_scaled_fp4_quant` or `prismaquant_model`) and
 the build it ran in: `op`, `platform`, `torch`, `torch_git`, `vllm`, and the
 launcher-stamped `image_content_sha256` from
-`joint_projection_backend.executing_image`. It is resolved ONCE per
+`joint_projection_backend.executing_image`. A registered-operator identity
+also names `dequant_kernel`, the implementation of the leg's dequantisation
+(`prismaquant.triton_nvfp4_served_dequant.v1`, PQ #1211); it is recorded, not
+a reuse axis, because the kernels are bit-identical to the Torch composition
+they replaced. It is resolved ONCE per
 process/config (`resolve_served_quantizer_identity`, one cache slot; the vLLM
 extension import happens only there) and bound before any score or cache work
 (`bind_served_quantizer_identity`). No hot path probes, imports or hashes.
