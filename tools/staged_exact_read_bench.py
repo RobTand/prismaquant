@@ -565,13 +565,22 @@ def main(argv=None) -> int:
                         default=["stage-b", "stage-a"])
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--out", default=None)
-    parser.add_argument("--py-spy", default=None)
+    parser.add_argument("--py-spy", default=None,
+                        help="py-spy executable; a comma-separated list is "
+                             "searched in order, so one command runs on boxes "
+                             "that install it in different places")
     parser.add_argument("--py-spy-rate", type=int, default=100)
     args = parser.parse_args(argv)
     if args.child:
         return child_main(args)
     if not args.arm or not args.out:
         parser.error("the driver needs --arm and --out")
+    if args.py_spy:
+        found = [c for c in args.py_spy.split(",") if c and os.access(c, os.X_OK)
+                 and os.path.isfile(c)]
+        if not found:
+            parser.error(f"no py-spy executable among {args.py_spy!r}")
+        args.py_spy = found[0]
     # What every child is told, minus the driver-only options.
     args.child_argv = [
         "--slice", args.slice, "--slice-sha256", args.slice_sha256,
