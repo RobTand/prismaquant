@@ -58,7 +58,42 @@ def _encoder_proof(tmp_path):
     return _write(tmp_path, 'source-proof.json', proof)
 
 
-def _pair(tmp_path, campaign, probe):
+def _scope_bindings(tmp_path, qnames):
+    """A census, campaign plan, calibration, capture and checkpoint the
+    original plan binds, the way a real joint plan binds them, so the one
+    scope builder (``joint_campaign_scope``) can derive the campaign's scope
+    from the plan alone."""
+    from tests.test_joint_campaign_scope import _bind
+    return _bind(tmp_path / 'scope', list(qnames), {'g0': list(qnames)})
+
+
+def _receipt(inputs, campaign, probe, *, scope, identity=None):
+    """The original run's completed receipt over the pair ``inputs``."""
+    qnames = campaign['roster']
+    original = json.loads(Path(inputs['original_prepared']['path']).read_bytes())
+    oldplan = json.loads(Path(inputs['original_plan']['path']).read_bytes())
+    return synthetic_receipt(
+        plan_sha256=inputs['original_plan']['sha256'],
+        prepared_sha256=inputs['original_prepared']['sha256'], scope=scope,
+        num_layers=3, stride=8, root=oldplan['output_root'],
+        identity={'calibration_sha256': original['calibration_input']['calibration_sha256'],
+                  'calibration_shape': original['calibration_input']['shape'],
+                  'n_probes': probe['n_probes'], 'seed_base': probe['seed_base'],
+                  'unit_roster_sha256': hashlib.sha256(
+                      ''.join(n+'\n' for n in sorted(qnames)).encode()).hexdigest(),
+                  **(identity or {})})
+
+
+def _pair(tmp_path, campaign, probe, *, scoped=False, identity=None):
+    """``(inputs, receipt, capture)`` of a synthetic catalog pair.
+
+    With ``scoped``, the original plan binds real scope artifacts
+    (:func:`_scope_bindings`) and the receipt seals ``campaign_scope: None``,
+    the way R13 sealed it (PQ #1126): the run declared no scope, and only the
+    plan it ran can say which campaign it answers for. ``identity`` overrides
+    run-identity fields of the receipt.
+    """
+    tmp_path.mkdir(parents=True, exist_ok=True)
     qnames = campaign['roster']
     oldfmt = 'TESSERA_E4M3_K1_R1024'
     source = {'content_sha256': '1'*64, 'shape': [4, 4], 'dtype': 'torch.bfloat16', 'logical_bytes': 32}
@@ -96,6 +131,15 @@ def _pair(tmp_path, campaign, probe):
         'retained_window_budget_derivation': {'windows_by_layer': {str(i): 1 for i in range(3)}},
         'execution': {'n_probes': probe['n_probes'], 'seed_base': probe['seed_base'],
                       'source_derivative': {'fixture': 'bf16-exact'}, 'temperature': 1.0}}
+    if scoped:
+        bindings = _scope_bindings(tmp_path, qnames)
+        oldplan['calibration_input'] = bindings['calibration_input']
+        oldplan['canonical_capture'] = bindings['canonical_capture']
+        oldplan['inputs'] = {'census': bindings['census'], 'campaign_plan': bindings['campaign_plan'],
+                             'merged_checkpoint': bindings['merged_checkpoint'],
+                             'required_source_units': len(qnames), 'required_campaign_groups': 1}
+        oldplan['execution'].update(calib_seqlen=512, n_calib_samples=512)
+        common['calibration_input']['artifact_sha256'] = bindings['calibration_input']['sha256']
     newplan = {**copy.deepcopy(oldplan), 'inputs': {'fixture': 'new'},
                'output_root': str(tmp_path / 'new-output')}
     inputs = {'original_plan': _write(tmp_path, 'old-plan.json', oldplan),
@@ -111,17 +155,331 @@ def _pair(tmp_path, campaign, probe):
             'formats_by_qname': {name: [oldfmt] + ([ADDED_FORMAT] if label == 'extended' else []) + ['BF16']
                                  for name in qnames}, 'measured_cells': len(cells)}
         inputs[label+'_prepared'] = _write(tmp_path, label+'-prepared.json', prepared)
-    receipt = synthetic_receipt(
-        plan_sha256=inputs['original_plan']['sha256'],
-        prepared_sha256=inputs['original_prepared']['sha256'], scope=campaign['scope'],
-        num_layers=3, stride=8, root=oldplan['output_root'],
-        identity={'calibration_sha256': common['calibration_input']['calibration_sha256'],
-                  'calibration_shape': common['calibration_input']['shape'],
-                  'n_probes': probe['n_probes'], 'seed_base': probe['seed_base'],
-                  'unit_roster_sha256': hashlib.sha256(
-                      ''.join(n+'\n' for n in sorted(qnames)).encode()).hexdigest()})
+    receipt = _receipt(inputs, campaign, probe, scope=None if scoped else campaign['scope'],
+                       identity=identity)
     capture = _write(tmp_path, 'capture.json', receipt)
     return inputs, receipt, capture
+
+
+def _campaign_identity(tmp_path, inputs):
+    """The frozen campaign identity an operator seals once, bound by path and digest."""
+    from tools.dispatch_tessera_campaign import campaign_identity, joint_campaign_scope
+    plan = json.loads(Path(inputs['original_plan']['path']).read_bytes())
+    return _write(tmp_path, 'campaign-identity.json', campaign_identity(joint_campaign_scope(plan)))
+
+
+def _expected_scope(inputs, identity):
+    """The scope the dispatcher stamps on a campaign-scoped submission
+    (``dispatch_tessera_campaign.cmd_submit_joint``)."""
+    from tools.dispatch_tessera_campaign import joint_campaign_scope
+    plan = json.loads(Path(inputs['original_plan']['path']).read_bytes())
+    return {**joint_campaign_scope(plan), 'campaign_identity_sha256': identity['sha256']}
+
+
+def _adopt_scope(campaign, scope):
+    """The parent manifest the Stage B prepare extends annotates ``scope``."""
+    campaign['scope'] = scope
+    campaign['parent_manifest']['annotations']['campaign_scope'] = scope
+
+
+def _scoped_case(tmp_path, campaign, probe, *, identity=None):
+    """A null-scope original run over a scoped plan, its identity file, and
+    the parent whose annotated scope is the one the plan derives."""
+    inputs, receipt, capture = _pair(tmp_path, campaign, probe, scoped=True, identity=identity)
+    assert receipt['run_identity']['campaign_scope'] is None
+    campaign_identity = _campaign_identity(tmp_path, inputs)
+    scope = _expected_scope(inputs, campaign_identity)
+    _adopt_scope(campaign, scope)
+    return inputs, receipt, capture, campaign_identity, scope
+
+
+def _site_args(inputs, campaign):
+    return dict(plan_sha256=inputs['extended_plan']['sha256'],
+                prepared_sha256=inputs['extended_prepared']['sha256'],
+                scope=campaign['scope'], checkpoints=[3])
+
+
+def _join_campaign(inputs, receipt, campaign):
+    """The joiner's view of the campaign: the proof and what the parent annotates."""
+    return {'adjoint_receipt': receipt, 'adjoint_bands': [],
+            'plan_sha256': inputs['extended_plan']['sha256'],
+            'prepared_sha256': inputs['extended_prepared']['sha256'], 'scope': campaign['scope']}
+
+
+def _all_four_sites(tmp_path, inputs, receipt, capture, campaign, bound):
+    """Run the generator, the dispatcher, the quantum gate and the joiner's
+    header check on one proof set.
+
+    Returns the generator's records. Every site raises its own refusal type
+    when the run header does not answer for the campaign.
+    """
+    from prismaquant.joint_cost_quantum import verify_quantum_identity
+    from prismaquant.joint_quanta_join import _check_stage_a_header
+    from tools.dispatch_joint_quanta import check_stage_a_proofs
+    plan = json.loads(Path(inputs['extended_plan']['path']).read_bytes())
+    prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
+    args = _site_args(inputs, campaign)
+    produced = layer_quanta(plan, prepared, campaign['parent_manifest'],
+        parent_manifest_sha256=campaign['manifest_sha256'],
+        plan_path=inputs['extended_plan']['path'], prepared_path=inputs['extended_prepared']['path'],
+        plan_sha256=args['plan_sha256'], prepared_sha256=args['prepared_sha256'],
+        catalog_extension=bound, stride=8, adjoint_receipt=receipt)
+    rows = []
+    for record in produced['records']:
+        adjoint_slice = produced['adjoint_slices'][record['quantum_id']]
+        write_adjoint_slice(record['adjoint']['slice_path'], adjoint_slice, layer=record['layer'])
+        rows.append((tmp_path/f"{record['quantum_id']}.json", record))
+    check_stage_a_proofs([(Path(capture['path']), receipt)], rows)
+    first = produced['records'][0]
+    quantum = _write(tmp_path, 'quantum.json', first)
+    verify_quantum_identity(
+        quantum_path=Path(quantum['path']), quantum_sha256=quantum['sha256'],
+        plan_path=Path(inputs['extended_plan']['path']), plan_sha256=args['plan_sha256'],
+        prepared_path=Path(inputs['extended_prepared']['path']), prepared_sha256=args['prepared_sha256'],
+        adjoint_path=Path(first['adjoint']['slice_path']), adjoint_sha256=first['adjoint']['slice_sha256'],
+        output_root=Path(plan['output_root']))
+    _check_stage_a_header(_join_campaign(inputs, receipt, campaign),
+                          {record['quantum_id']: record for record in produced['records']})
+    return produced['records']
+
+
+def _rescoped_record(record, scope):
+    """An honest record of a campaign whose parent annotates ``scope``."""
+    from prismaquant.joint_layer_quanta import canonical_sha256
+    other = copy.deepcopy(record)
+    other['campaign']['campaign_scope'] = scope
+    body = {key: value for key, value in other.items() if key != 'identity_sha256'}
+    other['identity_sha256'] = canonical_sha256(body, where='rescoped record')
+    return other
+
+
+def test_a_null_scope_run_is_admitted_through_the_derived_scope_at_every_site(tmp_path, campaign, probe):
+    """R13 sealed ``campaign_scope: null`` (no forward-recovery capsule, a plan
+    that declares no scope), while the parent it read annotates the campaign's
+    ``complete_campaign`` scope (PQ #1126). The extension derives the scope
+    once from the original plan with the one scope builder, binds the frozen
+    identity file, and the generator, the dispatcher, the quantum and the joiner admit
+    the run under it."""
+    from prismaquant.joint_catalog_extension import SCHEMA_V3, DERIVED_SCOPE_SCHEMA
+    inputs, receipt, capture, identity, scope = _scoped_case(tmp_path, campaign, probe)
+    header = stage_a_run_header(receipt)
+    args = _site_args(inputs, campaign)
+    # Without the identity file, the null scope cannot be derived: refuse.
+    with pytest.raises(ValueError, match='campaign-identity'):
+        create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'no-identity.json')
+    assert not (tmp_path/'no-identity.json').exists()
+    bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json',
+                             campaign_identity=identity)
+    document = json.loads(Path(bound['path']).read_bytes())
+    assert document['schema'] == SCHEMA_V3
+    block = document['original_campaign_scope']
+    assert block['schema'] == DERIVED_SCOPE_SCHEMA
+    assert block['scope'] == scope
+    assert block['derived_from']['original_plan'] == inputs['original_plan']
+    assert block['derived_from']['campaign_identity'] == identity
+    assert block['derived_from']['require_scope'] == 'complete_campaign'
+    # The sealed identity is null; the effective one is the derived scope.
+    effective = require_extension(bound, run_header=header, plan_sha256=args['plan_sha256'],
+                                  prepared_sha256=args['prepared_sha256'])
+    assert effective['campaign_scope'] == scope
+    assert {k: v for k, v in effective.items() if k != 'campaign_scope'} == \
+        {k: v for k, v in header['run_identity'].items() if k != 'campaign_scope'}
+    assert check_adjoint_run_header(header, **args, catalog_extension=bound) == \
+        stage_a_run_header_sha256(header)
+    records = _all_four_sites(tmp_path, inputs, receipt, capture, campaign, bound)
+    assert len(records) == 3
+    assert all(record['campaign']['campaign_scope'] == scope for record in records)
+    # The first sealed band of the run creates the same bytes as the receipt.
+    band = band_from_receipt(receipt, 3)
+    band_path = tmp_path/'band-003.json'
+    band_file = {'path': str(band_path), 'sha256': write_band_receipt(band_path, band)}
+    from_band = create_extension(inputs=inputs, adjoint_capture=band_file, campaign_identity=identity,
+                                 output=tmp_path/'extension-from-band.json')
+    assert from_band['sha256'] == bound['sha256']
+
+
+def test_a_derived_scope_that_is_not_the_parents_refuses_at_every_site(tmp_path, campaign, probe):
+    """The parent annotates another campaign (here, another checkpoint digest):
+    the derived scope is still this plan's, and it is not the parent's, so the
+    generator, the dispatcher, the quantum and the joiner refuse."""
+    from prismaquant.joint_cost_quantum import QuantumIdentityRefused, verify_quantum_identity
+    from prismaquant.joint_quanta_join import JoinRefused, _check_stage_a_header
+    from tools.dispatch_joint_quanta import DispatchRefused, check_stage_a_proofs
+    inputs, receipt, capture, identity, scope = _scoped_case(tmp_path, campaign, probe)
+    bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json',
+                             campaign_identity=identity)
+    records = _all_four_sites(tmp_path, inputs, receipt, capture, campaign, bound)
+    other = {**scope, 'campaign_checkpoint_sha256': '0' * 64}
+    header = stage_a_run_header(receipt)
+    with pytest.raises(ValueError, match='another scope'):
+        check_adjoint_run_header(header, **{**_site_args(inputs, campaign), 'scope': other},
+                                 catalog_extension=bound)
+    _adopt_scope(campaign, other)
+    plan = json.loads(Path(inputs['extended_plan']['path']).read_bytes())
+    prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
+    with pytest.raises(ValueError, match='another scope'):
+        layer_quanta(plan, prepared, campaign['parent_manifest'],
+            parent_manifest_sha256=campaign['manifest_sha256'],
+            plan_path=inputs['extended_plan']['path'], prepared_path=inputs['extended_prepared']['path'],
+            plan_sha256=inputs['extended_plan']['sha256'], prepared_sha256=inputs['extended_prepared']['sha256'],
+            catalog_extension=bound, stride=8, adjoint_receipt=receipt)
+    rescoped = [_rescoped_record(record, other) for record in records]
+    with pytest.raises(DispatchRefused, match='another scope'):
+        check_stage_a_proofs([(Path(capture['path']), receipt)],
+                             [(tmp_path/f"{r['quantum_id']}.json", r) for r in rescoped])
+    quantum = _write(tmp_path, 'rescoped-quantum.json', rescoped[0])
+    with pytest.raises(QuantumIdentityRefused, match='another scope'):
+        verify_quantum_identity(
+            quantum_path=Path(quantum['path']), quantum_sha256=quantum['sha256'],
+            plan_path=Path(inputs['extended_plan']['path']), plan_sha256=inputs['extended_plan']['sha256'],
+            prepared_path=Path(inputs['extended_prepared']['path']),
+            prepared_sha256=inputs['extended_prepared']['sha256'],
+            adjoint_path=Path(rescoped[0]['adjoint']['slice_path']),
+            adjoint_sha256=rescoped[0]['adjoint']['slice_sha256'],
+            output_root=Path(plan['output_root']))
+    with pytest.raises(JoinRefused, match='another scope'):
+        _check_stage_a_header(_join_campaign(inputs, receipt, campaign),
+                              {record['quantum_id']: record for record in rescoped})
+
+
+def test_a_null_scope_proof_without_a_derived_scope_refuses(tmp_path, campaign, probe):
+    """No extension, or an extension that derives nothing (a v2 document
+    bound to the null-scope header), leaves the sealed null, which never
+    equals the parent's scope. ``null == null`` never admits either."""
+    from prismaquant.joint_catalog_extension import SCHEMA
+    from prismaquant.joint_layer_quanta import check_adjoint_run_identity
+    inputs, receipt, capture, identity, scope = _scoped_case(tmp_path, campaign, probe)
+    header = stage_a_run_header(receipt)
+    args = _site_args(inputs, campaign)
+    # Without an extension the header answers for the original plan; asked
+    # under that plan, the sealed null is what refuses, not the plan digest.
+    with pytest.raises(ValueError, match='another scope'):
+        check_adjoint_run_header(header, **{**args,
+                                            'plan_sha256': inputs['original_plan']['sha256'],
+                                            'prepared_sha256': inputs['original_prepared']['sha256']})
+    with pytest.raises(ValueError):
+        check_adjoint_run_header(header, **args)
+    bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json',
+                             campaign_identity=identity)
+    document = json.loads(Path(bound['path']).read_bytes())
+    del document['original_campaign_scope']
+    document['schema'] = SCHEMA
+    v2 = _write(tmp_path, 'v2-on-null.json', document)
+    with pytest.raises(ValueError, match='no campaign scope'):
+        require_extension(v2, run_header=header, plan_sha256=args['plan_sha256'],
+                          prepared_sha256=args['prepared_sha256'])
+    with pytest.raises(ValueError, match='no campaign scope|another scope'):
+        check_adjoint_run_header(header, **args, catalog_extension=v2)
+    # A consumer handed no scope at all is refused before any comparison.
+    for unset in (None, {}):
+        with pytest.raises(ValueError, match='scope'):
+            check_adjoint_run_identity(header, plan_sha256=args['plan_sha256'],
+                                       prepared_sha256=args['prepared_sha256'], scope=unset,
+                                       catalog_extension=bound)
+        with pytest.raises(ValueError, match='scope'):
+            check_adjoint_run_identity(
+                {**header, 'run_identity': {**header['run_identity'],
+                                            'plan_sha256': args['plan_sha256'],
+                                            'prepared_sha256': args['prepared_sha256']}},
+                plan_sha256=args['plan_sha256'], prepared_sha256=args['prepared_sha256'], scope=unset)
+
+
+def test_a_sealed_scope_other_than_the_parents_refuses_even_with_an_extension(tmp_path, campaign, probe):
+    """A run that sealed a scope answers for that scope: the extension derives
+    nothing over it, and a parent annotating another scope refuses."""
+    inputs, receipt, capture = _pair(tmp_path, campaign, probe)
+    bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json')
+    header = stage_a_run_header(receipt)
+    args = _site_args(inputs, campaign)
+    assert check_adjoint_run_header(header, **args, catalog_extension=bound)
+    other = {**campaign['scope'], 'campaign': 'another-campaign'}
+    with pytest.raises(ValueError, match='another scope'):
+        check_adjoint_run_header(header, **{**args, 'scope': other}, catalog_extension=bound)
+    _adopt_scope(campaign, other)
+    with pytest.raises(ValueError, match='another scope'):
+        _all_four_sites(tmp_path, inputs, receipt, capture, campaign, bound)
+    # A sealed scope with a derived block on top refuses: the sealed scope rules.
+    inputs2, receipt2, capture2, identity, scope = _scoped_case(tmp_path/'scoped', campaign, probe)
+    derived = create_extension(inputs=inputs2, adjoint_capture=capture2, campaign_identity=identity,
+                               output=tmp_path/'derived.json')
+    document = json.loads(Path(derived['path']).read_bytes())
+    sealed = copy.deepcopy(receipt2)
+    sealed['run_identity']['campaign_scope'] = scope
+    document['adjoint_run_header'] = stage_a_run_header(sealed)
+    document['adjoint_run_header_sha256'] = canonical_json_sha256(
+        document['adjoint_run_header'], where='sealed header')
+    forged = _write(tmp_path, 'derived-over-sealed.json', document)
+    with pytest.raises(ValueError, match='sealed'):
+        require_extension(forged, run_header=stage_a_run_header(sealed),
+                          plan_sha256=inputs2['extended_plan']['sha256'],
+                          prepared_sha256=inputs2['extended_prepared']['sha256'])
+
+
+@pytest.mark.parametrize('change', ['bytes', 'identity_field', 'checkpoint', 'kind', 'windows',
+                                    'identity_binding', 'plan_binding', 'artifact_binding',
+                                    'identity_stamp', 'rule'])
+def test_a_tampered_derived_scope_refuses(tmp_path, campaign, probe, change):
+    """Every field of the embedded scope is rechecked cheaply by consumers:
+    the identity file's fields, the plan's stated digests and counts, and the
+    bindings the derivation names. Changed bytes under the bound digest
+    refuse before any field is read."""
+    from tools.dispatch_tessera_campaign import campaign_identity
+    inputs, receipt, capture, identity, scope = _scoped_case(tmp_path, campaign, probe)
+    bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json',
+                             campaign_identity=identity)
+    header = stage_a_run_header(receipt)
+    args = _site_args(inputs, campaign)
+    document = json.loads(Path(bound['path']).read_bytes())
+    block = document['original_campaign_scope']
+    if change == 'bytes':
+        Path(bound['path']).write_bytes(Path(bound['path']).read_bytes() + b'\n')
+        tampered = bound
+    else:
+        if change == 'identity_field': block['scope']['source_unit_count'] += 1
+        elif change == 'checkpoint': block['scope']['campaign_checkpoint_sha256'] = '0' * 64
+        elif change == 'kind': block['scope']['kind'] = 'diagnostic'
+        elif change == 'windows': block['scope']['window_count'] = 16
+        elif change == 'identity_stamp': block['scope']['campaign_identity_sha256'] = '0' * 64
+        elif change == 'rule': block['rule'] = 'operator_declared'
+        elif change == 'plan_binding':
+            block['derived_from']['original_plan'] = {**inputs['original_plan'], 'sha256': '0' * 64}
+        elif change == 'artifact_binding':
+            block['derived_from']['bound_artifacts']['census']['sha256'] = '0' * 64
+        elif change == 'identity_binding':
+            # Another identity file whose fields agree with the tampered scope:
+            # the plan's stated digests and the parent's scope still refuse.
+            forged = campaign_identity({**block['scope'], 'campaign_checkpoint_sha256': '0' * 64})
+            block['derived_from']['campaign_identity'] = _write(tmp_path, 'forged-identity.json', forged)
+            block['scope']['campaign_checkpoint_sha256'] = '0' * 64
+        tampered = _write(tmp_path, 'tampered.json', document)
+    with pytest.raises(ValueError):
+        require_extension(tampered, run_header=header, plan_sha256=args['plan_sha256'],
+                          prepared_sha256=args['prepared_sha256'])
+    with pytest.raises(ValueError):
+        check_adjoint_run_header(header, **args, catalog_extension=tampered)
+
+
+def test_a_sealed_scope_header_keeps_the_v2_document_and_its_identity(tmp_path, campaign, probe):
+    """A run that sealed its scope creates the v2 bytes it always did, with
+    or without an identity binding in hand, and consumers get the sealed
+    identity unchanged. Existing v2 documents keep verifying."""
+    from prismaquant.joint_catalog_extension import SCHEMA
+    inputs, receipt, capture = _pair(tmp_path, campaign, probe, scoped=True)
+    receipt['run_identity']['campaign_scope'] = campaign['scope']
+    capture = _write(tmp_path, 'sealed-capture.json', receipt)
+    identity = _campaign_identity(tmp_path, inputs)
+    plain = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'plain.json')
+    with_identity = create_extension(inputs=inputs, adjoint_capture=capture, campaign_identity=identity,
+                                     output=tmp_path/'with-identity.json')
+    assert plain['sha256'] == with_identity['sha256']
+    document = json.loads(Path(plain['path']).read_bytes())
+    assert document['schema'] == SCHEMA
+    assert 'original_campaign_scope' not in document
+    header = stage_a_run_header(receipt)
+    args = _site_args(inputs, campaign)
+    assert require_extension(plain, run_header=header, plan_sha256=args['plan_sha256'],
+                             prepared_sha256=args['prepared_sha256']) == header['run_identity']
+    assert check_adjoint_run_header(header, **args, catalog_extension=plain)
 
 
 def test_additive_catalog_binds_original_capture_without_relabelling(tmp_path, campaign, probe):

@@ -1344,8 +1344,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-23 · `fix/1120-1121-readback-budget-window`.
+As of: 2026-09-23 · `fix/1126-extend-parent-sealed-read`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-23, `fix/1126-extend-parent-sealed-read`) for **a Stage A
+run that sealed no campaign scope** (PQ #1126): the catalog extension derives
+the original campaign's scope from the original plan and the frozen campaign
+identity (`joint_catalog_extension.v3`), and every Stage B site compares that
+derived scope with the parent's; a null scope alone still refuses. See the
+Stage B preparation section and the "Catalog extension v3" paragraph. No
+format, pipeline default or ship gate changes.
 
 Re-stamped (2026-09-23, `fix/1120-1121-readback-budget-window`) for **a
 Stage A owner that reads back refusing at admission** (PQ #1120): the budget
@@ -21850,7 +21858,22 @@ reads boundary storage and checkpoint manifests from the original capture
 namespace its slice names (`boundary_storage.directory`).
 `prepare_extended_joint_quanta` requires sealed Stage A proof (the completed
 receipt or checkpoint bands, PQ #993), fully qualified old/new PWC records and
-the catalog authority before generating fresh metadata. Historical parent layer extents remain identifiable; actual
+the catalog authority before generating fresh metadata. Its base parent names
+the original plan, or is the manifest every Stage A proof seals as what the run
+read (`run_identity.read_manifest_sha256`, never the all-zero unbound digest)
+under the original plan: a run whose plan was re-derived from its parent's plan
+(R13) read a parent that names the older plan (PQ #1126). The extended parent
+then records that rule and the parent's own plan under
+`produced_by.parent_admitted_by`. The parent's `campaign_scope` is compared
+with the scope the proofs seal at every site, byte for byte over canonical
+JSON; a run that sealed `campaign_scope: null` (R13 ran without a
+forward-recovery capsule, and its plan declares no scope) is admitted only
+through the scope its catalog extension derives, never through a null
+comparison (see "Catalog extension v3"). The preparation binds the frozen
+campaign identity for that derivation (`--campaign-identity`,
+`--campaign-identity-sha256`) and declares the identity file in its readset;
+a null-scope run prepared without the identity refuses before it generates
+anything. Historical parent layer extents remain identifiable; actual
 new candidate reads must be completed by the executable prepared-input producer.
 It emits a coordinator launch recipe without submitting nested PB work.
 A spec may explicitly bind `container_admission_reference` to PB's portable
@@ -21983,6 +22006,38 @@ any band of that run verifies against the same bytes. v1 extensions, which
 bind the completed receipt, still verify. The roster check reads the spelling
 the header implies: a fresh run seals one newline per qname; a recovered run
 seals the canonical `roster_digest`.
+
+**Catalog extension v3 (PQ #1126).** A run header that seals
+`campaign_scope: null` gives the sites nothing to compare with the parent's
+`complete_campaign` scope, and a null is never equal to a scope. When the
+header seals null, `create_extension` derives the original campaign's scope
+once from `inputs["original_plan"]` through the one scope builder
+(`dispatch_tessera_campaign.joint_campaign_scope`, which re-hashes every bound
+artifact: the merged checkpoint, census, campaign plan, calibration input and
+canonical capture), verifies it with `verify_joint_campaign_scope(...,
+require_scope="complete_campaign", campaign=<frozen identity>)`, stamps
+`campaign_identity_sha256` from the identity file the operator binds by path
+and digest, and writes `joint_catalog_extension.v3`: the v2 bindings plus an
+`original_campaign_scope` block (`schema`, `rule`
+`sealed_null_derived_from_original_plan`, `scope`, `derived_from`: the original
+plan binding, the identity binding, `require_scope` and the artifacts the plan
+binds). A header that seals a non-null scope gets the unchanged v2 bytes, and
+a v3 block over a sealed scope refuses. `require_extension` returns the
+*effective* run identity (the sealed one, or the header with the derived scope
+in place of null), and `check_adjoint_run_identity`, the dispatcher, the
+quantum and the joiner compare that identity's scope with the parent's; an
+unset parent or sealed scope refuses at the guard. Consumers never re-hash
+the multi-GB artifacts: `_check_derived_scope` re-reads the frozen identity
+(hundreds of bytes) and checks the block's fields against the original plan
+already in hand (identity fields and stamp, artifact bindings, window count,
+sequence length, checkpoint digest, declared counts); the extension's own
+digest binds the rest. Creation pays the full re-hash once (about 6 s on the
+R13 inputs). Limit: the scope builder's re-hash reads the pool directly, not
+through the staged reader, so a preparation under strict staged reads
+(PQ #1092) that creates a v3 extension reads the merged checkpoint and census
+off the pool that once; the consumers, which re-read only the declared
+identity file, stay inside their readsets. v1 and v2 documents verify
+unchanged.
 
 **Joining.** `joint_quanta_join` takes exactly one Stage A proof:
 
