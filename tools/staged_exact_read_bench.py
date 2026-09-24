@@ -45,6 +45,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -308,6 +309,89 @@ def child_ceiling(args, _slice_doc) -> dict:
     return {"ceiling": results}
 
 
+def child_sink_ceiling(args, _slice_doc) -> dict:
+    """Sequential writes to the Stage B scratch file system: no reads, no torch.
+
+    ``direct`` writes 16 MiB blocks with ``O_DIRECT`` from one aligned buffer
+    per thread, so no page cache stands between the writer and the device:
+    the rate a scratch writer can reach on this disk. ``sync-each`` writes the
+    same blocks buffered and runs ``fdatasync`` and a whole-file
+    ``DONTNEED`` after each one, which is what the scratch did per entry.
+    """
+    import mmap
+    import tempfile
+    block = 1 << 24
+    total = args.sink_ceiling_bytes // block * block
+    pattern = os.urandom(block)
+    results = []
+    for mode, threads in (("direct", 1), ("direct", 4), ("sync-each", 1)):
+        with tempfile.TemporaryFile(dir=args.scratch_root) as handle:
+            os.posix_fallocate(handle.fileno(), 0, total)
+            os.fdatasync(handle.fileno())
+            os.posix_fadvise(handle.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+            lock = threading.Lock()
+            cursor = [0]
+            errors = []
+
+            def work():
+                buf = mmap.mmap(-1, block)
+                buf[:] = pattern
+                view = memoryview(buf)
+                flags = os.O_WRONLY | os.O_CLOEXEC | (os.O_DIRECT if mode == "direct" else 0)
+                fd = os.open(f"/proc/self/fd/{handle.fileno()}", flags)
+                try:
+                    while True:
+                        with lock:
+                            if cursor[0] >= total or errors:
+                                return
+                            offset = cursor[0]
+                            cursor[0] += block
+                        done = 0
+                        while done < block:
+                            done += os.pwritev(fd, [view[done:]], offset + done)
+                        if mode == "sync-each":
+                            os.fdatasync(fd)
+                            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                except OSError as exc:
+                    with lock:
+                        errors.append(f"{type(exc).__name__}: {exc}")
+                finally:
+                    os.close(fd)
+                    view.release()
+                    buf.close()
+
+            memcg = MemcgPeaks()
+            started = time.monotonic()
+            with memcg:
+                pool = [threading.Thread(target=work) for _ in range(threads)]
+                for thread in pool:
+                    thread.start()
+                for thread in pool:
+                    thread.join()
+                os.fdatasync(handle.fileno())
+            wall = time.monotonic() - started
+            results.append({"mode": mode, "threads": threads, "bytes": total,
+                            "block_bytes": block, "wall_s": round(wall, 4),
+                            "gb_s": round(total / wall / 1e9, 3),
+                            "errors": errors[:3], "memcg": memcg.report()})
+    return {"sink_ceiling": results, "scratch_root": args.scratch_root,
+            "fs": _statfs_type(args.scratch_root)}
+
+
+def _statfs_type(path):
+    try:
+        best = ("", "")
+        for line in Path("/proc/self/mounts").read_text().splitlines():
+            parts = line.split()
+            mount = parts[1]
+            if (str(Path(path).resolve()) + "/").startswith(mount.rstrip("/") + "/") \
+                    and len(mount) > len(best[0]):
+                best = (mount, parts[2] + " " + parts[0])
+        return {"mount": best[0], "type_device": best[1]}
+    except OSError:
+        return None
+
+
 class _DiscardSink(dict):
     """A cotangent factory result that keeps nothing but a count."""
 
@@ -327,6 +411,285 @@ def _call_supported(function, *args, **kwargs):
     return function(*args, **{k: v for k, v in kwargs.items() if k in accepted})
 
 
+class MemcgPeaks:
+    """Sample this process's cgroup ``memory.stat`` and keep each field's peak.
+
+    The file charge (``file``, ``file_dirty``, ``file_writeback``) is what a
+    buffered scratch writer adds to the cgroup on top of its anon tensors.
+    """
+
+    FIELDS = ("anon", "file", "file_dirty", "file_writeback", "active_file",
+              "inactive_file")
+
+    def __init__(self, period_s=0.02):
+        self.period_s = period_s
+        self.path = None
+        try:
+            for line in Path("/proc/self/cgroup").read_text().splitlines():
+                if line.startswith("0::"):
+                    self.path = Path("/sys/fs/cgroup") / line[3:].lstrip("/") / "memory.stat"
+        except OSError:
+            self.path = None
+        self.peaks = {field: 0 for field in self.FIELDS}
+        self.first = None
+        self.samples = 0
+        self._stop = threading.Event()
+        self._thread = None
+
+    def _read(self):
+        values = {}
+        for line in self.path.read_text().splitlines():
+            key, _, value = line.partition(" ")
+            if key in self.FIELDS:
+                values[key] = int(value)
+        return values
+
+    def __enter__(self):
+        if self.path is None or not self.path.exists():
+            return self
+        self.first = self._read()
+
+        def run():
+            while not self._stop.wait(self.period_s):
+                try:
+                    values = self._read()
+                except OSError:
+                    continue
+                self.samples += 1
+                for key, value in values.items():
+                    self.peaks[key] = max(self.peaks[key], value)
+
+        self._thread = threading.Thread(target=run, name="memcg-peaks", daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join()
+        return False
+
+    def report(self):
+        return {"cgroup_memory_stat": str(self.path) if self.path else None,
+                "samples": self.samples, "period_s": self.period_s,
+                "start": self.first, "peak": self.peaks}
+
+
+def _sink_variant(base, variant, *, window_bytes):
+    """A candidate cotangent scratch writer (PQ #1152), measured on the same slots.
+
+    ``current`` is the tree's own class. The others keep its slots, file and
+    checks and change only how written bytes leave the page cache:
+
+    * ``window``: buffered writes; one ``fdatasync`` and one ranged
+      ``DONTNEED`` once the unsynced range reaches ``window_bytes``.
+    * ``writebehind``: buffered writes; ``sync_file_range(WRITE)`` starts each
+      entry's writeback at once, and entries more than ``window_bytes`` behind
+      are waited on and dropped by range.
+    * ``direct``: ``O_DIRECT`` through one aligned bounce buffer, so no page
+      cache holds scratch bytes at all.
+    """
+    if variant == "current":
+        return base
+    import ctypes
+    import mmap
+    import torch
+    libc = ctypes.CDLL(None, use_errno=True)
+    sync_file_range = libc.sync_file_range
+    sync_file_range.argtypes = [ctypes.c_int, ctypes.c_int64, ctypes.c_int64, ctypes.c_uint]
+    wait_before, start_write, wait_after = 1, 2, 4
+
+    def sfr(fd, offset, size, flags):
+        if sync_file_range(fd, offset, size, flags) != 0:
+            err = ctypes.get_errno()
+            raise OSError(err, os.strerror(err))
+
+    def drop(fd, offset, size):
+        os.posix_fadvise(fd, offset, size, os.POSIX_FADV_DONTNEED)
+
+    def checked_view(self, key, tensor):
+        if self._file is None:
+            raise RuntimeError("cotangent scratch is closed")
+        offset, size, shape, dtype = self._slots[key]
+        if (tensor.device.type != 'cpu' or tensor.dtype != dtype
+                or tuple(tensor.shape) != shape):
+            raise ValueError("cotangent scratch rollover changed shape/dtype")
+        self._written.discard(key)
+        compact = tensor.detach().contiguous()
+        return offset, size, memoryview(compact.view(torch.uint8).reshape(-1).numpy())
+
+    def write_all(fd, view, offset, size):
+        done = 0
+        while done < size:
+            put = os.pwritev(fd, [view[done:]], offset + done)
+            if put <= 0:
+                raise RuntimeError("cotangent scratch short write")
+            done += put
+
+    def read_slot(self, key, fd, *, drop_range):
+        if self._file is None or key not in self._written:
+            raise RuntimeError("cotangent scratch slot is not ready")
+        offset, size, shape, dtype = self._slots[key]
+        tensor = torch.empty(shape, dtype=dtype, device='cpu')
+        view = memoryview(tensor.view(torch.uint8).reshape(-1).numpy())
+        try:
+            done = 0
+            while done < size:
+                got = os.preadv(fd, [view[done:]], offset + done)
+                if got <= 0:
+                    raise RuntimeError("cotangent scratch slot is truncated")
+                done += got
+            if drop_range:
+                drop(fd, offset, size)
+        finally:
+            view.release()
+        return tensor
+
+    if variant == "window":
+        class Window(base):
+            _unsynced = None
+
+            def _flush(self):
+                if self._unsynced:
+                    lo, hi, keys = self._unsynced
+                    self._unsynced = None
+                    fd = self._file.fileno()
+                    try:
+                        os.fdatasync(fd)
+                        drop(fd, lo, hi - lo)
+                    except BaseException:
+                        self._written.difference_update(keys)
+                        raise
+
+            def __setitem__(self, key, tensor):
+                offset, size, view = checked_view(self, key, tensor)
+                try:
+                    write_all(self._file.fileno(), view, offset, size)
+                finally:
+                    view.release()
+                lo, hi, keys = self._unsynced or (offset, offset + size, [])
+                self._unsynced = (min(lo, offset), max(hi, offset + size), keys + [key])
+                self._written.add(key)
+                if self._unsynced[1] - self._unsynced[0] >= window_bytes:
+                    self._flush()
+
+            def __getitem__(self, key):
+                # Dirty pages read back from the cache; only synced slots are dropped.
+                offset, size = self._slots[key][:2]
+                pending = self._unsynced
+                inside = pending and pending[0] < offset + size and offset < pending[1]
+                return read_slot(self, key, self._file.fileno(), drop_range=not inside)
+        return Window
+
+    if variant == "writebehind":
+        class WriteBehind(base):
+            def _pending(self):
+                if not hasattr(self, "_behind"):
+                    self._behind = []
+                return self._behind
+
+            def _retire(self, keep_bytes):
+                pending, fd = self._pending(), self._file.fileno()
+                while pending and sum(size for _o, size, _k in pending) > keep_bytes:
+                    offset, size, key = pending.pop(0)
+                    try:
+                        sfr(fd, offset, size, wait_before | start_write | wait_after)
+                        drop(fd, offset, size)
+                    except BaseException:
+                        self._written.discard(key)
+                        raise
+
+            def __setitem__(self, key, tensor):
+                offset, size, view = checked_view(self, key, tensor)
+                fd = self._file.fileno()
+                try:
+                    write_all(fd, view, offset, size)
+                finally:
+                    view.release()
+                sfr(fd, offset, size, start_write)
+                self._pending().append((offset, size, key))
+                self._written.add(key)
+                self._retire(window_bytes)
+
+            def __getitem__(self, key):
+                offset, size = self._slots[key][:2]
+                inside = any(o == offset for o, _s, _k in self._pending())
+                return read_slot(self, key, self._file.fileno(), drop_range=not inside)
+        return WriteBehind
+
+    if variant in ("direct", "direct-zc"):
+        zero_copy = variant == "direct-zc"
+
+        class Direct(base):
+            copies = 0
+            direct_calls = 0
+
+            def _direct(self):
+                if getattr(self, "_dfd", None) is None:
+                    from prismaquant.perturbed_x_cache import _direct_io_block
+                    self._dfd = os.open(f"/proc/self/fd/{self._file.fileno()}",
+                                        os.O_RDWR | os.O_DIRECT | os.O_CLOEXEC)
+                    self._grid = _direct_io_block(self._dfd)
+                    self._bounce = mmap.mmap(-1, self.max_slot_bytes)
+                    self._bounce_view = memoryview(self._bounce)
+                return self._dfd
+
+            def _on_grid(self, view):
+                import ctypes
+                address = ctypes.addressof(ctypes.c_char.from_buffer(view)) \
+                    if not view.readonly else None
+                return address is not None and address % self._grid == 0
+
+            def __setitem__(self, key, tensor):
+                offset, size, view = checked_view(self, key, tensor)
+                fd = self._direct()
+                if offset % self._grid or size % self._grid:
+                    raise RuntimeError("direct scratch bench needs grid-sized slots")
+                try:
+                    if zero_copy and self._on_grid(view):
+                        write_all(fd, view, offset, size)
+                    else:
+                        self._bounce_view[:size] = view
+                        type(self).copies += 1
+                        write_all(fd, self._bounce_view, offset, size)
+                finally:
+                    view.release()
+                type(self).direct_calls += 1
+                self._written.add(key)
+
+            def __getitem__(self, key):
+                if self._file is None or key not in self._written:
+                    raise RuntimeError("cotangent scratch slot is not ready")
+                offset, size, shape, dtype = self._slots[key]
+                fd = self._direct()
+                tensor = torch.empty(shape, dtype=dtype, device='cpu')
+                out = memoryview(tensor.view(torch.uint8).reshape(-1).numpy())
+                try:
+                    target = out if zero_copy and self._on_grid(out) else self._bounce_view
+                    done = 0
+                    while done < size:
+                        got = os.preadv(fd, [target[done:size]], offset + done)
+                        if got <= 0:
+                            raise RuntimeError("cotangent scratch slot is truncated")
+                        done += got
+                    if target is not out:
+                        out[:] = self._bounce_view[:size]
+                        type(self).copies += 1
+                finally:
+                    out.release()
+                return tensor
+
+            def close(self):
+                if getattr(self, "_dfd", None) is not None:
+                    self._bounce_view.release()
+                    self._bounce.close()
+                    os.close(self._dfd)
+                    self._dfd = None
+                super().close()
+        return Direct
+    raise SystemExit(f"unknown sink variant {variant!r}")
+
+
 def child_stage_b(args, slice_doc) -> dict:
     from prismaquant.joint_adjoint_checkpoints import load_adjoint_checkpoint
     resolver = _bind(args.manifest_sha256, args.allowed_tiers)
@@ -336,14 +699,22 @@ def child_stage_b(args, slice_doc) -> dict:
     sink = None
 
     discard = args.sink == "discard" or args.child == "stage-b-discard"
+    variant = os.environ.get("BENCH_SINK_VARIANT", "current")
+    readback = {}
 
     def factory(rows):
         nonlocal arena, sink
         if discard:
             sink = _DiscardSink()
             return sink
+        from prismaquant.joint_adjoint_checkpoints import exact_entry_windows
         from prismaquant.perturbed_x_cache import ExactCotangentScratch
-        arena = ExactCotangentScratch(
+        windows, _ahead = exact_entry_windows(
+            rows, max_resident_bytes=policy["max_resident_bytes"])
+        window_bytes = max(sum(int(r["tensor_bytes"]) for r in w) for w in windows)
+        scratch_class = _sink_variant(ExactCotangentScratch, variant,
+                                      window_bytes=window_bytes)
+        arena = scratch_class(
             rows, directory=args.scratch_root, max_bytes=args.scratch_max_bytes,
             max_tensor_bytes=policy["max_resident_bytes"])
         return arena
@@ -357,8 +728,10 @@ def child_stage_b(args, slice_doc) -> dict:
             raise RuntimeError("bench residency budget exceeded")
 
     io0 = proc_io()
+    memcg = MemcgPeaks()
     started = time.monotonic()
     try:
+      with memcg:
         cotangents, _adjoint, _pass = _call_supported(
             load_adjoint_checkpoint, args.space, record, cotangent_factory=factory,
             shared_state_max_bytes=policy["max_auxiliary_bytes"],
@@ -371,6 +744,17 @@ def child_stage_b(args, slice_doc) -> dict:
         got = len(cotangents) if sink is None else sink.count
         if got != entries:
             raise RuntimeError(f"stage-b read {got} of {entries} entries")
+        if arena is not None:
+            # Every slot read back once, in plane order, as Stage B's renders do.
+            back = time.monotonic()
+            nbytes = 0
+            for key in list(arena):
+                tensor = arena[key]
+                nbytes += tensor.numel() * tensor.element_size()
+                del tensor
+            readback = {"slots": len(arena), "bytes": nbytes,
+                        "wall_s": round(time.monotonic() - back, 4)}
+            readback["mb_s"] = round(nbytes / max(readback["wall_s"], 1e-9) / 1e6, 1)
     finally:
         if arena is not None:
             arena.close()
@@ -378,7 +762,81 @@ def child_stage_b(args, slice_doc) -> dict:
             "wall_s": round(wall, 4), "entries_per_s": round(entries / wall, 3),
             "mb_s": round(file_bytes / wall / 1e6, 1),
             "resident_peak_bytes": resident["peak"], "io": _io_delta(io0, proc_io()),
-            "counters": _counters(), "residency": _residency(resolver)}
+            "counters": _counters(), "residency": _residency(resolver),
+            "sink": "discard" if discard else variant, "readback": readback,
+            "memcg": memcg.report()}
+
+
+def child_sink_feed(args, slice_doc) -> dict:
+    """The cotangent scratch alone, fed from memory: no reads, no link.
+
+    The Stage B plane's slots (names, shapes, dtypes and order from the
+    slice) are written from a small pool of distinct in-memory tensors, as
+    the checkpoint load writes them; then one chain roll reads and rewrites
+    every slot, as ``render_free_layer_roll`` does per chain layer; then
+    every slot is read back and compared with the tensor it was written
+    from. ``BENCH_SINK_VARIANT`` picks the writer (see ``_sink_variant``);
+    ``memcg`` holds the cgroup's peak file, dirty and writeback bytes.
+    """
+    import torch
+    from prismaquant.joint_adjoint_checkpoints import exact_entry_windows
+    from prismaquant.perturbed_x_cache import ExactCotangentScratch
+    variant = os.environ.get("BENCH_SINK_VARIANT", "current")
+    policy = slice_doc["boundary_storage"]["policy"]
+    rows = []
+    for entry in slice_doc["checkpoint"]["activation_entries"]:
+        name = re.sub(r"-at-[0-9]+$", "", entry["name"])
+        rows.append({"name": name, "shape": list(entry["shape"]),
+                     "dtype": entry["dtype"], "tensor_bytes": int(entry["tensor_bytes"])})
+    windows, _ahead = exact_entry_windows(rows, max_resident_bytes=policy["max_resident_bytes"])
+    window_bytes = max(sum(r["tensor_bytes"] for r in w) for w in windows)
+    scratch_class = _sink_variant(ExactCotangentScratch, variant, window_bytes=window_bytes)
+    shape = tuple(rows[0]["shape"])
+    dtype = getattr(torch, rows[0]["dtype"].removeprefix("torch."))
+    generator = torch.Generator().manual_seed(1152)
+    pool = [torch.randn(shape, generator=generator).to(dtype) for _ in range(8)]
+    keys = [tuple(int(x) for x in r["name"].split("-")[1:]) for r in rows]
+    total = sum(r["tensor_bytes"] for r in rows)
+    phases = {}
+    arena = scratch_class(rows, directory=args.scratch_root,
+                          max_bytes=args.scratch_max_bytes,
+                          max_tensor_bytes=policy["max_resident_bytes"])
+    memcg_all = MemcgPeaks()
+    try:
+        with memcg_all:
+            for phase in ("load", "roll", "readback"):
+                memcg = MemcgPeaks()
+                started = time.monotonic()
+                mismatches = 0
+                with memcg:
+                    for index, key in enumerate(keys):
+                        if phase == "load":
+                            arena[key] = pool[index % len(pool)]
+                        elif phase == "roll":
+                            tensor = arena[key]
+                            del tensor
+                            arena[key] = pool[(index + 1) % len(pool)]
+                        else:
+                            tensor = arena[key]
+                            if not torch.equal(tensor, pool[(index + 1) % len(pool)]):
+                                mismatches += 1
+                            del tensor
+                wall = time.monotonic() - started
+                moved = total * (2 if phase == "roll" else 1)
+                phases[phase] = {"wall_s": round(wall, 4),
+                                 "entries_per_s": round(len(keys) / wall, 2),
+                                 "mb_s": round(moved / wall / 1e6, 1),
+                                 "mismatches": mismatches, "memcg": memcg.report()}
+    finally:
+        arena.close()
+    extra = {k: getattr(scratch_class, k) for k in ("copies", "direct_calls")
+             if hasattr(scratch_class, k)}
+    load = phases["load"]
+    return {"sink": variant, "entries": len(keys), "tensor_bytes": total,
+            "window_bytes": window_bytes, "wall_s": load["wall_s"],
+            "entries_per_s": load["entries_per_s"], "mb_s": load["mb_s"],
+            "phases": phases, "memcg": memcg_all.report(), "variant_counters": extra,
+            "scratch_fs": _statfs_type(args.scratch_root)}
 
 
 def child_stage_a(args, slice_doc) -> dict:
@@ -441,7 +899,10 @@ def _residency(resolver):
     return out
 
 
+LOCAL_WORKLOADS = frozenset({"sink-feed"})
+
 CHILDREN = {"paths": child_paths, "ceiling": child_ceiling,
+            "sink-ceiling": child_sink_ceiling, "sink-feed": child_sink_feed,
             "stage-b": child_stage_b, "stage-b-discard": child_stage_b,
             "stage-a": child_stage_a}
 
@@ -524,24 +985,35 @@ def driver_main(args) -> int:
               "host": os.uname().nodename, "action_key": os.environ.get(
                   "PRISMABUILD_ACTION_KEY"), "arms": arms, "argv": sys.argv,
               "runs": []}
-    paths = run_child(args, "paths", tree=own_tree, sdk_root=None, out=out,
-                      label="paths", profile=False)
-    copies = paths.pop("copies")
-    (out / "copies.json").write_text(json.dumps(copies))
-    report["paths"] = paths
-    if paths["verdict"] != "hit":
-        print(f"warning: landing verdict {paths['verdict']}", flush=True)
-    staged_files = [p for c in copies for p in (c["stage_path"], c["ram_path"]) if p]
+    # Local workloads read nothing staged, so they wait for no landing.
+    staged = [w for w in args.workloads if w not in LOCAL_WORKLOADS]
+    staged_files = []
+    if staged or args.ceiling_threads:
+        paths = run_child(args, "paths", tree=own_tree, sdk_root=None, out=out,
+                          label="paths", profile=False)
+        copies = paths.pop("copies")
+        (out / "copies.json").write_text(json.dumps(copies))
+        report["paths"] = paths
+        if paths["verdict"] != "hit":
+            print(f"warning: landing verdict {paths['verdict']}", flush=True)
+        staged_files = [p for c in copies for p in (c["stage_path"], c["ram_path"]) if p]
     if args.ceiling_threads:
         report["ceiling"] = run_child(
             args, "ceiling", tree=own_tree, sdk_root=None, out=out, label="ceiling",
             profile=False, extra=["--copies", str(out / "copies.json")])["ceiling"]
         (out / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True))
+    if args.sink_ceiling_bytes:
+        started_unix = time.time()
+        report["sink_ceiling"] = run_child(
+            args, "sink-ceiling", tree=own_tree, sdk_root=None, out=out,
+            label="sink-ceiling", profile=False)
+        report["sink_ceiling"]["started_unix"] = round(started_unix, 3)
+        (out / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True))
     for repeat in range(args.repeats):
         for workload in args.workloads:
             order = arms if repeat % 2 == 0 else list(reversed(arms))
             for arm in order:
-                advised = drop_client_cache(staged_files)
+                advised = drop_client_cache(staged_files) if staged_files else 0
                 label = f"r{repeat}-{workload}-{arm['name']}"
                 result = run_child(args, workload, tree=arm["tree"],
                                    sdk_root=arm["sdk_root"], out=out, label=label,
@@ -572,6 +1044,9 @@ def main(argv=None) -> int:
     parser.add_argument("--sink", choices=("scratch", "discard"), default="scratch")
     parser.add_argument("--scratch-root", default=None)
     parser.add_argument("--scratch-max-bytes", type=int, default=64 << 30)
+    parser.add_argument("--sink-ceiling-bytes", type=int, default=0,
+                        help="write this many bytes per mode to the scratch root "
+                             "to measure its sequential write rate; 0 skips it")
     parser.add_argument("--stage-a-boundary", default="44")
     parser.add_argument("--stage-a-batches", type=int, default=16)
     parser.add_argument("--stage-a-windows", type=int, default=8)
@@ -617,6 +1092,7 @@ def main(argv=None) -> int:
         "--allowed-tiers", args.allowed_tiers, "--land-wait-s", str(args.land_wait_s),
         "--ram-wait-s", str(args.ram_wait_s),
         "--sink", args.sink, "--scratch-max-bytes", str(args.scratch_max_bytes),
+        "--sink-ceiling-bytes", str(args.sink_ceiling_bytes),
         "--stage-a-boundary", args.stage_a_boundary,
         "--stage-a-batches", str(args.stage_a_batches),
         "--stage-a-windows", str(args.stage_a_windows),
