@@ -114,7 +114,12 @@ def _qualification():
 QUALIFIED_FIELDS = ("name", "source_sha256", "compiled", "probe", "runtime")
 
 
-def _require_qualified(identity) -> str | None:
+def _require_qualified(identity) -> tuple[str | None, bool]:
+    """The packaged qualification's digest, and whether this runtime matches it.
+
+    Certified mode refuses a mismatch. Dev mode prints it and returns
+    ``False``, so the kernel record says the run is not the qualified one.
+    """
     from .dev_mode import seal_check
     qualification, digest = _qualification()
     expected = None if qualification is None else {
@@ -122,21 +127,26 @@ def _require_qualified(identity) -> str | None:
     actual = {key: identity.get(key) for key in QUALIFIED_FIELDS}
     changed = (["qualification file"] if expected is None else
                sorted(key for key in QUALIFIED_FIELDS if actual[key] != expected[key]))
-    seal_check("KDA capture kernel qualification", expected, actual,
-               where="packaged kernels/kda_chunk_qualification.json versus this runtime",
-               refusal=lambda: KdaCaptureKernelRefused(
-                   "KDA capture kernel runs outside its packaged qualification: "
-                   + ", ".join(changed)))
-    return digest
+    matched = seal_check(
+        "KDA capture kernel qualification", expected, actual,
+        where="packaged kernels/kda_chunk_qualification.json versus this runtime",
+        refusal=lambda: KdaCaptureKernelRefused(
+            "KDA capture kernel runs outside its packaged qualification: "
+            + ", ".join(changed)))
+    return digest, matched
 
 
 class AdmittedKdaKernel:
     """One quantum's admitted kernel: its identity, its pass scope and its counts."""
 
-    def __init__(self, dispatch, identity, qualification_sha256):
+    def __init__(self, dispatch, identity, qualification_sha256, *,
+                 qualification_matched=False):
         self._dispatch = dispatch
         self.identity = identity
+        # The digest of the packaged qualification this runtime was compared
+        # with (None without one), and whether the identities were equal.
         self.qualification_sha256 = qualification_sha256
+        self.qualification_matched = bool(qualification_matched)
         self.identity_sha256 = hashlib.sha256(json.dumps(
             identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         self.passes = 0
@@ -162,6 +172,7 @@ class AdmittedKdaKernel:
         return {"executed": True, "name": self.identity["name"],
                 "identity_sha256": self.identity_sha256,
                 "qualification_sha256": self.qualification_sha256,
+                "qualification_matched": self.qualification_matched,
                 "passes": self.passes, "calls": self.calls}
 
 
@@ -205,7 +216,8 @@ def admit_kda_capture_kernel(name, model, layer_module, *, device, emits_handoff
     identity = {"schema": IDENTITY_SCHEMA, "name": name, "declaration": declaration,
                 "source_sha256": kda_chunk.source_sha256(), "compiled": compiled,
                 "probe": probe, "runtime": _runtime_identity(device)}
-    return AdmittedKdaKernel(dispatch, identity, _require_qualified(identity))
+    digest, matched = _require_qualified(identity)
+    return AdmittedKdaKernel(dispatch, identity, digest, qualification_matched=matched)
 
 
 def qualification_candidate(device) -> dict:
