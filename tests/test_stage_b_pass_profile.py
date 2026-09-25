@@ -86,3 +86,23 @@ def test_other_errors_propagate(tmp_path):
             raise RuntimeError("boom")
     timing = json.loads((tmp_path / "quantum-p1-capture.timing.json").read_text())
     assert timing["ended_by"] == "RuntimeError"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA (CUPTI trace)")
+def test_cuda_trace_carries_kernels_and_the_device_to_host_copy(tmp_path):
+    import gzip
+
+    request = pass_profile_request({PROFILE_ENV: str(tmp_path),
+                                    SPEC_ENV: "capture=0,wait=1,warmup=1,active=2"})
+    session = request.session(kind="capture", probe=0, identity={"quantum_id": "cuda"})
+    a = torch.randn(1024, 1024, device="cuda", dtype=torch.bfloat16)
+    with session:
+        for _ in range(5):
+            session.unit_begin()
+            (a @ a).float().sum().to("cpu")
+            session.unit_end()
+    events = json.loads(gzip.open(tmp_path / "cuda-p0-capture.trace.json.gz").read())
+    events = events["traceEvents"] if isinstance(events, dict) else events
+    categories = {event.get("cat") for event in events}
+    assert "kernel" in categories
+    assert any(event.get("cat") == "gpu_memcpy" for event in events)
