@@ -43,14 +43,6 @@ def mount_bytes():
     return out
 
 
-def proc_io():
-    out = {}
-    for line in open("/proc/self/io"):
-        key, _, value = line.partition(":")
-        out[key.strip()] = int(value)
-    return out
-
-
 def drop_client_cache(paths):
     """Forget what this client cached, so the next read is a read."""
     for path in paths:
@@ -102,6 +94,7 @@ def main():
     import torch
     from safetensors import safe_open
     from prismaquant import residency_shard_reader
+    from prismaquant.io_spans import read_proc_io
     from prismaquant.layer_streaming import _source_safe_open
     from prismaquant.residency_map import bind_residency_manifest, residency_resolver
 
@@ -157,14 +150,14 @@ def main():
         residency_shard_reader.reset_read_shape_cache_for_tests()
         shape = residency_shard_reader._read_shape(target["stage_path"])
         drop_client_cache([target["stage_path"]])
-        m0, i0 = mount_bytes(), proc_io()
+        m0, i0 = mount_bytes(), read_proc_io()
         r0 = resource.getrusage(resource.RUSAGE_SELF)
         t0 = time.time()
         with _source_safe_open(target["shard"], framework="pt") as handle:
             tensor = handle.get_tensor(target["name"])
         wall = time.time() - t0
         r1 = resource.getrusage(resource.RUSAGE_SELF)
-        m1, i1 = mount_bytes(), proc_io()
+        m1, i1 = mount_bytes(), read_proc_io()
         digest = digest_tensor(tensor, torch)
         stage_client = m1["/stage/prewarm"][0] - m0["/stage/prewarm"][0]
         stage_server = m1["/stage/prewarm"][1] - m0["/stage/prewarm"][1]
