@@ -62,7 +62,10 @@ otherwise lost when PrismaBuild retires the spool namespace.
 Because PB's ``release_group`` re-checks every landed destination against
 the export's receipt, a retired entry's canonical file must outlive the
 group's release. The owner therefore unlinks it only once ``released``
-says so (``StreamedBoundaryArtifacts._retire``, the deferred unlink).
+says so (``StreamedBoundaryArtifacts._retire``, the deferred unlink). A group
+released for room before its reads are done keeps its retired files until
+its last live entry is retired too (PQ #1236): that entry's read publishes
+or restages the whole group, and PB stats every origin in it.
 """
 from __future__ import annotations
 
