@@ -9,7 +9,7 @@ name = "prismaquant"
 version = "0.16.2"
 description = "Mixed-precision quantization allocator for LLMs: every layer refracts into a different format based on its sensitivity."
 readme = "README.md"
-license = "Apache-2.0"
+license = "LicenseRef-PrismaQuant-Attribution-1.0"
 # 3.12 is the supported floor as of 2026-08-29. 3.11 was technically
 # sufficient for the language features used (prismaquant/schemas.py needs
 # typing.NotRequired, 3.11+), but nothing is exercised on it: the reference
