@@ -1506,7 +1506,17 @@ declared input is then read through a lifetime-pinned lease window
   header read: the source plan and the spill bound's seal
   (`--replay-mode spill`, PQ #1138) read it off the stage and detect the
   model profile from those bytes (`detect_profile(config=)`, PQ #1139)
-  instead of opening the pool copy.
+  instead of opening the pool copy;
+- for a source checkpoint with FP8 weights, the FP8 scale map the source
+  plan builds (`_build_fp8_scale_inv_map`, PQ #1219): its dequant block size
+  and MXFP4 declarations (`_declared_weight_block_size`,
+  `autoscale.declared_fp4_expert_dtype`, `_check_declared_mxfp4_scale_fmt`)
+  come from that same staged config (`config=`), and a profile's
+  `fp8_scale_pairs` (DeepSeek-V4's `.scale` pairing) scans the staged index
+  (`raw_weight_map=`) instead of opening its own. DeepSeek-V4 itself does not
+  reach the map through the source plan: its head extras come from the live
+  module tree, so the plan refuses it first. Nor does a Qwen3.5-MoE source
+  reach its profile's own index read (`source_tensor_name`).
 
 The bytes must hash to the map entry's digest and to the caller's own pinned
 digest. A read the stage does not hold refuses. It is never read from the pool.
@@ -1525,15 +1535,6 @@ as before.
 cost pickle, about 36k journal units) still opens its inputs at the pool
 path. That is about 10.9 GB, the bulk of the head phase. PQ #1082 routes it.
 
-**Not routed either** (found by reading the code during PQ #1139, not
-measured): for a source checkpoint with FP8 weights,
-`streaming_source_plan`'s `_build_fp8_scale_inv_map` opens `config.json` at
-its pool path for the block size and the MXFP4 declaration
-(`_declared_weight_block_size`, `autoscale.declared_fp4_expert_dtype`,
-`_check_declared_mxfp4_scale_fmt`), and DeepSeek-V4's `fp8_scale_pairs`
-opens the checkpoint index there. The fixtures that gate these reads have no
-FP8 weights.
-
 Gates:
 - `tests/test_stage_b_prep_staged_reads_1092.py`: a real PrismaBuild lease
   stack in which every generator input opens at its map `stage_path`;
@@ -1541,6 +1542,12 @@ Gates:
   sealed under strict reads over a resolver double (no PrismaBuild), with
   `config.json` read only off the stage; without its header read the run
   refuses;
+- `tests/test_stage_b_fp8_source_strict_reads_1219.py`: a real FP8 source
+  checkpoint (`float8_e4m3fn` weights, `weight_scale_inv`, a declared
+  `weight_block_size`). The generator's strict spill run, over a Qwen3 and a
+  Qwen3.5-MoE source, opens no source file at its pool path; the FP8 map's
+  block size and MXFP4 declarations come from the staged config; DeepSeek-V4
+  pairs its scales from the caller's index;
 - `tests/test_stage_b_prep_io_1070.py`.
 
 No format, pipeline default, stage or ship gate changes.
@@ -2607,6 +2614,16 @@ under that plan while the records keep naming the sealed plan, which is never
 rewritten. Dev mode stamps a differing digest; certified mode refuses it. See
 the entry after "Sealing is off by default". A dispatcher flag is added; no
 format, pipeline default, stage, lane or ship gate changes.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1219`) for **an FP8 source checkpoint's
+config and index read only off the stage under the Stage B preparation's
+strict reads** (PQ #1219). The source plan's FP8 scale map took its block
+size and MXFP4 declarations from `config.json` at its pool path, and
+DeepSeek-V4's `fp8_scale_pairs` opened the index there. Both now read the
+staged bytes the plan already holds (`config=`, `raw_weight_map=`), and the
+"Not routed either" note #1139 added is removed. See "The Stage B
+preparation reads its declared inputs off the stage". No format, pipeline
+default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1129`) for **a spec that pins a
 container cache to the overlay refuses at the joint dispatcher's spec check**

@@ -849,7 +849,8 @@ def declared_expert_dtype_covers(name: str) -> bool:
 _PACKED_BYTE_DTYPES = frozenset({"I8", "U8"})
 
 
-def declared_fp4_expert_dtype(model_path: str) -> bool:
+def declared_fp4_expert_dtype(model_path: str, *,
+                              config: dict | None = None) -> bool:
     """True when the checkpoint config *explicitly* declares packed-FP4
     routed experts (DSv4-Flash: top-level `expert_dtype: "fp4"` alongside a
     block-FP8 `quantization_config`; the MXFP4 scale siblings are E8M0).
@@ -857,10 +858,17 @@ def declared_fp4_expert_dtype(model_path: str) -> bool:
     This declaration — never a tensor-shape heuristic — is what gates the
     streaming loader's MXFP4 decode (`layer_streaming` step 3b) and what
     the resident-size estimators key on: a nibble-packed I8 expert byte
-    dequants to 2 logical elements of the execution dtype."""
+    dequants to 2 logical elements of the execution dtype.
+
+    ``config`` is the checkpoint's parsed `config.json` when the caller
+    already read it, for example off the stage under the Stage B
+    preparation's strict reads (PQ #1219); the file is then not opened."""
     try:
-        with open(os.path.join(model_path, "config.json")) as f:
-            cfg = json.load(f)
+        if config is not None:
+            cfg = config
+        else:
+            with open(os.path.join(model_path, "config.json")) as f:
+                cfg = json.load(f)
         if not isinstance(cfg, dict):
             return False
         tc = cfg.get("text_config")
