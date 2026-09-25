@@ -289,6 +289,45 @@ def test_a_producer_commits_its_handoff_as_origin_batches(
     check_origin_batches(publication, producer, published, handoff)
 
 
+def test_every_handoff_template_declares_one_export_rate_family(
+        tmp_path, monkeypatch):
+    """PQ #1254: the rows' handoff exports share one learned rate (PB #1126).
+
+    Each producer row's handoff template is its own (a digest per row), so a
+    rate PrismaBuild learned per template was never learned at all. Every
+    handoff template declares ``export_rate_family``; PrismaBuild keys the
+    learned rate by it, and the owner's queued reference carries it to the
+    claim path that sizes the exports.
+    """
+    _src, pb_repo = pb_source(monkeypatch)
+    from prismabuild import adaptive_cpu, pool
+    from prismabuild import produced_output as po
+
+    import dispatch_joint_quanta as dispatch
+
+    producer, consumer, storage = band_campaign(tmp_path)
+    templates = [json.loads(dispatch.handoff_template_path(
+        record, plan={"execution": {"boundary_storage": storage}},
+        adjoint_slice=_adjoint_slice(record), tier=chain.TIER,
+        output_root=tmp_path / "run").read_text())
+        for record in (producer, consumer)]
+    family = dispatch.HANDOFF_EXPORT_RATE_FAMILY
+    for template in templates:
+        assert template["export_rate_family"] == family
+        assert po.validate_template(template) == template
+    digests = [po.template_sha256(template) for template in templates]
+    assert digests[0] != digests[1], "each row's template is its own"
+    assert {adaptive_cpu.export_rate_key(digest, family) for digest in digests} == {
+        adaptive_cpu.EXPORT_RATE_FAMILY_PREFIX + family}
+
+    # The owner's queued reference names the family beside its digest.
+    publication, q, _env = producer_owner(tmp_path, pb_repo, producer, storage)
+    owner = publication.instance["owner_action_key"]
+    item = json.loads(q.item_path(pool.CLAIMED, owner).read_text())
+    assert adaptive_cpu.export_rate_names(item["produced_output"]) == (
+        po.template_sha256(templates[0]), family)
+
+
 def test_a_read_back_handoff_template_is_refused(tmp_path, monkeypatch):
     """A handoff template that reads back could never commit its groups.
 
