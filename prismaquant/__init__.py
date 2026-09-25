@@ -243,10 +243,17 @@ def pretrained_initialization_contract(model):
 
 
 def validate_source_initialization_contract(value):
-    """Read either qualified source-loading route without conflating them."""
+    """Read a qualified source-loading route without conflating the routes.
+
+    The streamed text forward, a checkpoint load through ``from_pretrained``,
+    and the checkpoint load of one MTP layer outside that forward.
+    """
     if isinstance(value, dict) and value.get("schema") == "prismaquant.streaming_initialization.v1":
         from .streaming_model import validate_streaming_initialization_contract
         return validate_streaming_initialization_contract(value)
+    if isinstance(value, dict) and value.get("schema") == "prismaquant.mtp_layer_initialization.v1":
+        from .streaming_model import validate_mtp_layer_initialization_contract
+        return validate_mtp_layer_initialization_contract(value)
     return validate_pretrained_initialization_contract(value)
 
 
