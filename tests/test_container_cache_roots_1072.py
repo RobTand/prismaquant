@@ -3,24 +3,22 @@
 When a row declares bounded local scratch (PB #911), the launcher binds HF,
 Triton, inductor, XDG and PrismaQuant's temp parent under
 ``<scratch root>/container-cache/`` for each one the spec leaves unset. A spec
-value wins. The dispatcher warns, and does not refuse, when a spec pins one
-of them to ``/tmp``, ``/var/tmp`` or a path no writable mount covers. A row
-with no scratch launches exactly as before.
+value wins. A row with no scratch launches exactly as before. The dispatcher
+warned when a spec pinned one of them to ``/tmp``, ``/var/tmp`` or a path no
+writable mount covers; it now refuses unless the spec names a reason
+(PQ #1129, ``tests/test_overlay_cache_refusal_1129.py``).
 """
 from __future__ import annotations
 
 import importlib
-import json
 import sys
-import warnings
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from test_dispatch_joint_quanta import (  # noqa: E402,F401  (fixtures)
-    _COTANGENT, _SPILL, _scratch_quantum_argv, _portable_spec, campaign)
+from test_dispatch_joint_quanta import _COTANGENT, _SPILL  # noqa: E402
 
 COT_ROOT = "/home/rob/pb-scratch/cot"
 SPILL_ROOT = "/home/rob/pb-scratch/spill"
@@ -106,34 +104,3 @@ def test_no_scratch_launches_exactly_as_before(monkeypatch):
                                  uid=1000, gid=1000, image_id="sha256:resolved",
                                  environ={}) == argv
     assert not any(part.split("=", 1)[0] in CACHES for part in argv)
-
-
-def test_dispatcher_warns_and_does_not_refuse_an_overlay_pin(tmp_path, campaign):
-    import dispatch_joint_quanta as dispatch
-    env = {_SPILL[0]: SPILL_ROOT, _SPILL[1]: str(1 << 30),
-           "PRISMAQUANT_TMPDIR": "/tmp/pq-joint-pilot"}
-    build = _scratch_quantum_argv(tmp_path, campaign, env, (SPILL_ROOT,))
-    with pytest.warns(dispatch.OverlayCacheWarning,
-                      match="PRISMAQUANT_TMPDIR=/tmp/pq-joint-pilot") as caught:
-        argv = build()
-    assert "unset them" in str(caught[0].message)
-    sealed = json.loads(argv[argv.index("--spec") + 1])
-    # The spec is sealed as written: the defaults are derived at launch.
-    assert sealed["env"] == env
-
-
-def test_dispatcher_warns_without_scratch_too(tmp_path, campaign):
-    import dispatch_joint_quanta as dispatch
-    build = _scratch_quantum_argv(tmp_path, campaign, {"HF_HOME": "/tmp/pq-hf"}, ())
-    with pytest.warns(dispatch.OverlayCacheWarning, match="declare a bounded local"):
-        build()
-
-
-def test_dispatcher_is_silent_when_nothing_is_pinned(tmp_path, campaign):
-    env = {_SPILL[0]: SPILL_ROOT, _SPILL[1]: str(1 << 30)}
-    build = _scratch_quantum_argv(tmp_path, campaign, env, (SPILL_ROOT,))
-    import dispatch_joint_quanta as dispatch
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        build()
-    assert not [w for w in caught if issubclass(w.category, dispatch.OverlayCacheWarning)]
