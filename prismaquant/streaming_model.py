@@ -85,14 +85,13 @@ from .layer_streaming import (
 )
 from .source_read_plan import select_source_tensors, check_sealed_selection
 from .tied_embeddings import resolve_tied_output_embedding
+from .digests import DIRECT_ASCII_STRICT
 
 
 _STREAMING_INITIALIZATION_SCHEMA = "prismaquant.streaming_initialization.v1"
 
 
-def _initialization_digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                    allow_nan=False).encode()).hexdigest()
+_initialization_digest = DIRECT_ASCII_STRICT.sha256
 
 
 def validate_streaming_initialization_contract(value):

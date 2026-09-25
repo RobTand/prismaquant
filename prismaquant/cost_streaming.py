@@ -28,6 +28,7 @@ from prismaquant.layer_streaming import (
     _compute_position_embeddings,
     _get_final_norm,
 )
+from .digests import DIRECT_ASCII_LAX
 
 
 STREAMED_MODEL_IDENTITY_SCHEMA = "prismaquant.streamed_model.identity.v1"
@@ -5999,8 +6000,7 @@ def _read_source_checkpoint_digest_cache(
     return reusable
 
 
-def canonical_fingerprint_key(fingerprint: dict[str, object]) -> str:
-    return json.dumps(fingerprint, sort_keys=True, separators=(",", ":"))
+canonical_fingerprint_key = DIRECT_ASCII_LAX.text
 
 
 #: The stat fields that prove the bytes did not change. ``device`` is

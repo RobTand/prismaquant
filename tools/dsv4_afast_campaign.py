@@ -13,7 +13,6 @@ import argparse
 import copy
 import ctypes
 import gc
-import hashlib
 import json
 import math
 import os
@@ -73,6 +72,7 @@ from prismaquant.nvfp4_cb_footprint import cb_fields_for_context
 from prismaquant.production_weight_cache import (
     canonical_cb_col_weights_sha256,
 )
+from prismaquant.digests import DIRECT_ASCII_STRICT
 
 
 SCHEMA = "prismaquant.dsv4_afast_minchain.v1"
@@ -322,10 +322,7 @@ def _configure() -> None:
         torch.cuda.synchronize()
 
 
-def _sha256_text(payload: Mapping[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")).hexdigest()
+_sha256_text = DIRECT_ASCII_STRICT.sha256
 
 
 def _pava_decreasing(y: np.ndarray) -> np.ndarray:

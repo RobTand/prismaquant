@@ -46,6 +46,7 @@ from prismaquant.memory_management import (
 from prismaquant.nvfp4_activation_contract import (
     require_matching_input_global_scale,
 )
+from .digests import DIRECT_ASCII_STRICT
 
 _FNAME_SUB = re.compile(r"[^A-Za-z0-9_-]")
 _SHARED_FROZEN_WEIGHT_FORMAT_CACHE: OrderedDict[
@@ -960,8 +961,7 @@ class ExactActivationReference:
     sha256: str
 
 
-def _exact_activation_json(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+_exact_activation_json = DIRECT_ASCII_STRICT.text
 
 
 def _activation_file_signature(path):
