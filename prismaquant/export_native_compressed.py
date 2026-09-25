@@ -5869,14 +5869,12 @@ def _quantize_2d_nvfp4_group_batched(
 
 
 def _host_mem_available_bytes() -> int:
+    from .io_spans import mem_available_bytes
+
     try:
-        with open("/proc/meminfo") as f:
-            for line in f:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * 1024
-    except OSError:
-        pass
-    return 1 << 30
+        return mem_available_bytes()
+    except (OSError, RuntimeError):
+        return 1 << 30
 
 
 def _export_vector_chunk_len(

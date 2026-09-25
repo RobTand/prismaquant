@@ -1169,11 +1169,6 @@
    "tools/band_serial_handoff_live_pair.py",
    "tools/prepare_extended_joint_quanta.py"
   ],
-  "proc_io": [
-   "tools/profile_stage_b_head.py",
-   "tools/staged_exact_read_bench.py",
-   "tools/staged_read_stream_ab.py"
-  ],
   "read_safetensors_header": [
    "prismaquant/source_read_plan.py",
    "tools/tp2_budget_plan.py"

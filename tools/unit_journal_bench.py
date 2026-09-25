@@ -305,7 +305,7 @@ def _py_spy(explicit):
 
 
 def _power(seconds_fn):
-    from prismaquant.joint_adjoint_checkpoints import GpuPowerSampler
+    from prismaquant.io_spans import GpuPowerSampler
 
     sampler = GpuPowerSampler().start()
     try:

@@ -671,25 +671,14 @@ def _use_host_available_for_uma(device: torch.device | None = None) -> bool:
 
 
 def _host_memory_info() -> tuple[int, int] | None:
-    try:
-        import psutil
+    """``(MemAvailable, MemTotal)`` in bytes, or ``None`` when unreadable."""
+    from .io_spans import read_meminfo
 
-        vm = psutil.virtual_memory()
-        return int(vm.available), int(vm.total)
-    except Exception:
-        pass
     try:
-        values: dict[str, int] = {}
-        with open("/proc/meminfo") as f:
-            for line in f:
-                key, rest = line.split(":", 1)
-                if key in {"MemAvailable", "MemTotal"}:
-                    values[key] = int(rest.strip().split()[0]) * 1024
-        if "MemAvailable" in values and "MemTotal" in values:
-            return values["MemAvailable"], values["MemTotal"]
+        values = read_meminfo()
+        return values["MemAvailable"], values["MemTotal"]
     except Exception:
         return None
-    return None
 
 
 def _dynamic_gpu_memory_budget_bytes(

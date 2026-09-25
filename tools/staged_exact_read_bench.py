@@ -115,17 +115,6 @@ def mountstats_delta(before: dict, after: dict) -> dict:
     return delta
 
 
-def proc_io() -> dict:
-    out = {}
-    try:
-        for line in open("/proc/self/io"):
-            key, _, value = line.partition(":")
-            out[key.strip()] = int(value)
-    except OSError:
-        pass
-    return out
-
-
 def drop_client_cache(paths) -> int:
     """Forget what this client cached for ``paths``; returns files advised."""
     done = 0
@@ -691,6 +680,7 @@ def _sink_variant(base, variant, *, window_bytes):
 
 
 def child_stage_b(args, slice_doc) -> dict:
+    from prismaquant.io_spans import counter_delta, read_proc_io
     from prismaquant.joint_adjoint_checkpoints import load_adjoint_checkpoint
     resolver = _bind(args.manifest_sha256, args.allowed_tiers)
     record = slice_doc["checkpoint"]
@@ -727,7 +717,7 @@ def child_stage_b(args, slice_doc) -> dict:
         if resident["now"] > policy["max_resident_bytes"] or resident["now"] < 0:
             raise RuntimeError("bench residency budget exceeded")
 
-    io0 = proc_io()
+    io0 = read_proc_io()
     memcg = MemcgPeaks()
     started = time.monotonic()
     try:
@@ -763,7 +753,7 @@ def child_stage_b(args, slice_doc) -> dict:
     return {"entries": entries, "file_bytes": file_bytes, "tensor_bytes": tensor_bytes,
             "wall_s": round(wall, 4), "entries_per_s": round(entries / wall, 3),
             "mb_s": round(file_bytes / wall / 1e6, 1),
-            "resident_peak_bytes": resident["peak"], "io": _io_delta(io0, proc_io()),
+            "resident_peak_bytes": resident["peak"], "io": counter_delta(read_proc_io(), io0),
             "counters": _counters(), "residency": _residency(resolver),
             "sink": "discard" if discard else variant, "readback": readback,
             "memcg": memcg.report()}
@@ -854,6 +844,7 @@ def child_sink_feed(args, slice_doc) -> dict:
 
 
 def child_stage_a(args, slice_doc) -> dict:
+    from prismaquant.io_spans import counter_delta, read_proc_io
     from prismaquant.joint_adjoint_checkpoints import reference_from_record
     from prismaquant.perturbed_x_cache import (
         EntryReadScratch, prefetch_exact_activation_cache_entries)
@@ -863,7 +854,7 @@ def child_stage_a(args, slice_doc) -> dict:
                               batches=args.stage_a_batches, windows=args.stage_a_windows)
     session = windows[0][0]["metadata"]["identity"]["session"]
     scratch = EntryReadScratch()
-    io0 = proc_io()
+    io0 = read_proc_io()
     started = time.monotonic()
     entries = file_bytes = 0
     per_window = []
@@ -885,12 +876,8 @@ def child_stage_a(args, slice_doc) -> dict:
             "window_entries": len(windows[0]), "wall_s": round(wall, 4),
             "entries_per_s": round(entries / wall, 3),
             "mb_s": round(file_bytes / wall / 1e6, 1), "window_s": per_window,
-            "io": _io_delta(io0, proc_io()), "counters": _counters(),
+            "io": counter_delta(read_proc_io(), io0), "counters": _counters(),
             "residency": _residency(resolver)}
-
-
-def _io_delta(before, after):
-    return {key: after.get(key, 0) - before.get(key, 0) for key in after}
 
 
 def _counters():
