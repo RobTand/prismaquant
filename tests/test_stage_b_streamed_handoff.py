@@ -234,19 +234,40 @@ def test_a_scratch_plane_through_the_tee_ring_writes_the_same_bytes(
     assert telemetry["tee_misses"] == telemetry["scratch_reads"]
 
 
-def test_a_handoff_generation_digest_line(tmp_path, monkeypatch, capsys):
+def test_a_handoff_generation_digest_line(monkeypatch, capsys):
     """The all-final writer's file digests, printed for a before/after
-    comparison across trees (PQ #1251): run with a fixed ``--basetemp``."""
-    record, adjoint_slice = _producer(tmp_path)
-    _pin_generations(monkeypatch, 1251)
-    published = _emitter(tmp_path, record, adjoint_slice).emit(
-        grad_plane=_plane(), cotangent_owners=_owners(), n_probes=N_PROBES,
-        n_batches=N_BATCHES, kda_capture_kernel=None)
-    generation = Path(published["path"]).parent
-    document = json.loads(Path(published["path"]).read_bytes())
-    line = {"published": published, "files": _digest(generation),
-            "entries": {entry["name"]: entry["sha256"]
-                        for entry in document["activation_entries"]}}
+    comparison across trees (PQ #1251).
+
+    The campaign's records, and so every handoff file, name the paths they
+    were written under, so the fixture runs under one fixed root in the
+    system temporary directory, not under ``tmp_path``: two trees' runs
+    then write the same paths and their digests compare. An exclusive lock
+    serializes runs on one box, and each run removes the root first and
+    last, so a root left by a killed run is removed by the next one.
+    """
+    import fcntl
+    import shutil
+    import tempfile
+
+    base = Path(tempfile.gettempdir())
+    root = base / "pq-1251-handoff-identity"
+    with open(base / "pq-1251-handoff-identity.lock", "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir()
+        try:
+            record, adjoint_slice = _producer(root)
+            _pin_generations(monkeypatch, 1251)
+            published = _emitter(root, record, adjoint_slice).emit(
+                grad_plane=_plane(), cotangent_owners=_owners(), n_probes=N_PROBES,
+                n_batches=N_BATCHES, kda_capture_kernel=None)
+            generation = Path(published["path"]).parent
+            document = json.loads(Path(published["path"]).read_bytes())
+            line = {"published": published, "files": _digest(generation),
+                    "entries": {entry["name"]: entry["sha256"]
+                                for entry in document["activation_entries"]}}
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
     with capsys.disabled():
         print("HANDOFF-IDENTITY " + json.dumps(line, sort_keys=True), flush=True)
 
