@@ -121,7 +121,7 @@ def test_delayed_monitors_refuse_missing_telemetry(tmp_path, controlled, monkeyp
     monkeypatch.setattr(obs, 'monitor', delayed_monitor)
     token = object()
     journal = []
-    with pytest.raises(RuntimeError, match='required profiler evidence'):
+    with pytest.raises(RuntimeError, match='required profiler evidence') as raised:
         with obs:
             for kind, event in ready.items():
                 if kind not in missing:
@@ -135,6 +135,10 @@ def test_delayed_monitors_refuse_missing_telemetry(tmp_path, controlled, monkeyp
         repr(RuntimeError(f'no {kind} sample was recorded')) for kind in missing}
     for kind in ready:
         assert bool(result[kind].get('samples')) == (kind not in missing)
+    # #1096: the failing recorder entry is in the message, not only in a
+    # result.json that a test's temporary directory may delete.
+    for kind in missing:
+        assert f"anchor_profiler: RuntimeError('no {kind} sample was recorded')" in str(raised.value)
 
 
 @pytest.mark.parametrize('failure', ['no_cuda', 'trace_cap', 'enter'])
@@ -149,9 +153,10 @@ def test_observation_failure_preserves_success_for_journaling(tmp_path, controll
     def original(**kwargs):
         seen.append(kwargs)
         return token
-    with pytest.raises(RuntimeError, match='required profiler evidence'):
+    with pytest.raises(RuntimeError, match='required profiler evidence') as raised:
         with obs:
             journal.append(obs.wrap_anchor(original)(qname='u', format_name='f'))
+    assert 'anchor_profiler: ' in str(raised.value)
     assert len(seen) == 1 and journal == [token]
     result = json.loads((obs.out/'result.json').read_text())
     assert result['status'] == 'failed' and not result['native_anchor_profiled']

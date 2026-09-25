@@ -25,6 +25,16 @@ import torch
 from experiments.workspace_netdata import NetdataWriter, sample_netdata
 
 
+def describe_errors(errors):
+    """Render recorder error entries as one line, instrument first."""
+    def entry(row):
+        extra = ', '.join(f'{key}={value!r}' for key, value in row.items()
+                          if key not in ('instrument', 'error'))
+        text = f"{row.get('instrument', '?')}: {row.get('error', '?')}"
+        return f'{text} ({extra})' if extra else text
+    return '; '.join(entry(row) for row in errors)
+
+
 class CaptureObserver:
     def __init__(self, out, *, profile_layers=(0, 3, 4, 23, 44)):
         self.out = Path(out)
@@ -168,7 +178,10 @@ class CaptureObserver:
         (self.out/'result.json').write_text(final)
         (self.out/'progress.json').write_text(final)
         if error is None and self.result['errors']:
-            raise RuntimeError('campaign completed but required profiler evidence is incomplete')
+            # Name the failing recorder entries: result.json may live in a
+            # temporary directory that is gone before anyone can read it.
+            raise RuntimeError('campaign completed but required profiler evidence is incomplete: '
+                               + describe_errors(self.result['errors']))
 
     def validate_result(self):
         pass
