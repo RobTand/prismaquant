@@ -59,7 +59,6 @@ import statistics
 import subprocess
 import sys
 import tarfile
-import threading
 import time
 from pathlib import Path
 
@@ -396,27 +395,8 @@ def _materialize_base(ref: str, target: Path) -> Path:
     return target
 
 
-class _PowerSampler(threading.Thread):
-    def __init__(self, path: Path):
-        super().__init__(daemon=True)
-        self.path, self.stop = path, threading.Event()
-
-    def run(self):
-        with self.path.open('w') as out:
-            while not self.stop.is_set():
-                try:
-                    watts = subprocess.run(
-                        ['nvidia-smi', '--query-gpu=power.draw', '--format=csv,noheader,nounits'],
-                        capture_output=True, text=True, timeout=5).stdout.strip()
-                except (OSError, subprocess.SubprocessError):
-                    watts = ''
-                out.write(f"{time.time():.3f}\t{watts}\n")
-                out.flush()
-                self.stop.wait(0.5)
-
-
-def _power_between(samples, start, end):
-    values = [watts for when, watts in samples if start <= when <= end]
+def _power_between(sampler, start, end):
+    values = sampler.watts_between(start, end)
     return (statistics.fmean(values) if values else None, len(values))
 
 
@@ -536,8 +516,10 @@ def run_ab(args):
     compute_s = (args.compute_s if args.compute_s is not None
                  else ROW_041_NONLOAD_S * args.files / ROW_041_RENDERS)
     summary['compute_s'] = compute_s
-    sampler = _PowerSampler(out / 'power.tsv')
-    sampler.start()
+    sys.path.insert(0, str(REPO))
+    from prismaquant.io_spans import GpuPowerSampler
+
+    sampler = GpuPowerSampler(0.5).start()
     runs = []
     try:
         (out / 'pyspy').mkdir(exist_ok=True)
@@ -565,15 +547,9 @@ def run_ab(args):
                              'pyspy': str(raw) if args.pyspy else None})
                 _log(f"round {round_index} {arm}: {time.time() - started:.1f} s")
     finally:
-        sampler.stop.set()
-        sampler.join(timeout=5)
-    power = []
-    for line in (out / 'power.tsv').read_text().splitlines():
-        when, _, watts = line.partition('\t')
-        try:
-            power.append((float(when), float(watts)))
-        except ValueError:
-            pass
+        sampler.stop()
+    (out / 'power.tsv').write_text(''.join(
+        f"{when:.3f}\t{watts}\n" for when, watts in zip(sampler.times, sampler.samples)))
 
     arms = {}
     for run in runs:
@@ -587,7 +563,7 @@ def run_ab(args):
         arm['counters'].append(result['lease_counters'])
         arm['bytes_from_pool'] += result['bytes_from_pool'] or 0
         for window in measured:
-            mean, count = _power_between(power, window['epoch_start'], window['epoch_end'])
+            mean, count = _power_between(sampler, window['epoch_start'], window['epoch_end'])
             arm['power'].append({'mean_w': mean, 'samples': count,
                                  'wall_s': window['epoch_end'] - window['epoch_start']})
         if run['pyspy'] and Path(run['pyspy']).exists():

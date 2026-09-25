@@ -196,37 +196,9 @@ class _Timers:
         return timed
 
 
-class _Power:
-    """GPU power from nvidia-smi every 100 ms, with host timestamps."""
-
-    def __init__(self):
-        self.samples = []
-        try:
-            self.process = subprocess.Popen(
-                ["nvidia-smi", "--query-gpu=power.draw", "--format=csv,noheader,nounits",
-                 "-lms", "100"], stdout=subprocess.PIPE, text=True)
-        except OSError:
-            self.process = None
-            return
-        self.thread = threading.Thread(target=self._read, name="gpu-power", daemon=True)
-        self.thread.start()
-
-    def _read(self):
-        for line in self.process.stdout:
-            try:
-                self.samples.append((time.time(), float(line.strip())))
-            except ValueError:
-                pass
-
-    def stop(self):
-        if self.process is not None:
-            self.process.terminate()
-            self.process.wait()
-
-    def between(self, start, end):
-        values = [watts for stamp, watts in self.samples if start <= stamp <= end]
-        return ({"samples": len(values), "mean_w": statistics.fmean(values),
-                 "max_w": max(values)} if values else {"samples": 0})
+def _power_summary(values):
+    return ({"samples": len(values), "mean_w": statistics.fmean(values),
+             "max_w": max(values)} if values else {"samples": 0})
 
 
 def _drop_pages(paths):
@@ -355,7 +327,9 @@ def cmd_child(args) -> int:
         timers.window = None
 
     _drop_pages([value["path"] for value in keys.values()])
-    power = _Power()
+    from prismaquant.io_spans import GpuPowerSampler
+
+    power = GpuPowerSampler(0.1).start()
     time.sleep(0.5)
     started = time.time()
     observe_and_project_retained_windows(
@@ -372,7 +346,8 @@ def cmd_child(args) -> int:
         per_window.setdefault(str(window), {})[f"{kind}.{category}"] = {
             "seconds": seconds, "calls": timers.calls[(window, kind, category)]}
     for index, window in windows.items():
-        window["gpu_power"] = power.between(window["start_unix"], window["end_unix"])
+        window["gpu_power"] = _power_summary(
+            power.watts_between(window["start_unix"], window["end_unix"]))
         window["timers"] = per_window.get(str(index), {})
     result = {"arm": args.arm, "label": args.label, "memo": memo,
               "render_identities": bool(options), "workers": workers,
@@ -380,7 +355,7 @@ def cmd_child(args) -> int:
               "probes": args.probes, "tokens": args.tokens, "file_bytes": file_bytes,
               "window_count": len(windows), "replay_s": ended - started,
               "start_unix": started, "end_unix": ended,
-              "gpu_power": power.between(started, ended),
+              "gpu_power": _power_summary(power.watts_between(started, ended)),
               "projection_digest": digest.hexdigest(), "windows": windows,
               "outside_windows": per_window.get("None", {})}
     Path(args.result).write_text(json.dumps(result, indent=1, sort_keys=True))
