@@ -148,6 +148,20 @@ def test_staged_exact_mountstats_is_unchanged(mountstats):
     assert new["/mnt/shared"]["ops"]["ACCESS"] == [2, 2, 0, 300, 200, 0, 1, 1]
 
 
+def test_live_reader_mountstats_sees_the_nfs_mounts(mountstats):
+    """The old parser tested ``" on "`` against split tokens: always ``{}``."""
+    from tools import live_reader_qualify as probe
+
+    before = probe._mountstats()
+    assert before == {
+        "/mnt/shared": {"client_read": 812345678, "server_read": 790000000},
+        "/stage/prewarm": {"client_read": 7, "server_read": 11}}
+    after = {**before, "/mnt/shared": {"client_read": 812345678 + 4096,
+                                       "server_read": 790000000}}
+    assert probe.eval_pool_delta(before, before, "/mnt/shared") == (True, 0)
+    assert probe.eval_pool_delta(before, after, "/mnt/shared") == (True, 4096)
+
+
 def test_staged_exact_mountstats_is_empty_when_unreadable(tmp_path, monkeypatch):
     from tools import staged_exact_read_bench as bench
 
