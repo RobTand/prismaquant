@@ -1,7 +1,14 @@
-"""Closed opt-in GLM KDA derivative identity; never mutates model code or dispatch."""
+"""Closed opt-in GLM KDA derivative identity; never mutates model code.
+
+Dispatch changes in one declared place only: ``CaptureKernelDispatch`` runs a
+capture kernel this contract declares (``capture_kernel_declaration``) in
+place of the verified Torch fallback for the length of one ``with`` block,
+and restores the fallback on exit (PQ #1199).
+"""
 from __future__ import annotations
 
 import hashlib
+import importlib
 import inspect
 import json
 import math
@@ -229,3 +236,71 @@ def source_derivative_identity(model):
     identity = dict(**observed, image_build_sha256=binding['policy']['image_build']['sha256'])
     _require(identity == binding['identity'], 'source derivative execution changed')
     return identity
+
+
+#: Capture kernels this contract declares (PQ #1199). A declared kernel
+#: computes this derivative's semantics (``implements``) with its own
+#: rounding, for the Stage B capture's call only, and runs only inside a
+#: ``CaptureKernelDispatch`` block.
+CAPTURE_KERNEL_SCHEMA = 'prismaquant.glm_source_derivative.capture_kernel.v1'
+_CAPTURE_KERNELS = {
+    'kda_gram_v1': dict(module='prismaquant.kernels.kda_chunk',
+                        entry='chunk_kimi_delta_attention'),
+}
+
+
+def capture_kernel_declaration(name):
+    """The closed declaration of one capture kernel; an undeclared name refuses."""
+    _require(isinstance(name, str) and name in _CAPTURE_KERNELS, f'undeclared capture kernel {name!r}')
+    return dict(schema=CAPTURE_KERNEL_SCHEMA, name=name, implements=VERSION,
+                replaces='chunk_kimi_delta_attention',
+                dispatch='module_global_substituted_for_one_block_then_restored',
+                scope='stage_b_target_layer_pass', **_CAPTURE_KERNELS[name])
+
+
+class CaptureKernelDispatch:
+    """Run a declared capture kernel in place of the verified fallback, one block at a time.
+
+    Construction observes the bound runtime through ``source_derivative_identity``,
+    so the model must carry this derivative's binding and the module global
+    ``chunk_kimi_delta_attention`` must be the decorated Torch fallback. Each
+    ``with`` block then points that global, which the attention forward reads
+    at call time, at the kernel entry, and points it back at the fallback on
+    exit. A global that is not the fallback on entry, or not the kernel on
+    exit, refuses: something else changed dispatch. Blocks do not nest.
+    Outside a block, ``source_derivative_identity`` observes the fallback as
+    before, so every identity check between passes is unchanged; inside one,
+    it refuses.
+    """
+
+    def __init__(self, model, name):
+        declaration = capture_kernel_declaration(name)
+        identity = source_derivative_identity(model)
+        _require(identity is not None, 'a capture kernel requires the bound GLM derivative')
+        _require(identity['declaration']['version'] == declaration['implements'],
+                 'capture kernel implements another derivative')
+        from transformers.models.glm5_next import modeling_glm5_next as modeling
+        entry = getattr(importlib.import_module(declaration['module']), declaration['entry'])
+        _require(isinstance(entry, types.FunctionType), 'capture kernel entry is not a function')
+        self.declaration = declaration
+        self.derivative = identity
+        self._modeling = modeling
+        # The object _observe authenticated just now, in this thread.
+        self._fallback = modeling.chunk_kimi_delta_attention
+        self._entry = entry
+        self._active = False
+
+    def __enter__(self):
+        _require(not self._active, 'capture kernel blocks do not nest')
+        _require(self._modeling.chunk_kimi_delta_attention is self._fallback,
+                 'KDA dispatch changed outside a capture kernel block')
+        self._modeling.chunk_kimi_delta_attention = self._entry
+        self._active = True
+        return self
+
+    def __exit__(self, *exc_info):
+        current = self._modeling.chunk_kimi_delta_attention
+        self._modeling.chunk_kimi_delta_attention = self._fallback
+        self._active = False
+        _require(current is self._entry, 'KDA dispatch changed inside a capture kernel block')
+        return False
