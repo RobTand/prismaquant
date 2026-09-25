@@ -17,7 +17,19 @@ Standard library only, so it runs anywhere:
 ``HOST`` is the box the PrismaBuild record says ran the action.
 
 ``--rejected`` records a run of an earlier source that missed the bound, so
-the file keeps the history of what did not qualify next to what did.
+the file keeps the history of what did not qualify next to what did. The
+rest of the history is recorded too:
+
+* ``--development RUN_DIR=PB_KEY@HOST``: a numerics run of an earlier source
+  or at another shape. Its counts come from its ``numerics.json``. The ``2u``
+  verdict is recomputed from the stored errors, so a run from a harness
+  version that computed none still has one; where the run did compute it,
+  the two must agree. A harness version that ran no repeat records ``None``.
+* ``--withdrawn LABEL=PB_KEY``: a numerics submission withdrawn before it
+  wrote a number. Its states, times and reason come from its PrismaBuild
+  withdrawn record, which must exist.
+* ``--preflight PB_KEY@HOST=OUTCOME``: a failed test run of the kernel's
+  tests, with its key as ``pbtest`` printed it and what failed.
 """
 from __future__ import annotations
 
@@ -27,6 +39,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PB_QUEUE = Path("/mnt/shared/prismabuild-fleet/pb-queue")
 KERNEL_SOURCE = ROOT / "prismaquant/kernels/kda_chunk.py"
 HARNESS = ROOT / "experiments/kda_kernel_numerics.py"
 NUMERICS_SCHEMA = "prismaquant.kda_kernel_numerics.v1"
@@ -35,6 +48,8 @@ SCHEMA = "prismaquant.kda_capture_kernel_qualification.v1"
 QUALIFIED_FIELDS = ("name", "source_sha256", "compiled", "probe", "runtime")
 PRODUCTION_SHAPE = {"batch": 4, "seqlen": 512, "heads": 64, "head_dim": 128}
 PATHS = ("fp32", "bf16")
+#: ``kda_kernel_numerics.UNIT_ROUNDOFF``, by path.
+UNIT_ROUNDOFF = {"fp32": 2.0 ** -24, "bf16": 2.0 ** -8}
 TENSORS = ("o", "dq", "dk", "dv", "dg", "dbeta")
 CRITERION = (
     "For every case, path (fp32, bf16) and tensor (o, dq, dk, dv, dg, dbeta), against a "
@@ -53,10 +68,14 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _is_key(key: str, length: int = 64) -> bool:
+    return len(key) == length and all(c in "0123456789abcdef" for c in key)
+
+
 def _run(spec: str):
     directory, _, rest = spec.partition("=")
     key, _, host = rest.partition("@")
-    if len(key) != 64 or any(c not in "0123456789abcdef" for c in key) or not host:
+    if not _is_key(key) or not host:
         raise QualificationRefused(f"{spec!r}: expected RUN_DIR=<64-hex PrismaBuild key>@HOST")
     path = Path(directory) / "numerics.json"
     numerics = json.loads(path.read_bytes())
@@ -75,6 +94,23 @@ def _cells(numerics):
                 yield case, path, tensor, value[path]
 
 
+def within_bound(block, path, tensor, where) -> bool:
+    """``kda_kernel_numerics.verdict``'s pass, recomputed from the stored errors.
+
+    Refuses when the run stored a verdict that disagrees, so the two
+    formulas cannot drift apart unnoticed.
+    """
+    unit = UNIT_ROUNDOFF[path]
+    kernel, fallback = block["kernel"][tensor], block["fallback"][tensor]
+    value = (not kernel["nonfinite"] > fallback["nonfinite"]) and all(
+        kernel[metric] - fallback[metric] <= 2.0 * unit * scale
+        for metric, scale in (("max_abs", fallback["reference_max_abs"]), ("rel_fro", 1.0)))
+    if "verdict" in block and block["verdict"][tensor]["pass"] != value:
+        raise QualificationRefused(f"{where}: the stored verdict for {path}/{tensor} "
+                                   "disagrees with the recomputed one")
+    return value
+
+
 def summarize(numerics) -> dict:
     """Counts and worst excesses over every cell, read from the run's verdicts."""
     compare = {metric: {"lower": 0, "equal": 0, "higher": 0} for metric in ("max_abs", "rel_fro")}
@@ -83,6 +119,7 @@ def summarize(numerics) -> dict:
     for case, path, tensor, block in _cells(numerics):
         cells += 1
         verdict = block["verdict"][tensor]
+        within_bound(block, path, tensor, f"{case}")
         if not (verdict["pass"] and verdict["finite_where_fallback_finite"]
                 and block["kernel_repeat_bit_equal"][tensor]):
             failures.append([case, path, tensor])
@@ -118,7 +155,54 @@ def qualify(numerics) -> dict:
             "oracle": numerics["oracle"], **summary}
 
 
-def build(qualifying, identities, rejected=()) -> dict:
+def development(numerics, receipt) -> dict:
+    """A run of an earlier source or another shape: what it compared and how it came out."""
+    cells = list(_cells(numerics))
+    beyond = [[case, path, tensor] for case, path, tensor, block in cells
+              if not within_bound(block, path, tensor, receipt["artifact"])]
+    repeats = [block["kernel_repeat_bit_equal"][tensor] for _, _, tensor, block in cells
+               if "kernel_repeat_bit_equal" in block]
+    return {**receipt, "source_sha256": numerics["kernel"]["source_sha256"],
+            "kernel": numerics["kernel"]["name"],
+            "harness_sha256": numerics["harness_sha256"], "shape": numerics["shape"],
+            "cases": list(numerics["cases"]), "cells": len(cells),
+            "cells_no_larger_error_than_fallback": sum(
+                all(block["kernel_no_worse"][tensor].values()) for _, _, tensor, block in cells),
+            "verdict_computed_by_the_run": any("verdict" in block for *_, block in cells),
+            "cells_beyond_2u_bound": beyond,
+            "cells_repeat_bit_equal": sum(repeats) if repeats else None}
+
+
+def withdrawn(spec: str, queue: Path = PB_QUEUE) -> dict:
+    """A numerics submission withdrawn before it wrote a number, from its PrismaBuild record."""
+    label, _, key = spec.partition("=")
+    if not label or not _is_key(key):
+        raise QualificationRefused(f"{spec!r}: expected LABEL=<64-hex PrismaBuild key>")
+    path = queue / "withdrawn" / f"{key}.json"
+    try:
+        record = json.loads(path.read_bytes())
+    except FileNotFoundError:
+        raise QualificationRefused(f"{spec!r}: no PrismaBuild withdrawn record {path}") from None
+    if record.get("action_key") != key:
+        raise QualificationRefused(f"{path}: the record names {record.get('action_key')!r}")
+    return {"label": label, "pb_action": key, "withdrawn_from": record["withdrawn_from"],
+            "claimed_host": record.get("claimed_host"), "attempts": record["attempts"],
+            "published_unix": record["published_unix"],
+            "claimed_unix": record.get("claimed_unix"),
+            "withdrawn_unix": record["withdrawn_unix"], "reason": record["reason"]}
+
+
+def preflight(spec: str) -> dict:
+    """A failed test run of the kernel's tests: PB_KEY@HOST=OUTCOME."""
+    head, _, outcome = spec.partition("=")
+    key, _, host = head.partition("@")
+    if not (_is_key(key) or _is_key(key, 12)) or not host or not outcome:
+        raise QualificationRefused(f"{spec!r}: expected PB_KEY@HOST=OUTCOME")
+    return {"pb_action": key, "host": host, "outcome": outcome}
+
+
+def build(qualifying, identities, rejected=(), developments=(), withdrawals=(),
+          preflights=()) -> dict:
     numerics, receipt = qualifying
     identity = {key: numerics["qualification_candidate"][key] for key in QUALIFIED_FIELDS}
     if identity["source_sha256"] != _sha256(KERNEL_SOURCE):
@@ -146,7 +230,11 @@ def build(qualifying, identities, rejected=()) -> dict:
             "implements": "glm_kda_causal_exp_v1",
             "harness": {"path": str(HARNESS.relative_to(ROOT)), "sha256": _sha256(HARNESS)},
             "criterion": CRITERION, "numerics": block, "evidence": evidence,
-            "rejected_attempts": history}
+            "rejected_attempts": history,
+            "development_runs": [development(other, other_receipt)
+                                 for other, other_receipt in developments],
+            "withdrawn_submissions": list(withdrawals),
+            "failed_preflights": list(preflights)}
 
 
 def main(argv=None) -> int:
@@ -154,10 +242,17 @@ def main(argv=None) -> int:
     parser.add_argument("--qualify", required=True)
     parser.add_argument("--identity", action="append", default=[])
     parser.add_argument("--rejected", action="append", default=[])
+    parser.add_argument("--development", action="append", default=[])
+    parser.add_argument("--withdrawn", action="append", default=[])
+    parser.add_argument("--preflight", action="append", default=[])
+    parser.add_argument("--pb-queue", type=Path, default=PB_QUEUE)
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
     value = build(_run(args.qualify), [_run(spec) for spec in args.identity],
-                  [_run(spec) for spec in args.rejected])
+                  [_run(spec) for spec in args.rejected],
+                  [_run(spec) for spec in args.development],
+                  [withdrawn(spec, args.pb_queue) for spec in args.withdrawn],
+                  [preflight(spec) for spec in args.preflight])
     Path(args.out).write_text(json.dumps(value, indent=1, sort_keys=True) + "\n")
     print(json.dumps({"out": args.out, "cells": value["numerics"]["cells"],
                       "worst_excess": value["numerics"]["worst_excess"]}, sort_keys=True))
