@@ -1,6 +1,7 @@
 """The Stage B KDA capture kernel's contract (PQ #1199, #1214).
 
-A launch names the kernel with ``PRISMAQUANT_STAGE_B_KDA_KERNEL``. The GLM
+A launch names the kernel with ``PRISMAQUANT_STAGE_B_KDA_KERNEL``, or leaves
+it unset for the default (PQ #1252, ``tests/test_kda_kernel_default_1252.py``). The GLM
 derivative contract declares it, ``CaptureKernelDispatch`` substitutes it for
 the verified fallback for one block at a time, and the layer quantum admits
 it once per launch (kernel mode, PQ #1214). Every Stage B layer pass then
@@ -100,13 +101,16 @@ def kda_layer():
 
 # ---- the launch setting ----------------------------------------------------
 
-def test_the_launch_setting_names_a_known_kernel_or_nothing():
-    assert capture.kda_capture_kernel_from_environment({}) is None
-    assert capture.kda_capture_kernel_from_environment(
+def test_the_launch_setting_names_a_known_kernel_the_fallback_or_nothing():
+    # Unset is the default, which each quantum resolves (PQ #1252).
+    assert capture.kda_capture_kernel_setting({}) is None
+    assert capture.kda_capture_kernel_setting(
         {capture.KDA_KERNEL_ENV: "kda_gram_v1"}) == "kda_gram_v1"
-    for text in ("", "kda_gram_fp32_v1", "torch"):
+    assert capture.kda_capture_kernel_setting(
+        {capture.KDA_KERNEL_ENV: "fallback"}) == capture.FALLBACK == "fallback"
+    for text in ("", "kda_gram_fp32_v1", "torch", capture.FOLLOW_PRODUCER):
         with pytest.raises(capture.KdaCaptureKernelRefused, match="names no known capture kernel"):
-            capture.kda_capture_kernel_from_environment({capture.KDA_KERNEL_ENV: text})
+            capture.kda_capture_kernel_setting({capture.KDA_KERNEL_ENV: text})
 
 
 @needs_triton

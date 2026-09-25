@@ -12,7 +12,16 @@ rolls. A pass of a layer with KDA attention runs the kernel; a pass of any
 other layer calls it zero times. Everything else keeps the fallback:
 
 * Stage A, whose checkpoint planes stay the fallback's arithmetic;
-* every process that leaves the variable unset.
+* every launch that sets the variable to ``fallback``;
+* an unset launch on a model with no KDA attention.
+
+Kernel mode is the default (PQ #1252). An unset variable resolves at launch
+(:func:`resolve_kda_capture_kernel`): a band-serial consumer takes its
+producer's mode from the handoff's stamp, so a band already in flight on the
+fallback stays on it; any other quantum runs :data:`DEFAULT_KERNEL` when a
+decoder layer of the model has KDA attention, and the fallback otherwise.
+``fallback`` selects the fallback explicitly and stamps nothing, as an unset
+variable did before PQ #1252. A kernel name selects that kernel.
 
 The setting is a launch setting, like ``PRISMAQUANT_STAGE_B_REPLAY_REGIME``:
 the campaign container spec carries it, and a plan's ``execution`` block
@@ -68,6 +77,14 @@ QUALIFICATION_SCHEMA = "prismaquant.kda_capture_kernel_qualification.v1"
 QUALIFICATION_PATH = Path(__file__).with_name("kernels") / "kda_chunk_qualification.json"
 #: The kernels a launch may name. Each must be declared by the GLM contract.
 KERNELS = ("kda_gram_v1",)
+#: The setting that selects the image's Torch fallback (PQ #1252). It stamps
+#: nothing, so its rows are byte for byte an unset launch's before PQ #1252.
+FALLBACK = "fallback"
+#: The kernel an unset setting selects on a model with KDA attention (PQ #1252).
+DEFAULT_KERNEL = "kda_gram_v1"
+#: The mode an unset consumer binds its handoff in: its producer's, whichever
+#: that is. A mode argument of the handoff checks, never a setting's value.
+FOLLOW_PRODUCER = "follow-producer"
 #: The attention class whose forward calls ``chunk_kimi_delta_attention``.
 KDA_ATTENTION_CLASS = ("transformers.models.glm5_next.modeling_glm5_next",
                        "Glm5NextTextLinearAttention")
@@ -77,15 +94,56 @@ class KdaCaptureKernelRefused(ValueError):
     """A malformed setting, an unadmittable kernel, or a pass the kernel did not run."""
 
 
-def kda_capture_kernel_from_environment(environ: Mapping) -> str | None:
-    """The kernel a launch names, or ``None`` (the fallback) when unset."""
+def kda_capture_kernel_setting(environ: Mapping) -> str | None:
+    """The launch's setting: a kernel name, :data:`FALLBACK`, or ``None`` when unset.
+
+    ``None`` is not the fallback: an unset setting is the default, which
+    :func:`resolve_kda_capture_kernel` resolves per quantum.
+    """
     text = environ.get(KDA_KERNEL_ENV)
     if text is None:
         return None
-    if text not in KERNELS:
+    if text != FALLBACK and text not in KERNELS:
         raise KdaCaptureKernelRefused(
-            f"{KDA_KERNEL_ENV}={text!r} names no known capture kernel; known: {list(KERNELS)}")
+            f"{KDA_KERNEL_ENV}={text!r} names no known capture kernel; known: "
+            f"{list(KERNELS)}, or {FALLBACK!r} for the image's Torch fallback")
     return text
+
+
+def producer_kernel_mode(producer: Mapping) -> str | None:
+    """The mode a handoff's ``producer`` block names: its kernel, or ``None`` (fallback)."""
+    stamp = producer.get("kda_capture_kernel")
+    return None if stamp is None else stamp["name"]
+
+
+def consumer_handoff_mode(setting: str | None) -> str | None:
+    """The mode a band-serial consumer launched with ``setting`` binds a handoff in.
+
+    An unset setting follows the producer (:data:`FOLLOW_PRODUCER`), so the
+    default never moves a band already in flight to another mode. An
+    explicit setting binds only a handoff from its own mode.
+    """
+    if setting is None:
+        return FOLLOW_PRODUCER
+    return None if setting == FALLBACK else setting
+
+
+def resolve_kda_capture_kernel(setting: str | None, *, layers, producer=None) -> str | None:
+    """The kernel a quantum launched with ``setting`` runs, or ``None`` (the fallback).
+
+    An explicit setting is what it names. An unset one is the default (PQ
+    #1252): the mode of ``producer``, the handoff's ``producer`` block, for a
+    band-serial consumer; otherwise :data:`DEFAULT_KERNEL` when any of
+    ``layers`` (the model's decoder layers, an iterable read lazily) has KDA
+    attention, and the fallback when none does.
+    """
+    if setting == FALLBACK:
+        return None
+    if setting is not None:
+        return setting
+    if producer is not None:
+        return producer_kernel_mode(producer)
+    return DEFAULT_KERNEL if any(layer_runs_kda(layer) for layer in layers) else None
 
 
 def layer_runs_kda(layer_module) -> bool:

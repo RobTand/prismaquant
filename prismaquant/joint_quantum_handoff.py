@@ -72,7 +72,9 @@ producer names its kernel in the ``producer`` block (``kda_capture_kernel``:
 name and identity digest); a fallback producer names none. The consumer's
 load compares the name with its own launch's (:func:`load_quantum_handoff`),
 and the quantum core compares the identity digest with the kernel it
-admitted. A band runs in one mode.
+admitted. A band runs in one mode. A consumer launched with the setting
+unset follows its producer's mode (PQ #1252), so a band that started on the
+fallback stays on it after the default moved to the kernel.
 """
 from __future__ import annotations
 
@@ -417,28 +419,39 @@ def _kernel_stamp_refusal(stamp) -> str | None:
 def handoff_kernel_refusal(producer: Mapping, kda_capture_kernel) -> str | None:
     """Why a consumer launched with ``kda_capture_kernel`` cannot take this plane.
 
-    ``kda_capture_kernel`` is the consumer launch's kernel name, or ``None``
-    for the fallback (PQ #1214). The producer's block names its kernel, or
-    nothing for a fallback producer. The two must be the same mode and, in
-    kernel mode, the same kernel by name; the core binds the identity.
+    ``kda_capture_kernel`` is the consumer launch's kernel name, ``None`` for
+    the fallback (PQ #1214), or ``FOLLOW_PRODUCER`` for a launch that left the
+    setting unset (PQ #1252), which takes the producer's mode. The producer's
+    block names its kernel, or nothing for a fallback producer. The two must
+    be the same mode and, in kernel mode, the same kernel by name; the core
+    binds the identity.
     """
+    from .glm_kda_capture_kernel import FALLBACK, FOLLOW_PRODUCER, KDA_KERNEL_ENV
+
     stamp = producer.get("kda_capture_kernel")
     if stamp is not None:
         refusal = _kernel_stamp_refusal(stamp)
         if refusal is not None:
             return refusal
+    if kda_capture_kernel == FOLLOW_PRODUCER:
+        return None
     if stamp is None and kda_capture_kernel is None:
         return None
     if stamp is None:
         return (f"the handoff plane was captured on the fallback, and this quantum "
-                f"launches in kernel mode ({kda_capture_kernel}); a band runs in one mode")
+                f"launches in kernel mode ({kda_capture_kernel}); a band runs in one mode. "
+                f"Leave {KDA_KERNEL_ENV} unset to follow the producer, or set it to "
+                f"{FALLBACK}")
     if kda_capture_kernel is None:
         return (f"the handoff plane was captured in kernel mode ({stamp['name']}), and "
-                "this quantum launches on the fallback; a band runs in one mode")
+                "this quantum launches on the fallback; a band runs in one mode. "
+                f"Leave {KDA_KERNEL_ENV} unset to follow the producer, or set it to "
+                f"{stamp['name']}")
     if stamp["name"] != kda_capture_kernel:
         return (f"the handoff plane was captured by the KDA capture kernel "
                 f"{stamp['name']}, and this quantum runs {kda_capture_kernel}; a band "
-                "runs in one mode, on one kernel")
+                f"runs in one mode, on one kernel. Leave {KDA_KERNEL_ENV} unset to "
+                f"follow the producer, or set it to {stamp['name']}")
     return None
 
 
@@ -451,8 +464,10 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
     boundary, campaign, Stage A run and checkpoint. Entry coverage, shapes
     and dtypes are checked against the consumer's own slice checkpoint.
     ``kda_capture_kernel`` is the consumer launch's KDA capture kernel name,
-    or ``None`` for the fallback; it has no default, and a handoff captured
-    in the other mode, or by another kernel, refuses (PQ #1214).
+    ``None`` for the fallback, or ``FOLLOW_PRODUCER`` when the launch left
+    the setting unset (PQ #1252); it has no default. A handoff captured in
+    another mode than an explicit one, or by another kernel, refuses (PQ
+    #1214).
     """
     from .joint_adjoint_slices import chain_layers_for
     from .joint_layer_quanta import quantum_id

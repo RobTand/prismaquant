@@ -697,7 +697,7 @@ def test_band_serial_refuses_what_it_cannot_run(tmp_path, monkeypatch, capsys, c
 
 
 @pytest.mark.parametrize("spec_kernel,producer_kernel",
-                         [("kda_gram_v1", None), (None, "kda_gram_v1")],
+                         [("kda_gram_v1", None), ("fallback", "kda_gram_v1")],
                          ids=["kernel-spec-fallback-producer",
                               "fallback-spec-kernel-producer"])
 def test_a_band_runs_in_one_kda_kernel_mode(tmp_path, monkeypatch, capsys,
@@ -705,8 +705,9 @@ def test_a_band_runs_in_one_kda_kernel_mode(tmp_path, monkeypatch, capsys,
     """A consumer binds only a handoff produced in its own launch's mode (PQ #1214).
 
     One dispatch wraps every row in one spec, so a band dispatched once is in
-    one mode. A band resumed under a spec in the other mode is the case the
-    handoff's stamp refuses, before the consumer is published.
+    one mode. A band resumed under a spec that names the other mode is the
+    case the handoff's stamp refuses, before the consumer is published. The
+    refusal names the setting that binds it (PQ #1252).
     """
     dispatch, bound, records, receipt_path, out = _dispatch_layout(tmp_path, monkeypatch)
     flags = ("--band-serial", "--handoff-tier", TIER)
@@ -724,4 +725,30 @@ def test_a_band_runs_in_one_kda_kernel_mode(tmp_path, monkeypatch, capsys,
     assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 3
     refusal = capsys.readouterr().err
     assert "refuses the handoff" in refusal and "one mode" in refusal
+    assert "PRISMAQUANT_STAGE_B_KDA_KERNEL unset to follow the producer" in refusal
     assert gateway.submitted == []
+
+
+@pytest.mark.parametrize("producer_kernel", [None, "kda_gram_v1"],
+                         ids=["fallback-producer", "kernel-producer"])
+def test_an_unset_spec_binds_the_producers_mode(tmp_path, monkeypatch, producer_kernel):
+    """With the setting unset, a consumer follows its producer's mode (PQ #1252).
+
+    The default moved to the kernel, so a band already in flight on the
+    fallback must not change mode: its consumer binds the fallback handoff.
+    A band whose producer ran the kernel binds too.
+    """
+    dispatch, bound, records, receipt_path, out = _dispatch_layout(tmp_path, monkeypatch)
+    flags = ("--band-serial", "--handoff-tier", TIER)
+    gateway = dispatch.FakeGateway()
+    spec = json.loads(Path(dispatch.SPEC_PATH).read_text())
+    assert "PRISMAQUANT_STAGE_B_KDA_KERNEL" not in spec.get("env", {})
+    assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 0
+    key = _by_id(gateway)["layer-003"]["action_key"]
+    published = _emit(bound[3], kernel=producer_kernel)
+    _complete(bound[3], published)
+    gateway.mark_terminal(key)
+    gateway.submitted = []
+    assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 0
+    inner = _inner(_by_id(gateway)["layer-002"]["argv"])
+    assert inner[inner.index("--adjoint-handoff") + 1] == published["path"]
