@@ -54,6 +54,7 @@ from .cb_layout import (
 )
 from .routed_moe_codebooks import bundle_role_qname
 from .shard_layout import SHARD_INDEX_NAME, describe_container_layout
+from .schemas import strict_json_loads
 
 CB_SERIALIZED_PAYLOAD_SCHEMA = "prismaquant.cb_serialized_payload.v3"
 MINCHAIN_CB_SERIALIZED_PAYLOAD_SCHEMA = "prismaquant.cb_serialized_payload.v4"
@@ -2940,25 +2941,13 @@ def cb_payload_summary(breakdown: Mapping[str, object]) -> dict:
     }
 
 
-def _reject_json_constant(value: str):
-    raise ValueError(f"non-finite JSON constant {value!r} is not allowed")
-
-
-def _unique_json_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"duplicate JSON object key {key!r}")
-        result[key] = value
-    return result
-
-
 def _strict_json_loads(raw: str, *, where: str):
     try:
-        return json.loads(
+        return strict_json_loads(
             raw,
-            object_pairs_hook=_unique_json_object,
-            parse_constant=_reject_json_constant,
+            duplicate=lambda key: ValueError(f"duplicate JSON object key {key!r}"),
+            constant=lambda value: ValueError(
+                f"non-finite JSON constant {value!r} is not allowed"),
         )
     except (ValueError, json.JSONDecodeError) as exc:
         raise AssertionError(f"{where}: invalid strict JSON: {exc}") from exc

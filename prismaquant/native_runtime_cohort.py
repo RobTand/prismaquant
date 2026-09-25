@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Mapping
 from .measured_runtime_prices import RuntimePriceError, identity_sha256
+from .schemas import Contract
 
 SCHEMA='prismaquant.native_runtime_cohort.v1'
 BUNDLE_SCHEMA='tessera.native_operator_source_bundle.v1'
@@ -17,8 +18,7 @@ _COMMON_FIELDS={'image','image_declaration','arithmetic','versions','gpu','resou
 _BASE_FIELDS=_COMMON_FIELDS|{'schema','execution','source','native_libraries'}
 
 
-def _fail(message):
-    raise RuntimePriceError('native runtime cohort: '+message)
+_fail = Contract(RuntimePriceError, "native runtime cohort: ").fail
 
 
 def project(panel):

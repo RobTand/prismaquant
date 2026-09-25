@@ -22,6 +22,7 @@ from .anchored_shape import (
 from .cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, canonical_json_sha256, unit_path,
 )
+from .schemas import Contract
 
 PLAN_SCHEMA = "prismaquant.tessera_anchored_replay.plan.v1"
 REPORT_SCHEMA = "prismaquant.tessera_anchored_replay.report.v1"
@@ -33,9 +34,7 @@ class ReplayError(ValueError):
     """An explicit replay input or its recorded identity is inconsistent."""
 
 
-def _require(condition, message):
-    if not condition:
-        raise ReplayError(message)
+_require = Contract(ReplayError).require
 
 
 def _digest(value):

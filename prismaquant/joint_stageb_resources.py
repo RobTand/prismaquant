@@ -12,15 +12,14 @@ from pathlib import Path
 
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
 from .tessera_joint_allocation import _read_bound, _bound_stat_fence
+from .schemas import Contract
 
 SCHEMA = "prismaquant.joint_stageb_resource_policy.v1"
 GIB = 1024 ** 3
 _VERIFIED = {}
 
 
-def _require(ok, message):
-    if not ok:
-        raise ValueError("Stage B resources: " + message)
+_require = Contract(ValueError, "Stage B resources: ").require
 
 
 def capture_policy(capture):
