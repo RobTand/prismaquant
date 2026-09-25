@@ -511,17 +511,13 @@ def _set_minimax_fast_moe(
 def _read_proc_status_kb(*keys: str) -> dict[str, int]:
     """Read /proc/self/status for the given keys (e.g. 'VmHWM', 'VmRSS').
     Returns a dict of key -> kilobytes. Missing keys map to 0."""
-    out = {k: 0 for k in keys}
+    from .io_spans import read_proc_status
+
     try:
-        with open("/proc/self/status") as f:
-            for line in f:
-                k, _, rest = line.partition(":")
-                k = k.strip()
-                if k in out:
-                    out[k] = int(rest.strip().split()[0])
+        status = read_proc_status()
     except Exception:
-        pass
-    return out
+        status = {}
+    return {k: status.get(k, 0) // 1024 for k in keys}
 
 
 def _print_mem_snapshot(label: str, log_prefix: str = "[incremental]"):
@@ -529,9 +525,10 @@ def _print_mem_snapshot(label: str, log_prefix: str = "[incremental]"):
     (process high-water mark RSS), VmRSS (current resident), VmSwap
     (paged out), and MemAvailable (system-wide). All values in GB."""
     proc = _read_proc_status_kb("VmHWM", "VmRSS", "VmSwap")
+    from .io_spans import mem_available_bytes
+
     try:
-        import psutil
-        avail_gb = psutil.virtual_memory().available / (1024 ** 3)
+        avail_gb = mem_available_bytes() / (1024 ** 3)
     except Exception:
         avail_gb = -1.0
     print(f"{log_prefix} mem[{label}] "
@@ -5823,8 +5820,9 @@ def main():
                 except Exception:
                     total_size = 0
             try:
-                import psutil
-                avail_bytes = int(psutil.virtual_memory().available)
+                from .io_spans import mem_available_bytes
+
+                avail_bytes = mem_available_bytes()
             except Exception:
                 avail_bytes = 0
             # The fallback loads the full multimodal model. On 122B-scale

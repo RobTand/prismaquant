@@ -3064,7 +3064,7 @@ per-unit router_path/expert_id topology". Two changes:
   (`None`/`None` when no router places it) and a packed expert's per-expert
   view `_packed_experts_module` + `num_experts`, the count of the full profile
   split, as `tessera_campaign` records for the same members. Both assemblers
-  merge it into every row (`aura_cost.py:1759`, `:1898`); the Stage B layer
+  merge it into every row (`aura_cost.py:1752`, `:1891`); the Stage B layer
   quantum computes it with its roster, off the skeleton, before any window
   loads (`joint_cost_quantum.py:1042`). A Linear the profile declares routed
   that the walk cannot place gets no keys, so the scope reports it missing

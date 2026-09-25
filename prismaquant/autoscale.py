@@ -970,9 +970,10 @@ def _available_ram_bytes() -> int:
     """Free RAM right now. On UMA (Grace-Blackwell) this is the shared
     LPDDR5X pool that both CPU and GPU draw from — same number matters
     for CUDA and host work."""
+    from .io_spans import mem_available_bytes
+
     try:
-        import psutil
-        return int(psutil.virtual_memory().available)
+        return mem_available_bytes()
     except Exception:
         return 64 * 1024 ** 3  # conservative fallback
 

@@ -51,15 +51,6 @@ def mount_ops(mount_point: str = "/mnt/shared") -> dict:
     return ops
 
 
-def proc_io() -> dict:
-    values = {}
-    with open("/proc/self/io") as handle:
-        for line in handle:
-            key, _, value = line.partition(":")
-            values[key.strip()] = int(value)
-    return values
-
-
 def delta(after: dict, before: dict) -> dict:
     out = {}
     for key, value in after.items():
@@ -193,6 +184,7 @@ def main(argv=None) -> int:
     if str(args.scratch).startswith("/mnt/shared"):
         parser.error("--scratch must be host-local, never the pool")
     args.scratch.mkdir(parents=True, exist_ok=True)
+    from prismaquant.io_spans import read_proc_io
     from prismaquant.tessera_joint_aura import _load_plan
 
     record = load_record(args.quantum, args.quantum_sha256)
@@ -205,7 +197,7 @@ def main(argv=None) -> int:
         from prismaquant.staged_tier_policy import activate_staged_tier_policy
         activate_staged_tier_policy(args.allowed_tiers)
     load_before = os.getloadavg()
-    io_before, nfs_before = proc_io(), mount_ops()
+    io_before, nfs_before = read_proc_io(), mount_ops()
     wall_before, cpu_before = time.monotonic(), time.process_time()
     if args.mode == "walk":
         result = walk_intake(config, prepared=prepared,
@@ -215,7 +207,7 @@ def main(argv=None) -> int:
                               plan_sha256=args.plan_sha256, scratch=args.scratch)
     wall = time.monotonic() - wall_before
     cpu = time.process_time() - cpu_before
-    io_after, nfs_after = proc_io(), mount_ops()
+    io_after, nfs_after = read_proc_io(), mount_ops()
     journal = args.scratch / "checkpoints" / "head-walk"
     written = {"files": 0, "bytes": 0}
     if journal.exists():
