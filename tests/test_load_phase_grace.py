@@ -87,8 +87,8 @@ def test_the_layer_044_gate_derives_846_seconds_from_the_one_reader_floor():
 
 def test_the_bound_cites_the_reader_deadline_lines():
     """The stamp's file:line references are the reader's one deadline."""
-    for ref in ("prismaquant/joint_adjoint_checkpoints.py:1856",
-                "prismaquant/joint_quantum_handoff.py:655"):
+    for ref in ("prismaquant/joint_adjoint_checkpoints.py:1869",
+                "prismaquant/joint_quantum_handoff.py:1015"):
         assert ref in dispatch.LOAD_PHASE_BOUND
         path, line = ref.rsplit(":", 1)
         text = (ROOT / path).read_text().splitlines()[int(line) - 1]

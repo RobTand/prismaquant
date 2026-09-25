@@ -95,6 +95,45 @@ def prepare_joint_aura_identities(cost_data):
             row["probe_identity"] = prepared[key][1]
 
 
+def validated_identity_memo(cost_data) -> dict:
+    """A ``copy.deepcopy`` memo that keeps ``cost_data``'s validated probe
+    identities, which are immutable, as themselves in the copy.
+
+    Without it a deep copy turns each one back into a plain dict and every
+    row of the copy re-validates its source model (PQ #1256). Pair it with
+    :func:`release_joint_aura_identities` before the copy leaves its owner.
+    """
+    memo = {}
+    for per_unit in cost_data.get("costs", {}).values():
+        if not isinstance(per_unit, Mapping):
+            continue
+        for row in per_unit.values():
+            if isinstance(row, Mapping):
+                probe = row.get("probe_identity")
+                if type(probe) is _ValidatedProbeIdentity:
+                    memo[id(probe)] = probe
+    return memo
+
+
+def release_joint_aura_identities(cost_data):
+    """Give every row an ordinary dict again, built once per validated
+    identity from its validated snapshot, so rows that shared an identity
+    still share one dict, as they do after unpickling."""
+    released = {}
+    for per_unit in cost_data.get("costs", {}).values():
+        if not isinstance(per_unit, Mapping):
+            continue
+        for row in per_unit.values():
+            if not isinstance(row, dict):
+                continue
+            probe = row.get("probe_identity")
+            if type(probe) is _ValidatedProbeIdentity:
+                key = id(probe)
+                if key not in released:
+                    released[key] = (probe, dict(probe))
+                row["probe_identity"] = released[key][1]
+
+
 def validated_probe_identity(probe) -> Mapping:
     """``probe`` validated and hashed once, for a producer that publishes many rows.
 
