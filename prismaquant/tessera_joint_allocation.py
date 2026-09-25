@@ -17,6 +17,9 @@ import pickle
 
 from .cluster_campaign import _atomic_write_new_bytes as atomic_write_bytes
 from .cost_stage_checkpoint import canonical_json_sha256
+from .joint_aura import (
+    prepare_joint_aura_identities, release_joint_aura_identities, validated_identity_memo,
+)
 from .tessera_joint_aura import (
     HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN, SCHEMA, _require, _same,
     cell_render_census, render_origin_census,
@@ -104,7 +107,13 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
     _same(calibration['provenance'], {key: original_draw.get(key) for key in calibration['provenance']},
           'anchor calibration draw')
     source_by_unit = {}
-    result = copy.deepcopy(joint)
+    # One probe identity object serves every row of a quantum (pickle keeps
+    # the shared reference), and on GLM-5.3 its source model is 8.9 MB of
+    # weight map. Compare its fields once per object, not once per row
+    # (PQ #1256). Keeping each probe as the value means no keyed id can be
+    # reused by another object while this loop runs.
+    checked_probes = {}
+    result = copy.deepcopy(joint, validated_identity_memo(joint))
     policy_binding = prepared.get('served_activation_policy')
     _same(joint['provenance'].get('stage_b_resource_policy'), prepared.get('stage_b_resource_policy'),
           'joint Stage B resource policy')
@@ -135,14 +144,17 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
                   f'{name}@{fmt}: priced served policy arithmetic')
             _same(operator['arithmetic'].get('stage_b_resource_policy'), prepared.get('stage_b_resource_policy'),
                   f'{name}@{fmt}: priced resource policy arithmetic')
-            _same(probe['source_model'], prepared['source_model_identity'], f'{name}: source model')
-            _same(probe['source_model']['source'], original['model'], f'{name}: source model path')
-            _same(probe['calibration_sha256'],
-                  calibration['calibration_sha256'] if pilot is None else pilot['eval_ids_sha256'],
-                  f'{name}: probe calibration')
-            _same(probe.get('calibration_shape'),
-                  calibration['shape'] if pilot is None else pilot['shape'],
-                  f'{name}: calibration shape')
+            if id(probe) not in checked_probes:
+                source_model = probe['source_model']
+                _same(source_model, prepared['source_model_identity'], f'{name}: source model')
+                _same(source_model['source'], original['model'], f'{name}: source model path')
+                _same(probe['calibration_sha256'],
+                      calibration['calibration_sha256'] if pilot is None else pilot['eval_ids_sha256'],
+                      f'{name}: probe calibration')
+                _same(probe.get('calibration_shape'),
+                      calibration['shape'] if pilot is None else pilot['shape'],
+                      f'{name}: calibration shape')
+                checked_probes[id(probe)] = probe
             _same(operator['arithmetic']['projection_backend'], prepared['projection_backend'], f'{name}: projection backend')
             _same(operator['source_weight']['shape'], shape, f'{name}: source shape')
             source = operator['source_weight']
@@ -219,6 +231,7 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
         **render_census,
     }, 'joint provenance')
     _same(currency_gate(result), currency, 'unchanged joint currency')
+    release_joint_aura_identities(result)
     return result
 
 
@@ -295,6 +308,9 @@ def handoff(*, joint_binding, plan_binding, output_path):
     # tensors or weaken the exporter's current-byte verification.
     data = load_measured_anchor_input(plan['inputs'], verify_payloads=False)
     _same(cache.weights, {pair: cell['render'] for pair, cell in data.cells.items()}, 'prepared render paths')
+    # Every row's currency check re-validates its probe identity; validate and
+    # hash each shared identity once instead (PQ #1256), as the allocator does.
+    prepare_joint_aura_identities(joint)
     result = bind_allocation_payload(joint, data, prepared, cache.metadata,
         plan_sha256=plan_binding['sha256'], prepared_binding=prepared_binding)
     result['provenance']['tessera_joint_allocation']['original_joint_cost'] = dict(joint_binding)
