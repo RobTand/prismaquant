@@ -392,3 +392,77 @@ def test_shell_passes_the_bound_build_json_to_lane_shipcard():
     assert '--write-build-json "$TESSERA_BUILD_JSON"' in driver
     opening = driver[driver.index("python3 -m prismaquant.lane_shipcard open"):]
     assert '--build-json "$TESSERA_BUILD_JSON"' in opening.split("; then", 1)[0]
+
+
+# ---------------------------------------------------------------------------
+# #1320: a fused module's per-member rungs need a serve receipt
+# ---------------------------------------------------------------------------
+QKV = tuple(f"model.layers.0.self_attn.{leaf}_proj" for leaf in ("q", "k", "v"))
+QKV_GROUP = "model.layers.0.self_attn.qkv_proj"
+
+
+def _fused_block(receipt):
+    return {"schema": "tessera.fused-module.v1", "container": "TSRFUSE1",
+            "fields": {"family": "shared", "structure": "shared", "grid": "shared",
+                       "body": "shared", "plane": "shared", "columns": "shared",
+                       "q256": "per_member", "rows": "per_member"},
+            "sidecar_q256": "int_or_per_role_list", "mixed_rung_receipt": receipt}
+
+
+def _with_qkv(case, formats, *, receipt=None):
+    """Give the fixture a q/k/v fused module at ``formats``; ``receipt=None``
+    publishes no ``fused_module`` block at all."""
+    names = (DENSE, EXPERT, *QKV)
+    header = json.dumps({
+        name + ".weight": {"dtype": "BF16", "shape": [64, 64],
+                           "data_offsets": [index * 8192, (index + 1) * 8192]}
+        for index, name in enumerate(names)
+    }).encode()
+    (case.model / "model.safetensors").write_bytes(struct.pack("<Q", len(header)) + header)
+    for name, fmt in zip(QKV, formats):
+        if fmt == "BF16":
+            case.payload[name] = {"bits": 16, "group_size": 0, "data_type": "float",
+                                  "act_bits": 16, "act_data_type": "float"}
+        else:
+            case.payload[name] = {"data_type": "tessera", "bits": 4, "tessera_format": fmt}
+            _scope(case)["by_unit"][name] = _context()
+    _save(case)
+    payload = _payload()
+    for row in payload["lane_eligibility"]["cells"]:
+        row["rungs_q256"] = [896, 1024]
+    if receipt is not None:
+        payload["fused_module"] = _fused_block(receipt)
+    case.contract.write_text(json.dumps(payload))
+
+
+def test_uniform_fused_module_never_reads_the_licence(case):
+    _with_qkv(case, [FORMAT] * 3)
+    report = export.require_assignment_scope(case.model, case.assignment, target=Target())
+    assert set(QKV) <= set(report["by_unit"])
+    assert "fused_module" not in report
+
+
+def test_mixed_rung_fused_module_is_refused_without_a_serve_receipt(case):
+    _with_qkv(case, ["TESSERA_E4M3_K1_R896", FORMAT, FORMAT], receipt=False)
+    with pytest.raises(export.TesseraExportLaneError,
+                       match=r"mixed_rung_receipt=false.*qkv_proj"):
+        export.require_assignment_scope(case.model, case.assignment, target=Target())
+
+
+def test_mixed_rung_fused_module_with_a_receipt_is_reported(case):
+    _with_qkv(case, ["TESSERA_E4M3_K1_R896", FORMAT, FORMAT], receipt=True)
+    report = export.require_assignment_scope(case.model, case.assignment, target=Target())
+    assert report["fused_module"]["mixed_rung_groups"] == [QKV_GROUP]
+    assert report["fused_module"]["licence"]["mixed_rung_receipt"] is True
+
+
+def test_mixed_rung_fused_module_needs_a_published_licence(case):
+    _with_qkv(case, ["TESSERA_E4M3_K1_R896", FORMAT, FORMAT])
+    with pytest.raises(export.TesseraExportLaneError, match="does not license"):
+        export.require_assignment_scope(case.model, case.assignment, target=Target())
+
+
+def test_fused_module_mixing_a_tessera_wire_with_bf16_is_refused(case):
+    _with_qkv(case, [FORMAT, "BF16", FORMAT], receipt=True)
+    with pytest.raises(export.TesseraExportLaneError, match="mix decoder families"):
+        export.require_assignment_scope(case.model, case.assignment, target=Target())

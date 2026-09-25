@@ -412,12 +412,20 @@ def write_seed_receipt(space, receipt) -> dict:
     return {"path": str(path), "sha256": hashlib.sha256(payload).hexdigest()}
 
 
-def tensor_payload_sha256(tensor) -> str:
-    """sha256 of a tensor's contiguous payload bytes, dtype and shape aside."""
+def tensor_payload_sha256(tensor, *, chunk_bytes: int = 1 << 26) -> str:
+    """sha256 of a tensor's contiguous payload bytes, dtype and shape aside.
+
+    The bytes are copied to the host ``chunk_bytes`` at a time, so hashing a
+    device tensor holds one chunk beside it, not a second copy of it.
+    """
     import torch
 
-    data = tensor.detach().to("cpu").contiguous().reshape(-1)
-    return hashlib.sha256(data.view(torch.uint8).numpy()).hexdigest()
+    data = tensor.detach().contiguous().reshape(-1)
+    digest = hashlib.sha256()
+    step = max(1, int(chunk_bytes) // max(data.element_size(), 1))
+    for start in range(0, data.numel(), step):
+        digest.update(data[start:start + step].to("cpu").view(torch.uint8).numpy())
+    return digest.hexdigest()
 
 
 def compare_seed_plane(plan: ChainSeed, digests: dict, *, max_resident_bytes=None) -> dict:

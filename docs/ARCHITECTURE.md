@@ -1106,6 +1106,19 @@ replay, which still charges the operator windows' declared reserve. Gates: `test
 `tests/test_stage_b_workspace_profile.py`. No format, pipeline default or
 ship gate changes.
 
+A Stage B spill row can also record a torch.profiler timeline of its own
+passes (2026-09-25, PQ #1269, `prismaquant/stage_b_pass_profile.py`). It is
+off unless `PRISMAQUANT_STAGE_B_PASS_PROFILE` names an output directory;
+`PRISMAQUANT_STAGE_B_PASS_PROFILE_SPEC` picks the probes and the schedule
+(for example `capture=1+2:stack,windowed=1,shadow_batches=48`). A capture
+pass traces a bounded run of capture groups and times every group and every
+gap between groups. `windowed=P` first runs a bounded windowed-replay shadow
+of probe P under a throwaway lease on window 0, whose statistics are
+discarded. Each traced pass writes `<quantum>-p<probe>-<kind>.trace.json.gz`,
+`.key_averages.txt` and `.timing.json`. Unset, the row runs the same code as
+before. It is a development instrument: no format, pipeline default or ship
+gate changes. Gate: `tests/test_stage_b_pass_profile.py`.
+
 Checkpoint planes stream in leased windows (2026-09-24,
 `ws-rd/1142-grouped-reads`, PQ #1142). Stage B checkpoint-load and
 handoff-load, the Stage A seed comparison and `checkpoint_plane_distance`
@@ -2960,8 +2973,81 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/aura-topology-1278`.
+As of: 2026-09-25 · `claude/mixed-rung-export-gate-1320`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/mixed-rung-export-gate-1320`) for **the
+export gate reading `mixed_rung_receipt`** (PQ #1320, P2, part of #1317).
+The pinned contract's `fused_module` block licenses a rung per member and
+publishes `mixed_rung_receipt: false`: a decode identity backs the licence,
+and no serve does. Before this change the allocator read the licence, the fold
+stamped the receipt, and no gate read it. Now
+`tessera_export_lane.require_fused_rung_coherence`, called from
+`require_assignment_scope`, groups the selected assignment with the allocator's
+own `_fused_sibling_groups` and handles each fused module whose members
+disagree as follows:
+
+- Members of different decoder families (`format_promotion_class`, which
+  includes a Tessera wire beside BF16): refused.
+- Per-member rungs, with the packaged contract publishing no `fused_module`
+  block or marking `q256` shared: refused.
+- Per-member rungs, with `mixed_rung_receipt: false`: refused.
+- Per-member rungs, with the receipt true: passes. The export report carries
+  the groups and the licence answer under `fused_module`, so the shipcard can
+  say so.
+
+The gate reads the licence from the same packaged contract bytes as the route
+gate, and only when a mixed group exists. A uniform module never asks.
+Measured on the GLM-5.3 scoped allocation (PB 69f5ec94): 69 fused gate/up
+groups, none mixed. Routed stacks are uniform per layer. Attention is
+profile-pinned BF16, so no q/k/v group has a Tessera member.
+
+Re-stamped (2026-09-25, `claude/glm-mtp-capture-1271`) for **the GLM MTP
+layer's calibration capture** (PQ #1290, part 2 of #1271, P1). The MTP
+layer (`layers.45`) now gets a capture in the canonical format, on the body's
+calibration draw, in two PrismaBuild actions (`tools/glm_mtp_capture.py`,
+`prismaquant/glm_mtp_capture.py`):
+
+- Phase `final-hidden` reads Stage A's layer-44 input entries through a
+  hash-bound boundary manifest, runs layer 44 on the plan's streamed BF16
+  source (`build_quantum_source_runner`, which now takes a
+  `source_authentication` owner), then the collapse and the final norm. It
+  writes each sequence's post-norm hidden state as an exact entry and records
+  the target head's top-1 and NLL on it as a check. Its witness is
+  `prismaquant.streaming_selected_initialization.v1`
+  (`StreamingContext.source_selected_initialization_witness`): the installed
+  state of the layers it ran, with the same `source_map_sha256` a complete
+  traversal names. It is a record, not a load contract.
+- Phase `capture` loads the MTP layer with the experts dispatch the body's
+  last MoE layer ran (`prepared.json` `source_execution`; `load_mtp_layer`
+  now requires it by name) and runs the body's collector over it
+  (`_collect_activations`, unchanged). The feed runs the layer at its
+  weights' dtype.
+- The capture's load contract is `prismaquant.mtp_layer_initialization.v1`
+  (`streaming_model.validate_mtp_layer_initialization_contract`, routed by
+  `validate_source_initialization_contract`): each state tensor's shape,
+  dtype and payload hash, the checkpoint source map, the dispatch, and the
+  hash-bound final-hidden manifest. `SELECTED_SOURCE_LOAD_SCHEMAS` admits it
+  for a selected consumer.
+- The MTP census (`mtp_extension`) is derived from the body census. A source
+  owner admits a derived census only over the same model and producer roster
+  (`CaptureSourceAuthentication.admit_derived_census`); the capture then
+  inherits the canonical capture's source roster, and every shard either
+  phase reads is authenticated through that owner. The owner's receipt names
+  each admitted census (`derived_census_sha256`).
+
+No format, pipeline default, stage, lane or ship gate changes; nothing reads
+the MTP capture yet. `stage_a_chain_seed.tensor_payload_sha256` now hashes in
+bounded host chunks (same digest). Gate: `tests/test_glm_mtp_capture.py`
+(both phases end to end on a tiny checkpoint, the CLI from a body-shaped
+plan, the derived-census and load-contract refusals).
+
+Re-stamped (2026-09-25, `claude/stageb-pass-profile-1269`) for **the Stage B
+pass profiler** (PQ #1269), an opt-in development instrument:
+`PRISMAQUANT_STAGE_B_PASS_PROFILE` records a torch.profiler timeline of a
+spill row's capture passes and of a bounded windowed-replay shadow. Unset, the
+row runs the same code as before. No format, pipeline default or ship gate
+changes.
 
 Re-stamped (2026-09-25, `claude/aura-topology-1278`) for **per-unit topology
 on AURA stats rows** (PQ #1278, P1). A scoped Tessera allocation classifies
@@ -10481,7 +10567,9 @@ activation-cache writer/journal before the source layer unloads.
 
 This route produces `prismaquant.streaming_initialization.v1` only after actual
 installed source state has been observed across every decoder layer. Its scope
-is the text source forward; vision/MTP are outside that witness. A streamed
+is the text source forward; vision/MTP are outside that witness. The GLM MTP
+layer's capture carries its own load contract,
+`prismaquant.mtp_layer_initialization.v1` (PQ #1290). A streamed
 capture requires a census from the same route and verifies its own completed
 initialization witness before publishing the full manifest. Legacy pretrained
 contracts remain readable through the strict schema dispatcher. Interrupted
@@ -19067,11 +19155,10 @@ rung (3.276 bpp, 30.4 GB of budget unused). Gate:
 > module -- the relaxation is proven by a decode identity -- and nothing in it
 > covers per-expert rungs, which is why packed components stay uniform. This
 > section describes what the *allocator* may consider; §9's export gate
-> decides what ships, and under the default attested menu there are no Tessera
-> candidates for the relaxation to act on. The export lane additionally refuses
-> routed-MoE models outright (it reads the contract's `structures: ["dense"]`
-> and the absent `routed_moe` cell), so no mixed-rung expert group can reach
-> an artifact even where the allocator states one.
+> decides what ships. Since PQ #1320 that gate reads the receipt:
+> `require_assignment_scope` refuses a fused module with per-member rungs while
+> `mixed_rung_receipt` is `false`, so the licence can widen the menu but cannot
+> ship an unserved module.
 
 **The route travels with the choice.** `serving_lane_route` falls through to
 `tessera_menu.tessera_resolved_serving_lane` for a `TESSERA_*` name when no profile

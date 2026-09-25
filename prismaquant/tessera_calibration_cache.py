@@ -135,6 +135,23 @@ def capture_identity(census_path, *, calibration, max_act_rows,
                 units={name:list(shape) for name,shape in sorted(census['unit_shapes'].items())})
 
 
+def _producer_digests(producer_source):
+    """``{file name: sha256}`` a census producer declares for its source."""
+    declared = {**producer_source.get('files', {}),
+                **producer_source.get('auxiliary_sha256', {})}
+    if producer_source.get('config_sha256'):
+        declared['config.json'] = producer_source['config_sha256']
+    return declared
+
+
+#: Initialization contracts a selected-source capture may carry: the streamed
+#: text forward, and the checkpoint load of an MTP layer outside it.
+SELECTED_SOURCE_LOAD_SCHEMAS = frozenset({
+    'prismaquant.streaming_initialization.v1',
+    'prismaquant.mtp_layer_initialization.v1',
+})
+
+
 def _source_stat(value):
     return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
 
@@ -155,10 +172,9 @@ class CaptureSourceAuthentication:
         self._identity_json = json.dumps(identity, sort_keys=True, allow_nan=False)
         self._source_files = dict(identity['source_files'])
         self._expected = dict(self._source_files)
-        declared = {**producer_source.get('files', {}),
-                    **producer_source.get('auxiliary_sha256', {})}
-        if producer_source.get('config_sha256'):
-            declared['config.json'] = producer_source['config_sha256']
+        declared = _producer_digests(producer_source)
+        self._producer = dict(declared)
+        self._derived_censuses = {}
         for name, digest in declared.items():
             if name in self._expected and self._expected[name] != digest:
                 raise RuntimeError(f'capture source roster differs from census producer: {name}')
@@ -309,10 +325,36 @@ class CaptureSourceAuthentication:
         self._adopted_cache_sha256 = hashlib.sha256(raw).hexdigest()
         return len(candidate)
 
+    def admit_derived_census(self, census_path):
+        """Let a census derived from this capture's source bind its roster.
+
+        A derived capture covers units the canonical capture never ran (an
+        MTP layer outside the streamed text forward) over the same source
+        checkpoint. It inherits this owner's hash-bound source roster instead
+        of re-hashing every shard, and its payload reads are still
+        authenticated one shard at a time. The derived census must name the
+        same model and declare the same producer source digests; its own
+        digest is then the one other census :meth:`source_files` accepts.
+        Returns that digest.
+        """
+        raw = Path(census_path).read_bytes()
+        census = json.loads(raw)
+        digest = hashlib.sha256(raw).hexdigest()
+        producer = ((census.get('expert_projection') or {}).get('producer') or {}).get('source') or {}
+        if (not isinstance(census.get('model'), str) or
+                Path(os.path.abspath(census['model'])) != self.root or
+                _producer_digests(producer) != self._producer):
+            raise RuntimeError('derived census names another source model or producer roster')
+        with self._lock:
+            self._require_open()
+            self._derived_censuses[digest] = str(Path(os.path.abspath(census_path)))
+        return digest
+
     def source_files(self, root, census_digest, names, producer_digests):
         canonical = json.loads(self._identity_json)
         if (Path(os.path.abspath(root)) != self.root or
-                census_digest != canonical['census_sha256'] or names != set(self._source_files) or
+                census_digest not in {canonical['census_sha256'], *self._derived_censuses} or
+                names != set(self._source_files) or
                 any(self._expected.get(name) != digest for name, digest in producer_digests.items())):
             raise RuntimeError('selected source census or complete source roster changed')
         # Metadata includes producer auxiliaries outside capture's historical
@@ -372,6 +414,8 @@ class CaptureSourceAuthentication:
                             'fresh SHA256 through held read-only source descriptors'),
             **({'streamed_identity_cache_sha256': self._adopted_cache_sha256}
                if adopted else {}),
+            **({'derived_census_sha256': sorted(self._derived_censuses)}
+               if self._derived_censuses else {}),
             verified_files=verified,
             payload_bytes_hashed=sum(row['bytes_hashed'] for row in verified
                                      if row['name'].endswith('.safetensors')),
@@ -1110,7 +1154,7 @@ def authenticate_selected_capture_source(census_path, capture_path, *, expected_
     canonical = manifest['identity']
     census = json.loads(Path(census_path).read_text())
     if (census.get('model') != str(model) or
-            canonical['model_load_contract']['schema'] != 'prismaquant.streaming_initialization.v1' or
+            canonical['model_load_contract']['schema'] not in SELECTED_SOURCE_LOAD_SCHEMAS or
             any(census.get(key) != value for key, value in (calibration_parameters or {}).items())):
         raise RuntimeError('selected source model, draw or streaming witness differs from census')
     producer = ((census.get('expert_projection') or {}).get('producer') or {}).get('source') or {}
