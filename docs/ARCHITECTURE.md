@@ -588,6 +588,25 @@ it raises the site's original exception, with the same type and message. In
 dev mode it prints one `[DEV-MODE]` line that names the first differing field
 and both values, and the run continues.
 
+A re-declared plan has its own path (2026-09-25, `claude/gpu-availability-i1azgo-pq1191`, PQ #1191).
+`dispatch_joint_quanta --execution-plan PATH` names the plan the rows run
+under, for example a Stage B resource re-declare. The records keep naming the
+sealed plan in `campaign.plan_path`, and nothing rewrites that file, so a
+later band prepare still reads it against the sealed digest
+(`prepare_extended_joint_quanta`, `regenerate_joint_quanta --plan-sha256`).
+Before, the only way to hand a row a re-declared plan was to write it over the
+sealed path, and every later prepare refused with "extended plan digest
+mismatch". `with_execution_plan` points every plan read of the dispatch at the
+execution plan: the row's `--plan` and its digest, the Stage A memory bound,
+spool window and output root, the handoff template and the source coverage
+check. `campaign.plan_sha256` stays the sealed digest, which the Stage A proof
+gate and the manifest binding compare with. The execution plan's digest
+against the sealed one goes through `seal_check`: dev mode prints it, and
+certified mode refuses a plan whose bytes differ and runs a byte-identical
+copy. The dry run prints the execution plan's path and digest beside the
+sealed ones under `execution_plan`, and each state event records them. Gate:
+`tests/test_dispatch_execution_plan_1191.py`.
+
 These still refuse in both modes:
 
 - Byte integrity: bytes that do not hash to their stored digest, a record that
@@ -2581,6 +2600,13 @@ spool report (schema v3) keeps one export record per group, and a row's
 `counters.json` keeps the handoff's (`handoff_export`). See "The local
 window", Durability and Barriers, and "Stage B's spans". No format,
 pipeline default, stage, lane or ship gate changes.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1191`) for **a re-declared plan at its own
+path** (PQ #1191): `dispatch_joint_quanta --execution-plan PATH` runs every row
+under that plan while the records keep naming the sealed plan, which is never
+rewritten. Dev mode stamps a differing digest; certified mode refuses it. See
+the entry after "Sealing is off by default". A dispatcher flag is added; no
+format, pipeline default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1129`) for **a spec that pins a
 container cache to the overlay refuses at the joint dispatcher's spec check**
