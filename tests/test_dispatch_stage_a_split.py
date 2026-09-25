@@ -65,8 +65,11 @@ def _json(path, value) -> Path:
 
 
 @pytest.fixture
-def sealed(tmp_path, monkeypatch):
-    """An interrupted run, its split package and its sealed round."""
+def sealed(tmp_path, monkeypatch, request):
+    """An interrupted run, its split package and its sealed round.
+
+    An indirect parameter is a dict of extra ``seal_round`` keywords.
+    """
     import dispatch_joint_quanta
     from tools.build_stagea_split_package import build
 
@@ -128,7 +131,8 @@ def sealed(tmp_path, monkeypatch):
         chain_regime={"chain_batch_size": 1, "chain_probe_fusion": "off"},
         seconds_per_layer=100.0, digest_layer=3,
         band_request={"path": str(band_request), "sha256": _sha(band_request)},
-        band_references=[{"path": str(earlier)}], python="/venv/bin/python")
+        band_references=[{"path": str(earlier)}], python="/venv/bin/python",
+        **getattr(request, "param", {}))
     return {"root": root, "round": tmp_path / "round", "document": document,
             "campaign": campaign, "space": space}
 
@@ -197,6 +201,36 @@ def test_a_sealed_round_names_every_row_and_its_order(sealed):
         "--receipt", str(sealed["round"] / "joins" / "join-002.json")]
     assert rows["band-set"]["bands"] == [str(sealed["round"].parent / "band-005.json"),
                                          str(sealed["round"] / "bands" / "band-002.json")]
+
+
+@pytest.mark.parametrize("sealed", [{"priority": "0"}], indirect=True)
+def test_a_sealed_priority_reaches_every_row(sealed):
+    """``seal --priority`` sets every row's band, and the round records it."""
+    document = sealed["document"]
+    assert document["priority"] == "0"
+    assert load_round(sealed["round"])["priority"] == "0"
+    for row in document["rows"]:
+        envelope = _envelope(row)
+        assert envelope.count("--priority") == 1, row["name"]
+        assert _flag(envelope, "--priority") == "0", row["name"]
+
+
+def test_the_default_priority_is_recorded(sealed):
+    assert sealed["document"]["priority"] == "-10"
+    for row in sealed["document"]["rows"]:
+        assert _flag(_envelope(row), "--priority") == "-10", row["name"]
+
+
+@pytest.mark.parametrize("priority", ["high", "", "1.5", "0 "])
+def test_a_priority_that_is_not_an_integer_refuses(tmp_path, priority):
+    # The band is checked before any input is read or anything is written.
+    with pytest.raises(SplitDispatchRefused, match="not an integer"):
+        seal_round(round_dir=tmp_path / "round", checkout=None, split_package=None,
+                   campaign=None, spec=None, prefetch_override=None, base_template=None,
+                   artifact_budget_bytes=None, chain_regime=None, seconds_per_layer=None,
+                   digest_layer=None, band_request=None, band_references=None,
+                   python=None, template_prefix=None, tier=None, priority=priority)
+    assert not (tmp_path / "round").exists()
 
 
 def test_a_quantum_seals_its_own_windows(sealed):

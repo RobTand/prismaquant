@@ -50,7 +50,7 @@ GIB = 1024 ** 3
 
 # The sealed hostcap32 campaign lives on the fleet's shared mount; skip --
 # never fail -- where it is absent (GitHub CI has no /mnt/shared, the
-# convention tests/test_glm_campaign_streaming.py:188 established).
+# convention tests/test_glm_campaign_streaming.py:261 established).
 real_plan = pytest.mark.skipif(
     not os.path.exists(PLAN_PATH),
     reason=f"the sealed campaign {PLAN_PATH} is absent (GitHub CI has no "
