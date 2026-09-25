@@ -44,7 +44,8 @@ from prismaquant.cost_stage_checkpoint import (
     canonical_json_bytes,
     canonical_json_sha256,
 )
-from prismaquant.joint_aura import validate_joint_aura_entry
+from prismaquant.joint_aura import (
+    prepare_joint_aura_identities, validate_joint_aura_entry)
 from prismaquant.joint_layer_quanta import (
     phase_ranges,
     qname_layer,
@@ -144,11 +145,24 @@ def _sha_file(path: Path, *, where: str) -> str:
         raise JoinRefused(f"{where}: unreadable file at {path}: {exc}") from exc
 
 
-def _check_digest(path: Path, expected: str, *, where: str) -> None:
-    actual = _sha_file(path, where=where)
-    if actual != expected:
+def _read_checked(path: Path, expected: str | None, *,
+                  where: str) -> tuple[bytes, str]:
+    """Read ``path`` once and return its bytes with their digest. The digest
+    describes the bytes returned, so a caller that parses them never
+    authenticates one read and parses another (PQ #1256)."""
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise JoinRefused(f"{where}: unreadable file at {path}: {exc}") from exc
+    actual = hashlib.sha256(data).hexdigest()
+    if expected is not None and actual != expected:
         raise JoinRefused(
             f"{where}: digest mismatch at {path}: expected {expected}, got {actual}")
+    return data, actual
+
+
+def _check_digest(path: Path, expected: str, *, where: str) -> None:
+    _read_checked(path, expected, where=where)
 
 
 def _scan_receipts(input_root: Path | None, *, records_dir: Path | None = None) -> list[dict]:
@@ -421,7 +435,8 @@ def _read_status(receipt: dict) -> tuple[str, list]:
     return status["status"], units
 
 
-def _load_cost_payload(receipt: dict, record: dict, campaign: dict) -> dict:
+def _load_cost_payload(receipt: dict, record: dict,
+                       campaign: dict) -> tuple[dict, str]:
     """Custody step 2: the payload's provenance equals the campaign binding
     and answers for exactly this record's sealed identity and adjoint
     binding; only per-layer content may differ. B4 (#787): the grammar is
@@ -430,12 +445,11 @@ def _load_cost_payload(receipt: dict, record: dict, campaign: dict) -> dict:
     -- pinned here before the campaign's payloads land."""
     quantum_id = receipt["quantum_id"]
     where = f"custody {quantum_id}"
-    cost_path = Path(receipt["cost_path"])
-    if receipt.get("cost_sha256") is not None:
-        _check_digest(cost_path, receipt["cost_sha256"], where=where)
+    cost_bytes, cost_sha256 = _read_checked(
+        Path(receipt["cost_path"]), receipt.get("cost_sha256"), where=where)
     try:
-        payload = pickle.loads(cost_path.read_bytes())
-    except (OSError, ValueError, pickle.UnpicklingError) as exc:
+        payload = pickle.loads(cost_bytes)
+    except (ValueError, pickle.UnpicklingError) as exc:
         raise JoinRefused(f"{where}: unreadable cost payload: {exc}") from exc
     if not isinstance(payload, dict) or not isinstance(
             payload.get("costs"), dict) or not isinstance(
@@ -493,7 +507,12 @@ def _load_cost_payload(receipt: dict, record: dict, campaign: dict) -> dict:
         raise JoinRefused(
             f"{where}: record is unbound (pre-A): re-seal against its "
             "stage-A slice before joining")
-    return payload
+    # Every row of one payload carries the same probe identity object (pickle
+    # keeps the shared reference), and on GLM-5.3 that identity is 8.9 MB of
+    # model weight map. Validate and hash it once per payload instead of once
+    # per row; every per-row check below still runs on every row (PQ #1256).
+    prepare_joint_aura_identities(payload)
+    return payload, cost_sha256
 
 
 def _check_rows(costs: dict, quantum_id: str) -> None:
@@ -648,7 +667,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
                               "identity_sha256": record["identity_sha256"],
                               "status": status, "units": units})
             continue
-        payload = _load_cost_payload(receipt, record, campaign)
+        payload, cost_sha256 = _load_cost_payload(receipt, record, campaign)
         measured_payloads[quantum_id] = payload
         costs = payload["costs"]
         for qname in costs:
@@ -666,9 +685,7 @@ def join_joint_quanta(*, receipts: list[dict] | None, campaign: dict,
         merged.update(costs)
         per_layer.append({"quantum_id": quantum_id,
                           "identity_sha256": record["identity_sha256"],
-                          "cost_sha256": hashlib.sha256(
-                              Path(receipt["cost_path"]).read_bytes()
-                          ).hexdigest(),
+                          "cost_sha256": cost_sha256,
                           "status": status, "units": units})
 
     # A quantum with no record at all is still a named gap, never a shrunk

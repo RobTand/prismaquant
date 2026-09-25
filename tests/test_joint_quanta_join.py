@@ -806,3 +806,38 @@ def test_producer_records_join_synthetic_runtime_outputs(tmp_path, campaign,
     assert joined["provenance"]["coverage"]["status"] == "complete"
     assert load_joint_cost_for_allocation(out / "joint-cost.pkl")["costs"] \
         == joined["costs"]
+
+
+# -- one probe-identity validation per payload (PQ #1256) --------------------
+
+
+def test_join_validates_each_payloads_probe_identity_once(
+        tmp_path, campaign, probe, monkeypatch):
+    """Every row of a payload shares one probe identity object, and on
+    GLM-5.3 that identity is 8.9 MB of model weight map. The join validated
+    it once per ROW (119 ms each, about 14 h for 45 layers); it validates it
+    once per PAYLOAD, and the joined bytes still carry the plain probe."""
+    from prismaquant import cost_streaming
+    calls = []
+    validate = cost_streaming.validate_streamed_model_identity
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get("where"))
+        return validate(*args, **kwargs)
+
+    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity",
+                        counted)
+    root = tmp_path / "campaign"
+    _seal_inputs(root, campaign)
+    _write_all(root, campaign, probe)
+    rows = N_LAYERS * UNITS_PER_LAYER * len(FORMATS)
+    calls.clear()  # building the fixture rows validates each one
+    cost_path, _ = _run_cli(root, tmp_path / "joined", campaign)
+    row_calls = [where for where in calls if where == "joint AURA row"]
+    assert len(row_calls) == N_LAYERS < rows
+
+    joined = pickle.loads(cost_path.read_bytes())
+    for per_unit in joined["costs"].values():
+        for row in per_unit.values():
+            assert type(row["probe_identity"]) is dict
+            assert row["probe_identity"] == probe
