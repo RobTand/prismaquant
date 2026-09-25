@@ -2596,8 +2596,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq-misc`.
+As of: 2026-09-25 · `fix/1236-deferred-unlink-publish`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `fix/1236-deferred-unlink-publish`) for **a retired
+entry that keeps its file while its group can still be read** (PQ #1236). A
+Stage A owner no longer unlinks a retired entry of a group the local window
+released for room while another entry of that group is live: the next
+read's publication or restage stats every origin in the group. See
+"Deferred unlink" under "Same-box readback and write-behind export (#1110)".
+No format, pipeline default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq-misc`) for **one pin per PrismaBuild bundle
 the tests run against** (PQ #1084): the Stage B preparation (#1070), Stage A
@@ -24524,7 +24532,17 @@ export whose worker dies.
 destination against the export's receipt, so a retired entry's canonical
 file must outlive its group's local release. `_retire` of an entry in a held
 group records it (`produced_deferred_unlinks`) and unlinks it once the spool
-no longer holds the group. A group read only on this box and never published
+no longer holds the group. A group the window released for room can still
+have live entries, and the read of one publishes or restages the whole
+group, which stats every origin its manifest names
+(`produced_output.publish`, `ensure_batch_materialized`). So a retired
+entry's file also waits while another entry of its group is live
+(`_produced_group_read_may_follow`, PQ #1236), and the group's last
+retirement unlinks the files held for it. Before #1236 such an entry was
+unlinked at once, and a Stage A quantum died when the next window's first
+publication refused `descriptor-unstatable`. At `settle_local_output` and at
+a failed exit no read follows, so only the local release holds a file back
+there. A group read only on this box and never published
 releases its prewrite charge when its last entry retires (`abort_prewrite`,
 `produced_groups_prewrite_released`); one still held at exit is recorded in
 `retained_uncommitted`.

@@ -284,6 +284,60 @@ def test_a_full_window_releases_the_oldest_unread_landed_group_with_a_record(tmp
         assert local == {}
 
 
+def test_a_group_released_for_room_keeps_its_retired_files_for_its_next_read(
+        tmp_path, monkeypatch):
+    """PQ #1236: the window releases a landed group for room while the roll
+    has read only part of it. The entry the roll retires keeps its file,
+    because the next window's read of a live entry is the group's first
+    publication, and PrismaBuild stats every origin the group names. Before
+    the fix the retirement unlinked the file at once and that publication
+    refused ``descriptor-unstatable``. The held files go with the group's
+    last live entry."""
+    from prismaquant.stage_a_produced_output import (
+        BoundaryProducedPublicationFailed)
+
+    owner, publication, backend = _owner(tmp_path, monkeypatch)
+    spool = owner._local_output_spool
+    refs = chain._write_group(owner)
+    key, group = owner._produced_group_for(refs[0])
+    batch_id = group["batch_id"]
+    backend.acknowledge(batch_id)
+    assert spool.landed(batch_id) and spool.holds(batch_id)
+    # The first window reads its entry from this box's copy.
+    with owner.prefetch(refs[:1]) as window:
+        owner.get(window, refs[0])
+    assert owner.telemetry["produced_local_reads"] == 1
+    # The next plane's first write finds the window full. The landed group
+    # is not being read and has nothing retired, so it goes for room.
+    backend.capacity = backend.groups[batch_id]["ceiling"]
+    chain._write_group(owner, boundary_index=1, count=1)
+    assert not spool.holds(batch_id)
+    assert [e["batch_id"] for e in spool.report()["evictions"]] == [batch_id]
+    # The roll retires the entry it read; three of the group's entries are
+    # still live, so the file stays.
+    owner._retire(refs[0])
+    owner._produced_flush_deferred_unlinks()
+    # The next window reads a live entry through PrismaBuild: the group's
+    # first publication, over all four origins.
+    try:
+        with owner._produced_lock.held():
+            owner._produced_fund_group_for_read(
+                key, group, {key: group}, time.monotonic() + 2)
+    except BoundaryProducedPublicationFailed as exc:
+        pytest.fail(f"the read's first publication refused: {exc}")
+    assert group["published"] is not None
+    assert Path(refs[0].path).exists()
+    assert owner.telemetry["produced_deferred_unlinks_done"] == 0
+    # The roll retires the rest; the last one takes the held files with it.
+    for ref in refs[1:-1]:
+        owner._retire(ref)
+    assert all(Path(ref.path).exists() for ref in refs)
+    owner._retire(refs[-1])
+    assert not any(Path(ref.path).exists() for ref in refs)
+    assert owner.telemetry["produced_deferred_unlinks_done"] == len(refs) - 1
+    assert owner.produced_output_report()["deferred_unlinks"] == {}
+
+
 def test_a_window_nothing_can_free_refuses_at_once_with_a_record(tmp_path):
     """Every held copy is being read and no export is live: nothing will
     free room, so the writer's reservation refuses at once and says why; a
@@ -423,7 +477,7 @@ def _write_only_owner(adapter, groups):
     owner._produced_origin_batches = []
     owner.telemetry = {"produced_groups_committed_at_origin": 0,
                        "produced_commit_origin_s": 0.0}
-    owner._produced_flush_deferred_unlinks = lambda: None
+    owner._produced_flush_deferred_unlinks = lambda **_: None
     owner._commit_local_output_progress = lambda: None
     return owner
 
