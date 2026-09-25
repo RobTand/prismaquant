@@ -61,7 +61,7 @@ def _run(campaign, monkeypatch, *, layer, spill_root=None, handoff=None, emit=Fa
                    if emit else None)
         bound = (None if handoff is None else load_quantum_handoff(
             handoff["path"], handoff["sha256"], record=record,
-            adjoint_slice=adjoint_slice))
+            adjoint_slice=adjoint_slice, kda_capture_kernel=None))
         payload = original(*args, record=record, adjoint_slice=adjoint_slice,
                            execution=execution, adjoint_handoff=bound,
                            handoff_emitter=emitter, **kwargs)

@@ -1,16 +1,18 @@
-"""The Stage B KDA capture kernel's contract (PQ #1199).
+"""The Stage B KDA capture kernel's contract (PQ #1199, #1214).
 
 A launch names the kernel with ``PRISMAQUANT_STAGE_B_KDA_KERNEL``. The GLM
 derivative contract declares it, ``CaptureKernelDispatch`` substitutes it for
 the verified fallback for one block at a time, and the layer quantum admits
-it for a KDA target layer only, runs every target-layer pass inside its
-scope, stamps its identity into the probe arithmetic and records it in the
-counters. Every step refuses rather than fall back to Torch.
+it once per launch (kernel mode, PQ #1214). Every Stage B layer pass then
+runs inside the dispatch: a pass of a KDA layer must run the kernel once
+forward and once per backward, and a pass of any other layer must call no
+kernel. Every step refuses rather than fall back to Torch.
 
 These tests need no GPU. The kernel's numerics are
-``tests/test_kda_chunk_kernel.py``'s. The tests that touch
+``tests/test_kda_chunk_kernel.py``'s; the quantum core in kernel mode is
+``tests/test_kda_kernel_mode.py``'s. The tests that touch
 ``prismaquant.kernels.kda_chunk`` (directly, or through the dispatch, the
-admission or the pass scope, which import it) need Triton importable, because
+admission or the layer pass, which import it) need Triton importable, because
 that module defines its kernels with ``@triton.jit`` at import; they are marked
 ``needs_triton`` and skip on hosted CPU CI (#1224). The rest run everywhere.
 """
@@ -96,11 +98,6 @@ def kda_layer():
     return layer
 
 
-def count_one_kernel_pass():
-    for key, value in ONE_PASS.items():
-        kda_chunk._COUNTS[key] += value
-
-
 # ---- the launch setting ----------------------------------------------------
 
 def test_the_launch_setting_names_a_known_kernel_or_nothing():
@@ -118,7 +115,9 @@ def test_every_launchable_kernel_is_declared_by_the_derivative_contract():
         declaration = derivative.capture_kernel_declaration(name)
         assert declaration["implements"] == derivative.VERSION
         assert declaration["replaces"] == "chunk_kimi_delta_attention"
-        assert declaration["scope"] == "stage_b_target_layer_pass"
+        # Kernel mode (PQ #1214): every Stage B pass of a KDA layer, the
+        # target's capture passes and the chain rolls; never Stage A.
+        assert declaration["scope"] == "stage_b_kda_layer_passes"
         assert (declaration["module"], declaration["entry"]) == (
             "prismaquant.kernels.kda_chunk", "chunk_kimi_delta_attention")
     assert kda_chunk.NAME in capture.KERNELS
@@ -174,40 +173,32 @@ def test_dispatch_requires_the_bound_derivative(modeling):
 # ---- admission --------------------------------------------------------------
 
 @needs_triton
-def test_admission_skips_a_target_without_kda_before_any_kernel_work(monkeypatch):
+def test_admission_is_per_launch_and_refuses_an_unknown_kernel_before_any_work(monkeypatch):
+    """Kernel mode admits once per launch, whatever the target layer (PQ #1214)."""
     monkeypatch.setattr(kda_chunk, "probe_digest", lambda device: pytest.fail("probed"))
+    with pytest.raises(capture.KdaCaptureKernelRefused, match="unknown KDA capture kernel"):
+        capture.admit_kda_capture_kernel("other", None, device="cpu")
+    # The class check each layer pass applies.
     layer = torch.nn.Sequential(torch.nn.Linear(2, 2))
     assert capture.layer_runs_kda(layer) is False
     assert capture.layer_runs_kda(kda_layer()) is True
-    assert capture.admit_kda_capture_kernel("kda_gram_v1", None, layer, device="cpu") is None
-    with pytest.raises(capture.KdaCaptureKernelRefused, match="unknown KDA capture kernel"):
-        capture.admit_kda_capture_kernel("other", None, layer, device="cpu")
-
-
-@needs_triton
-def test_admission_refuses_a_band_serial_handoff(monkeypatch):
-    monkeypatch.setattr(kda_chunk, "probe_digest", lambda device: pytest.fail("probed"))
-    with pytest.raises(capture.KdaCaptureKernelRefused, match="band-serial producer"):
-        capture.admit_kda_capture_kernel("kda_gram_v1", None, kda_layer(), device="cpu",
-                                         emits_handoff=True)
 
 
 @needs_triton
 def test_admission_refuses_an_unbound_model_and_a_kernel_that_cannot_run(
         bound_model, modeling, monkeypatch):
     with pytest.raises(capture.KdaCaptureKernelRefused, match="bound GLM derivative"):
-        capture.admit_kda_capture_kernel("kda_gram_v1", torch.nn.Linear(2, 2), kda_layer(),
-                                         device="cpu")
+        capture.admit_kda_capture_kernel("kda_gram_v1", torch.nn.Linear(2, 2), device="cpu")
 
     def broken(device):
         raise RuntimeError("no CUDA device")
 
     monkeypatch.setattr(kda_chunk, "probe_digest", broken)
     with pytest.raises(capture.KdaCaptureKernelRefused, match="probe failed.*no CUDA device"):
-        capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(), device="cpu")
+        capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, device="cpu")
     monkeypatch.setattr(kda_chunk, "IMPLEMENTS", "glm_kda_causal_exp_v0")
     with pytest.raises(capture.KdaCaptureKernelRefused, match="not the declared kernel"):
-        capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(), device="cpu")
+        capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, device="cpu")
     assert modeling.chunk_kimi_delta_attention is fallback
 
 
@@ -240,8 +231,7 @@ def test_admission_compares_the_runtime_with_the_packaged_qualification(
 
     path = _admitted(monkeypatch, tmp_path, qualified={})
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
-    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(),
-                                                device="cpu")
+    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, device="cpu")
     assert admitted.qualification_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
     # The arithmetic identity names what runs; the evidence digest stays out of it.
     assert "qualification_sha256" not in admitted.identity
@@ -251,14 +241,13 @@ def test_admission_compares_the_runtime_with_the_packaged_qualification(
 
     _admitted(monkeypatch, tmp_path, qualified={"probe": {"shape": [1], "sha256": "0" * 64}})
     with pytest.raises(capture.KdaCaptureKernelRefused, match="outside its packaged qualification: probe"):
-        capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(), device="cpu")
+        capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, device="cpu")
     _admitted(monkeypatch, tmp_path, qualified=None)
     with pytest.raises(capture.KdaCaptureKernelRefused, match="qualification file"):
-        capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(), device="cpu")
+        capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, device="cpu")
     # Dev mode prints the difference and runs the kernel in this runtime.
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
-    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(),
-                                                device="cpu")
+    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, device="cpu")
     assert admitted.qualification_sha256 is None
     assert admitted.record()["qualification_matched"] is False
     assert "seal KDA capture kernel qualification differs" in capsys.readouterr().out
@@ -272,8 +261,7 @@ def test_a_dev_mode_mismatch_records_that_the_runtime_is_not_the_qualified_one(
 
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     path = _admitted(monkeypatch, tmp_path, qualified={"probe": {"shape": [1], "sha256": "0" * 64}})
-    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(),
-                                                device="cpu")
+    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, device="cpu")
     assert "seal KDA capture kernel qualification differs" in capsys.readouterr().out
     record = admitted.record()
     # The digest names the file this runtime was compared with; the flag says
@@ -283,19 +271,23 @@ def test_a_dev_mode_mismatch_records_that_the_runtime_is_not_the_qualified_one(
     assert admitted.qualification_matched is False
 
     _admitted(monkeypatch, tmp_path, qualified={})
-    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(),
-                                                device="cpu")
+    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, device="cpu")
     assert "seal KDA capture kernel qualification" not in capsys.readouterr().out
     assert admitted.record()["qualification_matched"] is True
 
 
-# ---- the pass scope ---------------------------------------------------------
+# ---- the layer pass ---------------------------------------------------------
 
 class CountingDispatch:
-    """A dispatch whose block runs the kernel ``calls`` times (0: the fallback ran)."""
+    """A dispatch whose block adds ``counts`` to the kernel's counters on exit.
 
-    def __init__(self, calls=1):
-        self.calls = calls
+    The counts are this unit test's input: the arithmetic of the pass check,
+    not whether a kernel ran. ``tests/test_kda_kernel_mode.py`` counts real
+    forwards and backwards through an autograd function instead.
+    """
+
+    def __init__(self, counts=None):
+        self.counts = dict(counts or {})
         self.active = False
         self.entered = 0
 
@@ -305,25 +297,80 @@ class CountingDispatch:
         return self
 
     def __exit__(self, *exc_info):
-        for _ in range(self.calls):
-            count_one_kernel_pass()
+        for key, value in self.counts.items():
+            kda_chunk._COUNTS[key] += value
         self.active = False
         return False
 
 
+def _kernel(counts=None, identity=None):
+    return capture.AdmittedKdaKernel(CountingDispatch(counts),
+                                     identity or {"name": "kda_gram_v1"}, None)
+
+
 @needs_triton
-def test_a_pass_must_run_the_kernel_exactly_once():
-    admitted = capture.AdmittedKdaKernel(CountingDispatch(), {"name": "kda_gram_v1"}, None)
-    with admitted.scope():
+def test_a_kda_layer_pass_runs_the_kernel_once_forward_and_once_per_backward():
+    admitted = _kernel(ONE_PASS)
+    with admitted.layer_pass(kda_layer(), site="target", layer=3):
+        assert admitted._dispatch.active
+    # A fused chain roll: one forward, then one backward per probe on the
+    # retained graph.
+    admitted._dispatch.counts = {"calls": 1, "gram_forward": 2, "gram_backward": 8}
+    with admitted.layer_pass(kda_layer(), site="chain", layer=4, backwards=4):
         pass
-    assert (admitted.passes, admitted.calls) == (1, 1)
-    for calls in (0, 2):
-        admitted = capture.AdmittedKdaKernel(CountingDispatch(calls), {"name": "kda_gram_v1"},
-                                             None)
-        with pytest.raises(capture.KdaCaptureKernelRefused, match="must run the kernel once"):
-            with admitted.scope():
+    record = admitted.record()
+    assert (record["executed"], record["passes"], record["calls"]) == (True, 1, 1)
+    assert record["chain"] == {"layers": [4], "passes": 1, "calls": 1, "gram_backward": 8}
+    assert record["scoped_passes"] == 2 and "reason" not in record
+    # Any other count refuses and is not counted: no call (the fallback ran),
+    # two calls, a forward without its backward, a fused pass one backward short.
+    for counts, backwards in (({}, 1),
+                              ({"calls": 2, "gram_forward": 4, "gram_backward": 4}, 1),
+                              ({"calls": 1, "gram_forward": 2}, 1),
+                              ({"calls": 1, "gram_forward": 2, "gram_backward": 6}, 4)):
+        refused = _kernel(counts)
+        with pytest.raises(capture.KdaCaptureKernelRefused, match="layer 5 chain pass"):
+            with refused.layer_pass(kda_layer(), site="chain", layer=5, backwards=backwards):
                 pass
-        assert admitted.passes == 0
+        assert refused.record()["scoped_passes"] == 0
+        assert refused.record()["chain"]["passes"] == 0
+
+
+@needs_triton
+def test_a_pass_of_a_layer_without_kda_runs_in_the_dispatch_and_calls_no_kernel():
+    dense = torch.nn.Sequential(torch.nn.Linear(2, 2))
+    admitted = _kernel()
+    with admitted.layer_pass(dense, site="target", layer=39):
+        assert admitted._dispatch.active
+    with admitted.layer_pass(dense, site="chain", layer=43, backwards=4):
+        pass
+    record = admitted.record()
+    assert record["executed"] is False and record["scoped_passes"] == 2
+    assert record["passes"] == record["calls"] == 0
+    assert record["chain"] == {"layers": [], "passes": 0, "calls": 0, "gram_backward": 0}
+    assert "no KDA" in record["reason"]
+    # A layer the class check reads as having no KDA attention, but whose pass
+    # calls the kernel, refuses: outside the dispatch that pass would have run
+    # the fallback.
+    calling = _kernel(ONE_PASS)
+    with pytest.raises(capture.KdaCaptureKernelRefused,
+                       match="layer 39 target pass.*no KDA attention"):
+        with calling.layer_pass(dense, site="target", layer=39):
+            pass
+
+
+def test_a_layer_pass_names_a_stage_b_site_and_its_backwards():
+    for kwargs, match in ((dict(site="stage_a", layer=1), "site"),
+                          (dict(site="chain", layer=1, backwards=0), "backward")):
+        with pytest.raises(capture.KdaCaptureKernelRefused, match=match):
+            with _kernel(ONE_PASS).layer_pass(kda_layer(), **kwargs):
+                pass
+
+
+def test_the_handoff_names_the_kernel_by_name_and_identity():
+    admitted = _kernel(identity={"name": "kda_gram_v1", "probe": "fixture"})
+    assert admitted.handoff_stamp() == {"name": "kda_gram_v1",
+                                        "identity_sha256": admitted.identity_sha256}
 
 
 # ---- the layer quantum -------------------------------------------------------
@@ -355,122 +402,7 @@ def test_the_runtime_execution_and_the_counters_carry_the_kernel_only_when_named
         "kda_capture_kernel"] == "kda_gram_v1"
     counters = QuantumCounters(quantum_id="q", identity_sha256="i", chunks=[], frontier=None)
     assert "kda_capture_kernel" not in counters.finish(units_done=0, units_total=0)
-    counters.kda_capture_kernel = capture.not_executed_record("kda_gram_v1", "no KDA")
-    assert counters.finish(units_done=0, units_total=0)["kda_capture_kernel"] == {
-        "executed": False, "name": "kda_gram_v1", "reason": "no KDA"}
-
-
-# The core, on the CPU fixture campaign of test_joint_cost_quantum_runtime. A
-# quantum refuses to rerun into its own checkpoints, so each run gets its own
-# campaign; the fixture is seeded, so their rows agree bit for bit.
-
-def _quantum(tmp_path, monkeypatch, *, kernel=None):
-    import test_joint_cost_quantum_runtime as runtime
-    import test_quantum_probe_identity_once_1183 as once
-
-    single, receipt, output_root = once._campaign(tmp_path, monkeypatch)
-    execution = runtime._execution
-    if kernel is not None:
-        monkeypatch.setattr(runtime, "_execution", lambda path, **kwargs: {
-            **execution(path, **kwargs), "kda_capture_kernel": kernel})
-    try:
-        return runtime._run_quantum(
-            tmp_path, monkeypatch, single=single, layer=1, receipt=receipt,
-            output_root=output_root, plan_sha=runtime._hex("d"),
-            prepared_sha=runtime._hex("e"))
-    finally:
-        monkeypatch.setattr(runtime, "_execution", execution)
-
-
-def _passes(monkeypatch, dispatch):
-    """Every isolated-layer call inside the quantum core, and whether the kernel block was open.
-
-    The reference run and Stage A, which build the campaign before the
-    quantum runs, call the same method; only calls made while
-    ``run_layer_quantum_core`` runs are recorded.
-    """
-    import test_joint_cost_quantum_runtime as runtime
-    from prismaquant import cost_streaming
-
-    events, inside = [], []
-    original = cost_streaming.StreamedCausalLM.isolated_layer
-    core = runtime.run_layer_quantum_core
-
-    def recorded(self, batch, layer, *args, **kwargs):
-        if inside:
-            events.append((layer, dispatch.active))
-        return original(self, batch, layer, *args, **kwargs)
-
-    def counted_core(*args, **kwargs):
-        inside.append(True)
-        try:
-            return core(*args, **kwargs)
-        finally:
-            inside.pop()
-
-    monkeypatch.setattr(cost_streaming.StreamedCausalLM, "isolated_layer", recorded)
-    monkeypatch.setattr(runtime, "run_layer_quantum_core", counted_core)
-    return events
-
-
-def _rows(payload):
-    return {(name, fmt): (row["signed_components_per_probe"], row["x2_per_probe"])
-            for name, rows in payload["costs"].items() for fmt, row in rows.items()}
-
-
-def _probe(payload):
-    return payload["provenance"]["probe_identity"]
-
-
-@needs_triton
-def test_the_core_runs_every_target_pass_on_the_kernel_and_stamps_its_identity(
-        tmp_path, monkeypatch):
-    baseline, _, baseline_counters = _quantum(tmp_path / "baseline", monkeypatch)
-    assert "kda_capture_kernel" not in _probe(baseline)["arithmetic"]
-    assert "kda_capture_kernel" not in baseline_counters
-
-    dispatch = CountingDispatch()
-    identity = {"schema": capture.IDENTITY_SCHEMA, "name": "kda_gram_v1", "probe": "fixture"}
-    admissions = []
-
-    def admit(name, model, layer_module, *, device, emits_handoff=False):
-        admissions.append((name, emits_handoff))
-        return capture.AdmittedKdaKernel(dispatch, identity, "q" * 64,
-                                         qualification_matched=True)
-
-    monkeypatch.setattr(capture, "admit_kda_capture_kernel", admit)
-    events = _passes(monkeypatch, dispatch)
-    payload, _, counters = _quantum(tmp_path / "kernel", monkeypatch, kernel="kda_gram_v1")
-    assert admissions == [("kda_gram_v1", False)]
-    target = [active for layer, active in events if layer == 1]
-    assert target and all(target), events
-    assert not any(active for layer, active in events if layer != 1)
-    assert _probe(payload)["arithmetic"]["kda_capture_kernel"] == identity
-    record = counters["kda_capture_kernel"]
-    assert record["executed"] is True and record["name"] == "kda_gram_v1"
-    assert record["qualification_sha256"] == "q" * 64
-    assert record["qualification_matched"] is True
-    assert record["passes"] == record["calls"] == len(target) == dispatch.entered
-    # The fixture dispatch changes no arithmetic, so the rows are the baseline's.
-    assert _rows(payload) == _rows(baseline)
-
-
-@needs_triton
-def test_the_core_refuses_a_pass_the_kernel_did_not_run(tmp_path, monkeypatch):
-    silent = CountingDispatch(calls=0)
-    monkeypatch.setattr(capture, "admit_kda_capture_kernel",
-                        lambda *args, **kwargs: capture.AdmittedKdaKernel(
-                            silent, {"name": "kda_gram_v1"}, None))
-    with pytest.raises(capture.KdaCaptureKernelRefused, match="must run the kernel once"):
-        _quantum(tmp_path, monkeypatch, kernel="kda_gram_v1")
-    assert silent.entered == 1
-
-
-def test_a_target_without_kda_records_the_kernel_as_not_executed(tmp_path, monkeypatch):
-    baseline, _, _ = _quantum(tmp_path / "baseline", monkeypatch)
-    payload, _, counters = _quantum(tmp_path / "kernel", monkeypatch, kernel="kda_gram_v1")
-    assert counters["kda_capture_kernel"] == {
-        "executed": False, "name": "kda_gram_v1",
-        "reason": "target layer 1 has no KDA attention"}
-    assert _probe(payload) == _probe(baseline)
-    assert _rows(payload) == _rows(baseline)
+    counters.kda_capture_kernel = _kernel()
+    block = counters.finish(units_done=0, units_total=0)["kda_capture_kernel"]
+    assert block["executed"] is False and block["name"] == "kda_gram_v1"
+    assert block["scoped_passes"] == 0

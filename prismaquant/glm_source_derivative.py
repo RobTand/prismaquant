@@ -240,8 +240,10 @@ def source_derivative_identity(model):
 
 #: Capture kernels this contract declares (PQ #1199). A declared kernel
 #: computes this derivative's semantics (``implements``) with its own
-#: rounding, for the Stage B capture's call only, and runs only inside a
-#: ``CaptureKernelDispatch`` block.
+#: rounding, and runs only inside a ``CaptureKernelDispatch`` block. Its
+#: scope is every Stage B pass of a KDA layer, the target's capture passes
+#: and the chain rolls, in a launch that names it (kernel mode, PQ #1214);
+#: Stage A never runs it.
 CAPTURE_KERNEL_SCHEMA = 'prismaquant.glm_source_derivative.capture_kernel.v1'
 _CAPTURE_KERNELS = {
     'kda_gram_v1': dict(module='prismaquant.kernels.kda_chunk',
@@ -255,7 +257,7 @@ def capture_kernel_declaration(name):
     return dict(schema=CAPTURE_KERNEL_SCHEMA, name=name, implements=VERSION,
                 replaces='chunk_kimi_delta_attention',
                 dispatch='module_global_substituted_for_one_block_then_restored',
-                scope='stage_b_target_layer_pass', **_CAPTURE_KERNELS[name])
+                scope='stage_b_kda_layer_passes', **_CAPTURE_KERNELS[name])
 
 
 class CaptureKernelDispatch:

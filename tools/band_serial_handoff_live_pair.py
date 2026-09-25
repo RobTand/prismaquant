@@ -301,8 +301,10 @@ def producer_role(root: Path, data_manifest_sha256: str) -> int:
     emitter = HandoffEmitter(record=producer, adjoint_slice=adjoint_slice,
                              boundary_storage=pair["storage"],
                              capture_batch=capture_batch, publication=publication)
+    # A synthetic plane, so no KDA capture kernel captured it (PQ #1214).
     published = emitter.emit(grad_plane=plane, cotangent_owners=owners,
-                             n_probes=n_probes, n_batches=n_batches)
+                             n_probes=n_probes, n_batches=n_batches,
+                             kda_capture_kernel=None)
     out["published"] = published
 
     # The record group: its files, and its commit at the origin (PQ #1075).
@@ -350,9 +352,11 @@ def derive(root: Path, handoff: str, handoff_sha256: str) -> dict:
     import dispatch_joint_quanta as dispatch
 
     pair, records = _load(root)
+    # The pair runs on the fallback: no KDA capture kernel (PQ #1214).
     bound = dispatch.bind_consumer_handoff(
         records["consumer"], path=handoff, sha256=handoff_sha256,
-        producer=records["producer"]["quantum_id"], output_root=root / "out")
+        producer=records["producer"]["quantum_id"], output_root=root / "out",
+        kda_capture_kernel=None)
     return {**bound, "consumer_record": pair["consumer_record"]}
 
 
@@ -378,7 +382,8 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
     _bind_staged(data_manifest_sha256)
 
     handoff_doc = load_quantum_handoff(handoff, handoff_sha256, record=consumer,
-                                       adjoint_slice=adjoint_slice)
+                                       adjoint_slice=adjoint_slice,
+                                       kda_capture_kernel=None)
     require_band_serial_readset(consumer, handoff_doc, checkpoint,
                                 output_root=root / "out",
                                 data_manifest_sha256=data_manifest_sha256)
