@@ -256,20 +256,27 @@ class DeepseekV4Profile(ModelProfile):
 
         return None
 
-    def fp8_scale_pairs(self, model_path: str
+    def fp8_scale_pairs(self, model_path: str, *,
+                        raw_weight_map: dict[str, str] | None = None,
                         ) -> dict[str, tuple[str, str]] | None:
         """DSv4 stores F8_E8M0 `.scale` siblings (not `.weight_scale_inv`).
         Build the `{weight_qname: (shard_path, scale_ckpt_key)}` map by
         pairing every `.scale` ckpt key with its `.weight` sibling. Body
         weights route through `checkpoint_to_live_name`; deliberately
         probe-excluded `mtp.*` weights retain their physical checkpoint key so
-        the separate DSpark sidecar producer can decode their source values."""
+        the separate DSpark sidecar producer can decode their source values.
+
+        ``raw_weight_map`` is the index's ``weight_map`` when the caller
+        already read it (off the stage under strict reads, PQ #1219); the
+        index is then not opened."""
         import json as _json
         import os as _os
         from safetensors import safe_open as _safe_open
 
         index_file = _os.path.join(model_path, "model.safetensors.index.json")
-        if _os.path.exists(index_file):
+        if raw_weight_map is not None:
+            raw = raw_weight_map
+        elif _os.path.exists(index_file):
             with open(index_file) as f:
                 raw = _json.load(f)["weight_map"]
         else:
