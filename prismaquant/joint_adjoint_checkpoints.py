@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mmap
 import os
 import pickle
 import re
 import struct
 import time
 from concurrent.futures import ThreadPoolExecutor, wait as wait_futures
-from contextlib import closing, nullcontext
+from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
 
 import torch
@@ -2164,6 +2165,166 @@ def _stage_to_device(tensors, *, device, dtype=None):
     # The caching host allocator records this copy on the stream and does not
     # reuse the pinned block until it lands, so ``staged`` may be dropped now.
     return staged.to(target, non_blocking=True)
+
+
+class PlaneHostStaging:
+    """One held host buffer for a Stage B pass's cotangent plane traffic.
+
+    A capture group used to allocate its host memory once per group: a fresh
+    tensor for each cotangent scratch read, the stacked incoming cotangents
+    and layer inputs (``_stack_to_device``'s ``torch.cat``), and the input
+    cotangent's copy to the host plus one clone per stored batch. The
+    bounded capture allocator's purge delay is zero (#366), so every one of
+    those allocations faulted its pages in again, and on a fragmented box a
+    huge-page fault compacts memory first (RobTand/prismaquant#1246).
+
+    A pass holds this buffer instead. Its owner charges
+    ``reserve_host_bytes`` to the capture guard, then ``held`` allocates the
+    buffer and touches every page, so the guard's next reading counts it as
+    committed memory; while held it reserves nothing more. Each group reads,
+    stacks and copies through it. The bytes are the allocating paths': the
+    same rows in the same order, each read the scratch's own, and each
+    conversion the host-side copy that the stacked blocking transfer made.
+
+    The buffer is reused within a group (incoming cotangents, then layer
+    inputs, then the input cotangent) and across groups. That is safe only
+    because every copy through it blocks: a copy from pageable memory to the
+    device has consumed its source when it returns, and a copy from the
+    device into pageable memory has landed when it returns. Pinned memory
+    with ``non_blocking=True`` would need a stream-ordered wait before each
+    reuse.
+
+    A plane that keeps its tensors, a ``dict``, keeps getting owned tensors:
+    a lone entry moves to the device as it always moved, and a store copies
+    each stored batch's rows into a tensor of its own. The cotangent scratch
+    copies bytes out and keeps nothing, so a store writes each batch's rows
+    straight from the buffer. A kept plane in one-batch groups needs no
+    buffer, and none is allocated.
+    """
+
+    def __init__(self, plane, keys, *, group_batches, dtype):
+        from .perturbed_x_cache import ExactCotangentScratch
+
+        group_batches = int(group_batches)
+        if group_batches < 1:
+            raise ValueError("a Stage B capture group holds at least one stored batch")
+        self.plane = plane
+        self.copies_out = isinstance(plane, ExactCotangentScratch)
+        compute = torch.empty((), dtype=dtype).element_size()
+        entry = 0
+        for key in keys:
+            shape, stored = self._layout(key)
+            # The incoming rows keep the plane's dtype; the layer inputs and
+            # the input cotangent are in the compute dtype, one per entry.
+            entry = max(entry, torch.Size(shape).numel() * max(
+                compute, torch.empty((), dtype=stored).element_size()))
+        needed = self.copies_out or group_batches > 1
+        self.capacity_bytes = group_batches * entry if needed else 0
+        self._buffer = None
+
+    @property
+    def reserve_host_bytes(self):
+        """What ``held`` will commit, until it has: the buffer and its alignment."""
+        if not self.capacity_bytes or self._buffer is not None:
+            return 0
+        return self.capacity_bytes + mmap.PAGESIZE
+
+    @contextmanager
+    def held(self):
+        """Allocate the buffer for one pass and release it when the pass ends."""
+        if self._buffer is not None:
+            raise RuntimeError("Stage B plane staging is already held")
+        if self.capacity_bytes:
+            from .joint_replay_spill import _aligned_buffer
+
+            buffer = _aligned_buffer(self.capacity_bytes, mmap.PAGESIZE, False)
+            # Fault every page in now, once per pass, so the admissions that
+            # follow read the buffer as committed rather than as free memory.
+            buffer.zero_()
+            self._buffer = buffer
+        try:
+            yield self
+        finally:
+            self._buffer = None
+
+    def _layout(self, key):
+        if self.copies_out:
+            shape, dtype, _nbytes = self.plane.slot_layout(key)
+            return tuple(shape), dtype
+        tensor = self.plane[key]
+        return tuple(tensor.shape), tensor.dtype
+
+    def _view(self, shape, dtype):
+        if self._buffer is None:
+            raise RuntimeError("Stage B plane staging is not held")
+        nbytes = torch.Size(shape).numel() * torch.empty((), dtype=dtype).element_size()
+        if nbytes > self.capacity_bytes:
+            raise RuntimeError(f"Stage B plane staging needs {nbytes} bytes; its pass "
+                               f"admitted {self.capacity_bytes}")
+        return self._buffer[:nbytes].view(dtype).view(shape)
+
+    def incoming(self, keys, *, device):
+        """The keys' cotangents stacked on ``device``: ``_stack_to_device``'s tensor."""
+        keys = list(keys)
+        if not self.copies_out and len(keys) == 1:
+            return _stack_to_device([self.plane[keys[0]]], device=device)
+        layouts = [self._layout(key) for key in keys]
+        shape, dtype = layouts[0]
+        if any(rows[1:] != shape[1:] or stored != dtype for rows, stored in layouts):
+            raise RuntimeError("Stage B plane staging stacks entries of one row shape "
+                               "and dtype")
+        host = self._view((sum(rows[0] for rows, _stored in layouts), *shape[1:]), dtype)
+        start = 0
+        for key, (rows, _stored) in zip(keys, layouts):
+            block = host.narrow(0, start, rows[0])
+            if self.copies_out:
+                self.plane.read_into(key, block)
+            else:
+                block.copy_(self.plane[key])
+            start += rows[0]
+        return host.to(device=device, copy=True)
+
+    def boundaries(self, tensors, *, device, dtype):
+        """The layer inputs stacked on ``device`` in ``dtype``: ``_stack_to_device``'s.
+
+        A lone input moves as it always moved when it needs no conversion or
+        no buffer is held. Otherwise the inputs are copied, and converted on
+        the host as the blocking stacked transfer converted them, into
+        consecutive rows of the buffer.
+        """
+        tensors = list(tensors)
+        if len(tensors) == 1 and (tensors[0].dtype == dtype or self._buffer is None):
+            return _stack_to_device(tensors, device=device, dtype=dtype)
+        shape = tuple(tensors[0].shape)
+        if any(tuple(tensor.shape[1:]) != shape[1:] for tensor in tensors):
+            raise RuntimeError("Stage B plane staging stacks inputs of one row shape")
+        host = self._view((sum(int(tensor.shape[0]) for tensor in tensors), *shape[1:]),
+                          dtype)
+        start = 0
+        for tensor in tensors:
+            host.narrow(0, start, int(tensor.shape[0])).copy_(tensor)
+            start += int(tensor.shape[0])
+        return host.to(device=device, copy=True)
+
+    def store(self, keys, rows, gradient):
+        """Write each stored batch's rows of ``gradient`` back to the plane."""
+        keys, rows = list(keys), [int(count) for count in rows]
+        if len(keys) != len(rows) or sum(rows) != int(gradient.shape[0]):
+            raise RuntimeError("Stage B capture split its cotangent into the wrong rows")
+        start = 0
+        if not self.copies_out:
+            for key, count in zip(keys, rows):
+                part = gradient.narrow(0, start, count)
+                kept = torch.empty(tuple(part.shape), dtype=part.dtype, device="cpu")
+                kept.copy_(part)
+                self.plane[key] = kept
+                start += count
+            return
+        host = self._view(tuple(gradient.shape), gradient.dtype)
+        host.copy_(gradient)
+        for key, count in zip(keys, rows):
+            self.plane[key] = host.narrow(0, start, count)
+            start += count
 
 
 class _RollPipeline:

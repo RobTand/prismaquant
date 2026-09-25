@@ -50,12 +50,12 @@ from .joint_adjoint_checkpoints import (
     QUANTUM_STATUS_SCHEMA,
     GpuPowerSampler,
     KernelTimeProfiler,
+    PlaneHostStaging,
     adjoint_space,
     boundary_entry_directory,
     chain_layers_for,
     _chain_group_batch,
     _require_per_sample_state,
-    _stack_to_device,
     dev_mode_stamp,
     load_adjoint_checkpoint,
     require_dev_mode,
@@ -1901,7 +1901,7 @@ def run_layer_quantum_core(
     # bound is geometry only and the scratch is allocated here, before the
     # chain or any GPU work, so an undersized ceiling or disk refuses first.
     # A resume recaptures the spill for its pending targets.
-    from contextlib import nullcontext
+    from contextlib import contextmanager, nullcontext
 
     from .joint_replay_spill import (
         REPLAY_SPILL,
@@ -2331,17 +2331,35 @@ def run_layer_quantum_core(
         noncontiguous_seeds: set[tuple[int, int]] = set()
         capture_group_cache: dict = {}
 
-        def capture_group(group, active_probe, observer):
+        @contextmanager
+        def held_plane_staging(active_probe, group_batches):
+            # PQ #1246: one host buffer per pass for the plane's traffic,
+            # charged to the guard before it is allocated. ``held`` touches
+            # every page, so the admissions that follow, this pass's backward
+            # admission first, read it as committed, as they read the spill's
+            # pinned arenas.
+            staging = PlaneHostStaging(
+                grad_plane, [(active_probe, index) for index in range(len(batches))],
+                group_batches=group_batches, dtype=runner.dtype)
+            if guard is not None and staging.reserve_host_bytes:
+                check_operator_allocation(guard, "before_stage_b_plane_staging",
+                                          reserve_bytes=staging.reserve_host_bytes)
+            with staging.held():
+                yield staging
+
+        def capture_group(group, active_probe, observer, stage):
             # One backward over a batch group (capture_batch > 1), as the
             # batched render-free chain runs it: the samples' pass state is
             # empty, so there is nothing to graft or harvest, and the input
-            # cotangent is split back per stored batch.
+            # cotangent is split back per stored batch. Its host bytes go
+            # through the pass's held staging buffer (PQ #1246).
             indices = [item[0] for item in group]
+            keys = [(active_probe, index) for index in indices]
             _require_per_sample_state(
                 runner, batches, layer,
                 [cotangent_owners[active_probe][index] for index in indices],
                 indices, where="batched Stage B spill capture")
-            x_in = out = incoming_grad = gradient = None
+            x_in = out = incoming_grad = None
             try:
                 storage.check_auxiliary(batches, cotangents=cotangent_owners)
                 if _free_gib() < min_free_gib:
@@ -2349,10 +2367,8 @@ def run_layer_quantum_core(
                 cpu_rng = torch.get_rng_state()
                 cuda_rng = (torch.cuda.get_rng_state(runner.device)
                             if torch.device(runner.device).type == "cuda" else None)
-                incoming_grad = _stack_to_device(
-                    [grad_plane[(active_probe, index)] for index in indices],
-                    device=runner.device)
-                x_in = _stack_to_device(
+                incoming_grad = stage.incoming(keys, device=runner.device)
+                x_in = stage.boundaries(
                     [item[2] for item in group], device=runner.device,
                     dtype=runner.dtype).detach().requires_grad_(True)
                 batch = (batches[indices[0]] if len(indices) == 1 else
@@ -2370,22 +2386,13 @@ def run_layer_quantum_core(
                     raise RuntimeError("joint operator replay source consumed Torch RNG")
                 if x_in.grad is None:
                     raise RuntimeError("joint operator replay produced no input cotangent")
-                gradient = x_in.grad.detach().to("cpu")
-                start = 0
-                for index, item in zip(indices, group):
-                    rows = int(item[2].shape[0])
-                    grad_plane[(active_probe, index)] = (
-                        gradient if len(indices) == 1
-                        else gradient[start:start + rows].clone())
-                    start += rows
-                if start != int(gradient.shape[0]):
-                    raise RuntimeError("batched Stage B spill capture split its cotangent "
-                                       "into the wrong rows")
+                stage.store(keys, [int(item[2].shape[0]) for item in group],
+                            x_in.grad.detach())
                 storage.check_auxiliary(batches, cotangents=cotangent_owners)
             finally:
-                group = x_in = out = incoming_grad = gradient = None
+                group = x_in = out = incoming_grad = None
 
-        def batched_capture(active_probe, observer):
+        def batched_capture(active_probe, observer, stage):
             last, expected = len(batches) - 1, iter(capture_groups)
             with prefetched_boundary_batches(storage, batches, layer) as reverse_batches:
                 pending_items = []
@@ -2397,7 +2404,7 @@ def run_layer_quantum_core(
                     if [entry[0] for entry in group] != next(expected, None):
                         raise RuntimeError(
                             "Stage B spill capture group differs from its geometry")
-                    capture_group(group, active_probe, observer)
+                    capture_group(group, active_probe, observer, stage)
                     group = None
                 if pending_items or next(expected, None) is not None:
                     raise RuntimeError("Stage B spill capture left batches ungrouped")
@@ -2408,6 +2415,16 @@ def run_layer_quantum_core(
                 raise RuntimeError(
                     "the spill capture is the probe's one final pass, with no "
                     "statistics lease")
+            grouped = observer is not None and capture_batch > 1
+            # The pass's staging buffer is admitted and committed before its
+            # backward admission reads the guard (PQ #1246).
+            with held_plane_staging(active_probe,
+                                    capture_batch if grouped else 1) as stage:
+                replay_pass(stage, final=final, lease=lease, active_probe=active_probe,
+                            observer=observer, grouped=grouped)
+            counters.replay["layer_passes"] += 1
+
+        def replay_pass(stage, *, final, lease, active_probe, observer, grouped):
             # One phase admission per pass, as check_operator_allocation's
             # contract states: it synchronizes, empties the allocator cache
             # and charges the guard, which is too much work per sample. The
@@ -2419,6 +2436,8 @@ def run_layer_quantum_core(
             # the spill capture holds are CUDA allocations, so they are charged
             # to the device side; only the spill's pinned host arenas are not
             # (PQ #1157), and ``spill.capture`` has allocated those by now.
+            # The pass's staging buffer is host memory too, admitted and
+            # committed by ``held_plane_staging`` before this (PQ #1246).
             if guard is not None:
                 check_operator_allocation(
                     guard, "before_joint_window_backward",
@@ -2432,9 +2451,8 @@ def run_layer_quantum_core(
                            - lease.resident_statistics_bytes)
                         + (0 if observer is None
                            else spill.capture_reserve_device_bytes)))
-            if observer is not None and capture_batch > 1:
-                batched_capture(active_probe, observer)
-                counters.replay["layer_passes"] += 1
+            if grouped:
+                batched_capture(active_probe, observer, stage)
                 return
             with prefetched_boundary_batches(storage, batches, layer) as reverse_batches:
                 for batch_index, batch, boundary_cpu, _unused in reverse_batches:
@@ -2471,10 +2489,10 @@ def run_layer_quantum_core(
                         cuda_rng = (torch.cuda.get_rng_state(runner.device)
                                     if torch.device(runner.device).type == "cuda"
                                     else None)
-                        incoming_grad = grad_plane[(active_probe, batch_index)].to(
-                            runner.device)
-                        x_in = boundary_cpu.to(
-                            device=runner.device, dtype=runner.dtype
+                        incoming_grad = stage.incoming(
+                            [(active_probe, batch_index)], device=runner.device)
+                        x_in = stage.boundaries(
+                            [boundary_cpu], device=runner.device, dtype=runner.dtype
                         ).detach().requires_grad_(True)
                         isolated = profile.isolated_layer_pass_state(
                             batch.shared_pass_state, runner.layers[layer])
@@ -2506,8 +2524,8 @@ def run_layer_quantum_core(
                             raise RuntimeError(
                                 "joint operator replay produced no input cotangent")
                         if final:
-                            grad_plane[(active_probe, batch_index)] = (
-                                x_in.grad.detach().to("cpu"))
+                            stage.store([(active_probe, batch_index)],
+                                        [int(x_in.grad.shape[0])], x_in.grad.detach())
                             storage.check_auxiliary(batches,
                                                     cotangents=cotangent_owners)
                     finally:
@@ -2515,7 +2533,6 @@ def run_layer_quantum_core(
                         out = x_in = incoming_grad = isolated = None
                         roots = root_grads = None
                         replay_owner = owner = None
-            counters.replay["layer_passes"] += 1
 
         def consume_window_probe(probe_index, terms, diagnostics, window_receipt):
             operator_window_receipts.append(dict(layer=layer,
@@ -2649,7 +2666,7 @@ def run_layer_quantum_core(
                     activation_max_abs=joint_activation_maxima(production_cache),
                     projection_backend=projection_backend)
 
-            def profile_group(group, observer):
+            def profile_group(group, observer, *, stage):
                 # capture_group replaces each batch's incoming cotangent with
                 # the layer input's, and the ladder passes the same batches
                 # again, so every pass gets the incoming cotangent back
@@ -2657,7 +2674,7 @@ def run_layer_quantum_core(
                 keys = [(0, int(item[0])) for item in group]
                 saved = {key: grad_plane[key] for key in keys}
                 try:
-                    capture_group(group, 0, observer)
+                    capture_group(group, 0, observer, stage)
                 finally:
                     for key, tensor in saved.items():
                         grad_plane[key] = tensor
@@ -2673,12 +2690,15 @@ def run_layer_quantum_core(
                         executable_spill_phase_name(probe_index))
                 if workspace_profile is not None and int(probe_index) == 0:
                     # PQ #1151: measure the capture workspace where the
-                    # production pass would run, then stop the quantum.
-                    with counters.io.span("workspace-profile", probe=int(probe_index)):
+                    # production pass would run, then stop the quantum. Its
+                    # groups stage through a held buffer as the pass's do
+                    # (PQ #1246), committed before the ladder measures any.
+                    with counters.io.span("workspace-profile", probe=int(probe_index)), \
+                            held_plane_staging(0, capture_batch) as stage:
                         profile_capture_workspace(
                             workspace_profile, storage=storage, batches=batches,
                             layer=layer,
-                            run_group=profile_group,
+                            run_group=partial(profile_group, stage=stage),
                             observed=lambda: spill_observer(probe_index),
                             guard=guard,
                             declared_workspace_bytes=(
