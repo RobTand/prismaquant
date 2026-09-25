@@ -54,7 +54,9 @@ def test_the_handoff_exports_through_the_spool_before_its_record(
         producer_environment={ROOT_ENV: str(spool), MAX_ENV: str(1 << 20)},
         claim_capacity=capacity)
     with chain._fleet(q, tmp_path, capacity=capacity) as fleet:
-        published, plane = emit_handoff(producer, storage, publication)
+        emitters = []
+        published, plane = emit_handoff(producer, storage, publication,
+                                        emitters=emitters)
     outcomes = [json.loads(line) for line in fleet.stdout.splitlines()
                 if line.startswith("{")]
     # One export per group: each probe's three batches in groups of two,
@@ -66,3 +68,12 @@ def test_the_handoff_exports_through_the_spool_before_its_record(
         "the spool still holds a group's payload")
     handoff = check_consumer_binds(published, plane, consumer, publication)
     check_origin_batches(publication, producer, published, handoff)
+    # PQ #1225: the emitter keeps each group's export record for the row's
+    # counters, and each names the export action that landed it.
+    report = getattr(emitters[0], "export_report", None)
+    assert report is not None, "the emitter keeps no export report"
+    exports = report["local_spool"]["exports"]
+    assert len(exports) == len(outcomes)
+    assert all(row["export_key"] and row["landed_unix"] and row["released_unix"]
+               and row["bytes"] > 0 for row in exports)
+    json.dumps(report)
