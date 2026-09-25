@@ -1302,7 +1302,7 @@ def prepare_retained_window_read(window_index: int, *, record: Mapping,
         await_staged_spans,
         staged_range_wait_s,
     )
-    from .staged_lease import stage_cover_is_published
+    from .staged_lease import stage_cover_is_published, stage_covers_are_published
 
     window_index = int(window_index)
     block = record.get("executable_readset")
@@ -1323,10 +1323,14 @@ def prepare_retained_window_read(window_index: int, *, record: Mapping,
               for item in entry.get("entries", [])]
     if not wanted:
         return "legacy"
+    # One cover lookup proves the whole window (PQ #1210), as it does for the
+    # exact-cache and adjoint reads (PQ #997); a batch that cannot say which
+    # entry is missing falls back to one lookup per entry.
     verdict = await_staged_spans(
         resolver, wanted,
         deadline=_time.monotonic() + staged_range_wait_s(),
-        published=stage_cover_is_published)
+        published=stage_cover_is_published,
+        published_batch=stage_covers_are_published)
     print(f"[residency] retained render window {window_index:02d}: "
           f"{verdict} for {len(wanted)} staged entr"
           f"{'y' if len(wanted) == 1 else 'ies'}", flush=True)

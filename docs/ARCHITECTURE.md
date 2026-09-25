@@ -1,5 +1,82 @@
 # PrismaQuant Architecture
 
+A retained PWC window loads its renders under one reader lease, on one loader
+pool, and parses each archive once (2026-09-24, `perf/1210-render-readahead`,
+PQ #1210). In GLM-5.3 Stage B row 041's render windows 01 to 14, the main
+thread spent 24.5% of its py-spy samples waiting on its own window's loads,
+and 63% of the loader threads' samples were per-file lease work:
+`LeaseWindow.__enter__` 47.1%, `acquire_entry_window` 10.6% and
+`LeaseWindow.__exit__` 5.3% (PB `4e1468a6d07e`). `ProductionWeightCache.
+retained_window` now does each of these once per window:
+
+- **One reader lease.** Under the strict tier policy, `_enter_window_leases`
+  pins every staged render that has a bound digest through
+  `perturbed_x_cache._enter_group_lease`, the batched lease the exact
+  activation cache uses (PQ #997): RAM copies share one lease window and the
+  rest share one SSD window. Each load still opens its file through the SDK
+  under that pin, reads the entry the pin was built from, and hashes the
+  bytes against the bound digest and the map's digest. The window releases
+  the pin when the last quantum's loads are done, before the consumer runs.
+  If the batched lease refuses, every load leases on its own, as before.
+  `PWC_WINDOW_LEASE_COUNTERS` counts both outcomes.
+- **One archive parse per file.** Preflight no longer opens each declared
+  file to read its ZIP central directory. It charges each file its length,
+  which is the bound the sealed plan already charges
+  (`retained_admission_targets`): an ordinary uncompressed Torch archive
+  stores every tensor byte inside the file. The loader parses the archive
+  once, on the bytes it read, before deserializing them. A compressed or
+  malformed archive refuses there, and the window releases what it had
+  loaded. `retained_key_costs` prices a file the same way, and the
+  `remaining_incoming_storage_bytes` that `before_load_quantum` receives is
+  the remaining files' lengths.
+- **One loader pool.** A single pool of `max_workers` threads
+  (`pwc-window-load`) serves every quantum. Each quantum is still a barrier
+  and is still charged to its own serialized-buffer cap.
+- **One cover lookup.** `prepare_retained_window_read` passes
+  `published_batch=stage_covers_are_published` to `await_staged_spans`.
+
+Loading the next window's renders while this window computes does not fit the
+sealed budget. `retained_render_cap_bytes` (6,023,929,799 bytes on the
+row-041 plan) is the largest window's renders, and the quantum sizes the PWC
+LRU to it, so a second window's renders would be unpriced. The one charged
+buffer that is idle while a window computes is the load buffer (402,662,764
+bytes on row 041), about 6.8% of a 5,940,033,573-byte window; reading the next
+window's first bytes into it was considered and not built.
+
+Measured with `tools/pwc_window_load_bench.py`: 64 of row 041's window-1
+renders, three windows per child, base and fix children interleaved over six
+rounds in one PrismaBuild action, 12 measured windows per arm, py-spy
+`--nonblocking` on every child. Base first, then fix:
+
+- **sparklina, GPU consumer, idle box** (PB `88c2b1705f1c`): window load
+  median 1.213 s to 0.658 s (-46%), window wall median 4.727 s to 4.157 s
+  (-12%). Main-thread samples in the window's loads 20.2% to 12.3%. Loader
+  samples in lease work 43.3% to 16.5%, and loader samples overall 3342 to
+  1946. GPU power per window 65.9 W to 73.7 W mean (47% to 53% of the 140 W
+  envelope) for 311.7 J to 305.1 J per window at the same GPU work. NFS
+  `LOCK` operations per child (192 loads) 414.5 to 36 (medians; the box's
+  background rate was 0.7 per second).
+- **sparky, sleep consumer beside a Stage B row** (PB `fc7776229114`): window
+  load median 2.354 s to 1.154 s (-51%), standard deviation 2.572 s to
+  0.149 s, window wall median 7.780 s to 6.605 s (-15%). Main-thread samples
+  in the window's loads 31.9% to 12.4%, loader samples in lease work 38.6% to
+  13.1%. The sampler recorded 31.7 W and 34.8 W, but the GPU belonged to
+  the Stage B row, so neither figure is attributable to this change.
+
+Power comes from the bench's own 0.5 s `nvidia-smi` sampler: sparklina's
+Netdata GPU series updates every 10 s, which is too coarse for 20 s children.
+The fixture's lease root has one consumer, while production's has every
+action's, so the base arm's lease cost is a lower bound.
+
+The loaded tensors, file-load receipts and render identities are
+byte-identical with and without the window lease: one digest across both arms
+of both runs. The layer-1 joint quantum's 185 numeric leaves are identical on
+base and fix, with the producer source digest pinned (PB `0215f2eeb9ac`).
+Gates:
+`tests/test_pwc_window_load_1210.py`, `tests/test_pwc_resident_windows.py`,
+`tests/test_render_identity_once_1192.py`. No format, pipeline default, stage
+or ship gate changes.
+
 Stage B can capture GLM KDA layers on a Triton kernel (2026-09-24,
 `perf/1199-kda-kernel`, PQ #1199). A GLM-5.3 KDA layer's capture group took
 2.1 s, against 0.32 s for a DSA layer, and 1.86 s of it was attention, whose
@@ -2430,8 +2507,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `perf/1199-kda-kernel`.
+As of: 2026-09-24 · `perf/1210-render-readahead`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-24, `perf/1210-render-readahead`) for **a retained PWC
+window's one reader lease, one loader pool and one archive parse per file**
+(PQ #1210). See the entry at the top. A retained window now charges each file
+its length instead of its parsed archive storage. No format, pipeline
+default, stage or ship gate changes.
 
 Re-stamped (2026-09-24, `perf/1199-kda-kernel`) for **a Stage B launch
 setting that runs a KDA target layer's capture passes on the `kda_gram_v1`
@@ -5100,7 +5183,9 @@ roster the cache already holds a path for, and it is dropped when a window
 closes or the cache is compacted, which keeps it out of a pickled cache. The
 bytes-backed scan inside `_load_file_tensor` is a different call on the loader
 thread against an in-memory buffer and is never memoized, so the loaded
-archive is still priced against what preflight recorded. No default, stage,
+archive is still priced against what preflight recorded. (Since PQ #1210 a
+retained window does not scan at preflight; it charges file lengths and
+parses each archive once, on the loaded bytes.) No default, stage,
 format, lane, pin, plugin contract, ship gate or published byte changes.
 Gates: `tests/test_pwc_resident_windows.py`.
 
@@ -6590,7 +6675,8 @@ and the existing joint-window/allocation suites.
 Re-stamped (2026-09-13, `codex/pwc-retained-window-20260913`) for
 opt-in retained PWC candidate windows. `retained_key_costs` inspects only
 selected concrete keys and reports incoming uncompressed Torch archive storage
-and serialized file bytes without loading tensors. `plan_retained_window`
+and serialized file bytes without loading tensors. (Since PQ #1210 both are
+the file's length, which the retained window charges.) `plan_retained_window`
 preflights the complete selected roster, including unrelated resident backing
 storages and the LRU cap, then returns key-only prefetch quanta bounded by CPU
 workers and the concurrent serialized-buffer budget. `retained_window` repeats

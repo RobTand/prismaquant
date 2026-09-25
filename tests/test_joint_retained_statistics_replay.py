@@ -34,8 +34,10 @@ def _fixture(tmp_path):
     cache = ProductionWeightCache(
         {key: str(path) for key, path in paths.items()}, {},
         activation_max_abs={name: 1.0 for name in modules})
-    cache.enable_lru(4 * 16 * 16 * 4)
     maximum_file = max(path.stat().st_size for path in paths.values())
+    # The quantum sizes the LRU to the retained render cap, which the plan
+    # counts in file lengths, as the retained window charges them (PQ #1210).
+    cache.enable_lru(4 * maximum_file)
     full = plan_joint_statistics_target_windows(
         modules, specs, max_statistics_bytes=1 << 20,
         activation_max_abs=cache.activation_max_abs)

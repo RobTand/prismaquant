@@ -80,6 +80,7 @@ import subprocess
 import stat
 import time
 import zipfile
+from typing import NamedTuple
 
 import torch
 import torch.nn as nn
@@ -237,6 +238,21 @@ def is_packed_expert_param_qname(qname: str) -> bool:
     params and the module-input capture is the wrong tensor for ``down``.
     """
     return bool(_PACKED_EXPERT_PARAM_RE.search(str(qname)))
+
+
+#: Reader-lease windows a retained PWC window pinned its staged renders
+#: under (PQ #1210), in the exact activation cache's counter shape (PQ #997):
+#: ``windows_batched`` lease windows serving ``entries_batched`` entries, and
+#: ``batch_fallbacks`` windows whose batched lease was refused and whose
+#: loads then leased one entry at a time. Only the window's own thread
+#: updates them.
+PWC_WINDOW_LEASE_COUNTERS = {"windows_batched": 0, "entries_batched": 0,
+                             "batch_fallbacks": 0}
+
+
+class _WindowLeaseRef(NamedTuple):
+    """The declared file one retained-window group-lease member stands for."""
+    path: str
 
 
 class _WindowTrackedWeights(dict):
@@ -538,12 +554,12 @@ class ProductionWeightCache:
         # function of the file's bytes, and the file identity this cache
         # already trusts for that -- the stat signature every window read
         # re-checks -- is the memo key, so a file that changed is a miss and is
-        # rescanned. Preflight runs three times over the same key on the joint
-        # walk (the caller's plan, the window's re-plan, and the window's own
-        # file table) and each scan was a fresh open plus a central-directory
+        # rescanned. A research plan runs preflight more than once over the
+        # same key and each scan was a fresh open plus a central-directory
         # read over cold NFS: 11.0% of the prepare's main-thread wall time
         # (#693). The bytes-backed scan at ``_load_file_tensor`` is a different
-        # call on the loader thread and is never memoized.
+        # call on the loader thread and is never memoized. A retained window
+        # does not scan here at all (``_window_file_bound``, PQ #1210).
         memo = self._window_archive_memo()
         signature = self._file_signature(before)
         remembered = memo.get(str(path))
@@ -559,48 +575,32 @@ class ProductionWeightCache:
             raise RuntimeError('PWC window file storage estimate changed')
         return path, before, estimate, storage_bytes
 
-    def _prefill_window_archive_memo(self, keys, max_workers):
-        """Scan the selected files' archive directories on the loader pool.
+    def _window_file_bound(self, key):
+        """Stat one retained-window file and charge its length (PQ #1210).
 
-        Each scan opens one file and reads its ZIP end record and central
-        directory. On a Stage B window that is one cold read per candidate
-        of the declared file, and run one after another on the main thread
-        they were 14% of row 43's main-thread samples while the GPU idled
-        (PQ #1192). Here each distinct file is scanned once, on at most
-        ``max_workers`` threads (``_window_limits`` has already bounded that
-        by the assigned CPU affinity), with exactly the reads and stat checks
-        of ``_window_file``, and the result lands in the window's archive
-        memo.
-
-        This only warms the memo. The caller's serial preflight then runs
-        ``_window_file`` for every key as before: it re-stats each file and
-        uses a scan only when the file's stat signature still matches, and a
-        scan that failed here is simply missing, so the serial pass repeats
-        it and raises the same refusal, for the same first key, as before.
+        The retained window charges each file its length, the bound the
+        sealed plan already charges (``retained_admission_targets``): an
+        ordinary uncompressed Torch archive stores every tensor byte inside
+        the file, so its archive storage cannot exceed the file's length.
+        The archive itself is parsed once, on the bytes the loader has just
+        read and hashed (``_read_file_tensor``), before anything is
+        deserialized, and a load whose storage exceeds this charge, or whose
+        archive is not an ordinary uncompressed Torch archive, fails its
+        window there. Parsing it again here meant a second open of every
+        declared pool file only to read its central directory: 5.7% of row
+        041's main thread in the render windows, on top of the loads.
         """
-        from concurrent.futures import ThreadPoolExecutor
-
-        memo = self._window_archive_memo()
-        pending = {}
-        for key in keys:
-            value = self.weights.get(key)
-            if not isinstance(value, (str, Path)):
-                continue
-            path = str(Path(self._path_for_value(value)).absolute())
-            if path not in memo:
-                pending.setdefault(path, key)
-        if not pending:
-            return
-
-        def scan(key):
-            try:
-                self._window_file(key)
-            except Exception:  # noqa: BLE001 -- the serial preflight refuses
-                pass           # this key again, in order, with the same error.
-
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(pending)),
-                                thread_name_prefix='pwc-archive-scan') as pool:
-            list(pool.map(scan, pending.values()))
+        value = self.weights[key]
+        if not isinstance(value, (str, Path)):
+            raise RuntimeError('PWC window has an unaccountable cache input')
+        path = Path(self._path_for_value(value)).absolute()
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise RuntimeError('PWC window requires a regular file, not a symlink')
+        estimate = self.estimate_nbytes([key])
+        if estimate != before.st_size:
+            raise RuntimeError('PWC window file storage estimate changed')
+        return path, before, estimate
 
     def _window_archive_memo(self):
         """Per-file archive storage totals for the current window lifetime.
@@ -681,11 +681,11 @@ class ProductionWeightCache:
         baseline = sum(self._window_resident_storages().values())
         if baseline > max_resident_bytes:
             raise RuntimeError('PWC existing resident storage exceeds retained window budget')
-        self._prefill_window_archive_memo(keys, max_workers)
 
         # Preflight every selected file before the first load. The persistent
-        # charge is its complete archive storage, while the serialized file
-        # buffer is charged only within the quantum that reads it.
+        # charge is the file's length, which bounds its archive storage (see
+        # ``_window_file_bound``), while the serialized file buffer is charged
+        # only within the quantum that reads it.
         files, file_costs = {}, {}
         persistent_bytes = baseline
         incoming_lru_bytes = 0
@@ -695,8 +695,11 @@ class ProductionWeightCache:
             value = self.weights[key]
             file_bytes = storage_bytes = 0
             if not isinstance(value, torch.Tensor):
-                path, observed, file_bytes, storage_bytes = self._window_file(key)
-                files[str(path)] = (observed, file_bytes, storage_bytes)
+                path, observed, file_bytes = self._window_file_bound(key)
+                storage_bytes = file_bytes
+                # A bound, not an exact total: the read's own parse must not
+                # exceed it (``_read_file_tensor``).
+                files[str(path)] = (observed, file_bytes, storage_bytes, False)
                 file_costs[key] = (str(path), file_bytes, storage_bytes)
                 persistent_bytes += storage_bytes
                 incoming_lru_bytes += storage_bytes
@@ -737,8 +740,10 @@ class ProductionWeightCache:
 
         Returned keys are concrete aliases. Existing resident tensors have no
         *incoming* charge; ``retained_window`` counts their complete backing
-        storages in its baseline. Disk entries report exact uncompressed
-        archive storage and conservative serialized file bytes. The context
+        storages in its baseline. A disk entry is charged its file length for
+        both its incoming storage and its serialized buffer, exactly as the
+        retained window charges it (``_window_file_bound``, PQ #1210) and as
+        the sealed plan does (``retained_admission_targets``). The context
         repeats this preflight before loading because paths can change.
         """
         costs = {}
@@ -747,8 +752,8 @@ class ProductionWeightCache:
                 self._window_storage(self.weights[key])
                 costs[key] = {'incoming_storage_bytes': 0, 'serialized_bytes': 0}
             else:
-                _, _, file_bytes, storage_bytes = self._window_file(key)
-                costs[key] = {'incoming_storage_bytes': storage_bytes,
+                _, _, file_bytes = self._window_file_bound(key)
+                costs[key] = {'incoming_storage_bytes': file_bytes,
                               'serialized_bytes': file_bytes}
         return costs
 
@@ -775,6 +780,15 @@ class ProductionWeightCache:
         it loaded (``_cb_cache_tensor_identity``) before the tensor is handed
         out, and ``resident_render_identity`` serves that hash for the rest
         of the load's lifetime (PQ #1192).
+
+        Per-file work is done once per window, not once per file or per
+        quantum (PQ #1210): one loader pool of ``max_workers`` threads serves
+        every quantum, and each quantum is still a barrier charged to its own
+        serialized-buffer cap; each file's archive is parsed once, on the
+        bytes its loader read; and under the strict tier policy the window's
+        staged renders are pinned by one reader-lease window
+        (``_enter_window_leases``) that is released when the last quantum's
+        loads are done, before the consumer runs.
         """
         if getattr(self, '_resident_window_files', None) is not None:
             raise RuntimeError('PWC resident windows cannot be nested')
@@ -789,9 +803,12 @@ class ProductionWeightCache:
                 keys, max_resident_bytes=max_resident_bytes,
                 max_workers=max_workers,
                 max_load_buffer_bytes=max_load_buffer_bytes))
+        from concurrent.futures import ThreadPoolExecutor
+
         self._resident_window_files = files
         self._resident_window_receipt_keys = frozenset(file_costs)
         self._resident_window_render_identities = render_identities
+        live_leases = []
         try:
             loaded = 0
             remaining_incoming_bytes = sum(cost[2] for cost in file_costs.values())
@@ -799,30 +816,39 @@ class ProductionWeightCache:
             for path, _, _ in file_costs.values():
                 remaining_path_uses[path] = remaining_path_uses.get(path, 0) + 1
             advised_paths = set()
-            for quantum in quanta:
-                if before_load_quantum is not None:
-                    before_load_quantum({
-                        'resident_bytes': sum(self._window_resident_storages().values()),
-                        'remaining_incoming_storage_bytes': remaining_incoming_bytes,
-                        'next_serialized_bytes': sum(
-                            file_costs[key][1] for key in quantum if key in file_costs),
-                    })
-                loaded += self.prefetch(quantum, max_workers=max_workers)
-                for key in quantum:
-                    self.get_resident(*key)
-                if sum(self._window_resident_storages().values()) > max_resident_bytes:
-                    raise RuntimeError('PWC actual backing storage exceeds retained window budget')
-                for key in quantum:
-                    if key not in file_costs:
-                        continue
-                    path, _, storage_bytes = file_costs[key]
-                    remaining_incoming_bytes -= storage_bytes
-                    remaining_path_uses[path] -= 1
-                    if release_file_pages and remaining_path_uses[path] == 0:
-                        from .perturbed_x_cache import release_activation_cache_file_pages
-                        release_activation_cache_file_pages(
-                            path, expected_stat=files[path][0])
-                        advised_paths.add(path)
+            self._resident_window_leases = self._enter_window_leases(
+                file_costs, live_leases)
+            with ThreadPoolExecutor(max_workers=max_workers,
+                                    thread_name_prefix='pwc-window-load') as loaders:
+                for quantum in quanta:
+                    if before_load_quantum is not None:
+                        before_load_quantum({
+                            'resident_bytes': sum(self._window_resident_storages().values()),
+                            'remaining_incoming_storage_bytes': remaining_incoming_bytes,
+                            'next_serialized_bytes': sum(
+                                file_costs[key][1] for key in quantum if key in file_costs),
+                        })
+                    loaded += self.prefetch(quantum, max_workers=max_workers,
+                                            executor=loaders)
+                    for key in quantum:
+                        self.get_resident(*key)
+                    if sum(self._window_resident_storages().values()) > max_resident_bytes:
+                        raise RuntimeError('PWC actual backing storage exceeds retained window budget')
+                    for key in quantum:
+                        if key not in file_costs:
+                            continue
+                        path, _, storage_bytes = file_costs[key]
+                        remaining_incoming_bytes -= storage_bytes
+                        remaining_path_uses[path] -= 1
+                        if release_file_pages and remaining_path_uses[path] == 0:
+                            from .perturbed_x_cache import release_activation_cache_file_pages
+                            release_activation_cache_file_pages(
+                                path, expected_stat=files[path][0])
+                            advised_paths.add(path)
+            # Every load is done: the pin protected the reads, not the
+            # consumer's compute, so it is released before the consumer runs.
+            self._resident_window_leases = None
+            self._exit_window_leases(live_leases)
             # Catch selected source drift between early and late quanta before
             # exposing any partial window to the consumer.
             for key in keys:
@@ -837,13 +863,92 @@ class ProductionWeightCache:
                    'file_pages_advised': len(advised_paths),
                    'load_quanta': quanta}
         finally:
+            self._resident_window_leases = None
             try:
-                self.release_resident_tensors(keys)
+                # Error paths must not strand a pin; the loader pool above
+                # has already joined, so no read is still using one.
+                self._exit_window_leases(live_leases)
             finally:
-                self._resident_window_files = None
-                self._resident_window_receipt_keys = frozenset()
-                self._resident_window_render_identities = False
-                self._forget_window_archive_bytes()
+                try:
+                    self.release_resident_tensors(keys)
+                finally:
+                    self._resident_window_files = None
+                    self._resident_window_receipt_keys = frozenset()
+                    self._resident_window_render_identities = False
+                    self._forget_window_archive_bytes()
+
+    def _enter_window_leases(self, file_costs, live_leases):
+        """Pin a retained window's staged renders under one lease (PQ #1210).
+
+        Under the strict tier policy each load used to acquire, open and
+        release its own reader-lease window: on row 041 that was 63% of the
+        loader threads' time (the SDK acquire's ownership lock and its scan
+        of every retiring mover, the per-entry cover lookup, and the
+        release), paid once per 16 MiB file. PrismaBuild's ``acquire`` pins
+        a whole key set under one ownership-lock hold (PQ #997), so the
+        window's entries are pinned together here, by the same
+        ``_enter_group_lease`` the exact activation cache uses: RAM copies
+        in one window and the rest in one SSD window.
+
+        The pin is taken before the first ``before_load_quantum`` guard: it
+        holds staged copies in place and allocates no host memory, so it
+        changes nothing the guard prices.
+
+        Returns ``{declared path: (lease window, map key, staged entry)}`` for
+        the loads to open under, or ``None`` when no group applies: the policy is
+        inactive, no resolver is bound, fewer than two renders are staged
+        with a bound digest, or the batched lease refused. Then every load
+        leases on its own exactly as before, so a refusal keeps its
+        single-entry kind. Nothing is served on the batched proof alone:
+        the SDK re-verifies every key under its lock at acquire, each file
+        is still opened through the SDK under the pin, and its bytes are
+        still hashed against the bound digest and the map's digest.
+        """
+        from .staged_tier_policy import policy_is_active
+        if not policy_is_active():
+            return None
+        from .residency_map import residency_resolver
+        resolver = residency_resolver()
+        expected = getattr(self, '_expected_file_sha256', None)
+        if resolver is None or expected is None:
+            return None
+        members, seen = [], set()
+        for key, (path, _file_bytes, _storage) in file_costs.items():
+            binding = expected.get(key)
+            if binding is None or path in seen:
+                continue
+            staged = resolver.staged_read(Path(path), expected_sha256=binding)
+            if staged is None:
+                continue
+            seen.add(path)
+            members.append((_WindowLeaseRef(path), staged))
+        if len(members) < 2:
+            return None
+        from .perturbed_x_cache import _enter_group_lease
+        assignments = _enter_group_lease(resolver, members, live_leases,
+                                         counters=PWC_WINDOW_LEASE_COUNTERS)
+        if assignments is None:
+            return None
+        staged_by_path = {ref.path: staged for ref, staged in members}
+        return {ref.path: (lease_window, lease_key, staged_by_path[ref.path])
+                for ref, (lease_window, lease_key) in assignments.items()}
+
+    @staticmethod
+    def _exit_window_leases(live_leases):
+        """Close every window lease's descriptors and release its one ref.
+
+        Every lease is exited even when one fails; the first failure is
+        raised last.
+        """
+        failure = None
+        while live_leases:
+            try:
+                live_leases.pop().__exit__(None, None, None)
+            except Exception as exc:  # noqa: BLE001 -- raised below
+                if failure is None:
+                    failure = exc
+        if failure is not None:
+            raise failure
 
     @contextmanager
     def resident_window(self, keys, *, max_resident_bytes: int, max_workers: int,
@@ -876,7 +981,8 @@ class ProductionWeightCache:
             value = self.weights[key]
             if not isinstance(value, torch.Tensor):
                 path, observed, estimate, storage_bytes = self._window_file(key)
-                files[str(path)] = (observed, estimate, storage_bytes)
+                # Exact: the read must parse to this storage total.
+                files[str(path)] = (observed, estimate, storage_bytes, True)
         # Different keys reading one file still allocate separate load buffers.
         buffer_bytes = sum(files[str(Path(self._path_for_value(self.weights[key])).absolute())][1]
                            for key in keys if not isinstance(self.weights[key], torch.Tensor))
@@ -899,7 +1005,7 @@ class ProductionWeightCache:
                 raise RuntimeError('PWC actual backing storage exceeds resident window budget')
             if release_file_pages:
                 from .perturbed_x_cache import release_activation_cache_file_pages
-                for path, (observed, _, _) in files.items():
+                for path, (observed, *_rest) in files.items():
                     release_activation_cache_file_pages(path, expected_stat=observed)
             yield {'keys': keys, 'loaded': loaded, 'resident_bytes': actual,
                    'budget_bytes': max_resident_bytes, 'load_buffer_capacity_bytes': buffer_bytes,
@@ -1368,7 +1474,14 @@ class ProductionWeightCache:
             # the digest-less prepare leg runs outside campaign scope.
             raise refuse_pool_bulk_read(str(path), "missing-digest-binding")
         staged = None
-        if resolver is not None:
+        shared = ((getattr(self, '_resident_window_leases', None) or {}).get(str(path))
+                  if strict and window_entry is not None else None)
+        if shared is not None:
+            # Pinned by the retained window with the entry the pin was built
+            # from: a map recomposed since then cannot unserve bytes the pin
+            # holds, and asking again would refuse a perfectly pinned read.
+            staged = shared[2]
+        elif resolver is not None:
             staged = resolver.staged_read(path, expected_sha256=binding)
         if staged is not None:
             try:
@@ -1408,12 +1521,13 @@ class ProductionWeightCache:
         active, in which case the caller converts it into a refusal.
 
         Under the active policy the staged copy is read through a
-        lifetime-pinned window (one per load): the RAM leg needs RAM-mover
-        covers the composed map does not carry and refuses fast, the SSD
-        copy acquires honestly with the map's leads, payload comes from the
-        held descriptor, and the SDK's own serving record is registered at
-        the successful actual open. Inactive policy keeps the legacy
-        stage-only open order.
+        lifetime-pinned window: the retained window's shared lease when it
+        pinned this file (``_enter_window_leases``, PQ #1210), else one per
+        load. The RAM leg needs RAM-mover covers the composed map does not
+        carry and refuses fast, the SSD copy acquires honestly with the map's
+        leads, payload comes from the held descriptor, and the SDK's own
+        serving record is registered at the successful actual open. Inactive
+        policy keeps the legacy stage-only open order.
         """
         from .residency_map import (
             StagedReadRefused, residency_map_key, residency_resolver)
@@ -1451,27 +1565,39 @@ class ProductionWeightCache:
                 recorder = residency_resolver()
                 if recorder is None:
                     raise StagedReadRefused("readset-not-staged")
-                window, key = acquire_entry_window(recorder, path, staged)
-                try:
-                    window.__enter__()
-                except LeaseRefused as refusal:
-                    recorder.record_fallback(path, str(refusal))
-                    raise
-                try:
-                    fd, serving = window.open(key)
-                except LeaseRefused as refusal:
-                    recorder.record_fallback(path, str(refusal))
+                shared = (getattr(self, '_resident_window_leases', None)
+                          or {}).get(str(path))
+                if shared is not None:
+                    # The retained window already holds this file's pin; the
+                    # window releases it once every load is done.
+                    window, key, _pinned_entry = shared
                     try:
-                        window.__exit__(None, None, None)
-                    except (LeaseRefused, RuntimeError):
-                        pass
-                    raise
+                        fd, serving = window.open(key)
+                    except LeaseRefused as refusal:
+                        recorder.record_fallback(path, str(refusal))
+                        raise
+                else:
+                    window, key = acquire_entry_window(recorder, path, staged)
+                    try:
+                        window.__enter__()
+                    except LeaseRefused as refusal:
+                        recorder.record_fallback(path, str(refusal))
+                        raise
+                    try:
+                        fd, serving = window.open(key)
+                    except LeaseRefused as refusal:
+                        recorder.record_fallback(path, str(refusal))
+                        try:
+                            window.__exit__(None, None, None)
+                        except (LeaseRefused, RuntimeError):
+                            pass
+                        raise
                 serving_tier = window.serving_tier or "stage"
                 recorder.record_serving_tier(
                     path, serving_tier,
                     pin_id=str(serving.get("pin_id") or ""),
                     range_ref=str(serving.get("range_ref") or ""))
-                pinned = (window, fd, serving)
+                pinned = (window, fd, serving, shared is not None)
             recorder = residency_resolver()
             if recorder is not None and pinned is None:
                 recorder.record_serving_tier(path, serving_tier)
@@ -1497,7 +1623,7 @@ class ProductionWeightCache:
                 raise StagedReadRefused(
                     f'staged copy is unreadable: {error.strerror}') from None
         else:
-            window, fd, serving = pinned
+            window, fd, serving, shared = pinned
             try:
                 first = os.fstat(fd)
                 if first.st_size != source_before.st_size:
@@ -1519,8 +1645,12 @@ class ProductionWeightCache:
             finally:
                 # The owned buffer is fully read above: the descriptor is
                 # closed and the exact ref released before deserialization,
-                # on success and on failure alike.
-                window.__exit__(None, None, None)
+                # on success and on failure alike. A shared window lease
+                # outlives this read: the retained window releases it.
+                if shared:
+                    window.close_fd(fd)
+                else:
+                    window.__exit__(None, None, None)
         if staged is not None and self._file_signature(path.lstat()) != signature:
             raise StagedReadRefused('declared file changed during the staged read')
         # The temporary serialized buffer is per loader worker and is released
@@ -1537,17 +1667,29 @@ class ProductionWeightCache:
             # the caller has no expected digest yet -- it is the only one.
             raise StagedReadRefused('staged bytes differ from the map digest')
         if window_entry is not None:
-            if self._window_archive_storage_bytes(io.BytesIO(raw)) != window_entry[2]:
+            # The one parse of this file's archive, on the bytes just hashed
+            # and about to be deserialized. A resident window's preflight
+            # parsed the file and this total must equal it; a retained window
+            # charged the file's length, which this total must not exceed
+            # (``_window_file_bound``, PQ #1210).
+            _observed, _buffer, storage_bound, exact = window_entry
+            storage_bytes = self._window_archive_storage_bytes(io.BytesIO(raw))
+            if exact and storage_bytes != storage_bound:
                 if staged is not None:
                     raise StagedReadRefused(
                         'staged archive storage differs from the window preflight')
                 raise RuntimeError('PWC window archive storage changed during its read')
+            if not exact and storage_bytes > storage_bound:
+                if staged is not None:
+                    raise StagedReadRefused(
+                        'staged archive storage exceeds the window charge')
+                raise RuntimeError('PWC window archive storage exceeds its charged bound')
         tensor = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)
         if not isinstance(tensor, torch.Tensor):
             if staged is not None:
                 raise StagedReadRefused('staged copy is not a tensor shard')
             raise RuntimeError("PWC file receipt requires a tensor shard")
-        if window_entry is not None and self._window_storage(tensor)[1] > window_entry[2]:
+        if window_entry is not None and self._window_storage(tensor)[1] > storage_bytes:
             raise RuntimeError('PWC loaded backing storage exceeds its archive bound')
         return tensor, (receipt, signature, self._file_tensor_guard(tensor))
 
@@ -1625,7 +1767,7 @@ class ProductionWeightCache:
         return dict(receipt)
 
     def prefetch(self, keys: Sequence[tuple[str, str]] | None = None,
-                 max_workers: int = 4) -> int:
+                 max_workers: int = 4, *, executor=None) -> int:
         """Eagerly load (a subset of) cache entries via a thread pool.
 
         ``keys=None`` prefetches every entry that's still on disk (the
@@ -1638,8 +1780,14 @@ class ProductionWeightCache:
         drops to ~6 sec.  Subsequent ``.get()`` calls hit the in-memory
         copy (no torch.load), so per-trial materialization in polish
         becomes essentially free.
+
+        ``executor`` is a caller-owned pool of at most ``max_workers``
+        threads to load on instead of a fresh one (a retained window keeps
+        one for all its quanta, PQ #1210). This call is still a barrier:
+        it returns, or raises, only after every load it submitted has
+        finished, so nothing it started is in flight past it.
         """
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, wait
 
         if getattr(self, "_file_load_max_bytes", 0):
             if type(max_workers) is not int or not 0 < max_workers <= len(os.sched_getaffinity(0)):
@@ -1662,25 +1810,37 @@ class ProductionWeightCache:
             # out, when the window asked for it (PQ #1192).
             return key, value, tensor, receipt, self._loaded_render_identity(tensor, receipt)
 
+        if executor is None:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                return self._admit_prefetched(pool.map(_load_one, keys))
+        futures = [executor.submit(_load_one, key) for key in keys]
+        try:
+            return self._admit_prefetched(future.result() for future in futures)
+        finally:
+            for future in futures:
+                future.cancel()
+            wait(futures)
+
+    def _admit_prefetched(self, items) -> int:
+        """Admit ``prefetch``'s loads, in key order, as each one lands."""
         loaded_count = 0
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for item in pool.map(_load_one, keys):
-                if item is None:
-                    continue
-                key, original_value, tensor, receipt, derived = item
-                if isinstance(self.weights.get(key), torch.Tensor):
-                    continue
-                self._check_expected_file_sha256(key, receipt)
-                self._validate_loaded_cb_pair_tensor(key, tensor)
-                self.weights[key] = tensor
-                self._record_lru_load(key, original_value, tensor)
-                self._record_file_load(key, tensor, receipt)
-                entry = (self._file_load_receipts or {}).get(key)
-                if derived and entry is not None and entry[0] is tensor:
-                    entry[2].update(derived)
-                if getattr(self, "_expected_file_sha256", None) is not None:
-                    self.file_load_receipt(key, tensor)
-                loaded_count += 1
+        for item in items:
+            if item is None:
+                continue
+            key, original_value, tensor, receipt, derived = item
+            if isinstance(self.weights.get(key), torch.Tensor):
+                continue
+            self._check_expected_file_sha256(key, receipt)
+            self._validate_loaded_cb_pair_tensor(key, tensor)
+            self.weights[key] = tensor
+            self._record_lru_load(key, original_value, tensor)
+            self._record_file_load(key, tensor, receipt)
+            entry = (self._file_load_receipts or {}).get(key)
+            if derived and entry is not None and entry[0] is tensor:
+                entry[2].update(derived)
+            if getattr(self, "_expected_file_sha256", None) is not None:
+                self.file_load_receipt(key, tensor)
+            loaded_count += 1
         return loaded_count
 
     def _resolve_to_tensor(self, key: tuple[str, str], *, resident_only=False) -> torch.Tensor | None:
