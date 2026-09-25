@@ -18,8 +18,9 @@ every consumer that declared them has succeeded.
 PrismaBuild's local output spool.
 
 The PrismaBuild these tests run against is the published runtime generation
-``band_serial_origin_pb_pin.json`` names: the older bundles the Stage A
-tests pin reject a write-only template. The module is marked
+``pb_runtime_generation_pin.json`` names, the one pin the write-only
+produced-output suites share (PQ #1084): the older bundles the Stage A tests
+pin reject a write-only template. The module is marked
 ``own_process``: resolving the pinned bundle leaves ``prismabuild`` in
 ``sys.modules``, so in a shared session its tests run in a child pytest of
 their own (``tests/conftest.py``, PQ #1008).
@@ -51,8 +52,8 @@ from test_stage_a_produced_boundary_chain import (  # noqa: E402,F401
 PREFETCH = 2
 ARTIFACT_MAX = 1 << 20
 #: The PrismaBuild with write-only templates, origin batches and their
-#: retirement (#912, #914): the published generation this pin names.
-ORIGIN_PIN = Path(__file__).with_name("band_serial_origin_pb_pin.json")
+#: retirement (#912, #914): the shared published-generation pin (PQ #1084).
+ORIGIN_PIN = chain.PB_GENERATION_PIN
 #: Entry groups per handoff: each probe's batches in groups of ``PREFETCH``.
 ENTRY_GROUPS = N_PROBES * -(-N_BATCHES // PREFETCH)
 

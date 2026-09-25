@@ -1719,7 +1719,7 @@ it. The preparation's reads are plain file reads, so the staged copy is not
 yet what they read. Gates: `tests/test_stage_b_prep_io_1070.py` (an audit
 hook shows every file the generator opens is in its manifest),
 `tests/test_stage_b_prep_produced_1070.py` (a real admitted owner on the
-published generation pinned in `tests/stage_b_prep_pb_pin.json`: every file
+published generation pinned in `tests/pb_runtime_generation_pin.json`: every file
 under the metadata root is in a committed batch with its digest, and a replay
 commits nothing). A new submission contract for one tool; no format, pipeline
 default, stage or ship gate changes.
@@ -2670,6 +2670,16 @@ every row of the launch. A handoff names its producer's mode, and a
 consumer in another mode refuses it. See the entry at the top, and the
 restated #996 and #997 contracts. No format, pipeline default, stage, lane
 or ship gate changes; a launch without the setting is unchanged.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq-misc`) for **one pin per PrismaBuild bundle
+the tests run against** (PQ #1084): the Stage B preparation (#1070), Stage A
+retirement (#1073) and band-serial handoff (#1075) suites read one pin of the
+published generation, `tests/pb_runtime_generation_pin.json`, holding the
+union of the files they check; the two pins that named that generation are
+gone, and `tests/test_pb_generation_pin_1084.py` refuses a second pin file
+naming a bundle, generation or commit another pin names. The Stage A pins
+name older bundles and stay. Test hygiene only: no format, pipeline default,
+stage or ship gate changes.
 
 Re-stamped (2026-09-25, `perf/1225-drain-tail`) for **a Stage B handoff
 tail that keeps its export records and does not fsync its spool** (PQ
@@ -24867,7 +24877,7 @@ a read-back handoff template, so its resubmission refuses at the quantum's
 head, before any GPU work. Gates: `tests/test_band_serial_handoff_produced.py`
 and `tests/test_band_serial_handoff_spool_real_pb.py` (each in its own
 pytest process), against the published PrismaBuild generation
-`tests/band_serial_origin_pb_pin.json` names.
+`tests/pb_runtime_generation_pin.json` names.
 
 **Consumer.** `joint_cost_quantum --adjoint-handoff PATH
 --adjoint-handoff-sha256 HEX` loads the handoff at the quantum head

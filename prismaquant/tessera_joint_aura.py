@@ -2138,6 +2138,24 @@ def _source_prefetch(config):
     return dict(prefetch)
 
 
+def _planned_source_window(config):
+    """The prefetch note's bound from the sealed plan (PQ #1134), as kwargs.
+
+    A plan with retained operator windows budgets the replay after the head
+    phase inside its cap; only its source reserve is the source window. A
+    plan without one gives no bound and the note reads the measured budget.
+    """
+    from .joint_retained_window_plan import planned_source_window_bytes
+    try:
+        window = planned_source_window_bytes(
+            config.get('execution', {}).get('retained_operator_windows'))
+    except Exception as exc:  # noqa: BLE001 - a log note must never stop a run
+        print(f"prefetch note: the plan's source window is unreadable ({exc!r}); "
+              f"the note reads the measured budget", flush=True)
+        return {}
+    return {} if window is None else {'planned_source_window_bytes': window}
+
+
 def recommend_source_prefetch(*, cache_bytes, layer_bytes, cpu_count,
                               cache_headroom_gb, prefetch_min_available_gb):
     """Derive explicit ``source_prefetch`` numbers from measured budgets.
@@ -2750,6 +2768,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             **({'source_derivative': execution['source_derivative']} if execution.get('source_derivative') is not None else {}),
             **({'source_authentication': source_authentication}
                if source_authentication is not None else {}),
+            **_planned_source_window(config),
             **source_prefetch)
         from .glm_capture_compatibility import require_capture_compatibility
         require_capture_compatibility(config.get('source_capture_compatibility'),

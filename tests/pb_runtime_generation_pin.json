@@ -3,6 +3,7 @@
   "bundle_root": "/mnt/shared/prismabuild-fleet/runtime-generations/81d95cba8d91-1790160372-5d100532e024",
   "candidate_commit": "81d95cba8d911907ca85db5618d34c0c0855e7bf",
   "runtime_generation": "81d95cba8d91-1790160372-5d100532e024",
+  "qualification": "PUBLISHED RUNTIME GENERATION 81d95cba8d91-1790160372-5d100532e024",
   "files": {
     "src/prismabuild/action_edges.py": "d9d5bba03815c6a60b359475539263a33fe7b24eaa09cbcea9701dcb1a88eafb",
     "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
@@ -22,11 +23,17 @@
   },
   "search_paths": [
     {
-      "env": "PRISMAQUANT_BAND_SERIAL_ORIGIN_PB_SRC"
+      "env": "PRISMAQUANT_PB_GENERATION_SRC"
     },
     {
       "path": "/mnt/shared/prismabuild-fleet/runtime-generations/81d95cba8d91-1790160372-5d100532e024"
     }
   ],
-  "note": "The published PrismaBuild runtime generation that carries write-only produced-output templates and origin batches (#912), their lifetime and retirement (#914) and the local spool's origin commit. The band-serial handoff tests (PQ #1075) drive the handoff's commit and its retirement against it. It is the generation the fleet ran when this pin was cut, read-only under runtime-generations, and the digests below are what the tests check. The older bundles the Stage A tests pin reject a write-only template, so these tests cannot use them. When nothing resolves against the digests the tests skip loudly; they never imply support that does not exist."
+  "consumers": [
+    "tests/test_band_serial_handoff_produced.py",
+    "tests/test_band_serial_handoff_spool_real_pb.py",
+    "tests/test_stage_a_retirement_pb_1073.py",
+    "tests/test_stage_b_prep_produced_1070.py"
+  ],
+  "note": "The one published PrismaBuild runtime generation the write-only produced-output tests run against (PQ #1084): write-only produced-output templates and origin batches (PB #912), their lifetime and retirement (PB #914) and the local spool's origin commit. The Stage B preparation's write-only publication (PQ #1070), the Stage A retirement against it (PQ #1073) and the band-serial handoff (PQ #1075) all read this file, so bumping it once moves every one of them; tests/test_pb_generation_pin_1084.py refuses a second pin file naming the same generation. The files are the union the suites need. The older bundles the Stage A pins name (stagea_produced_pb_pin.json, stagea_local_spool_pb_pin.json) reject a write-only template, so those suites keep their own pins. The bundle is read-only under runtime-generations; the digests below are what the tests check, and the tests skip loudly when nothing resolves against them."
 }
