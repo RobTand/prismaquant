@@ -1,5 +1,58 @@
 # PrismaQuant Architecture
 
+Stage B capture groups stage their host bytes in one held buffer
+(2026-09-25, `fix/1246-host-buffer-reuse`, PQ #1246). A capture pass used to
+allocate host memory once per capture group, at three sites: each read of
+the cotangent scratch (`ExactCotangentScratch.__getitem__` allocated a
+tensor and `_direct_io` read into it), the stacks of the incoming cotangents
+and of the layer inputs (`_stack_to_device`'s `torch.cat`), and the input
+cotangent's copy to the host plus one `.clone()` per stored batch. On the
+one-pass spill fixture at 1,024 tokens per sample, a group of two stored
+batches made seven host allocations of at least one slot, and a batch at
+`capture_batch=1` made two. The CPU allocator's purge delay is zero under
+the bounded capture contract (#366), so each freed block gave its pages
+back, and the next group faulted them in again. With transparent huge pages
+at `defrag=madvise`, as the Sparks ran until 2026-09-25, a huge-page fault
+on a fragmented box compacts memory first. They have run `defrag=defer`
+since, where a fault doesn't compact but still zeroes each page it faults
+in. Each Stage B backward pass over the plane now holds one pageable buffer,
+`joint_adjoint_checkpoints.PlaneHostStaging`, sized for one group: one plane
+entry per stored batch, at the wider of the plane's dtype and the compute
+dtype.
+
+- Admission. The pass charges the buffer, plus one page of alignment, to
+  the capture guard's host side at `before_stage_b_plane_staging` before it
+  allocates the buffer. It then allocates the buffer and writes every page,
+  so the pass's `before_joint_window_backward` admission and every later
+  reading count it as committed memory. While held, it reserves nothing. A
+  pass that stages nothing, on a plane kept in memory in one-batch groups,
+  holds no buffer and makes no admission. The workspace profile's ladder
+  (PQ #1151) holds the same buffer for its groups.
+- Reads and stacks. `ExactCotangentScratch.read_into` reads a slot into a
+  caller's tensor, on the direct-I/O path or the buffered one, and returns
+  the bytes that `__getitem__` returns. A group reads its incoming
+  cotangents into consecutive rows of the buffer and copies its layer
+  inputs into the buffer, converting on the host as the stacked transfer
+  did. Each moves to the device in one blocking copy.
+- Store. The input cotangent lands in the buffer in one blocking copy, and
+  each stored batch's rows are written to its scratch slot from there. A
+  plane kept in memory still gets one owned tensor per stored batch.
+
+Every copy through the buffer blocks, so the buffer is free again when a
+copy returns. Pinned memory with `non_blocking=True` would need a
+stream-ordered wait before each reuse. The rows, their order and their
+bytes are the ones the allocating paths produced, so the plane, the device
+arithmetic and the records are unchanged. The chain roll's host copies are
+not changed. The buffer is a host charge outside the plan's capture
+quantity, like the spill's pinned arenas. The allocations it replaces
+peaked at about twice its bytes within a group, and no admission counted
+them. Gates: `tests/test_stageb_host_staging_1246.py` (no host allocation of
+a slot or more per capture group at `capture_batch` 1 and 2, the admission
+order, and the bytes of `read_into` and the staging helpers),
+`tests/test_stageb_one_pass_spill.py` and
+`tests/test_stageb_cotangent_scratch.py`. No format, pipeline default,
+stage, record identity or ship gate changes.
+
 Stage B runs every pass of a KDA layer on the capture kernel in kernel mode
 (2026-09-25, `perf/1214-kda-kernel-mode`, PQ #1214). The kernel of PQ #1199,
 below, ran only a KDA target layer's capture passes. It refused a
@@ -798,8 +851,10 @@ box watchdog's 16 GiB; see the entry above). The device split:
 window backward and spill capture charge their CUDA allocations there (the
 retained budget's backward workspace, PQ #1151, times the stored batches, the
 lease's statistics, and the target inputs the spill holds), so an aggregate
-guard also holds them against the device envelope. Only the spill's pinned host arenas stay on the host
-side (`StageBReplaySpill.capture_reserve_host_bytes`). A guard without a
+guard also holds them against the device envelope. Two owners stay on the host
+side: the spill's pinned host arenas
+(`StageBReplaySpill.capture_reserve_host_bytes`) and, since PQ #1246, the
+capture pass's plane staging buffer (`before_stage_b_plane_staging`). A guard without a
 device envelope takes the sum, as before. Gates:
 `tests/test_committed_memory_1157.py`, which carries the row's own
 `memory.stat` from sparky (attempt 2), and
@@ -850,11 +905,12 @@ The live guard admits each step, charged on the device side: B=1 under the
 declared reserve, each later step under the previous step's measured peak
 times the batch ratio. It writes a JSON receipt of the device peak deltas and
 the cgroup `memory.stat` at each group's host peak, then stops the quantum.
-Two charges stay outside the shared quantity: the spill's own capture
+Three charges stay outside the shared quantity: the spill's own capture
 reserve, which the plan cannot see (since PQ #1157 its pinned host arenas,
 `StageBReplaySpill.capture_reserve_host_bytes`, and its held target inputs,
-`capture_reserve_device_bytes`), and the spill window replay, which still
-charges the operator windows' declared reserve. Gates: `tests/test_stage_b_capture_pricing.py`,
+`capture_reserve_device_bytes`), the capture pass's plane staging buffer
+(PQ #1246, admitted at `before_stage_b_plane_staging`), and the spill window
+replay, which still charges the operator windows' declared reserve. Gates: `tests/test_stage_b_capture_pricing.py`,
 `tests/test_stageb_one_pass_spill.py`
 (`test_capture_pass_charges_the_planned_workspace_per_stored_batch`),
 `tests/test_joint_stageb_resources.py`,
@@ -2535,7 +2591,9 @@ extent in a private disposable file, loads authenticated checkpoint entries
 through the existing strict pinned reader in leased windows under its
 resident budget (PQ #1142), and owns cleanup.
 Every coordinate has a fixed dtype/shape slot; replay reads owned CPU tensors
-and overwrites the same slot. The file keeps no page cache, which the cgroup
+and overwrites the same slot. A Stage B capture pass reads slots into its
+held staging buffer instead (`read_into`, PQ #1246), and writes them from it.
+The file keeps no page cache, which the cgroup
 would charge to the job (PQ #1152). When every slot is a whole number of the
 file's direct-I/O blocks, as a Stage B plane of 16 MiB slots is, slots are
 written and read with `O_DIRECT` and no sync, straight from and into the
@@ -2701,8 +2759,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq1087`.
+As of: 2026-09-25 · `fix/1246-host-buffer-reuse`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `fix/1246-host-buffer-reuse`) for **a Stage B
+capture pass that stages its host bytes in one held buffer** (PQ #1246).
+The capture guard admits the buffer at `before_stage_b_plane_staging`
+before it is allocated, and the buffer is committed before the pass's
+backward admission. See the entry at the top. No format, pipeline
+default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1087`) for **a dispatch dry run whose
 stdout is one JSON document** (PQ #1087, item 3). `dispatch_joint_quanta

@@ -1082,6 +1082,11 @@ class ExactCotangentScratch:
     every completed I/O drops the file's pages, one slot at a time. Nothing
     is durable either way: a slot is published once its write returns and
     the file dies with the process.
+
+    ``read_into`` reads a slot into a tensor its caller holds instead of a
+    fresh one, and a write keeps no reference to its source, so a caller
+    that stages rows in one held host buffer allocates nothing per slot
+    (PQ #1246).
     """
 
     @staticmethod
@@ -1197,25 +1202,47 @@ class ExactCotangentScratch:
     def __iter__(self):
         return iter(self._slots)
 
+    def slot_layout(self, key):
+        """``(shape, dtype, nbytes)`` of the slot at ``key``; reads nothing."""
+        _offset, size, shape, dtype = self._slots[key]
+        return shape, dtype, size
+
     def __getitem__(self, key):
         if self._file is None or key not in self._written:
             raise RuntimeError("cotangent scratch slot is not ready")
+        _offset, _size, shape, dtype = self._slots[key]
+        return self.read_into(key, torch.empty(shape, dtype=dtype, device='cpu'))
+
+    def read_into(self, key, out):
+        """Read the slot at ``key`` into ``out`` and return ``out``.
+
+        ``out`` is a contiguous CPU tensor of the slot's shape and dtype,
+        such as rows of a buffer its caller holds across reads (PQ #1246),
+        so a read allocates nothing. The device fills it in place when its
+        address is on the direct-I/O memory grid, and the reused bounce
+        buffer stages it otherwise. ``__getitem__`` reads a fresh tensor
+        this way, so the bytes are the same.
+        """
+        if self._file is None or key not in self._written:
+            raise RuntimeError("cotangent scratch slot is not ready")
         offset, size, shape, dtype = self._slots[key]
-        tensor = torch.empty(shape, dtype=dtype, device='cpu')
+        if (out.device.type != 'cpu' or out.dtype != dtype
+                or tuple(out.shape) != shape or not out.is_contiguous()):
+            raise ValueError("cotangent scratch read target differs from its slot")
         if self._direct is not None:
-            view, bounced = self._device_buffer(tensor, size)
+            view, bounced = self._device_buffer(out, size)
             try:
                 self._direct_io(os.preadv, view, offset, size, "read")
                 if bounced:
-                    out = memoryview(tensor.view(torch.uint8).reshape(-1).numpy())
+                    target = memoryview(out.view(torch.uint8).reshape(-1).numpy())
                     try:
-                        out[:] = view
+                        target[:] = view
                     finally:
-                        out.release()
+                        target.release()
             finally:
                 view.release()
-            return tensor
-        view = memoryview(tensor.view(torch.uint8).reshape(-1).numpy())
+            return out
+        view = memoryview(out.view(torch.uint8).reshape(-1).numpy())
         try:
             done = 0
             while done < size:
@@ -1226,7 +1253,7 @@ class ExactCotangentScratch:
             self._drop_pages()
         finally:
             view.release()
-        return tensor
+        return out
 
     def __setitem__(self, key, tensor):
         if self._file is None:
