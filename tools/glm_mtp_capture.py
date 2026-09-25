@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GLM MTP layer calibration capture, in two PrismaBuild actions (PQ #1290).
+"""GLM MTP layer calibration capture, in three PrismaBuild actions (PQ #1290, #1319).
 
 ``--phase final-hidden`` reads the last backbone layer's input for every
 calibration sequence (Stage A's boundary entries, through a hash-bound
@@ -7,12 +7,23 @@ manifest), runs that layer on the plan's streamed BF16 source, then the
 model's collapse and final norm, and writes each sequence's post-final-norm
 hidden state as an exact entry under ``--out``.
 
-``--phase capture`` loads the MTP layer from the checkpoint and runs the body
-campaign's collector over it on those hidden states. It writes the MTP census
-to ``--census-out`` and the capture, in the canonical format, under ``--out``.
+``--phase projection`` asks the producer once for its projection of the MTP
+layer's routed stack, the question the body census asked for its stacks, and
+writes the block a census carries as ``mtp-projection.json`` under ``--out``.
+It loads no weights and needs no GPU: the producer's cost is hashing the
+checkpoint to seal its source.
 
-Both phases read every source shard through the canonical capture's source
-owner, so each shard is authenticated before a tensor from it is used. See
+``--phase capture`` loads the MTP layer from the checkpoint, checks the
+projection's source bytes against it, and runs the body campaign's collector
+over it on those hidden states. It writes the MTP census, carrying the
+projection, to ``--census-out`` and the capture, in the canonical format,
+under ``--out``.
+
+The final-hidden and capture phases read every source shard through the
+canonical capture's source owner, so each shard is authenticated before a
+tensor from it is used. The projection is the producer's own read of the
+checkpoint, and the capture phase checks it against those authenticated
+reads. See
 ``prismaquant/glm_mtp_capture.py`` for what each phase binds.
 
 Run inside the campaign container (the plan's source derivative needs it)::
@@ -20,14 +31,18 @@ Run inside the campaign container (the plan's source derivative needs it)::
     python3 -m tools.glm_mtp_capture --phase final-hidden \\
         --plan PLAN --plan-sha256 SHA --boundaries MANIFEST --boundaries-sha256 SHA \\
         --out DIR --offload-folder DIR
+    python3 -m tools.glm_mtp_capture --phase projection \\
+        --plan PLAN --plan-sha256 SHA --out DIR
     python3 -m tools.glm_mtp_capture --phase capture \\
         --plan PLAN --plan-sha256 SHA --prepared PREPARED --prepared-sha256 SHA \\
         --final-hidden MANIFEST --final-hidden-sha256 SHA \\
+        --expert-projection PROJECTION --expert-projection-sha256 SHA \\
         --out DIR --census-out PATH
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -37,7 +52,8 @@ from pathlib import Path
 
 def _capture_arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--phase", required=True, choices=("final-hidden", "capture"))
+    parser.add_argument("--phase", required=True,
+                        choices=("final-hidden", "projection", "capture"))
     parser.add_argument("--plan", required=True)
     parser.add_argument("--plan-sha256", required=True)
     parser.add_argument("--boundaries")
@@ -46,6 +62,8 @@ def _capture_arguments(argv):
     parser.add_argument("--prepared-sha256")
     parser.add_argument("--final-hidden")
     parser.add_argument("--final-hidden-sha256")
+    parser.add_argument("--expert-projection")
+    parser.add_argument("--expert-projection-sha256")
     parser.add_argument("--out", required=True)
     parser.add_argument("--census-out")
     parser.add_argument("--offload-folder")
@@ -54,8 +72,10 @@ def _capture_arguments(argv):
                         help="the capture phase's device; phase 1 runs on the plan's runner")
     args = parser.parse_args(argv)
     needed = {"final-hidden": ("boundaries", "boundaries_sha256", "offload_folder"),
+              "projection": (),
               "capture": ("prepared", "prepared_sha256", "final_hidden",
-                          "final_hidden_sha256", "census_out")}[args.phase]
+                          "final_hidden_sha256", "expert_projection",
+                          "expert_projection_sha256", "census_out")}[args.phase]
     missing = [f"--{name.replace('_', '-')}" for name in needed if getattr(args, name) is None]
     if missing:
         parser.error(f"--phase {args.phase} needs {' '.join(missing)}")
@@ -166,9 +186,49 @@ def final_hidden_phase(args):
     }
 
 
+def _text_config(model_path):
+    from transformers import AutoConfig
+
+    config = AutoConfig.from_pretrained(model_path)
+    text_config = getattr(config, "text_config", config)
+    text_config._attn_implementation = "eager"
+    return text_config
+
+
+def projection_phase(args):
+    from prismaquant import glm_mtp, glm_mtp_capture as cap
+    from prismaquant.model_profiles import detect_profile
+
+    started = time.monotonic()
+    plan, plan_sha256 = cap.read_bound_json(args.plan, args.plan_sha256)
+    base, _ = cap.read_bound_json(plan["inputs"]["census"]["path"],
+                                  plan["inputs"]["census"]["sha256"])
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    wrapper = glm_mtp.MtpCheckpointModel(glm_mtp.mtp_layer_skeleton(_text_config(plan["model"])))
+    print(f"[mtp-projection] asking the producer for {plan['model']}", flush=True)
+    carried = cap.mtp_expert_projection(plan["model"], wrapper, detect_profile(plan["model"]),
+                                        base_census=base, out_path=out / "producer-answer.json")
+    path = out / "mtp-projection.json"
+    if path.exists():
+        raise RuntimeError(f"{path} exists; the projection publishes once")
+    raw = (json.dumps(carried, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+
+    atomic_write_bytes(path, raw)
+    return {
+        "phase": "projection",
+        "projection": {"path": str(path.resolve()), "sha256": hashlib.sha256(raw).hexdigest()},
+        "plan": {"path": str(Path(args.plan).resolve()), "sha256": plan_sha256},
+        "stacks": sorted(carried["stacks"]),
+        "units": sum(len(units) for units in carried["stacks"].values()),
+        "request": carried["request"], "tool": carried["tool"],
+        "seconds": {"total": time.monotonic() - started},
+    }
+
+
 def capture_phase(args):
     import torch
-    from transformers import AutoConfig
 
     from prismaquant import glm_mtp, glm_mtp_capture as cap
     from prismaquant.model_profiles import detect_profile
@@ -176,6 +236,8 @@ def capture_phase(args):
     started = time.monotonic()
     plan, plan_ref, ids, calibration, manifest, owner = _plan_inputs(args)
     try:
+        projection, projection_sha256 = cap.read_bound_json(
+            args.expert_projection, args.expert_projection_sha256)
         final, _ = cap.read_bound_json(args.final_hidden, args.final_hidden_sha256)
         if final["inputs"]["calibration_sha256"] != calibration["calibration_sha256"]:
             raise RuntimeError("the final hidden states were computed on another calibration draw")
@@ -189,9 +251,7 @@ def capture_phase(args):
             f"model.language_model.layers.{body_layer}.mlp.experts"]["experts"]
         base, _ = cap.read_bound_json(plan["inputs"]["census"]["path"],
                                       plan["inputs"]["census"]["sha256"])
-        config = AutoConfig.from_pretrained(plan["model"])
-        text_config = getattr(config, "text_config", config)
-        text_config._attn_implementation = "eager"
+        text_config = _text_config(plan["model"])
         profile = detect_profile(plan["model"])
         device = torch.device(args.device)
         layer, receipt = glm_mtp.load_mtp_layer(
@@ -208,6 +268,10 @@ def capture_phase(args):
                                                              input_manifest=final_ref)
         wrapper = glm_mtp.MtpCheckpointModel(layer)
         units = glm_mtp.mtp_priced_units(wrapper, profile)
+        checked = cap.check_mtp_expert_projection(
+            projection, wrapper, profile, model_path=plan["model"],
+            source_authentication=owner, layer_stride=int(base["layer_stride"]))
+        print(f"[mtp-capture] projection checked on {len(checked)} routed units", flush=True)
         read, stream = cap.final_hidden_stream(final, int(ids.shape[0]),
                                                read_ahead_bytes=int(args.read_ahead_mb) << 20)
         with closing(stream):
@@ -222,7 +286,7 @@ def capture_phase(args):
             groups=cap.mtp_anchor_groups(wrapper, units, profile),
             model_load_contract=contract,
             attention_implementation=layer.config._attn_implementation,
-            capture_runtime=_runtime())
+            capture_runtime=_runtime(), expert_projection=projection)
         identity, census_sha256, sealed = cap.publish_mtp_capture(
             args.out, census=census, census_path=args.census_out, source_authentication=owner,
             calibration=manifest["identity"]["calibration"],
@@ -246,12 +310,16 @@ def capture_phase(args):
                         "max": max(counts[n] for n in routed)},
         "source_authentication": authentication,
         "plan": plan_ref, "identity_units": len(identity["units"]),
+        "expert_projection": {"path": str(Path(args.expert_projection).resolve()),
+                              "sha256": projection_sha256},
+        "projection_checked_units": len(checked),
     }
 
 
 def main(argv=None):
     args = _capture_arguments(sys.argv[1:] if argv is None else argv)
-    summary = (final_hidden_phase if args.phase == "final-hidden" else capture_phase)(args)
+    summary = {"final-hidden": final_hidden_phase, "projection": projection_phase,
+               "capture": capture_phase}[args.phase](args)
     raw = json.dumps(summary, indent=2, sort_keys=True, allow_nan=False) + "\n"
     report = Path(args.out) / f"{args.phase}-run.json"
     report.write_text(raw)

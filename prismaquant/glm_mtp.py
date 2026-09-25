@@ -203,6 +203,20 @@ class Glm5NextMtpLayer(nn.Module):
         return self.shared_head.norm(mlp_out + residual)
 
 
+def mtp_layer_skeleton(text_config, *, experts_implementation=None) -> Glm5NextMtpLayer:
+    """The MTP layer on the meta device: its modules and shapes, no tensors.
+
+    ``experts_implementation``, when given, is set on a copy of the config
+    before construction, so the routed experts are built for that dispatch.
+    The input config is not modified.
+    """
+    config = copy.deepcopy(text_config)
+    if experts_implementation is not None:
+        config._experts_implementation = experts_implementation
+    with torch.device("meta"):
+        return Glm5NextMtpLayer(config)
+
+
 def mtp_checkpoint_prefix(layer_index: int) -> str:
     """Where layer ``layer_index`` lives in the checkpoint and the census."""
     return f"model.language_model.layers.{int(layer_index)}."
@@ -328,10 +342,7 @@ def load_mtp_layer(checkpoint_dir, text_config, *, profile, dtype=torch.bfloat16
     if not isinstance(experts_implementation, str) or not experts_implementation:
         raise ValueError("the MTP layer's experts dispatch must be named, not left to a default")
     checkpoint_dir = Path(checkpoint_dir)
-    config = copy.deepcopy(text_config)
-    config._experts_implementation = experts_implementation
-    with torch.device("meta"):
-        layer = Glm5NextMtpLayer(config)
+    layer = mtp_layer_skeleton(text_config, experts_implementation=experts_implementation)
     prefix = mtp_checkpoint_prefix(layer.layer_idx)
     expected = layer.state_dict()
 
@@ -382,7 +393,7 @@ def load_mtp_layer(checkpoint_dir, text_config, *, profile, dtype=torch.bfloat16
         parameter.requires_grad_(False)
     return layer, {"prefix": prefix, "shards": sorted(by_shard), "tensors": len(keys),
                    "source_map": {key: weight_map[key] for key in keys},
-                   "experts_implementation": config._experts_implementation}
+                   "experts_implementation": layer.config._experts_implementation}
 
 
 def mtp_layer_initialization_contract(layer, receipt, *, input_manifest):

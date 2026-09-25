@@ -2973,8 +2973,33 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/glm-mtp-capture-1271`.
+As of: 2026-09-25 · `claude/glm-mtp-projection-1319`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/glm-mtp-projection-1319`) for **the GLM MTP
+census's producer projection** (PQ #1319, part of #1271, P1). The campaign
+prices a routed unit only against the producer's expert projection of its
+stack, which it reads from the census rather than asking the producer per row
+(`tessera_campaign._project_expert_population`). The MTP census carried only
+the body's 42-stack answer, so none of the 864 routed MTP units could be
+priced. The MTP capture now runs in three PrismaBuild actions:
+
+- Phase `projection` asks the producer once, on the meta MTP layer
+  (`glm_mtp.mtp_layer_skeleton`), the nominal question the body census
+  recorded for its stacks (`glm_mtp_capture.mtp_projection_request`). It binds
+  the answer to the profile-declared population (`mtp_expert_projection`). It
+  loads no weights and needs no GPU; its cost is the producer hashing the
+  checkpoint to seal its source.
+- Phase `capture` takes that block (`--expert-projection`). It checks each
+  routed unit's source bytes against the loaded layer
+  (`check_mtp_expert_projection`, the census path's
+  `_checked_projected_units`) and writes the block into the MTP census. The
+  block's source seal is the body producer's roster, so the derived census is
+  still admitted.
+
+No format, pipeline default, stage, lane or ship gate changes. Gate:
+`tests/test_glm_mtp_capture.py` (the real pinned producer on the tiny
+checkpoint; the campaign binds the census's block without asking again).
 
 Re-stamped (2026-09-25, `claude/glm-mtp-capture-1271`) for **the GLM MTP
 layer's calibration capture** (PQ #1290, part 2 of #1271, P1). The MTP

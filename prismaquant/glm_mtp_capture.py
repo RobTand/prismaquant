@@ -310,15 +310,84 @@ def mtp_anchor_groups(model, units, profile):
     return resolve_anchor_groups(sorted(units), profile=profile, expert_members=members)
 
 
+def mtp_projection_request(base_census, stacks):
+    """``{stack: (grid, q256)}``: the question the body census asked, per stack.
+
+    The producer's unit records do not depend on the nominal rung it is asked
+    at (``tessera_expert_projection.stack_plan_request``), so this is not a
+    choice made here: it is the one rung the body census's own request named
+    for every stack. A census that recorded none, or several, refuses.
+    """
+    asked = ((base_census.get("expert_projection") or {}).get("request") or {})
+    nominal = {(str(entry["grid"]), int(entry["q256"])) for entry in asked.values()}
+    if len(nominal) != 1:
+        raise RuntimeError(
+            f"the base census recorded {len(nominal)} nominal producer requests "
+            f"{sorted(nominal)}; the MTP projection asks the one the body asked")
+    grid, q256 = nominal.pop()
+    return {str(stack): (grid, q256) for stack in stacks}
+
+
+def mtp_expert_projection(model_path, model, profile, *, base_census, out_path):
+    """The producer's projection of the MTP layer's routed stack, as a census carries it.
+
+    ``model`` is an :class:`~prismaquant.glm_mtp.MtpCheckpointModel`; its
+    tensors may be on the meta device, since only the declared population is
+    read. The producer is asked once (it hashes the whole checkpoint to seal
+    its source) and its answer is bound exactly to the profile-declared
+    units, the campaign's own binding. Returns the carried block
+    (``tessera_expert_projection.carried_projection``) with its one attempt.
+    """
+    from .tessera_campaign import _require_campaign_population
+    from .tessera_expert_projection import (bind_expert_projection, carried_projection,
+                                            producer_plan_tool, request_expert_projection,
+                                            stack_plan_request)
+
+    population = _require_campaign_population(model, profile, int(base_census["layer_stride"]))
+    if not population.declared:
+        raise RuntimeError("the MTP layer declares no routed expert stack to project")
+    stacks = mtp_projection_request(base_census, population.declared)
+    tool = producer_plan_tool()
+    answer = request_expert_projection(model_path, stacks, out_path=out_path)
+    bound = bind_expert_projection(answer, declared=population.declared)
+    request = stack_plan_request(stacks)
+    carried = carried_projection(answer, bound, request=request, tool=str(tool))
+    carried["plan_attempts"] = [{"request": request, "refused": None}]
+    return carried
+
+
+def check_mtp_expert_projection(carried, model, profile, *, model_path,
+                                source_authentication=None, layer_stride=1):
+    """Bind a carried projection to the loaded MTP layer and check its bytes.
+
+    The census path's check (``tessera_campaign._checked_projected_units``):
+    every routed unit's source tensor, read from the shard the producer
+    hashed, must equal the loaded layer's view of it. Returns
+    ``{qname: unit record}`` for every routed unit.
+    """
+    from .tessera_campaign import _checked_projected_units, _require_campaign_population
+    from .tessera_expert_projection import bind_expert_projection
+
+    population = _require_campaign_population(model, profile, int(layer_stride))
+    bound = bind_expert_projection(carried["producer"], declared=population.declared)
+    return _checked_projected_units(
+        bound, weights={member.qname: member.weight for member in population.members},
+        model_path=model_path, source=carried["producer"]["source"],
+        **({"source_authentication": source_authentication}
+           if source_authentication is not None else {}))
+
+
 def mtp_census(*, base_census, base_census_ref, canonical_capture_ref, final_hidden_ref,
                layer, units, counts, max_abs, groups, model_load_contract,
-               attention_implementation, capture_runtime):
+               attention_implementation, capture_runtime, expert_projection):
     """The MTP capture's census: the body census's schema over the MTP units.
 
-    Model, draw and producer source roster are the body census's, so the
-    capture inherits its source roster. ``mtp_extension`` names what it was
-    derived from. No expert projection stacks are carried: the body's
-    producer planned none for this layer.
+    Model and draw are the body census's. ``expert_projection`` is the
+    producer's projection of the MTP stack (:func:`mtp_expert_projection`),
+    which the campaign reads instead of asking the producer per row; its
+    source seal is the body producer's roster, so the capture inherits that
+    roster (``admit_derived_census``). ``mtp_extension`` names what the census
+    was derived from.
     """
     from types import SimpleNamespace
 
@@ -334,7 +403,7 @@ def mtp_census(*, base_census, base_census_ref, canonical_capture_ref, final_hid
         counts, max_abs, args=args, groups=groups, dense_targets=dense,
         expert_targets=routed, shapes=units,
         identity={key: base_census[key] for key in ("text_sha256", "fit_ids_sha256")},
-        expert_projection={"producer": base_census["expert_projection"]["producer"]},
+        expert_projection=dict(expert_projection),
         model_load_contract=model_load_contract,
         attention_implementation=attention_implementation, capture_runtime=capture_runtime)
     census["mtp_extension"] = {
@@ -381,11 +450,14 @@ __all__ = [
     "FINAL_HIDDEN_SCHEMA",
     "MtpCaptureFeed",
     "capture_mtp_layer",
+    "check_mtp_expert_projection",
     "final_hidden",
     "final_hidden_session",
     "final_hidden_stream",
     "mtp_anchor_groups",
     "mtp_census",
+    "mtp_expert_projection",
+    "mtp_projection_request",
     "ordered_boundary_records",
     "publish_final_hidden",
     "publish_mtp_capture",
