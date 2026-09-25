@@ -1,0 +1,72 @@
+{
+  "schema": "prismaquant.serving_runtime_patch_set.v1",
+  "name": "glm53_mtp_mapper",
+  "purpose": "Let the GLM-5.3 MTP drafter (Glm5NextMTP) claim quantization targets written in the checkpoint namespace (model.language_model.layers.45.*), by giving the class the hf_to_vllm_mapper vLLM uses to translate a quantization config.",
+  "attested": false,
+  "base_image": "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:a5424378322071f4c33e63d1372a2bb028e46b03f0da0e5edb0cdd7418e2cebb",
+  "base_image_local_name": "localhost/prismaquant/spark-vllm-nccl230@sha256:a5424378322071f4c33e63d1372a2bb028e46b03f0da0e5edb0cdd7418e2cebb",
+  "base_image_note": "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c with libnccl 2.31.2 replaced by 2.30.7; the image the routed Tessera E2M1_K2 cells name. Its MLA sparse-attention sources are stock, which Tessera's GLM53 NoPE backend requires.",
+  "base_vllm_version": "0.28.1rc1.dev397+gfd4a15126.d20260904",
+  "base_flashinfer_version": "0.6.18",
+  "derived_image": "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+  "derived_image_local_name": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+  "derived_image_registry_tag": "a5424378-mtpmap1",
+  "derived_image_local_id": null,
+  "derived_image_note": "The digest is the OCI image index digest; the 192.168.1.107 name is the pullable copy (plain HTTP, port 80). The localhost name resolves on both Sparks and is the name a Tessera runtime cell uses: sparky (containerd image store) reports the digest as the image Id; sparklina (overlay2) holds it as a RepoDigest over config sha256:9e6882df27dd5274bcb8fe048a0c435c531bbd794247cfc964556cf7d60fbc7d.",
+  "derived_image_container_content": "content:sha256:bc83eecebc8063b17f42340d3cbb2f21d43a499de75398023562145742a638ca",
+  "derived_image_built_on": "sparky",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "command": "docker build --build-arg BASE=localhost/prismaquant/spark-vllm-nccl230@sha256:a5424378322071f4c33e63d1372a2bb028e46b03f0da0e5edb0cdd7418e2cebb -t 192.168.1.107/prismaquant/spark-vllm-nccl230:a5424378-mtpmap1 prismaquant/serving_runtime_patches/glm53_mtp_mapper/",
+    "contents": "One Python source edit; no compile, no new wheels, no vendored serving runtime.",
+    "self_check": "The patch refuses an mtp.py whose sha256 is not the base's; the Dockerfile's final RUN imports Glm5NextMTP, asserts the mapper sends model.language_model.layers.45.mlp.experts to model.layers.45.mlp.experts, and asserts the four MLA sources still hash to the stock values."
+  },
+  "patches": [
+    {
+      "script": "patch_glm5next_mtp_mapper.py",
+      "sha256": "6301edf973e1b05c2b39256708d7f404e0d07646673437e71fd8e9f4f8d2d0e3",
+      "target_file": "vllm/models/glm5next/nvidia/mtp.py",
+      "base_sha256": "715768cd2ee83c8cdaff4574762753538f40643df3dca064310199fd9bce63ff",
+      "patched_sha256": "45124573a928ecd76e6bd4f595aec3c3d98d81a71fc7a41fb32564ace560b7d1",
+      "edits": [
+        {
+          "tag": "import_weights_mapper",
+          "what": "from vllm.model_executor.models.utils import maybe_prefix -> import WeightsMapper, maybe_prefix"
+        },
+        {
+          "tag": "glm5next_mtp_hf_to_vllm_mapper",
+          "what": "Glm5NextMTP.hf_to_vllm_mapper = WeightsMapper(orig_to_new_prefix={'model.language_model.': 'model.'}); load_weights keeps its own strip and is not touched"
+        }
+      ]
+    }
+  ],
+  "unchanged_stock_sources": {
+    "v1/attention/backends/mla/flashinfer_mla_sparse_sm120.py": "a0023f72125cb0d5599b5bf940c86be1f0c9985bd62b0919f243a8fda76f4449",
+    "v1/attention/backends/mla/flashinfer_mla_sparse.py": "093181e4e0198b34075a3713fa62267c3f1fe74b1c96bb08298d553727d44478",
+    "v1/attention/backends/mla/sparse_utils.py": "20372237899fb0a0c9152e12eab40396119b76c1ac5f1c9bdfdbed53f8146559",
+    "v1/attention/backend.py": "8ddf8dd73c2b953a79f99e8de74db616b135590ac1f74e21e20b9ddc366b9994"
+  },
+  "qualification": {
+    "status": "build_self_check_only",
+    "model": "none",
+    "model_layers": 0,
+    "full_model_layers": 45,
+    "dtype": "none",
+    "tensor_parallel": 0,
+    "modes_ready": [],
+    "checks_passed": [
+      "Dockerfile self-check: the mapper translates the layer-45 expert target; the four MLA sources hash to the stock values",
+      "the four MLA hashes and the patched mtp.py hash read identically inside the image on sparky and on sparklina (2026-09-25)"
+    ],
+    "not_qualified": [
+      "No model has been served on the derived image yet. The first serve is the GLM-5.3-Flash stub route census; this block is updated from it.",
+      "The drafter claiming a Tessera- or compressed-tensors-quantized layer 45 has not been exercised; the MTP A/B that would show it is separate work (#1271).",
+      "The side effect -- the target model seeing layer-45 targets and the drafter seeing layer 0-44 targets that match none of their modules -- is expected to be ignored (Tessera looks targets up by prefix) but is not yet observed."
+    ],
+    "measured_on": "sparky (GB10, sm121) build; sparklina load",
+    "measured_at": "2026-09-25"
+  },
+  "receipts": {
+    "issue": "https://github.com/RobTand/prismaquant/issues/1282"
+  }
+}
