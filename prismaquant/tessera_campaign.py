@@ -4062,12 +4062,19 @@ def census_token_counts(census: "Mapping | None", observed: Mapping[str, int]):
     makes a sharded campaign's ``fit_tokens`` the whole scope's -- and therefore
     equal to the monolith's -- without any shard asserting a count it did not
     see (principle 14).
+
+    A **derived** census (``mtp_extension``: the GLM MTP layer's census,
+    covering units the body never ran over the body's draw) takes the pair
+    from the hash-bound base census it names instead, because the capture
+    identity it carries is the base draw's. The run's own rows are still
+    checked against the derived census's counts.
     """
     if census is None:
         if not observed:
             return 0, 0
         return max(observed.values()), min(observed.values())
     counts = census["counts"]
+    base = _derived_census_base(census)
     missing = sorted(set(observed) - set(counts))
     if missing:
         raise RuntimeError(
@@ -4080,7 +4087,41 @@ def census_token_counts(census: "Mapping | None", observed: Mapping[str, int]):
             "calibration census disagrees with this run's observed rows for "
             + ", ".join(f"{name} (census {counts[name]}, observed {observed[name]})"
                         for name in disagree))
+    if base is not None:
+        return census_token_counts(base, {})
     return max(counts.values()), min(counts.values())
+
+
+@functools.lru_cache(maxsize=4)
+def _bound_base_census(path: str, sha256: str):
+    from .glm_mtp_capture import read_bound_json
+
+    return read_bound_json(path, sha256)[0]
+
+
+def _derived_census_base(census: Mapping):
+    """The base census a derived census names, or None for a body census.
+
+    The base is bound by its bytes and must describe the same draw
+    (:func:`require_census_draw`'s fields); an extension of another schema is
+    refused rather than read as a body census.
+    """
+    extension = census.get("mtp_extension")
+    if extension is None:
+        return None
+    from .glm_mtp_capture import CENSUS_EXTENSION_SCHEMA
+
+    if extension.get("schema") != CENSUS_EXTENSION_SCHEMA:
+        raise RuntimeError(
+            f"calibration census carries an unknown extension {extension.get('schema')!r}")
+    ref = extension["base_census"]
+    base = _bound_base_census(str(ref["path"]), str(ref["sha256"]))
+    for field in ("text_sha256", "fit_ids_sha256"):
+        if str(base.get(field)) != str(census.get(field)):
+            raise RuntimeError(
+                f"derived census names a base census of another draw: its {field} is "
+                f"{base.get(field)!r} and the derived census's is {census.get(field)!r}")
+    return base
 
 
 def census_max_abs(census: Mapping, observed: Mapping[str, float]) -> dict[str, float]:
