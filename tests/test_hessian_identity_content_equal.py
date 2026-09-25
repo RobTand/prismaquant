@@ -146,3 +146,33 @@ def test_references_resolve_through_the_bound_catalog_extension_chain(tmp_path):
     (tmp_path/'overlay-cost.pkl').write_bytes(pickle.dumps({'provenance': {'hessian': panel}}))
     with pytest.raises(ValueError, match='owned bytes'):
         hessian_references(payload)
+
+
+@pytest.mark.parametrize('change', [None, 'unselected', 'primary_value', 'not_hex'])
+def test_export_binds_rebound_units_to_the_primary_reference(tmp_path, change):
+    """Export reads one reference file; the per-unit seal map must be well formed."""
+    from prismaquant import tessera_export_lane as export
+    from tests.test_tessera_priced_export_inputs import _assignment
+    _costs, _references, panel, overlay = _joined(tmp_path)
+    assignment = _assignment(tmp_path, formats={name: PANEL_FMT for name in UNITS},
+                             capture_sha256=panel['capture_sha256'])
+    payload = json.loads(assignment.read_text())
+    block = payload['__prismaquant__']['tessera_hessian']
+    block['reference_binding'] = panel['reference_binding']
+    block['unit_capture_sha256'] = {UNITS[0]: overlay['capture_sha256']}
+    if change == 'unselected':
+        block['unit_capture_sha256'][_EXTRA_DENSE] = overlay['capture_sha256']
+    elif change == 'primary_value':
+        block['unit_capture_sha256'][UNITS[0]] = panel['capture_sha256']
+    elif change == 'not_hex':
+        block['unit_capture_sha256'][UNITS[0]] = 'overlay'
+    assignment.write_text(json.dumps(payload))
+    if change is None:
+        report = export.require_priced_export_inputs(assignment, hessian_path=panel['capture_path'])
+        assert report['hessian_capture_sha256'] == panel['capture_sha256']
+        assert report['hessian_unit_capture_sha256'] == {UNITS[0]: overlay['capture_sha256']}
+        return
+    expected = {'unselected': 'does not select', 'primary_value': "another capture's",
+                'not_hex': "another capture's"}[change]
+    with pytest.raises(export.TesseraExportLaneError, match=expected):
+        export.require_priced_export_inputs(assignment, hessian_path=panel['capture_path'])

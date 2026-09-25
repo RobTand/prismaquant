@@ -154,7 +154,12 @@ def validate_prepriced_cost(
             raise ValueError(
                 "research-stamped cost input requires the allocator's explicit "
                 "research acknowledgement; the pipeline override cannot accept it")
-        hessian = assert_uniform_hessian_identity(payload["costs"])
+        # A content-equal second reference seal is one identity (#1270); the
+        # report keeps the per-seal row counts, not the whole row map.
+        from .joint_catalog_extension import hessian_references
+        hessian = assert_uniform_hessian_identity(
+            payload["costs"], references=lambda: hessian_references(payload))
+        hessian.pop("row_capture_sha256", None)
         binding = _model_binding(payload, model)
         usable = sum(
             "error" not in row

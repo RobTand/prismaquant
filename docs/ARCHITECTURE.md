@@ -2960,8 +2960,49 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `fix/1262-handoff-telemetry`.
+As of: 2026-09-25 · `claude/hessian-gate-content-equal-1270`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/hessian-gate-content-equal-1270`) for **the
+Hessian-identity gate over content-equal reference seals** (PQ #1270, P1).
+`tessera_menu.assert_uniform_hessian_identity` (#204) refused the joined
+GLM-5.3 table `joint-allocation.pkl` (d490a96d): its 36,288 overlay rows
+(routed `TESSERA_E2M1_K2_R896`) carry the overlay workspace's
+`hessian_capture.references.json` seal (e4a17770), the other 197,990 rows
+the panel's (0336076b). #985 made the overlay loader accept exactly that
+shape, because a references file's seal covers the unit roster it commits,
+so two files that bind one canonical capture and census carry different
+seals for identical H. The gate now splits its key: the draw triple, the
+legacy fields, the kwarg set and `reference_binding` must still be uniform
+(a difference is refused as before), and the capture seal may differ only
+when `reference_binding` is present and, for every row under a seal other
+than the table's own, both reference files, opened through
+`joint_catalog_extension._overlay_hessian_commitments`, commit that unit
+with the same per-unit H digest. A unit either file does not commit, or
+whose digests differ, is refused as `qname[format]`. The files are found
+by `joint_catalog_extension.hessian_references(payload)` through the
+table's own hash-bound chain (`provenance.catalog_extension` → extended
+plan → `candidate_overlay` → overlay `cost` → `provenance.hessian`, or
+`provenance.candidate_overlay` directly), resolved only when a second seal
+appears; without a reachable file a second seal still refuses. The return
+keeps `capture_sha256` = the table's own seal, the file export opens, and
+adds `captures` (rows per seal) and `row_capture_sha256` (`{qname:
+{format: seal}}`). `tessera_menu.project_hessian_identity` reduces that map
+to the selection: the allocator's and the sampled-proposal's
+`tessera_hessian` stamp gains `unit_capture_sha256` (`{unit: seal}` for
+selected units priced under another seal); the prepriced-cost report keeps
+only `captures`. `tessera_export_lane.require_priced_export_inputs` binds
+those units to the one reference file it is handed, whose seal is the
+allocation's `capture_sha256`: the allocation-time gate proved that file
+commits the same per-unit digest, and the reference reader authenticates
+every consumed tensor against its commitment. Export refuses a
+`unit_capture_sha256` without a reference binding, naming an unselected
+unit, or carrying a value that is not another seal, and reports it as
+`hessian_unit_capture_sha256`. A one-seal table returns and stamps exactly
+what it did before. Sampled selected-wire materialization still refuses
+reference-bound tables (`tessera_materialization._request`), so its
+capture rewrite never meets the map. No format, pipeline default, stage,
+lane or ship gate changes. Gate: `tests/test_hessian_identity_content_equal.py`.
 
 Re-stamped (2026-09-25, `fix/1262-handoff-telemetry`) for **the handoff
 writer's own telemetry** (PQ #1262). The owner the handoff writer thread
@@ -11994,7 +12035,8 @@ where the running Tessera publishes the seal the gate computes both and refuses
 on disagreement. The campaign stamps that digest on every cost row
 (`hessian_identity.capture_sha256`) and in `provenance.hessian.capture_sha256`;
 `assert_uniform_hessian_identity` keys on it, so two captures of one draw
-refuse to merge; the allocator's `tessera_hessian` stamp carries it; the gate
+refuse to merge (since #1270, unless both are canonical reference files over
+one binding that commit equal per-unit H; see that stamp); the allocator's `tessera_hessian` stamp carries it; the gate
 always loads the `.pt`, digests it, and refuses a payload whose digest is not
 the allocation's (by name, distinguishing "same triple, different content"
 from a triple mismatch), an allocation without the digest (pre-#204: unbound,
