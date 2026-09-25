@@ -2972,6 +2972,15 @@ it aborts their prewrites, and `counters.json` gains `handoff_emit`. See
 the entry at the top, "Stage B's spans" and "Producer". No format,
 pipeline default, stage, lane or ship gate changes.
 
+Re-stamped (2026-09-25, `perf/1254-handoff-rate-family`) for **a Stage B
+handoff template that declares its export rate family** (PQ #1254,
+PrismaBuild #1126). Every handoff template carries `export_rate_family:
+"pq-stageb-handoff"`, so PrismaBuild learns one export rate across the rows.
+The write-only produced-output suites now pin the published generation
+`68cd6233b179-1790347882-953848afb6b9`, the first they share with #1126.
+See "Producer". No format, pipeline default, stage, lane or ship gate
+changes.
+
 Re-stamped (2026-09-25, `perf/1252-kda-kernel-default`) for **the KDA
 capture kernel as the Stage B default** (PQ #1252). An unset
 `PRISMAQUANT_STAGE_B_KDA_KERNEL` runs `kda_gram_v1` in kernel mode on a
@@ -25254,7 +25263,12 @@ them, so no stage copy is published.
 The handoff template is **write-only** (PrismaBuild #912, PQ #1075):
 `handoff_template_path` builds it with `build_boundary_template(...,
 write_only=True)`, so it reserves no stage window (every tier's minimum and
-window are 0, and admission charges the producer no stage token). Every
+window are 0, and admission charges the producer no stage token). It also
+declares `export_rate_family: "pq-stageb-handoff"` (PrismaBuild #1126, PQ
+#1254, `HANDOFF_EXPORT_RATE_FAMILY`): each row's template has its own
+digest, and PrismaBuild keys the export rate it learns on a host by the
+family instead, so a row's spool exports start from what the earlier rows'
+exports measured rather than one at a time. Every
 group is committed at its origin as its own batch, first each entry group
 and then the record group, with the `consumed` lifetime (PrismaBuild #914,
 `HANDOFF_ORIGIN_LIFETIME`). Without the spool a group commits when its last
