@@ -2666,8 +2666,15 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # DP would trade them against each other. Raises on a mix; reports what
     # it found otherwise, so "no claim" stays distinguishable from "a
     # matching claim" (principle 14).
-    from .tessera_menu import assert_uniform_hessian_identity, priced_static_scales
-    tessera_hessian_identity = assert_uniform_hessian_identity(costs)
+    # A joined table whose overlay rows carry another reference file's seal
+    # over the same per-unit H is one identity (RobTand/prismaquant#1270);
+    # the files are found through the table's own hash-bound inputs, and only
+    # when a second seal appears.
+    from .tessera_menu import (assert_uniform_hessian_identity, priced_static_scales,
+                               project_hessian_identity)
+    from .joint_catalog_extension import hessian_references
+    tessera_hessian_identity = assert_uniform_hessian_identity(
+        costs, references=lambda: hessian_references(cost_data))
     if tessera_hessian_identity.get("stamped_rows") or \
             tessera_hessian_identity.get("unstamped_rows"):
         print(f"[alloc] tessera hessian identity: "
@@ -2676,6 +2683,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
               f"sha={str(tessera_hessian_identity['text_sha'])[:12]} "
               f"({tessera_hessian_identity['stamped_rows']} stamped, "
               f"{tessera_hessian_identity['unstamped_rows']} unstamped rows)")
+        if tessera_hessian_identity.get("captures"):
+            print("[alloc] tessera hessian captures (per-unit content equal): "
+                  + ", ".join(f"{digest[:12]}={n}" for digest, n in
+                              tessera_hessian_identity["captures"].items())
+                  + f"; export binds {str(tessera_hessian_identity['capture_sha256'])[:12]}")
 
     # Which runtime contract answered this run's Tessera route queries, if any.
     # The block names the exact Tessera commit and consumed contract digest;
@@ -6106,7 +6118,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                    or tessera_menu_widths) else {}),
         **({"tessera_group_knapsack": dict(tessera_group_menu_report)}
            if tessera_group_menu_report else {}),
-        **({"tessera_hessian": dict(tessera_hessian_identity)}
+        # Per selection: a content-equal second seal names only the selected
+        # units priced under it (``unit_capture_sha256``), never the whole
+        # table's row map (RobTand/prismaquant#1270).
+        **({"tessera_hessian": project_hessian_identity(
+                tessera_hessian_identity, assignment_expanded)}
            if (tessera_hessian_identity.get("stamped_rows")
                or tessera_hessian_identity.get("unstamped_rows")) else {}),
         # The static A-side scale VALUE each selected Tessera unit was priced

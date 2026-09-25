@@ -719,6 +719,50 @@ def _overlay_hessian_commitments(overlay_hessian, panel_hessian):
     return overlay_units, panel_units
 
 
+def hessian_references(payload):
+    """Every Hessian reference a cost table's rows can name, found through hash-bound inputs.
+
+    A joined table keeps the panel's H provenance in ``provenance.hessian``;
+    the rows :func:`attach_candidate_overlay` added keep the overlay cost
+    run's ``capture_sha256`` (PQ #985). The overlay's own H provenance, the
+    one that names its ``hessian_capture.references.json``, is reached through
+    the chain the table already binds: ``provenance.catalog_extension`` ->
+    ``inputs.extended_plan`` -> ``inputs.candidate_overlay`` -> ``cost`` ->
+    ``provenance.hessian`` (or directly from ``provenance.candidate_overlay``
+    on a table built with the overlay attached). Every hop is read by path and
+    SHA-256, so no reference is taken on a name alone.
+
+    Returns ``{"primary": <the table's own capture_sha256>, "captures":
+    {capture_sha256: hessian provenance}}`` for
+    ``tessera_menu.assert_uniform_hessian_identity`` (RobTand/prismaquant#1270).
+    Nothing here opens a reference file; the gate does, for the rows that
+    need it.
+    """
+    provenance = (payload or {}).get("provenance") or {}
+    primary = provenance.get("hessian")
+    captures = {}
+
+    def add(hessian):
+        if isinstance(hessian, dict) and hessian.get("capture_sha256"):
+            captures.setdefault(hessian["capture_sha256"], dict(hessian))
+
+    add(primary)
+    overlays = []
+    if provenance.get("catalog_extension") is not None:
+        document = _json(provenance["catalog_extension"], "catalog extension")
+        plan = _json(document["inputs"]["extended_plan"], "extended plan")
+        overlays.append(plan.get("inputs", {}).get("candidate_overlay"))
+    overlays.append(provenance.get("candidate_overlay"))
+    for bound in overlays:
+        if bound is None:
+            continue
+        catalog = _json(bound, "candidate overlay")
+        costs = pickle.loads(_read_bound(catalog["cost"], "overlay measured scalar costs"))
+        add((costs.get("provenance") or {}).get("hessian"))
+    return {"primary": primary.get("capture_sha256") if isinstance(primary, dict) else None,
+            "captures": captures}
+
+
 def attach_candidate_overlay(data, bound, *, verify_payloads=False):
     """Attach an authenticated historical catalog without rewriting its base.
 
