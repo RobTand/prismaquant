@@ -231,6 +231,9 @@ class StagedPreparationReads:
     generator's ``--head-slices``) opens its inputs itself. Those reads still
     come from the pool under this binding until PQ #1082 routes them. That
     exemption is named here and in ``docs/ARCHITECTURE.md``, not silent.
+    Nor, for a source checkpoint with FP8 weights, are the config and index
+    reads ``layer_streaming._build_fp8_scale_inv_map`` makes for the source
+    plan (found during PQ #1139; ``docs/ARCHITECTURE.md`` names them too).
     """
 
     def __init__(self, resolver, *, manifest_sha256: str, own_outputs=()):

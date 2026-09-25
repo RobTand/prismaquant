@@ -237,8 +237,9 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
     before it reads a byte (``_build_streaming_context``'s
     ``sealed_head_tensors``), so they cannot disagree unnoticed.
 
-    ``source_reads`` reads the index and each header off the stage (PQ #1092);
-    None opens the files.
+    ``source_reads`` reads the model config, the index and each header off
+    the stage (PQ #1092); None opens the files. Profile detection resolves
+    from that staged config (PQ #1139), so it opens no config of its own.
 
     Returns ``{"profile", "multimodal", "layers_prefix", "head_prefixes",
     "head_tensors", "head_spans", "layer_spans", "span_tensors",
@@ -260,7 +261,12 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
         selection_checkpoint_names, tensor_span,
     )
 
-    profile = detect_profile(model_path)
+    config_path = os.path.normpath(os.path.join(model_path, "config.json"))
+    if source_reads is not None and os.path.isfile(config_path):
+        profile = detect_profile(model_path, config=json.loads(
+            source_reads.whole(config_path, where="model config")))
+    else:
+        profile = detect_profile(model_path)
     if _live_tree_head_extras(profile):
         raise ValueError(
             f"profile {profile.name} derives its resident head from the live "
@@ -279,7 +285,7 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
         raw, model_path,
         lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal))
     fp8 = _build_fp8_scale_inv_map(model_path, multimodal=multimodal,
-                                   raw_weight_map=raw)
+                                   raw_weight_map=raw, profile=profile)
     head_prefixes = resident_head_prefixes(
         base_prefix_of_layers(layers_prefix),
         profile.head_resident_extra_prefixes(None))
@@ -320,7 +326,6 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
     head_spans = _spans(selections["head"])
     layer_spans = {layer: _spans(selection)
                    for layer, selection in selections.items() if layer != "head"}
-    config_path = os.path.normpath(os.path.join(model_path, "config.json"))
     header_reads = ([(config_path, 0, os.path.getsize(config_path))]
                     if os.path.isfile(config_path) else [])
     header_reads.append((index_path, 0, len(index_raw)))
@@ -431,6 +436,7 @@ def _fp8_dequant_block(
 def _build_fp8_scale_inv_map(model_path: str, *,
                              multimodal: bool = False, source_authentication=None,
                              raw_weight_map: dict[str, str] | None = None,
+                             profile=None,
                              ) -> "Fp8ScaleInvMap":
     """Return `{model_weight_key: (scale_shard_path, scale_ckpt_key)}`
     for every native-FP8 weight tensor (fp8_e4m3fn + paired
@@ -451,15 +457,18 @@ def _build_fp8_scale_inv_map(model_path: str, *,
 
     ``raw_weight_map`` is the checkpoint index's ``weight_map`` when the
     caller has already read it (`streaming_source_plan`, which reads it off
-    the stage); None reads the index here, as before.
+    the stage); None reads the index here, as before. ``profile`` is the
+    checkpoint's profile when the caller has already detected it
+    (`streaming_source_plan`, from the staged config); None detects it here.
     """
     # Profile-driven dispatch (refactor #32). Profiles that store FP8
     # scales under a non-standard path (DSv4 uses `.scale` siblings)
     # return a fully populated map from `fp8_scale_pairs`. Profiles
     # without overrides return None and we fall through to the legacy
     # `.weight_scale_inv`-suffix scan.
-    from .model_profiles import detect_profile
-    profile = detect_profile(model_path)
+    if profile is None:
+        from .model_profiles import detect_profile
+        profile = detect_profile(model_path)
     fp8_scale_pairs = getattr(profile, "fp8_scale_pairs", None)
     explicit = (
         fp8_scale_pairs(model_path)
