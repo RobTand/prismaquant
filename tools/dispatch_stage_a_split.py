@@ -4,7 +4,8 @@ A split round (``prismaquant.stage_a_chain_split``) runs as a prep row, one
 quantum row per sample range, a join row per stride checkpoint the round
 seals, and a band row per joined checkpoint. Until ``pbcampaign`` carries
 the residency fields (PB #1082) the rows are plain ``pbrun`` submissions,
-``--tag gb10 --priority -10`` and never a host. ``pbrun --after`` does not
+``--tag gb10 --priority -10`` and never a host. ``seal --priority`` sets
+another band for every row of a round, and ``round.json`` records it. ``pbrun --after`` does not
 order them: it defers a consumer on a producer's write-only template and
 builds the consumer's manifest from the batches it committed, and a prep
 commits nothing. So this tool orders the rows by what they leave on disk:
@@ -60,6 +61,7 @@ if str(TOOLS) not in sys.path:
 ROUND_SCHEMA = "prismaquant.stage_a.split_round.v1"
 ROUND_NAME = "round.json"
 PRIORITY = "-10"
+_PRIORITY = re.compile(r"-?\d+")
 GIB = 1 << 30
 _SOURCE = re.compile(r"\.safetensors$")
 
@@ -208,7 +210,7 @@ def row_template(base_template: dict, *, template_id: str, tier: str,
 
 def _stage_row(*, name, kind, checkout, manifest, template_path, campaign, spec,
                prefetch_override, artifact_budget_bytes, tag, payload_extra, reader,
-               batch_range=None) -> dict:
+               batch_range=None, priority=PRIORITY) -> dict:
     import dispatch_joint_quanta as dispatch
 
     dispatch.SPEC_PATH = Path(spec)
@@ -221,7 +223,7 @@ def _stage_row(*, name, kind, checkout, manifest, template_path, campaign, spec,
     envelope, payload = argv[:first], argv[inner + 1:]
     if "--forward-recovery" in payload or "--chain-seed" in payload:
         raise SplitDispatchRefused("a split row takes no forward recovery and no seed")
-    head = [*envelope[:2], "--cwd", str(checkout), *envelope[2:], "--priority", PRIORITY,
+    head = [*envelope[:2], "--cwd", str(checkout), *envelope[2:], "--priority", priority,
             "--residency-prefetch-depth-gib", str(reader["depth"]["declared_gib"]),
             "--residency-read-mb-s", str(reader["rate"]["read_mb_s"])]
     tags = [head[i + 1] for i, word in enumerate(head) if word == "--tag"]
@@ -233,24 +235,32 @@ def _stage_row(*, name, kind, checkout, manifest, template_path, campaign, spec,
             "reader": reader}
 
 
-def _cpu_row(*, name, kind, checkout, tag, python, module_argv, mem_gb=8, cpus=2) -> dict:
+def _cpu_row(*, name, kind, checkout, tag, python, module_argv, mem_gb=8, cpus=2,
+             priority=PRIORITY) -> dict:
     import dispatch_joint_quanta as dispatch
 
     return {"name": name, "kind": kind,
             "argv": [sys.executable, str(dispatch.PBRUN), "--cwd", str(checkout),
-                     "--tag", tag, "--priority", PRIORITY, "--demand", f"mem_gb={mem_gb}",
+                     "--tag", tag, "--priority", priority, "--demand", f"mem_gb={mem_gb}",
                      "--cpus", str(cpus), "--detach", "--", str(python), *module_argv]}
 
 
 def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_override,
                base_template, artifact_budget_bytes, chain_regime, seconds_per_layer,
                digest_layer, band_request, band_references, python, tag="gb10",
-               template_prefix, tier) -> dict:
-    """Write ``round_dir`` (templates and ``round.json``); submit nothing."""
+               template_prefix, tier, priority=PRIORITY) -> dict:
+    """Write ``round_dir`` (templates and ``round.json``); submit nothing.
+
+    ``priority`` is the PrismaBuild priority band of every row (an integer
+    string, ``-10`` by default).
+    """
     from prismaquant.joint_adjoint_checkpoints import adjoint_space
     from prismaquant.stage_a_chain_resume import load_chain_state, resume_records
     from prismaquant.stage_a_chain_split import quantum_label
 
+    priority = str(priority)
+    if not _PRIORITY.fullmatch(priority):
+        raise SplitDispatchRefused(f"priority {priority!r} is not an integer")
     round_dir = Path(round_dir)
     if (round_dir / ROUND_NAME).exists():
         raise SplitDispatchRefused(f"{round_dir / ROUND_NAME} exists: a round is sealed once")
@@ -282,7 +292,7 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
               "--resume-from-checkpoint", str(boundary)]
     common = dict(checkout=checkout, campaign=campaign, spec=spec,
                   prefetch_override=prefetch_override,
-                  artifact_budget_bytes=artifact_budget_bytes, tag=tag)
+                  artifact_budget_bytes=artifact_budget_bytes, tag=tag, priority=priority)
     templates = round_dir / "templates"
     templates.mkdir(parents=True, exist_ok=True)
 
@@ -335,14 +345,14 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
     for mark in package["boundaries"]:
         receipt = round_dir / "joins" / f"join-{int(mark):03d}.json"
         rows.append({**_cpu_row(
-            name=f"join-{int(mark):03d}", kind="join", checkout=checkout, tag=tag,
+            name=f"join-{int(mark):03d}", kind="join", checkout=checkout, tag=tag, priority=priority,
             python=python, module_argv=[
                 "-m", "prismaquant.stage_a_chain_split", "--output-root", str(output_root),
                 "--boundary", str(int(mark)), "--receipt", str(receipt)]),
             "boundary": int(mark), "receipt": str(receipt)})
         band = round_dir / "bands" / f"band-{int(mark):03d}.json"
         rows.append({**_cpu_row(
-            name=f"band-{int(mark):03d}", kind="band", checkout=checkout, tag=tag,
+            name=f"band-{int(mark):03d}", kind="band", checkout=checkout, tag=tag, priority=priority,
             python=python, module_argv=[
                 "-m", "prismaquant.joint_adjoint_band", "--request", band_request["path"],
                 "--request-sha256", band_request["sha256"], "--boundary", str(int(mark)),
@@ -351,7 +361,8 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
     bands = [*(reference["path"] for reference in band_references),
              *(row["band"] for row in rows if row["kind"] == "band")]
     rows.append({**_cpu_row(
-        name="band-set", kind="band-set", checkout=checkout, tag=tag, python=python,
+        name="band-set", kind="band-set", checkout=checkout, tag=tag, priority=priority,
+        python=python,
         module_argv=["-c", _BAND_SET, *bands]), "bands": bands})
     document = {
         "schema": ROUND_SCHEMA, "checkout": str(checkout), "commit": commit,
@@ -359,7 +370,7 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
         "output_root": str(output_root), "from": boundary, "through": through,
         "chain_state_sha256": package["chain_state"]["sha256"],
         "boundaries": list(package["boundaries"]), "ranges": ranges, "labels": labels,
-        "digest_layer": digest_layer, "tag": tag,
+        "digest_layer": digest_layer, "tag": tag, "priority": priority,
         "pins": {"split_package": _pin(package_path), "spec": _pin(spec),
                  "prefetch_override": _pin(prefetch_override),
                  "base_template": _pin(base_template),
@@ -581,6 +592,8 @@ def main(argv=None) -> int:
                       help="an earlier band of the run the band set must accept")
     seal.add_argument("--python", required=True, help="the CPU rows' interpreter")
     seal.add_argument("--tag", default="gb10")
+    seal.add_argument("--priority", default=PRIORITY,
+                      help="every row's PrismaBuild priority band (default %(default)s)")
     for name in ("plan", "status"):
         sub.add_parser(name).add_argument("--round-dir", required=True)
     go = sub.add_parser("submit")
@@ -605,7 +618,7 @@ def main(argv=None) -> int:
                 seconds_per_layer=args.seconds_per_layer, digest_layer=args.digest_layer,
                 band_request={"path": args.band_request, "sha256": args.band_request_sha256},
                 band_references=[{"path": path} for path in args.band_reference],
-                python=args.python, tag=args.tag)
+                python=args.python, tag=args.tag, priority=args.priority)
             print(json.dumps({"round": str(Path(args.round_dir) / ROUND_NAME),
                               "rows": [row["name"] for row in document["rows"]]}))
         elif args.command == "plan":

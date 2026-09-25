@@ -192,7 +192,7 @@ def _emitter(record, adjoint_slice, execution, regime):
 
 
 def _run(campaign, monkeypatch, *, layer, regime, spill_root, handoff=None,
-         emit=False, stand_down=False):
+         emit=False, stand_down=False, kernel=None):
     """The spill suite's quantum harness on this module's fixture.
 
     ``stand_down`` replaces both regime refusals with ``None`` so the
@@ -200,6 +200,8 @@ def _run(campaign, monkeypatch, *, layer, regime, spill_root, handoff=None,
     last test. The harness imports ``run_layer_quantum_core`` at call time,
     so a wrapper patched onto the module adds the consumer's bound handoff
     and the producer's emitter, both built as ``main`` builds them.
+    ``kernel`` launches the quantum in kernel mode (PQ #1214), and its
+    consumer binds the handoff under the same kernel.
     """
     original = core.run_layer_quantum_core
     published = {}
@@ -209,7 +211,7 @@ def _run(campaign, monkeypatch, *, layer, regime, spill_root, handoff=None,
                    if emit else None)
         bound = (None if handoff is None else load_quantum_handoff(
             handoff["path"], handoff["sha256"], record=record,
-            adjoint_slice=adjoint_slice))
+            adjoint_slice=adjoint_slice, kda_capture_kernel=kernel))
         payload = original(*args, record=record, adjoint_slice=adjoint_slice,
                            execution=execution, adjoint_handoff=bound,
                            handoff_emitter=emitter, **kwargs)
@@ -220,7 +222,8 @@ def _run(campaign, monkeypatch, *, layer, regime, spill_root, handoff=None,
     _clear_output(campaign, layer)
     with monkeypatch.context() as patch:
         patch.setattr(spill_tests, "_calibration", _calibration)
-        patch.setattr(spill_tests, "_execution", _execution)
+        patch.setattr(spill_tests, "_execution", _execution if kernel is None else (
+            lambda root: {**_execution(root), "kda_capture_kernel": kernel}))
         patch.setattr(core, "run_layer_quantum_core", band_serial)
         if stand_down:
             patch.setattr(regime_module, "handoff_regime_refusal",
@@ -233,7 +236,7 @@ def _run(campaign, monkeypatch, *, layer, regime, spill_root, handoff=None,
     return payload, state, (published or None)
 
 
-def _chain_consumer(campaign, monkeypatch, *, regime, spill_root, tmp_path):
+def _chain_consumer(campaign, monkeypatch, *, regime, spill_root, tmp_path, kernel=None):
     """Quantum 0 in chain mode; keeps the plane its chain ends on."""
     rolled = {}
     original_roll = roll_owner.render_free_layer_roll
@@ -256,7 +259,7 @@ def _chain_consumer(campaign, monkeypatch, *, regime, spill_root, tmp_path):
     with monkeypatch.context() as patch:
         patch.setattr(roll_owner, "render_free_layer_roll", spy)
         payload, state, _ = _run(campaign, monkeypatch, layer=0, regime=regime,
-                                 spill_root=spill_root)
+                                 spill_root=spill_root, kernel=kernel)
     assert payload is not None, _chain(state.error)
     assert sorted(rolled) == [1]
     plane, states, chain_regime, backwards = rolled[1]
@@ -289,7 +292,7 @@ def _assert_is_the_chain_plane(handoff, chain):
 
 
 def _band_serial_consumer(campaign, monkeypatch, *, regime, spill_root, handoff,
-                          chain, stand_down):
+                          chain, stand_down, kernel=None):
     """Quantum 0 on the handoff: the chain-mode bytes, no chain walked."""
     from tools.compare_joint_layer_gate import compare_layer
 
@@ -299,7 +302,7 @@ def _band_serial_consumer(campaign, monkeypatch, *, regime, spill_root, handoff,
         patch.setattr(roll_owner, "render_free_layer_roll", no_chain)
         payload, state, _ = _run(campaign, monkeypatch, layer=0, regime=regime,
                                  spill_root=spill_root, handoff=handoff,
-                                 stand_down=stand_down)
+                                 stand_down=stand_down, kernel=kernel)
     assert payload is not None, _chain(state.error)
     assert state.counters_block["chain"]["layers"] == 0
     assert pickle.dumps(payload) == pickle.dumps(chain.payload)
@@ -314,32 +317,35 @@ def _handoff_of(published):
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
-def _witness(campaign, monkeypatch, tmp_path, capsys, *, regime, stand_down, label):
+def _witness(campaign, monkeypatch, tmp_path, capsys, *, regime, stand_down, label,
+             kernel=None):
     spill_root = _spill_root(tmp_path)
     assert campaign.records[1]["adjoint"]["chain_layers"] == []
     assert campaign.records[0]["adjoint"]["chain_layers"] == [1]
     chain = _chain_consumer(campaign, monkeypatch, regime=regime,
-                            spill_root=spill_root, tmp_path=tmp_path)
+                            spill_root=spill_root, tmp_path=tmp_path, kernel=kernel)
     capture_batch = chain.counters["replay"]["regime"]["capture_batch"] \
         if chain.counters["replay"].get("regime") else 1
     assert capture_batch == campaign.chain_batch
 
     # The producer's payload and journal do not depend on emitting.
     _silent, silent_state, nothing = _run(campaign, monkeypatch, layer=1,
-                                          regime=regime, spill_root=spill_root)
+                                          regime=regime, spill_root=spill_root,
+                                          kernel=kernel)
     assert _silent is not None, _chain(silent_state.error)
     assert nothing is None
     silent_evidence = _evidence(campaign, 1, _silent)
     payload, state, published = _run(campaign, monkeypatch, layer=1, regime=regime,
                                      spill_root=spill_root, emit=True,
-                                     stand_down=stand_down)
+                                     stand_down=stand_down, kernel=kernel)
     assert payload is not None, _chain(state.error)
     assert published is not None and Path(published["path"]).is_file()
     assert _evidence(campaign, 1, payload) == silent_evidence
     handoff = _handoff_of(published)
     _assert_is_the_chain_plane(handoff, chain)
     _band_serial_consumer(campaign, monkeypatch, regime=regime, spill_root=spill_root,
-                          handoff=handoff, chain=chain, stand_down=stand_down)
+                          handoff=handoff, chain=chain, stand_down=stand_down,
+                          kernel=kernel)
     document, plane, _states = _handoff_plane(handoff)
     with capsys.disabled():
         # Past pytest's capture, so the shard log carries the digests of a
@@ -387,6 +393,52 @@ def test_a_band_serial_producer_runs_the_campaign_regime(campaign4, monkeypatch,
     """
     _witness(campaign4, monkeypatch, tmp_path, capsys, regime=CAMPAIGN_REGIME,
              stand_down=False, label="regime-b4")
+
+
+def test_kernel_mode_band_serial_is_chain_mode_at_the_campaign_regime(
+        campaign4, monkeypatch, tmp_path, capsys):
+    """#996 within kernel mode (PQ #1214), at the campaign's batch-4 capture.
+
+    Layer 1 carries the fixture KDA attention of ``tests/test_kda_kernel_mode.py``,
+    so the producer's capture passes (``capture_group``) and the consumer's
+    fused batch-4 chain roll of layer 1 both run the fixture kernel, whose
+    counts come from real retained-graph backwards. Band-serial is then chain
+    mode byte for byte, and the chain plane is not the fallback's, so the
+    equality is the kernel's.
+    """
+    from test_kda_kernel_mode import (
+        KERNEL, FakeKdaAttention, admit_fixture_kernel, attach_kda,
+        install_fixture_kernel, kda_chunk, track_core)
+
+    if kda_chunk is None:
+        pytest.skip("prismaquant.kernels.kda_chunk defines its kernels with Triton "
+                    "at import (#1224)")
+    calls = install_fixture_kernel(monkeypatch)
+    attach_kda(monkeypatch, spill_tests._MoELayer)
+    runner = spill_tests._runner
+
+    def with_kda(state, device):
+        model, context, built = runner(state, device)
+        model.model.layers[1].kda = FakeKdaAttention()
+        return model, context, built
+
+    monkeypatch.setattr(spill_tests, "_runner", with_kda)
+    track_core(monkeypatch, core, calls)
+    admit_fixture_kernel(monkeypatch, calls)
+    fallback = _chain_consumer(campaign4, monkeypatch, regime=CAMPAIGN_REGIME,
+                               spill_root=_spill_root(tmp_path),
+                               tmp_path=tmp_path / "fallback")
+    assert calls.in_core("fallback") > 0 and calls.in_core("kernel") == 0
+    calls.events.clear()
+    _handoff, chain = _witness(campaign4, monkeypatch, tmp_path, capsys,
+                               regime=CAMPAIGN_REGIME, stand_down=False,
+                               label="kernel-b4", kernel=KERNEL)
+    assert calls.in_core("fallback") == 0 and calls.in_core("kernel") > 0
+    groups = SAMPLES // campaign4.chain_batch
+    assert chain.counters["kda_capture_kernel"]["chain"] == {
+        "layers": [1], "passes": groups, "calls": groups,
+        "gram_backward": 2 * N_PROBES * groups}
+    assert _plane_digests(chain.plane) != _plane_digests(fallback.plane)
 
 
 # -- the refusals, once the predicate compares the two batch sizes ------------
@@ -459,7 +511,7 @@ def test_a_consumer_refuses_a_handoff_captured_at_another_batch(
     assert document["producer"]["capture_batch"] == 4
     record, adjoint_slice = campaign4.records[0], campaign4.slices[0]
     load_quantum_handoff(handoff["path"], handoff["sha256"], record=record,
-                         adjoint_slice=adjoint_slice)
+                         adjoint_slice=adjoint_slice, kda_capture_kernel=None)
 
     def at_batch_one(document):
         document["producer"]["capture_batch"] = 1
@@ -470,8 +522,8 @@ def test_a_consumer_refuses_a_handoff_captured_at_another_batch(
     with pytest.raises(QuantumHandoffRefused, match="batch size 4.*captured at batch 1"):
         twin = _tampered(handoff, at_batch_one, "batch-one")
         load_quantum_handoff(twin["path"], twin["sha256"], record=record,
-                             adjoint_slice=adjoint_slice)
+                             adjoint_slice=adjoint_slice, kda_capture_kernel=None)
     with pytest.raises(QuantumHandoffRefused, match="records no capture batch"):
         twin = _tampered(handoff, unstamped, "unstamped")
         load_quantum_handoff(twin["path"], twin["sha256"], record=record,
-                             adjoint_slice=adjoint_slice)
+                             adjoint_slice=adjoint_slice, kda_capture_kernel=None)

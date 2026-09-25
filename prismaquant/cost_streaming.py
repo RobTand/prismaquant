@@ -1192,7 +1192,7 @@ class StreamedBoundaryArtifacts:
             # own state, no clock, PQ #1110), no read follows here, so every
             # local copy goes, and then every retired entry's canonical file.
             self._local_output_spool.drain(release=True)
-            self._produced_flush_deferred_unlinks()
+            self._produced_flush_deferred_unlinks(final=True)
             self._commit_local_output_progress()
             if self._produced_plan is not None and self._produced_plan["write_only"]:
                 for group in list(self._produced_groups.values()):
@@ -1379,7 +1379,10 @@ class StreamedBoundaryArtifacts:
             return
         if self._local_output_spool is not None and not missing_ok:
             batch_id = self._spool_retire_entry(reference)
-            if batch_id is not None and self._local_output_spool.holds(batch_id):
+            if batch_id is not None and (
+                    self._local_output_spool.holds(batch_id)
+                    or self._produced_group_read_may_follow(
+                        reference, retiring=reference)):
                 # Write-behind (PQ #1110): the chain does not wait for the
                 # export here. The entry leaves the live set now; its
                 # canonical file goes once the group's local copy is
@@ -1387,6 +1390,10 @@ class StreamedBoundaryArtifacts:
                 # landed and which re-checks every landed destination. The
                 # window bounds how many wait: a full window makes the next
                 # reservation wait on the exports, never on a clock.
+                # A group the window released for room while another of
+                # its entries is still live keeps the file too (PQ #1236):
+                # that entry's read publishes or restages the whole group,
+                # and PrismaBuild stats every origin in it.
                 del self._references[reference.name]
                 self.telemetry["retired_entries"] += 1
                 self._deferred_unlinks.setdefault(batch_id, []).append(reference)
@@ -1401,6 +1408,29 @@ class StreamedBoundaryArtifacts:
         del self._references[reference.name]
         self.telemetry["retired_entries"] += 1
         self._produced_forget_origin(reference)
+        if self._local_output_spool is not None and not missing_ok:
+            # The group's last live entry is gone, and with it every read
+            # that could publish the group: the files held for it go too.
+            self._produced_flush_deferred_unlinks()
+
+    def _produced_group_read_may_follow(self, reference, *, retiring=None):
+        """Can a read here still publish or restage ``reference``'s group?
+
+        True while any entry of the group other than ``retiring`` is live
+        (PQ #1236). A read of that entry publishes the whole group through
+        PrismaBuild, or restages it, and both stat every origin the group's
+        manifest names (``produced_output`` refuses ``descriptor-unstatable``
+        or ``restage-origin-changed``). So no retired file of the group may
+        go before it. A retired entry is out of ``_references``, so no read
+        of it follows here (``_entry_identity``).
+        """
+
+        _key, group = self._produced_group_for(reference)
+        if group is None:
+            return False
+        return any(entry != retiring
+                   and self._references.get(entry.name) == entry
+                   for entry in group["references"])
 
     def _spool_retire_entry(self, reference):
         """Tell the spool no read of ``reference`` follows here.
@@ -1418,13 +1448,18 @@ class StreamedBoundaryArtifacts:
         self._local_output_spool.retire_entry(group["batch_id"], reference)
         return group["batch_id"]
 
-    def _produced_flush_deferred_unlinks(self):
-        """Unlink the canonical files whose group's local copy is released.
+    def _produced_flush_deferred_unlinks(self, *, final=False):
+        """Unlink the retired canonical files no step here can need again.
 
         Runs on the thread that writes and retires (PQ #1110): at each
         write, each retirement and at settle. Never waits. A group still
         held keeps its deferred entries, and its local copy counts against
-        the window until PrismaBuild's export lands.
+        the window until PrismaBuild's export lands. A released group keeps
+        them too while another of its entries is live (PQ #1236): the
+        window can release a group for room before its reads are done, and
+        the read of a live entry then publishes or restages the whole group
+        from its origins. ``final`` is the action's end, when no read
+        follows here, so only the local copy's release holds a file back.
         """
 
         if not self._deferred_unlinks:
@@ -1432,6 +1467,9 @@ class StreamedBoundaryArtifacts:
         spool = self._local_output_spool
         for batch_id in list(self._deferred_unlinks):
             if spool.holds(batch_id):
+                continue
+            if not final and self._produced_group_read_may_follow(
+                    self._deferred_unlinks[batch_id][0]):
                 continue
             for reference in self._deferred_unlinks.pop(batch_id):
                 Path(reference.path).unlink()
@@ -4737,7 +4775,7 @@ class StreamedBoundaryArtifacts:
                 # ``produced_output_report()["deferred_unlinks"]``.
                 try:
                     self._local_output_spool.release_landed()
-                    self._produced_flush_deferred_unlinks()
+                    self._produced_flush_deferred_unlinks(final=True)
                 except Exception as cleanup:            # noqa: BLE001
                     self._produced_release_errors.append(
                         {"batch_id": None, "step": "failed-exit-deferred-unlinks",

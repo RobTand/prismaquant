@@ -113,7 +113,8 @@ def _emitter(record, adjoint_slice, execution):
 def _consumer(handoff):
     def bind(record, adjoint_slice):
         return load_quantum_handoff(handoff["path"], handoff["sha256"],
-                                    record=record, adjoint_slice=adjoint_slice)
+                                    record=record, adjoint_slice=adjoint_slice,
+                                    kda_capture_kernel=None)
     return bind
 
 
@@ -273,7 +274,8 @@ def test_a_handoff_binds_its_consumer_and_refuses_everything_else(tmp_path, monk
     raw = path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
     record, adjoint_slice = _consumer_record(producer_record, layer=1, receipt=receipt)
-    handoff = load_quantum_handoff(path, sha, record=record, adjoint_slice=adjoint_slice)
+    handoff = load_quantum_handoff(path, sha, record=record, adjoint_slice=adjoint_slice,
+                                   kda_capture_kernel=None)
     assert handoff["boundary"] == 2 and handoff["producer"]["layer"] == 2
     # The head's staged reads: the plane, the owner states and the slice
     # checkpoint's shared-pass states -- never the checkpoint plane. A packed
@@ -291,7 +293,8 @@ def test_a_handoff_binds_its_consumer_and_refuses_everything_else(tmp_path, monk
 
     def refused(match, *, record=record, adjoint_slice=adjoint_slice, path=path, sha=sha):
         with pytest.raises(QuantumHandoffRefused, match=match):
-            load_quantum_handoff(path, sha, record=record, adjoint_slice=adjoint_slice)
+            load_quantum_handoff(path, sha, record=record, adjoint_slice=adjoint_slice,
+                                 kda_capture_kernel=None)
 
     # The bound digest is the file's.
     refused("does not hash", sha=_hex("0"))
@@ -359,11 +362,12 @@ def test_owner_states_travel_per_probe_and_sample(tmp_path, monkeypatch, capsys)
     published = _emitter(producer_record, stage_a_slice(receipt, 2),
                          _execution(tmp_path)).emit(
         grad_plane=plane, cotangent_owners=owners, n_probes=n_probes,
-        n_batches=n_batches)
+        n_batches=n_batches, kda_capture_kernel=None)
 
     record, adjoint_slice = _consumer_record(producer_record, layer=1, receipt=receipt)
     bound = load_quantum_handoff(published["path"], published["sha256"],
-                                 record=record, adjoint_slice=adjoint_slice)
+                                 record=record, adjoint_slice=adjoint_slice,
+                                 kda_capture_kernel=None)
     capsys.readouterr()
     read_plane, shared_adjoint, _shared_pass = load_handoff_inputs(
         bound, adjoint_slice["checkpoint"], n_probes=n_probes, n_batches=n_batches)
@@ -395,7 +399,8 @@ def test_the_band_top_takes_no_handoff(tmp_path, monkeypatch):
     record, adjoint_slice = _consumer_record(producer_record, layer=2, receipt=receipt)
     with pytest.raises(QuantumHandoffRefused, match="tops band 3"):
         load_quantum_handoff(path, hashlib.sha256(path.read_bytes()).hexdigest(),
-                             record=record, adjoint_slice=adjoint_slice)
+                             record=record, adjoint_slice=adjoint_slice,
+                             kda_capture_kernel=None)
 
 
 def test_the_emitter_refuses_layer_zero_and_a_capture_batch_off_the_chains(

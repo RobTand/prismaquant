@@ -284,6 +284,60 @@ def test_a_full_window_releases_the_oldest_unread_landed_group_with_a_record(tmp
         assert local == {}
 
 
+def test_a_group_released_for_room_keeps_its_retired_files_for_its_next_read(
+        tmp_path, monkeypatch):
+    """PQ #1236: the window releases a landed group for room while the roll
+    has read only part of it. The entry the roll retires keeps its file,
+    because the next window's read of a live entry is the group's first
+    publication, and PrismaBuild stats every origin the group names. Before
+    the fix the retirement unlinked the file at once and that publication
+    refused ``descriptor-unstatable``. The held files go with the group's
+    last live entry."""
+    from prismaquant.stage_a_produced_output import (
+        BoundaryProducedPublicationFailed)
+
+    owner, publication, backend = _owner(tmp_path, monkeypatch)
+    spool = owner._local_output_spool
+    refs = chain._write_group(owner)
+    key, group = owner._produced_group_for(refs[0])
+    batch_id = group["batch_id"]
+    backend.acknowledge(batch_id)
+    assert spool.landed(batch_id) and spool.holds(batch_id)
+    # The first window reads its entry from this box's copy.
+    with owner.prefetch(refs[:1]) as window:
+        owner.get(window, refs[0])
+    assert owner.telemetry["produced_local_reads"] == 1
+    # The next plane's first write finds the window full. The landed group
+    # is not being read and has nothing retired, so it goes for room.
+    backend.capacity = backend.groups[batch_id]["ceiling"]
+    chain._write_group(owner, boundary_index=1, count=1)
+    assert not spool.holds(batch_id)
+    assert [e["batch_id"] for e in spool.report()["evictions"]] == [batch_id]
+    # The roll retires the entry it read; three of the group's entries are
+    # still live, so the file stays.
+    owner._retire(refs[0])
+    owner._produced_flush_deferred_unlinks()
+    # The next window reads a live entry through PrismaBuild: the group's
+    # first publication, over all four origins.
+    try:
+        with owner._produced_lock.held():
+            owner._produced_fund_group_for_read(
+                key, group, {key: group}, time.monotonic() + 2)
+    except BoundaryProducedPublicationFailed as exc:
+        pytest.fail(f"the read's first publication refused: {exc}")
+    assert group["published"] is not None
+    assert Path(refs[0].path).exists()
+    assert owner.telemetry["produced_deferred_unlinks_done"] == 0
+    # The roll retires the rest; the last one takes the held files with it.
+    for ref in refs[1:-1]:
+        owner._retire(ref)
+    assert all(Path(ref.path).exists() for ref in refs)
+    owner._retire(refs[-1])
+    assert not any(Path(ref.path).exists() for ref in refs)
+    assert owner.telemetry["produced_deferred_unlinks_done"] == len(refs) - 1
+    assert owner.produced_output_report()["deferred_unlinks"] == {}
+
+
 def test_a_window_nothing_can_free_refuses_at_once_with_a_record(tmp_path):
     """Every held copy is being read and no export is live: nothing will
     free room, so the writer's reservation refuses at once and says why; a
@@ -423,7 +477,7 @@ def _write_only_owner(adapter, groups):
     owner._produced_origin_batches = []
     owner.telemetry = {"produced_groups_committed_at_origin": 0,
                        "produced_commit_origin_s": 0.0}
-    owner._produced_flush_deferred_unlinks = lambda: None
+    owner._produced_flush_deferred_unlinks = lambda **_: None
     owner._commit_local_output_progress = lambda: None
     return owner
 
@@ -463,3 +517,230 @@ def test_a_write_only_group_commits_while_later_exports_still_copy(tmp_path):
         ("commit", "g0"), ("commit", "g1")]
     assert all(backend.groups[batch_id]["released"] for batch_id in groups)
     assert [group["origin_ref"]["batch_id"] for group in groups.values()] == ["g0", "g1"]
+
+
+# --- PQ #1240: the owner declares its wait on its own exports ---------------
+#
+# A wait on an export commits nothing, so PrismaBuild's no_progress rung saw
+# it as quiet and a congested export queue could end a healthy owner. The
+# spool now writes ``<progress path>.export-wait`` (PB #1035) while it waits.
+
+EXPORT_WAIT_TOKEN = "e" * 32
+
+
+@pytest.fixture
+def export_wait_channel(tmp_path, monkeypatch):
+    """This action's progress channel; returns the export-wait record path."""
+    from prismaquant import prismabuild_progress
+
+    progress = tmp_path / "action.progress"
+    monkeypatch.setenv(prismabuild_progress.PATH_ENV, str(progress))
+    monkeypatch.setenv(prismabuild_progress.TOKEN_ENV, EXPORT_WAIT_TOKEN)
+    return Path(str(progress) + ".export-wait")
+
+
+def _export_key(batch_id):
+    """The key ``ControlledExport.submit_group`` returns for a group."""
+    return hashlib.sha256(batch_id.encode()).hexdigest()
+
+
+def _submitted_group(adapter, batch_id, tmp_path, ceiling=65536):
+    adapter.reserve(batch_id, ceiling)
+    reference = write_exact_activation_cache_entry(
+        adapter.directory(batch_id), f"{batch_id}-entry", torch.arange(8),
+        identity={"session": "fixture"}, max_tensor_bytes=64, max_file_bytes=65536)
+    adapter.record(batch_id, reference, tmp_path / "canonical")
+    adapter.submit(batch_id)
+
+
+def _read_export_wait(path, *, until=None, timeout=5.0):
+    """The record once it exists (and ``until(record)`` holds), or None."""
+    import json
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            record = json.loads(path.read_text())
+        except (FileNotFoundError, ValueError):
+            record = None
+        if record is not None and (until is None or until(record)):
+            return record
+        time.sleep(0.01)
+    return None
+
+
+def _observe_then(path, action, *, looks=3, until=None):
+    """A thread that reads the record ``looks`` times, then runs ``action``.
+
+    ``action`` always runs, so the wait under test always ends; a missing
+    record is recorded as None and fails the test's own assertion.
+    """
+    seen = []
+
+    def run():
+        try:
+            for _ in range(looks):
+                seen.append(_read_export_wait(path, until=until))
+                time.sleep(0.03)
+        finally:
+            action()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    return thread, seen
+
+
+def test_a_barrier_declares_its_export_while_it_waits_and_clears_it(
+        tmp_path, export_wait_channel):
+    backend = ControlledExport(tmp_path / "local")
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    _submitted_group(adapter, "one", tmp_path)
+    before = time.time()
+    thread, seen = _observe_then(export_wait_channel,
+                                 lambda: backend.acknowledge("one"))
+    try:
+        adapter.await_group("one")
+    finally:
+        thread.join(timeout=10)
+    assert len(seen) == 3 and None not in seen, (
+        f"no export-wait record while the barrier waited: {seen}")
+    # For the whole wait: one record, the same since_unix at every look.
+    assert all(record == seen[0] for record in seen)
+    record = seen[0]
+    assert set(record) == {"schema", "token", "since_unix", "exports"}
+    assert record["schema"] == "prismabuild.export_wait.v1"
+    assert record["token"] == EXPORT_WAIT_TOKEN
+    assert record["exports"] == [_export_key("one")]
+    assert before <= record["since_unix"] <= time.time()
+    # Gone once the export landed.
+    assert not export_wait_channel.exists()
+    assert adapter.report()["waits"][-1]["export_key"] == _export_key("one")
+
+
+def test_a_refused_export_clears_the_declared_wait(tmp_path, export_wait_channel):
+    from prismaquant.produced_output_spool import ProducedExportRefused
+
+    backend = ControlledExport(tmp_path / "local")
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    _submitted_group(adapter, "one", tmp_path)
+
+    def refuse():
+        backend.groups["one"]["failure"] = "export-failed-without-ack"
+
+    thread, seen = _observe_then(export_wait_channel, refuse, looks=1)
+    try:
+        with pytest.raises(ProducedExportRefused, match="export-failed-without-ack"):
+            adapter.await_group("one")
+    finally:
+        thread.join(timeout=10)
+    assert seen and seen[0] is not None, "no export-wait record while it waited"
+    assert seen[0]["exports"] == [_export_key("one")]
+    assert not export_wait_channel.exists(), (
+        "a refused export left its wait declared")
+
+
+def test_concurrent_waits_declare_the_union_and_clear_with_the_last(
+        tmp_path, export_wait_channel):
+    """Two threads wait on two exports: PrismaBuild reads one record per
+    action, so it names both, dated from the earlier wait, and outlives the
+    first wait to end."""
+    backend = ControlledExport(tmp_path / "local")
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    _submitted_group(adapter, "one", tmp_path)
+    _submitted_group(adapter, "two", tmp_path)
+    errors = []
+
+    def wait(batch_id):
+        try:
+            adapter.await_group(batch_id)
+        except BaseException as exc:                      # noqa: BLE001
+            errors.append(exc)
+
+    first = threading.Thread(target=wait, args=("one",))
+    second = threading.Thread(target=wait, args=("two",))
+    first.start()
+    try:
+        alone = _read_export_wait(export_wait_channel)
+        second.start()
+        both = _read_export_wait(
+            export_wait_channel, until=lambda record: len(record["exports"]) == 2)
+        backend.acknowledge("one")
+        first.join(timeout=10)
+        remaining = _read_export_wait(
+            export_wait_channel,
+            until=lambda record: record["exports"] == [_export_key("two")])
+    finally:
+        # Whatever the assertions find, both waits end.
+        for batch_id in ("one", "two"):
+            if not backend.groups[batch_id]["complete"]:
+                backend.acknowledge(batch_id)
+        first.join(timeout=10)
+        second.join(timeout=10)
+    assert errors == []
+    assert alone is not None and alone["exports"] == [_export_key("one")]
+    assert both is not None, "the second wait replaced the first's record"
+    assert both["exports"] == sorted([_export_key("one"), _export_key("two")])
+    assert both["since_unix"] == alone["since_unix"]
+    assert remaining is not None, (
+        "the first wait to end cleared the record the second still needs")
+    assert remaining["since_unix"] > alone["since_unix"]
+    assert not export_wait_channel.exists()
+
+
+def test_a_full_window_declares_the_live_exports_it_waits_on(
+        tmp_path, export_wait_channel):
+    backend = ControlledExport(tmp_path / "local", capacity=65536)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    _submitted_group(adapter, "one", tmp_path)
+    thread, seen = _observe_then(export_wait_channel,
+                                 lambda: backend.acknowledge("one"))
+    try:
+        adapter.reserve("two", 65536)
+    finally:
+        thread.join(timeout=10)
+    assert len(seen) == 3 and None not in seen, (
+        f"no export-wait record while the window waited: {seen}")
+    assert all(record == seen[0] for record in seen)
+    assert seen[0]["exports"] == [_export_key("one")]
+    assert not export_wait_channel.exists()
+    assert adapter.report()["waits"][-1]["kind"] == "window"
+
+
+def test_a_window_whose_live_export_is_refused_clears_its_wait(
+        tmp_path, export_wait_channel):
+    from prismaquant.produced_output_spool import ProducedExportRefused
+
+    backend = ControlledExport(tmp_path / "local", capacity=65536)
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    _submitted_group(adapter, "one", tmp_path)
+
+    def refuse():
+        backend.groups["one"]["failure"] = "export-withdrawn-without-ack"
+
+    thread, seen = _observe_then(export_wait_channel, refuse, looks=1)
+    try:
+        with pytest.raises(ProducedExportRefused):
+            adapter.reserve("two", 65536)
+    finally:
+        thread.join(timeout=10)
+    assert seen and seen[0] is not None and seen[0]["exports"] == [_export_key("one")]
+    assert not export_wait_channel.exists()
+
+
+def test_without_a_progress_channel_a_wait_declares_nothing(tmp_path, monkeypatch):
+    """No channel: the wait behaves as before and writes nothing anywhere."""
+    from prismaquant import prismabuild_progress
+
+    monkeypatch.delenv(prismabuild_progress.PATH_ENV, raising=False)
+    monkeypatch.delenv(prismabuild_progress.TOKEN_ENV, raising=False)
+    backend = ControlledExport(tmp_path / "local")
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    _submitted_group(adapter, "one", tmp_path)
+    timer = threading.Timer(0.3, backend.acknowledge, args=("one",))
+    timer.start()
+    try:
+        adapter.await_group("one")
+    finally:
+        timer.join()
+    assert adapter.report()["export_waits"] == 1
+    assert not list(tmp_path.rglob("*.export-wait"))
