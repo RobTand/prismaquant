@@ -980,6 +980,68 @@ def write_cached_expert_units(projection: Mapping[str, Any]) -> Path:
     return destination
 
 
+def require_fused_rung_coherence(assignment: Mapping[str, str], profile,
+                                 contract_path: str | Path) -> dict | None:
+    """Refuse a fused module whose Tessera members no serve has covered.
+
+    The pinned contract's ``fused_module`` block licenses a rate per member,
+    and its ``mixed_rung_receipt`` says whether a vLLM serve has covered a
+    module whose members took different rungs (false while only a decode
+    identity backs the licence).  The allocator reads the licence
+    (``promote_fused``); this is where the receipt is read, so a stamp that
+    nothing consumed becomes a refusal (RobTand/prismaquant#1320).
+
+    Groups come from the allocator's own ``_fused_sibling_groups``, and the
+    licence from the same packaged contract bytes the route gate resolves
+    against, so the fold and this gate cannot disagree about one runtime.  A
+    group whose members share one format never asks the question, so the
+    block is read only when a mixed group exists.  Returns ``None`` for no
+    mixed group, else the groups and the licence answer for the shipcard.
+    """
+    from .allocator_candidates import _fused_sibling_groups
+    from .tessera_formats import format_promotion_class
+    from .tessera_runtime_contract import TesseraContractError, _parse_fused_module
+
+    grouped, _ = _fused_sibling_groups(list(assignment), profile)
+    mixed = {key: {name: assignment[name] for name in sorted(members)}
+             for key, members in sorted(grouped.items())
+             if len({assignment[name] for name in members}) > 1
+             and any(assignment[name].startswith("TESSERA_") for name in members)}
+    if not mixed:
+        return None
+
+    def _detail(groups):
+        return "; ".join(
+            f"{key}: " + ", ".join(f"{name}={fmt}" for name, fmt in members.items())
+            for key, members in groups.items())
+
+    unlicensed = {key: members for key, members in mixed.items()
+                  if len({format_promotion_class(fmt) for fmt in members.values()}) != 1}
+    if unlicensed:
+        raise TesseraExportLaneError(
+            f"{len(unlicensed)} fused module(s) mix decoder families, which no "
+            f"licence permits (one fused tensor has one decoder): {_detail(unlicensed)}")
+    try:
+        licence = _parse_fused_module(
+            json.loads(Path(contract_path).read_text(encoding="utf-8")), str(contract_path))
+        per_member = licence.is_per_member("q256")
+    except (OSError, ValueError, TesseraContractError) as exc:
+        raise TesseraExportLaneError(
+            f"{len(mixed)} fused module(s) carry per-member rungs and the packaged "
+            f"contract does not license them: {exc}: {_detail(mixed)}") from exc
+    if not per_member:
+        raise TesseraExportLaneError(
+            f"{len(mixed)} fused module(s) carry per-member rungs but the packaged "
+            f"contract marks q256 shared: {_detail(mixed)}")
+    if not licence.mixed_rung_receipt:
+        raise TesseraExportLaneError(
+            f"{len(mixed)} fused module(s) carry per-member rungs and the packaged "
+            "contract publishes mixed_rung_receipt=false: the licence is proven by "
+            "a decode identity, and no serve has covered such a module. "
+            f"{_detail(mixed)}")
+    return {"mixed_rung_groups": sorted(mixed), "licence": licence.answer()}
+
+
 def require_assignment_scope(model_path: str | Path, assignment_path: str | Path,
                              *, target=None) -> dict | None:
     """Re-resolve selected Tessera units before the external translator runs.
@@ -1060,6 +1122,7 @@ def require_assignment_scope(model_path: str | Path, assignment_path: str | Path
         selected = {name: fmt for name, fmt in assignment.items()
                     if fmt.startswith("TESSERA_")}
         profile = detect_profile(str(model_path))
+        fused_module = require_fused_rung_coherence(assignment, profile, path)
         shards: dict[str, str] = {}
         shapes = _source_unit_shapes(model_path, profile, shards)
         structures = {name: unit_structure_from_profile(name, profile) for name in selected}
@@ -1128,6 +1191,8 @@ def require_assignment_scope(model_path: str | Path, assignment_path: str | Path
                   ROUTED_EXPERT_BYTES_KEY: routed_expert_bytes}
         if projection is not None:
             report["expert_projection"] = projection
+        if fused_module is not None:
+            report["fused_module"] = fused_module
         return report
     except TesseraExportLaneError:
         raise
