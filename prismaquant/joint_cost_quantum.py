@@ -1419,13 +1419,17 @@ def bind_joint_served_quantizer(formats_by_qname):
 
 
 def build_quantum_source_runner(config, *, offload_folder,
-                                sealed_head_tensors=None):
+                                sealed_head_tensors=None, source_authentication=None):
     """Rebuild the same sealed BF16 source used by Stage A.
 
     ``sealed_head_tensors`` is the resident head the quantum's executable
     readset declares (``executable_readset.head_source.tensors``, PQ #1095):
     the streaming context refuses before its first head read when the head
     it selects differs.
+
+    ``source_authentication`` is a capture source owner
+    (``tessera_calibration_cache.authenticate_selected_capture_source``);
+    given one, every shard the runner reads is authenticated through it.
     """
     from .cost_streaming import build_streamed_causal_lm
     from .model_profiles import detect_profile
@@ -1434,7 +1438,7 @@ def build_quantum_source_runner(config, *, offload_folder,
     return build_streamed_causal_lm(
         config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
         offload_folder=str(offload_folder), profile=detect_profile(config["model"]),
-        attn_implementation="eager", source_authentication=None,
+        attn_implementation="eager", source_authentication=source_authentication,
         source_derivative=config["execution"].get("source_derivative"),
         **({"sealed_head_tensors": sealed_head_tensors}
            if sealed_head_tensors is not None else {}),
@@ -1624,6 +1628,10 @@ def run_layer_quantum_core(
     # PQ #1151: an opt-in measurement of the capture workspace, read once.
     from .stage_b_workspace_profile import profile_capture_workspace, profile_request
     workspace_profile = profile_request()
+    # PQ #1269: an opt-in torch.profiler timeline of named capture passes and
+    # a bounded shadow of the windowed replay's pass. Off unless requested.
+    from .stage_b_pass_profile import pass_profile_request
+    pass_profile = pass_profile_request()
     # PQ #1011: an executable read plan is sealed for one replay mode, and a
     # launch in the other mode would stage reads this quantum never makes.
     sealed_spill = False
@@ -2423,6 +2431,8 @@ def run_layer_quantum_core(
 
         noncontiguous_seeds: set[tuple[int, int]] = set()
         capture_group_cache: dict = {}
+        # The open PQ #1269 profile session, or None (always, unless asked).
+        pass_session = None
 
         @contextmanager
         def held_plane_staging(active_probe, group_batches, on_store=None, *,
@@ -2515,8 +2525,12 @@ def run_layer_quantum_core(
                     if [entry[0] for entry in group] != next(expected, None):
                         raise RuntimeError(
                             "Stage B spill capture group differs from its geometry")
+                    if pass_session is not None:
+                        pass_session.unit_begin()
                     capture_group(group, active_probe, observer, stage)
                     group = None
+                    if pass_session is not None:
+                        pass_session.unit_end()
                 if pending_items or next(expected, None) is not None:
                     raise RuntimeError("Stage B spill capture left batches ungrouped")
 
@@ -2581,6 +2595,8 @@ def run_layer_quantum_core(
                 return
             with prefetched_boundary_batches(storage, batches, layer) as reverse_batches:
                 for batch_index, batch, boundary_cpu, _unused in reverse_batches:
+                    if pass_session is not None:
+                        pass_session.unit_begin()
                     owner = cotangent_owners[active_probe][batch_index]
                     # A fork seeds its roots from contiguous clones of these
                     # accumulators, the final pass from the originals. Only
@@ -2658,6 +2674,8 @@ def run_layer_quantum_core(
                         out = x_in = incoming_grad = isolated = None
                         roots = root_grads = None
                         replay_owner = owner = None
+                    if pass_session is not None:
+                        pass_session.unit_end()
 
         def consume_window_probe(probe_index, terms, diagnostics, window_receipt):
             operator_window_receipts.append(dict(layer=layer,
@@ -2853,10 +2871,67 @@ def run_layer_quantum_core(
                                 "git_commit": _checkpoint_git_commit(),
                                 **({} if kda_kernel is None else {
                                     "kda_capture_kernel": kda_kernel.identity_sha256})})
+                if pass_profile is None:
+                    with counters.io.span("spill-capture", probe=int(probe_index)), \
+                            spill_observer(probe_index) as observer:
+                        replay_backward(final=True, lease=None, probe=probe_index,
+                                        observer=observer)
+                    return
+                profiled_spill_capture(probe_index)
+
+            def profiled_spill_capture(probe_index):
+                # PQ #1269: dev-only. A bounded shadow of the windowed
+                # replay's pass first, when asked, then the capture itself
+                # with its groups timed and a few of them traced.
+                nonlocal pass_session
+                identity = {"quantum_id": quantum_id, "layer": layer,
+                            "record_identity_sha256": record.get("identity_sha256"),
+                            "replay_regime": dict(replay_regime),
+                            "capture_batch": capture_batch,
+                            "stored_batches": len(batches),
+                            "capture_groups": len(capture_groups),
+                            "git_commit": _checkpoint_git_commit()}
+                if pass_profile.windowed_probe == int(probe_index):
+                    shadow_names = [name for name in resolved_windows[0]["names"]
+                                    if name in measured]
+                    shadow_lease = JointOperatorStatisticsLease(
+                        {name: measured[name] for name in shadow_names},
+                        {name: {fmt: fr.get_format(fmt) for fmt in render_formats[name]}
+                         for name in shadow_names},
+                        max_statistics_bytes=retained_budget.statistics_cap_bytes,
+                        max_candidate_bytes=retained_budget.candidate_delta_bytes,
+                        activation_max_abs=joint_activation_maxima(production_cache),
+                        projection_backend=projection_backend)
+                    with counters.io.span("pass-profile-windowed-shadow",
+                                          probe=int(probe_index)), shadow_lease as lease:
+                        lease.begin_probe()
+                        session = pass_profile.session(
+                            kind="windowed", probe=probe_index,
+                            identity={**identity, "shadow_window_units": len(shadow_names)},
+                            stop_after=pass_profile.shadow_batches)
+                        with session:
+                            pass_session = session
+                            try:
+                                with held_plane_staging(int(probe_index), 1) as stage:
+                                    replay_pass(stage, final=False, lease=lease,
+                                                active_probe=int(probe_index),
+                                                observer=None, grouped=False)
+                            finally:
+                                pass_session = None
                 with counters.io.span("spill-capture", probe=int(probe_index)), \
                         spill_observer(probe_index) as observer:
-                    replay_backward(final=True, lease=None, probe=probe_index,
-                                    observer=observer)
+                    if not pass_profile.profiles_capture(probe_index):
+                        replay_backward(final=True, lease=None, probe=probe_index,
+                                        observer=observer)
+                        return
+                    with pass_profile.session(kind="capture", probe=probe_index,
+                                              identity=identity) as session:
+                        pass_session = session
+                        try:
+                            replay_backward(final=True, lease=None, probe=probe_index,
+                                            observer=observer)
+                        finally:
+                            pass_session = None
 
             def spill_replay(*, window_index, probe_index, lease):
                 # Reads nothing: the window's render phase stays current.
