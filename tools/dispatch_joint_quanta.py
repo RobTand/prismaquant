@@ -514,6 +514,55 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
     return ordered
 
 
+def with_execution_plan(records: list[tuple[Path, dict]],
+                        execution_plan: Path) -> tuple[list[tuple[Path, dict]], dict]:
+    """The records as this dispatch runs them under ``--execution-plan`` (PQ #1191).
+
+    A re-declared Stage B plan (a resource re-declare, for example) gets its
+    own path. The sealed plan stays at the record's ``campaign.plan_path``,
+    where the band prepare reads it against the sealed digest; writing the
+    re-declared plan over that path blocked every later prepare.
+
+    Returns the records with their in-memory ``campaign.plan_path`` naming
+    the execution plan, so every execution-time plan read of this dispatch
+    (the row's ``--plan`` and its digest, the Stage A memory bound and spool
+    window, the plan's output root, the handoff template, the readset
+    coverage check) takes that file. ``campaign.plan_sha256`` stays the
+    sealed digest: the Stage A proof gate and the manifest binding compare
+    with it, and the argv digest is derived from the bytes read, as for a
+    re-declared plan at the sealed path. The record files are never written.
+    The second value is the stamp the dry run and the state events carry.
+
+    The records share one campaign (:func:`load_records`), so the plan is
+    read and compared once. A digest that differs from the sealed one is a
+    run seal (PQ #1147): dev mode prints it, certified mode refuses it.
+    """
+    from prismaquant.dev_mode import seal_check
+
+    try:
+        raw = Path(execution_plan).read_bytes()
+        json.loads(raw)
+    except (OSError, ValueError) as exc:
+        raise DispatchRefused(
+            f"--execution-plan {execution_plan}: unreadable JSON: {exc}") from exc
+    campaign = records[0][1].get("campaign")
+    if not isinstance(campaign, dict):
+        raise DispatchRefused("the layer records carry no campaign block")
+    sealed = campaign.get("plan_sha256")
+    actual = _sha_bytes(raw)
+    seal_check("execution plan", sealed, actual,
+               where=f"--execution-plan {execution_plan}",
+               refusal=lambda: DispatchRefused(
+                   f"execution plan {execution_plan} ({actual}) differs from "
+                   f"the records' sealed plan {campaign.get('plan_path')} "
+                   f"({sealed})"))
+    stamp = {"path": str(execution_plan), "sha256": actual,
+             "sealed_plan_path": campaign.get("plan_path"),
+             "sealed_plan_sha256": sealed}
+    running = [(path, {**record, "campaign": {**record["campaign"],
+                                              "plan_path": str(execution_plan)}})
+               for path, record in records]
+    return running, stamp
 
 
 def _is_hex64(value: object) -> bool:
@@ -3175,6 +3224,14 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                         help="stage-A read manifest (defaults beside records)")
     parser.add_argument("--plan", default=None,
                         help="plan file carrying the distributed_campaign block")
+    parser.add_argument("--execution-plan", type=Path, default=None,
+                        help="PQ #1191: a re-declared plan (for example a "
+                             "Stage B resource re-declare) at its own path. "
+                             "Every row runs under it (--plan PATH and its "
+                             "digest) while the records keep naming the "
+                             "sealed plan, which is never rewritten. Dev mode "
+                             "stamps a digest that differs from the sealed "
+                             "one; certified mode refuses it")
     parser.add_argument("--priority", type=int, default=SUBMISSION_PRIORITY)
     parser.add_argument("--head-grace-s", type=int, default=HEAD_PROGRESS_GRACE_S)
     parser.add_argument("--stage-a-prefetch-override", type=Path, default=None,
@@ -3256,6 +3313,10 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
         block = _plan_block(Path(args.plan) if args.plan else None)
         tags = plan_consumer_tags(block)
         records = load_records(records_dir)
+        execution_stamp = None
+        if args.execution_plan is not None:
+            records, execution_stamp = with_execution_plan(
+                records, args.execution_plan)
         wanted = set(args.quantum)
         unknown = sorted(wanted - {record["quantum_id"] for _, record in records})
         if unknown:
@@ -3444,6 +3505,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
     if args.dry_run:
         by_id = {record["quantum_id"]: record for _, record in records}
         print(json.dumps({"consumer_tags": list(tags), "priority": priority,
+                          "execution_plan": execution_stamp,
                           "stage_a_terminal": bool(stage_a_keys) and bool(
                               receipt_ok),
                           "stage_a_pending": [record["quantum_id"] for _, record in records
@@ -3493,7 +3555,8 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                                                str(args.stage_a_artifact_budget_bytes)
                                                if args.stage_a_artifact_budget_bytes
                                                is not None
-                                               else None)})
+                                               else None),
+                                           "execution_plan": execution_stamp})
             else:
                 _append_state(state_path,
                               {"event": "quantum-submitted",
@@ -3504,6 +3567,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                                "handoff_template": row["handoff_template"],
                                "link": row["link"],
                                "progress_grace": row["progress_grace"],
+                               "execution_plan": execution_stamp,
                                "action_key": answer["action_key"]})
             print(json.dumps({"published": row.get("quantum_id", "stage-a"),
                               "action_key": answer["action_key"],
