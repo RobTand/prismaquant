@@ -18,7 +18,6 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +25,7 @@ from prismaquant import joint_aura
 from prismaquant.io_spans import IO_SPAN_MARKER
 
 import test_joint_cost_quantum_runtime as runtime
+from handoff_emitter_stub import StubHandoffEmitter
 from test_quantum_failure_counters import _Stop, failing_head  # noqa: F401
 from test_quantum_probe_identity_once_1183 import _campaign
 
@@ -81,14 +81,13 @@ def test_a_band_serial_handoff_is_written_under_its_own_span(tmp_path, monkeypat
     def emitter(record, adjoint_slice, execution):
         from prismaquant.joint_replay_regime import normalize_replay_regime
 
-        def emit(**kwargs):
-            calls.append(sorted(kwargs))
-            return {}
         # The core refuses an emitter built for another capture batch, so the
-        # stub carries the launch regime's, as HandoffEmitter does.
+        # stub carries the launch regime's, as HandoffEmitter does. Since PQ
+        # #1251 the core streams the handoff and the tail holds its finish.
         capture_batch = normalize_replay_regime(
             execution.get("replay_regime"))["capture_batch"]
-        return SimpleNamespace(emit=emit, published={}, capture_batch=capture_batch)
+        return StubHandoffEmitter(capture_batch=capture_batch,
+                                  on_finish=lambda **kwargs: calls.append(sorted(kwargs)))
 
     _payload, _record, block = _quantum(tmp_path, monkeypatch, handoff_emitter=emitter)
     assert calls, "the fixture emitter was never called"
@@ -203,14 +202,13 @@ def test_the_handoff_export_record_is_kept_in_the_counters(tmp_path, monkeypatch
     def emitter(record, adjoint_slice, execution):
         from prismaquant.joint_replay_regime import normalize_replay_regime
 
-        stub = SimpleNamespace(published={}, export_report=None,
-                               capture_batch=normalize_replay_regime(
-                                   execution.get("replay_regime"))["capture_batch"])
-
-        def emit(**kwargs):
+        def finish(**kwargs):
             stub.export_report = report
-            return {}
-        stub.emit = emit
+
+        stub = StubHandoffEmitter(
+            capture_batch=normalize_replay_regime(
+                execution.get("replay_regime"))["capture_batch"],
+            on_finish=finish)
         return stub
 
     _payload, _record, block = _quantum(tmp_path, monkeypatch, handoff_emitter=emitter)
