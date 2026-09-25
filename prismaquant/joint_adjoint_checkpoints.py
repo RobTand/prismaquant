@@ -316,7 +316,8 @@ def _await_checkpoint_entries(entries, *, deadline):
 
 
 def stream_exact_entry_tensors(records, *, expected_session, max_resident_bytes=None,
-                               residency_check=None, deadline=None):
+                               residency_check=None, deadline=None,
+                               deadline_per_window=False):
     """Yield ``(record, tensor)`` for every record, in order, window by window.
 
     The streaming form of :func:`read_exact_entry_tensors` for a whole
@@ -335,18 +336,29 @@ def stream_exact_entry_tensors(records, *, expected_session, max_resident_bytes=
 
     Close the generator (``contextlib.closing``) when the consumer may stop
     early: closing waits for a read in flight and releases its charge.
+
+    ``deadline`` is one bound for every staged wait of the stream, started
+    at its first read when ``None``: a load phase's rule. With
+    ``deadline_per_window`` each window's wait starts its own configured
+    bound when its read starts, as a boundary prefetch window's does: the
+    rule for a stream read across a compute pass (PQ #1143), whose later
+    windows are read minutes after its first.
     """
     from .residency_shard_reader import staged_range_wait_s
     windows, read_ahead = exact_entry_windows(records, max_resident_bytes=max_resident_bytes)
     if not windows:
         return
-    if deadline is None:
+    if deadline_per_window and deadline is not None:
+        raise ValueError("a stream takes one deadline or one per window, not both")
+    if deadline is None and not deadline_per_window:
         deadline = time.monotonic() + staged_range_wait_s()
 
     def read(window):
-        _await_checkpoint_entries(window, deadline=deadline)
+        bound = (time.monotonic() + staged_range_wait_s() if deadline_per_window
+                 else deadline)
+        _await_checkpoint_entries(window, deadline=bound)
         return read_exact_entry_tensors(window, expected_session=expected_session,
-                                        deadline=deadline)
+                                        deadline=bound)
 
     held = []  # (charge, future or tensors), oldest first
 
@@ -2200,9 +2212,17 @@ class PlaneHostStaging:
     copies bytes out and keeps nothing, so a store writes each batch's rows
     straight from the buffer. A kept plane in one-batch groups needs no
     buffer, and none is allocated.
+
+    ``incoming`` is a stream of the pass's incoming rows (PQ #1143): an
+    object with ``layout(key)`` and ``take(keys)``, which returns verified
+    CPU tensors in the order the pass asks for them. The incoming rows are
+    then read from it, never from the plane, which the pass's stores still
+    write. Each row is copied as the plane's row was: the same bytes, in the
+    same place, moved to the device by the same copy.
     """
 
-    def __init__(self, plane, keys, *, group_batches, dtype, on_store=None):
+    def __init__(self, plane, keys, *, group_batches, dtype, on_store=None,
+                 incoming=None):
         from .perturbed_x_cache import ExactCotangentScratch
 
         group_batches = int(group_batches)
@@ -2213,7 +2233,16 @@ class PlaneHostStaging:
         #: every key: the streamed handoff's finality signal (PQ #1251).
         #: ``rows`` are the stored CPU tensors, valid only during the call.
         self.on_store = on_store
+        self.incoming_source = incoming
         self.copies_out = isinstance(plane, ExactCotangentScratch)
+        if incoming is not None and self.copies_out:
+            for key in keys:
+                shape, stored, _nbytes = plane.slot_layout(key)
+                if (tuple(shape), stored) != tuple(incoming.layout(key)):
+                    raise RuntimeError(
+                        f"the incoming stream's row {key!r} is "
+                        f"{tuple(incoming.layout(key))!r}; the scratch's slot "
+                        f"is {(tuple(shape), stored)!r}")
         compute = torch.empty((), dtype=dtype).element_size()
         entry = 0
         for key in keys:
@@ -2255,6 +2284,9 @@ class PlaneHostStaging:
         if self.copies_out:
             shape, dtype, _nbytes = self.plane.slot_layout(key)
             return tuple(shape), dtype
+        if self.incoming_source is not None:
+            shape, dtype = self.incoming_source.layout(key)
+            return tuple(shape), dtype
         tensor = self.plane[key]
         return tuple(tensor.shape), tensor.dtype
 
@@ -2270,8 +2302,16 @@ class PlaneHostStaging:
     def incoming(self, keys, *, device):
         """The keys' cotangents stacked on ``device``: ``_stack_to_device``'s tensor."""
         keys = list(keys)
+        taken = (None if self.incoming_source is None
+                 else self.incoming_source.take(keys))
+        if taken is not None:
+            for key, tensor in zip(keys, taken):
+                if (tuple(tensor.shape), tensor.dtype) != self._layout(key):
+                    raise RuntimeError(
+                        f"the incoming stream's row {key!r} is not its declared layout")
         if not self.copies_out and len(keys) == 1:
-            return _stack_to_device([self.plane[keys[0]]], device=device)
+            return _stack_to_device([self.plane[keys[0]] if taken is None else taken[0]],
+                                    device=device)
         layouts = [self._layout(key) for key in keys]
         shape, dtype = layouts[0]
         if any(rows[1:] != shape[1:] or stored != dtype for rows, stored in layouts):
@@ -2279,13 +2319,16 @@ class PlaneHostStaging:
                                "and dtype")
         host = self._view((sum(rows[0] for rows, _stored in layouts), *shape[1:]), dtype)
         start = 0
-        for key, (rows, _stored) in zip(keys, layouts):
+        for index, (key, (rows, _stored)) in enumerate(zip(keys, layouts)):
             block = host.narrow(0, start, rows[0])
-            if self.copies_out:
+            if taken is not None:
+                block.copy_(taken[index])
+            elif self.copies_out:
                 self.plane.read_into(key, block)
             else:
                 block.copy_(self.plane[key])
             start += rows[0]
+        taken = None
         return host.to(device=device, copy=True)
 
     def boundaries(self, tensors, *, device, dtype):

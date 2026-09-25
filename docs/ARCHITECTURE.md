@@ -1,5 +1,69 @@
 # PrismaQuant Architecture
 
+A band-serial spill consumer reads each probe's incoming plane during that
+probe's final pass (2026-09-25, `perf/1143-stream-handoff-load`, PQ #1143).
+A consumer used to read its whole incoming plane at its head, in
+`handoff-load`: every entry of the producer's handoff, 32 GiB on a GLM row,
+written into the cotangent scratch and then read back, one slot at a time,
+by each probe's capture. Stage B R13 row 009 spent 65.9 s there, writing
+526 MB/s to the NVMe at 90% utilization, with the GPU at 13.6 W of its
+140 W envelope. Under the
+one-pass spill each incoming row is read exactly once, by its probe's
+final pass, so a spill consumer now streams each probe's rows there.
+
+- The read plan. For a spill-sealed readset (`annotations.replay_mode` is
+  `spill`), `band_serial_manifest` stages probe p's plane entries in
+  `spill-pP`, each right after the boundary entry of its batch: the order
+  the pass reads them, and the order PrismaBuild's movers walk a phase
+  (`storage_tiers.manifest_read_entries`). `handoff-load` keeps the owner
+  states and the shared-pass entries. The phase sequence does not change;
+  the phase that stages each plane entry does, so the derived readset's
+  digest changes (`annotations.band_serial` schema v2, with
+  `streamed_incoming`, each spill phase's moved count). The sealed record
+  does not change. A windowed row reads every incoming slot in every pass,
+  so its readset keeps the whole plane in `handoff-load`, as before.
+- The read path. `load_handoff_inputs(..., stream_incoming=True)` builds
+  the plane empty and reads only the owner states and the shared-pass
+  entries. Each probe's final pass opens `HandoffIncoming.open(p)`, a
+  verified `stream_exact_entry_tensors` over that probe's entries in batch
+  order, in the staging it builds (`held_plane_staging`), so the capture
+  and a complete resume's final pass (which runs outside any capture) both
+  read through it. The launch's replay mode decides, not an open spill: a
+  resume with every unit committed opens no spill, and its final passes
+  still run one per probe under that probe's spill phase, where the read
+  plan stages its rows. `PlaneHostStaging(..., incoming=stream)` takes each
+  group's rows from the stream and copies them where the plane's rows went:
+  the same bytes, moved to the device by the same copy. The pass's stores
+  still write the plane, so the streamed handoff writer (PQ #1251) is
+  unchanged. A stream taken out of batch order, or left with unread rows
+  at a clean exit, refuses. Each window's staged wait has its own bound
+  (`deadline_per_window`), as a boundary prefetch window's does, because a
+  pass reads its later windows minutes after its first.
+- Memory. The stream charges `reserve_resident`, the storage's
+  `max_resident_bytes` counter, and so does the capture's boundary prefetch
+  window. The stream gets what the largest boundary window leaves:
+  `max_resident_bytes` less `prefetch_batches` boundary entries. On R13
+  that is 2,281,701,376 B less 64 boundary entries of 16 MiB, so
+  1,207,959,552 B: two windows of 36 rows.
+  A budget under one row refuses before any pass. The pass's backward
+  admission (`before_joint_window_backward`) charges the stream's budget to
+  the capture guard. A workspace-profile row writes probe 0's rows into the
+  plane first (`before_stage_b_handoff_incoming`), because its ladder
+  passes them again and again.
+- Counters. `counters.json` gains `handoff_incoming`: the budget, the
+  boundary window it shares the budget with, and per probe the rows read,
+  their bytes and the seconds the pass waited for them.
+
+The dispatcher counts a spill capture by its stored batches
+(`phase_work_entries` subtracts `streamed_incoming`), so the moved entries
+add read bytes to a `spill-pP` grace, never capture groups. This is a
+source transition: a consumer row submitted with the old readset refuses
+on resume (`require_band_serial_readset`). Gates:
+`tests/test_stage_b_streamed_incoming_1143.py`,
+`tests/test_band_serial_spill.py` (bitwise against chain mode, both resume
+paths) and `tests/test_band_serial_batched_regime.py` (capture batch 4).
+No format, pipeline default, record identity or ship gate changes.
+
 A band-serial producer writes its handoff while its final passes run
 (2026-09-25, `perf/1251-stream-handoff-emit`, PQ #1251). A producer quantum
 used to write its whole handoff after the retained-window driver returned:
@@ -1103,9 +1167,13 @@ It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
 row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
-(`prismaquant/joint_adjoint_checkpoints.py:1857`,
-`prismaquant/joint_quantum_handoff.py:972`), so the phase waits at most W in
-total outside a PrismaBuild landing record. The bytes are the phase's count
+(`prismaquant/joint_adjoint_checkpoints.py:1869`,
+`prismaquant/joint_quantum_handoff.py:1015`), so the phase waits at most W in
+total outside a PrismaBuild landing record. Since PQ #1143 a spill
+consumer's `handoff-load` holds only the owner states and the shared-pass
+entries; each probe's plane is read in its `spill-pP` phase, whose waits
+have one bound per stream window, and whose compute grace counts those
+bytes in its read term. The bytes are the phase's count
 in the row's read plan. The built-in floor, 62,954,973 B/s, is the slowest
 30 s read window of the R13 layer-044 v4 and v5 gates (action keys
 `70e7baeb…`, `2dc14529…`), measured with one reader on the dl380g10 link.
@@ -1138,7 +1206,9 @@ pipeline stage or ship gate changes.
 The dispatcher derives Stage B's compute-phase grace (2026-09-24,
 `ws-prog/1165-compute-phase-progress`, PQ #1165). Four phases run a whole
 pass: `chain-NNN-bound` rolls a chain layer's backward, `spill-pP` captures
-one probe into the spill and replays the first window for it, a spill row's
+one probe into the spill and replays the first window for it (on a
+band-serial consumer it also reads that probe's incoming plane, PQ #1143,
+which adds read bytes and no capture units), a spill row's
 `render-NN` (NN >= 1) replays its window from the spill, and a windowed row's
 `replay-NN-pP` replays one probe. Each pass writes only disposable scratch:
 rolled rows go to the cotangent scratch and spilled rows to the `O_TMPFILE`
@@ -2882,8 +2952,17 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `perf/1251-stream-handoff-emit`.
+As of: 2026-09-25 · `perf/1143-stream-handoff-load`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `perf/1143-stream-handoff-load`) for **a
+band-serial spill consumer that reads each probe's incoming plane during
+that probe's final pass** (PQ #1143). The derived band-serial readset
+stages each probe's plane entries in its `spill-pP` phase (schema v2), the
+dispatcher counts a spill capture by its stored batches, and
+`counters.json` gains `handoff_incoming`. See the entry at the top, the
+load-phase grace and "Consumer". No format, pipeline default, lane or ship
+gate changes.
 
 Re-stamped (2026-09-25, `perf/1251-stream-handoff-emit`) for **a
 band-serial handoff written while the producer's final passes run** (PQ
@@ -25223,7 +25302,12 @@ phase and every `chain-NNN-source` and `chain-NNN-bound` phase give way to
 one `handoff-load` phase after `head`, which stages exactly what
 `load_handoff_inputs` reads, in order: the plane entries, the owner-state
 file, and the checkpoint's forward shared-pass pickles. Every other phase
-keeps its entries; the prepared-input windows are re-indexed. The record is
+keeps its entries; the prepared-input windows are re-indexed. A
+spill-sealed consumer (PQ #1143) leaves the plane entries out of
+`handoff-load`: each `spill-pP` stages probe p's entries, each right after
+the boundary entry of its batch, and the probe's final pass reads them
+through `HandoffIncoming`. `annotations.band_serial.streamed_incoming`
+names each spill phase's moved count. The record is
 not re-sealed: its `executable_readset` still names the chain manifest, and
 `annotations.band_serial` names what the derived manifest came from.
 

@@ -114,8 +114,13 @@ def _receipt(tmp_path, campaign, *, run_identity_extra=None):
     }
 
 
-def _campaign(tmp_path, *, run_identity_extra=None):
-    """Bound executable records for layers 0-3, with prepared inputs."""
+def _campaign(tmp_path, *, run_identity_extra=None, replay_mode=None):
+    """Bound executable records for layers 0-3, with prepared inputs.
+
+    ``replay_mode="spill"`` seals the records' read plans for the one-pass
+    spill (PQ #1011), whose band-serial readset streams each probe's
+    incoming plane in its spill phase (PQ #1143).
+    """
     root = str(tmp_path / "run")
     records, parent = _tiny_records(tmp_path)
     receipt = _receipt(tmp_path, records[0]["campaign"],
@@ -135,7 +140,8 @@ def _campaign(tmp_path, *, run_identity_extra=None):
         manifest = jl.build_quantum_executable_manifest(
             record, production, parent, strided_boundaries=STRIDED,
             n_probes=N_PROBES, calib=dict(CALIB),
-            render_prerequisite=dict(RENDER_PREREQ), prepared_inputs=prepared)
+            render_prerequisite=dict(RENDER_PREREQ), prepared_inputs=prepared,
+            replay_mode=replay_mode)
         wire = jl.seal_manifest_bytes(manifest)
         path = Path(jl.bound_readset_directory(root)) / (
             f"{record['quantum_id']}.executable.json.gz")
@@ -146,7 +152,8 @@ def _campaign(tmp_path, *, run_identity_extra=None):
             manifest_path=str(path),
             manifest_sha256=hashlib.sha256(wire).hexdigest(), output_root=root,
             strided_boundaries=STRIDED, n_probes=N_PROBES, calib=dict(CALIB),
-            render_prerequisite=dict(RENDER_PREREQ), prepared_inputs=prepared)
+            render_prerequisite=dict(RENDER_PREREQ), prepared_inputs=prepared,
+            replay_mode=replay_mode)
     return bound, production
 
 

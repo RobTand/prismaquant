@@ -88,6 +88,7 @@ from .joint_quantum_handoff import (
     HANDOFF_LOAD_PHASE,
     HANDOFF_TEE_GROUPS,
     HandoffEmitter,
+    HandoffIncoming,
     QuantumHandoffRefused,
     bind_handoff_publication,
     load_handoff_inputs,
@@ -565,6 +566,10 @@ class QuantumCounters:
         # bytes written before and after the finish, its busy and waiting
         # seconds, the largest finality lag, and the finish's wait.
         self.handoff_emit = None
+        # A spill consumer's streamed incoming plane (PQ #1143): its budget,
+        # the boundary window it shares that budget with, and per probe the
+        # rows read, their bytes and the seconds the pass waited for them.
+        self.handoff_incoming = None
         self.phases = [{"name": str(chunk["name"]),
                         "start_bytes": int(chunk["start_bytes"]),
                         "end_bytes": int(chunk["end_bytes"]),
@@ -706,6 +711,8 @@ class QuantumCounters:
                else {"handoff_export": self.handoff_export}),
             **({} if self.handoff_emit is None
                else {"handoff_emit": self.handoff_emit}),
+            **({} if self.handoff_incoming is None
+               else {"handoff_incoming": self.handoff_incoming}),
             "phases": self.phases,
             "windows": self.windows,
             # Every closed span, in close order (prismaquant.io_spans).
@@ -2046,6 +2053,19 @@ def run_layer_quantum_core(
     # writer is joined before the spill and the storage (and with it the
     # cotangent scratch the writer reads) close, on every path.
     handoff_stream = None
+    # PQ #1143: under the one-pass spill each incoming row is read once, by
+    # its probe's final pass, so a band-serial consumer streams each probe's
+    # plane there instead of loading the whole plane here. The read plan
+    # stages it in the probe's spill phase (``band_serial_manifest``); a
+    # sealed plan's mode equals the launch's, checked above. The launch's
+    # mode decides, not whether a spill opened: a resume with every unit
+    # committed opens none, and its final passes still run one per probe
+    # under that probe's spill phase, where its rows are staged.
+    handoff_incoming = (HandoffIncoming(adjoint_handoff, n_probes=n_probes,
+                                        n_batches=len(row_offsets))
+                        if adjoint_handoff is not None and spill_config is not None
+                        else None)
+    incoming_budget = None
     with storage, (spill if spill is not None else nullcontext()), \
             ExitStack() as handoff_exit:
         with counters.io.span(CHECKPOINT_LOAD_PHASE if adjoint_handoff is None
@@ -2064,7 +2084,8 @@ def run_layer_quantum_core(
                     cotangent_factory=storage.checkpoint_cotangent_sink,
                     shared_state_max_bytes=storage.config["max_auxiliary_bytes"],
                     max_resident_bytes=storage.config["max_resident_bytes"],
-                    residency_check=storage.reserve_resident)
+                    residency_check=storage.reserve_resident,
+                    stream_incoming=handoff_incoming is not None)
         cotangent_owners = [[SharedStateCotangents(enabled=kv_cotangent_path_enabled())
                              for _ in row_offsets] for _ in range(n_probes)]
         for (probe, batch), state in shared_adjoint.items():
@@ -2085,6 +2106,27 @@ def run_layer_quantum_core(
                 for boundary in range(runner.num_layers + 1)]
         storage.watch_auxiliary(batches, cotangent_owners)
         storage.check_auxiliary(batches, cotangents=cotangent_owners)
+        if handoff_incoming is not None:
+            # The stream shares the storage's resident budget with the
+            # capture's boundary prefetch window, which charges the same
+            # counter: it gets what the largest such window leaves.
+            window = int(storage.config["prefetch_batches"])
+            own = [int(batch.activations_cpu[layer].tensor_bytes) for batch in batches]
+            boundary_window_bytes = max(sum(own[start:start + window])
+                                        for start in range(0, len(own), window))
+            incoming_budget = (int(storage.config["max_resident_bytes"])
+                               - boundary_window_bytes)
+            if incoming_budget < handoff_incoming.max_entry_bytes:
+                raise RuntimeError(
+                    f"the incoming plane's rows of {handoff_incoming.max_entry_bytes} "
+                    f"bytes do not fit the {incoming_budget} resident bytes a "
+                    f"{boundary_window_bytes}-byte boundary window leaves of "
+                    f"max_resident_bytes={int(storage.config['max_resident_bytes'])}")
+            counters.handoff_incoming = {
+                "budget_bytes": incoming_budget,
+                "boundary_window_bytes": boundary_window_bytes,
+                "max_resident_bytes": int(storage.config["max_resident_bytes"]),
+                "probes": []}
         if spill is not None and capture_batch > 1:
             # Before the chain: a batched capture merges samples, so every
             # sample's pass state must be empty (no profile shared state, no
@@ -2376,21 +2418,38 @@ def run_layer_quantum_core(
         capture_group_cache: dict = {}
 
         @contextmanager
-        def held_plane_staging(active_probe, group_batches, on_store=None):
+        def held_plane_staging(active_probe, group_batches, on_store=None, *,
+                               final=False):
             # PQ #1246: one host buffer per pass for the plane's traffic,
             # charged to the guard before it is allocated. ``held`` touches
             # every page, so the admissions that follow, this pass's backward
             # admission first, read it as committed, as they read the spill's
             # pinned arenas. ``on_store`` is the streamed handoff's finality
-            # signal, passed only for a final pass (PQ #1251).
-            staging = PlaneHostStaging(
-                grad_plane, [(active_probe, index) for index in range(len(batches))],
-                group_batches=group_batches, dtype=runner.dtype, on_store=on_store)
-            if guard is not None and staging.reserve_host_bytes:
-                check_operator_allocation(guard, "before_stage_b_plane_staging",
-                                          reserve_bytes=staging.reserve_host_bytes)
-            with staging.held():
-                yield staging
+            # signal, passed only for a final pass (PQ #1251). A spill
+            # consumer's final pass reads its incoming rows from the
+            # handoff's stream (PQ #1143), which the pass's backward
+            # admission charges; nothing is read before the first group.
+            source = (handoff_incoming.open(
+                active_probe, max_resident_bytes=incoming_budget,
+                residency_check=storage.reserve_resident)
+                if final and handoff_incoming is not None else nullcontext())
+            with source as stream:
+                try:
+                    staging = PlaneHostStaging(
+                        grad_plane,
+                        [(active_probe, index) for index in range(len(batches))],
+                        group_batches=group_batches, dtype=runner.dtype,
+                        on_store=on_store, incoming=stream)
+                    if guard is not None and staging.reserve_host_bytes:
+                        check_operator_allocation(
+                            guard, "before_stage_b_plane_staging",
+                            reserve_bytes=staging.reserve_host_bytes)
+                    with staging.held():
+                        yield staging
+                finally:
+                    if stream is not None:
+                        counters.handoff_incoming["probes"].append(
+                            dict(stream.telemetry))
 
         def capture_group(group, active_probe, observer, stage):
             # One backward over a batch group (capture_batch > 1), as the
@@ -2467,11 +2526,15 @@ def run_layer_quantum_core(
             # without this signal.
             on_store = (handoff_stream.mark_final
                         if final and handoff_stream is not None else None)
+            if handoff_incoming is not None and not final:
+                raise RuntimeError(
+                    "a streamed incoming plane is read once, by each probe's "
+                    "final pass; a spill row runs no other pass")
             # The pass's staging buffer is admitted and committed before its
             # backward admission reads the guard (PQ #1246).
             with held_plane_staging(active_probe,
                                     capture_batch if grouped else 1,
-                                    on_store=on_store) as stage:
+                                    on_store=on_store, final=final) as stage:
                 replay_pass(stage, final=final, lease=lease, active_probe=active_probe,
                             observer=observer, grouped=grouped)
             counters.replay["layer_passes"] += 1
@@ -2493,8 +2556,11 @@ def run_layer_quantum_core(
             if guard is not None:
                 check_operator_allocation(
                     guard, "before_joint_window_backward",
-                    reserve_bytes=(0 if observer is None
-                                   else spill.capture_reserve_host_bytes),
+                    reserve_bytes=((0 if observer is None
+                                    else spill.capture_reserve_host_bytes)
+                                   # The incoming stream's windows (PQ #1143).
+                                   + (0 if stage.incoming_source is None
+                                      else incoming_budget)),
                     reserve_device_bytes=(
                         retained_budget.capture_workspace_bytes(
                             1 if observer is None else capture_batch)
@@ -2745,6 +2811,18 @@ def run_layer_quantum_core(
                     # production pass would run, then stop the quantum. Its
                     # groups stage through a held buffer as the pass's do
                     # (PQ #1246), committed before the ladder measures any.
+                    # The ladder passes probe 0's incoming rows again and
+                    # again, so a streamed plane is written into the plane
+                    # first, under the phase that stages it (PQ #1143).
+                    if handoff_incoming is not None:
+                        if guard is not None:
+                            check_operator_allocation(
+                                guard, "before_stage_b_handoff_incoming",
+                                reserve_bytes=incoming_budget)
+                        with handoff_incoming.open(
+                                0, max_resident_bytes=incoming_budget,
+                                residency_check=storage.reserve_resident) as stream:
+                            stream.materialize(grad_plane)
                     with counters.io.span("workspace-profile", probe=int(probe_index)), \
                             held_plane_staging(0, capture_batch) as stage:
                         profile_capture_workspace(
