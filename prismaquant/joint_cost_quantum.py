@@ -1376,7 +1376,7 @@ def build_quantum_source_runner(config, *, offload_folder,
     """
     from .cost_streaming import build_streamed_causal_lm
     from .model_profiles import detect_profile
-    from .tessera_joint_aura import _source_prefetch
+    from .tessera_joint_aura import _planned_source_window, _source_prefetch
 
     return build_streamed_causal_lm(
         config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
@@ -1385,6 +1385,7 @@ def build_quantum_source_runner(config, *, offload_folder,
         source_derivative=config["execution"].get("source_derivative"),
         **({"sealed_head_tensors": sealed_head_tensors}
            if sealed_head_tensors is not None else {}),
+        **_planned_source_window(config),
         **_source_prefetch(config))
 
 
