@@ -588,6 +588,25 @@ it raises the site's original exception, with the same type and message. In
 dev mode it prints one `[DEV-MODE]` line that names the first differing field
 and both values, and the run continues.
 
+A re-declared plan has its own path (2026-09-25, `claude/gpu-availability-i1azgo-pq1191`, PQ #1191).
+`dispatch_joint_quanta --execution-plan PATH` names the plan the rows run
+under, for example a Stage B resource re-declare. The records keep naming the
+sealed plan in `campaign.plan_path`, and nothing rewrites that file, so a
+later band prepare still reads it against the sealed digest
+(`prepare_extended_joint_quanta`, `regenerate_joint_quanta --plan-sha256`).
+Before, the only way to hand a row a re-declared plan was to write it over the
+sealed path, and every later prepare refused with "extended plan digest
+mismatch". `with_execution_plan` points every plan read of the dispatch at the
+execution plan: the row's `--plan` and its digest, the Stage A memory bound,
+spool window and output root, the handoff template and the source coverage
+check. `campaign.plan_sha256` stays the sealed digest, which the Stage A proof
+gate and the manifest binding compare with. The execution plan's digest
+against the sealed one goes through `seal_check`: dev mode prints it, and
+certified mode refuses a plan whose bytes differ and runs a byte-identical
+copy. The dry run prints the execution plan's path and digest beside the
+sealed ones under `execution_plan`, and each state event records them. Gate:
+`tests/test_dispatch_execution_plan_1191.py`.
+
 These still refuse in both modes:
 
 - Byte integrity: bytes that do not hash to their stored digest, a record that
@@ -1010,6 +1029,14 @@ said nothing about its own reads between the head and the records.
   every row, with `units` and `rows`; PQ #1187), the runner `teardown`, and
   records out. `counters.json` gains `io_spans`, every span closed before
   the counters are written; on a failure `teardown` reaches the log only.
+  A row that emits a handoff also keeps the emitter's export report in
+  `counters.json` (`handoff_export`, PQ #1225), on success and on failure:
+  per group, the PrismaBuild export key, the bytes and entries, the reserved,
+  submitted, landed and released times, and the seconds the end-of-action
+  drain waited on it (`local_spool.exports`), and the owner's
+  `produced_commit_origin_s`. The key names PrismaBuild's own record of the
+  export (`pb-queue/done/<key>.json`: published, claimed and finished), which
+  is otherwise lost when PrismaBuild retires the spool namespace.
   The power sampler now starts before the head, so the counters' `wall_s`
   and `gpu_joules` include the head.
 - **What the counters see.** `/proc/self/io` covers the process's thread
@@ -2574,6 +2601,21 @@ gone, and `tests/test_pb_generation_pin_1084.py` refuses a second pin file
 naming a bundle, generation or commit another pin names. The Stage A pins
 name older bundles and stay. Test hygiene only: no format, pipeline default,
 stage or ship gate changes.
+Re-stamped (2026-09-25, `perf/1225-drain-tail`) for **a Stage B handoff
+tail that keeps its export records and does not fsync its spool** (PQ
+#1225). The produced-output spool writes its entries without fsync, a
+write-only owner commits each group at its origin as its export lands, the
+spool report (schema v3) keeps one export record per group, and a row's
+`counters.json` keeps the handoff's (`handoff_export`). See "The local
+window", Durability and Barriers, and "Stage B's spans". No format,
+pipeline default, stage, lane or ship gate changes.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1191`) for **a re-declared plan at its own
+path** (PQ #1191): `dispatch_joint_quanta --execution-plan PATH` runs every row
+under that plan while the records keep naming the sealed plan, which is never
+rewritten. Dev mode stamps a differing digest; certified mode refuses it. See
+the entry after "Sealing is off by default". A dispatcher flag is added; no
+format, pipeline default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1129`) for **a spec that pins a
 container cache to the overlay refuses at the joint dispatcher's spec check**
@@ -21996,7 +22038,12 @@ RobTand/tessera has been public since 2026-09-05, and the first receipt is run
 pinned Tessera` fetched `1221d2a4…` and `Install pinned Tessera` reported
 `Successfully installed tessera-quant-0.1.0` in both jobs, and the suite ran
 green (4698 passed, 136 skipped, 3 xfailed, 21m20s). No repository secret
-exists or is wanted for this step (#175). §12 D11.
+exists or is wanted for this step (#175). Only PR runs cancel a superseded
+run: a push to `main` gets a concurrency group of its own and is never
+cancelled or replaced by the next merge, so every merged tree gets a complete
+hosted run (#962; `tests/test_ci_concurrency.py`). The test job is still not a
+required check on `main`, which is branch protection rather than the workflow.
+§12 D11.
 
 ### 8.7 A fourth plug-in point: `FormatCostPlugin` (formats, not models)
 
@@ -24394,6 +24441,20 @@ launches and into its `--env`. The capture recomputes it at bind from the
 live model (`_stage_a_per_tensor_nbytes`) and refuses a sealed bound below it
 or a spool disk with less free space (`ProducedWindowRefused`).
 
+**Durability.** A spool entry is written without fsync, of the file or of
+its directory (`write_exact_activation_cache_entry(durable=False)`, PQ
+#1225). The spool copy is never the only copy of committed work: a group's
+entries count as durable, for progress or an origin commit, only once
+PrismaBuild acknowledged its export, and the export copies with its own
+fsync after it hashed every byte it read against the entry's recorded size
+and sha256. A same-box read (below) checks the size and the sha256 of every
+byte it reads. A new attempt writes into a new spool namespace and never
+opens a previous attempt's files, and PrismaBuild discards an unacknowledged
+group when it retires the namespace. A crash that tears a local file
+therefore fails a check; it never lands. Every other writer of an exact
+entry, and a spool-less owner, still fsyncs file and directory. On Stage B
+row 029, the fsyncs were about 50 s of the writer's 105 s.
+
 **Reads.** `StreamedBoundaryArtifacts.prefetch` splits a window's
 references into the ones this box holds and the rest. The held ones are read
 from their local paths through `prefetch_exact_activation_cache_entries`
@@ -24412,7 +24473,10 @@ no pool bytes.
   look, oldest export first (`poll_oldest`), and progress reports what the
   looks and the waits found acknowledged, in submission order;
 - `settle_local_output` at the capture's end, which drains every export,
-  releases the landed groups and runs the deferred unlinks.
+  releases the landed groups and runs the deferred unlinks. A write-only
+  owner first waits on each complete group in write order and commits it at
+  its origin as soon as its own export lands, so the commits overlap the
+  later exports instead of following the last one (PQ #1225).
 
 Each barrier waits on PrismaBuild's evidence, with no clock
 (`ProducedOutputSpool.await_group`): it waits while `poll_group` reports the
@@ -24422,7 +24486,14 @@ when PrismaBuild reports `export-failed-without-ack`,
 `export-withdrawn-without-ack` or `export-done-without-ack`. Every refusal is
 kept in `produced_output_report()["local_spool"]["refusals"]`, every wait
 that waited in `["waits"]` (the export or the live exports it waited on, and
-its seconds), and every group released for room in `["evictions"]`. A claim
+its seconds), every group released for room in `["evictions"]`, and one
+record per group in `["exports"]` (report schema
+`prismaquant.produced_output_spool.v3`, PQ #1225): its export key, bytes and
+entries, its reserved, submitted, landed and released times, and the seconds
+every barrier, and the `drain` alone, waited on it (`drain_wait_s` in total).
+A landed time is when this client first saw the acknowledgement, at most
+one look after PrismaBuild's own finish, which the export's record keeps. A
+claim
 ahead of the writer that the window declines is counted
 (`window_declines`, with the latest reason). A finished capture seals these
 records into its receipt (`telemetry.produced_output`); a failed one appends
@@ -24689,7 +24760,8 @@ file lands (`BoundaryProducedPublication.commit_origin`, PrismaBuild's
 acknowledged its export, against the identities the export receipt recorded
 (`ProducedOutputSpool.commit_origin`, PrismaBuild's
 `ProducedSpool.commit_origin_group`): entry groups in
-`settle_local_output`, the record group right after its export. The commit
+`settle_local_output`, each as soon as its own export lands (PQ #1225), the
+record group right after its export. The commit
 consumes the group's prewrite, and the batch keeps its durable charge and
 path ownership until PrismaBuild reclaims it. The emitter's `results.json`
 record carries the batch refs in commit order (`origin_batches`: owner
