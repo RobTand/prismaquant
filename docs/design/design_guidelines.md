@@ -68,6 +68,12 @@ or the established streaming activation cache paths. New features must not
 introduce parallel cache stores, independent preload systems, or duplicate
 key-resolution logic.
 
+The same holds for moving bytes. Reads, verification, writes and their thread
+pools belong to one engine, `prismaquant/io_engine.py` (PQ #1294).
+`tests/test_io_site_freeze.py` freezes the thread and executor sites that
+predate it: a new pool anywhere else fails the test, and the allowlist only
+shrinks.
+
 If a call site needs different behavior, add a shared method to the existing
 cache abstraction and reuse it everywhere.
 
