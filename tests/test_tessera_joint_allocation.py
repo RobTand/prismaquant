@@ -255,3 +255,86 @@ def test_file_handoff_authenticates_owned_bytes_and_preserves_original(tmp_path,
     result = pickle.loads(output.read_bytes())
     assert result['stats'] == joint['stats']
     assert receipt['joint_fields_unchanged'] and receipt['research_only']
+
+
+def _share_one_probe(joint):
+    """Rows of a real joined table share one probe object per quantum:
+    pickle keeps the reference. The fixture builds an equal copy per row."""
+    rows = [row for per_unit in joint['costs'].values() for row in per_unit.values()]
+    shared = rows[0]['probe_identity']
+    for row in rows:
+        assert row['probe_identity'] == shared
+        row['probe_identity'] = shared
+    return len(rows)
+
+
+def test_bind_compares_a_shared_probe_identity_once(monkeypatch):
+    """PQ #1256: on GLM-5.3 a probe's source model is 8.9 MB of weight map;
+    the bind compared it once per row (about 400k rows)."""
+    from prismaquant import tessera_joint_allocation as handoff_module
+    joint, data, prepared, metadata, kwargs = fixture()
+    rows = _share_one_probe(joint)
+    labels = []
+    same = handoff_module._same
+
+    def counted(left, right, label):
+        labels.append(label)
+        return same(left, right, label)
+
+    monkeypatch.setattr(handoff_module, '_same', counted)
+    handoff_module.bind_allocation_payload(joint, data, prepared, metadata, **kwargs)
+    assert len([label for label in labels if label.endswith(': source model')]) == 1 < rows
+
+
+def test_file_handoff_validates_a_shared_probe_identity_once(tmp_path, monkeypatch):
+    """PQ #1256: the handoff re-validated the probe's source model for every
+    row's currency check (119 ms each on GLM-5.3, about 13 h in total)."""
+    import hashlib
+    import json
+    import pickle
+    from prismaquant import cost_streaming
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    from prismaquant.tessera_joint_allocation import handoff
+
+    joint, data, prepared, metadata, _kwargs = fixture()
+    rows = _share_one_probe(joint)
+    shared = next(iter(next(iter(joint['costs'].values())).values()))['probe_identity']
+    original_probe = copy.deepcopy(shared)
+
+    def write_bound(name, raw):
+        path = tmp_path / name
+        path.write_bytes(raw)
+        return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
+
+    plan = {'schema': bridge.SCHEMA, 'inputs': data.inputs, 'calibration_input': {'sha256': '3'*64}}
+    plan_binding = write_bound('plan.json', json.dumps(plan).encode())
+    prepared['plan_sha256'] = plan_binding['sha256']
+    prepared['calibration_input']['artifact_sha256'] = '3'*64
+    for pair, cell in data.cells.items():
+        cell['render'] = '/fixture/' + pair[0] + '.pt'
+    cache = ProductionWeightCache(weights={pair: cell['render'] for pair, cell in data.cells.items()},
+                                  levers={}, metadata=metadata)
+    prepared['production_cache'] = write_bound('production.pkl', pickle.dumps(cache))
+    prepared_binding = write_bound('prepared.json', json.dumps(prepared).encode())
+    joint['provenance']['tessera_joint_anchors'].update(
+        plan_sha256=plan_binding['sha256'], prepared=prepared_binding,
+        calibration_input=prepared['calibration_input'])
+    joint_binding = write_bound('joint.pkl', pickle.dumps(joint))
+    monkeypatch.setattr(bridge, 'load_measured_anchor_input', lambda inputs, *, verify_payloads: data)
+    calls = []
+    validate = cost_streaming.validate_streamed_model_identity
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get('where'))
+        return validate(*args, **kwargs)
+
+    monkeypatch.setattr(cost_streaming, 'validate_streamed_model_identity', counted)
+    output = tmp_path / 'allocation.pkl'
+    handoff(joint_binding=joint_binding, plan_binding=plan_binding, output_path=output)
+    assert len([where for where in calls if where == 'joint AURA row']) == 1 < rows
+    result = pickle.loads(output.read_bytes())
+    for per_unit in result['costs'].values():
+        for row in per_unit.values():
+            assert type(row['probe_identity']) is dict
+            assert row['probe_identity'] == original_probe
