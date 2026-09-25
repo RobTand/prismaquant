@@ -167,7 +167,8 @@ def emit_handoff(producer, storage, publication, *, emitters=None):
     if emitters is not None:
         emitters.append(emitter)
     published = emitter.emit(grad_plane=plane, cotangent_owners=owners,
-                             n_probes=N_PROBES, n_batches=N_BATCHES)
+                             n_probes=N_PROBES, n_batches=N_BATCHES,
+                             kda_capture_kernel=None)
     return published, plane
 
 
@@ -178,7 +179,8 @@ def check_consumer_binds(published, plane, consumer, publication):
 
     handoff = load_quantum_handoff(published["path"], published["sha256"],
                                    record=consumer,
-                                   adjoint_slice=_adjoint_slice(consumer))
+                                   adjoint_slice=_adjoint_slice(consumer),
+                                   kda_capture_kernel=None)
     for entry in handoff["activation_entries"]:
         assert publication.contains(Path(entry["path"]))
         coordinates = entry["metadata"]["identity"]["coordinates"]

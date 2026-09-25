@@ -211,8 +211,7 @@ def _run(campaign, monkeypatch, *, layer, regime, spill_root, handoff=None,
                    if emit else None)
         bound = (None if handoff is None else load_quantum_handoff(
             handoff["path"], handoff["sha256"], record=record,
-            adjoint_slice=adjoint_slice,
-            **({} if kernel is None else {"kda_capture_kernel": kernel})))
+            adjoint_slice=adjoint_slice, kda_capture_kernel=kernel))
         payload = original(*args, record=record, adjoint_slice=adjoint_slice,
                            execution=execution, adjoint_handoff=bound,
                            handoff_emitter=emitter, **kwargs)
@@ -512,7 +511,7 @@ def test_a_consumer_refuses_a_handoff_captured_at_another_batch(
     assert document["producer"]["capture_batch"] == 4
     record, adjoint_slice = campaign4.records[0], campaign4.slices[0]
     load_quantum_handoff(handoff["path"], handoff["sha256"], record=record,
-                         adjoint_slice=adjoint_slice)
+                         adjoint_slice=adjoint_slice, kda_capture_kernel=None)
 
     def at_batch_one(document):
         document["producer"]["capture_batch"] = 1
@@ -523,8 +522,8 @@ def test_a_consumer_refuses_a_handoff_captured_at_another_batch(
     with pytest.raises(QuantumHandoffRefused, match="batch size 4.*captured at batch 1"):
         twin = _tampered(handoff, at_batch_one, "batch-one")
         load_quantum_handoff(twin["path"], twin["sha256"], record=record,
-                             adjoint_slice=adjoint_slice)
+                             adjoint_slice=adjoint_slice, kda_capture_kernel=None)
     with pytest.raises(QuantumHandoffRefused, match="records no capture batch"):
         twin = _tampered(handoff, unstamped, "unstamped")
         load_quantum_handoff(twin["path"], twin["sha256"], record=record,
-                             adjoint_slice=adjoint_slice)
+                             adjoint_slice=adjoint_slice, kda_capture_kernel=None)

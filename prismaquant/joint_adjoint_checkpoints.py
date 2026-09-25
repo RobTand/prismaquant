@@ -1933,7 +1933,7 @@ def render_free_layer_roll(
     runner, *, storage, batches, layer, cotangents, n_probes,
     incoming_entries, incoming_tensor, roll, min_free_gib: float = 0.0,
     then=None, batch_size: int = 1, probe_fusion: bool = False,
-    roll_may_keep: bool = True, on_durable=None,
+    roll_may_keep: bool = True, on_durable=None, layer_pass=None,
 ) -> int:
     """Roll the cotangent through one layer with no renders and no projection.
 
@@ -2002,6 +2002,14 @@ def render_free_layer_roll(
     that only stores the row in memory reports a row in memory. A row whose
     ``roll`` raised, and a row still waiting when the roll fails, is never
     reported. ``None`` (the default) reports nothing.
+
+    ``layer_pass(backwards=n)``, when given, returns the context each layer
+    pass runs in: one forward and its ``n`` backwards, ``n`` being one per
+    unfused or batched pass and ``n_probes`` per fused pass. A Stage B
+    quantum in KDA kernel mode passes its admitted kernel's
+    (``AdmittedKdaKernel.layer_pass``, PQ #1214); Stage A passes none, so
+    its planes stay the fallback's. ``None`` (the default) runs every pass
+    as before.
     """
     regime = normalize_chain_regime(batch_size, probe_fusion)
     # Staging only, never order: every probe pass below re-reads this
@@ -2027,7 +2035,7 @@ def render_free_layer_roll(
                 incoming_entries=incoming_entries,
                 incoming_tensor=incoming_tensor, pipeline=pipeline,
                 min_free_gib=min_free_gib, then=then,
-                batch_size=regime["batch_size"])
+                batch_size=regime["batch_size"], layer_pass=layer_pass)
         else:
             with (retain(int(layer)) if retain is not None else nullcontext()):
                 backwards = _render_free_probe_passes(
@@ -2036,7 +2044,7 @@ def render_free_layer_roll(
                     incoming_entries=incoming_entries,
                     incoming_tensor=incoming_tensor, pipeline=pipeline,
                     min_free_gib=min_free_gib, then=then,
-                    batch_size=regime["batch_size"])
+                    batch_size=regime["batch_size"], layer_pass=layer_pass)
         # Every window drained its own rows; nothing waits here.
         pipeline.drain()
     except BaseException as failure:
@@ -2048,6 +2056,11 @@ def render_free_layer_roll(
             failure.add_note(f"chain roll cleanup also failed: {cleanup!r}")
         raise
     return backwards
+
+
+def _layer_pass_context(layer_pass, backwards):
+    """The context one chain layer pass runs in: the caller's, else none."""
+    return nullcontext() if layer_pass is None else layer_pass(backwards=backwards)
 
 
 def _chain_free_floor(min_free_gib, layer, where):
@@ -2244,7 +2257,7 @@ class _RollPipeline:
 def _render_free_probe_passes(
     runner, *, storage, batches, layer, cotangents, n_probes,
     incoming_entries, incoming_tensor, pipeline, min_free_gib, then=None,
-    batch_size=1,
+    batch_size=1, layer_pass=None,
 ) -> int:
     """The probe passes of :func:`render_free_layer_roll`, probe-major.
 
@@ -2279,7 +2292,7 @@ def _render_free_probe_passes(
                         runner, item, layer=layer, probe_index=probe_index,
                         cotangents=cotangents, entries=entries,
                         incoming_tensor=incoming_tensor, pipeline=pipeline,
-                        min_free_gib=min_free_gib)
+                        min_free_gib=min_free_gib, layer_pass=layer_pass)
                     # The window's tensors are dropped here, as the
                     # pre-#997 loop dropped them in its ``finally``.
                     item = None
@@ -2293,14 +2306,15 @@ def _render_free_probe_passes(
                         runner, group, batches=batches, layer=layer,
                         probe_index=probe_index, cotangents=cotangents,
                         entries=entries, incoming_tensor=incoming_tensor,
-                        pipeline=pipeline, min_free_gib=min_free_gib, cache=groups)
+                        pipeline=pipeline, min_free_gib=min_free_gib, cache=groups,
+                        layer_pass=layer_pass)
                 finally:
                     group = None
     return backwards
 
 
 def _roll_one(runner, item, *, layer, probe_index, cotangents, entries,
-              incoming_tensor, pipeline, min_free_gib) -> int:
+              incoming_tensor, pipeline, min_free_gib, layer_pass=None) -> int:
     """One (probe, batch) backward: the roll as it ran before #997."""
     profile = runner.profile
     device, dtype = runner.device, runner.dtype
@@ -2317,9 +2331,10 @@ def _roll_one(runner, item, *, layer, probe_index, cotangents, entries,
         isolated = profile.isolated_layer_pass_state(
             batch.shared_pass_state, runner.layers[layer])
         isolated = owner.graft(isolated)
-        out = runner.isolated_layer(batch, layer, x_in, pass_state=isolated)
-        roots, root_grads = owner.produced_roots()
-        torch.autograd.backward([out, *roots], [incoming_grad, *root_grads])
+        with _layer_pass_context(layer_pass, 1):
+            out = runner.isolated_layer(batch, layer, x_in, pass_state=isolated)
+            roots, root_grads = owner.produced_roots()
+            torch.autograd.backward([out, *roots], [incoming_grad, *root_grads])
         owner.harvest()
         _chain_rng_fence(saved, device)
         if x_in.grad is None:
@@ -2333,14 +2348,15 @@ def _roll_one(runner, item, *, layer, probe_index, cotangents, entries,
 
 
 def _roll_group(runner, group, *, batches, layer, probe_index, cotangents,
-                entries, incoming_tensor, pipeline, min_free_gib, cache) -> int:
+                entries, incoming_tensor, pipeline, min_free_gib, cache,
+                layer_pass=None) -> int:
     """One probe's backward for a batch group (B > 1), split back per batch."""
     if len(group) == 1:
         return _roll_one(
             runner, group[0], layer=layer, probe_index=probe_index,
             cotangents=cotangents, entries=entries,
             incoming_tensor=incoming_tensor, pipeline=pipeline,
-            min_free_gib=min_free_gib)
+            min_free_gib=min_free_gib, layer_pass=layer_pass)
     device, dtype = runner.device, runner.dtype
     indices = [item[0] for item in group]
     _require_per_sample_state(
@@ -2356,8 +2372,9 @@ def _roll_group(runner, group, *, batches, layer, probe_index, cotangents,
         x_in = _stage_to_device([item[2] for item in group], device=device,
                                 dtype=dtype).detach().requires_grad_(True)
         batch = _chain_group_batch(runner, batches, indices, cache)
-        out = runner.isolated_layer(batch, layer, x_in, pass_state={})
-        torch.autograd.backward([out], [incoming_grad])
+        with _layer_pass_context(layer_pass, 1):
+            out = runner.isolated_layer(batch, layer, x_in, pass_state={})
+            torch.autograd.backward([out], [incoming_grad])
         _chain_rng_fence(saved, device)
         if x_in.grad is None:
             raise RuntimeError(
@@ -2372,7 +2389,7 @@ def _roll_group(runner, group, *, batches, layer, probe_index, cotangents,
 def _render_free_fused_passes(
     runner, *, storage, batches, layer, cotangents, n_probes,
     incoming_entries, incoming_tensor, pipeline, min_free_gib, then=None,
-    batch_size=1,
+    batch_size=1, layer_pass=None,
 ) -> int:
     """The fused roll: one forward per batch group, one backward per probe.
 
@@ -2414,25 +2431,28 @@ def _render_free_fused_passes(
                     boundary = None
                     batch = (batches[members[0]] if len(members) == 1
                              else _chain_group_batch(runner, batches, members, groups))
-                    out = runner.isolated_layer(batch, layer, x_in, pass_state={})
-                    for probe_index in range(n_probes):
-                        incoming = [incoming_tensor(probe_index, index)
-                                    if incoming_entries is None
-                                    else incoming_of(probe_index, index)
-                                    for index in members]
-                        incoming_grad = _stage_to_device(incoming, device=device)
-                        incoming = None
-                        x_in.grad = None
-                        torch.autograd.backward(
-                            [out], [incoming_grad],
-                            retain_graph=probe_index + 1 < n_probes)
-                        if x_in.grad is None:
-                            raise RuntimeError(
-                                f"render-free chain layer {layer} produced no "
-                                "input cotangent")
-                        pipeline.submit(x_in.grad, members, probe_index)
-                        incoming_grad = None
-                        backwards += len(members)
+                    # One layer pass: the forward and every probe's backward
+                    # on its retained graph.
+                    with _layer_pass_context(layer_pass, n_probes):
+                        out = runner.isolated_layer(batch, layer, x_in, pass_state={})
+                        for probe_index in range(n_probes):
+                            incoming = [incoming_tensor(probe_index, index)
+                                        if incoming_entries is None
+                                        else incoming_of(probe_index, index)
+                                        for index in members]
+                            incoming_grad = _stage_to_device(incoming, device=device)
+                            incoming = None
+                            x_in.grad = None
+                            torch.autograd.backward(
+                                [out], [incoming_grad],
+                                retain_graph=probe_index + 1 < n_probes)
+                            if x_in.grad is None:
+                                raise RuntimeError(
+                                    f"render-free chain layer {layer} produced no "
+                                    "input cotangent")
+                            pipeline.submit(x_in.grad, members, probe_index)
+                            incoming_grad = None
+                            backwards += len(members)
                     _chain_rng_fence(saved, device)
                 finally:
                     boundary = incoming = None
