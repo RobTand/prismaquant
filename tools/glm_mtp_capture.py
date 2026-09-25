@@ -100,6 +100,19 @@ def _peak_memory():
             "max_reserved_bytes": int(torch.cuda.max_memory_reserved())}
 
 
+def _progress(label, total):
+    """A reporter that prints about sixteen lines over ``total`` sequences."""
+    started = time.monotonic()
+    step = max(1, int(total) // 16)
+
+    def report(done):
+        if done % step == 0 or done == total:
+            print(f"{label} {done}/{total} sequences, {time.monotonic() - started:.0f} s",
+                  flush=True)
+
+    return report
+
+
 def _plan_inputs(args):
     """The plan, the calibration draw and the canonical capture's source owner."""
     from prismaquant import glm_mtp_capture as cap
@@ -153,13 +166,16 @@ def final_hidden_phase(args):
             runner.context.install(layer, require_prefetched=runner.require_prefetched_residency,
                                    prefetch_following=False)
             installed = time.monotonic()
+            print(f"[mtp-final-hidden] layer {layer} installed in {installed - started:.0f} s",
+                  flush=True)
             session = cap.final_hidden_session(run_identity)
             records, head_check = cap.write_final_hidden(
                 runner, ids,
                 cap.ordered_boundary_records(boundaries, int(ids.shape[0]), layer=layer),
                 boundary_session=boundaries["session"], layer=layer, out_dir=args.out,
                 session=session, read_ahead_bytes=int(args.read_ahead_mb) << 20,
-                head=runner._head())
+                head=runner._head(),
+                progress=_progress("[mtp-final-hidden]", int(ids.shape[0])))
             witness = runner.context.source_selected_initialization_witness([layer])
         finally:
             runner.shutdown()
@@ -264,6 +280,8 @@ def capture_phase(args):
             weight.to(device=device, dtype=torch.bfloat16), freeze=True)
         del weight
         loaded = time.monotonic()
+        print(f"[mtp-capture] layer {layer.layer_idx} loaded in {loaded - started:.0f} s",
+              flush=True)
         contract = glm_mtp.mtp_layer_initialization_contract(layer, receipt,
                                                              input_manifest=final_ref)
         wrapper = glm_mtp.MtpCheckpointModel(layer)
@@ -274,11 +292,19 @@ def capture_phase(args):
         print(f"[mtp-capture] projection checked on {len(checked)} routed units", flush=True)
         read, stream = cap.final_hidden_stream(final, int(ids.shape[0]),
                                                read_ahead_bytes=int(args.read_ahead_mb) << 20)
+        report = _progress("[mtp-capture] capture", int(ids.shape[0]))
+
+        def reporting_read(index):
+            value = read(index)
+            report(index + 1)
+            return value
+
         with closing(stream):
             rows, hessians, counts, maxima = cap.capture_mtp_layer(
-                wrapper, embed, ids, read, units=units, profile=profile, device=device,
-                max_act_rows=manifest["identity"]["max_act_rows"])
+                wrapper, embed, ids, reporting_read, units=units, profile=profile,
+                device=device, max_act_rows=manifest["identity"]["max_act_rows"])
         captured = time.monotonic()
+        print(f"[mtp-capture] captured in {captured - loaded:.0f} s; publishing", flush=True)
         census = cap.mtp_census(
             base_census=base, base_census_ref=plan["inputs"]["census"],
             canonical_capture_ref=plan["canonical_capture"], final_hidden_ref=final_ref,
@@ -295,6 +321,7 @@ def capture_phase(args):
             completed_contract=glm_mtp.mtp_layer_initialization_contract(
                 layer, receipt, input_manifest=final_ref))
         authentication = owner.receipt()
+        print(f"[mtp-capture] published in {time.monotonic() - captured:.0f} s", flush=True)
     finally:
         owner.close()
     routed = [n for n in units if ".mlp.experts." in n]

@@ -167,7 +167,7 @@ def ordered_boundary_records(manifest, n_sequences, *, layer):
 
 
 def write_final_hidden(runner, calibration_ids, boundary_records, *, boundary_session,
-                       layer, out_dir, session, read_ahead_bytes, head=None):
+                       layer, out_dir, session, read_ahead_bytes, head=None, progress=None):
     """Phase 1: every sequence's post-final-norm hidden state, as exact entries.
 
     ``boundary_records`` come from :func:`ordered_boundary_records`. They are
@@ -175,6 +175,9 @@ def write_final_hidden(runner, calibration_ids, boundary_records, *, boundary_se
     it is used. ``head`` is the target's ``lm_head``: when given, each
     sequence's next-token top-1 agreement and NLL are recorded beside its
     entry, a check that the hidden state is the one the head reads.
+
+    ``progress``, when given, is called with the count of sequences written
+    after each one.
 
     Returns ``(records, head_check)``. Refuses an output directory that
     already holds entries: a retry writes to a new one.
@@ -220,6 +223,8 @@ def write_final_hidden(runner, calibration_ids, boundary_records, *, boundary_se
                 max_tensor_bytes=value.numel() * value.element_size(),
                 max_file_bytes=value.numel() * value.element_size() + (1 << 16))
             records.append(exact_entry_record(reference))
+            if progress is not None:
+                progress(index + 1)
     return records, head_check
 
 
