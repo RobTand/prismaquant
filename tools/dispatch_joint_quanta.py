@@ -25,6 +25,7 @@ other re-publication is a CAS attach to the same sealed action key, never a
 repartition.
 
 ``--dry-run`` prints the submission plan with digests and submits nothing.
+Its stdout is that one JSON document; every log line goes to stderr.
 It writes nothing either: a band-serial row's handoff template and readset
 are derived and printed with their digests, never published (PQ #1200).
 
@@ -36,6 +37,7 @@ call after the runtime's cutover check; this tool's tests use fixtures.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import gzip
 import hashlib
 import json
@@ -3336,7 +3338,20 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
     parser.add_argument("--state", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if not args.dry_run:
+        return _dispatch(args, _gateway=_gateway, _coverage=_coverage,
+                         report=sys.stdout)
+    # A dry run's stdout is its plan, one JSON document (PQ #1087). Every
+    # line printed while deriving it -- a helper's progress, a [DEV-MODE]
+    # stamp -- is a log, and goes to stderr.
+    report = sys.stdout
+    with contextlib.redirect_stdout(sys.stderr):
+        return _dispatch(args, _gateway=_gateway, _coverage=_coverage,
+                         report=report)
 
+
+def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
+    """Run ``main`` on parsed ``args``; ``report`` receives the dry-run plan."""
     gateway = _gateway if _gateway is not None else Gateway()
     if args.spec:
         global SPEC_PATH
@@ -3568,7 +3583,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                                        if row["kind"] == "quantum" else {}),
                                     "argv": row["argv"]}
                                    for row in rows]},
-                         indent=2, sort_keys=True))
+                         indent=2, sort_keys=True), file=report)
         return 0
 
     try:

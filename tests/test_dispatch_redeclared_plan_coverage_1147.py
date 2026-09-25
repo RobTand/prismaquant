@@ -146,13 +146,16 @@ def test_dev_mode_dry_run_reads_a_re_declared_plan(
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     code, out, err = _main(dispatch, argv, capsys)
     assert code == 0, err
-    assert f"[DEV-MODE] seal campaign plan differs (readset coverage at {plan_path})" in out
+    # The [DEV-MODE] stamps are logs: a dry run's stdout is its plan alone,
+    # one JSON document (PQ #1087).
+    assert "[DEV-MODE]" not in out
+    assert f"[DEV-MODE] seal campaign plan differs (readset coverage at {plan_path})" in err
     # quantum_argv stamps the plan once: the resource-bound seal, or the
     # record digest it replaces in a plain plan's argv.
-    assert ("[DEV-MODE] seal resource-bound plan differs" in out) is resource_bound
+    assert ("[DEV-MODE] seal resource-bound plan differs" in err) is resource_bound
     assert ("[DEV-MODE] seal record plan differs (quantum 'layer-002' argv)"
-            in out) is not resource_bound
-    rows = json.loads(out[out.index("{\n"):])["rows"]
+            in err) is not resource_bound
+    rows = json.loads(out)["rows"]
     assert [row["quantum_id"] for row in rows] == ["layer-002"]
     # The row names the files on disk by their digests, which is what the
     # quantum's byte check (joint_cost_quantum.verify_quantum_identity)
@@ -170,7 +173,7 @@ def test_certified_mode_refuses_a_re_declared_plan(
     plan_path.write_text(json.dumps(json.loads(plan_path.read_text()), indent=2))
     code, out, err = _main(dispatch, argv, capsys)
     assert code == dispatch.EXIT_PRECONDITION_REFUSED
-    assert "[DEV-MODE]" not in out
+    assert "[DEV-MODE]" not in out + err
     if resource_bound:
         # The row's own seal refuses first, as before #1147.
         assert "resource-bound plan differs from its quantum seal" in err

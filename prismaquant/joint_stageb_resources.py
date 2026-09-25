@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pickle
+import sys
 from pathlib import Path
 
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
@@ -180,13 +181,13 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
         key_costs[pair] = {"incoming_storage_bytes": fence[3], "serialized_bytes": fence[3]}
     io_workers = min(8, max(1, 2 * len(os.sched_getaffinity(0))))
     if recorded is None:
-        print(f"resource geometry: observing {len(paths)} candidate file sizes with {io_workers} bounded I/O readers", flush=True)
+        print(f"resource geometry: observing {len(paths)} candidate file sizes with {io_workers} bounded I/O readers", file=sys.stderr, flush=True)
         _drive_ordered_units(sorted(paths), observe_file, record_file, workers=io_workers)
     else:
         for pair in sorted(paths):
             record_file(pair, observe_file(pair))
     mode = "observed" if recorded is None else "reused sealed observations for"
-    print(f"resource geometry: {mode} {len(file_rows)} files; deriving {len(by_layer)} layers", flush=True)
+    print(f"resource geometry: {mode} {len(file_rows)} files; deriving {len(by_layer)} layers", file=sys.stderr, flush=True)
     maxima = {**cache.activation_max_abs, FORMAT_MAXIMA_KEY: {FORMAT: activation["effective_max_abs"]}}
     targets = {}
     for layer, names in sorted(by_layer.items()):
