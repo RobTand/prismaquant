@@ -446,9 +446,13 @@ def _mtp_routed(env):
 
 
 @pytest.fixture
-def mtp_source(tmp_path, monkeypatch):
+def mtp_source(request, tmp_path, monkeypatch):
     """A two-layer GLM checkpoint plus its MTP layer (index 2), a body census
-    and a complete canonical capture over one body unit."""
+    and a complete canonical capture over one body unit.
+
+    The MTP layer is stored in float32 unless the test asks for another dtype
+    (``indirect`` parametrization)."""
+    mtp_dtype = getattr(request, "param", torch.float32)
     import prismaquant.model_profiles.glm5_next as glm5_profile
     from safetensors import safe_open
     from transformers import AutoConfig
@@ -477,7 +481,7 @@ def mtp_source(tmp_path, monkeypatch):
     _randomize(mtp, 20260927)
     with torch.no_grad():
         mtp.mlp.gate.e_score_correction_bias.mul_(0.05)
-    mtp = mtp.to(torch.float32).eval()
+    mtp = mtp.to(mtp_dtype).eval()
     mtp_state = _per_expert_checkpoint(mtp)
     save_file({key: value.contiguous() for key, value in mtp_state.items()},
               str(source / "model-mtp.safetensors"))
@@ -818,6 +822,10 @@ def test_derived_census_must_name_the_canonical_source(mtp_source, tmp_path):
         owner.close()
 
 
+# The CLI loads the MTP layer in BF16, as the body's source runner does, and the
+# projection check compares the loaded experts byte for byte with the source.
+# GLM-5.3-Flash's checkpoint is BF16, so the tiny MTP layer is stored in BF16 here.
+@pytest.mark.parametrize("mtp_source", [torch.bfloat16], indirect=True)
 def test_cli_runs_both_phases_from_the_body_plan(mtp_source, monkeypatch):
     """``tools/glm_mtp_capture`` reads the body's plan, its boundary entries
     and its prepared dispatch, and publishes a capture a consumer accepts."""
