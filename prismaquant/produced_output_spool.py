@@ -52,6 +52,13 @@ that waited and every group released for room is kept as a record
 (``report()["refusals"]``, ``["waits"]``, ``["evictions"]``); a claim ahead
 of the writer that the window declines is counted, with its latest reason.
 
+Every group also keeps its export record (``report()["exports"]``, PQ
+#1225): the export action's key, the bytes and entries it carries, and when
+it was reserved, submitted, seen landed and released, with the seconds a
+barrier waited on it. The key names PrismaBuild's own record of the export
+(``pb-queue/done/<key>.json``: published, claimed and finished), which is
+otherwise lost when PrismaBuild retires the spool namespace.
+
 Because PB's ``release_group`` re-checks every landed destination against
 the export's receipt, a retired entry's canonical file must outlive the
 group's release. The owner therefore unlinks it only once ``released``
@@ -193,7 +200,8 @@ class ProducedOutputSpool:
         self.refusals = []
         self.waits = []
         self.evictions = []
-        self.telemetry = {"export_wait_s": 0.0, "window_wait_s": 0.0,
+        self.telemetry = {"export_wait_s": 0.0, "drain_wait_s": 0.0,
+                          "window_wait_s": 0.0,
                           "export_waits": 0, "window_waits": 0,
                           "window_declines": 0, "last_window_decline": None,
                           "release_held_s": 0.0, "release_held_max_s": 0.0,
@@ -300,7 +308,10 @@ class ProducedOutputSpool:
                             directory=Path(directory), references=[], submitted=False,
                             durable=False, released=False,
                             ceiling_bytes=int(ceiling_bytes), sequence=self._sequence,
-                            read_back=False, retired=set(), reading=0)
+                            read_back=False, retired=set(), reading=0,
+                            reserved_unix=time.time(), submitted_unix=None,
+                            landed_unix=None, released_unix=None,
+                            export_wait_s=0.0, drain_wait_s=0.0)
                         return Path(directory)
                 if waited is None:
                     waited = time.monotonic()
@@ -365,6 +376,7 @@ class ProducedOutputSpool:
             if not answer.get("ok"):
                 self._refuse(batch_id, answer, where="submit")
             group["submitted"] = True
+            group["submitted_unix"] = time.time()
             group["export_key"] = answer.get("export_key")
             self._pending.add(batch_id)
 
@@ -388,6 +400,10 @@ class ProducedOutputSpool:
                 return False
             # Only the backend's verified durable receipt establishes this.
             group["durable"] = True
+            # When this client first saw the acknowledgement: at most one
+            # look (``POLL_S``, or one write's poll) after PrismaBuild's own
+            # finish, which the export's record keeps.
+            group["landed_unix"] = time.time()
             group["export_key"] = answer.get("export_key") or group.get("export_key")
             self._pending.discard(batch_id)
             self._durable_progress.extend(ref for _, ref, _ in group["references"])
@@ -420,6 +436,7 @@ class ProducedOutputSpool:
         if not answer.get("ok"):
             raise ProducedOutputSpoolRefused(f"PB retained local export debt: {answer!r}")
         group["released"] = True
+        group["released_unix"] = time.time()
         for _, canonical, _ in group["references"]:
             self._local.pop(canonical.path, None)
         group["references"] = [(None, canonical, artifact_class)
@@ -545,8 +562,14 @@ class ProducedOutputSpool:
                 seconds = time.monotonic() - started
                 self.telemetry["export_wait_s"] += seconds
                 self.telemetry["export_waits"] += 1
+                if where == "drain":
+                    self.telemetry["drain_wait_s"] += seconds
                 with self._lock:
-                    export_key = self._groups[batch_id].get("export_key")
+                    group = self._groups[batch_id]
+                    group["export_wait_s"] += seconds
+                    if where == "drain":
+                        group["drain_wait_s"] += seconds
+                    export_key = group.get("export_key")
                 self.waits.append({"kind": "export", "batch_id": str(batch_id),
                                    "export_key": export_key, "where": str(where),
                                    "seconds": seconds, "unix": time.time()})
@@ -705,10 +728,41 @@ class ProducedOutputSpool:
             group = self._groups.get(batch_id)
             return group is not None and not group["released"]
 
+    def export_records(self):
+        """One record per group, in the order the groups were reserved.
+
+        What a row's counters keep of its exports (PQ #1225): the export
+        action's key, the bytes and entries it carries, the unix times it
+        was reserved, submitted, seen landed and released (None until
+        then), and the seconds any barrier, and the end-of-action ``drain``
+        alone, waited on it. Reads no export state.
+        """
+        with self._lock:
+            records = []
+            for batch_id, group in sorted(self._groups.items(),
+                                          key=lambda item: item[1]["sequence"]):
+                references = group["references"]
+                records.append({
+                    "batch_id": str(batch_id),
+                    "export_key": group.get("export_key"),
+                    "entries": len(references),
+                    "bytes": sum(int(canonical.file_bytes)
+                                 for _, canonical, _ in references),
+                    "ceiling_bytes": group["ceiling_bytes"],
+                    "reserved_unix": group["reserved_unix"],
+                    "submitted_unix": group["submitted_unix"],
+                    "landed_unix": group["landed_unix"],
+                    "released_unix": group["released_unix"],
+                    "export_wait_s": group["export_wait_s"],
+                    "drain_wait_s": group["drain_wait_s"],
+                })
+            return records
+
     def report(self):
+        exports = self.export_records()
         with self._lock:
             held = [g for g in self._groups.values() if not g["released"]]
-            return dict(schema="prismaquant.produced_output_spool.v2",
+            return dict(schema="prismaquant.produced_output_spool.v3",
                         groups=len(self._groups),
                         durable_groups=sum(g["durable"] for g in self._groups.values()),
                         pending_groups=len(held),
@@ -718,4 +772,5 @@ class ProducedOutputSpool:
                         refusals=[dict(record) for record in self.refusals],
                         waits=[dict(record) for record in self.waits],
                         evictions=[dict(record) for record in self.evictions],
+                        exports=exports,
                         **{key: value for key, value in self.telemetry.items()})

@@ -305,3 +305,161 @@ def test_a_window_nothing_can_free_refuses_at_once_with_a_record(tmp_path):
     (record,) = adapter.report()["refusals"]
     assert (record["batch_id"], record["state"]) == ("two", "window-full-no-live-export")
     assert adapter.holds("one")
+
+
+# --- PQ #1225: the Stage B handoff tail ------------------------------------
+#
+# Row 029 held its GPU 324 s in ``handoff-out``: about 50 s of per-file and
+# per-directory fsync on spool entries PrismaBuild copies and hashes anyway,
+# 204 s waiting on exports admitted one at a time, then 32 origin commits in
+# a row after the last export. The export keys that name PrismaBuild's own
+# records of those exports were nowhere in the row's output.
+
+def _synced_paths(monkeypatch):
+    """Record the path behind every descriptor ``os.fsync`` is given."""
+    synced = []
+    real = os.fsync
+
+    def fsync(descriptor):
+        synced.append(os.readlink(f"/proc/self/fd/{descriptor}"))
+        return real(descriptor)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    return synced
+
+
+def test_a_spool_entry_is_written_without_fsync(tmp_path, monkeypatch):
+    """The spool copy is never the only copy of committed work: PrismaBuild
+    hashes every byte it exports, and a same-box read hashes every byte it
+    reads. An fsync of it only holds the writer."""
+    owner, _publication, _backend = _owner(tmp_path, monkeypatch)
+    synced = _synced_paths(monkeypatch)
+    chain._write_group(owner)
+    local = os.path.realpath(tmp_path / "local")
+    assert len(list(Path(local).rglob("*.pt"))) == chain.GROUP_SIZE
+    assert [path for path in synced if path.startswith(local)] == []
+
+
+def test_an_entry_outside_the_spool_is_still_fsynced(tmp_path, monkeypatch):
+    """Without a spool the written file is the only copy: file and directory
+    are both fsynced before the entry is returned."""
+    synced = _synced_paths(monkeypatch)
+    directory = tmp_path / "canonical"
+    reference = write_exact_activation_cache_entry(
+        directory, "entry", torch.arange(8), identity={"session": "fixture"},
+        max_tensor_bytes=64, max_file_bytes=65536)
+    # The file under its temporary name, then the directory that names it.
+    assert os.path.realpath(reference.path) + ".tmp" in synced
+    assert os.path.realpath(directory) in synced
+
+
+def test_each_group_keeps_its_export_record(tmp_path):
+    """The report names each group's export action, its bytes, when it was
+    reserved, submitted, seen landed and released, and the drain's wait."""
+    import json
+
+    backend = ControlledExport(tmp_path / "local")
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    adapter.reserve("one", 65536)
+    reference = write_exact_activation_cache_entry(
+        adapter.directory("one"), "entry", torch.arange(8),
+        identity={"session": "fixture"}, max_tensor_bytes=64, max_file_bytes=65536)
+    adapter.record("one", reference, tmp_path / "canonical")
+    adapter.submit("one")
+    timer = threading.Timer(0.3, backend.acknowledge, args=("one",))
+    timer.start()
+    try:
+        adapter.await_group("one", where="drain")
+    finally:
+        timer.join()
+    adapter.drain(release=True)
+    report = adapter.report()
+    assert report["schema"] == "prismaquant.produced_output_spool.v3"
+    assert "exports" in report, "the report keeps no export record"
+    (record,) = report["exports"]
+    assert record["export_key"] == hashlib.sha256(b"one").hexdigest()
+    assert (record["batch_id"], record["entries"], record["bytes"]) == (
+        "one", 1, reference.file_bytes)
+    assert (record["reserved_unix"] <= record["submitted_unix"]
+            <= record["landed_unix"] <= record["released_unix"])
+    assert record["drain_wait_s"] >= 0.2
+    assert record["export_wait_s"] == record["drain_wait_s"] == report["drain_wait_s"]
+    json.dumps(report)
+
+
+class _RecordingExport(ControlledExport):
+    """The transport double, plus origin commits and a log of every call."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.calls = []
+        self.committed = {}
+
+    def poll_group(self, batch_id):
+        self.calls.append(("poll", batch_id))
+        return super().poll_group(batch_id)
+
+    def release_group(self, batch_id):
+        self.calls.append(("release", batch_id))
+        return super().release_group(batch_id)
+
+    def commit_origin_group(self, batch_id, descriptors, *, lifetime):
+        self.calls.append(("commit", batch_id))
+        self.committed.setdefault(batch_id, threading.Event()).set()
+        return {"ok": True, "ref": {"batch_id": batch_id, "lifetime": lifetime}}
+
+
+def _write_only_owner(adapter, groups):
+    """An owner's settle state around a real spool: only what it reads."""
+    from types import SimpleNamespace
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+
+    owner = StreamedBoundaryArtifacts.__new__(StreamedBoundaryArtifacts)
+    owner._local_output_spool = adapter
+    owner._produced_plan = {"write_only": True, "origin_lifetime": "consumed"}
+    owner._produced_groups = groups
+    owner._produced = SimpleNamespace(
+        descriptor_for=lambda reference, producer_generation: {"path": reference.path})
+    owner._produced_origin_batches = []
+    owner.telemetry = {"produced_groups_committed_at_origin": 0,
+                       "produced_commit_origin_s": 0.0}
+    owner._produced_flush_deferred_unlinks = lambda: None
+    owner._commit_local_output_progress = lambda: None
+    return owner
+
+
+def test_a_write_only_group_commits_while_later_exports_still_copy(tmp_path):
+    """Each group commits at its origin once its own export lands, not after
+    the last one: row 029's 32 commits (9.8 s) followed its whole drain."""
+    backend = _RecordingExport(tmp_path / "local")
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    groups = {}
+    for batch_id in ("g0", "g1"):
+        adapter.reserve(batch_id, 65536)
+        reference = write_exact_activation_cache_entry(
+            adapter.directory(batch_id), f"{batch_id}-entry", torch.arange(8),
+            identity={"session": "fixture"}, max_tensor_bytes=64, max_file_bytes=65536)
+        canonical = adapter.record(batch_id, reference, tmp_path / "canonical")
+        adapter.submit(batch_id)
+        groups[batch_id] = {"batch_id": batch_id, "references": [canonical],
+                            "planned": [None, None]}
+    backend.acknowledge("g0")
+    first = backend.committed.setdefault("g0", threading.Event())
+    seen = []
+
+    def land_later():
+        # g1's export lands once g0 committed, or after 5 s regardless.
+        seen.append(first.wait(timeout=5))
+        backend.acknowledge("g1")
+
+    thread = threading.Thread(target=land_later)
+    thread.start()
+    try:
+        _write_only_owner(adapter, groups).settle_local_output()
+    finally:
+        thread.join(timeout=10)
+    assert seen == [True], "g0 committed only after g1's export landed"
+    assert [call for call in backend.calls if call[0] == "commit"] == [
+        ("commit", "g0"), ("commit", "g1")]
+    assert all(backend.groups[batch_id]["released"] for batch_id in groups)
+    assert [group["origin_ref"]["batch_id"] for group in groups.values()] == ["g0", "g1"]

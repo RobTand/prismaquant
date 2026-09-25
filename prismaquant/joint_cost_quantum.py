@@ -555,6 +555,10 @@ class QuantumCounters:
             self.quantum_id, self.sampler)
         self.total_kernel_active_s = 0.0
         self._kernel_error = None
+        # The band-serial handoff's export report (PQ #1225): per group, the
+        # PrismaBuild export key, the bytes, the submitted and landed times
+        # and the wait at the drain. ``None`` when the row emits no handoff.
+        self.handoff_export = None
         self.phases = [{"name": str(chunk["name"]),
                         "start_bytes": int(chunk["start_bytes"]),
                         "end_bytes": int(chunk["end_bytes"]),
@@ -694,6 +698,8 @@ class QuantumCounters:
             "replay": dict(self.replay),
             **({} if self.kda_capture_kernel is None
                else {"kda_capture_kernel": self.kda_capture_kernel_record()}),
+            **({} if self.handoff_export is None
+               else {"handoff_export": self.handoff_export}),
             "phases": self.phases,
             "windows": self.windows,
             # Every closed span, in close order (prismaquant.io_spans).
@@ -2726,9 +2732,16 @@ def run_layer_quantum_core(
         # (the plane may live in its cotangent scratch).
         if handoff_emitter is not None:
             with counters.io.span("handoff-out"):
-                handoff_emitter.emit(grad_plane=grad_plane,
-                                     cotangent_owners=cotangent_owners,
-                                     n_probes=n_probes, n_batches=len(row_offsets))
+                try:
+                    handoff_emitter.emit(grad_plane=grad_plane,
+                                         cotangent_owners=cotangent_owners,
+                                         n_probes=n_probes,
+                                         n_batches=len(row_offsets))
+                finally:
+                    # Success or failure, the row's counters keep the export
+                    # keys, bytes and waits (PQ #1225).
+                    counters.handoff_export = getattr(
+                        handoff_emitter, "export_report", None)
 
     # ---- payload (§6.4 cost.pkl) -----------------------------------------
     payload = _assemble_streamed_aura_payload(
