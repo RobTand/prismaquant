@@ -40,6 +40,7 @@ from prismaquant.joint_quantum_handoff import (  # noqa: E402
     HANDOFF_DIRECTORY,
     HANDOFF_RECORD_NAME,
     HandoffEmitter,
+    HandoffStream,
     handoff_root,
 )
 from test_quantum_executable_readset import (  # noqa: E402
@@ -159,12 +160,16 @@ def test_streamed_bytes_equal_the_all_final_bytes(tmp_path, monkeypatch):
         for key in _keys():
             plane[key] = _plane()[key]
             stream.mark_final([key])
-            # The writer writes each entry before the next slot is final.
+            # The writer writes each entry before the next slot is final. The
+            # file lands inside the write and the writer counts it just after,
+            # so wait for the count: a file alone lets finish overtake it.
+            want = _keys().index(key) + 1
             deadline = time.monotonic() + 30
-            while (len(list(entries.glob("*.pt"))) < _keys().index(key) + 1
+            while (stream.telemetry["entries_before_finish"] < want
                    and time.monotonic() < deadline):
                 time.sleep(0.01)
-            assert len(list(entries.glob("*.pt"))) == _keys().index(key) + 1
+            assert stream.telemetry["entries_before_finish"] == want
+            assert len(list(entries.glob("*.pt"))) == want
         streamed = stream.finish(_owners())
     assert streamed == serial
     assert _digest(generation) == expected
@@ -593,6 +598,16 @@ def test_the_handoff_is_written_while_the_final_passes_run(tmp_path, monkeypatch
             prefix.add(key)
         return prefix
 
+    streams = []
+    real_enter = HandoffStream.__enter__
+
+    def enter(self):
+        streams.append(self)
+        return real_enter(self)
+
+    def counted():
+        return sum(stream.telemetry["entries_before_finish"] for stream in streams)
+
     def store(self, keys, rows, gradient):
         keys = list(keys)
         real_store(self, keys, rows, gradient)
@@ -604,7 +619,16 @@ def test_the_handoff_is_written_while_the_final_passes_run(tmp_path, monkeypatch
                 prefix = written_prefix(self.plane)
                 assert written.wait_for(lambda: prefix <= handoff_keys, timeout=60), (
                     "the writer did not write the stored slots while the passes ran")
+            # The file lands inside the write and the writer counts it just
+            # after. Wait for the count too, so the finish the quantum reaches
+            # next cannot overtake it.
+            deadline = time.monotonic() + 60
+            while counted() < len(prefix) and time.monotonic() < deadline:
+                time.sleep(0.005)
+            assert counted() >= len(prefix), (
+                "the writer did not count the stored slots while the passes ran")
 
+    monkeypatch.setattr(HandoffStream, "__enter__", enter)
     monkeypatch.setattr(StreamedBoundaryArtifacts, "write", write)
     monkeypatch.setattr(PlaneHostStaging, "store", store)
     _payload, record, counters = band._quantum(
