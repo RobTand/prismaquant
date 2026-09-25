@@ -1515,10 +1515,18 @@ value set in the spec wins. The defaults are derived at launch from the
 sealed scratch pair, so the sealed spec and the outer request are unchanged.
 A row with no scratch launches exactly as before.
 
-`dispatch_joint_quanta` warns (`OverlayCacheWarning`), and does not refuse,
-when a spec points one of them at `/tmp`, `/var/tmp` or a path that no
-writable mount covers. It warns whether or not scratch is declared. The
-launcher's preamble lists the same variables as `overlay_pinned_caches`.
+A spec that points one of them at `/tmp`, `/var/tmp` or a path that no
+writable mount covers refuses at `dispatch_joint_quanta`'s spec check
+(`_container_wrap`, which the Stage B prepare's `check_stage_b_spec` also
+runs), with or without declared scratch (2026-09-25, PQ #1129; #1072 only
+warned, the warning fired on every R13 Stage B prepare, and nothing acted on
+it). The refusal names each pin and the escape: unset them, or name why in the
+spec's top-level `overlay_cache_reason` (a non-empty string). An admitted spec
+is sealed with a derived `overlay_cache_admission` object that repeats the
+reason beside the pins it admits, so the sealed request carries the waiver. A
+spec may not declare that object itself, and a reason with nothing pinned
+refuses. The launcher's preamble lists the same variables as
+`overlay_pinned_caches`.
 
 Limits:
 - The caches are charged to PrismaBuild through nothing but the scratch
@@ -1526,11 +1534,14 @@ Limits:
   bytes can run past what PrismaBuild charged. Their size is unmeasured.
 - The caches persist on the box's disk across rows.
 - The campaign's default spec (`spec-hostcap32-ram-dev-spool.json`) pins all
-  five to `/tmp` and declares no scratch, so it warns and changes nothing
-  until a spec declares a scratch root and drops those pins.
+  five to `/tmp` and declares no scratch, so since PQ #1129 every row it wraps
+  refuses until a revision drops those pins or names an
+  `overlay_cache_reason`. R13's Stage B spec (`stage-b-spec.r13.json`) pins
+  all five under `/var/tmp/pq-stageb-full512` and refuses the same way.
 
-Gate: `tests/test_container_cache_roots_1072.py`. No format, pipeline
-default, stage or ship gate changes.
+Gates: `tests/test_container_cache_roots_1072.py`,
+`tests/test_overlay_cache_refusal_1129.py`. The dispatch refusal replaces a
+warning; no format, pipeline default, stage or ship gate changes.
 
 A superseded Stage A run's checkpoints and the entries they pin can be
 retired (2026-09-23, `ws-tq/1073-retire-superseded-pins`, PQ #1073). Since
@@ -2533,8 +2544,17 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq1190`.
+As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq1129`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1129`) for **a spec that pins a
+container cache to the overlay refuses at the joint dispatcher's spec check**
+(PQ #1129) unless it names an `overlay_cache_reason`, which the sealed spec
+repeats in a derived `overlay_cache_admission` stamp beside the pins. It
+replaces #1072's `OverlayCacheWarning`. See the container-cache entry under
+PQ #1072. No format, pipeline default, stage or ship gate changes; the
+campaign's default spec and R13's Stage B spec refuse until a revision drops
+their pins or names a reason.
 
 Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1190`) for **the quantum's tail in the
 last declared phase's grace** (PQ #1190): the joint dispatcher appends a
