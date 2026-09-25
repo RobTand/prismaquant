@@ -41,6 +41,7 @@ for _entry in (ROOT, ROOT / "tools"):
     if str(_entry) not in sys.path:
         sys.path.insert(0, str(_entry))
 
+from prismaquant import io_engine
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.production_weight_cache import ProductionWeightCache
 from test_quantum_executable_readset import (
@@ -544,13 +545,15 @@ def test_generator_dispatch_waits_for_delayed_leased_render(shared_bridge_path, 
         {pair: row["sha256"] for pair, row in layout["files"].items()},
         max_file_bytes=max(Path(row["path"]).stat().st_size
                            for row in layout["files"].values()))
-    real_prefetch = cache.prefetch
+    real_load = io_engine.load_file
 
-    def prefetch(keys=None, max_workers=1, **kwargs):
+    def load_file(path, limit, **kwargs):
+        # A retained window's renders are read by the IO engine (PQ #1294),
+        # on its pool threads: record the phase each read opens in.
         order.append(f"open:{progress._phase}")
-        return real_prefetch(keys, max_workers=max_workers, **kwargs)
+        return real_load(path, limit, **kwargs)
 
-    monkeypatch.setattr(cache, "prefetch", prefetch)
+    monkeypatch.setattr(io_engine, "load_file", load_file)
     failures = []
 
     def delayed_mover():

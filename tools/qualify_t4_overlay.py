@@ -5,6 +5,7 @@ import torch
 from tessera.cached_unit import verify_cached_unit
 from prismaquant.tessera_joint_aura import _decode_wire, _resolve_render_origin, RENDER_COMPARISON_BY_ORIGIN, _read_verified_wire_blob, _drive_ordered_walk, _decoder_identity
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity, ProductionWeightCache
+from prismaquant.io_engine import read_file
 from prismaquant.residency_map import residency_resolver
 from prismaquant.staged_tier_policy import policy_is_active, refuse_pool_bulk_read
 
@@ -34,7 +35,7 @@ def read_cell(cell):
  if policy_is_active() and staged is None:raise refuse_pool_bulk_read(str(render),'new-candidate-render-not-staged')
  # First qualification has no prior digest. Existing bounded reader checks
  # PB copy-time digest and pinned lease, then this leg establishes decoder equality.
- tensor,observed=ProductionWeightCache._read_file_tensor(ProductionWeightCache.__new__(ProductionWeightCache),render,cell['render_stat']['bytes'],None,staged=staged);file_sha=observed[0]['sha256']
+ raw,receipt,_signature=read_file(render,cell['render_stat']['bytes'],staged=staged);tensor,_guard=ProductionWeightCache._decode_file_tensor(ProductionWeightCache.__new__(ProductionWeightCache),None,raw,receipt,staged is not None);del raw;observed=(receipt,);file_sha=receipt['sha256']
  if resolver is not None:
   if staged is None:resolver.record_pool_read(render,observed[0]['bytes'])
   elif observed[0].get('serving_tier')=='ram':resolver.record_ram_read(render,observed[0]['bytes'])

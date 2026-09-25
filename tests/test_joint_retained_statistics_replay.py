@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from prismaquant import format_registry as fr
+from prismaquant import io_engine
 from prismaquant.joint_retained_window_plan import RetainedWindowBudget
 from prismaquant.joint_statistics_plan import plan_joint_statistics_target_windows
 from prismaquant.joint_statistics_replay import (
@@ -70,6 +71,17 @@ def _fixture(tmp_path):
     return modules, specs, cache, paths, policy, budget
 
 
+def _spy_reads(monkeypatch, reads):
+    """Record every file the IO engine reads (PQ #1294), on any thread."""
+    load = io_engine.load_file
+
+    def spy(path, limit, **kwargs):
+        reads.append(str(path))
+        return load(path, limit, **kwargs)
+
+    monkeypatch.setattr(io_engine, 'load_file', spy)
+
+
 def _backward(modules, *, probe_index, final, lease):
     # The exact same signed source/cotangent arithmetic feeds both replay
     # orders. The input needs grad so real output observers see backward.
@@ -112,12 +124,8 @@ def _run_probe_major(modules, specs, cache, policy):
 def test_retained_replay_matches_probe_major_signed_components_and_loads_once(
         tmp_path, monkeypatch):
     modules, specs, cache, paths, policy, budget = _fixture(tmp_path)
-    original_load = cache._load_file_tensor
     loaded = []
-    def read_once(value, key=None):
-        loaded.append(str(value))
-        return original_load(value, key)
-    monkeypatch.setattr(cache, '_load_file_tensor', read_once)
+    _spy_reads(monkeypatch, loaded)
     result, calls, consumed, records = _run_retained(
         modules, specs, cache, policy, budget)
     assert len(result['plan']['windows']) == 2
@@ -179,36 +187,46 @@ def test_retained_replay_source_mutation_refuses_and_releases_cache(tmp_path):
 def test_retained_replay_refuses_nonempty_pwc_before_selected_file_load(tmp_path, monkeypatch):
     modules, specs, cache, _, policy, budget = _fixture(tmp_path)
     cache.weights['unrelated', 'FP8'] = torch.zeros(16)
-    monkeypatch.setattr(cache, '_load_file_tensor',
-                        lambda *args: pytest.fail('nonempty baseline loaded a file'))
+    monkeypatch.setattr(io_engine, 'load_file',
+                        lambda *args, **kwargs: pytest.fail('nonempty baseline loaded a file'))
     with pytest.raises(RuntimeError, match='empty PWC resident baseline'):
         _run_retained(modules, specs, cache, policy, budget)
 
 
-def test_retained_replay_guard_reserves_remaining_window_and_unwinds_midload(
+def test_retained_replay_guard_reserves_each_side_and_unwinds_a_loaded_window(
         tmp_path, monkeypatch):
+    """The window's loads are charged once, each reservation on its side.
+
+    The IO engine reads a window's renders without a barrier between load
+    quanta (PQ #1291), so the window charges everything it has not read yet
+    before its first load: the incoming renders, their serialized buffers,
+    the read pages and the boundaries on the host, the statistics, the
+    workspace and the candidate delta on the device. The sums are the ones
+    the lumped reservation charged. A refusal after the loads, at the first
+    probe, releases the whole window.
+    """
     import prismaquant.joint_statistics_replay as replay
     modules, specs, cache, paths, policy, budget = _fixture(tmp_path)
     checks = []
-    def check(guard, label, *, reserve_bytes):
+    def check(guard, label, *, reserve_bytes, reserve_device_bytes=0):
         assert guard is marker
-        checks.append((label, reserve_bytes))
+        checks.append((label, reserve_bytes, reserve_device_bytes))
         if len(checks) == 2:
-            raise RuntimeError('physical guard refused next load')
+            raise RuntimeError('physical guard refused the first probe')
     marker = object()
     monkeypatch.setattr(replay, 'check_operator_allocation', check)
     first_keys = tuple(key for key in paths if key[0] == 'first')
     costs = cache.retained_key_costs(first_keys)
     remaining = sum(cost['incoming_storage_bytes'] for cost in costs.values())
-    common = (budget.statistics_cap_bytes + budget.workspace_reserve_bytes
-              + budget.boundary_reserve_bytes + budget.load_buffer_bytes
-              + budget.read_page_reserve_bytes + budget.candidate_delta_bytes)
+    host = (budget.boundary_reserve_bytes + budget.load_buffer_bytes
+            + budget.read_page_reserve_bytes)
+    device = (budget.statistics_cap_bytes + budget.workspace_reserve_bytes
+              + budget.candidate_delta_bytes)
     with pytest.raises(RuntimeError, match='physical guard refused'):
         _run_retained(modules, specs, cache, policy, budget, guard=marker)
     assert checks == [
-        ('before_joint_retained_candidate_load', remaining + common),
-        ('before_joint_retained_candidate_load',
-         remaining - costs[first_keys[0]]['incoming_storage_bytes'] + common),
+        ('before_joint_retained_candidate_load', remaining + host, device),
+        ('before_joint_retained_statistics_probe', budget.boundary_reserve_bytes, device),
     ]
     assert all(isinstance(value, str) for value in cache.weights.values())
     assert cache._lru_bytes == 0 and cache._resident_window_files is None
@@ -239,11 +257,7 @@ def test_retained_replay_file_change_between_probes_refuses_and_cleans(tmp_path)
 def test_resume_keeps_original_windows_and_only_final_active_updates_cotangents(tmp_path, monkeypatch):
     modules, specs, cache, paths, policy, budget = _fixture(tmp_path)
     loads, entered, committed = [], [], []
-    loader = cache._load_file_tensor
-    def load(path, key=None):
-        loads.append(str(path))
-        return loader(path, key)
-    monkeypatch.setattr(cache, '_load_file_tensor', load)
+    _spy_reads(monkeypatch, loads)
     result, calls, consumed, _ = _run_retained(modules, specs, cache, policy, budget,
         completed_names={'first'},
         before_window=lambda index, names: entered.append((index, names)),

@@ -350,6 +350,15 @@ class _RecordingGuard:
         return {"conservative_cgroup_plus_cuda_reserved_bytes": 0,
                 "committed_cgroup_plus_cuda_reserved_bytes": 0}
 
+    def headroom_bytes(self):
+        # It reads no process, so its baseline cannot include renders read
+        # ahead (PQ #1291): it offers no headroom, and the quantum's render
+        # stream reads each window when the window asks for it.
+        return 0
+
+    def add_reclaimer(self, reclaim):
+        return lambda: None
+
 
 def test_layer_quantum_charges_each_phase_to_its_guard(campaign, monkeypatch):
     """Every guarded admission of a layer quantum reaches its guard.

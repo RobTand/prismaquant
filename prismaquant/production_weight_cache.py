@@ -69,6 +69,7 @@ import copy
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 import hashlib
 import io
 import json
@@ -583,7 +584,7 @@ class ProductionWeightCache:
         ordinary uncompressed Torch archive stores every tensor byte inside
         the file, so its archive storage cannot exceed the file's length.
         The archive itself is parsed once, on the bytes the loader has just
-        read and hashed (``_read_file_tensor``), before anything is
+        read and hashed (``_decode_file_tensor``), before anything is
         deserialized, and a load whose storage exceeds this charge, or whose
         archive is not an ordinary uncompressed Torch archive, fails its
         window there. Parsing it again here meant a second open of every
@@ -698,7 +699,7 @@ class ProductionWeightCache:
                 path, observed, file_bytes = self._window_file_bound(key)
                 storage_bytes = file_bytes
                 # A bound, not an exact total: the read's own parse must not
-                # exceed it (``_read_file_tensor``).
+                # exceed it (``_decode_file_tensor``).
                 files[str(path)] = (observed, file_bytes, storage_bytes, False)
                 file_costs[key] = (str(path), file_bytes, storage_bytes)
                 persistent_bytes += storage_bytes
@@ -757,38 +758,80 @@ class ProductionWeightCache:
                               'serialized_bytes': file_bytes}
         return costs
 
+    def retained_read_entries(self, keys, *, group, render_identities: bool = False):
+        """The IO engine entries that load ``keys`` for one retained window.
+
+        One ``io_engine.ReadEntry`` per selected disk-backed key, in window
+        order, all in ``group``. Each is priced exactly as the retained window
+        prices it (``_window_file_bound``: the file's length bounds both its
+        serialized buffer and its archive storage), bound to its expected
+        digest, and decoded by :meth:`_decode_file_tensor` against that same
+        bound. With ``render_identities`` the reading thread also hashes the
+        tensor it decoded (PQ #1192), before the consumer sees it. A stream of
+        these entries can run ahead of the window that will admit them
+        (:meth:`retained_window` with ``stream=``, PQ #1291).
+        """
+        from .io_engine import ReadEntry
+        expected = getattr(self, "_expected_file_sha256", None)
+        bound = getattr(self, "_file_load_max_bytes", 0)
+        derive = (partial(self._loaded_render_identity, requested=True)
+                  if render_identities else None)
+        entries = []
+        for key in self._window_keys(keys):
+            if isinstance(self.weights[key], torch.Tensor):
+                continue
+            path, observed, file_bytes = self._window_file_bound(key)
+            window_entry = (observed, file_bytes, file_bytes, False)
+            entries.append(ReadEntry(
+                key=key, path=str(path), size=file_bytes,
+                limit=min(bound, file_bytes) if bound else file_bytes,
+                held_bytes=file_bytes,
+                expected_sha256=None if expected is None else expected.get(key),
+                decoder=partial(self._decode_file_tensor, window_entry),
+                group=group, declared_stat=observed, derive=derive,
+                measure=lambda tensor: self._window_storage(tensor)[1]))
+        return entries
+
     @contextmanager
     def retained_window(self, keys, *, max_resident_bytes: int, max_workers: int,
                         max_load_buffer_bytes: int | None = None,
                         release_file_pages: bool = False,
                         before_load_quantum=None,
-                        render_identities: bool = False):
+                        render_identities: bool = False,
+                        stream=None, stream_group=None):
         """Keep many selected renders resident across repeated consumer passes.
 
-        Only PWC owns the tensors. The existing prefetch pool loads bounded
-        quanta, then every key must be resident before the consumer runs. The
-        cap covers all PWC backing storages; serialized buffers have a
-        separate concurrent-quantum cap. The consumer must release borrowed
+        Only PWC owns the tensors. Every selected file is preflighted and
+        charged before the first load, then every key must be resident before
+        the consumer runs. The cap covers all PWC backing storages; serialized
+        buffers have a separate cap. The consumer must release borrowed
         references before context exit. Selected disk-backed entries are
         restored to paths on success or failure. When requested, checked file
-        page advice runs after each completed quantum. It is not a guarantee
-        of physical reclaim; ``before_load_quantum`` may enforce a live host
-        guard before the next load, on this thread, using current resident
-        bytes, all remaining incoming storage and the next serialized buffer.
+        page advice runs once the window's loads are done. It is not a
+        guarantee of physical reclaim; ``before_load_quantum`` may enforce a
+        live host guard before the loads, on this thread, using current
+        resident bytes, the incoming storage not yet read and its serialized
+        buffers.
 
-        With ``render_identities``, each loader thread also hashes the tensor
+        The loads go through the IO engine (``io_engine``, PQ #1294). With
+        ``stream``, an ``io_engine.ReadStream`` built from
+        :meth:`retained_read_entries`, this window takes ``stream_group`` from
+        a stream that may already have read it while an earlier window
+        computed (PQ #1291), and the guard is charged only what is still
+        unread. Without one, the window reads its own entries on demand. Either
+        way each file is read once, hashed once against its bound digest,
+        its archive parsed once on those bytes, under the staged renders'
+        group lease where the strict tier policy pins one (PQ #1210), and the
+        serialized buffers in flight stay within ``max_load_buffer_bytes``.
+        ``load_quanta`` in the receipt is the preflight's admission plan: the
+        width ``max_workers`` and the buffer cap admit each quantum; the
+        engine's own concurrency follows its measured rates within the same
+        buffer cap.
+
+        With ``render_identities``, each reading thread also hashes the tensor
         it loaded (``_cb_cache_tensor_identity``) before the tensor is handed
         out, and ``resident_render_identity`` serves that hash for the rest
         of the load's lifetime (PQ #1192).
-
-        Per-file work is done once per window, not once per file or per
-        quantum (PQ #1210): one loader pool of ``max_workers`` threads serves
-        every quantum, and each quantum is still a barrier charged to its own
-        serialized-buffer cap; each file's archive is parsed once, on the
-        bytes its loader read; and under the strict tier policy the window's
-        staged renders are pinned by one reader-lease window
-        (``_enter_window_leases``) that is released when the last quantum's
-        loads are done, before the consumer runs.
         """
         if getattr(self, '_resident_window_files', None) is not None:
             raise RuntimeError('PWC resident windows cannot be nested')
@@ -803,54 +846,46 @@ class ProductionWeightCache:
                 keys, max_resident_bytes=max_resident_bytes,
                 max_workers=max_workers,
                 max_load_buffer_bytes=max_load_buffer_bytes))
-        from concurrent.futures import ThreadPoolExecutor
-
+        own = None
+        if stream is None and file_costs:
+            from .io_engine import FixedBudget, read_stream
+            own = stream = read_stream(
+                self.retained_read_entries(keys, group=0,
+                                           render_identities=render_identities),
+                budget=FixedBudget(buffer_bytes=buffer_cap),
+                lease_counters=PWC_WINDOW_LEASE_COUNTERS)
+            stream_group = 0
+        elif stream is not None:
+            if stream.group_keys(stream_group) != tuple(key for key in keys if key in file_costs):
+                raise RuntimeError('PWC retained window keys differ from its stream group')
         self._resident_window_files = files
         self._resident_window_receipt_keys = frozenset(file_costs)
         self._resident_window_render_identities = render_identities
-        live_leases = []
         try:
             loaded = 0
-            remaining_incoming_bytes = sum(cost[2] for cost in file_costs.values())
-            remaining_path_uses = {}
-            for path, _, _ in file_costs.values():
-                remaining_path_uses[path] = remaining_path_uses.get(path, 0) + 1
+            if file_costs:
+                unread_bytes, unread_serialized = stream.demand(stream_group)
+                if before_load_quantum is not None:
+                    before_load_quantum({
+                        'resident_bytes': sum(self._window_resident_storages().values()),
+                        'remaining_incoming_storage_bytes': unread_bytes,
+                        'next_serialized_bytes': min(unread_serialized, buffer_cap),
+                    })
+                loaded = self._admit_prefetched(
+                    (item.entry.key, self.weights.get(item.entry.key), item.value,
+                     item.observed, item.derived)
+                    for item in stream.take(stream_group))
+            for key in keys:
+                self.get_resident(*key)
+            if sum(self._window_resident_storages().values()) > max_resident_bytes:
+                raise RuntimeError('PWC actual backing storage exceeds retained window budget')
             advised_paths = set()
-            self._resident_window_leases = self._enter_window_leases(
-                file_costs, live_leases)
-            with ThreadPoolExecutor(max_workers=max_workers,
-                                    thread_name_prefix='pwc-window-load') as loaders:
-                for quantum in quanta:
-                    if before_load_quantum is not None:
-                        before_load_quantum({
-                            'resident_bytes': sum(self._window_resident_storages().values()),
-                            'remaining_incoming_storage_bytes': remaining_incoming_bytes,
-                            'next_serialized_bytes': sum(
-                                file_costs[key][1] for key in quantum if key in file_costs),
-                        })
-                    loaded += self.prefetch(quantum, max_workers=max_workers,
-                                            executor=loaders)
-                    for key in quantum:
-                        self.get_resident(*key)
-                    if sum(self._window_resident_storages().values()) > max_resident_bytes:
-                        raise RuntimeError('PWC actual backing storage exceeds retained window budget')
-                    for key in quantum:
-                        if key not in file_costs:
-                            continue
-                        path, _, storage_bytes = file_costs[key]
-                        remaining_incoming_bytes -= storage_bytes
-                        remaining_path_uses[path] -= 1
-                        if release_file_pages and remaining_path_uses[path] == 0:
-                            from .perturbed_x_cache import release_activation_cache_file_pages
-                            release_activation_cache_file_pages(
-                                path, expected_stat=files[path][0])
-                            advised_paths.add(path)
-            # Every load is done: the pin protected the reads, not the
-            # consumer's compute, so it is released before the consumer runs.
-            self._resident_window_leases = None
-            self._exit_window_leases(live_leases)
-            # Catch selected source drift between early and late quanta before
-            # exposing any partial window to the consumer.
+            if release_file_pages:
+                from .perturbed_x_cache import release_activation_cache_file_pages
+                for path, (observed, *_rest) in files.items():
+                    release_activation_cache_file_pages(path, expected_stat=observed)
+                    advised_paths.add(path)
+            # Catch selected source drift before exposing the window.
             for key in keys:
                 self.get_resident(*key)
             actual = sum(self._window_resident_storages().values())
@@ -863,11 +898,11 @@ class ProductionWeightCache:
                    'file_pages_advised': len(advised_paths),
                    'load_quanta': quanta}
         finally:
-            self._resident_window_leases = None
             try:
-                # Error paths must not strand a pin; the loader pool above
-                # has already joined, so no read is still using one.
-                self._exit_window_leases(live_leases)
+                if own is not None:
+                    own.close()
+                elif stream is not None and file_costs:
+                    stream.release()
             finally:
                 try:
                     self.release_resident_tensors(keys)
@@ -876,79 +911,6 @@ class ProductionWeightCache:
                     self._resident_window_receipt_keys = frozenset()
                     self._resident_window_render_identities = False
                     self._forget_window_archive_bytes()
-
-    def _enter_window_leases(self, file_costs, live_leases):
-        """Pin a retained window's staged renders under one lease (PQ #1210).
-
-        Under the strict tier policy each load used to acquire, open and
-        release its own reader-lease window: on row 041 that was 63% of the
-        loader threads' time (the SDK acquire's ownership lock and its scan
-        of every retiring mover, the per-entry cover lookup, and the
-        release), paid once per 16 MiB file. PrismaBuild's ``acquire`` pins
-        a whole key set under one ownership-lock hold (PQ #997), so the
-        window's entries are pinned together here, by the same
-        ``_enter_group_lease`` the exact activation cache uses: RAM copies
-        in one window and the rest in one SSD window.
-
-        The pin is taken before the first ``before_load_quantum`` guard: it
-        holds staged copies in place and allocates no host memory, so it
-        changes nothing the guard prices.
-
-        Returns ``{declared path: (lease window, map key, staged entry)}`` for
-        the loads to open under, or ``None`` when no group applies: the policy is
-        inactive, no resolver is bound, fewer than two renders are staged
-        with a bound digest, or the batched lease refused. Then every load
-        leases on its own exactly as before, so a refusal keeps its
-        single-entry kind. Nothing is served on the batched proof alone:
-        the SDK re-verifies every key under its lock at acquire, each file
-        is still opened through the SDK under the pin, and its bytes are
-        still hashed against the bound digest and the map's digest.
-        """
-        from .staged_tier_policy import policy_is_active
-        if not policy_is_active():
-            return None
-        from .residency_map import residency_resolver
-        resolver = residency_resolver()
-        expected = getattr(self, '_expected_file_sha256', None)
-        if resolver is None or expected is None:
-            return None
-        members, seen = [], set()
-        for key, (path, _file_bytes, _storage) in file_costs.items():
-            binding = expected.get(key)
-            if binding is None or path in seen:
-                continue
-            staged = resolver.staged_read(Path(path), expected_sha256=binding)
-            if staged is None:
-                continue
-            seen.add(path)
-            members.append((_WindowLeaseRef(path), staged))
-        if len(members) < 2:
-            return None
-        from .perturbed_x_cache import _enter_group_lease
-        assignments = _enter_group_lease(resolver, members, live_leases,
-                                         counters=PWC_WINDOW_LEASE_COUNTERS)
-        if assignments is None:
-            return None
-        staged_by_path = {ref.path: staged for ref, staged in members}
-        return {ref.path: (lease_window, lease_key, staged_by_path[ref.path])
-                for ref, (lease_window, lease_key) in assignments.items()}
-
-    @staticmethod
-    def _exit_window_leases(live_leases):
-        """Close every window lease's descriptors and release its one ref.
-
-        Every lease is exited even when one fails; the first failure is
-        raised last.
-        """
-        failure = None
-        while live_leases:
-            try:
-                live_leases.pop().__exit__(None, None, None)
-            except Exception as exc:  # noqa: BLE001 -- raised below
-                if failure is None:
-                    failure = exc
-        if failure is not None:
-            raise failure
 
     @contextmanager
     def resident_window(self, keys, *, max_resident_bytes: int, max_workers: int,
@@ -1426,23 +1388,19 @@ class ProductionWeightCache:
     def _load_file_tensor(self, value, key=None):
         """Load one shard, from PrismaBuild's stage tier when it holds it.
 
-        The redirect lives here because this is the one place a PWC shard's
-        bytes are opened with a digest fused to the read: whatever copy is
-        read, the same SHA-256 fence decides whether it is admitted, so a
-        wrong or stale staged copy is refused exactly as a wrong pool copy
-        would be. The declared path is the fallback and the accounting says
-        so. Without ``PRISMABUILD_RESIDENCY_MAP`` nothing below runs and the
-        bytes are the pool's, as today.
+        The bounded read is ``io_engine.load_file``: the tier comes from the
+        residency map, the bytes are hashed once and held to the map's digest,
+        and this cache's decoder (:meth:`_decode_file_tensor`) turns them into
+        the tensor. A load inside an active resident window is bounded by, and
+        fenced against, that window's preflight of the file.
 
         The unbounded ``torch.load`` branch is deliberately not redirected: it
         computes no digest, so a staged copy there would be admitted on the
         map's word alone. Both joint stages take the bounded branch (prepare
         through ``enable_file_load_receipts``, run through
-        ``require_file_load_sha256``).
-
-        Under the active allowed-tier policy the unbounded branch refuses
-        outright (no digest, no bulk HDD open), and the bounded branch
-        requires the caller's digest binding.
+        ``require_file_load_sha256``). Under the active allowed-tier policy the
+        unbounded branch refuses outright (no digest, no bulk HDD open), and
+        the bounded branch requires the caller's digest binding.
         """
         from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
         path = Path(self._path_for_value(value)).absolute()
@@ -1462,236 +1420,49 @@ class ProductionWeightCache:
                 raise refuse_pool_bulk_read(
                     str(path), "unbounded-read-has-no-digest-binding")
             return torch.load(path, map_location="cpu", weights_only=True), None
-        from .residency_map import StagedReadRefused, residency_resolver
-        resolver = residency_resolver()
-        strict = policy_is_active()
+        from .io_engine import load_file
         expected = getattr(self, "_expected_file_sha256", None)
         binding = None if expected is None or key is None else expected.get(key)
-        if strict and binding is None:
-            # Without the digest the caller already requires, a staged
-            # copy would be admitted on the map's word alone. The run
-            # leg binds every render through ``require_file_load_sha256``;
-            # the digest-less prepare leg runs outside campaign scope.
-            raise refuse_pool_bulk_read(str(path), "missing-digest-binding")
-        staged = None
-        shared = ((getattr(self, '_resident_window_leases', None) or {}).get(str(path))
-                  if strict and window_entry is not None else None)
-        if shared is not None:
-            # Pinned by the retained window with the entry the pin was built
-            # from: a map recomposed since then cannot unserve bytes the pin
-            # holds, and asking again would refuse a perfectly pinned read.
-            staged = shared[2]
-        elif resolver is not None:
-            staged = resolver.staged_read(path, expected_sha256=binding)
-        if staged is not None:
-            try:
-                tensor, observed = self._read_file_tensor(
-                    path, limit, window_entry, staged=staged)
-            except StagedReadRefused as refusal:
-                if resolver is not None:
-                    resolver.record_fallback(path, str(refusal))
-                if policy_is_active():
-                    raise refuse_pool_bulk_read(str(path), str(refusal))
-            else:
-                if resolver is not None:
-                    if observed[0].get("serving_tier") == "ram":
-                        resolver.record_ram_read(path, observed[0]["bytes"])
-                    else:
-                        resolver.record_stage_read(path, observed[0]["bytes"])
-                return tensor, observed
-        if policy_is_active():
-            raise refuse_pool_bulk_read(
-                str(path), "readset-not-staged" if resolver is None
-                else "staged-not-serving")
-        tensor, observed = self._read_file_tensor(path, limit, window_entry, staged=None)
-        if resolver is not None:
-            resolver.record_pool_read(path, observed[0]["bytes"])
-        return tensor, observed
+        return load_file(
+            path, limit, binding=binding,
+            decode=partial(self._decode_file_tensor, window_entry),
+            declared_signature=(None if window_entry is None
+                                else self._file_signature(window_entry[0])))
 
-    def _read_file_tensor(self, path, limit, window_entry, *, staged):
-        """Read one shard's bytes; ``path`` is always the declared file.
+    def _decode_file_tensor(self, window_entry, raw, receipt, staged):
+        """Turn one file's verified bytes into its tensor: ``(tensor, guard)``.
 
-        A staged read opens another copy, and every fence that belongs to the
-        declared object still runs on the declared object: the window's stat
-        signature, the receipt's path, and the signature the receipt's lifetime
-        fence re-checks on every later borrow. The staged copy gets its own
-        open/read fences plus the digest the map published, and a failure of
-        any of those raises ``StagedReadRefused``, which reads the declared
-        path instead of failing the load — unless the allowed-tier policy is
-        active, in which case the caller converts it into a refusal.
-
-        Under the active policy the staged copy is read through a
-        lifetime-pinned window: the retained window's shared lease when it
-        pinned this file (``_enter_window_leases``, PQ #1210), else one per
-        load. The RAM leg needs RAM-mover covers the composed map does not
-        carry and refuses fast, the SSD copy acquires honestly with the map's
-        leads, payload comes from the held descriptor, and the SDK's own
-        serving record is registered at the successful actual open. Inactive
-        policy keeps the legacy stage-only open order.
+        The decoder ``io_engine.load_file`` runs on the bytes it just read and
+        hashed. With a window entry (the file's preflight), the archive is
+        parsed once here, before anything is deserialized: a resident window's
+        preflight parsed the file and this total must equal it; a retained
+        window charged the file's length, which this total must not exceed
+        (``_window_file_bound``, PQ #1210). A staged copy that fails a fence
+        raises ``StagedReadRefused``, which falls back like a read fence does.
         """
-        from .residency_map import (
-            StagedReadRefused, residency_map_key, residency_resolver)
-        from .staged_tier_policy import policy_is_active
-        before = path.lstat()
-        if not stat.S_ISREG(before.st_mode):
-            raise RuntimeError("PWC file receipt requires a regular file, not a symlink")
-        if before.st_size > limit:
-            raise RuntimeError("PWC file exceeds the explicit read buffer bound")
-        signature = self._file_signature(before)
-        if window_entry is not None and signature != self._file_signature(window_entry[0]):
-            raise RuntimeError('PWC window file changed before its content read')
-        source, source_before = path, before
-        serving_tier = "pool"
-        pinned: tuple | None = None
-        if staged is not None:
-            # PrismaBuild recomposes the map after every egress, so a staged
-            # copy can be released between the resolver's stat and this open.
-            # That is an ordinary fallback, not a failed load.
-            strict = policy_is_active()
-            if not strict:
-                source = Path(staged["stage_path"])
-                try:
-                    source_before = source.lstat()
-                except OSError as error:
-                    raise StagedReadRefused(
-                        f'staged copy is unreadable: {error.strerror}') from None
-                if not stat.S_ISREG(source_before.st_mode):
-                    raise StagedReadRefused('staged copy is not a regular file')
-                if source_before.st_size != before.st_size:
-                    raise StagedReadRefused('staged copy size differs from the declared file')
-                serving_tier = "stage"
-            else:
-                from .staged_lease import LeaseRefused, acquire_entry_window
-                recorder = residency_resolver()
-                if recorder is None:
-                    raise StagedReadRefused("readset-not-staged")
-                shared = (getattr(self, '_resident_window_leases', None)
-                          or {}).get(str(path))
-                if shared is not None:
-                    # The retained window already holds this file's pin; the
-                    # window releases it once every load is done.
-                    window, key, _pinned_entry = shared
-                    try:
-                        fd, serving = window.open(key)
-                    except LeaseRefused as refusal:
-                        recorder.record_fallback(path, str(refusal))
-                        raise
-                else:
-                    window, key = acquire_entry_window(recorder, path, staged)
-                    try:
-                        window.__enter__()
-                    except LeaseRefused as refusal:
-                        recorder.record_fallback(path, str(refusal))
-                        raise
-                    try:
-                        fd, serving = window.open(key)
-                    except LeaseRefused as refusal:
-                        recorder.record_fallback(path, str(refusal))
-                        try:
-                            window.__exit__(None, None, None)
-                        except (LeaseRefused, RuntimeError):
-                            pass
-                        raise
-                serving_tier = window.serving_tier or "stage"
-                recorder.record_serving_tier(
-                    path, serving_tier,
-                    pin_id=str(serving.get("pin_id") or ""),
-                    range_ref=str(serving.get("range_ref") or ""))
-                pinned = (window, fd, serving, shared is not None)
-            recorder = residency_resolver()
-            if recorder is not None and pinned is None:
-                recorder.record_serving_tier(path, serving_tier)
-        source_signature = self._file_signature(source_before)
-
-        def changed(message):
-            return (StagedReadRefused(f'staged copy {message}') if staged is not None
-                    else RuntimeError(f"PWC file {message}"))
-
-        if pinned is None:
-            try:
-                with source.open("rb") as handle:
-                    if self._file_signature(os.fstat(handle.fileno())) != source_signature:
-                        raise changed("changed before its content read")
-                    raw = handle.read(source_before.st_size + 1)
-                    if (len(raw) != source_before.st_size
-                            or self._file_signature(os.fstat(handle.fileno())) != source_signature
-                            or self._file_signature(source.lstat()) != source_signature):
-                        raise changed("changed during its content read")
-            except OSError as error:
-                if staged is None:
-                    raise
-                raise StagedReadRefused(
-                    f'staged copy is unreadable: {error.strerror}') from None
-        else:
-            window, fd, serving, shared = pinned
-            try:
-                first = os.fstat(fd)
-                if first.st_size != source_before.st_size:
-                    raise changed("changed before its content read")
-                parts = []
-                remaining = source_before.st_size + 1
-                offset = 0
-                while remaining > 0:
-                    block = os.pread(fd, min(remaining, 8 << 20), offset)
-                    if not block:
-                        break
-                    parts.append(block)
-                    offset += len(block)
-                    remaining -= len(block)
-                raw = b"".join(parts)
-                if (len(raw) != source_before.st_size
-                        or self._file_signature(os.fstat(fd)) != self._file_signature(first)):
-                    raise changed("changed during its content read")
-            finally:
-                # The owned buffer is fully read above: the descriptor is
-                # closed and the exact ref released before deserialization,
-                # on success and on failure alike. A shared window lease
-                # outlives this read: the retained window releases it.
-                if shared:
-                    window.close_fd(fd)
-                else:
-                    window.__exit__(None, None, None)
-        if staged is not None and self._file_signature(path.lstat()) != signature:
-            raise StagedReadRefused('declared file changed during the staged read')
-        # The temporary serialized buffer is per loader worker and is released
-        # before its result enters the existing LRU. No whole-cache byte store.
-        receipt = {"path": str(path), "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
-        if staged is not None:
-            # Serving-tier provenance (ID-07) rides the staged receipt;
-            # the pool receipt keeps its pinned shape.
-            receipt["serving_tier"] = serving_tier
-        if staged is not None and receipt["sha256"] != staged["sha256"]:
-            # The read is already digested, so the staged bytes are held to the
-            # digest the map published for them. This is the check that makes
-            # the redirect safe rather than trusted, and on a prepare -- where
-            # the caller has no expected digest yet -- it is the only one.
-            raise StagedReadRefused('staged bytes differ from the map digest')
+        from .residency_map import StagedReadRefused
+        del receipt
         if window_entry is not None:
-            # The one parse of this file's archive, on the bytes just hashed
-            # and about to be deserialized. A resident window's preflight
-            # parsed the file and this total must equal it; a retained window
-            # charged the file's length, which this total must not exceed
-            # (``_window_file_bound``, PQ #1210).
             _observed, _buffer, storage_bound, exact = window_entry
             storage_bytes = self._window_archive_storage_bytes(io.BytesIO(raw))
             if exact and storage_bytes != storage_bound:
-                if staged is not None:
+                if staged:
                     raise StagedReadRefused(
                         'staged archive storage differs from the window preflight')
                 raise RuntimeError('PWC window archive storage changed during its read')
             if not exact and storage_bytes > storage_bound:
-                if staged is not None:
+                if staged:
                     raise StagedReadRefused(
                         'staged archive storage exceeds the window charge')
                 raise RuntimeError('PWC window archive storage exceeds its charged bound')
         tensor = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)
         if not isinstance(tensor, torch.Tensor):
-            if staged is not None:
+            if staged:
                 raise StagedReadRefused('staged copy is not a tensor shard')
             raise RuntimeError("PWC file receipt requires a tensor shard")
         if window_entry is not None and self._window_storage(tensor)[1] > storage_bytes:
             raise RuntimeError('PWC loaded backing storage exceeds its archive bound')
-        return tensor, (receipt, signature, self._file_tensor_guard(tensor))
+        return tensor, self._file_tensor_guard(tensor)
 
     def _record_file_load(self, key, tensor, observed) -> None:
         if observed is not None and self.weights.get(key) is tensor:
@@ -1702,16 +1473,19 @@ class ProductionWeightCache:
             # as its render identity, and is dropped with the receipt.
             self._file_load_receipts[key] = (tensor, observed, {})
 
-    def _loaded_render_identity(self, tensor, observed):
+    def _loaded_render_identity(self, tensor, observed, requested=None):
         """Hash one just-loaded render on its loader thread, if the window asks.
 
-        Only a retained window opened with ``render_identities`` asks, and
-        only a load with a receipt (``observed``) can keep the result. The
-        tensor is still private to the loader thread here, so its bytes and
-        its guard are the ones the receipt records. ``hashlib`` releases the
-        GIL for each 8 MiB chunk, so the loaders hash in parallel.
+        Only a retained window opened with ``render_identities`` asks (the
+        active window's flag, or ``requested`` for an entry read ahead of its
+        window), and only a load with a receipt (``observed``) can keep the
+        result. The tensor is still private to the reading thread here, so its
+        bytes and its guard are the ones the receipt records. ``hashlib``
+        releases the GIL for each 8 MiB chunk, so the readers hash in parallel.
         """
-        if observed is None or not getattr(self, '_resident_window_render_identities', False):
+        if requested is None:
+            requested = getattr(self, '_resident_window_render_identities', False)
+        if observed is None or not requested:
             return None
         return {"rendered_identity": _cb_cache_tensor_identity(tensor)}
 

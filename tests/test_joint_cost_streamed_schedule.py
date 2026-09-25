@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import prismaquant.aura_cost as aura
+from prismaquant import io_engine
 from prismaquant import format_registry as fr
 from prismaquant.joint_cost_read_schedule import load_joint_cost_read_schedule
 from prismaquant.joint_retained_window_plan import (
@@ -161,22 +162,21 @@ def _run_case(root, monkeypatch, *, checkpoint, resume=False, completed=()):
                                          kwargs["retained_operator_windows"],
                                          completed, events)
         holder["schedule"] = schedule
-        loaded = cache._load_file_tensor
-        def read(path, key=None):
-            # ``_load_file_tensor`` takes the cache key positionally (#707); it
-            # selects the expected SHA-256 for the digest fence, so the spy
-            # forwards it rather than dropping it.
-            events.append(("render_read", str(path), schedule.current_phase))
-            return loaded(path, key)
-        cache._load_file_tensor = read
         install = runner.context.install
         def source_install(layer, **options):
             events.append(("source_install", layer, schedule.current_phase))
             return install(layer, **options)
         runner.context.install = source_install
         return original(runner, ids, formats, **kwargs, cost_read_schedule=schedule)
+    loaded = io_engine.load_file
+    def read(path, limit, **kwargs):
+        # Every render read goes through the IO engine (PQ #1294); the spy
+        # forwards the digest binding and the decoder unchanged.
+        events.append(("render_read", str(path), holder["schedule"].current_phase))
+        return loaded(path, limit, **kwargs)
     with monkeypatch.context() as patch:
         patch.setattr(aura, "compute_aura_cost_streamed", wrapped)
+        patch.setattr(io_engine, "load_file", read)
         save = aura._write_aura_unit_checkpoint
         def write(*args, **kwargs):
             result = save(*args, **kwargs)

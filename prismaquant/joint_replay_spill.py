@@ -933,9 +933,18 @@ class StageBReplaySpill:
         Under ``operator_gemm`` also one input stream's row blocks and one
         chunk's FP32 GEMM operands (bounded at the probe-0 capture).
         """
-        buffers = 0 if self._read_buffers else (
+        return self.replay_reserve_host_bytes + self.replay_reserve_device_bytes
+
+    @property
+    def replay_reserve_host_bytes(self):
+        """The pinned host read buffers, until ``replay`` allocates them."""
+        return 0 if self._read_buffers else (
             (self.read_bytes + self._block) * self.telemetry["read_buffers"])
-        return buffers + 2 * (self.read_bytes + ADDRESS_ALIGNMENT) + self._gemm_reserve
+
+    @property
+    def replay_reserve_device_bytes(self):
+        """The device staging, row blocks and GEMM operands a window keeps live."""
+        return 2 * (self.read_bytes + ADDRESS_ALIGNMENT) + self._gemm_reserve
 
     # -- lifetime -------------------------------------------------------------
     def __enter__(self):

@@ -203,6 +203,49 @@ class PreflightRetainedWindow:
     candidate_count: int
 
 
+def retained_window_keys(window_names, specs, cache, *, completed_names=()):
+    """``[(window index, keys)]`` for every window with a pending target.
+
+    The keys each retained window opens on, in the order
+    :func:`observe_and_project_retained_windows` opens them: the window's
+    pending targets in window order, each with its candidates in ``specs``
+    order. A caller builds its read stream from these (PQ #1291), and the
+    replay refuses a stream whose groups differ.
+    """
+    completed = set(completed_names)
+    result = []
+    for index, names in enumerate(window_names):
+        pending = [name for name in names if name not in completed]
+        if not pending:
+            continue
+        requested = [(name, fmt) for name in pending for fmt in specs[name]]
+        keys = tuple(cache.resolve_key(name, fmt) for name, fmt in requested)
+        if any(key is None for key in keys):
+            missing = [pair for pair, key in zip(requested, keys) if key is None]
+            raise RuntimeError(f'retained joint PWC candidate entry missing: {missing}')
+        result.append((index, keys))
+    return result
+
+
+class GuardReadBudget:
+    """A read stream's budget, read off the replay's capture guard (PQ #1291).
+
+    ``headroom_bytes`` is ``CaptureMemoryGuard.headroom_bytes``: the host
+    bytes the row can still take beside the phase it is in. That reading is
+    of the process, so the renders the stream already holds are in it and
+    ``held_bytes`` is not subtracted again. The serialized buffers in flight
+    are held to the sealed load buffer.
+    """
+
+    def __init__(self, guard, *, buffer_bytes):
+        self.guard = guard
+        self.buffer_bytes = int(buffer_bytes)
+
+    def headroom_bytes(self, held_bytes: int) -> int:
+        del held_bytes
+        return self.guard.headroom_bytes()
+
+
 def retained_admission_targets(statistics_plan, specs, cache):
     """Join a statistics plan to the PWC's declared candidate file sizes.
 
@@ -313,7 +356,7 @@ def observe_and_project_retained_windows(
         source_bytes, backward, record_operator, consume_probe,
         collect_col_energy, backend, guard=None, source_fingerprints=None,
         completed_names=(), sealed_windows=None, before_window=None, after_window=None,
-        spill=None, render_identities=False):
+        spill=None, render_identities=False, render_stream=None):
     """Replay all probes inside each admitted target's retained PWC lifetime.
 
     The selected-key-only PWC preflight and scalar target planner run before
@@ -343,6 +386,15 @@ def observe_and_project_retained_windows(
     they load it (PQ #1192), for a ``record_operator`` that reads the hash
     through ``cache.resident_render_identity`` instead of hashing the render
     itself on every probe.
+
+    ``render_stream`` is an ``io_engine.ReadStream`` over
+    :func:`retained_window_keys`'s windows, one group per window index, built
+    with ``cache.retained_read_entries`` (PQ #1291). Each retained window then
+    takes its renders from the stream, which reads the next window while this
+    one computes, and its guard is charged only the renders still unread. The
+    stream's groups must equal the windows opened here, or the replay refuses
+    before any window opens. Without it each window reads its own renders when
+    it opens.
 
     ``source_bytes`` is the caller's declared, separately checked source-owner
     cap. Passing a varying per-layer observation here would change the sealed
@@ -419,6 +471,15 @@ def observe_and_project_retained_windows(
                 raise RuntimeError('sealed retained window membership or footprint differs')
     active_indices = [i for i, window in enumerate(retained_plan.windows)
                       if set(window.names) - completed_names]
+    if render_stream is not None:
+        for window_index, keys in retained_window_keys(
+                [window.names for window in retained_plan.windows], specs, cache,
+                completed_names=completed_names):
+            if render_stream.group_keys(window_index) != tuple(
+                    key for key in cache._window_keys(keys)
+                    if not isinstance(cache.weights[key], torch.Tensor)):
+                raise RuntimeError(
+                    f'retained joint read stream differs from window {window_index}')
     first_active = active_indices[0] if active_indices else None
     last_active = active_indices[-1] if active_indices else None
     # Window zero's slot holds the captures (PQ #1172). A resume that has
@@ -444,18 +505,20 @@ def observe_and_project_retained_windows(
         def before_load_quantum(state):
             if guard is None:
                 return
-            reserve = (
-                state['remaining_incoming_storage_bytes']
-                + window.statistics_bytes
-                + retained_budget.workspace_reserve_bytes
-                + retained_budget.boundary_reserve_bytes
-                + retained_budget.load_buffer_bytes
-                + retained_budget.read_page_reserve_bytes
-                + retained_budget.candidate_delta_bytes
-            )
+            # Each reservation on the side it lands (PQ #1291): the incoming
+            # renders, their serialized buffers, the read pages and the
+            # boundaries on the host; the statistics, the workspace and the
+            # candidate delta on the device. A guard without a device envelope
+            # charges the sum, as before.
             check_operator_allocation(
                 guard, 'before_joint_retained_candidate_load',
-                reserve_bytes=reserve)
+                reserve_bytes=(state['remaining_incoming_storage_bytes']
+                               + retained_budget.boundary_reserve_bytes
+                               + retained_budget.load_buffer_bytes
+                               + retained_budget.read_page_reserve_bytes),
+                reserve_device_bytes=(window.statistics_bytes
+                                      + retained_budget.workspace_reserve_bytes
+                                      + retained_budget.candidate_delta_bytes))
 
         with cache.retained_window(
                 keys, max_resident_bytes=retained_budget.retained_render_cap_bytes,
@@ -464,6 +527,7 @@ def observe_and_project_retained_windows(
                 release_file_pages=True,
                 before_load_quantum=before_load_quantum if guard is not None else None,
                 render_identities=render_identities,
+                stream=render_stream, stream_group=window_index,
                 ) as candidate_receipt:
             for probe_index in range(n_probes):
                 require_sources()
@@ -473,10 +537,10 @@ def observe_and_project_retained_windows(
                 if guard is not None:
                     check_operator_allocation(
                         guard, 'before_joint_retained_statistics_probe',
-                        reserve_bytes=(window.statistics_bytes
-                                       + retained_budget.workspace_reserve_bytes
-                                       + retained_budget.boundary_reserve_bytes
-                                       + retained_budget.candidate_delta_bytes))
+                        reserve_bytes=retained_budget.boundary_reserve_bytes,
+                        reserve_device_bytes=(window.statistics_bytes
+                                              + retained_budget.workspace_reserve_bytes
+                                              + retained_budget.candidate_delta_bytes))
                 with JointOperatorStatisticsLease(
                         selected, selected_specs,
                         max_statistics_bytes=retained_budget.statistics_cap_bytes,

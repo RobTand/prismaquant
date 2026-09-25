@@ -39,6 +39,7 @@ for _entry in (ROOT, ROOT / "tools"):
     if str(_entry) not in sys.path:
         sys.path.insert(0, str(_entry))
 
+from prismaquant import io_engine
 from prismaquant import joint_layer_quanta as jl
 from test_quantum_executable_readset import (
     CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bound_inputs,
@@ -511,14 +512,15 @@ def test_strict_pwc_serves_two_windows_with_phase_order(
         tmp_path, monkeypatch, files)
     order: list[str] = []
     current = {"phase": "none"}
-    real_prefetch = cache.prefetch
+    real_load = io_engine.load_file
+    qname_by_path = {row["path"]: key[0] for key, row in files.items()}
 
-    def recording_prefetch(keys=None, max_workers=1, **kwargs):
-        for key in (keys or ()):
-            order.append(f"open:{current['phase']}:{key[0]}")
-        return real_prefetch(keys, max_workers=max_workers, **kwargs)
+    def recording_load(path, limit, **kwargs):
+        # A retained window's renders are read by the IO engine (PQ #1294).
+        order.append(f"open:{current['phase']}:{qname_by_path[str(path)]}")
+        return real_load(path, limit, **kwargs)
 
-    cache.prefetch = recording_prefetch
+    monkeypatch.setattr(io_engine, "load_file", recording_load)
 
     def enter_phase(name):
         current["phase"] = name
