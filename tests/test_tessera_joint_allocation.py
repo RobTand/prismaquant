@@ -214,9 +214,10 @@ def test_file_handoff_authenticates_owned_bytes_and_preserves_original(tmp_path,
             prepared=prepared_binding, coverage={'status': 'complete', 'gaps': []})
     joint_raw = pickle.dumps(joint)
     joint_binding = write_bound('joint.pkl', joint_raw)
-    def load_inputs(inputs, *, verify_payloads):
+    def load_inputs(inputs, *, verify_payloads, historical_encoder_reuse):
         assert inputs == data.inputs
         assert verify_payloads is False
+        assert historical_encoder_reuse is None
         return data
     monkeypatch.setattr(bridge, 'load_measured_anchor_input', load_inputs)
     output = tmp_path / 'allocation.pkl'
@@ -321,7 +322,8 @@ def test_file_handoff_validates_a_shared_probe_identity_once(tmp_path, monkeypat
         plan_sha256=plan_binding['sha256'], prepared=prepared_binding,
         calibration_input=prepared['calibration_input'])
     joint_binding = write_bound('joint.pkl', pickle.dumps(joint))
-    monkeypatch.setattr(bridge, 'load_measured_anchor_input', lambda inputs, *, verify_payloads: data)
+    monkeypatch.setattr(bridge, 'load_measured_anchor_input',
+                        lambda inputs, *, verify_payloads, historical_encoder_reuse: data)
     calls = []
     validate = cost_streaming.validate_streamed_model_identity
 
@@ -338,3 +340,88 @@ def test_file_handoff_validates_a_shared_probe_identity_once(tmp_path, monkeypat
         for row in per_unit.values():
             assert type(row['probe_identity']) is dict
             assert row['probe_identity'] == original_probe
+
+
+def test_file_handoff_passes_the_plans_historical_encoder_allowance(tmp_path, monkeypatch):
+    """The GLM-5.3 handoff refused its own campaign: the joint anchor checkpoint
+    was encoded by a historical Tessera package that the bound plan names in
+    ``historical_encoder_reuse``, but ``handoff`` read the anchor input without
+    that allowance, so the loader saw an unnamed encoder seal."""
+    import hashlib
+    import json
+    import pickle
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.joint_quanta_join import JOINED_RESULTS_SCHEMA
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    from prismaquant.tessera_joint_allocation import handoff
+
+    joint, data, prepared, metadata, _kwargs = fixture()
+    recorded, installed = '8'*64, '9'*64
+    allowance = {'schema': bridge.HISTORICAL_ENCODER_REUSE_SCHEMA, 'allowlist': [{
+        'encoder_source_sha256': recorded, 'reason': 'wires encoded by the historical package',
+        'evidence': '/fixture/finding.md', 'recorded_by': 'fixture', 'recorded_unix': 1.0}]}
+
+    def write_bound(name, raw):
+        path = tmp_path / name
+        path.write_bytes(raw)
+        return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
+
+    plan = {'schema': bridge.SCHEMA, 'inputs': data.inputs, 'calibration_input': {'sha256': '3'*64},
+            'historical_encoder_reuse': allowance}
+    plan_binding = write_bound('plan.json', json.dumps(plan).encode())
+    prepared['plan_sha256'] = plan_binding['sha256']
+    prepared['calibration_input']['artifact_sha256'] = '3'*64
+    for pair, cell in data.cells.items():
+        cell['render'] = '/fixture/' + pair[0] + '.pt'
+    cache = ProductionWeightCache(weights={pair: cell['render'] for pair, cell in data.cells.items()},
+                                  levers={}, metadata=metadata)
+    prepared['production_cache'] = write_bound('production.pkl', pickle.dumps(cache))
+    prepared_binding = write_bound('prepared.json', json.dumps(prepared).encode())
+    del joint['provenance']['tessera_joint_anchors']
+    joint['provenance'].update(join_schema=JOINED_RESULTS_SCHEMA,
+        plan_sha256=plan_binding['sha256'], prepared_sha256=prepared_binding['sha256'],
+        prepared=prepared_binding, coverage={'status': 'complete', 'gaps': []})
+    joint_binding = write_bound('joint.pkl', pickle.dumps(joint))
+
+    def load_inputs(inputs, *, verify_payloads, historical_encoder_reuse=None):
+        # The loader's own encoder decision (load_measured_anchor_input), on a
+        # checkpoint whose recorded seal is not the installed package's.
+        data.encoder_source_reuse = bridge.resolve_encoder_source_reuse(
+            recorded, installed, bridge.normalize_historical_encoder_reuse(historical_encoder_reuse),
+            where='joint anchor checkpoint encoder source')
+        return data
+
+    monkeypatch.setattr(bridge, 'load_measured_anchor_input', load_inputs)
+    output = tmp_path / 'allocation.pkl'
+    receipt = handoff(joint_binding=joint_binding, plan_binding=plan_binding, output_path=output)
+    assert hashlib.sha256(output.read_bytes()).hexdigest() == receipt['output']['sha256']
+    assert data.encoder_source_reuse['recorded_encoder_source_sha256'] == recorded
+    assert data.encoder_source_reuse['observed_current_encoder_source_sha256'] == installed
+
+
+@pytest.mark.parametrize('certified', [False, True])
+def test_bind_stamps_the_resource_policy_the_rows_ran_under(monkeypatch, capsys, certified):
+    """Every GLM-5.3 Stage B row ran under the approved chain resource policy,
+    while prepared.json still names the one it was prepared with. Sealing is
+    off (PQ #1147): the handoff stamps each distinct mismatch once and binds.
+    Certified mode refuses exactly as before."""
+    from prismaquant.tessera_joint_allocation import bind_allocation_payload
+    joint, data, prepared, metadata, kwargs = fixture()
+    prepared['stage_b_resource_policy'] = {'path': '/fixture/prepared-policy.json', 'sha256': '4'*64}
+    ran = {'path': '/fixture/chain-policy.json', 'sha256': '5'*64}
+    joint['provenance']['stage_b_resource_policy'] = ran
+    for rows in joint['costs'].values():
+        for fmt, row in list(rows.items()):
+            rows[fmt] = _rebuild(row, probe_change=lambda probe: probe['arithmetic'].update(
+                stage_b_resource_policy=copy.deepcopy(ran)))
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
+    if certified:
+        with pytest.raises(ValueError, match='joint Stage B resource policy: identity mismatch'):
+            bind_allocation_payload(joint, data, prepared, metadata, **kwargs)
+        return
+    result = bind_allocation_payload(joint, data, prepared, metadata, **kwargs)
+    stamps = [line for line in capsys.readouterr().out.splitlines() if line.startswith('[DEV-MODE]')]
+    # One for the joined provenance, one for the rows' single distinct policy.
+    assert len(stamps) == 2, stamps
+    assert all('Stage B resource policy' in line for line in stamps)
+    assert result['provenance']['stage_b_resource_policy'] == ran
