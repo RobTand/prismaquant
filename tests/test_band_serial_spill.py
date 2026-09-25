@@ -43,12 +43,19 @@ from test_stageb_one_pass_spill import (  # noqa: F401 (module fixture)
 SPILL, WINDOWED = "one_pass_spill", "windowed"
 
 
-def _run(campaign, monkeypatch, *, layer, spill_root=None, handoff=None, emit=False):
+def _run(campaign, monkeypatch, *, layer, spill_root=None, handoff=None, emit=False,
+         resume=False):
     """The spill suite's quantum harness, run band-serial when asked.
 
     The harness imports ``run_layer_quantum_core`` at call time, so a wrapper
     patched onto the module adds the consumer's bound handoff and the
-    producer's emitter, both built as ``main`` builds them.
+    producer's emitter, both built as ``main`` builds them. ``resume`` keeps
+    the layer's committed units and resumes from them.
+
+    A consumer under the spill reads each probe's incoming plane from the
+    handoff during that probe's final pass (PQ #1143); its counters record
+    one stream per probe, each over all of that probe's entries. No other
+    run streams.
     """
     original = core.run_layer_quantum_core
     published = {}
@@ -69,15 +76,27 @@ def _run(campaign, monkeypatch, *, layer, spill_root=None, handoff=None, emit=Fa
             published.update(emitter.published)
         return payload
 
-    _clear_output(campaign, layer)
+    if not resume:
+        _clear_output(campaign, layer)
     with monkeypatch.context() as patch:
         patch.setattr(core, "run_layer_quantum_core", band_serial)
         payload, state = _spill_harness(
             campaign, monkeypatch, layer=layer, spill_root=spill_root,
-            ceiling=None if spill_root is None else 1 << 30)
+            ceiling=None if spill_root is None else 1 << 30, resume=resume)
     assert payload is not None, _chain(state.error)
     mode = state.counters_block["replay"]["mode"]
     assert mode == (WINDOWED if spill_root is None else SPILL), mode
+    incoming = state.counters_block.get("handoff_incoming")
+    if handoff is not None and spill_root is not None:
+        _document, plane, _states = _handoff_plane(handoff)
+        expected = {}
+        for probe, _batch in plane:
+            expected[probe] = expected.get(probe, 0) + 1
+        assert incoming is not None, "the spill consumer did not stream its plane"
+        assert {row["probe"]: row["entries"] for row in incoming["probes"]} == expected
+        assert [row["probe"] for row in incoming["probes"]] == sorted(expected)
+    else:
+        assert incoming is None, incoming
     return payload, _evidence(campaign, layer, payload), (published or None)
 
 
@@ -160,3 +179,24 @@ def test_band_serial_under_the_spill_equals_the_chain_rebuild(campaign, monkeypa
             verdict = compare_layer(kept, _checkpoint_dir(campaign, 0),
                                     layer=0, qname_filter=None)
             assert verdict["verdict"] == "match", (mode, verdict)
+            if root is None:
+                continue
+            # PQ #1143: both resume paths stream the incoming plane too. With
+            # every unit committed, no window is active and each probe's
+            # final pass runs outside any capture; with window 0 committed,
+            # every probe is captured ahead of window 1.
+            _resumed, resumed, _ = _run(campaign, monkeypatch, layer=0,
+                                        spill_root=root, handoff=handoff,
+                                        resume=True)
+            assert resumed == chain_evidence, "a complete resume"
+            windows = campaign.preflight[0]
+            if len(windows) > 1:
+                from prismaquant.aura_cost import _aura_unit_checkpoint_path
+                for window in windows[1:]:
+                    for name in window.original_full_target_names:
+                        _aura_unit_checkpoint_path(
+                            _checkpoint_dir(campaign, 0), name).unlink()
+                _resumed, resumed, _ = _run(campaign, monkeypatch, layer=0,
+                                            spill_root=root, handoff=handoff,
+                                            resume=True)
+                assert resumed == chain_evidence, "a resume after window 0"
