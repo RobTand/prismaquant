@@ -177,6 +177,10 @@ PROGRESS_GRACE_FLAG = "--progress-grace-derivation"
 #: plus each compute term, with each term's derivation in the stamp.
 #: Before #1165 these phases took CHUNK_PROGRESS_GRACE_S, the legacy chunk
 #: lane's allowance, which bounds no pass.
+#: The quantum's tail after its last window (the ``payload`` and ``teardown``
+#: spans, PQ #1187) declares no phase and commits no unit, so it runs on the
+#: last declared phase's clock after that phase's last commit. That phase's
+#: grace carries it as one more term, ``tail`` (PQ #1190).
 COMPUTE_CEILING_SCHEMA = "prismaquant.compute_unit_ceiling.v1"
 COMPUTE_PHASE_GRACE_SCHEMA = "prismaquant.compute_phase_grace.v1"
 COMPUTE_PHASE_BOUND = (
@@ -190,7 +194,12 @@ COMPUTE_PHASE_BOUND = (
     "slowest window of at least 30 s of a pass on the same regime and device "
     "class. An unmeasured term takes the blanket HEAD_PROGRESS_GRACE_S. The "
     "pass commits no unit (nothing in it is durable), so the grace is its "
-    "whole time budget.")
+    "whole time budget. The row's last declared phase adds a tail term: the "
+    "quantum's tail after its last window (the payload and teardown spans) "
+    "commits no unit and runs on that phase's clock after its last commit, "
+    "so the term is ceil(1 x unit_s), unit_s the slowest measured tail "
+    "(payload plus teardown wall_s) on the same regime and device class, or "
+    "the blanket.")
 #: What each compute kind counts, and where an unmeasured kind's time will
 #: come from once a run records it.
 COMPUTE_KINDS = {
@@ -211,7 +220,18 @@ COMPUTE_KINDS = {
         "unit": "one stored batch's replay backward, with statistics hooks, "
                 "for one probe",
         "measured_by": "counters.json each window's wall_s"},
+    "tail": {
+        "unit": "one quantum's tail after its last window: the band-serial "
+                "handoff write, the payload assembly, the final check of "
+                "every row, the runner shutdown and the residency report",
+        "measured_by": "counters.json io_spans: the payload and teardown "
+                       "spans' wall_s, summed (PQ #1187)"},
 }
+#: The tail's one term (PQ #1190), which :func:`compute_phase_work` appends to
+#: the last declared phase's work.
+TAIL_WORK = {"kind": "tail", "units": 1,
+             "work": ("the quantum's tail after its last window, which "
+                      "declares no phase and commits no unit")}
 #: The per-row entry that carries the bound and the ceiling documents once,
 #: so each compute stamp names its ceiling by kind and the payload stays
 #: small.
@@ -1315,7 +1335,8 @@ _REPLAY_PHASE = re.compile(r"replay-(\d{2,})-p(\d+)")
 
 
 def compute_phase_work(name: str, *, replay_mode: str, entries,
-                       n_probes, capture_batch) -> list[dict] | None:
+                       n_probes, capture_batch,
+                       runs_tail: bool = False) -> list[dict] | None:
     """The compute one phase's pass runs, or ``None`` for a phase with none.
 
     Each term is ``{"kind", "units", "work"}``; ``units`` is ``None`` when
@@ -1327,16 +1348,21 @@ def compute_phase_work(name: str, *, replay_mode: str, entries,
     captures under ``spill-pP`` and replays nothing there (PQ #1172), so the
     replay term of ``spill-pP`` is an upper bound for it. ``render-00`` of a
     spill row, and every ``render-NN`` of a windowed row, only read.
+
+    ``runs_tail`` marks the row's last declared phase: the quantum's tail
+    after its last window runs on its clock (PQ #1187), so :data:`TAIL_WORK`
+    is its last term, with or without a pass of its own (PQ #1190).
     """
     def counted(*values):
         return all(type(value) is int and value > 0 for value in values)
 
+    tail = [dict(TAIL_WORK)] if runs_tail else []
     match = _CHAIN_BOUND_PHASE.fullmatch(name)
     if match:
         return [{"kind": "chain-roll",
                  "units": entries * n_probes if counted(entries, n_probes) else None,
                  "work": (f"chain layer {int(match.group(1))}'s backward roll: "
-                          "one row per probe and stored batch")}]
+                          "one row per probe and stored batch")}, *tail]
     match = _SPILL_PHASE.fullmatch(name)
     if match and replay_mode == "spill":
         probe = int(match.group(1))
@@ -1346,21 +1372,22 @@ def compute_phase_work(name: str, *, replay_mode: str, entries,
                  "work": (f"probe {probe}'s spill capture: one group per "
                           "capture_batch stored batches")},
                 {"kind": "spill-replay", "units": 1,
-                 "work": f"the first window's spill replay for probe {probe}"}]
+                 "work": f"the first window's spill replay for probe {probe}"},
+                *tail]
     match = _RENDER_PHASE.fullmatch(name)
     if match and replay_mode == "spill" and int(match.group(1)) >= 1:
         return [{"kind": "spill-replay",
                  "units": n_probes if counted(n_probes) else None,
                  "work": (f"window {int(match.group(1))}'s spill replay for "
-                          "each probe")}]
+                          "each probe")}, *tail]
     match = _REPLAY_PHASE.fullmatch(name)
     if match and replay_mode == "windowed":
         return [{"kind": "windowed-replay",
                  "units": entries if counted(entries) else None,
                  "work": (f"window {int(match.group(1))}'s replay for probe "
                           f"{int(match.group(2))}: one backward per stored "
-                          "batch")}]
-    return None
+                          "batch")}, *tail]
+    return tail or None
 
 
 def _scope_misses(scope: Mapping, context: Mapping) -> list[str]:
@@ -1444,12 +1471,15 @@ def compute_grace_basis(stamps: Sequence[Mapping], *, ceilings: Mapping,
 
 def _row_compute_context(record: Mapping, *, spec: Mapping,
                          consumer_tags: Sequence[str],
-                         annotations: Mapping) -> dict:
+                         annotations: Mapping,
+                         emits_handoff: bool = False) -> dict:
     """The fields a compute ceiling's scope is checked against, for one row.
 
     It refuses nothing: a spec regime, spill bound or slice this cannot read
     leaves its fields out, the terms that need them take the blanket, and
     the row's own checks in :func:`quantum_argv` refuse it as before.
+    ``emits_handoff`` says the row is a band-serial producer, whose tail
+    writes the handoff, so a ``tail`` measurement can scope it (PQ #1190).
     """
     from prismaquant.joint_adjoint_slices import (
         AdjointSliceRefused, chain_regime_of)
@@ -1458,7 +1488,8 @@ def _row_compute_context(record: Mapping, *, spec: Mapping,
         replay_regime_from_environment)
 
     context: dict = {"consumer_tags": [str(tag) for tag in consumer_tags],
-                     "n_probes": annotations.get("n_probes")}
+                     "n_probes": annotations.get("n_probes"),
+                     "emits_handoff": bool(emits_handoff)}
     try:
         regime = normalize_replay_regime(
             replay_regime_from_environment(spec.get("env") or {}))
@@ -2099,6 +2130,12 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         return stamp["grace_s"]
 
     row_context: dict = {}
+    # The quantum's tail after its last window runs on the last declared
+    # phase's clock (PQ #1187), so that phase's grace carries it (PQ #1190).
+    declared_phases = (handoff if handoff is not None
+                       else executable or {}).get("phases")
+    tail_phase = (declared_phases[-1] if isinstance(declared_phases, list)
+                  and declared_phases else None)
 
     def compute_grace(name, fact, annotations):
         from prismaquant.joint_layer_quanta import normalize_replay_mode
@@ -2106,13 +2143,15 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         if "context" not in row_context:
             row_context["context"] = _row_compute_context(
                 record, spec=parsed_spec(), consumer_tags=consumer_tags,
-                annotations=annotations)
+                annotations=annotations,
+                emits_handoff=emit_template is not None)
         context = row_context["context"]
         work = compute_phase_work(
             name, replay_mode=normalize_replay_mode(
                 (executable or {}).get("replay_mode")),
             entries=fact.get("entries"), n_probes=context.get("n_probes"),
-            capture_batch=context.get("replay_regime.capture_batch"))
+            capture_batch=context.get("replay_regime.capture_batch"),
+            runs_tail=name == tail_phase)
         if work is None:
             return None
         stamp = compute_phase_grace(
@@ -3120,11 +3159,11 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
     parser.add_argument("--compute-ceiling", type=Path, action="append",
                         default=[], metavar="FILE",
                         help="a compute ceiling document "
-                             f"({COMPUTE_CEILING_SCHEMA}) that replaces the "
-                             "built-in ceiling of its kind (repeatable). A "
-                             "compute phase outside every ceiling's scope "
-                             f"takes the blanket {HEAD_PROGRESS_GRACE_S} s "
-                             "for that term")
+                             f"({COMPUTE_CEILING_SCHEMA}) that sets the "
+                             "ceiling of its kind, replacing any built-in "
+                             "one (repeatable). A compute term outside every "
+                             "ceiling's scope takes the blanket "
+                             f"{HEAD_PROGRESS_GRACE_S} s")
     parser.add_argument("--state", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)

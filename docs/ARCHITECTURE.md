@@ -896,6 +896,32 @@ prices. This changes a dispatcher default (the compute-phase grace) and adds
 one dispatcher option. No format, pipeline stage, record identity or ship
 gate changes.
 
+The row's last declared phase also prices the quantum's tail (2026-09-25,
+`claude/gpu-availability-i1azgo-pq1190`, PQ #1190). After the last window commits, the handoff
+write, the payload assembly, the final check of every row (the `payload`
+span) and the runner `teardown` (PQ #1187) declare no phase and commit no
+unit. They run on the last declared phase's no-progress clock, which
+restarts at that window's commit, and nothing checked that the phase's grace
+covered them: on v7 (layer 44, before #1184) the tail took 796 s under
+`render-14`'s 2,168 s grace. `compute_phase_work(..., runs_tail=True)` now
+appends one `tail` term (`TAIL_WORK`, one unit per quantum) to the phase
+that is last in the row's sealed phase list, with or without a pass of its
+own, and `compute_phase_grace` prices it like every other term: ceil(1 x
+unit_s) from a `tail` compute ceiling in the row's scope, else the blanket
+1800 s, with a reason that names the counter that will measure it (the
+`payload` and `teardown` spans' `wall_s` in `counters.json`). There is no
+built-in tail measurement, so every executable row's last phase grows by the
+blanket until a `--compute-ceiling` document of kind `tail` is supplied (an
+R13 spill row's last `render-NN` gains 1800 s over its pass's grace), and
+the rows' action keys move with it. The row context gains `emits_handoff`,
+so a tail measured on rows that write no band-serial handoff can be scoped
+away from a producer's.
+Gate: `tests/test_compute_tail_grace_1190.py`, which also drives the real
+quantum and checks that the `payload` span opens with the last declared
+phase in effect and that nothing commits after it. A dispatcher default (the
+last phase's grace) changes; no format, pipeline stage, record identity or
+ship gate changes.
+
 A resumed spill row whose first active window is not window 0 ran its
 captures under that window's `render-NN` phase, because progress phases only
 move forward, and that grace has no capture term. PQ #1172 moves those
@@ -2507,8 +2533,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-24 · `perf/1210-render-readahead`.
+As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq1190`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1190`) for **the quantum's tail in the
+last declared phase's grace** (PQ #1190): the joint dispatcher appends a
+`tail` compute term to the row's last declared phase, measured from a `tail`
+compute ceiling or the blanket 1800 s. See the entry after the PQ #1165
+compute-phase grace. A dispatcher default changes; no format, pipeline
+stage, lane or ship gate changes.
 
 Re-stamped (2026-09-24, `perf/1210-render-readahead`) for **a retained PWC
 window's one reader lease, one loader pool and one archive parse per file**
