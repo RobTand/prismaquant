@@ -1241,7 +1241,8 @@ class ModelProfile(ABC):
             return "model." + ckpt_key[len("model.language_model."):]
         return ckpt_key
 
-    def fp8_scale_pairs(self, model_path: str
+    def fp8_scale_pairs(self, model_path: str, *,
+                        raw_weight_map: dict[str, str] | None = None,
                         ) -> dict[str, tuple[str, str]] | None:
         """Return `{model_weight_key: (scale_shard_path, scale_ckpt_key)}`
         for every native-FP8 weight tensor in this checkpoint. Returns
@@ -1250,7 +1251,13 @@ class ModelProfile(ABC):
         applies to this model". Returns a populated dict to fully
         override the discovery (e.g. DSv4 uses `.scale` siblings).
 
+        ``raw_weight_map`` is the checkpoint index's ``weight_map`` when
+        the caller already read it (off the stage under the Stage B
+        preparation's strict reads, PQ #1219); an override then scans it
+        instead of opening the index.
+
         Default: None (use the legacy `.weight_scale_inv` discovery)."""
+        del raw_weight_map
         return None
 
     def head_resident_extra_prefixes(self, root) -> list[str]:

@@ -34,6 +34,7 @@ import pickle
 import socket
 import time
 from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -573,18 +574,16 @@ class QuantumCounters:
         # ``layer_passes`` counts full target-layer forward/backward passes.
         self.replay = {"mode": "windowed", "layer_passes": 0,
                        "noncontiguous_cotangent_seeds": 0}
-        # The KDA capture kernel (PQ #1199): None when the launch names none,
-        # a record when it names one this target does not run, else the
-        # admitted kernel, whose pass counts are read at finish.
+        # The KDA capture kernel (PQ #1199, #1214): None when the launch
+        # names none, else the kernel admitted for kernel mode, whose layer
+        # pass counts are read at finish.
         self.kda_capture_kernel = None
         self._phase_cursor = None
         self._window_cursor = None
 
     def kda_capture_kernel_record(self) -> dict | None:
         block = self.kda_capture_kernel
-        if block is None or isinstance(block, Mapping):
-            return None if block is None else dict(block)
-        return block.record()
+        return None if block is None else block.record()
 
     def _snapshot(self):
         report = self._report()
@@ -1382,7 +1381,7 @@ def build_quantum_source_runner(config, *, offload_folder,
     """
     from .cost_streaming import build_streamed_causal_lm
     from .model_profiles import detect_profile
-    from .tessera_joint_aura import _source_prefetch
+    from .tessera_joint_aura import _planned_source_window, _source_prefetch
 
     return build_streamed_causal_lm(
         config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
@@ -1391,6 +1390,7 @@ def build_quantum_source_runner(config, *, offload_folder,
         source_derivative=config["execution"].get("source_derivative"),
         **({"sealed_head_tensors": sealed_head_tensors}
            if sealed_head_tensors is not None else {}),
+        **_planned_source_window(config),
         **_source_prefetch(config))
 
 
@@ -1622,26 +1622,52 @@ def run_layer_quantum_core(
             f"resolved windows cover {resolved_names!r}, not layer {layer}'s "
             f"roster {names!r}")
 
-    # ---- the KDA capture kernel (PQ #1199) ---------------------------------
-    # A launch setting. Admitted only for a target layer with KDA attention,
-    # before any chain or capture work; it runs the target layer's passes
-    # and nothing else, and it refuses rather than fall back to Torch.
+    # ---- the KDA capture kernel: kernel mode (PQ #1199, #1214) -------------
+    # A launch setting. Admitted once, before any chain or capture work,
+    # whatever this quantum's layers are: every Stage B layer pass below,
+    # target and chain, runs inside its dispatch, and it refuses rather
+    # than fall back to Torch. The mode is the seal, so its identity is
+    # stamped even when no pass of this quantum runs a KDA layer.
     from contextlib import nullcontext
     kda_kernel = None
     requested_kda_kernel = execution.get("kda_capture_kernel")
     if requested_kda_kernel is not None:
-        from .glm_kda_capture_kernel import (
-            KdaCaptureKernelRefused, admit_kda_capture_kernel, not_executed_record)
+        from .glm_kda_capture_kernel import KdaCaptureKernelRefused, admit_kda_capture_kernel
         try:
             kda_kernel = admit_kda_capture_kernel(
-                requested_kda_kernel, runner.model, runner.layers[layer],
-                device=runner.device, emits_handoff=handoff_emitter is not None)
+                requested_kda_kernel, runner.model, device=runner.device)
         except KdaCaptureKernelRefused as exc:
             raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
-        counters.kda_capture_kernel = (
-            kda_kernel if kda_kernel is not None else not_executed_record(
-                requested_kda_kernel, f"target layer {layer} has no KDA attention"))
-    kernel_pass = nullcontext if kda_kernel is None else kda_kernel.scope
+        counters.kda_capture_kernel = kda_kernel
+    if adjoint_handoff is not None:
+        # The handoff names its producer's kernel by name and identity (PQ
+        # #1214). The mode and the name are the arithmetic, so they bind in
+        # both modes, as the consumer's load already checked; this repeats it
+        # on the launch setting the core runs. The identity is a run seal
+        # (PQ #1147): dev mode prints a different build and runs, certified
+        # mode refuses it.
+        from .joint_quantum_handoff import handoff_kernel_refusal
+        producer = adjoint_handoff["producer"]
+        refusal = handoff_kernel_refusal(producer, requested_kda_kernel)
+        if refusal is not None:
+            raise QuantumIdentityRefused(f"quantum {quantum_id}: adjoint handoff: {refusal}")
+        if kda_kernel is not None:
+            stamp = producer["kda_capture_kernel"]
+            seal_check(
+                "KDA capture kernel handoff", stamp, kda_kernel.handoff_stamp(),
+                where=f"quantum {quantum_id}: the adjoint handoff's producer versus "
+                      "the kernel this quantum admitted",
+                refusal=lambda: QuantumIdentityRefused(
+                    f"quantum {quantum_id}: the adjoint handoff was captured by KDA "
+                    f"capture kernel identity {stamp['identity_sha256']}, and this "
+                    f"quantum admitted {kda_kernel.identity_sha256}; a band runs on "
+                    "one kernel build"))
+
+    def target_pass():
+        """One target-layer pass, forward and backward, in this launch's mode."""
+        if kda_kernel is None:
+            return nullcontext()
+        return kda_kernel.layer_pass(runner.layers[layer], site="target", layer=layer)
 
     # ---- identity blocks (mirrors compute_aura_cost_streamed's) -----------
     batch_rows = min(probe_microbatch or len(calib_ids), len(calib_ids))
@@ -2089,6 +2115,11 @@ def run_layer_quantum_core(
                             chain_admission = None
 
                         def roll_chain_layer(chain_layer=chain_layer):
+                            # Kernel mode (PQ #1214): each chain layer pass
+                            # runs inside the admitted kernel's dispatch.
+                            chain_pass = (None if kda_kernel is None else partial(
+                                kda_kernel.layer_pass, runner.layers[chain_layer],
+                                site="chain", layer=chain_layer))
                             return render_free_layer_roll(
                                 runner, storage=storage, batches=batches, layer=chain_layer,
                                 cotangents=cotangent_owners, n_probes=n_probes,
@@ -2098,7 +2129,8 @@ def run_layer_quantum_core(
                                     (probe, batch), tensor),
                                 min_free_gib=min_free_gib,
                                 batch_size=chain_regime["batch_size"],
-                                probe_fusion=chain_regime["probe_fusion"])
+                                probe_fusion=chain_regime["probe_fusion"],
+                                layer_pass=chain_pass)
 
                         if chain_profile is None:
                             backwards = roll_chain_layer()
@@ -2325,7 +2357,7 @@ def run_layer_quantum_core(
                     dtype=runner.dtype).detach().requires_grad_(True)
                 batch = (batches[indices[0]] if len(indices) == 1 else
                          _chain_group_batch(runner, batches, indices, capture_group_cache))
-                with kernel_pass():
+                with target_pass():
                     out = runner.isolated_layer(batch, layer, x_in, pass_state={})
                     torch.autograd.backward([out], [incoming_grad])
                 if observer is not None:
@@ -2447,7 +2479,7 @@ def run_layer_quantum_core(
                         isolated = profile.isolated_layer_pass_state(
                             batch.shared_pass_state, runner.layers[layer])
                         isolated = owner.graft(isolated)
-                        with kernel_pass():
+                        with target_pass():
                             out = runner.isolated_layer(batch, layer, x_in,
                                                         pass_state=isolated)
                             roots, root_grads = owner.produced_roots()
@@ -2736,7 +2768,10 @@ def run_layer_quantum_core(
                     handoff_emitter.emit(grad_plane=grad_plane,
                                          cotangent_owners=cotangent_owners,
                                          n_probes=n_probes,
-                                         n_batches=len(row_offsets))
+                                         n_batches=len(row_offsets),
+                                         kda_capture_kernel=(
+                                             None if kda_kernel is None
+                                             else kda_kernel.handoff_stamp()))
                 finally:
                     # Success or failure, the row's counters keep the export
                     # keys, bytes and waits (PQ #1225).
@@ -2982,8 +3017,8 @@ def run_layer_quantum(
         bf16_reduction = bf16_reduction_from_environment(os.environ)
     except MatmulArithmeticRefused as exc:
         raise QuantumIdentityRefused(str(exc)) from exc
-    # So is the KDA capture kernel (PQ #1199). The core admits it for a KDA
-    # target layer and stamps its identity into the arithmetic.
+    # So is the KDA capture kernel (PQ #1199). The core admits it once and
+    # runs every Stage B layer pass in kernel mode (PQ #1214).
     from .glm_kda_capture_kernel import (
         KDA_KERNEL_ENV, KdaCaptureKernelRefused, kda_capture_kernel_from_environment)
     if "kda_capture_kernel" in execution:
@@ -3429,10 +3464,19 @@ def main(argv=None) -> int:
             raise QuantumIdentityRefused(
                 "--adjoint-handoff and --adjoint-handoff-sha256 go together")
         if args.adjoint_handoff is not None:
+            # A consumer binds only a handoff produced in its own launch's
+            # mode (PQ #1214); the core binds the kernel's identity.
+            from .glm_kda_capture_kernel import (
+                KdaCaptureKernelRefused, kda_capture_kernel_from_environment)
+            try:
+                launch_kernel = kda_capture_kernel_from_environment(os.environ)
+            except KdaCaptureKernelRefused as exc:
+                raise QuantumIdentityRefused(str(exc)) from exc
             try:
                 adjoint_handoff = load_quantum_handoff(
                     args.adjoint_handoff, args.adjoint_handoff_sha256,
-                    record=record, adjoint_slice=adjoint_slice)
+                    record=record, adjoint_slice=adjoint_slice,
+                    kda_capture_kernel=launch_kernel)
                 require_band_serial_readset(
                     record, adjoint_handoff, adjoint_slice["checkpoint"],
                     output_root=args.output_root,

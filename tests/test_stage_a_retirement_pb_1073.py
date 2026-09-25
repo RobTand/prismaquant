@@ -18,7 +18,7 @@ the real check refuses, and the retirement with it; the successful path
 replaces the check with a recorder, as ``test_stage_a_chain_resume`` does.
 
 PrismaBuild comes from the published generation pinned in
-``stage_b_prep_pb_pin.json``. ``own_process`` (PQ #1008).
+``pb_runtime_generation_pin.json`` (shared, PQ #1084). ``own_process`` (PQ #1008).
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ from test_stage_a_chain_resume import _offline_tier_policy  # noqa: E402,F401
 from test_stage_a_retirement_1073 import (  # noqa: E402
     argv, completed, last_json, plane_paths, retire_main, successor)
 
-PIN_PATH = Path(__file__).resolve().parent / "stage_b_prep_pb_pin.json"
+PIN_PATH = chain.PB_GENERATION_PIN
 SLOT = "boundary_entries"
 
 

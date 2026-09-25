@@ -81,6 +81,11 @@ if str(REPO) not in sys.path:
 TIER = "prismabuild-stage:dl380g10"
 KIND = "stage_gib"
 PIN_PATH = Path(__file__).resolve().parent / "stagea_produced_pb_pin.json"
+#: The ONE pin of the published PrismaBuild generation the write-only
+#: produced-output suites run against (PQ #1084): Stage B preparation
+#: (#1070), Stage A retirement (#1073) and the band-serial handoff (#1075)
+#: all read it, so one bump moves them together.
+PB_GENERATION_PIN = Path(__file__).resolve().parent / "pb_runtime_generation_pin.json"
 
 #: The fixture's publication group: small enough to run in seconds, large
 #: enough that a group is a group. The production group is the read
@@ -177,8 +182,9 @@ def _pb_source() -> tuple[Path, Path]:
         return src, root
     pytest.skip(
         "no PrismaBuild produced-output candidate resolves against "
-        "tests/stagea_produced_pb_pin.json (the named candidate is PENDING "
-        "QUALIFICATION and no runtime generation carries it)")
+        f"tests/{PIN_PATH.name} (qualification: "
+        f"{pin.get('qualification', 'not stated')}; nothing on its search "
+        "paths carries the pinned digests)")
 
 
 # -- PB-side fixtures (the shapes pbrun/tier_loop produce) -----------------

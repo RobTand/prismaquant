@@ -94,8 +94,11 @@ def test_netdata_failure_keeps_other_host_and_later_samples(tmp_path, monkeypatc
     assert observer.result['netdata']['samples'] == 2
     # A lost sample remains an explicit incomplete-evidence failure, even when
     # subsequent samples were retained. Collection recovery is not gap erasure.
-    with pytest.raises(RuntimeError, match='required profiler evidence'):
+    with pytest.raises(RuntimeError, match='required profiler evidence') as raised:
         observer.__exit__(None, None, None)
+    # #1096: the message names the failing entry and its host.
+    assert "netdata: " in str(raised.value) and "host='sparky'" in str(raised.value)
+    assert 'GPU power chart missing' in str(raised.value)
     result = json.loads((observer.out/'result.json').read_text())
     assert result['status'] == 'failed'
     assert result['errors'][0]['host'] == 'sparky'

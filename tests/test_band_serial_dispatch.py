@@ -167,8 +167,12 @@ class _Owner:
         return dict(self.state)
 
 
-def _emit(record, *, shift=0.0):
-    """Publish ``record``'s handoff as its final pass would (no PB owner)."""
+def _emit(record, *, shift=0.0, kernel=None):
+    """Publish ``record``'s handoff as its final pass would (no PB owner).
+
+    ``kernel`` names the KDA capture kernel of a kernel-mode producer
+    (PQ #1214); its handoff then carries the kernel's name and identity.
+    """
     emitter = HandoffEmitter(
         record=record, adjoint_slice=_slice(record),
         boundary_storage={"schema": BOUNDARY_STORAGE_SCHEMA,
@@ -181,8 +185,11 @@ def _emit(record, *, shift=0.0):
              for p in range(N_PROBES) for b in range(N_BATCHES)}
     owners = [[_Owner({"scale": float(p + b)}) for b in range(N_BATCHES)]
               for p in range(N_PROBES)]
+    stamp = (None if kernel is None
+             else {"name": kernel, "identity_sha256": "e" * 64})
     return emitter.emit(grad_plane=plane, cotangent_owners=owners,
-                        n_probes=N_PROBES, n_batches=N_BATCHES)
+                        n_probes=N_PROBES, n_batches=N_BATCHES,
+                        kda_capture_kernel=stamp)
 
 
 def _complete(record, published):
@@ -204,7 +211,8 @@ def test_the_band_serial_readset_swaps_the_chain_for_the_handoff(tmp_path):
     published = _emit(bound[3])
     consumer = bound[2]
     handoff = load_quantum_handoff(published["path"], published["sha256"],
-                                   record=consumer, adjoint_slice=_slice(consumer))
+                                   record=consumer, adjoint_slice=_slice(consumer),
+                                   kda_capture_kernel=None)
     sealed = _sealed(consumer)
     derived = band_serial_manifest(
         sealed, handoff, _slice(consumer)["checkpoint"],
@@ -269,7 +277,8 @@ def test_the_band_serial_readset_passes_the_pb_phase_planner(tmp_path):
     published = _emit(bound[3])
     consumer = bound[2]
     handoff = load_quantum_handoff(published["path"], published["sha256"],
-                                   record=consumer, adjoint_slice=_slice(consumer))
+                                   record=consumer, adjoint_slice=_slice(consumer),
+                                   kda_capture_kernel=None)
     derived = band_serial_manifest(
         _sealed(consumer), handoff, _slice(consumer)["checkpoint"],
         sealed_manifest_sha256=consumer["executable_readset"]["manifest_sha256"])
@@ -291,7 +300,8 @@ def test_the_quantum_refuses_a_staged_manifest_it_does_not_derive(tmp_path):
     consumer = bound[2]
     checkpoint = _slice(consumer)["checkpoint"]
     handoff = load_quantum_handoff(published["path"], published["sha256"],
-                                   record=consumer, adjoint_slice=_slice(consumer))
+                                   record=consumer, adjoint_slice=_slice(consumer),
+                                   kda_capture_kernel=None)
     wire = band_serial_manifest_bytes(consumer, handoff, checkpoint,
                                       output_root=tmp_path)
     require_band_serial_readset(
@@ -333,7 +343,8 @@ def test_the_handoff_load_phase_stages_every_read_the_consumer_makes(
     consumer = bound[2]
     checkpoint = _slice(consumer)["checkpoint"]
     handoff = load_quantum_handoff(published["path"], published["sha256"],
-                                   record=consumer, adjoint_slice=_slice(consumer))
+                                   record=consumer, adjoint_slice=_slice(consumer),
+                                   kda_capture_kernel=None)
     opened = []
     read_tensors = checkpoints.read_exact_entry_tensors
     read_payload = checkpoints._read_shared_state_payload
@@ -373,17 +384,20 @@ def test_a_handoff_reads_the_checkpoint_plane_by_its_coordinates(tmp_path):
     for index, entry in enumerate(entries):
         entry["name"] = f"renamed-{index}"
     load_quantum_handoff(published["path"], published["sha256"],
-                         record=consumer, adjoint_slice=adjoint_slice)
+                         record=consumer, adjoint_slice=adjoint_slice,
+                         kda_capture_kernel=None)
     repeated = copy.deepcopy(adjoint_slice)
     repeated["checkpoint"]["activation_entries"][1]["metadata"]["identity"][
         "coordinates"] = dict(entries[0]["metadata"]["identity"]["coordinates"])
     with pytest.raises(QuantumHandoffRefused, match="repeats probe"):
         load_quantum_handoff(published["path"], published["sha256"],
-                             record=consumer, adjoint_slice=repeated)
+                             record=consumer, adjoint_slice=repeated,
+                             kda_capture_kernel=None)
     entries[0]["metadata"]["identity"]["coordinates"] = {"probe": 0}
     with pytest.raises(QuantumHandoffRefused, match="carries no coordinates"):
         load_quantum_handoff(published["path"], published["sha256"],
-                             record=consumer, adjoint_slice=adjoint_slice)
+                             record=consumer, adjoint_slice=adjoint_slice,
+                             kda_capture_kernel=None)
 
 
 # -- the dispatch edge --------------------------------------------------------
@@ -533,7 +547,8 @@ def test_band_serial_publishes_producers_then_their_consumers(
     assert int(grace[HANDOFF_LOAD_PHASE]) == dispatch.HEAD_PROGRESS_GRACE_S
     # The quantum re-derives the staged bytes from what it is given.
     handoff = load_quantum_handoff(published["path"], published["sha256"],
-                                   record=bound[2], adjoint_slice=_slice(bound[2]))
+                                   record=bound[2], adjoint_slice=_slice(bound[2]),
+                                   kda_capture_kernel=None)
     require_band_serial_readset(bound[2], handoff, _slice(bound[2])["checkpoint"],
                                 output_root=out, data_manifest_sha256=digest)
     events = [json.loads(line) for line in
@@ -678,4 +693,35 @@ def test_band_serial_refuses_what_it_cannot_run(tmp_path, monkeypatch, capsys, c
             "legacy-rows": "executable rows only",
             "batched-regime": "batch size 8",
             "foreign-handoff": "refuses the handoff"}[case] in refusal
+    assert gateway.submitted == []
+
+
+@pytest.mark.parametrize("spec_kernel,producer_kernel",
+                         [("kda_gram_v1", None), (None, "kda_gram_v1")],
+                         ids=["kernel-spec-fallback-producer",
+                              "fallback-spec-kernel-producer"])
+def test_a_band_runs_in_one_kda_kernel_mode(tmp_path, monkeypatch, capsys,
+                                            spec_kernel, producer_kernel):
+    """A consumer binds only a handoff produced in its own launch's mode (PQ #1214).
+
+    One dispatch wraps every row in one spec, so a band dispatched once is in
+    one mode. A band resumed under a spec in the other mode is the case the
+    handoff's stamp refuses, before the consumer is published.
+    """
+    dispatch, bound, records, receipt_path, out = _dispatch_layout(tmp_path, monkeypatch)
+    flags = ("--band-serial", "--handoff-tier", TIER)
+    gateway = dispatch.FakeGateway()
+    assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 0
+    key = _by_id(gateway)["layer-003"]["action_key"]
+    _complete(bound[3], _emit(bound[3], kernel=producer_kernel))
+    gateway.mark_terminal(key)
+    gateway.submitted = []
+    spec = json.loads(Path(dispatch.SPEC_PATH).read_text())
+    spec["env"] = ({} if spec_kernel is None
+                   else {"PRISMAQUANT_STAGE_B_KDA_KERNEL": spec_kernel})
+    Path(dispatch.SPEC_PATH).write_text(json.dumps(spec))
+    capsys.readouterr()
+    assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 3
+    refusal = capsys.readouterr().err
+    assert "refuses the handoff" in refusal and "one mode" in refusal
     assert gateway.submitted == []

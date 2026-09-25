@@ -117,7 +117,7 @@ HEAD_PROGRESS_GRACE_S = 1800
 #: * W is the spec's ``PRISMAQUANT_STAGED_RANGE_WAIT_S``, read with the
 #:   reader's own rules. The reader sets one deadline, start + W, for every
 #:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1856 in
-#:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:552 in
+#:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:655 in
 #:   load_handoff_inputs). Without a PrismaBuild landing record the phase
 #:   waits at most W in total; with one (PB #989) its waits are declared and
 #:   exempt from the no-progress clock.
@@ -131,7 +131,7 @@ LOAD_PHASE_FLOOR_SCHEMA = "prismaquant.load_phase_floor.v1"
 LOAD_PHASE_BOUND = (
     "grace = W + ceil(bytes / floor). The reader sets one deadline, start + W, "
     "for every staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py"
-    ":1856 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:552 "
+    ":1856 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:655 "
     "load_handoff_inputs), so without a PrismaBuild landing record the phase "
     "waits at most W in total, and with one (PB #989) the waits are declared "
     "and exempt. At or above the floor rate the transfer takes at most "
@@ -1716,6 +1716,26 @@ def _spec_capture_batch(spec_path: Path) -> int:
         raise DispatchRefused(f"campaign spec {spec_path}: {exc}") from exc
 
 
+def _spec_kda_capture_kernel(spec_path: Path) -> str | None:
+    """The KDA capture kernel the sealed spec's launches run, or None (PQ #1214).
+
+    One dispatch seals one spec for every row, so a band it publishes runs in
+    one mode. A consumer binds a handoff only in the mode of the launch it
+    is published into.
+    """
+    from prismaquant.glm_kda_capture_kernel import (
+        KdaCaptureKernelRefused, kda_capture_kernel_from_environment)
+
+    try:
+        spec = json.loads(Path(spec_path).read_text())
+    except (OSError, ValueError) as exc:
+        raise DispatchRefused(f"campaign spec {spec_path}: {exc}") from exc
+    try:
+        return kda_capture_kernel_from_environment(spec.get("env") or {})
+    except KdaCaptureKernelRefused as exc:
+        raise DispatchRefused(f"campaign spec {spec_path}: {exc}") from exc
+
+
 def _slice_chain_batch_size(record: Mapping) -> int:
     """The batch size the record's Stage A slice rolls its chain at (#997)."""
     from prismaquant.joint_adjoint_slices import ChainRegimeRefused, chain_regime_of
@@ -2889,13 +2909,16 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
 
 def bind_consumer_handoff(record: Mapping, *, path: str, sha256: str,
                           producer: str, output_root: Path,
+                          kda_capture_kernel: str | None,
                           publish: bool = True) -> dict:
     """Bind a published handoff to its consumer row, or refuse.
 
     Runs the consumer's own checks (:func:`load_quantum_handoff`) and
     derives, then writes, the band-serial readset the row stages. A handoff
     the consumer would refuse is refused here: publishing it would only exit
-    3 on a GPU box.
+    3 on a GPU box. ``kda_capture_kernel`` is the mode the consumer launches
+    in (:func:`_spec_kda_capture_kernel`): a handoff produced in the other
+    mode refuses (PQ #1214).
 
     ``publish=False`` (a dry run, PQ #1200) derives the same readset and
     writes nothing: the result names the path it would be published at and
@@ -2909,7 +2932,8 @@ def bind_consumer_handoff(record: Mapping, *, path: str, sha256: str,
     adjoint_slice = _read_bound_slice(record)
     try:
         handoff = load_quantum_handoff(path, sha256, record=record,
-                                       adjoint_slice=adjoint_slice)
+                                       adjoint_slice=adjoint_slice,
+                                       kda_capture_kernel=kda_capture_kernel)
         wire = band_serial_manifest_bytes(record, handoff,
                                           adjoint_slice["checkpoint"],
                                           output_root=output_root)
@@ -3003,7 +3027,9 @@ def fresh_band_role(record: Mapping, *, roles: Mapping, by_id: Mapping,
         if published is not None:
             band["handoff"] = bind_consumer_handoff(
                 record, path=published["path"], sha256=published["sha256"],
-                producer=source, output_root=output_root, publish=publish)
+                producer=source, output_root=output_root,
+                kda_capture_kernel=_spec_kda_capture_kernel(SPEC_PATH),
+                publish=publish)
     successor = role["hands_to"]
     if successor is not None and successor not in last_submission:
         if tier is None:
@@ -3044,6 +3070,7 @@ def recorded_band_role(record: Mapping, event: Mapping, *,
         band["handoff"] = bind_consumer_handoff(
             record, path=source["path"], sha256=source["sha256"],
             producer=source["producer"], output_root=output_root,
+            kda_capture_kernel=_spec_kda_capture_kernel(SPEC_PATH),
             publish=publish)
     return band
 
