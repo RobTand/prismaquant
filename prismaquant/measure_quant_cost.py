@@ -31,7 +31,6 @@ import pickle
 import re
 import signal
 import stat
-import threading
 import time
 from collections.abc import Container, Mapping, Sequence
 from pathlib import Path
@@ -40,6 +39,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from . import io_spans
 from . import format_registry as fr
 from .name_projection import strip_weight_leaf
 from .render_score import (
@@ -1198,17 +1198,6 @@ class ActivationIndex:
 # ---------------------------------------------------------------------------
 # Memory-pressure watchdog
 # ---------------------------------------------------------------------------
-def _read_meminfo() -> dict[str, int]:
-    info = {}
-    with open("/proc/meminfo") as f:
-        for line in f:
-            k, _, v = line.partition(":")
-            parts = v.strip().split()
-            if parts:
-                info[k] = int(parts[0]) * 1024  # kB → bytes
-    return info
-
-
 def start_mem_watchdog(swap_grow_limit_mb: int = 256,
                        min_mem_available_mb: int = 1024,
                        interval_s: float = 2.0):
@@ -1221,36 +1210,34 @@ def start_mem_watchdog(swap_grow_limit_mb: int = 256,
 
     The abort uses `os._exit(3)` after printing a diagnostic to stderr,
     bypassing any Python-level cleanup that could itself allocate memory.
+    Returns the running :class:`io_spans.PeriodicSampler`.
     """
-    baseline = _read_meminfo()
+    baseline = io_spans.read_meminfo()
     swap_baseline = baseline.get("SwapTotal", 0) - baseline.get("SwapFree", 0)
 
-    def loop():
-        while True:
-            try:
-                info = _read_meminfo()
-                swap_used = info.get("SwapTotal", 0) - info.get("SwapFree", 0)
-                mem_avail = info.get("MemAvailable", 0)
-                swap_grow_mb = (swap_used - swap_baseline) / (1024 * 1024)
-                mem_avail_mb = mem_avail / (1024 * 1024)
-                if swap_grow_mb > swap_grow_limit_mb:
-                    print(f"\n[watchdog] ABORT: swap grew {swap_grow_mb:.0f} MB "
-                          f"(limit {swap_grow_limit_mb} MB). "
-                          f"MemAvailable={mem_avail_mb:.0f} MB",
-                          flush=True)
-                    os._exit(3)
-                if mem_avail_mb < min_mem_available_mb:
-                    print(f"\n[watchdog] ABORT: MemAvailable={mem_avail_mb:.0f} MB "
-                          f"< floor {min_mem_available_mb} MB. "
-                          f"swap_grow={swap_grow_mb:.0f} MB",
-                          flush=True)
-                    os._exit(3)
-            except Exception:
-                pass
-            time.sleep(interval_s)
+    def check():
+        try:
+            info = io_spans.read_meminfo()
+            swap_used = info.get("SwapTotal", 0) - info.get("SwapFree", 0)
+            mem_avail = info.get("MemAvailable", 0)
+            swap_grow_mb = (swap_used - swap_baseline) / (1024 * 1024)
+            mem_avail_mb = mem_avail / (1024 * 1024)
+            if swap_grow_mb > swap_grow_limit_mb:
+                print(f"\n[watchdog] ABORT: swap grew {swap_grow_mb:.0f} MB "
+                      f"(limit {swap_grow_limit_mb} MB). "
+                      f"MemAvailable={mem_avail_mb:.0f} MB",
+                      flush=True)
+                os._exit(3)
+            if mem_avail_mb < min_mem_available_mb:
+                print(f"\n[watchdog] ABORT: MemAvailable={mem_avail_mb:.0f} MB "
+                      f"< floor {min_mem_available_mb} MB. "
+                      f"swap_grow={swap_grow_mb:.0f} MB",
+                      flush=True)
+                os._exit(3)
+        except Exception:
+            pass
 
-    t = threading.Thread(target=loop, name="mem-watchdog", daemon=True)
-    t.start()
+    t = io_spans.PeriodicSampler(check, interval_s=interval_s, name="mem-watchdog").start()
     print(f"[watchdog] armed: swap_grow_limit={swap_grow_limit_mb}MB "
           f"min_mem_avail={min_mem_available_mb}MB interval={interval_s}s  "
           f"baseline swap_used={swap_baseline//(1024*1024)}MB "

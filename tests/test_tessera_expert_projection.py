@@ -169,6 +169,29 @@ def test_request_runs_the_declared_tool_once_and_keeps_the_request(tmp_path):
     assert "tessera_producer_plan.py" in str(error.value)
 
 
+def test_request_runs_the_tool_as_a_script_under_the_container_safe_path(tmp_path):
+    """The campaign container runs with ``PYTHONSAFEPATH=1``. The producer's
+    plan tool is a script that imports its sibling ``export_tessera_serving``
+    from its own directory, so the request still answers under that guard."""
+    from prismaquant.lane_spec import load_lane_spec
+
+    repo = tmp_path / "repo"
+    for tool in load_lane_spec("tessera").producer_tools:
+        (repo / tool.path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / tool.path).write_text("# stub\n")
+    tool = repo / tep.PRODUCER_PLAN_TOOL
+    (tool.parent / "export_tessera_serving.py").write_text("ANSWER = 'the sibling'\n")
+    tool.write_text(
+        "import json, sys\n"
+        "from export_tessera_serving import ANSWER\n"
+        "args = sys.argv[1:]\n"
+        "json.dump({'answer': ANSWER}, open(args[args.index('--out') + 1], 'w'))\n")
+    answer = request_expert_projection(
+        "/model", {STACK: ("E4M3", 1024)}, out_path=tmp_path / "proj.json",
+        env={**os.environ, "TESSERA_REPO": str(repo), "PYTHONSAFEPATH": "1"})
+    assert answer == {"answer": "the sibling"}
+
+
 def test_stack_plan_request_is_the_producers_exact_shape():
     assert stack_plan_request({STACK: ("E4M3", 1024)}) == {
         STACK: {"grid": "E4M3", "q256": 1024, "source_layout": tep.SOURCE_LAYOUT_UNPACKED}}

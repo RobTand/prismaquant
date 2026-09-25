@@ -6,19 +6,17 @@ import json
 import os
 from pathlib import Path
 import time
+from . import io_spans
 
 
 DEFAULT_HEADROOM_GB = 16.0
 
 
 def _available_memory_bytes() -> int | None:
-    meminfo = Path("/proc/meminfo")
-    if meminfo.exists():
-        for line in meminfo.read_text().splitlines():
-            if line.startswith("MemAvailable:"):
-                parts = line.split()
-                if len(parts) >= 2:
-                    return int(parts[1]) * 1024
+    try:
+        return io_spans.mem_available_bytes()
+    except (OSError, RuntimeError):
+        pass
     try:
         pages = os.sysconf("SC_AVPHYS_PAGES")
         page_size = os.sysconf("SC_PAGE_SIZE")

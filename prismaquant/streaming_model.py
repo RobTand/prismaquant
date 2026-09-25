@@ -83,6 +83,7 @@ from .layer_streaming import (
     _unload,
     set_module_tensor_to_device,
 )
+from .io_spans import mem_available_bytes
 from .source_read_plan import select_source_tensors, check_sealed_selection
 from .tied_embeddings import resolve_tied_output_embedding
 from .digests import DIRECT_ASCII_STRICT
@@ -932,8 +933,7 @@ class StreamingContext:
         pressure_floor = self.memory_pressure_floor_bytes()
         if pressure_floor > 0:
             try:
-                import psutil
-                if psutil.virtual_memory().available < pressure_floor:
+                if mem_available_bytes() < pressure_floor:
                     self.prefetch_memory_skips += 1
                     with self._inflight_lock:
                         self._inflight.pop(L, None)
@@ -989,8 +989,7 @@ class StreamingContext:
             return max(1, self.prefetch_workers)
         floor = self.memory_pressure_floor_bytes()
         try:
-            import psutil
-            avail = int(psutil.virtual_memory().available)
+            avail = mem_available_bytes()
         except Exception:
             return max(1, self.prefetch_workers)
         return max(0, (avail - int(floor)) // est)
@@ -1047,8 +1046,7 @@ class StreamingContext:
         pressure_floor = self.memory_pressure_floor_bytes()
         if pressure_floor > 0:
             try:
-                import psutil
-                if psutil.virtual_memory().available < pressure_floor:
+                if mem_available_bytes() < pressure_floor:
                     self.prefetch_memory_skips += 1
                     return None
             except Exception:
@@ -1483,8 +1481,8 @@ class StreamingContext:
         Does NOT touch the loaded model itself (that's the whole point
         of the in-process driver — keep the model+offload index resident).
         """
-        import gc, psutil
-        before_avail = psutil.virtual_memory().available
+        import gc
+        before_avail = mem_available_bytes()
         # Cancel inflight prefetches — they're loading layers based on
         # whatever the prior chunk's reverse sweep was scheduling, which
         # has no relevance to the next chunk's freshly-starting forward.
@@ -1532,7 +1530,7 @@ class StreamingContext:
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
         gc.collect()
-        after_avail = psutil.virtual_memory().available
+        after_avail = mem_available_bytes()
         return {
             "before_avail_gb": before_avail / (1024 ** 3),
             "after_avail_gb": after_avail / (1024 ** 3),
@@ -1952,7 +1950,6 @@ def _build_streaming_context(model_path: str, *,
             or max_cache_slots < 1
         ):
             raise ValueError("max_cache_slots must be an integer >= 1 or None")
-    import psutil
     from transformers import AutoConfig
 
     authenticated = ({} if source_authentication is None else
@@ -2176,7 +2173,7 @@ def _build_streaming_context(model_path: str, *,
           f"{sum(len(r) for r in install_resolvers)} tensors across "
           f"{num_layers} layers in {time.time()-t_res:.1f}s", flush=True)
 
-    free_bytes = psutil.virtual_memory().available
+    free_bytes = mem_available_bytes()
     # Resolve headroom: env override > explicit arg > autoscale > legacy 75 GB default.
     resolved_headroom_gb = cache_headroom_gb
     autoscale_diag = None

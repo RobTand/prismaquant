@@ -53,6 +53,7 @@ from prismaquant.kl_fisher import (
     select_token_scope,
     token_count_for_logits,
 )
+from prismaquant.io_spans import mem_available_bytes
 from prismaquant.perturbed_x_cache import calibration_data_hash
 from prismaquant.nvfp4_cb_footprint import (
     cb_cost_provenance,
@@ -541,15 +542,10 @@ def _resolve_auto_dtype(
     approx_params = total_bytes / bytes_per_param
     fp32_need = approx_params * 4
     if available_bytes is None:
-        available_bytes = 0
         try:
-            with open("/proc/meminfo") as fh:
-                for line in fh:
-                    if line.startswith("MemAvailable:"):
-                        available_bytes = int(line.split()[1]) * 1024
-                        break
+            available_bytes = mem_available_bytes()
         except Exception:
-            pass
+            available_bytes = 0
     fits = (
         available_bytes > 0
         and fp32_need + min_free_gib * 1024**3 <= available_bytes
@@ -577,10 +573,7 @@ def _free_gib() -> float:
     free aborts spuriously whenever a large file was just read. Fall back to
     the CUDA figure off-Linux / if /proc is unreadable."""
     try:
-        with open("/proc/meminfo") as fh:
-            for line in fh:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) / (1024 ** 2)  # kB -> GiB
+        return mem_available_bytes() / (1024 ** 3)
     except Exception:
         pass
     try:

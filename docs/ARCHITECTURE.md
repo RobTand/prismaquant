@@ -2973,8 +2973,59 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/glm-mtp-capture-1271`.
+As of: 2026-09-25 · `claude/glm-mtp-projection-1319`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/glm-mtp-projection-1319`) for **the GLM MTP
+census's producer projection** (PQ #1319, part of #1271, P1). The campaign
+prices a routed unit only against the producer's expert projection of its
+stack, which it reads from the census rather than asking the producer per row
+(`tessera_campaign._project_expert_population`). The MTP census carried only
+the body's 42-stack answer, so none of the 864 routed MTP units could be
+priced. The MTP capture now runs in three PrismaBuild actions:
+
+- Phase `projection` asks the producer once, on the meta MTP layer
+  (`glm_mtp.mtp_layer_skeleton`), the nominal question the body census
+  recorded for its stacks (`glm_mtp_capture.mtp_projection_request`). It binds
+  the answer to the profile-declared population (`mtp_expert_projection`). It
+  loads no weights and needs no GPU; its cost is the producer hashing the
+  checkpoint to seal its source.
+- Phase `capture` takes that block (`--expert-projection`). It checks each
+  routed unit's source bytes against the loaded layer
+  (`check_mtp_expert_projection`, the census path's
+  `_checked_projected_units`) and writes the block into the MTP census. The
+  block's source seal is the body producer's roster, so the derived census is
+  still admitted.
+
+No format, pipeline default, stage, lane or ship gate changes. Gate:
+`tests/test_glm_mtp_capture.py` (the real pinned producer on the tiny
+checkpoint; the campaign binds the census's block without asking again).
+
+Re-stamped (2026-09-25, `claude/mixed-rung-export-gate-1320`) for **the
+export gate reading `mixed_rung_receipt`** (PQ #1320, P2, part of #1317).
+The pinned contract's `fused_module` block licenses a rung per member and
+publishes `mixed_rung_receipt: false`: a decode identity backs the licence,
+and no serve does. Before this change the allocator read the licence, the fold
+stamped the receipt, and no gate read it. Now
+`tessera_export_lane.require_fused_rung_coherence`, called from
+`require_assignment_scope`, groups the selected assignment with the allocator's
+own `_fused_sibling_groups` and handles each fused module whose members
+disagree as follows:
+
+- Members of different decoder families (`format_promotion_class`, which
+  includes a Tessera wire beside BF16): refused.
+- Per-member rungs, with the packaged contract publishing no `fused_module`
+  block or marking `q256` shared: refused.
+- Per-member rungs, with `mixed_rung_receipt: false`: refused.
+- Per-member rungs, with the receipt true: passes. The export report carries
+  the groups and the licence answer under `fused_module`, so the shipcard can
+  say so.
+
+The gate reads the licence from the same packaged contract bytes as the route
+gate, and only when a mixed group exists. A uniform module never asks.
+Measured on the GLM-5.3 scoped allocation (PB 69f5ec94): 69 fused gate/up
+groups, none mixed. Routed stacks are uniform per layer. Attention is
+profile-pinned BF16, so no q/k/v group has a Tessera member.
 
 Re-stamped (2026-09-25, `claude/glm-mtp-capture-1271`) for **the GLM MTP
 layer's calibration capture** (PQ #1290, part 2 of #1271, P1). The MTP
@@ -3038,7 +3089,7 @@ per-unit router_path/expert_id topology". Two changes:
   (`None`/`None` when no router places it) and a packed expert's per-expert
   view `_packed_experts_module` + `num_experts`, the count of the full profile
   split, as `tessera_campaign` records for the same members. Both assemblers
-  merge it into every row (`aura_cost.py:1745`, `:1898`); the Stage B layer
+  merge it into every row (`aura_cost.py:1738`, `:1877`); the Stage B layer
   quantum computes it with its roster, off the skeleton, before any window
   loads (`joint_cost_quantum.py:1042`). A Linear the profile declares routed
   that the walk cannot place gets no keys, so the scope reports it missing
@@ -19129,11 +19180,10 @@ rung (3.276 bpp, 30.4 GB of budget unused). Gate:
 > module -- the relaxation is proven by a decode identity -- and nothing in it
 > covers per-expert rungs, which is why packed components stay uniform. This
 > section describes what the *allocator* may consider; §9's export gate
-> decides what ships, and under the default attested menu there are no Tessera
-> candidates for the relaxation to act on. The export lane additionally refuses
-> routed-MoE models outright (it reads the contract's `structures: ["dense"]`
-> and the absent `routed_moe` cell), so no mixed-rung expert group can reach
-> an artifact even where the allocator states one.
+> decides what ships. Since PQ #1320 that gate reads the receipt:
+> `require_assignment_scope` refuses a fused module with per-member rungs while
+> `mixed_rung_receipt` is `false`, so the licence can widen the menu but cannot
+> ship an unserved module.
 
 **The route travels with the choice.** `serving_lane_route` falls through to
 `tessera_menu.tessera_resolved_serving_lane` for a `TESSERA_*` name when no profile

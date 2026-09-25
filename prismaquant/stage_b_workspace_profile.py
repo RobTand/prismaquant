@@ -40,6 +40,8 @@ import threading
 import time
 from pathlib import Path
 
+from .io_spans import MemAvailableFloor, PeriodicSampler, mem_available_bytes
+
 PROFILE_ENV = "PRISMAQUANT_STAGE_B_WORKSPACE_PROFILE"
 GROUPS_ENV = "PRISMAQUANT_STAGE_B_WORKSPACE_PROFILE_GROUPS"
 SCHEMA = "prismaquant.stage_b_capture_workspace_profile.v1"
@@ -119,15 +121,6 @@ def ladder(capture_batch):
     return steps
 
 
-def parse_memory_stat(text):
-    values = {}
-    for line in text.splitlines():
-        key, _, raw = line.partition(" ")
-        if raw.strip().lstrip("-").isdigit():
-            values[key] = int(raw)
-    return values
-
-
 class HostPeakSampler:
     """Samples the cgroup at a fixed interval and keeps each window's peak.
 
@@ -141,38 +134,35 @@ class HostPeakSampler:
         self.interval_s = float(interval_s)
         self._lock = threading.Lock()
         self._window = None
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._loop, name="stage-b-workspace-host",
-                                        daemon=True)
+        self._sampler = PeriodicSampler(self._tick, interval_s=interval_s,
+                                        name="stage-b-workspace-host")
         self.samples = 0
 
     def __enter__(self):
-        self._thread.start()
+        self._sampler.start()
         return self
 
     def __exit__(self, *_exc):
-        self._stop.set()
-        self._thread.join()
+        self._sampler.stop()
 
     def _read(self):
-        current = int((self.scope / "memory.current").read_text())
-        stat = parse_memory_stat((self.scope / "memory.stat").read_text())
-        return current, stat
+        from .memory_management import read_memory_stat
 
-    def _loop(self):
-        while not self._stop.is_set():
-            try:
-                current, stat = self._read()
-            except OSError:
-                current, stat = None, None
-            now = time.time()
-            with self._lock:
-                self.samples += 1
-                window = self._window
-                if window is not None and current is not None and (
-                        window["peak"] is None or current > window["peak"]["current"]):
-                    window["peak"] = {"unix": now, "current": current, "stat": stat}
-            self._stop.wait(self.interval_s)
+        current = int((self.scope / "memory.current").read_text())
+        return current, read_memory_stat(self.scope / "memory.stat")
+
+    def _tick(self):
+        try:
+            current, stat = self._read()
+        except OSError:
+            current, stat = None, None
+        now = time.time()
+        with self._lock:
+            self.samples += 1
+            window = self._window
+            if window is not None and current is not None and (
+                    window["peak"] is None or current > window["peak"]["current"]):
+                window["peak"] = {"unix": now, "current": current, "stat": stat}
 
     def open(self):
         current, stat = self._read()
@@ -437,56 +427,6 @@ class ChainWorkspaceProfiled(CaptureWorkspaceProfiled):
         self.sha256 = str(sha256)
 
 
-def _mem_available_bytes():
-    with open("/proc/meminfo") as handle:
-        for line in handle:
-            if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) * 1024
-    raise RuntimeError("/proc/meminfo has no MemAvailable")
-
-
-class _MemAvailableFloor:
-    """The box's lowest MemAvailable over a window, sampled on a thread.
-
-    On GB10 unified memory, device allocations are host memory, so
-    MemAvailable is the box-level reading of what a roll takes.
-    """
-
-    def __init__(self, interval_s=MEMINFO_SAMPLE_INTERVAL_S):
-        self.interval_s = float(interval_s)
-        self._stop = threading.Event()
-        self._lock = threading.Lock()
-        self.minimum = None
-        self.samples = 0
-        self._thread = threading.Thread(target=self._loop, name="stage-b-chain-meminfo",
-                                        daemon=True)
-
-    def _sample(self):
-        value, now = _mem_available_bytes(), time.time()
-        with self._lock:
-            self.samples += 1
-            if self.minimum is None or value < self.minimum["bytes"]:
-                self.minimum = {"bytes": value, "unix": now}
-
-    def _loop(self):
-        while not self._stop.is_set():
-            try:
-                self._sample()
-            except (OSError, RuntimeError):
-                pass
-            self._stop.wait(self.interval_s)
-
-    def __enter__(self):
-        self._sample()
-        self._thread.start()
-        return self
-
-    def __exit__(self, *_exc):
-        self._stop.set()
-        self._thread.join()
-        self._sample()
-
-
 def chain_roll_owner_bytes(roll):
     """The owner bytes one measured chain roll states (PQ #1163).
 
@@ -601,7 +541,8 @@ class ChainRollProfile:
         reserved = torch.cuda.memory_reserved(self.device)
         host = None if self.guard is None else HostPeakSampler(self.guard.scope)
         failure, result = None, None
-        with (host if host is not None else _nullcontext()), _MemAvailableFloor() as floor:
+        with (host if host is not None else _nullcontext()), MemAvailableFloor(
+                MEMINFO_SAMPLE_INTERVAL_S, name="stage-b-chain-meminfo") as floor:
             if host is not None:
                 host.open()
             started = time.time()
@@ -639,13 +580,13 @@ class ChainRollProfile:
 
         torch.cuda.synchronize(self.device)
         before = torch.cuda.memory_reserved(self.device)
-        mem_before = _mem_available_bytes()
+        mem_before = mem_available_bytes()
         torch.cuda.empty_cache()
         after = torch.cuda.memory_reserved(self.device)
         released = {"reserved_before_bytes": before, "reserved_after_bytes": after,
                     "released_bytes": before - after,
                     "mem_available_before_bytes": mem_before,
-                    "mem_available_after_bytes": _mem_available_bytes()}
+                    "mem_available_after_bytes": mem_available_bytes()}
         sha256 = self._write(self._profile(self.identity, released=released))
         raise ChainWorkspaceProfiled(self.path, sha256)
 

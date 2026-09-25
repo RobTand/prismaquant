@@ -2715,97 +2715,6 @@ def dev_mode_stamp(environ=None) -> dict:
     return stamp
 
 
-# --------------------------------------------------------------------------
-# Telemetry: GPU energy sampler (§8.1) -- power against the GB10 envelope,
-# never utilization percentages.
-# --------------------------------------------------------------------------
-
-
-class GpuPowerSampler:
-    """1 Hz ``nvidia-smi --query-gpu=power.draw`` sampling in-process.
-
-    ``nvidia_smi.gpu_utilization`` is non-diagnostic on GB10 (AGENTS.md
-    principle 13), so the counters carry joules, watts and the kernel-active
-    ratio instead. A missing or failing sampler is recorded, never silent and
-    never zero.
-    """
-
-    def __init__(self, interval_s: float = 1.0):
-        self.interval_s = float(interval_s)
-        self.samples: list[float] = []
-        self.error: str | None = None
-        self._process = None
-        self._thread = None
-        self._stopping = False
-
-    def start(self) -> "GpuPowerSampler":
-        import subprocess
-        import threading
-
-        try:
-            self._process = subprocess.Popen(
-                ["nvidia-smi", "--query-gpu=power.draw",
-                 "--format=csv,noheader,nounits", "-l", str(int(self.interval_s))],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-            )
-        except (OSError, ValueError) as exc:
-            self.error = f"sampler launch failed: {exc}"
-            return self
-
-        def sample():
-            try:
-                for line in self._process.stdout:
-                    if self._stopping:
-                        return
-                    value = line.strip().split(",")[0].strip()
-                    try:
-                        self.samples.append(float(value))
-                    except ValueError:
-                        continue
-            except (OSError, ValueError) as exc:
-                if not self._stopping:
-                    self.error = f"sampler read failed: {exc}"
-
-        self._thread = threading.Thread(target=sample, daemon=True, name="gpu-power")
-        self._thread.start()
-        return self
-
-    def stop(self) -> dict:
-        self._stopping = True
-        try:
-            if self._process is not None:
-                self._process.terminate()
-                self._process.wait(timeout=5)
-        except Exception:  # noqa: BLE001 - teardown best effort, sample list stands
-            pass
-        if self._thread is not None:
-            self._thread.join(timeout=2)
-        watts = sorted(self.samples)
-        if watts:
-            joules = sum(watts) * self.interval_s
-            p95 = watts[max(0, int(0.95 * len(watts)) - 1)]
-            block = {
-                "sample_count": len(watts),
-                "interval_s": self.interval_s,
-                "gpu_joules": joules,
-                "gpu_power_w_p50": watts[len(watts) // 2],
-                "gpu_power_w_p95": p95,
-                "gpu_power_w_max": watts[-1],
-            }
-        else:
-            block = {
-                "sample_count": 0,
-                "interval_s": self.interval_s,
-                "gpu_joules": None,
-                "gpu_power_w_p50": None,
-                "gpu_power_w_p95": None,
-                "gpu_power_w_max": None,
-            }
-        if self.error:
-            block["sampler_error"] = self.error
-        return block
-
-
 class KernelTimeProfiler:
     """CUDA kernel-time accumulation via ``torch.profiler`` (§8.1).
 
@@ -2867,7 +2776,7 @@ def wall_clock_seconds(started: float) -> float:
 
 __all__ = [
     "ADJOINT_CAPTURE_ENTRY_POINT", "ADJOINT_CHECKPOINT_SCHEMA",
-    "ADJOINT_RECEIPT_SCHEMA", "DEFAULT_STRIDE", "GpuPowerSampler",
+    "ADJOINT_RECEIPT_SCHEMA", "DEFAULT_STRIDE",
     "KernelTimeProfiler", "QUANTUM_COUNTERS_SCHEMA", "QUANTUM_RECORD_SCHEMA",
     "QUANTUM_STATUS_SCHEMA", "adjoint_space", "adjoint_receipt_path",
     "boundary_entry_directory", "chain_layers_for", "checkpoint_directory",

@@ -81,6 +81,7 @@ except ModuleNotFoundError:
             yield
 from safetensors.torch import save_file
 
+from . import io_spans
 from . import nvfp4_activation_contract as _nvfp4_activation_contract
 from .allocator_candidates import (
     PASSTHROUGH_SOURCE_REQUIREMENTS,
@@ -5870,13 +5871,9 @@ def _quantize_2d_nvfp4_group_batched(
 
 def _host_mem_available_bytes() -> int:
     try:
-        with open("/proc/meminfo") as f:
-            for line in f:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * 1024
-    except OSError:
-        pass
-    return 1 << 30
+        return io_spans.mem_available_bytes()
+    except (OSError, RuntimeError):
+        return 1 << 30
 
 
 def _export_vector_chunk_len(

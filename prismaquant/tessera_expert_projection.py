@@ -147,8 +147,16 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
     request.write_text(json.dumps(stack_plan_request(stacks), indent=1, sort_keys=True))
     command = [python or sys.executable, str(tool), str(model_path),
                "--stack-plan", str(request), "--out", str(out)]
+    child_env = dict(os.environ if env is None else env)
+    # The tool is a script that imports its sibling ``export_tessera_serving``
+    # from its own directory. Python's safe-path mode drops that directory
+    # from ``sys.path``, and the campaign container sets PYTHONSAFEPATH=1 for
+    # its ``python -m`` entry point, where ``sys.path[0]`` would be the sealed
+    # checkout. A script's ``sys.path[0]`` is its own directory, never the
+    # working directory, so the child runs without the guard.
+    child_env.pop("PYTHONSAFEPATH", None)
     completed = subprocess.run(
-        command, env=dict(os.environ if env is None else env),
+        command, env=child_env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if completed.returncode != 0:
         tail = "\n".join(completed.stderr.strip().splitlines()[-12:])
