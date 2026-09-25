@@ -51,6 +51,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
+from . import io_spans
 from prismaquant.incremental_shards import (
     annotate_incremental_shard as annotate_probe_shard,
     read_pickle as _read_pickle,
@@ -511,10 +512,8 @@ def _set_minimax_fast_moe(
 def _read_proc_status_kb(*keys: str) -> dict[str, int]:
     """Read /proc/self/status for the given keys (e.g. 'VmHWM', 'VmRSS').
     Returns a dict of key -> kilobytes. Missing keys map to 0."""
-    from .io_spans import read_proc_status
-
     try:
-        status = read_proc_status()
+        status = io_spans.read_proc_status()
     except Exception:
         status = {}
     return {k: status.get(k, 0) // 1024 for k in keys}
@@ -525,10 +524,8 @@ def _print_mem_snapshot(label: str, log_prefix: str = "[incremental]"):
     (process high-water mark RSS), VmRSS (current resident), VmSwap
     (paged out), and MemAvailable (system-wide). All values in GB."""
     proc = _read_proc_status_kb("VmHWM", "VmRSS", "VmSwap")
-    from .io_spans import mem_available_bytes
-
     try:
-        avail_gb = mem_available_bytes() / (1024 ** 3)
+        avail_gb = io_spans.mem_available_bytes() / (1024 ** 3)
     except Exception:
         avail_gb = -1.0
     print(f"{log_prefix} mem[{label}] "
@@ -5820,9 +5817,7 @@ def main():
                 except Exception:
                     total_size = 0
             try:
-                from .io_spans import mem_available_bytes
-
-                avail_bytes = mem_available_bytes()
+                avail_bytes = io_spans.mem_available_bytes()
             except Exception:
                 avail_bytes = 0
             # The fallback loads the full multimodal model. On 122B-scale

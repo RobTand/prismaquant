@@ -80,21 +80,24 @@ def _read_int(path: Path) -> int | None:
 
 
 def _memory_sample(group: Path | None) -> dict:
+    from prismaquant.io_spans import read_meminfo
+    from prismaquant.memory_management import read_memory_stat
+
     sample = {"unix": time.time()}
-    for line in Path("/proc/meminfo").read_text().splitlines():
-        if line.startswith("MemAvailable:"):
-            sample["mem_available_bytes"] = int(line.split()[1]) * 1024
+    meminfo = read_meminfo()
+    if "MemAvailable" in meminfo:
+        sample["mem_available_bytes"] = meminfo["MemAvailable"]
     if group is None:
         return sample
     sample["memory_current"] = _read_int(group / "memory.current")
     sample["memory_max"] = _read_int(group / "memory.max")
     try:
-        stat = dict(line.split() for line in (group / "memory.stat").read_text().splitlines())
+        stat = read_memory_stat(group / "memory.stat")
         for key in ("file", "anon", "pgscan", "pgsteal", "pgscan_direct",
                     "pgsteal_direct", "workingset_refault_file"):
             if key in stat:
-                sample[key] = int(stat[key])
-    except (OSError, ValueError):
+                sample[key] = stat[key]
+    except (OSError, RuntimeError, ValueError):
         pass
     try:
         for line in (group / "memory.pressure").read_text().splitlines():

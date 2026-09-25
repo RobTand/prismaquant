@@ -13,20 +13,6 @@ MAP = ("/mnt/shared/prismabuild-fleet/pb-queue/residency/"
        "ad8803aa32333dffc52b5d35d7203e0a544a62c88babb013fe763312c35fefe4.map.json")
 
 
-def mount_bytes():
-    """{mountpoint: (client_read, server_read)} from /proc/self/mountstats."""
-    out, cur = {}, None
-    for line in open("/proc/self/mountstats"):
-        if line.startswith("device "):
-            parts = line.split()
-            cur = parts[parts.index("on") + 1] if " on " in line else None
-        elif cur and line.strip().startswith("bytes:"):
-            f = [int(x) for x in line.split()[1:]]
-            out[cur] = (f[0], f[4])
-            cur = None
-    return out
-
-
 def delta(a, b, mnt):
     if mnt not in a or mnt not in b:
         return (0, 0)
@@ -36,6 +22,7 @@ def delta(a, b, mnt):
 def main():
     os.environ["PRISMABUILD_RESIDENCY_MAP"] = MAP
     from safetensors import safe_open
+    from prismaquant.io_spans import nfs_read_bytes
     from prismaquant.layer_streaming import _source_safe_open
     from prismaquant.residency_map import residency_resolver, bind_residency_manifest
 
@@ -92,14 +79,14 @@ def main():
     resolver = residency_resolver()
     print(f"resolver active: {resolver is not None and getattr(resolver, 'active', True)}")
 
-    before = mount_bytes()
+    before = nfs_read_bytes()
     t0 = time.time()
     served = {}
     with _source_safe_open(declared, framework="pt") as fh:
         for k in picked:
             served[k] = fh.get_tensor(k)
     read_s = time.time() - t0
-    after = mount_bytes()
+    after = nfs_read_bytes()
 
     stage_d = delta(before, after, "/stage/prewarm")
     pool_d = delta(before, after, "/mnt/shared")

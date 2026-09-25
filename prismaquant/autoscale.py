@@ -32,6 +32,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from . import io_spans
 
 
 DEFAULT_SAFETY_GB = 20.0     # slack above the committed estimate. NEVER rely on
@@ -970,10 +971,8 @@ def _available_ram_bytes() -> int:
     """Free RAM right now. On UMA (Grace-Blackwell) this is the shared
     LPDDR5X pool that both CPU and GPU draw from — same number matters
     for CUDA and host work."""
-    from .io_spans import mem_available_bytes
-
     try:
-        return mem_available_bytes()
+        return io_spans.mem_available_bytes()
     except Exception:
         return 64 * 1024 ** 3  # conservative fallback
 
