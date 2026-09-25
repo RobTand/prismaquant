@@ -143,12 +143,17 @@ def _refuse_dead_vendored_override(model_type: str) -> None:
         )
 
 
-def detect_profile(model_path: str) -> ModelProfile:
+def detect_profile(model_path: str, *, config: dict | None = None) -> ModelProfile:
     """Pick the right ModelProfile for a checkpoint directory.
 
     Reads `config.json`, walks registered profiles, returns the first
     whose `.matches()` returns True. Falls back to `DefaultProfile` if
     nothing matches.
+
+    `config` is the checkpoint's parsed `config.json` when the caller has
+    already read it, for example off the stage under strict reads (PQ
+    #1139); the file is then not opened, and a config that is not a JSON
+    object refuses instead of falling back.
 
     Raises if `model_path` is not an existing directory. The DefaultProfile
     fallback is deliberate for a checkpoint whose architecture is not yet
@@ -168,7 +173,13 @@ def detect_profile(model_path: str) -> ModelProfile:
     cfg_path = root / "config.json"
     model_type = ""
     archs: list[str] = []
-    if cfg_path.exists():
+    if config is not None:
+        if not isinstance(config, dict):
+            raise ValueError(
+                f"the config.json given for {model_path} is not a JSON object")
+        model_type = config.get("model_type") or ""
+        archs = list(config.get("architectures") or [])
+    elif cfg_path.exists():
         try:
             with open(cfg_path) as f:
                 cfg = json.load(f)

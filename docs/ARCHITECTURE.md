@@ -1474,7 +1474,12 @@ declared input is then read through a lifetime-pinned lease window
 - the catalog pair's bound documents (`tessera_joint_allocation._read_bound`,
   through its `BOUND_READER` hook);
 - the checkpoint index and each safetensors header range
-  (`layer_streaming.streaming_source_plan(source_reads=)`, PQ #1095).
+  (`layer_streaming.streaming_source_plan(source_reads=)`, PQ #1095);
+- the source `config.json`, which `streaming_source_plan` declares as a
+  header read: the source plan and the spill bound's seal
+  (`--replay-mode spill`, PQ #1138) read it off the stage and detect the
+  model profile from those bytes (`detect_profile(config=)`, PQ #1139)
+  instead of opening the pool copy.
 
 The bytes must hash to the map entry's digest and to the caller's own pinned
 digest. A read the stage does not hold refuses. It is never read from the pool.
@@ -1493,9 +1498,22 @@ as before.
 cost pickle, about 36k journal units) still opens its inputs at the pool
 path. That is about 10.9 GB, the bulk of the head phase. PQ #1082 routes it.
 
+**Not routed either** (found by reading the code during PQ #1139, not
+measured): for a source checkpoint with FP8 weights,
+`streaming_source_plan`'s `_build_fp8_scale_inv_map` opens `config.json` at
+its pool path for the block size and the MXFP4 declaration
+(`_declared_weight_block_size`, `autoscale.declared_fp4_expert_dtype`,
+`_check_declared_mxfp4_scale_fmt`), and DeepSeek-V4's `fp8_scale_pairs`
+opens the checkpoint index there. The fixtures that gate these reads have no
+FP8 weights.
+
 Gates:
 - `tests/test_stage_b_prep_staged_reads_1092.py`: a real PrismaBuild lease
   stack in which every generator input opens at its map `stage_path`;
+- `tests/test_stage_b_spill_bound_strict_reads_1139.py`: the spill bound
+  sealed under strict reads over a resolver double (no PrismaBuild), with
+  `config.json` read only off the stage; without its header read the run
+  refuses;
 - `tests/test_stage_b_prep_io_1070.py`.
 
 No format, pipeline default, stage or ship gate changes.
@@ -2572,6 +2590,16 @@ neither. The template's `output_prefix` now derives from `--output-root`,
 the root its file lives under, instead of the record's sealed output space.
 See "Band-serial Stage B quanta (#996)", Dispatch. No format, pipeline
 default, stage, lane or ship gate changes.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1139`) for **the source config read only
+off the stage under the Stage B preparation's strict reads** (PQ #1139). A
+spill-bound seal under strict reads opened `config.json` at its pool path
+three times, through `detect_profile` in `streaming_source_plan`, in its
+`_build_fp8_scale_inv_map`, and in the generator's spill block. The profile
+now resolves from the staged bytes (`detect_profile(config=)`). The FP8 and
+DeepSeek-V4 source reads that still open the pool are named beside the head
+walk's exemption. See "The Stage B preparation reads its declared inputs off
+the stage". No format, pipeline default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-24, `perf/1210-render-readahead`) for **a retained PWC
 window's one reader lease, one loader pool and one archive parse per file**
