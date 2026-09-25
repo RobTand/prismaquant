@@ -718,7 +718,9 @@ gate and the manifest binding compare with. The execution plan's digest
 against the sealed one goes through `seal_check`: dev mode prints it, and
 certified mode refuses a plan whose bytes differ and runs a byte-identical
 copy. The dry run prints the execution plan's path and digest beside the
-sealed ones under `execution_plan`, and each state event records them. Gate:
+sealed ones under `execution_plan`, and each state event records them. The dry
+run's stdout is that one JSON document; its log lines, `[DEV-MODE]` stamps
+included, go to stderr (PQ #1087). Gate:
 `tests/test_dispatch_execution_plan_1191.py`.
 
 These still refuse in both modes:
@@ -777,6 +779,46 @@ gate changes. Gates: `tests/test_sealing_off_1147.py`,
 `tests/test_dev_mode_provenance_gates.py`,
 `tests/test_source_identity_portable_device.py`.
 
+The capture guard's host floor is the GB10 box watchdog's 16 GiB (2026-09-25,
+`claude/non-gpu-issues-repos-vl3e30`, PQ #1158). On 2026-09-14 a vLLM A8 routed-expert load
+(tessera#501) hung both Sparks at 8.5 GiB `MemAvailable`, memory PSI full 89.
+The box watchdog set after that hang acts below 16 GiB available, or at memory
+PSI full avg10 20 and above. The guard's default floor was 8 GiB, a
+campaign's `min_free_gib` carried over, so `CaptureMemoryGuard` admitted
+allocations that left the box inside the range it hung in.
+`memory_management.DEFAULT_HOST_FLOOR_BYTES` is now `BOX_WATCHDOG_FLOOR_BYTES`,
+and `HANG_MEM_AVAILABLE_BYTES` records the hang beside it. The watchdog is
+fleet configuration. No repository holds it, and no PrismaBuild offer field,
+host announcement or launch environment publishes its floor, so
+`memory_management` restates the value from the Tessera receipts that record
+it (`docs/measurements/tessera-glm53-a4-stub-tp2-served-2026-09-14.md`,
+"Memory watchdog") and is PrismaQuant's one home of it. All three guard
+shapes (un-split, split, aggregate) take the default, and no production caller
+states its own. `MIN_HOST_FLOOR_BYTES`, the lowest floor a caller may state,
+stays 3 GiB.
+
+What it costs a row: an idle GB10 has 115.638 GiB available of 121.627 GiB
+(PrismaBuild `docs/gb10_memory_104_capacity_2026-09-07.md`, sparklina, no
+jobs), so a guarded row can now hold at most 99.638 GiB, down from 107.638 GiB.
+Each shape at the most its own guard admits:
+
+- The split Stage A pilot shape, 21 GiB cgroup cap and 80 GiB envelope, admits
+  99 GiB and leaves 0.638 GiB above the floor.
+- The R13 Stage B aggregate, 28 + 66 GiB, admits 92 GiB and leaves 7.638 GiB.
+- The 2026-09-18 COST aggregate, 24 + 80 GiB, can no longer reach its 102 GiB
+  ceiling. It refuses 2.362 GiB short of it. The old floor admitted it at
+  13.638 GiB available, below the watchdog's floor.
+
+Two floors this does not move. The Stage A adjoint capture row
+(`joint_adjoint_capture`, a 101 GiB reservation) builds no capture guard, so
+its only `MemAvailable` floor is its plan's `min_free_gib`
+(`_chain_free_floor`), which is also the Stage B roll's second check. The
+streaming prefetch's automatic floor
+(`streaming_model._auto_prefetch_min_available_bytes`) is still 8 GiB. Gates:
+`tests/test_host_floor_watchdog_1158.py`. This changes a runtime default, the
+host floor every capture guard holds. No format, pipeline stage, lane or ship
+gate changes.
+
 The capture guard counts committed memory, not page cache (2026-09-24,
 `ws-sb4/1157-committed-memory`, PQ #1157, part of #1141). One definition,
 `memory_management.committed_cgroup_bytes`, now feeds every admission in
@@ -801,8 +843,8 @@ read (`joint_retained_window_plan.OBSERVED_BASELINE_KEY`). `baseline_bytes()`
 and `peak_conservative_bytes` stay raw, because the Tessera lane subtracts the
 baseline from its cap; `baseline.committed_bytes` and `peak_committed_bytes`
 are recorded beside them. The margins do not change: 2 GiB under the cgroup
-cap and the 8 GiB host floor (#1158 tracks that floor against the 8.5 GiB
-MemAvailable of the 2026-09-14 hang). The device split:
+cap and the host floor, 8 GiB at the time (PQ #1158 has since raised it to the
+box watchdog's 16 GiB; see the entry above). The device split:
 `check_operator_allocation` takes `reserve_device_bytes`, and the Stage B
 window backward and spill capture charge their CUDA allocations there (the
 retained budget's backward workspace, PQ #1151, times the stored batches, the
@@ -2724,6 +2766,33 @@ The capture guard admits the buffer at `before_stage_b_plane_staging`
 before it is allocated, and the buffer is committed before the pass's
 backward admission. See the entry at the top. No format, pipeline
 default, stage, lane or ship gate changes.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1087`) for **a dispatch dry run whose
+stdout is one JSON document** (PQ #1087, item 3). `dispatch_joint_quanta
+--dry-run` sends every line printed while it derives the plan -- the
+`joint_stageb_resources` geometry progress and each `[DEV-MODE]` stamp -- to
+stderr, so its stdout parses as JSON. The geometry progress goes to stderr
+in every caller. Output streams only: no format, pipeline default, stage,
+lane or ship gate changes.
+
+Re-stamped (2026-09-25, `claude/non-gpu-issues-repos-vl3e30`) for **the capture guard's host floor
+held at the GB10 box watchdog's 16 GiB** (PQ #1158). The 8 GiB default sat
+below the 8.5 GiB `MemAvailable` at which both Sparks hung on 2026-09-14.
+`memory_management.DEFAULT_HOST_FLOOR_BYTES` is now `BOX_WATCHDOG_FLOOR_BYTES`,
+restated from the Tessera receipts that record the watchdog, because nothing
+publishes it. A guarded row on an idle GB10 now holds at most 99.638 GiB. See
+the entry before "The capture guard counts committed memory". This changes a
+runtime default; no format, pipeline stage, lane or ship gate changes.
+
+Re-stamped (2026-09-25, `claude/non-gpu-issues-repos-vl3e30`) for **a Stage A owner's wait on
+its own exports declared to PrismaBuild's `no_progress` rung** (PQ #1240,
+PrismaBuild #1035): while a barrier or a full window of the produced-output
+spool waits, it writes `<progress path>.export-wait`
+(`prismabuild.export_wait.v1`, `prismabuild_progress.declare_export_wait`)
+naming the export keys it waits on, the union across the process's waits,
+and removes it when the last ends. See "The wait is declared" under
+"Same-box readback and write-behind export (#1110)", and its Limits. No
+format, pipeline default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `fix/1236-deferred-unlink-publish`) for **a retired
 entry that keeps its file while its group can still be read** (PQ #1236). A
@@ -24671,6 +24740,21 @@ them, with its error, as one line to
 slow is waited on; PrismaBuild's dead-producer recovery (PB #1001) owns an
 export whose worker dies.
 
+**The wait is declared** (PQ #1240, PrismaBuild #1035). A wait commits
+nothing, so PrismaBuild's `no_progress` rung saw it as quiet. While a
+barrier (`await_group`) or a full window (`reserve`) waits, the spool writes
+`<progress path>.export-wait` (`prismabuild.export_wait.v1`,
+`prismabuild_progress.declare_export_wait`): the barrier names its group's
+`export_key`, and a full window names every live export, read again at each
+look. The record is the union of every live wait in the process (the
+compute thread's and the stager's, on every spool), dated from the earliest
+of them (`produced_output_spool._EXPORT_WAITS`, written and removed under one
+lock), and is removed when the last wait ends: landed, refused or raised.
+The rung checks each named export is the owner's own and leaves the wait out
+of the quiet only while one shows progress (claimed and writing, or queued
+for at most one evidence window). Without a progress channel nothing is
+written, as before.
+
 **Deferred unlink.** PrismaBuild's `release_group` re-checks each landed
 destination against the export's receipt, so a retired entry's canonical
 file must outlive its group's local release. `_retire` of an entry in a held
@@ -24728,10 +24812,19 @@ the two allowances are equal.
   the set shrank as read groups were committed; now the forward's boundary
   prewrites stay outstanding through the reverse chain, so each prewrite
   reads them all. An index or fingerprint in PrismaBuild is the remedy.
-- A barrier wait is not declared to PrismaBuild's `no_progress` rung: the
-  staged-wait declaration names movers in the consumer's residency plan, and
-  an export action is not one. A barrier that waits longer than the row's
-  grace ends as a no-progress kill.
+- A declared export wait (PQ #1240) is exempt only on PrismaBuild's evidence
+  about the named export itself. A barrier on a group whose export is queued
+  behind the owner's other exports names that group alone, so PrismaBuild
+  gives it one evidence window from its first look (PB #1035's bound). A
+  PrismaBuild before #1035 does not read the record, and there a wait longer
+  than the row's grace still ends as a no-progress kill. As of this change
+  neither PQ's PrismaBuild dev pin (`461728e`, which the PrismaBuild test
+  interpreter carries) nor the runtime generation the produced-output tests
+  pin (`tests/pb_runtime_generation_pin.json`, `81d95cba8d91`) carries
+  #1035. The PrismaBuild round-trip in
+  `tests/test_export_wait_record_reads_in_prismabuild.py` skips on an
+  interpreter whose `prismabuild` predates #1035, naming the one it found;
+  its wire-format tests run everywhere.
 - PrismaBuild charges the spool to a box's `spool_gb` only with
   `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1`. The Stage A row seals it
   (PQ #1120); a quantum row does not, so its spool is refused at bind, not

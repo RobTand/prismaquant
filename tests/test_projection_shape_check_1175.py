@@ -217,7 +217,7 @@ def test_certified_mode_refuses_glm_shapes_before_the_row_runs(tmp_path, dispatc
     assert code == dispatch.EXIT_PRECONDITION_REFUSED, captured.err
     # Nothing reached PrismaBuild: the refusal comes before the submission.
     assert gateway.submitted == []
-    assert "[DEV-MODE]" not in captured.out
+    assert "[DEV-MODE]" not in captured.out + captured.err
     assert "outside the packaged qualification" in captured.err
     # The message names the unqualified shapes and the qualified set.
     for shape in GLM_SHAPES:
@@ -231,13 +231,16 @@ def test_dev_mode_prints_the_glm_shapes_and_publishes(tmp_path, dispatch, monkey
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     code, out, err = _main(dispatch, argv, capsys)
     assert code == 0, err
-    lines = _shape_lines(out)
-    assert len(lines) == 1, out
+    # A dry run's [DEV-MODE] line is a log on stderr; stdout is the plan
+    # alone, one JSON document (PQ #1087).
+    assert _shape_lines(out) == []
+    lines = _shape_lines(err)
+    assert len(lines) == 1, err
     # The count of shapes that run the reference arithmetic, and the shapes.
     assert "2 of 2 reduction shapes run the reference arithmetic" in lines[0]
     for shape in GLM_SHAPES:
         assert str(shape) in lines[0]
-    rows = json.loads(out[out.index("{\n"):])["rows"]
+    rows = json.loads(out)["rows"]
     assert [row["quantum_id"] for row in rows] == ["layer-002"]
 
 
@@ -247,7 +250,8 @@ def test_the_reference_backend_accepts_every_shape(tmp_path, dispatch, monkeypat
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev)
     code, out, err = _main(dispatch, argv, capsys)
     assert code == 0, err
-    assert _shape_lines(out) == []
+    assert _shape_lines(out) == [] and _shape_lines(err) == []
+    json.loads(out)
 
 
 # ---- the check itself -------------------------------------------------------

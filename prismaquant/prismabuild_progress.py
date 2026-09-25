@@ -127,3 +127,59 @@ def clear_staged_wait() -> bool:
     except OSError:
         return False
     return True
+
+
+#: What an owner blocked on its own produced-output exports writes beside its
+#: progress report (PrismaBuild #1035): at an ordering barrier, or with its
+#: local window full (``ProducedOutputSpool``). PrismaBuild's ``no_progress``
+#: rung reads it after the staged-wait record, checks every named export
+#: against the owner's own sealed exports, and leaves the blocked time out of
+#: the quiet only while one of them shows progress. A record of its own, not a
+#: field of the staged-wait one: an owner can wait on both at once. The wire
+#: format of ``prismabuild.progress.declare_export_wait``, written here for
+#: the same reason ``report`` is.
+EXPORT_WAIT_SCHEMA = "prismabuild.export_wait.v1"
+EXPORT_WAIT_SUFFIX = ".export-wait"
+
+
+def declare_export_wait(exports, *, since_unix: float) -> bool:
+    """Say that this action is blocked until one of its own ``exports`` lands.
+
+    ``exports`` are export action keys (``ProducedSpool.submit_group``'s
+    ``export_key``). Replaces any earlier record, so a caller with several
+    waits passes their union. Returns whether a record was written; ``False``
+    without a progress channel, which leaves the wait counted as quiet, as
+    before. Never raises.
+    """
+
+    destination = os.environ.get(PATH_ENV) or ""
+    token = os.environ.get(TOKEN_ENV) or ""
+    names = sorted({str(export) for export in exports})
+    if not destination or not token or not names:
+        return False
+    record = {"schema": EXPORT_WAIT_SCHEMA, "token": token,
+              "since_unix": float(since_unix), "exports": names}
+    path = Path(destination + EXPORT_WAIT_SUFFIX)
+    try:
+        temporary = path.parent / f".{path.name}.{os.getpid()}.tmp"
+        temporary.write_text(json.dumps(record, sort_keys=True) + "\n",
+                             encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        return False
+    return True
+
+
+def clear_export_wait() -> bool:
+    """End the declared export wait.  Never raises."""
+
+    destination = os.environ.get(PATH_ENV) or ""
+    if not destination:
+        return False
+    try:
+        os.unlink(destination + EXPORT_WAIT_SUFFIX)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True

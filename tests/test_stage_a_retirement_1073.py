@@ -33,7 +33,7 @@ from prismaquant.joint_adjoint_checkpoints import (
     adjoint_space, checkpoint_directory, write_adjoint_receipt)
 from prismaquant.stage_a_chain_resume import ChainResumeRefused, chain_state_path
 
-from fleet_sdk import require_prismabuild_sdk
+from fleet_sdk import require_lease_helper
 from test_stage_a_chain_resume import (  # noqa: F401  (autouse fixture)
     DIGESTS, TWO, _at, _interrupted, _offline_tier_policy, _resume, _run)
 
@@ -87,8 +87,11 @@ def retire_main(args):
 
 def test_a_superseded_run_loses_its_checkpoints_and_the_entries_they_pin(
         tmp_path, monkeypatch, capsys):
-    # The retirement runs through to PrismaBuild's lease release (PQ #886).
-    require_prismabuild_sdk()
+    # The retirement runs through to PrismaBuild's lease release (PQ #886);
+    # require_prismabuild_sdk only proves a distribution installed, which an
+    # editable dev checkout with no fleet-injected helper root also passes
+    # (PQ #1097) -- probe the helper the lane actually calls.
+    require_lease_helper()
     root = tmp_path / "run"
     space = completed(root, monkeypatch)
     succ = successor(tmp_path, monkeypatch)
@@ -211,8 +214,11 @@ def test_zero_binding_roots_prove_nothing(tmp_path, monkeypatch, capsys):
 
 
 def test_a_retirement_that_stops_partway_finishes_on_a_rerun(tmp_path, monkeypatch, capsys):
-    # The retirement runs through to PrismaBuild's lease release (PQ #886).
-    require_prismabuild_sdk()
+    # The retirement runs through to PrismaBuild's lease release (PQ #886);
+    # require_prismabuild_sdk only proves a distribution installed, which an
+    # editable dev checkout with no fleet-injected helper root also passes
+    # (PQ #1097) -- probe the helper the lane actually calls.
+    require_lease_helper()
     root = tmp_path / "run"
     space = completed(root, monkeypatch)
     succ = successor(tmp_path, monkeypatch)
