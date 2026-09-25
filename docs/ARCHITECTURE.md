@@ -111,8 +111,10 @@ capture batch 4.
     `5071bcbc9573`) and num-03 (PB `173eec09cb8f`) were withdrawn before a
     worker claimed them: num-01's snapshot predated the FP64 block
     accumulation, and num-03 was resubmitted after a harness refactor.
-    num-02 (PB `f6a2f79118c5`) was withdrawn 25 s after sparky claimed it,
-    before its first case finished, to free the box for the bench.
+    num-02 (PB `f6a2f79118c5`) was withdrawn 25 s after sparky claimed it.
+    Its withdrawal record gives the reason: sparky refused the measurement
+    while other holders kept 1.8 to 3.5 CPUs busy, and the bench was to run
+    first.
   - Two test preflights failed on defects in the test code, fixed in the
     test file: PB `716bf120459d` (2 of 15 tests) and `43f7859b05aa` (1 of
     15).
