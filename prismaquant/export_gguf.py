@@ -43,7 +43,7 @@ from prismaquant.export_output_safety import (
     prepare_fresh_export_file,
     transactional_file_output,
 )
-from prismaquant.nvfp4_cb_footprint import (
+from prismaquant.footprint import (
     enforce_whole_artifact_budget,
     whole_artifact_budget_from_assignment_payload,
 )

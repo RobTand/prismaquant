@@ -41,7 +41,7 @@ from prismaquant.cost_stage_checkpoint import (
 )
 from prismaquant.cost_streaming import validate_streamed_model_identity
 from prismaquant.layer_config import load_assignment
-from prismaquant.nvfp4_cb_footprint import assignment_serialization_sha256
+from prismaquant.footprint import assignment_serialization_sha256
 from prismaquant.production_weight_cache import (
     ACTIVATION_HOOK_SCOPE_KEY,
     ACTIVATION_HOOK_SCOPE_SCHEMA,

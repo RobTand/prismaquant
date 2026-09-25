@@ -14,7 +14,7 @@ import math
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from .cb_imatrix import CB_IMATRIX_FROM_PROBE_SCHEMA
+from .moe_imatrix import IMATRIX_FROM_PROBE_SCHEMA
 from .cb_layout import FP8_PRODUCT_RUNGS, codebook_subtable_shapes, family_for
 
 
@@ -357,7 +357,7 @@ def validate_promotion_receipt(
         {"schema", "calibration_hash", "value_sha256"},
         where="promotion receipt.imatrix",
     )
-    if imatrix.get("schema") != CB_IMATRIX_FROM_PROBE_SCHEMA:
+    if imatrix.get("schema") != IMATRIX_FROM_PROBE_SCHEMA:
         raise CBLPromotionReceiptError(
             "promotion receipt imatrix must come from full-probe act_sq_sum"
         )

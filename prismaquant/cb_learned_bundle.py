@@ -30,7 +30,7 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 from prismaquant import nvfp4_cb_formats as cb
-from prismaquant.cb_imatrix import canonical_imatrix_sha256
+from prismaquant.moe_imatrix import canonical_imatrix_sha256
 from prismaquant.cb_learned_promotion import (
     CBL_STEP4_RUNGS,
     CBL_V2_TRAINER_SCHEMA,
