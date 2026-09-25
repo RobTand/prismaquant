@@ -1,5 +1,76 @@
 # PrismaQuant Architecture
 
+A band-serial producer writes its handoff while its final passes run
+(2026-09-25, `perf/1251-stream-handoff-emit`, PQ #1251). A producer quantum
+used to write its whole handoff after the retained-window driver returned:
+every entry of the boundary-`L` plane, the settle, and then the record
+group, all in the `payload` span's `handoff-out` child, with the GPU idle.
+Stage B R13 row 009 spent 163 s there and row 002 spent 344 s.
+`HandoffEmitter.stream` now starts a writer thread before the driver runs.
+The writer binds the handoff generation and its produced output first, so a
+refused binding stops the quantum before its passes. Each final pass's
+`PlaneHostStaging.store` then signals the keys it stored (`on_store`, which
+calls `HandoffStream.mark_final`), and the writer writes each entry as soon
+as its slot is final. It writes in the order the serial writer did,
+probe-major with batches ascending, with the same arguments.
+
+- The bytes don't change. Every entry's bytes and name, the groups and
+  their commit order, `owner-states.pkl` and `handoff.json` are the ones the
+  serial writer wrote. The main thread pickles the owner states from the
+  harvested owners at the finish. Every entry group is durable before the
+  record group exists (`settle_local_output`, on the writer), a group
+  through the spool commits at its origin only in that settle, and
+  `handoff.json` is still the record group's last file.
+  `HandoffEmitter.emit` is the same writer for a plane whose slots are all
+  final.
+- Finality. Only a final pass signals. `mark_final` refuses a key outside
+  the plane or a key signalled twice, and the finish refuses a key that was
+  never signalled. A cotangent scratch slot is sealed when it is signalled
+  (`ExactCotangentScratch.seal`), so a later write to it refuses. The writer
+  reads a scratch slot into its own buffer on the direct-I/O grid
+  (`aligned_buffer`, then `read_into(..., bounce=False)`), never through the
+  shared bounce buffer. A lock now serializes the pass's own off-grid reads
+  and writes through that buffer, and `close` waits, bounded, for a read in
+  flight. A workspace-profile row never emits, so it starts no writer.
+- The tee ring. On a scratch plane the writer takes most final rows from a
+  ring of host slots instead of reading them back from the scratch:
+  `HANDOFF_TEE_GROUPS` (2) capture groups of the scratch's largest slot.
+  The core charges the ring to the capture guard at
+  `before_stage_b_handoff_tee`, then allocates and touches it, as it does
+  the plane staging (PQ #1246). `mark_final` copies each stored row into a
+  free slot, and the writer frees the slot once the entry is written. A
+  full ring costs a scratch read, never a wait. The scratch write still
+  happens, and an entry's bytes are the same from either source.
+- Failure. A writer error is raised on the main thread at the next store or
+  at the finish. A failure on the main thread cancels the writer: it stops
+  between entries, and a spool wait ends at once
+  (`ProducedOutputSpool.cancelled`, `ProducedOutputWaitCancelled`). The core
+  joins the writer before the storage and its scratch close. Either way no
+  `handoff.json` exists, so no consumer can bind the handoff. On a failing
+  exit the handoff owner (`bind_produced_output(..., dispose_on_failure=True)`)
+  removes the files of each of its own uncommitted groups, exactly that
+  group's planned paths, and then calls `abort_prewrite`, which PrismaBuild
+  accepts because every planned path is absent. A group whose export is
+  still live is left alone. `produced_output_report()["disposed_uncommitted"]`
+  records each group. A killed producer leaves its generation `running`.
+  PrismaBuild's sweep of an ended attempt's prewrites (PB #1058) then finds
+  its landed, uncommitted groups present and not committed by any other
+  attempt, and reports them as orphaned for an operator to remove: each
+  handoff generation's paths are its own, so no later attempt supersedes
+  them.
+- Counters. `counters.json` gains `handoff_emit`: the entries and bytes
+  written before and after the finish, the writer's busy and finality-wait
+  seconds, the largest lag in entries, the scratch reads, the tee ring's
+  slots, hits and misses, the finish's wait, and whether the writer was
+  cancelled or failed. `handoff-out` now measures
+  the finish only: the entries not yet written, the settle and the record
+  group.
+
+Gates: `tests/test_stage_b_streamed_handoff.py`,
+`tests/test_band_serial_handoff_disposal_real_pb.py` (in its own pytest
+process) and `tests/test_quantum_band_serial.py`. No format, pipeline
+default, record identity or ship gate changes.
+
 The KDA capture kernel is the Stage B default (2026-09-25,
 `perf/1252-kda-kernel-default`, PQ #1252). `kda_gram_v1` passed its relaxed
 gate (PQ #1214) and runs KDA capture 2.54 times as fast, yet a launch ran it
@@ -137,8 +208,9 @@ whole quantum in kernel mode:
   kernel.
 - A handoff carries its mode. A kernel-mode producer names its kernel in
   the handoff's `producer` block (`kda_capture_kernel`: the name and the
-  identity digest). A fallback producer names none. `HandoffEmitter.emit`
-  and `load_quantum_handoff` take the mode as a required keyword. A handoff
+  identity digest). A fallback producer names none. `HandoffEmitter.emit`,
+  `HandoffEmitter.stream` and `load_quantum_handoff` take the mode as a
+  required keyword. A handoff
   from the other mode, or from another kernel name, refuses in dev mode and
   in certified mode alike (`handoff_kernel_refusal`). It is different
   arithmetic, the same class of check as the batch-size check in
@@ -1031,8 +1103,8 @@ It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
 row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
-(`prismaquant/joint_adjoint_checkpoints.py:1856`,
-`prismaquant/joint_quantum_handoff.py:655`), so the phase waits at most W in
+(`prismaquant/joint_adjoint_checkpoints.py:1857`,
+`prismaquant/joint_quantum_handoff.py:972`), so the phase waits at most W in
 total outside a PrismaBuild landing record. The bytes are the phase's count
 in the row's read plan. The built-in floor, 62,954,973 B/s, is the slowest
 30 s read window of the R13 layer-044 v4 and v5 gates (action keys
@@ -1140,7 +1212,10 @@ blanket until a `--compute-ceiling` document of kind `tail` is supplied (an
 R13 spill row's last `render-NN` gains 1800 s over its pass's grace), and
 the rows' action keys move with it. The row context gains `emits_handoff`,
 so a tail measured on rows that write no band-serial handoff can be scoped
-away from a producer's.
+away from a producer's. Since PQ #1251 a producer writes its handoff's
+entries during its passes, so its tail holds only the handoff's finish (the
+entries not yet written, the settle and the record group), not the whole
+handoff write.
 Gate: `tests/test_compute_tail_grace_1190.py`, which also drives the real
 quantum and checks that the `payload` span opens with the last declared
 phase in effect and that nothing commits after it. A dispatcher default (the
@@ -1230,11 +1305,14 @@ said nothing about its own reads between the head and the records.
   install, each window, each window's staged-render wait (`window-wait`) and
   unit commit (`commit`, with the `units` it made durable), both children of
   the window (PQ #1207), each (window, probe) replay, each probe's spill
-  capture, the tail after the last window (`payload`: the handoff write
+  capture, the tail after the last window (`payload`: the handoff's finish
   under a `handoff-out` child, the payload assembly and the final check of
   every row, with `units` and `rows`; PQ #1187), the runner `teardown`, and
   records out. `counters.json` gains `io_spans`, every span closed before
   the counters are written; on a failure `teardown` reaches the log only.
+  The handoff's writer runs on its own thread while the passes run (PQ
+  #1251), so `handoff-out` holds only what the finish waits for, and the
+  writer's own counters are `handoff_emit` in `counters.json`.
   A row that emits a handoff also keeps the emitter's export report in
   `counters.json` (`handoff_export`, PQ #1225), on success and on failure:
   per group, the PrismaBuild export key, the bytes and entries, the reserved,
@@ -2804,8 +2882,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `perf/1252-kda-kernel-default`.
+As of: 2026-09-25 · `perf/1251-stream-handoff-emit`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `perf/1251-stream-handoff-emit`) for **a
+band-serial handoff written while the producer's final passes run** (PQ
+#1251). A writer thread writes each entry once a final pass has stored its
+slot, a failing handoff owner disposes of its own uncommitted groups before
+it aborts their prewrites, and `counters.json` gains `handoff_emit`. See
+the entry at the top, "Stage B's spans" and "Producer". No format,
+pipeline default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `perf/1252-kda-kernel-default`) for **the KDA
 capture kernel as the Stage B default** (PQ #1252). An unset
@@ -25067,8 +25153,12 @@ seal (`handoff_sha256`). Every entry is durable before the record exists
 owner, of kind `handoff-record`, written in that order
 (`StreamedBoundaryArtifacts.write_produced_files`, PQ #1015).
 
-**Producer.** `joint_cost_quantum --emit-adjoint-handoff` emits after the
-retained-window driver returns. Inside an admitted PrismaBuild action the
+**Producer.** `joint_cost_quantum --emit-adjoint-handoff` starts the
+handoff's writer thread before the retained-window driver runs
+(`HandoffEmitter.stream`, PQ #1251). The writer binds the generation, writes
+each entry once a final pass has stored its slot, and finishes after the
+driver returns, with the harvested owner states: the rest of the entries,
+the settle, then the record group. Inside an admitted PrismaBuild action the
 entries go through the row's produced-output template
 (`bind_handoff_publication`, the same binding Stage A uses for its own
 entries). It refuses when the action declared no template, or when the

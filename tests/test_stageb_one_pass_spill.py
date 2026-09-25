@@ -34,6 +34,7 @@ from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
 
 import test_joint_cost_quantum_runtime as rt
+from handoff_emitter_stub import StubHandoffEmitter
 from test_joint_operator_windows import policy as operator_policy
 from test_streamed_cost_checkpoints import _FakeStreamingContext, _model_identity
 
@@ -570,13 +571,14 @@ def test_a_band_serial_producer_admits_each_roll_before_its_capture_and_handoff(
     _mark_rolls(monkeypatch, guard)
     emitted = []
 
-    def emit(**kwargs):
+    def finish(**kwargs):
         guard.admissions.append(("handoff_emit", 0, 0))
         emitted.append(sorted(kwargs))
-        return {}
 
-    emitter = SimpleNamespace(capture_batch=CHAIN_REGIME["batch_size"], emit=emit,
-                              published={})
+    # PQ #1251: the core streams the handoff; the stub's finish stands where
+    # the serial emit stood, in the tail after every capture.
+    emitter = StubHandoffEmitter(capture_batch=CHAIN_REGIME["batch_size"],
+                                 on_finish=finish)
     original = quantum_mod.run_layer_quantum_core
     monkeypatch.setattr(quantum_mod, "run_layer_quantum_core",
                         lambda *args, **kwargs: original(

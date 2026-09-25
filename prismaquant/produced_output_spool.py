@@ -241,11 +241,26 @@ class ProducedWindowRefused(ProducedOutputSpoolRefused):
     """The local window is full and nothing live can free it."""
 
 
+class ProducedOutputWaitCancelled(RuntimeError):
+    """The writer's own action is failing: a wait ends without its evidence.
+
+    Raised from :meth:`ProducedOutputSpool.reserve` and
+    :meth:`ProducedOutputSpool.await_group` once the spool's ``cancelled``
+    predicate is true (PQ #1251). It is not a refusal: PrismaBuild reported
+    nothing. The owner that raised it exits on its failure path.
+    """
+
+
 class ProducedOutputSpool:
     def __init__(self, backend, *, capacity_deferred):
         self.backend = backend
         self.capacity_deferred = capacity_deferred
         self._lock = threading.RLock()
+        #: A predicate the waits poll (PQ #1251): true once the writer's
+        #: action is failing, and a wait then raises
+        #: :class:`ProducedOutputWaitCancelled` instead of waiting on.
+        #: ``None`` waits as before, on PrismaBuild's evidence only.
+        self.cancelled = None
         self._groups = {}
         self._pending = set()
         self._durable_progress = []
@@ -384,6 +399,7 @@ class ProducedOutputSpool:
                     since_unix = time.time()
                     with self._lock:
                         waiting_on = self._live_exports_locked()
+                self._raise_if_cancelled(f"reserve {batch_id}")
                 _export_wait(id(token), since_unix, live_keys)
                 time.sleep(POLL_S)
         finally:
@@ -522,6 +538,17 @@ class ProducedOutputSpool:
         with self._lock:
             return bool(self._pending)
 
+    def export_live(self, batch_id):
+        """Is this group's export submitted and not yet seen landed?
+
+        Looks at no export. A failing writer leaves such a group's files
+        alone (PQ #1251): its export may still land them.
+        """
+        with self._lock:
+            group = self._groups.get(batch_id)
+            return bool(group is not None and group["submitted"]
+                        and not group["durable"])
+
     def poll_oldest(self, *, where="poll"):
         """Look at live exports oldest first, until one is still live.
 
@@ -606,6 +633,13 @@ class ProducedOutputSpool:
                 raise ProducedOutputSpoolRefused("incomplete local group has no export submission")
             return self._poll_locked(batch_id, group)
 
+    def _raise_if_cancelled(self, where):
+        cancelled = self.cancelled
+        if cancelled is not None and cancelled():
+            raise ProducedOutputWaitCancelled(
+                f"the writer's action is failing; its wait at {where} ends "
+                "without an export state")
+
     def await_group(self, batch_id, *, where="barrier"):
         """Wait, on evidence, until the group's export is acknowledged.
 
@@ -632,6 +666,7 @@ class ProducedOutputSpool:
                 if started is None:
                     started = time.monotonic()
                     since_unix = time.time()
+                self._raise_if_cancelled(f"{where} {batch_id}")
                 _export_wait(id(token), since_unix, (export_key,))
                 time.sleep(POLL_S)
         finally:
