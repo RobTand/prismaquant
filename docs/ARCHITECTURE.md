@@ -77,6 +77,145 @@ Gates:
 `tests/test_render_identity_once_1192.py`. No format, pipeline default, stage
 or ship gate changes.
 
+Stage B can capture GLM KDA layers on a Triton kernel (2026-09-24,
+`perf/1199-kda-kernel`, PQ #1199). A GLM-5.3 KDA layer's capture group took
+2.1 s, against 0.32 s for a DSA layer, and 1.86 s of it was attention, whose
+time goes to the image's pinned Torch fallback `chunk_kimi_delta_attention`:
+2440 kernel launches, 1.58 s of them elementwise, with the GPU at 37 W of its
+140 W (PB `67c595722c0e`). The fallback is limited by memory bandwidth. It
+materializes FP32 `[B, H, N, 64, 64, 128]` decay products, 4.3 GB each at
+capture batch 4.
+
+- The kernel. `prismaquant/kernels/kda_chunk.py` (`kda_gram_v1`) computes
+  the fallback's function, `glm_kda_causal_exp_v1`. Three Triton Gram kernels
+  recompute `exp(G_i - G_j)` per element instead of storing it, and Torch
+  computes the rest in FP64: the L2 norms, the beta products, the cumulative
+  gates, the unit lower-triangular solve, the decay factors and the
+  eight-chunk recurrence. No stage rounds more than the fallback's stage
+  does; the module docstring lists them. The Triton kernels use no atomics
+  and no `tl.dot`, so they are deterministic and no product is TF32. One
+  correction to that docstring: each `G_i - G_j` a Gram kernel forms is
+  within two FP32 roundings of the exact difference, not one (`h_i - h_j`
+  rounds, and so does adding the `lo` difference). The error of each product
+  stays relative to `|G_i - G_j|`, so no bound changes. The docstring is
+  left as qualified, because the qualification binds the file's sha256; the
+  fix goes in with the next change that requalifies `kda_chunk.py`.
+- The launch setting. `PRISMAQUANT_STAGE_B_KDA_KERNEL=kda_gram_v1` names it.
+  The campaign container spec's `env` carries it, as it carries
+  `PRISMAQUANT_STAGE_B_REPLAY_REGIME`, and `dispatch_joint_quanta`
+  (`_container_wrap`) validates it before it publishes a row. A plan's
+  `execution` block may not carry it, an unknown name refuses, and unset
+  runs the fallback.
+- The contract. The GLM derivative contract declares the kernel
+  (`glm_source_derivative.capture_kernel_declaration`).
+  `CaptureKernelDispatch` points the modeling module's
+  `chunk_kimi_delta_attention` at the kernel for one `with` block and back
+  at the verified fallback on exit. It refuses a global that changed outside
+  or inside a block, and blocks do not nest.
+- Admission. `run_layer_quantum_core` admits the kernel before any chain or
+  capture work, and only for a target layer with KDA attention, found by
+  class. It compiles the kernels, runs a fixed probe, and compares the
+  identity with the packaged qualification
+  (`kernels/kda_chunk_qualification.json`) through `seal_check`. It refuses
+  a band-serial producer: the plane it hands off would be the kernel's
+  arithmetic, and the consumer's chain rebuild runs the fallback. Every
+  target-layer pass, forward and backward, runs inside
+  `AdmittedKdaKernel.scope()`, which refuses unless the kernel ran exactly
+  once (one call, two Gram forwards, two Gram backwards). The chain rolls
+  keep the fallback, because they must be Stage A's arithmetic (PQ #997). A
+  target without KDA runs nothing new and records `executed: false`.
+- Identity. The kernel's identity goes into the probe identity's
+  `arithmetic.kda_capture_kernel`: the declaration, the source sha256, each
+  compiled cubin's sha256 without its debug sections, the probe digest and
+  the runtime. `arithmetic` is a run seal, so dev mode joins rows with and
+  without the kernel and prints the difference, and certified mode refuses
+  to join them. The result and `counters.json` record `kda_capture_kernel`:
+  the identity digest, the digest of the packaged qualification it was
+  compared with, `qualification_matched`, and the pass and call counts.
+  `qualification_matched` is true only when the runtime's identity equals
+  the qualification's; a dev-mode mismatch or a missing file records false,
+  so a record never claims a qualification its runtime does not match. The
+  workspace-profile record carries the identity digest.
+- Numerics. `experiments/kda_kernel_numerics.py` runs the executed fallback
+  source, which it checks against the image's modeling file, in FP32 and in
+  float64, and runs the kernel, at B=4, T=512, H=64. It has 108 cells:
+  nine gate cases, times the FP32 and bf16 paths, times `o` and the
+  gradients of `q`, `k`, `v`, `g` and `beta`. Only the 54 FP32 cells
+  discriminate. The fallback casts its inputs to FP32 on entry, and bf16
+  inputs convert exactly, so a bf16 cell is the FP32 cell's computation plus
+  one final bf16 rounding, under a bound 65,536 times looser. The `g`
+  gradient is an FP32 leaf on both paths, so its bf16 cells equal its FP32
+  cells. A cell passes when, against the float64 run, the kernel's largest
+  element error exceeds the fallback's on the same path by at most
+  `2u max|ref|`, its relative Frobenius error exceeds the fallback's by at
+  most `2u` (the two final roundings, with `u` the path dtype's unit
+  roundoff), it has no non-finite value where the fallback has none, and two
+  kernel runs are bit-equal. The source that num-04 ran kept the L2 norms,
+  the beta products and the recurrence in FP32, as the fallback does. It
+  missed one cell: in
+  `correlated_keys_beta1`, the FP32 path's `v` gradient had a largest
+  element error `3.83u max|ref|` above the fallback's, against the `2u`
+  bound (PB `ccdc4d980689`, 107 of 108 cells). Those stages are FP64 now,
+  the bound is unchanged, and the qualifying run passes all 108 cells (PB
+  `dd176c809520`). Against the fallback, the largest element error is lower
+  in 63 cells, equal in 44, and higher in one, by 0.03u; the relative
+  Frobenius error is lower in all 108. The identity is equal on both Sparks
+  (PB `b98d49e28147`, `7841785edecf`).
+  `experiments/build_kda_kernel_qualification.py` builds the packaged file
+  from these runs, and records the rejected one and the history below.
+- History. The packaged file lists every other numerics submission and
+  failed test run of the kernel (`development_runs`,
+  `withdrawn_submissions`, `failed_preflights`). The builder recomputes the
+  `2u` verdict from each run's stored errors, and refuses if it disagrees
+  with a verdict the run computed.
+  - The first two development runs, at B=1, H=8, used harness versions
+    that compared strictly (kernel error no larger than the fallback's) and
+    computed no bound. smoke-01 (PB `f3bf87fedb11`), whose Gram kernels
+    accumulated in FP32 (`kda_gram_fp32_v1`), had a larger error in 39 of
+    108 cells, two of them beyond the later `2u` bound: the `beta` gradient
+    of `correlated_keys_beta1` at 7.8u and the `o` of `zero_decay` at 2.55u.
+    The Gram kernels then moved to FP64 block accumulation. smoke-02
+    (PB `185e7719d15e`) had a larger error in 23 cells, all within `2u`
+    (worst 0.99u).
+  - The `2u` bound entered the harness after those two runs, as the bound
+    derived from FP32 precision that the task allowed. It is the same from
+    harness `f3484cd7d824` through `6fa2f2f6f00f`, which num-04 and num-05
+    ran. Under it, smoke-04 and smoke-05 (PB `24431f4862c1`,
+    `89b74806783c`) passed every cell at B=1 on the source that then missed
+    one cell at the production shape (num-04). Only a production-shape run
+    qualifies.
+  - Three production-shape submissions wrote no numbers. num-01 (PB
+    `5071bcbc9573`) and num-03 (PB `173eec09cb8f`) were withdrawn before a
+    worker claimed them: num-01's snapshot predated the FP64 block
+    accumulation, and num-03 was resubmitted after a harness refactor.
+    num-02 (PB `f6a2f79118c5`) was withdrawn 25 s after sparky claimed it.
+    Its withdrawal record gives the reason: sparky refused the measurement
+    while other holders kept 1.8 to 3.5 CPUs busy, and the bench was to run
+    first.
+  - Two test preflights failed on defects in the test code, fixed in the
+    test file: PB `716bf120459d` (2 of 15 tests) and `43f7859b05aa` (1 of
+    15).
+- Performance. On layer 38 at capture batch 4 (PB `67c595722c0e`, sparky,
+  exclusive), a full-layer capture group drops from 2.125 s and 79.4 J to
+  0.644 s and 29.1 J; attention alone drops from 1.863 s and 68.1 J to
+  0.389 s and 17.6 J. Power rises from 37 W to 45 W of 140 W. torch.profiler
+  puts the kernel arm's attention at 118 ms of FP64 GEMMs, 103 ms of FP64
+  elementwise kernels and 25 ms of Gram kernels, with 0.4 ms of GPU idle
+  time. A KDA row's 512 capture groups (4 probes of 128) save about 12.6
+  minutes and 25.7 kJ. The bench compares each kernel arm's input cotangent
+  with the fallback arm's. At the attention input, 298,961 of 8,388,608
+  bf16 elements differ (rel Fro 8.5e-4), the order that one-ulp bf16
+  differences in 3.6% of the elements give. At the layer input, 18,862,478
+  of 33,554,432 differ (rel Fro 1.1e-2), and the largest difference,
+  4.1e-3, exceeds the mean magnitude of 2.4e-3. Whether MoE top-k selections flipped between the
+  arms, the likely cause, is unmeasured: the bench records no routing, and
+  its saved outputs (traces and a summary) cannot count it.
+
+Gates: `tests/test_kda_chunk_kernel.py`, `tests/test_kda_capture_kernel.py`,
+`tests/test_dispatch_joint_quanta.py`, `tests/test_no_new_seals.py`. No
+format, pipeline default, stage, lane or ship gate changes. A launch without
+the setting runs and records what it did before.
+
 The served NVFP4 activation leg dequantises with two declared Triton kernels
 and hands the operator a cached device scalar (2026-09-24,
 `perf/1211-nvfp4-qdq-fused`, PQ #1211). `_nvfp4_activation_qdq_registered_op`
@@ -2376,6 +2515,17 @@ window's one reader lease, one loader pool and one archive parse per file**
 (PQ #1210). See the entry at the top. A retained window now charges each file
 its length instead of its parsed archive storage. No format, pipeline
 default, stage or ship gate changes.
+
+Re-stamped (2026-09-24, `perf/1199-kda-kernel`) for **a Stage B launch
+setting that runs a KDA target layer's capture passes on the `kda_gram_v1`
+Triton kernel** (PQ #1199): `PRISMAQUANT_STAGE_B_KDA_KERNEL`, declared by the
+GLM derivative contract, admitted per quantum against its packaged
+qualification, and stamped into the probe arithmetic. See the entry at the
+top and §10's producer-side kernels. No format, pipeline default, stage, lane
+or ship gate changes; a launch without the setting is unchanged. Revised on
+the same branch after review: the kernel record's `qualification_matched`,
+the packaged qualification's run history, and the numerics and bench
+wording.
 
 Re-stamped (2026-09-24, `perf/1211-nvfp4-qdq-fused`) for **the served NVFP4
 activation leg's declared dequantisation kernels and cached global-scale
@@ -22607,6 +22757,21 @@ safe — one killed the box ~1.75 h after going quiet.
 Qwen3.5/3.6 need ≥5.5 (4.57.5 raises `KeyError` on the model type). Older launchers and
 `CLAUDE.md` name images (`vllm-fresh-b12x`, `vllm-node-tf5-cu132-lfm`) that are **not present on
 the box today** — treat those references as historical.
+
+**Producer-side kernels.** `prismaquant/kernels/` holds kernels that only
+the producer runs; no artifact needs them at serve time. Three are opt-in:
+`nvfp4_fused.py` routes the perturbed-activation emulation through a fused
+NVFP4 kernel under `PRISMAQUANT_FUSED_KERNEL_NVFP4`;
+`joint_projection_reduce.{cpp,cu,py}` is `fused_fp32_v1`, the joint
+projection reduction a plan selects with `execution.projection_backend`,
+checked against `joint_projection_reduce_qualification.json`, including its
+shapes (PQ #1175); and `kda_chunk.py` is `kda_gram_v1`, the Stage B KDA
+capture kernel a launch selects with `PRISMAQUANT_STAGE_B_KDA_KERNEL`,
+checked against `kda_chunk_qualification.json` (PQ #1199). The fourth is
+not: `nvfp4_served_dequant.py` (`prismaquant.triton_nvfp4_served_dequant.v1`)
+is the served NVFP4 activation leg's dequantisation, which the leg always
+runs, with no Torch fallback, and which `ServedQuantizerIdentity` records as
+`dequant_kernel` (PQ #1211).
 
 **Disk.** Keep ≥10% of the 1.8 TB free (224 GB at time of writing). A 27B production cache is
 ~90 GB and a multi-arm matrix is bounded by peak, not final state: `df -h /home/rob` before

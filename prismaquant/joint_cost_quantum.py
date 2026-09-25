@@ -569,8 +569,18 @@ class QuantumCounters:
         # ``layer_passes`` counts full target-layer forward/backward passes.
         self.replay = {"mode": "windowed", "layer_passes": 0,
                        "noncontiguous_cotangent_seeds": 0}
+        # The KDA capture kernel (PQ #1199): None when the launch names none,
+        # a record when it names one this target does not run, else the
+        # admitted kernel, whose pass counts are read at finish.
+        self.kda_capture_kernel = None
         self._phase_cursor = None
         self._window_cursor = None
+
+    def kda_capture_kernel_record(self) -> dict | None:
+        block = self.kda_capture_kernel
+        if block is None or isinstance(block, Mapping):
+            return None if block is None else dict(block)
+        return block.record()
 
     def _snapshot(self):
         report = self._report()
@@ -682,6 +692,8 @@ class QuantumCounters:
             },
             "chain": dict(self.chain),
             "replay": dict(self.replay),
+            **({} if self.kda_capture_kernel is None
+               else {"kda_capture_kernel": self.kda_capture_kernel_record()}),
             "phases": self.phases,
             "windows": self.windows,
             # Every closed span, in close order (prismaquant.io_spans).
@@ -890,20 +902,23 @@ def resolve_quantum_windows(
 # --------------------------------------------------------------------------
 
 
-def quantum_runtime_execution(config, *, replay_regime):
+def quantum_runtime_execution(config, *, replay_regime, kda_capture_kernel=None):
     """The execution block a launched quantum's core runs under.
 
     The plan's ``execution`` block, plus the settings the plan keeps at its
     top level: the device envelope (``max_gpu_bytes``) and the free-UMA floor
     (``min_free_gib``), which the chain roll and the retained replay check.
     Before PQ #1163 the floor was not carried, so the core read 0. The
-    replay regime is the launch setting ``run_layer_quantum`` resolved.
+    replay regime and the KDA capture kernel (PQ #1199) are the launch
+    settings ``run_layer_quantum`` resolved; an unset kernel adds no key.
     """
     execution = dict(config["execution"])
     execution.setdefault("device_envelope_bytes", config.get("max_gpu_bytes"))
     if "min_free_gib" in config:
         execution.setdefault("min_free_gib", config["min_free_gib"])
     execution["replay_regime"] = replay_regime
+    if kda_capture_kernel is not None:
+        execution["kda_capture_kernel"] = kda_capture_kernel
     return execution
 
 
@@ -1601,6 +1616,27 @@ def run_layer_quantum_core(
             f"resolved windows cover {resolved_names!r}, not layer {layer}'s "
             f"roster {names!r}")
 
+    # ---- the KDA capture kernel (PQ #1199) ---------------------------------
+    # A launch setting. Admitted only for a target layer with KDA attention,
+    # before any chain or capture work; it runs the target layer's passes
+    # and nothing else, and it refuses rather than fall back to Torch.
+    from contextlib import nullcontext
+    kda_kernel = None
+    requested_kda_kernel = execution.get("kda_capture_kernel")
+    if requested_kda_kernel is not None:
+        from .glm_kda_capture_kernel import (
+            KdaCaptureKernelRefused, admit_kda_capture_kernel, not_executed_record)
+        try:
+            kda_kernel = admit_kda_capture_kernel(
+                requested_kda_kernel, runner.model, runner.layers[layer],
+                device=runner.device, emits_handoff=handoff_emitter is not None)
+        except KdaCaptureKernelRefused as exc:
+            raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
+        counters.kda_capture_kernel = (
+            kda_kernel if kda_kernel is not None else not_executed_record(
+                requested_kda_kernel, f"target layer {layer} has no KDA attention"))
+    kernel_pass = nullcontext if kda_kernel is None else kda_kernel.scope
+
     # ---- identity blocks (mirrors compute_aura_cost_streamed's) -----------
     batch_rows = min(probe_microbatch or len(calib_ids), len(calib_ids))
     row_offsets = list(range(0, len(calib_ids), batch_rows))
@@ -1655,6 +1691,9 @@ def run_layer_quantum_core(
     if probe_layout is not None:
         joint_probe_identity["noise_layout"] = probe_layout
         joint_probe_identity["arithmetic"]["execution_partition"] = execution_partition
+    if kda_kernel is not None:
+        from .glm_kda_capture_kernel import ARITHMETIC_FIELD as KDA_KERNEL_FIELD
+        joint_probe_identity["arithmetic"][KDA_KERNEL_FIELD] = kda_kernel.identity
     # The probe identity is final here. It carries the source model's
     # identity (8.8 MB of JSON for GLM-5.3), which every operator and every
     # (unit, format) row serialized again, several times each, while the GPU
@@ -2280,8 +2319,9 @@ def run_layer_quantum_core(
                     dtype=runner.dtype).detach().requires_grad_(True)
                 batch = (batches[indices[0]] if len(indices) == 1 else
                          _chain_group_batch(runner, batches, indices, capture_group_cache))
-                out = runner.isolated_layer(batch, layer, x_in, pass_state={})
-                torch.autograd.backward([out], [incoming_grad])
+                with kernel_pass():
+                    out = runner.isolated_layer(batch, layer, x_in, pass_state={})
+                    torch.autograd.backward([out], [incoming_grad])
                 if observer is not None:
                     # None only under the workspace profile's window backward
                     # (PQ #1151): the same pass with no spill hooks installed.
@@ -2401,11 +2441,12 @@ def run_layer_quantum_core(
                         isolated = profile.isolated_layer_pass_state(
                             batch.shared_pass_state, runner.layers[layer])
                         isolated = owner.graft(isolated)
-                        out = runner.isolated_layer(batch, layer, x_in,
-                                                    pass_state=isolated)
-                        roots, root_grads = owner.produced_roots()
-                        torch.autograd.backward(
-                            [out, *roots], [incoming_grad, *root_grads])
+                        with kernel_pass():
+                            out = runner.isolated_layer(batch, layer, x_in,
+                                                        pass_state=isolated)
+                            roots, root_grads = owner.produced_roots()
+                            torch.autograd.backward(
+                                [out, *roots], [incoming_grad, *root_grads])
                         if observer is not None:
                             observer.end_batch()
                         owner.harvest()
@@ -2614,7 +2655,9 @@ def run_layer_quantum_core(
                                 "stored_batches": len(batches),
                                 "device_envelope_bytes": execution.get(
                                     "device_envelope_bytes"),
-                                "git_commit": _checkpoint_git_commit()})
+                                "git_commit": _checkpoint_git_commit(),
+                                **({} if kda_kernel is None else {
+                                    "kda_capture_kernel": kda_kernel.identity_sha256})})
                 with counters.io.span("spill-capture", probe=int(probe_index)), \
                         spill_observer(probe_index) as observer:
                     replay_backward(final=True, lease=None, probe=probe_index,
@@ -2926,6 +2969,18 @@ def run_layer_quantum(
         bf16_reduction = bf16_reduction_from_environment(os.environ)
     except MatmulArithmeticRefused as exc:
         raise QuantumIdentityRefused(str(exc)) from exc
+    # So is the KDA capture kernel (PQ #1199). The core admits it for a KDA
+    # target layer and stamps its identity into the arithmetic.
+    from .glm_kda_capture_kernel import (
+        KDA_KERNEL_ENV, KdaCaptureKernelRefused, kda_capture_kernel_from_environment)
+    if "kda_capture_kernel" in execution:
+        raise QuantumIdentityRefused(
+            f"the KDA capture kernel is a launch setting ({KDA_KERNEL_ENV}), "
+            "not a plan execution field")
+    try:
+        kda_capture_kernel = kda_capture_kernel_from_environment(os.environ)
+    except KdaCaptureKernelRefused as exc:
+        raise QuantumIdentityRefused(str(exc)) from exc
     # PQ #1065: compare the setting with the slice's stamp before any head
     # work. The core repeats the check on the verified slice and the live
     # flag, for every caller.
@@ -3174,7 +3229,8 @@ def run_layer_quantum(
         result.update(source_model_identity=source,
                       units=head_units, measured_cells=head_cells)
 
-        execution_runtime = quantum_runtime_execution(config, replay_regime=replay_regime)
+        execution_runtime = quantum_runtime_execution(
+            config, replay_regime=replay_regime, kda_capture_kernel=kda_capture_kernel)
         # D2 handshake, before any GPU work or progress: the record seals
         # window indices only, so membership and footprints are recomputed
         # from the sealed budget and handshook here. The chunk frontier,
@@ -3224,6 +3280,8 @@ def run_layer_quantum(
             adjoint_handoff=adjoint_handoff, handoff_emitter=handoff_emitter)
         if handoff_emitter is not None:
             result["handoff"] = dict(handoff_emitter.published)
+        if counters.kda_capture_kernel is not None:
+            result["kda_capture_kernel"] = counters.kda_capture_kernel_record()
         torch.cuda.synchronize()
         result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
         result["peak_gpu_reserved_bytes"] = torch.cuda.max_memory_reserved()

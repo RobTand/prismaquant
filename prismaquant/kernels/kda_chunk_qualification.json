@@ -1,0 +1,424 @@
+{
+ "criterion": "For every case, path (fp32, bf16) and tensor (o, dq, dk, dv, dg, dbeta), against a float64 run of the executed fallback source: the kernel's largest element error exceeds the FP32 fallback's by at most 2u max|ref|, and its relative Frobenius error exceeds the fallback's by at most 2u, u the unit roundoff of the path's dtype (the two implementations' final roundings); no non-finite value where the fallback has none; and two kernel runs are bit-equal.",
+ "development_runs": [
+  {
+   "artifact": "/mnt/shared/tessera-measurements/ws-kdak-1199/smoke-01/numerics.json",
+   "artifact_receipt_sha256": "0086d34531f3339c93fae0eb1b1151266c916e13e39318e0ba07be8aadd6de8c",
+   "cases": [
+    "glm_gate_random",
+    "bound_exact",
+    "bound_inexact",
+    "weak_decay",
+    "zero_decay",
+    "mixed_channels",
+    "alternating_steps",
+    "correlated_keys_beta1",
+    "beyond_bound"
+   ],
+   "cells": 108,
+   "cells_beyond_2u_bound": [
+    [
+     "zero_decay",
+     "fp32",
+     "o"
+    ],
+    [
+     "correlated_keys_beta1",
+     "fp32",
+     "dbeta"
+    ]
+   ],
+   "cells_no_larger_error_than_fallback": 69,
+   "cells_repeat_bit_equal": null,
+   "harness_sha256": "17eef36c2c0664c2a3a90eb923924b1ee29210113b2266ffe5eeb8da8f7184fc",
+   "host": "sparklina",
+   "kernel": "kda_gram_fp32_v1",
+   "pb_action": "f3bf87fedb119b71871858ffec62b4fa4310c2f9beffbcdbfece26c0ccef088a",
+   "shape": {
+    "batch": 1,
+    "head_dim": 128,
+    "heads": 8,
+    "seqlen": 512
+   },
+   "source_sha256": "86239a18970f4ff457d9ee0da43b60f841be5fd839397ad6fed20a8f5083dcf0",
+   "verdict_computed_by_the_run": false
+  },
+  {
+   "artifact": "/mnt/shared/tessera-measurements/ws-kdak-1199/smoke-02/numerics.json",
+   "artifact_receipt_sha256": "bdb884cdb6c9ac54c3803dde3dd2280847e87e81f8dae2799e6e7f659566b58d",
+   "cases": [
+    "glm_gate_random",
+    "bound_exact",
+    "bound_inexact",
+    "weak_decay",
+    "zero_decay",
+    "mixed_channels",
+    "alternating_steps",
+    "correlated_keys_beta1",
+    "beyond_bound"
+   ],
+   "cells": 108,
+   "cells_beyond_2u_bound": [],
+   "cells_no_larger_error_than_fallback": 85,
+   "cells_repeat_bit_equal": 108,
+   "harness_sha256": "675f2325da9f05a8fed38fb196c3201f316b2eb3b712d92d116d7da0af118cd5",
+   "host": "sparklina",
+   "kernel": "kda_gram_v1",
+   "pb_action": "185e7719d15e7d223b099561ff8133511eec0094d0f63d1631c5b20559d789c6",
+   "shape": {
+    "batch": 1,
+    "head_dim": 128,
+    "heads": 8,
+    "seqlen": 512
+   },
+   "source_sha256": "9c1e6a9cf4339a19b2ae48fc44a1ca9144158941d4d84b5bb729f53e355d3614",
+   "verdict_computed_by_the_run": false
+  },
+  {
+   "artifact": "/mnt/shared/tessera-measurements/ws-kdak-1199/smoke-04-lina/numerics.json",
+   "artifact_receipt_sha256": "1632531a311bce25fe83c0db6e94bbe72e8a8cb5b3666ba0c5851c42f5965929",
+   "cases": [
+    "glm_gate_random",
+    "bound_exact",
+    "bound_inexact",
+    "weak_decay",
+    "zero_decay",
+    "mixed_channels",
+    "alternating_steps",
+    "correlated_keys_beta1",
+    "beyond_bound"
+   ],
+   "cells": 108,
+   "cells_beyond_2u_bound": [],
+   "cells_no_larger_error_than_fallback": 85,
+   "cells_repeat_bit_equal": 108,
+   "harness_sha256": "f3484cd7d824af92ad20ca5ea0fbc243516afcaac96bd3f07fdad46597bd624e",
+   "host": "sparklina",
+   "kernel": "kda_gram_v1",
+   "pb_action": "24431f4862c19c33e45d4c8038d84c98f2020e2ed19d02071f4663d662eb04bc",
+   "shape": {
+    "batch": 1,
+    "head_dim": 128,
+    "heads": 8,
+    "seqlen": 512
+   },
+   "source_sha256": "28600795ef15219a7c3b4cd247540c3cee20d9da35f14029f8b8f28efa758402",
+   "verdict_computed_by_the_run": true
+  },
+  {
+   "artifact": "/mnt/shared/tessera-measurements/ws-kdak-1199/smoke-05-sparky/numerics.json",
+   "artifact_receipt_sha256": "be42578e07316c0db37da84b441337419c5edf527a9908684e7dab2b74f1e5ca",
+   "cases": [
+    "glm_gate_random"
+   ],
+   "cells": 12,
+   "cells_beyond_2u_bound": [],
+   "cells_no_larger_error_than_fallback": 12,
+   "cells_repeat_bit_equal": 12,
+   "harness_sha256": "f3484cd7d824af92ad20ca5ea0fbc243516afcaac96bd3f07fdad46597bd624e",
+   "host": "sparky",
+   "kernel": "kda_gram_v1",
+   "pb_action": "89b74806783ca40dad94887f94ab1158924327313285d096a1e8ee8edd9dfa46",
+   "shape": {
+    "batch": 1,
+    "head_dim": 128,
+    "heads": 8,
+    "seqlen": 512
+   },
+   "source_sha256": "28600795ef15219a7c3b4cd247540c3cee20d9da35f14029f8b8f28efa758402",
+   "verdict_computed_by_the_run": true
+  }
+ ],
+ "evidence": [
+  {
+   "artifact": "/mnt/shared/tessera-measurements/ws-kdak-1199/num-05/numerics.json",
+   "artifact_receipt_sha256": "781b791c25c0ce0b406db80c37a11c8d6dac125b522523f75fd7598d94d370de",
+   "gate": "For every case, path (fp32, bf16) and tensor (o, dq, dk, dv, dg, dbeta), against a float64 run of the executed fallback source: the kernel's largest element error exceeds the FP32 fallback's by at most 2u max|ref|, and its relative Frobenius error exceeds the fallback's by at most 2u, u the unit roundoff of the path's dtype (the two implementations' final roundings); no non-finite value where the fallback has none; and two kernel runs are bit-equal.",
+   "host": "sparky",
+   "pb_action": "dd176c809520ab540fa6ed8bc4649520e488220da552b88a7041d143b09ccd8a",
+   "role": "numerics at the production shape",
+   "shape": {
+    "batch": 4,
+    "head_dim": 128,
+    "heads": 64,
+    "seqlen": 512
+   }
+  },
+  {
+   "artifact": "/mnt/shared/tessera-measurements/ws-kdak-1199/smoke-06-fp64/numerics.json",
+   "artifact_receipt_sha256": "2a3d6e1bb2130b89f5723be74f943f87ff57cae736d19c5815f994bcbee944d0",
+   "cases": [
+    "glm_gate_random",
+    "bound_exact",
+    "bound_inexact",
+    "weak_decay",
+    "zero_decay",
+    "mixed_channels",
+    "alternating_steps",
+    "correlated_keys_beta1",
+    "beyond_bound"
+   ],
+   "host": "sparklina",
+   "pb_action": "b98d49e281477697c50d0b1d1eee98cb78d65b7b8afbdc3dc3ce86943864a119",
+   "role": "identity, equal",
+   "shape": {
+    "batch": 1,
+    "head_dim": 128,
+    "heads": 8,
+    "seqlen": 512
+   }
+  },
+  {
+   "artifact": "/mnt/shared/tessera-measurements/ws-kdak-1199/smoke-07-sparky/numerics.json",
+   "artifact_receipt_sha256": "1ba9439de9f3ed326fd1af12b954bc307a11a28b4e4b88ddab76110aef602081",
+   "cases": [
+    "glm_gate_random"
+   ],
+   "host": "sparky",
+   "pb_action": "7841785edecf63da70538a38ace86379b47b39b54c7e1bc5616a0b7326675586",
+   "role": "identity, equal",
+   "shape": {
+    "batch": 1,
+    "head_dim": 128,
+    "heads": 8,
+    "seqlen": 512
+   }
+  }
+ ],
+ "failed_preflights": [
+  {
+   "host": "sparky",
+   "outcome": "tests/test_kda_capture_kernel.py: 2 failed, 13 passed. Both were defects in the test code. test_admission_compares_the_runtime_with_the_packaged_qualification kept the previous case's qualification file where the missing-file case needs none, and test_the_core_runs_every_target_pass_on_the_kernel_and_stamps_its_identity counted Stage A and reference-run layer passes as target passes. The fixes were in the test file.",
+   "pb_action": "716bf120459d"
+  },
+  {
+   "host": "sparklina",
+   "outcome": "tests/test_kda_capture_kernel.py: 1 failed, 14 passed. A defect in the test code: test_admission_compares_the_runtime_with_the_packaged_qualification read the DEV-MODE line from stderr, and seal_check prints it to stdout. The fix was in the test file.",
+   "pb_action": "43f7859b05aa"
+  }
+ ],
+ "harness": {
+  "path": "experiments/kda_kernel_numerics.py",
+  "sha256": "6fa2f2f6f00f2fd0e1e9c78718a61801f1d58411e4e4ae922c9c09f1d7195d83"
+ },
+ "identity": {
+  "compiled": {
+   "gram_bwd_cols_inclusive": {
+    "code_sha256": "c622b621b6c0d10ebe21282b7709eda6c4849c80666d75e8f43cb656487e26ad",
+    "triton_hash": "3af52cd0a3d065d52ed9925cc0b7c13c05a9453665e3e0ad390f13bd95340693"
+   },
+   "gram_bwd_cols_strict": {
+    "code_sha256": "d6ef68d12f25f83b0bc1c2b799c840130c93efea510f339b596d5a4e51a841da",
+    "triton_hash": "630e83c68cb5a10f4a43fa0473f90bf8bf1142e338d5802bd90b2c53560df2f1"
+   },
+   "gram_bwd_rows_inclusive": {
+    "code_sha256": "03cb2893bcdef9ffbeb7a5b4b24dc489ba386f9831cb09489cf273cc6d75899d",
+    "triton_hash": "a3c241fa4b61dd1a30a63740584b33c70f7f3bd80217c2a329813ddc716ec952"
+   },
+   "gram_bwd_rows_strict": {
+    "code_sha256": "9bc87f2b8cc8a0ea6884d4804f39948c3647f461c825ca123923da284db7f500",
+    "triton_hash": "b98d81b0b687d7b44a2e68af1aa16cfb5ab33cdcfd136df1d41a3c2bb96e84be"
+   },
+   "gram_fwd_inclusive": {
+    "code_sha256": "2b3f3460071f5478292322a21f857442b4a7a4f71612d1f9600c83f1826158f2",
+    "triton_hash": "c39b023c7d052d24bba50800fb7c3698c334a24f68251923784a39c5350a939b"
+   },
+   "gram_fwd_strict": {
+    "code_sha256": "584818faabffabddded811cd6a9b376aed168d507c2504f52cade085558b6322",
+    "triton_hash": "a6dec308ce8fbbe2cb3b15b7769dba4281b7d552dbe9602f5a03f85d829a557a"
+   }
+  },
+  "name": "kda_gram_v1",
+  "probe": {
+   "sha256": "844e6ad2f98c481dcb6de63099428b7d49fa6b464da2f89dc4edf2afd6235f45",
+   "shape": [
+    1,
+    128,
+    2,
+    128
+   ]
+  },
+  "runtime": {
+   "cuda": "13.0",
+   "device": {
+    "major": 12,
+    "minor": 1,
+    "multi_processor_count": 48,
+    "name": "NVIDIA GB10"
+   },
+   "image": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+   "machine": "aarch64",
+   "torch": "2.13.0+cu130",
+   "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+   "triton": "3.7.1"
+  },
+  "source_sha256": "ec9d3339e5badb9e2c412a53be30effba419697e723100754639f22853eb195f"
+ },
+ "implements": "glm_kda_causal_exp_v1",
+ "numerics": {
+  "cases": [
+   "glm_gate_random",
+   "bound_exact",
+   "bound_inexact",
+   "weak_decay",
+   "zero_decay",
+   "mixed_channels",
+   "alternating_steps",
+   "correlated_keys_beta1",
+   "beyond_bound"
+  ],
+  "cells": 108,
+  "failures": [],
+  "kernel_vs_fallback": {
+   "max_abs": {
+    "equal": 44,
+    "higher": 1,
+    "lower": 63
+   },
+   "rel_fro": {
+    "equal": 0,
+    "higher": 0,
+    "lower": 108
+   }
+  },
+  "matmul": {
+   "allow_tf32": false,
+   "bf16_reduced_precision_reduction": false,
+   "float32_precision": "highest"
+  },
+  "oracle": {
+   "oracle_code_sha256": "c809c8557a6708cf761364ef8a3f862218e7082025242d92fdf6c41464b09320",
+   "pinned_sha256": "d1b1231435049b58a908e1db7d3743fa8de8dcf2419c8e8e6c9a1246f8c3a0da"
+  },
+  "paths": [
+   "fp32",
+   "bf16"
+  ],
+  "shape": {
+   "batch": 4,
+   "head_dim": 128,
+   "heads": 64,
+   "seqlen": 512
+  },
+  "tensors": [
+   "o",
+   "dq",
+   "dk",
+   "dv",
+   "dg",
+   "dbeta"
+  ],
+  "worst_excess": {
+   "max_abs": {
+    "bound_in_u": 2.0,
+    "cell": [
+     "bound_exact",
+     "fp32",
+     "o"
+    ],
+    "excess_in_u": 0.03317152167116708
+   },
+   "rel_fro": {
+    "bound_in_u": 2.0,
+    "cell": [
+     "bound_inexact",
+     "bf16",
+     "o"
+    ],
+    "excess_in_u": -1.899299051366654e-10
+   }
+  }
+ },
+ "rejected_attempts": [
+  {
+   "artifact": "/mnt/shared/tessera-measurements/ws-kdak-1199/num-04/numerics.json",
+   "artifact_receipt_sha256": "8f541d50134cf7f5748c6c5e24ae0c6e0ba3df728a3ffa2da69463c4fa4937da",
+   "cells": 108,
+   "failures": [
+    [
+     "correlated_keys_beta1",
+     "fp32",
+     "dv"
+    ]
+   ],
+   "host": "sparklina",
+   "kernel_vs_fallback": {
+    "max_abs": {
+     "equal": 53,
+     "higher": 7,
+     "lower": 48
+    },
+    "rel_fro": {
+     "equal": 2,
+     "higher": 9,
+     "lower": 97
+    }
+   },
+   "pb_action": "ccdc4d9806897385fe4c17695da2af663745b376276b808ecc95842b2efad631",
+   "shape": {
+    "batch": 4,
+    "head_dim": 128,
+    "heads": 64,
+    "seqlen": 512
+   },
+   "source_sha256": "28600795ef15219a7c3b4cd247540c3cee20d9da35f14029f8b8f28efa758402",
+   "worst_excess": {
+    "max_abs": {
+     "bound_in_u": 2.0,
+     "cell": [
+      "correlated_keys_beta1",
+      "fp32",
+      "dv"
+     ],
+     "excess_in_u": 3.8285875831697704
+    },
+    "rel_fro": {
+     "bound_in_u": 2.0,
+     "cell": [
+      "beyond_bound",
+      "fp32",
+      "dk"
+     ],
+     "excess_in_u": 8.987110611258231e-09
+    }
+   }
+  }
+ ],
+ "schema": "prismaquant.kda_capture_kernel_qualification.v1",
+ "status": "qualified",
+ "withdrawn_submissions": [
+  {
+   "attempts": 0,
+   "claimed_host": null,
+   "claimed_unix": null,
+   "label": "num-01",
+   "pb_action": "5071bcbc957331dd3331778fb734552bd6e4a97462b3fb82facc6a60295e41a7",
+   "published_unix": 1790286095.9083648,
+   "reason": "snapshot predates the FP64 accumulation revision of the KDA kernel (WS-KDAK, PQ #1199)",
+   "withdrawn_from": "ready",
+   "withdrawn_unix": 1790286731.4517062
+  },
+  {
+   "attempts": 0,
+   "claimed_host": "sparky",
+   "claimed_unix": 1790287882.4441638,
+   "label": "num-02",
+   "pb_action": "f6a2f79118c57f695a22ae353d2f765e558c0703d79b65f02005fc5915da24c6",
+   "published_unix": 1790287738.259427,
+   "reason": "WS-KDAK #1199: measurement refused on sparky (busy_cpus 1.8-3.5 > 1 from other holders); rerunning the bench pinned to the idle-GPU sparky first, numerics after",
+   "withdrawn_from": "claimed",
+   "withdrawn_unix": 1790287907.0526187
+  },
+  {
+   "attempts": 0,
+   "claimed_host": null,
+   "claimed_unix": null,
+   "label": "num-03",
+   "pb_action": "173eec09cb8f92b6d9907dd730a33151883490d1ed462efa8ea97f158ba7ece6",
+   "published_unix": 1790288083.331812,
+   "reason": "WS-KDAK #1199: harness refactor (pinned text helpers shared with the GPU test); resubmitting",
+   "withdrawn_from": "ready",
+   "withdrawn_unix": 1790288178.113292
+  }
+ ]
+}
