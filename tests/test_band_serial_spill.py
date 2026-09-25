@@ -44,18 +44,20 @@ SPILL, WINDOWED = "one_pass_spill", "windowed"
 
 
 def _run(campaign, monkeypatch, *, layer, spill_root=None, handoff=None, emit=False,
-         resume=False):
+         resume=False, complete=False):
     """The spill suite's quantum harness, run band-serial when asked.
 
     The harness imports ``run_layer_quantum_core`` at call time, so a wrapper
     patched onto the module adds the consumer's bound handoff and the
     producer's emitter, both built as ``main`` builds them. ``resume`` keeps
-    the layer's committed units and resumes from them.
+    the layer's committed units and resumes from them; ``complete`` says
+    every unit is committed, so no spill opens and the counters keep the
+    windowed mode, and the final passes still run.
 
-    A consumer under the spill reads each probe's incoming plane from the
-    handoff during that probe's final pass (PQ #1143); its counters record
-    one stream per probe, each over all of that probe's entries. No other
-    run streams.
+    A consumer launched under the spill reads each probe's incoming plane
+    from the handoff during that probe's final pass (PQ #1143), a complete
+    resume's included; its counters record one stream per probe, each over
+    all of that probe's entries. No other run streams.
     """
     original = core.run_layer_quantum_core
     published = {}
@@ -85,7 +87,7 @@ def _run(campaign, monkeypatch, *, layer, spill_root=None, handoff=None, emit=Fa
             ceiling=None if spill_root is None else 1 << 30, resume=resume)
     assert payload is not None, _chain(state.error)
     mode = state.counters_block["replay"]["mode"]
-    assert mode == (WINDOWED if spill_root is None else SPILL), mode
+    assert mode == (WINDOWED if spill_root is None or complete else SPILL), mode
     incoming = state.counters_block.get("handoff_incoming")
     if handoff is not None and spill_root is not None:
         _document, plane, _states = _handoff_plane(handoff)
@@ -187,7 +189,7 @@ def test_band_serial_under_the_spill_equals_the_chain_rebuild(campaign, monkeypa
             # every probe is captured ahead of window 1.
             _resumed, resumed, _ = _run(campaign, monkeypatch, layer=0,
                                         spill_root=root, handoff=handoff,
-                                        resume=True)
+                                        resume=True, complete=True)
             assert resumed == chain_evidence, "a complete resume"
             windows = campaign.preflight[0]
             if len(windows) > 1:
