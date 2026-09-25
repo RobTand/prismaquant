@@ -35,3 +35,4 @@ Two rules the reader enforces:
 | Set | Base | Qualified on | Status |
 |---|---|---|---|
 | `glm53_nope_sm120` | `eugr/spark-vllm@sha256:0afec8d4…` (vLLM 0.28.1rc1.dev397, flashinfer 0.6.18) | GLM-5.3-Flash **4-layer** stub, BF16, TP1, eager + CUDA graph, sparklina 2026-09-13 | RECORDED. The 45-layer body is untested; eager and graph disagree by up to 0.67 nats. |
+| `glm53_mtp_mapper` | `192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:a5424378…` (the image the routed Tessera cells name; stock MLA sources) | Nothing yet: build self-check only (the mapper sends `model.language_model.layers.45.*` to `model.layers.45.*`; the four MLA sources hash stock), sparky + sparklina 2026-09-25 | RECORDED. Derived image `…@sha256:f8dbe1a0…` is in the LAN registry. No model served on it yet; the drafter claiming a quantized layer 45 is unexercised (#1271). |
