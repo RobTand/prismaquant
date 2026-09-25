@@ -1,5 +1,69 @@
 # PrismaQuant Architecture
 
+Stage B runs every pass of a KDA layer on the capture kernel in kernel mode
+(2026-09-25, `perf/1214-kda-kernel-mode`, PQ #1214). The kernel of PQ #1199,
+below, ran only a KDA target layer's capture passes. It refused a
+band-serial producer, because the consumer's chain rebuild ran the
+fallback. A launch that sets `PRISMAQUANT_STAGE_B_KDA_KERNEL` now runs the
+whole quantum in kernel mode:
+
+- Scope. `run_layer_quantum_core` admits the kernel once per quantum,
+  before any chain or capture work, whatever the quantum's layers are.
+  Every Stage B layer pass then runs inside `AdmittedKdaKernel.layer_pass`:
+  the target layer's capture passes, windowed and batched, including a
+  band-serial producer's, and the chain rolls, through the `layer_pass`
+  hook of `render_free_layer_roll` on its unfused, batched and fused passes.
+  A pass of a layer with KDA attention, found by class, must run the kernel
+  once forward and once per backward: one call, two Gram forwards, and two
+  Gram backwards per backward. A fused roll's pass runs one backward per
+  probe on its retained graph. A pass of any other layer also runs inside
+  the dispatch and must call the kernel zero times, so a layer that the
+  class check misreads refuses instead of running the fallback. Stage A
+  passes no hook, so its checkpoint planes stay the fallback's. The
+  declaration's scope is now `stage_b_kda_layer_passes` (it was
+  `stage_b_target_layer_pass`). The scope is part of the kernel's identity
+  but not one of the fields the packaged qualification binds, so the
+  qualification still holds, and a kernel-mode row's identity digest
+  differs from a #1199 row's.
+- The mode is the seal. The kernel's identity goes into
+  `arithmetic.kda_capture_kernel` for every quantum of a kernel-mode
+  launch, including a quantum whose target and chain layers have no KDA
+  attention. Under #1199, such a target stamped nothing. Its record says
+  `executed: false` and gives the reason. The record adds `chain`, which
+  holds the KDA chain layers in roll order with their passes, calls and
+  Gram backwards, and `scoped_passes`, which counts every layer pass that
+  ran inside the dispatch.
+- The chain's arithmetic. A KDA chain layer's roll runs the kernel. A
+  kernel-mode quantum's chained cotangents are therefore the kernel's
+  arithmetic at Stage A's grouping (#997), not Stage A's own values. Within
+  one mode, band-serial is still chain mode byte for byte (#996), because
+  the producer's final pass and the consumer's chain rebuild both run the
+  kernel.
+- A handoff carries its mode. A kernel-mode producer names its kernel in
+  the handoff's `producer` block (`kda_capture_kernel`: the name and the
+  identity digest). A fallback producer names none. `HandoffEmitter.emit`
+  and `load_quantum_handoff` take the mode as a required keyword. A handoff
+  from the other mode, or from another kernel name, refuses in dev mode and
+  in certified mode alike (`handoff_kernel_refusal`). It is different
+  arithmetic, the same class of check as the batch-size check in
+  `handoff_chain_regime_refusal`, so crossing it takes an explicit
+  decision. The kernel's identity digest is compared in the core, after
+  admission, through `seal_check` (PQ #1147). Dev mode prints a different
+  build of the same kernel and runs; certified mode refuses it. The
+  dispatcher reads the spec's kernel (`_spec_kda_capture_kernel`) and runs
+  the consumer's load checks before it publishes a consumer. A consumer
+  whose producer ran in the other mode therefore refuses at dispatch
+  (exit 3). A band runs in one mode: the dispatcher does not move such a
+  consumer to chain mode.
+
+Gates: `tests/test_kda_kernel_mode.py` (the five-layer band-serial CPU
+campaign, with a fixture kernel that counts real forwards and backwards),
+`tests/test_kda_capture_kernel.py`, `tests/test_band_serial_batched_regime.py`
+(#996 within kernel mode at the campaign's batch-4 capture),
+`tests/test_band_serial_dispatch.py` and `tests/test_no_new_seals.py`. No
+format, pipeline default, stage, lane or ship gate changes. A launch
+without the setting runs and records what it did before.
+
 A retained PWC window loads its renders under one reader lease, on one loader
 pool, and parses each archive once (2026-09-24, `perf/1210-render-readahead`,
 PQ #1210). In GLM-5.3 Stage B row 041's render windows 01 to 14, the main
@@ -113,17 +177,15 @@ capture batch 4.
   at the verified fallback on exit. It refuses a global that changed outside
   or inside a block, and blocks do not nest.
 - Admission. `run_layer_quantum_core` admits the kernel before any chain or
-  capture work, and only for a target layer with KDA attention, found by
-  class. It compiles the kernels, runs a fixed probe, and compares the
-  identity with the packaged qualification
-  (`kernels/kda_chunk_qualification.json`) through `seal_check`. It refuses
-  a band-serial producer: the plane it hands off would be the kernel's
-  arithmetic, and the consumer's chain rebuild runs the fallback. Every
-  target-layer pass, forward and backward, runs inside
-  `AdmittedKdaKernel.scope()`, which refuses unless the kernel ran exactly
-  once (one call, two Gram forwards, two Gram backwards). The chain rolls
-  keep the fallback, because they must be Stage A's arithmetic (PQ #997). A
-  target without KDA runs nothing new and records `executed: false`.
+  capture work. It compiles the kernels, runs a fixed probe, and compares
+  the identity with the packaged qualification
+  (`kernels/kda_chunk_qualification.json`) through `seal_check`. As merged
+  in #1199, it admitted the kernel only for a target layer with KDA
+  attention, ran only the target layer's passes on it
+  (`AdmittedKdaKernel.scope()`), refused a band-serial producer, and kept
+  the chain rolls on the fallback. Kernel mode (PQ #1214, the entry above)
+  replaced that scope: the kernel is admitted once per quantum and runs
+  every Stage B pass of a KDA layer, chain rolls and producers included.
 - Identity. The kernel's identity goes into the probe identity's
   `arithmetic.kda_capture_kernel`: the declaration, the source sha256, each
   compiled cubin's sha256 without its debug sections, the probe digest and
@@ -131,7 +193,8 @@ capture batch 4.
   without the kernel and prints the difference, and certified mode refuses
   to join them. The result and `counters.json` record `kda_capture_kernel`:
   the identity digest, the digest of the packaged qualification it was
-  compared with, `qualification_matched`, and the pass and call counts.
+  compared with, `qualification_matched`, and the pass and call counts
+  (with the chain's counts and `scoped_passes` since PQ #1214).
   `qualification_matched` is true only when the runtime's identity equals
   the qualification's; a dev-mode mismatch or a missing file records false,
   so a record never claims a qualification its runtime does not match. The
@@ -826,7 +889,7 @@ row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
 (`prismaquant/joint_adjoint_checkpoints.py:1856`,
-`prismaquant/joint_quantum_handoff.py:586`), so the phase waits at most W in
+`prismaquant/joint_quantum_handoff.py:655`), so the phase waits at most W in
 total outside a PrismaBuild landing record. The bytes are the phase's count
 in the row's read plan. The built-in floor, 62,954,973 B/s, is the slowest
 30 s read window of the R13 layer-044 v4 and v5 gates (action keys
@@ -2607,6 +2670,15 @@ read's publication or restage stats every origin in the group. See
 "Deferred unlink" under "Same-box readback and write-behind export (#1110)".
 No format, pipeline default, stage, lane or ship gate changes.
 
+Re-stamped (2026-09-25, `perf/1214-kda-kernel-mode`) for **Stage B KDA
+kernel mode** (PQ #1214). A launch that names the KDA capture kernel runs
+every Stage B pass of a KDA layer on it: the target's capture passes, a
+band-serial producer's, and the chain rolls. The kernel's identity seals
+every row of the launch. A handoff names its producer's mode, and a
+consumer in another mode refuses it. See the entry at the top, and the
+restated #996 and #997 contracts. No format, pipeline default, stage, lane
+or ship gate changes; a launch without the setting is unchanged.
+
 Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq-misc`) for **one pin per PrismaBuild bundle
 the tests run against** (PQ #1084): the Stage B preparation (#1070), Stage A
 retirement (#1073) and band-serial handoff (#1075) suites read one pin of the
@@ -2616,6 +2688,7 @@ gone, and `tests/test_pb_generation_pin_1084.py` refuses a second pin file
 naming a bundle, generation or commit another pin names. The Stage A pins
 name older bundles and stay. Test hygiene only: no format, pipeline default,
 stage or ship gate changes.
+
 Re-stamped (2026-09-25, `perf/1225-drain-tail`) for **a Stage B handoff
 tail that keeps its export records and does not fsync its spool** (PQ
 #1225). The produced-output spool writes its entries without fsync, a
@@ -22940,7 +23013,8 @@ projection reduction a plan selects with `execution.projection_backend`,
 checked against `joint_projection_reduce_qualification.json`, including its
 shapes (PQ #1175); and `kda_chunk.py` is `kda_gram_v1`, the Stage B KDA
 capture kernel a launch selects with `PRISMAQUANT_STAGE_B_KDA_KERNEL`,
-checked against `kda_chunk_qualification.json` (PQ #1199). The fourth is
+checked against `kda_chunk_qualification.json` (PQ #1199), which runs every
+Stage B pass of a KDA layer in that launch (kernel mode, PQ #1214). The fourth is
 not: `nvfp4_served_dequant.py` (`prismaquant.triton_nvfp4_served_dequant.v1`)
 is the served NVFP4 activation leg's dequantisation, which the leg always
 runs, with no Torch fallback, and which `ServedQuantizerIdentity` records as
@@ -23666,8 +23740,12 @@ takes `--chain-batch-size` and `--chain-probe-fusion {on,off}`; the band tool
 reads the same flags from the sealed request (`request_chain_regime`), so a
 band's run header equals the receipt's. A quantum reads the regime from its
 slice (`chain_regime_of`) and rebuilds its chain at Stage A's B, which is
-what makes its chained cotangents Stage A's own; a malformed stamp refuses
-as a quantum identity error.
+what makes its chained cotangents Stage A's own on the fallback; a malformed
+stamp refuses as a quantum identity error. In KDA kernel mode (PQ #1214), a
+KDA chain layer's roll runs the capture kernel (`render_free_layer_roll`'s
+`layer_pass` hook), so the chained cotangents are the kernel's arithmetic at
+Stage A's grouping. Stage A itself passes no hook and always runs the
+fallback.
 
 **Produced staging.** A fused run binds its produced-output owner with
 `read_order="sample_major"`: a read window holds `1 + n_probes` groups, not
@@ -24738,11 +24816,19 @@ its owner states are all empty. A separate round trip gives every
 `(probe, sample)` its own accumulator and checks that the consumer reads
 each one back at its own coordinate. No end-to-end fixture with shared KV
 state exists yet; among the model profiles only Gemma4 carries it
-(`model_profiles/gemma4.py`). The rebuild matches only at a chain
-batch size of one: another batch size changes the GEMM shapes, so a Stage A
-run stamped with it refuses a handoff (`joint_quantum_handoff.
-handoff_chain_regime_refusal`, which reads the stamp through
-`chain_regime_of`). Probe fusion at a batch size of one is admitted. The
+(`model_profiles/gemma4.py`). The rebuild matches only when the
+producer's capture batch equals the slice's chain batch size: any other
+batch changes the GEMM shapes, so the consumer refuses the handoff
+(`joint_quantum_handoff.handoff_chain_regime_refusal`, which reads the stamp
+through `chain_regime_of`). Probe fusion is bitwise-neutral at a fixed batch
+size, so it is admitted at any batch size. It also matches only within one
+KDA kernel mode (PQ #1214). In kernel mode, the producer's final pass and
+the consumer's chain rolls both run the capture kernel on KDA layers, and
+band-serial is chain mode byte for byte there too
+(`tests/test_kda_kernel_mode.py`, and at the campaign's batch-4 capture
+`tests/test_band_serial_batched_regime.py`). Across modes the planes
+differ, so the handoff names its producer's mode and the consumer refuses
+the other one. The
 one-pass replay spill (#994) does not change the plane: its per-probe
 capture is the same `replay_backward(final=True)` pass that writes it. A
 spill producer and a windowed producer emit the same plane, and a
@@ -24817,7 +24903,12 @@ pytest process), against the published PrismaBuild generation
 matches its seal, sits in quantum `L + 1`'s output space, names boundary
 `L + 1`, the same band walk, campaign, Stage A run and checkpoint, and covers
 the checkpoint plane's probes and samples (read from each entry's sealed
-coordinates) with equal shapes and dtypes. The chain then walks no layers.
+coordinates) with equal shapes and dtypes. It also refuses a handoff
+captured in another KDA kernel mode, or by another kernel name, than the
+mode its own launch runs (`handoff_kernel_refusal`, in both dev and
+certified mode). The core then compares the producer's kernel identity with
+the kernel it admitted through `seal_check` (PQ #1214). The chain then walks
+no layers.
 The staged manifest must be the band-serial readset
 (`require_band_serial_readset`): `band_serial_manifest` derives it from the
 record's sealed executable readset and the handoff. Chain mode checks the
@@ -24875,7 +24966,10 @@ waiting; a retried producer writes a new generation (a resumed quantum still
 runs its final pass, so the plane is whole) and its `results.json` names
 that one. If `L - 1` fails, it is republished with its recorded handoff. A handoff the consumer would
 refuse refuses at dispatch (exit 3); there is no fallback to chain mode for a
-row that was submitted band-serial.
+row that was submitted band-serial. That includes a handoff produced in
+another KDA kernel mode than the one the spec's launches run
+(`_spec_kda_capture_kernel`, PQ #1214). A band runs in one mode, so a fresh
+consumer of such a producer refuses too, instead of moving to chain mode.
 
 **Retirement.** PrismaBuild's tier loop runs `origin_retirement_tick`
 once per cycle. It deletes a consumed batch's files, each checked against

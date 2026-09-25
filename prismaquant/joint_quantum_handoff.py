@@ -63,6 +63,16 @@ The consumer refuses (``QuantumHandoffRefused``) any handoff that is not
 the one its record, slice and campaign bind. It never falls back to the
 chain: the choice of mode belongs to the dispatcher, and a bad handoff is
 an identity failure.
+
+KDA kernel mode (PQ #1214) runs every Stage B layer pass of a KDA layer on
+the admitted capture kernel, the producer's final pass and the consumer's
+chain rolls alike, so within one mode the handoff plane is still the plane
+the consumer's chain rebuild ends on. Across modes it is not. A kernel-mode
+producer names its kernel in the ``producer`` block (``kda_capture_kernel``:
+name and identity digest); a fallback producer names none. The consumer's
+load compares the name with its own launch's (:func:`load_quantum_handoff`),
+and the quantum core compares the identity digest with the kernel it
+admitted. A band runs in one mode.
 """
 from __future__ import annotations
 
@@ -267,11 +277,21 @@ class HandoffEmitter:
         self.export_report: dict | None = None
 
     def emit(self, *, grad_plane, cotangent_owners, n_probes: int,
-             n_batches: int) -> dict:
+             n_batches: int, kda_capture_kernel) -> dict:
+        """Publish the plane; ``kda_capture_kernel`` is the producer's mode.
+
+        ``None`` for a fallback launch, else the admitted kernel's
+        ``handoff_stamp()`` (PQ #1214). It has no default, so no caller
+        publishes a mode it did not state.
+        """
         from .cost_streaming import StreamedBoundaryArtifacts, normalize_boundary_storage
 
         if self.published is not None:
             raise RuntimeError("a quantum emits its handoff once")
+        if kda_capture_kernel is not None:
+            refusal = _kernel_stamp_refusal(kda_capture_kernel)
+            if refusal is not None:
+                raise QuantumHandoffRefused(f"cannot emit a handoff: {refusal}")
         record, layer = self.record, int(self.record["layer"])
         source = _source_binding(record, self.adjoint_slice)
         producer = {
@@ -284,6 +304,9 @@ class HandoffEmitter:
             # admits it only at its slice's chain batch size.
             "capture_batch": self.capture_batch,
         }
+        if kda_capture_kernel is not None:
+            # Kernel mode (PQ #1214): the plane is the kernel's arithmetic.
+            producer["kda_capture_kernel"] = dict(kda_capture_kernel)
         policy = normalize_boundary_storage({
             **self.boundary_storage,
             "directory": str(handoff_root(record["output_space"]["root"]))})
@@ -379,14 +402,57 @@ class HandoffEmitter:
         return self.published
 
 
+def _kernel_stamp_refusal(stamp) -> str | None:
+    """Why ``stamp`` is not a KDA capture kernel's handoff stamp, or None."""
+    if not isinstance(stamp, Mapping) or set(stamp) != {"name", "identity_sha256"}:
+        return f"the KDA capture kernel stamp {stamp!r} is not a name and an identity digest"
+    if not isinstance(stamp["name"], str) or not stamp["name"]:
+        return f"the KDA capture kernel stamp names no kernel: {stamp!r}"
+    if not isinstance(stamp["identity_sha256"], str) or not _HEX64.fullmatch(
+            stamp["identity_sha256"]):
+        return f"the KDA capture kernel stamp's identity is not a sha256: {stamp!r}"
+    return None
+
+
+def handoff_kernel_refusal(producer: Mapping, kda_capture_kernel) -> str | None:
+    """Why a consumer launched with ``kda_capture_kernel`` cannot take this plane.
+
+    ``kda_capture_kernel`` is the consumer launch's kernel name, or ``None``
+    for the fallback (PQ #1214). The producer's block names its kernel, or
+    nothing for a fallback producer. The two must be the same mode and, in
+    kernel mode, the same kernel by name; the core binds the identity.
+    """
+    stamp = producer.get("kda_capture_kernel")
+    if stamp is not None:
+        refusal = _kernel_stamp_refusal(stamp)
+        if refusal is not None:
+            return refusal
+    if stamp is None and kda_capture_kernel is None:
+        return None
+    if stamp is None:
+        return (f"the handoff plane was captured on the fallback, and this quantum "
+                f"launches in kernel mode ({kda_capture_kernel}); a band runs in one mode")
+    if kda_capture_kernel is None:
+        return (f"the handoff plane was captured in kernel mode ({stamp['name']}), and "
+                "this quantum launches on the fallback; a band runs in one mode")
+    if stamp["name"] != kda_capture_kernel:
+        return (f"the handoff plane was captured by the KDA capture kernel "
+                f"{stamp['name']}, and this quantum runs {kda_capture_kernel}; a band "
+                "runs in one mode, on one kernel")
+    return None
+
+
 def load_quantum_handoff(path, sha256: str, *, record: Mapping,
-                         adjoint_slice: Mapping) -> dict:
+                         adjoint_slice: Mapping, kda_capture_kernel) -> dict:
     """Read and bind the handoff a consumer quantum was given.
 
     Refuses unless the file hashes to ``sha256``, carries its own seal, sits
     in the producer's output space, and names this quantum's successor
     boundary, campaign, Stage A run and checkpoint. Entry coverage, shapes
     and dtypes are checked against the consumer's own slice checkpoint.
+    ``kda_capture_kernel`` is the consumer launch's KDA capture kernel name,
+    or ``None`` for the fallback; it has no default, and a handoff captured
+    in the other mode, or by another kernel, refuses (PQ #1214).
     """
     from .joint_adjoint_slices import chain_layers_for
     from .joint_layer_quanta import quantum_id
@@ -433,6 +499,9 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
             "the handoff records no capture batch for its plane")
     refusal = handoff_chain_regime_refusal(adjoint_slice.get("run_identity"),
                                            capture_batch=capture_batch)
+    if refusal is not None:
+        raise QuantumHandoffRefused(refusal)
+    refusal = handoff_kernel_refusal(producer, kda_capture_kernel)
     if refusal is not None:
         raise QuantumHandoffRefused(refusal)
     boundary = int(record["adjoint"]["checkpoint_boundary"])
