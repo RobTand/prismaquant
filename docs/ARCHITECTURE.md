@@ -2563,6 +2563,16 @@ compute ceiling or the blanket 1800 s. See the entry after the PQ #1165
 compute-phase grace. A dispatcher default changes; no format, pipeline
 stage, lane or ship gate changes.
 
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1200`) for **a band-serial dry run that
+publishes nothing, and a handoff template whose prefix follows
+`--output-root`** (PQ #1200). `dispatch_joint_quanta --dry-run --band-serial`
+derives each producer's handoff template and each consumer's band-serial
+readset, prints their paths, digests and the template's body, and writes
+neither. The template's `output_prefix` now derives from `--output-root`,
+the root its file lives under, instead of the record's sealed output space.
+See "Band-serial Stage B quanta (#996)", Dispatch. No format, pipeline
+default, stage, lane or ship gate changes.
+
 Re-stamped (2026-09-24, `perf/1210-render-readahead`) for **a retained PWC
 window's one reader lease, one loader pool and one archive parse per file**
 (PQ #1210). See the entry at the top. A retained window now charges each file
@@ -24687,7 +24697,12 @@ fanout:
    never been submitted also declares a handoff template as
    `--produced-output-template` (`handoff_template_path`: the plan's boundary
    storage on the producer's handoff directory, the slice's largest
-   checkpoint tensor, and `TIER`) and passes `--emit-adjoint-handoff`.
+   checkpoint tensor, and `TIER`) and passes `--emit-adjoint-handoff`. The
+   template file (under `{output_root}/layer-quanta/band-serial/`) and its
+   `output_prefix` derive from one root, `--output-root` (PQ #1200): the
+   prefix is `{output_root}/layer-quanta/{quantum id}/handoff`, inside the
+   output space the quantum's identity gate requires its record to name
+   when it runs under that `--output-root`.
 2. Quantum `L - 1` publishes only after `L`'s action executed, its
    `status.json` reports complete for its identity, and the handoff its
    `results.json` names hashes to the digest named there. Until then it is
@@ -24698,6 +24713,13 @@ fanout:
    mode) leaves its consumer in chain mode, which gives the same bytes.
 
 Bands stay parallel: only the rows inside one band wait on each other.
+
+A `--dry-run --band-serial` derives each row's template and readset and
+publishes neither (PQ #1200). It prints each one's path and sha256
+(`handoff_template`, `handoff_template_sha256`, `band_serial_readset`) and
+the template's body (`handoff_template_document`), and the argv it prints is
+the one a real run submits: the readset's phase facts and the source-coverage
+check read its bytes in memory instead of the file.
 
 **Resubmission.** A submitted row keeps its mode. The state event records
 `cotangent_source` and `handoff_template`, and every resubmission rebuilds the

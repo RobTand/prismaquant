@@ -485,10 +485,13 @@ def test_band_serial_publishes_producers_then_their_consumers(
         template_path = Path(argv[argv.index("--produced-output-template") + 1])
         assert argv.index("--produced-output-template") < argv.index("--")
         template = json.loads(template_path.read_text())
-        # The template is the one the producer's emitter binds against.
+        # The template names the producer's handoff directory under
+        # --output-root, where the file itself lives (PQ #1200). The fixture
+        # records name <tmp>/run; a quantum run under this root refuses them.
         from prismaquant.joint_quantum_handoff import handoff_root
         assert template["output_prefix"] == str(
-            handoff_root(bound[layer]["output_space"]["root"]).resolve())
+            handoff_root(out / "layer-quanta" / quantum_id).resolve())
+        assert template_path.parent == out / "layer-quanta" / "band-serial"
         assert template["durable_maxima"]["payload_max_bytes"] == ARTIFACT_MAX
         assert template["permitted_tiers"] == [TIER]
         # Write-only (PQ #1075): the producer never reads its handoff back,
