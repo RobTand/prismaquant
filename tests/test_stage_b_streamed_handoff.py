@@ -85,8 +85,8 @@ def _emitter(tmp_path, record, adjoint_slice):
                           boundary_storage=_storage(tmp_path), capture_batch=1)
 
 
-def _plane():
-    return {(p, b): torch.full((2, 4), 10.0 * p + b)
+def _plane(shape=(2, 4)):
+    return {(p, b): torch.full(shape, 10.0 * p + b)
             for p in range(N_PROBES) for b in range(N_BATCHES)}
 
 
@@ -168,7 +168,13 @@ def test_streamed_bytes_equal_the_all_final_bytes(tmp_path, monkeypatch):
             while (stream.telemetry["entries_before_finish"] < want
                    and time.monotonic() < deadline):
                 time.sleep(0.01)
-            assert stream.telemetry["entries_before_finish"] == want
+            # A writer that leaves finality order waits on a slot that is not
+            # final yet: name the order it wrote in, not only the count (PQ #1263).
+            assert stream.telemetry["entries_before_finish"] == want, (
+                f"after {want} slot(s) became final in the order "
+                f"{_keys()[:want]}, the writer had written "
+                f"{sorted(path.name for path in entries.glob('*.pt'))}; "
+                "it must write each slot as soon as it is final")
             assert len(list(entries.glob("*.pt"))) == want
         streamed = stream.finish(_owners())
     assert streamed == serial
@@ -181,12 +187,19 @@ def test_streamed_bytes_equal_the_all_final_bytes(tmp_path, monkeypatch):
     assert not _writers()
 
 
+@pytest.mark.parametrize("shape", [(2, 4), (4, 1024)], ids=["buffered", "direct"])
 def test_a_scratch_plane_through_the_tee_ring_writes_the_same_bytes(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, shape):
     """A cotangent scratch plane, with final rows through a one-slot tee ring:
     one row per call fits the ring, and the second of two rows in one call
     finds it full, so the writer reads that slot back from the scratch. The
-    files are the dict plane's, byte for byte."""
+    files are the dict plane's, byte for byte.
+
+    ``direct``: 16 KiB rows, a whole number of the local disk's direct-I/O
+    blocks, so the scratch switches to ``O_DIRECT`` and the writer's reads
+    land in its own grid buffer through the direct read (PQ #1263). The
+    production plane's rows are sized that way; the 32-byte rows are not.
+    """
     import mmap
 
     from prismaquant.joint_replay_spill import _aligned_buffer
@@ -196,38 +209,44 @@ def test_a_scratch_plane_through_the_tee_ring_writes_the_same_bytes(
     _pin_generations(monkeypatch, 1251)
     root = handoff_root(record["output_space"]["root"])
     serial = _emitter(tmp_path, record, adjoint_slice).emit(
-        grad_plane=_plane(), cotangent_owners=_owners(), n_probes=N_PROBES,
+        grad_plane=_plane(shape), cotangent_owners=_owners(), n_probes=N_PROBES,
         n_batches=N_BATCHES, kda_capture_kernel=None)
     generation = Path(serial["path"]).parent
     expected = _digest(generation)
     root.rename(tmp_path / "all-final")
 
-    records = [{"name": f"cotangent-{p}-{b}", "shape": [2, 4],
-                "dtype": "torch.float32", "tensor_bytes": 32} for p, b in _keys()]
+    nbytes = 4 * shape[0] * shape[1]
+    records = [{"name": f"cotangent-{p}-{b}", "shape": list(shape),
+                "dtype": "torch.float32", "tensor_bytes": nbytes} for p, b in _keys()]
     (tmp_path / "scratch").mkdir()
     scratch = ExactCotangentScratch(records, directory=tmp_path / "scratch",
                                     max_bytes=1 << 20)
+    if shape == (4, 1024):
+        # The premise, checked rather than assumed: a box whose local disk
+        # has no direct I/O would pass this case on the buffered path.
+        assert _direct_io_supported(tmp_path / "scratch"), "no direct I/O here"
+        assert scratch._direct is not None
     try:
         emitter = _emitter(tmp_path, record, adjoint_slice)
         stream = emitter.stream(grad_plane=scratch, n_probes=N_PROBES,
                                 n_batches=N_BATCHES, kda_capture_kernel=None)
-        stream.attach_tee([_aligned_buffer(32, mmap.PAGESIZE, False).zero_()])
+        stream.attach_tee([_aligned_buffer(nbytes, mmap.PAGESIZE, False).zero_()])
         with stream:
             keys = _keys()
             first, rest = keys[:1], keys[1:]
             for key in first:
-                scratch[key] = _plane()[key]
-                stream.mark_final([key], [_plane()[key]])
+                scratch[key] = _plane(shape)[key]
+                stream.mark_final([key], [_plane(shape)[key]])
             deadline = time.monotonic() + 30
             while stream.telemetry["tee_hits"] < 1 and time.monotonic() < deadline:
                 time.sleep(0.01)
             for pair in (rest[i:i + 2] for i in range(0, len(rest), 2)):
                 for key in pair:
-                    scratch[key] = _plane()[key]
-                stream.mark_final(pair, [_plane()[key] for key in pair])
+                    scratch[key] = _plane(shape)[key]
+                stream.mark_final(pair, [_plane(shape)[key] for key in pair])
             streamed = stream.finish(_owners())
         with pytest.raises(RuntimeError, match="sealed"):
-            scratch[keys[0]] = torch.zeros(2, 4)
+            scratch[keys[0]] = torch.zeros(shape)
     finally:
         scratch.close()
     assert streamed == serial
@@ -244,17 +263,19 @@ def test_a_handoff_generation_digest_line(monkeypatch, capsys):
     comparison across trees (PQ #1251).
 
     The campaign's records, and so every handoff file, name the paths they
-    were written under, so the fixture runs under one fixed root in the
-    system temporary directory, not under ``tmp_path``: two trees' runs
-    then write the same paths and their digests compare. An exclusive lock
-    serializes runs on one box, and each run removes the root first and
-    last, so a root left by a killed run is removed by the next one.
+    were written under, so the fixture runs under one fixed root, not under
+    ``tmp_path``: two trees' runs then write the same paths and their
+    digests compare. The root is under ``~/tmp``, never the system
+    temporary directory, which is ``/tmp`` when ``TMPDIR`` is unset
+    (PQ #1263). An exclusive lock serializes runs on one box, and each run
+    removes the root first and last, so a root left by a killed run is
+    removed by the next one.
     """
     import fcntl
     import shutil
-    import tempfile
 
-    base = Path(tempfile.gettempdir())
+    base = Path.home() / "tmp"
+    base.mkdir(parents=True, exist_ok=True)
     root = base / "pq-1251-handoff-identity"
     with open(base / "pq-1251-handoff-identity.lock", "a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -309,6 +330,41 @@ def test_a_slot_stored_twice_or_outside_the_plane_refuses(tmp_path):
     with pytest.raises(RuntimeError, match="once"):
         emitter.stream(grad_plane=_plane(), n_probes=N_PROBES, n_batches=N_BATCHES,
                        kda_capture_kernel=None)
+
+
+def test_a_key_repeated_within_one_call_refuses(tmp_path):
+    """PQ #1263: a key named twice in one ``mark_final`` refuses, as a key
+    stored by two calls does. Accepted, its second tee copy would hold a
+    ring slot that nothing frees."""
+    record, adjoint_slice = _producer(tmp_path)
+    emitter = _emitter(tmp_path, record, adjoint_slice)
+    with pytest.raises(RuntimeError, match="twice"):
+        with emitter.stream(grad_plane=_plane(), n_probes=N_PROBES,
+                            n_batches=N_BATCHES, kda_capture_kernel=None) as stream:
+            stream.mark_final([(0, 0), (0, 0)])
+    assert _records(record) == [] and _statuses(record) == ["failed"]
+    assert not _writers()
+
+
+def test_a_refusal_on_entry_reaches_the_counters(tmp_path, monkeypatch):
+    """PQ #1263: the writer's binding refused, so ``__enter__`` raises, and
+    ``with`` then runs no ``__exit__``. The refusal must still reach
+    ``handoff_emit.error``, which the quantum's counters copy."""
+    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+
+    def refuse(self, *args, **kwargs):
+        raise RuntimeError("fixture: the handoff generation refused its binding")
+
+    monkeypatch.setattr(StreamedBoundaryArtifacts, "bind", refuse)
+    record, adjoint_slice = _producer(tmp_path)
+    stream = _emitter(tmp_path, record, adjoint_slice).stream(
+        grad_plane=_plane(), n_probes=N_PROBES, n_batches=N_BATCHES,
+        kda_capture_kernel=None)
+    with pytest.raises(RuntimeError, match="refused its binding"):
+        with stream:
+            pytest.fail("the stream started past a refused binding")
+    assert "refused its binding" in (stream.telemetry["error"] or ""), stream.telemetry
+    assert not _writers()
 
 
 def test_a_scratch_slot_is_write_once_after_its_final_store(tmp_path):
@@ -520,10 +576,10 @@ def test_close_waits_for_a_read_in_flight(tmp_path, monkeypatch):
     entered, release = threading.Event(), threading.Event()
     real = scratch._read_slot
 
-    def slow(key, out, *, bounce):
+    def slow(key, out, **kwargs):
         entered.set()
         release.wait(30)
-        return real(key, out, bounce=bounce)
+        return real(key, out, **kwargs)
 
     monkeypatch.setattr(scratch, "_read_slot", slow)
     result = {}
@@ -541,6 +597,55 @@ def test_close_waits_for_a_read_in_flight(tmp_path, monkeypatch):
     assert not closer.is_alive()
     assert torch.equal(result["out"], torch.ones(2, 1024))
     assert scratch._file is None
+
+
+def test_a_read_that_outlives_the_close_wait_finishes_on_its_descriptor(
+        tmp_path, monkeypatch):
+    """PQ #1263: ``close`` waits for a read in flight only so long, then
+    keeps the file open for it. The read must finish on that descriptor,
+    with its bytes, not fail on the handle ``close`` cleared."""
+    from prismaquant.perturbed_x_cache import ExactCotangentScratch
+    records = [{"name": "cotangent-0-0", "shape": [2, 1024],
+                "dtype": "torch.float32", "tensor_bytes": 8192}]
+    scratch = ExactCotangentScratch(records, directory=tmp_path, max_bytes=1 << 20)
+    scratch[0, 0] = torch.ones(2, 1024)
+    scratch.CLOSE_READER_WAIT_S = 0.2
+    block = scratch._direct[1] if scratch._direct is not None else 4096
+    entered, release = threading.Event(), threading.Event()
+    real, calls = os.preadv, []
+
+    def preadv(fd, buffers, offset):
+        calls.append(offset)
+        if len(calls) == 1:
+            entered.set()
+            release.wait(30)
+            # One block, so the read needs another call after the close.
+            return real(fd, [buffers[0][:block]], offset)
+        return real(fd, buffers, offset)
+
+    monkeypatch.setattr(os, "preadv", preadv)
+    result = {}
+
+    def read():
+        try:
+            result["out"] = scratch.read_into((0, 0), torch.empty(2, 1024))
+        except BaseException as exc:            # noqa: BLE001
+            result["error"] = exc
+
+    reader = threading.Thread(target=read)
+    reader.start()
+    try:
+        assert entered.wait(30)
+        scratch.close()                          # gives up on the read after 0.2 s
+        assert scratch._file is None
+    finally:
+        release.set()
+        reader.join(30)
+    assert not reader.is_alive()
+    assert "error" not in result, repr(result.get("error"))
+    assert torch.equal(result["out"], torch.ones(2, 1024))
+    assert len(calls) >= 2
+    scratch._open_under_read.close()
 
 
 # -- the quantum: entries are written while the final passes run -------------------
