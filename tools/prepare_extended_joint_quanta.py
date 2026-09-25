@@ -206,9 +206,11 @@ def check_stage_b_spec(spec_path, spec, policy):
     The dispatcher's own wrapper runs here, with the grace set a Stage B
     quantum row declares: the head grace and the 900 s chunk grace. The spec's
     ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` must sit below the smaller one, its
-    host/device envelope must equal the resource policy's limits, and a
-    declared cotangent workspace needs its identity mount. A spec that fails
-    would publish metadata whose every quantum the dispatcher then refuses.
+    host/device envelope must equal the resource policy's limits, a
+    declared cotangent workspace needs its identity mount, and a container
+    cache pinned to the overlay needs an ``overlay_cache_reason`` (PQ #1129).
+    A spec that fails would publish metadata whose every quantum the
+    dispatcher then refuses.
     """
     from tools.dispatch_joint_quanta import (
         CHUNK_PROGRESS_GRACE_S, HEAD_PROGRESS_GRACE_S, DispatchRefused, _container_wrap)

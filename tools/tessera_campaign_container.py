@@ -645,8 +645,9 @@ def container_cache_environment(spec: dict, scratch: dict) -> "tuple[dict, list[
     A variable the spec sets keeps its value, so the default never overrides
     a declaration. The second return value names each variable the spec
     points at ``/tmp``, ``/var/tmp`` or a path that no writable mount
-    covers, that is, the overlay. Callers warn about them. They do not
-    refuse them.
+    covers, that is, the overlay. The launcher only lists them in its
+    preamble; the joint dispatcher's spec check refuses them unless the spec
+    names an ``overlay_cache_reason`` (PQ #1129).
 
     The caches' bytes are not charged separately. They fall inside the scratch
     root's disk, and only that pair's ceiling is charged to PrismaBuild

@@ -227,9 +227,21 @@ def _read_declared(path: str, sealed_sha256: str | None, *, where: str) -> bytes
     return raw
 
 
-def load_manifest(path: str, sha256: str | None = None) -> dict:
-    """A (gzipped) manifest, checked against ``sha256`` when given."""
-    raw = _read_verified(path, sha256, where="read manifest")
+def load_manifest(path: str, sha256: str | None = None, *,
+                  wire: bytes | None = None) -> dict:
+    """A (gzipped) manifest, checked against ``sha256`` when given.
+
+    ``wire`` is the manifest's bytes when the caller derived them and did not
+    publish them (a dispatch dry run's band-serial readset, PQ #1200); they
+    are checked the same way and ``path`` only names them.
+    """
+    if wire is None:
+        raw = _read_verified(path, sha256, where="read manifest")
+    else:
+        raw = bytes(wire)
+        if sha256 is not None and hashlib.sha256(raw).hexdigest() != sha256:
+            raise ValueError(
+                f"read manifest for {path} does not hash to its sealed digest")
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
     return json.loads(raw)
@@ -240,8 +252,10 @@ def quantum_rows_gaps(rows: Sequence[Mapping], *,
     """Every gap of a set of Stage B quantum rows, in one pass.
 
     Each row is ``{"record": bound record, "manifest_path", "manifest_sha256",
-    "order": install order or None}``. The rows share one campaign, so the
-    source plan is read once for every layer any of them installs.
+    "order": install order or None}``, plus ``"manifest_wire"`` for a
+    manifest not yet published (:func:`load_manifest`). The rows share one
+    campaign, so the source plan is read once for every layer any of them
+    installs.
     """
     if not rows:
         return []
@@ -265,7 +279,8 @@ def quantum_rows_gaps(rows: Sequence[Mapping], *,
     for row in rows:
         record = row["record"]
         try:
-            manifest = load_manifest(row["manifest_path"], row["manifest_sha256"])
+            manifest = load_manifest(row["manifest_path"], row["manifest_sha256"],
+                                     wire=row.get("manifest_wire"))
         except (OSError, ValueError) as exc:
             gaps.append({"kind": "unreadable", "phase": None, "layer": None,
                          "quantum_id": record.get("quantum_id"),

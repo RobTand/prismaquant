@@ -154,10 +154,14 @@ def test_spill_window_replays_carry_their_pass(tmp_path, monkeypatch, capsys):
             f"{name}: a {graces[name]} s grace cannot cover the window's "
             f"spill replay (read + the {blanket} s blanket = {need} s)")
     stamps = {stamp.get("phase"): stamp for stamp in _stamps(argv)}
+    last = list(plan)[-1]
     for name in replays:
-        (term,) = stamps[name]["compute"]
+        term, *rest = stamps[name]["compute"]
         assert (term["kind"], term["mode"]) == ("spill-replay", "blanket")
         assert "replay_wall_s" in term["reason"]
+        # The last declared phase also runs the quantum's tail (PQ #1190).
+        assert [item["kind"] for item in rest] == (
+            ["tail"] if name == last else [])
     # render-00 only reads: it keeps the chunk grace and no stamp.
     assert graces["render-00"] == dispatch.CHUNK_PROGRESS_GRACE_S
     assert "render-00" not in stamps

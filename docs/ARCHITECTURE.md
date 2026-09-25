@@ -896,6 +896,32 @@ prices. This changes a dispatcher default (the compute-phase grace) and adds
 one dispatcher option. No format, pipeline stage, record identity or ship
 gate changes.
 
+The row's last declared phase also prices the quantum's tail (2026-09-25,
+`claude/gpu-availability-i1azgo-pq1190`, PQ #1190). After the last window commits, the handoff
+write, the payload assembly, the final check of every row (the `payload`
+span) and the runner `teardown` (PQ #1187) declare no phase and commit no
+unit. They run on the last declared phase's no-progress clock, which
+restarts at that window's commit, and nothing checked that the phase's grace
+covered them: on v7 (layer 44, before #1184) the tail took 796 s under
+`render-14`'s 2,168 s grace. `compute_phase_work(..., runs_tail=True)` now
+appends one `tail` term (`TAIL_WORK`, one unit per quantum) to the phase
+that is last in the row's sealed phase list, with or without a pass of its
+own, and `compute_phase_grace` prices it like every other term: ceil(1 x
+unit_s) from a `tail` compute ceiling in the row's scope, else the blanket
+1800 s, with a reason that names the counter that will measure it (the
+`payload` and `teardown` spans' `wall_s` in `counters.json`). There is no
+built-in tail measurement, so every executable row's last phase grows by the
+blanket until a `--compute-ceiling` document of kind `tail` is supplied (an
+R13 spill row's last `render-NN` gains 1800 s over its pass's grace), and
+the rows' action keys move with it. The row context gains `emits_handoff`,
+so a tail measured on rows that write no band-serial handoff can be scoped
+away from a producer's.
+Gate: `tests/test_compute_tail_grace_1190.py`, which also drives the real
+quantum and checks that the `payload` span opens with the last declared
+phase in effect and that nothing commits after it. A dispatcher default (the
+last phase's grace) changes; no format, pipeline stage, record identity or
+ship gate changes.
+
 A resumed spill row whose first active window is not window 0 ran its
 captures under that window's `render-NN` phase, because progress phases only
 move forward, and that grace has no capture term. PQ #1172 moves those
@@ -1507,10 +1533,18 @@ value set in the spec wins. The defaults are derived at launch from the
 sealed scratch pair, so the sealed spec and the outer request are unchanged.
 A row with no scratch launches exactly as before.
 
-`dispatch_joint_quanta` warns (`OverlayCacheWarning`), and does not refuse,
-when a spec points one of them at `/tmp`, `/var/tmp` or a path that no
-writable mount covers. It warns whether or not scratch is declared. The
-launcher's preamble lists the same variables as `overlay_pinned_caches`.
+A spec that points one of them at `/tmp`, `/var/tmp` or a path that no
+writable mount covers refuses at `dispatch_joint_quanta`'s spec check
+(`_container_wrap`, which the Stage B prepare's `check_stage_b_spec` also
+runs), with or without declared scratch (2026-09-25, PQ #1129; #1072 only
+warned, the warning fired on every R13 Stage B prepare, and nothing acted on
+it). The refusal names each pin and the escape: unset them, or name why in the
+spec's top-level `overlay_cache_reason` (a non-empty string). An admitted spec
+is sealed with a derived `overlay_cache_admission` object that repeats the
+reason beside the pins it admits, so the sealed request carries the waiver. A
+spec may not declare that object itself, and a reason with nothing pinned
+refuses. The launcher's preamble lists the same variables as
+`overlay_pinned_caches`.
 
 Limits:
 - The caches are charged to PrismaBuild through nothing but the scratch
@@ -1518,11 +1552,14 @@ Limits:
   bytes can run past what PrismaBuild charged. Their size is unmeasured.
 - The caches persist on the box's disk across rows.
 - The campaign's default spec (`spec-hostcap32-ram-dev-spool.json`) pins all
-  five to `/tmp` and declares no scratch, so it warns and changes nothing
-  until a spec declares a scratch root and drops those pins.
+  five to `/tmp` and declares no scratch, so since PQ #1129 every row it wraps
+  refuses until a revision drops those pins or names an
+  `overlay_cache_reason`. R13's Stage B spec (`stage-b-spec.r13.json`) pins
+  all five under `/var/tmp/pq-stageb-full512` and refuses the same way.
 
-Gate: `tests/test_container_cache_roots_1072.py`. No format, pipeline
-default, stage or ship gate changes.
+Gates: `tests/test_container_cache_roots_1072.py`,
+`tests/test_overlay_cache_refusal_1129.py`. The dispatch refusal replaces a
+warning; no format, pipeline default, stage or ship gate changes.
 
 A superseded Stage A run's checkpoints and the entries they pin can be
 retired (2026-09-23, `ws-tq/1073-retire-superseded-pins`, PQ #1073). Since
@@ -2525,8 +2562,34 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq1139`.
+As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq1129`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1129`) for **a spec that pins a
+container cache to the overlay refuses at the joint dispatcher's spec check**
+(PQ #1129) unless it names an `overlay_cache_reason`, which the sealed spec
+repeats in a derived `overlay_cache_admission` stamp beside the pins. It
+replaces #1072's `OverlayCacheWarning`. See the container-cache entry under
+PQ #1072. No format, pipeline default, stage or ship gate changes; the
+campaign's default spec and R13's Stage B spec refuse until a revision drops
+their pins or names a reason.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1190`) for **the quantum's tail in the
+last declared phase's grace** (PQ #1190): the joint dispatcher appends a
+`tail` compute term to the row's last declared phase, measured from a `tail`
+compute ceiling or the blanket 1800 s. See the entry after the PQ #1165
+compute-phase grace. A dispatcher default changes; no format, pipeline
+stage, lane or ship gate changes.
+
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1200`) for **a band-serial dry run that
+publishes nothing, and a handoff template whose prefix follows
+`--output-root`** (PQ #1200). `dispatch_joint_quanta --dry-run --band-serial`
+derives each producer's handoff template and each consumer's band-serial
+readset, prints their paths, digests and the template's body, and writes
+neither. The template's `output_prefix` now derives from `--output-root`,
+the root its file lives under, instead of the record's sealed output space.
+See "Band-serial Stage B quanta (#996)", Dispatch. No format, pipeline
+default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1139`) for **the source config read only
 off the stage under the Stage B preparation's strict reads** (PQ #1139). A
@@ -24662,7 +24725,12 @@ fanout:
    never been submitted also declares a handoff template as
    `--produced-output-template` (`handoff_template_path`: the plan's boundary
    storage on the producer's handoff directory, the slice's largest
-   checkpoint tensor, and `TIER`) and passes `--emit-adjoint-handoff`.
+   checkpoint tensor, and `TIER`) and passes `--emit-adjoint-handoff`. The
+   template file (under `{output_root}/layer-quanta/band-serial/`) and its
+   `output_prefix` derive from one root, `--output-root` (PQ #1200): the
+   prefix is `{output_root}/layer-quanta/{quantum id}/handoff`, inside the
+   output space the quantum's identity gate requires its record to name
+   when it runs under that `--output-root`.
 2. Quantum `L - 1` publishes only after `L`'s action executed, its
    `status.json` reports complete for its identity, and the handoff its
    `results.json` names hashes to the digest named there. Until then it is
@@ -24673,6 +24741,13 @@ fanout:
    mode) leaves its consumer in chain mode, which gives the same bytes.
 
 Bands stay parallel: only the rows inside one band wait on each other.
+
+A `--dry-run --band-serial` derives each row's template and readset and
+publishes neither (PQ #1200). It prints each one's path and sha256
+(`handoff_template`, `handoff_template_sha256`, `band_serial_readset`) and
+the template's body (`handoff_template_document`), and the argv it prints is
+the one a real run submits: the readset's phase facts and the source-coverage
+check read its bytes in memory instead of the file.
 
 **Resubmission.** A submitted row keeps its mode. The state event records
 `cotangent_source` and `handoff_template`, and every resubmission rebuilds the

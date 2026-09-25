@@ -25,6 +25,8 @@ other re-publication is a CAS attach to the same sealed action key, never a
 repartition.
 
 ``--dry-run`` prints the submission plan with digests and submits nothing.
+It writes nothing either: a band-serial row's handoff template and readset
+are derived and printed with their digests, never published (PQ #1200).
 
 Shapes owned elsewhere (fixtures here, never imports): the layer-quantum
 record (§3, built in parallel by the producer) and the stage-A receipt
@@ -42,7 +44,6 @@ import re
 import subprocess
 import sys
 import time
-import warnings
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
@@ -177,6 +178,10 @@ PROGRESS_GRACE_FLAG = "--progress-grace-derivation"
 #: plus each compute term, with each term's derivation in the stamp.
 #: Before #1165 these phases took CHUNK_PROGRESS_GRACE_S, the legacy chunk
 #: lane's allowance, which bounds no pass.
+#: The quantum's tail after its last window (the ``payload`` and ``teardown``
+#: spans, PQ #1187) declares no phase and commits no unit, so it runs on the
+#: last declared phase's clock after that phase's last commit. That phase's
+#: grace carries it as one more term, ``tail`` (PQ #1190).
 COMPUTE_CEILING_SCHEMA = "prismaquant.compute_unit_ceiling.v1"
 COMPUTE_PHASE_GRACE_SCHEMA = "prismaquant.compute_phase_grace.v1"
 COMPUTE_PHASE_BOUND = (
@@ -190,7 +195,12 @@ COMPUTE_PHASE_BOUND = (
     "slowest window of at least 30 s of a pass on the same regime and device "
     "class. An unmeasured term takes the blanket HEAD_PROGRESS_GRACE_S. The "
     "pass commits no unit (nothing in it is durable), so the grace is its "
-    "whole time budget.")
+    "whole time budget. The row's last declared phase adds a tail term: the "
+    "quantum's tail after its last window (the payload and teardown spans) "
+    "commits no unit and runs on that phase's clock after its last commit, "
+    "so the term is ceil(1 x unit_s), unit_s the slowest measured tail "
+    "(payload plus teardown wall_s) on the same regime and device class, or "
+    "the blanket.")
 #: What each compute kind counts, and where an unmeasured kind's time will
 #: come from once a run records it.
 COMPUTE_KINDS = {
@@ -211,7 +221,18 @@ COMPUTE_KINDS = {
         "unit": "one stored batch's replay backward, with statistics hooks, "
                 "for one probe",
         "measured_by": "counters.json each window's wall_s"},
+    "tail": {
+        "unit": "one quantum's tail after its last window: the band-serial "
+                "handoff write, the payload assembly, the final check of "
+                "every row, the runner shutdown and the residency report",
+        "measured_by": "counters.json io_spans: the payload and teardown "
+                       "spans' wall_s, summed (PQ #1187)"},
 }
+#: The tail's one term (PQ #1190), which :func:`compute_phase_work` appends to
+#: the last declared phase's work.
+TAIL_WORK = {"kind": "tail", "units": 1,
+             "work": ("the quantum's tail after its last window, which "
+                      "declares no phase and commits no unit")}
 #: The per-row entry that carries the bound and the ceiling documents once,
 #: so each compute stamp names its ceiling by kind and the payload stays
 #: small.
@@ -1315,7 +1336,8 @@ _REPLAY_PHASE = re.compile(r"replay-(\d{2,})-p(\d+)")
 
 
 def compute_phase_work(name: str, *, replay_mode: str, entries,
-                       n_probes, capture_batch) -> list[dict] | None:
+                       n_probes, capture_batch,
+                       runs_tail: bool = False) -> list[dict] | None:
     """The compute one phase's pass runs, or ``None`` for a phase with none.
 
     Each term is ``{"kind", "units", "work"}``; ``units`` is ``None`` when
@@ -1327,16 +1349,21 @@ def compute_phase_work(name: str, *, replay_mode: str, entries,
     captures under ``spill-pP`` and replays nothing there (PQ #1172), so the
     replay term of ``spill-pP`` is an upper bound for it. ``render-00`` of a
     spill row, and every ``render-NN`` of a windowed row, only read.
+
+    ``runs_tail`` marks the row's last declared phase: the quantum's tail
+    after its last window runs on its clock (PQ #1187), so :data:`TAIL_WORK`
+    is its last term, with or without a pass of its own (PQ #1190).
     """
     def counted(*values):
         return all(type(value) is int and value > 0 for value in values)
 
+    tail = [dict(TAIL_WORK)] if runs_tail else []
     match = _CHAIN_BOUND_PHASE.fullmatch(name)
     if match:
         return [{"kind": "chain-roll",
                  "units": entries * n_probes if counted(entries, n_probes) else None,
                  "work": (f"chain layer {int(match.group(1))}'s backward roll: "
-                          "one row per probe and stored batch")}]
+                          "one row per probe and stored batch")}, *tail]
     match = _SPILL_PHASE.fullmatch(name)
     if match and replay_mode == "spill":
         probe = int(match.group(1))
@@ -1346,21 +1373,22 @@ def compute_phase_work(name: str, *, replay_mode: str, entries,
                  "work": (f"probe {probe}'s spill capture: one group per "
                           "capture_batch stored batches")},
                 {"kind": "spill-replay", "units": 1,
-                 "work": f"the first window's spill replay for probe {probe}"}]
+                 "work": f"the first window's spill replay for probe {probe}"},
+                *tail]
     match = _RENDER_PHASE.fullmatch(name)
     if match and replay_mode == "spill" and int(match.group(1)) >= 1:
         return [{"kind": "spill-replay",
                  "units": n_probes if counted(n_probes) else None,
                  "work": (f"window {int(match.group(1))}'s spill replay for "
-                          "each probe")}]
+                          "each probe")}, *tail]
     match = _REPLAY_PHASE.fullmatch(name)
     if match and replay_mode == "windowed":
         return [{"kind": "windowed-replay",
                  "units": entries if counted(entries) else None,
                  "work": (f"window {int(match.group(1))}'s replay for probe "
                           f"{int(match.group(2))}: one backward per stored "
-                          "batch")}]
-    return None
+                          "batch")}, *tail]
+    return tail or None
 
 
 def _scope_misses(scope: Mapping, context: Mapping) -> list[str]:
@@ -1444,12 +1472,15 @@ def compute_grace_basis(stamps: Sequence[Mapping], *, ceilings: Mapping,
 
 def _row_compute_context(record: Mapping, *, spec: Mapping,
                          consumer_tags: Sequence[str],
-                         annotations: Mapping) -> dict:
+                         annotations: Mapping,
+                         emits_handoff: bool = False) -> dict:
     """The fields a compute ceiling's scope is checked against, for one row.
 
     It refuses nothing: a spec regime, spill bound or slice this cannot read
     leaves its fields out, the terms that need them take the blanket, and
     the row's own checks in :func:`quantum_argv` refuse it as before.
+    ``emits_handoff`` says the row is a band-serial producer, whose tail
+    writes the handoff, so a ``tail`` measurement can scope it (PQ #1190).
     """
     from prismaquant.joint_adjoint_slices import (
         AdjointSliceRefused, chain_regime_of)
@@ -1458,7 +1489,8 @@ def _row_compute_context(record: Mapping, *, spec: Mapping,
         replay_regime_from_environment)
 
     context: dict = {"consumer_tags": [str(tag) for tag in consumer_tags],
-                     "n_probes": annotations.get("n_probes")}
+                     "n_probes": annotations.get("n_probes"),
+                     "emits_handoff": bool(emits_handoff)}
     try:
         regime = normalize_replay_regime(
             replay_regime_from_environment(spec.get("env") or {}))
@@ -1689,31 +1721,58 @@ def produced_spool_row_environment(spec: Mapping) -> dict:
     return forwarded
 
 
-class OverlayCacheWarning(UserWarning):
-    """A spec points a container cache at the overlay or /tmp (PQ #1072)."""
+#: The spec field that admits a container cache pinned to the overlay, with
+#: the reason (PQ #1129). A spec with no pin may not name one.
+OVERLAY_CACHE_REASON_FIELD = "overlay_cache_reason"
+#: The stamp the dispatcher seals beside that reason: the pins it admits.
+#: Derived from the spec, never declared by one.
+OVERLAY_CACHE_ADMISSION_FIELD = "overlay_cache_admission"
 
 
-def _warn_overlay_caches(spec: dict, scratch: dict) -> None:
-    """Warn, but do not refuse, when a spec pins a cache to the overlay.
+def _admit_overlay_caches(spec: dict, scratch: dict) -> None:
+    """Refuse a spec that pins a container cache to the overlay (PQ #1129).
 
     When the row declares bounded local scratch, the launcher binds every
     cache the spec leaves unset under the scratch root
     (``container_cache_environment``). A value set in the spec wins over
-    that default. A value on ``/tmp``, ``/var/tmp`` or an unmounted path
-    writes to the container overlay, which is unbounded and invisible to
-    PrismaBuild. The warning fires with or without declared scratch.
+    that default. A value on ``/tmp``, ``/var/tmp`` or a path no writable
+    mount covers writes to the container overlay, which is unbounded and
+    invisible to PrismaBuild, with or without declared scratch.
+
+    Such a pin refuses, naming each pin and :data:`OVERLAY_CACHE_REASON_FIELD`,
+    unless the spec names why in that field. An admitted spec (``spec`` is
+    the parse being sealed) gains :data:`OVERLAY_CACHE_ADMISSION_FIELD`, which
+    repeats the reason beside the pins it admits, so the sealed request
+    carries the waiver. PQ #1072 only warned here; the warning fired on every
+    Stage B prepare of R13 and nothing acted on it.
     """
+    if OVERLAY_CACHE_ADMISSION_FIELD in spec:
+        raise RuntimeError(
+            f"spec field {OVERLAY_CACHE_ADMISSION_FIELD} is derived by the "
+            f"dispatcher from the spec's pins and {OVERLAY_CACHE_REASON_FIELD}, "
+            "not declared by a spec")
     _defaults, pinned = container_cache_environment(spec, scratch)
-    if pinned:
-        env = spec.get("env", {})
+    declared = OVERLAY_CACHE_REASON_FIELD in spec
+    reason = spec.get(OVERLAY_CACHE_REASON_FIELD)
+    if not pinned:
+        if declared:
+            raise RuntimeError(
+                f"the campaign spec names an {OVERLAY_CACHE_REASON_FIELD}, but "
+                "pins no container cache to the overlay; drop the reason")
+        return
+    env = spec.get("env", {})
+    if not isinstance(reason, str) or not reason.strip():
         named = ", ".join(f"{name}={env[name]}" for name in pinned)
         hint = ("unset them to bind them under the declared scratch root"
                 if scratch else
                 "declare a bounded local scratch root to bind them there")
-        warnings.warn(
+        raise RuntimeError(
             f"the campaign spec pins container caches to the overlay: {named}; "
-            f"these writes are unbounded and invisible to PrismaBuild; {hint}",
-            OverlayCacheWarning, stacklevel=3)
+            f"these writes are unbounded and invisible to PrismaBuild. {hint}, "
+            f"or name why in the spec's {OVERLAY_CACHE_REASON_FIELD} "
+            "(a non-empty string, sealed with the pins it admits)")
+    spec[OVERLAY_CACHE_ADMISSION_FIELD] = {
+        "pinned": {name: env[name] for name in pinned}, "reason": reason}
 
 
 def _container_wrap(spec_path: Path, payload: list[str], *,
@@ -1812,7 +1871,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     # coordinator environment or second spec read participates.
     try:
         scratch = local_scratch_environment(spec, spec.get("env", {}))
-        _warn_overlay_caches(spec, scratch)
+        _admit_overlay_caches(spec, scratch)
         _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload,
                                chain_batch_size=handoff_chain_batch_size)
         # The bf16 reduction flag is sealed in the same spec, so it is
@@ -2099,6 +2158,12 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         return stamp["grace_s"]
 
     row_context: dict = {}
+    # The quantum's tail after its last window runs on the last declared
+    # phase's clock (PQ #1187), so that phase's grace carries it (PQ #1190).
+    declared_phases = (handoff if handoff is not None
+                       else executable or {}).get("phases")
+    tail_phase = (declared_phases[-1] if isinstance(declared_phases, list)
+                  and declared_phases else None)
 
     def compute_grace(name, fact, annotations):
         from prismaquant.joint_layer_quanta import normalize_replay_mode
@@ -2106,13 +2171,15 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         if "context" not in row_context:
             row_context["context"] = _row_compute_context(
                 record, spec=parsed_spec(), consumer_tags=consumer_tags,
-                annotations=annotations)
+                annotations=annotations,
+                emits_handoff=emit_template is not None)
         context = row_context["context"]
         work = compute_phase_work(
             name, replay_mode=normalize_replay_mode(
                 (executable or {}).get("replay_mode")),
             entries=fact.get("entries"), n_probes=context.get("n_probes"),
-            capture_batch=context.get("replay_regime.capture_batch"))
+            capture_batch=context.get("replay_regime.capture_batch"),
+            runs_tail=name == tail_phase)
         if work is None:
             return None
         stamp = compute_phase_grace(
@@ -2142,9 +2209,13 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             manifest = Path(handoff["manifest_path"])
             staged_sha256 = handoff["manifest_sha256"]
             phase_bytes = handoff.get("phase_bytes") or {}
+            # A dry run's readset is unpublished: its bytes ride the handoff.
+            wire = handoff.get("manifest_wire")
             try:
-                facts, annotations = _manifest_phase_facts(
-                    manifest, quantum_id=quantum_id)
+                facts, annotations = (
+                    _manifest_phase_facts(manifest, quantum_id=quantum_id)
+                    if wire is None else _read_plan_phase_facts(
+                        wire, where=f"quantum {quantum_id!r} {manifest}"))
             except DispatchRefused:
                 # Grace derivation only: the terms take the blanket, and
                 # the row's staging checks stay what they were.
@@ -2673,11 +2744,10 @@ def handoff_template_id(quantum_id: str, template: Mapping) -> str:
     return f"{HANDOFF_TEMPLATE_ID_PREFIX}{quantum_id}-{digest[:16]}"
 
 
-def handoff_template_path(record: Mapping, *, plan: Mapping,
-                          adjoint_slice: Mapping, tier: str,
-                          output_root: Path,
-                          template_id: str | None = None) -> Path:
-    """Write and return a producer row's handoff produced-output template.
+def handoff_template(record: Mapping, *, plan: Mapping,
+                     adjoint_slice: Mapping, tier: str, output_root: Path,
+                     template_id: str | None = None) -> tuple[Path, bytes]:
+    """A producer row's handoff produced-output template: ``(path, bytes)``.
 
     Derived from the numbers the producer's emitter binds with: the plan's
     ``execution.boundary_storage`` normalized onto the producer's handoff
@@ -2686,6 +2756,14 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
     tier the declaration permits, a fleet fact the submitter names. The file
     is named by its content digest, so a changed tier or plan writes a new
     template and never rewrites one a submitted row already declared.
+
+    The handoff directory and the file derive from one root, ``output_root``
+    (PQ #1200): the handoff directory is inside the quantum's output space
+    under it, ``{output_root}/layer-quanta/{quantum id}``, the space the
+    quantum's identity gate requires its record to name when it runs under
+    that ``--output-root``; the file goes under
+    ``{output_root}/layer-quanta/band-serial``. Writes nothing:
+    :func:`handoff_template_path` publishes it.
 
     The template is write-only (PrismaBuild #912, PQ #1075): the producer
     never reads its handoff back, so it reserves no stage window and commits
@@ -2700,6 +2778,7 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
     explicit ``template_id`` overrides the derived one.
     """
     from prismaquant.cost_streaming import normalize_boundary_storage
+    from prismaquant.joint_layer_quanta import quantum_id as layer_quantum_id
     from prismaquant.joint_quantum_handoff import handoff_root
     from prismaquant.stage_a_produced_output import build_boundary_template
 
@@ -2710,9 +2789,10 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
             f"quantum {quantum_id!r}: the plan seals no boundary storage for a "
             "handoff")
     try:
+        space = (Path(output_root) / "layer-quanta"
+                 / layer_quantum_id(record["layer"]))
         policy = normalize_boundary_storage({
-            **storage,
-            "directory": str(handoff_root(record["output_space"]["root"]))})
+            **storage, "directory": str(handoff_root(space))})
         tensors = [int(entry["tensor_bytes"]) for entry in
                    adjoint_slice["checkpoint"]["activation_entries"]]
 
@@ -2735,17 +2815,34 @@ def handoff_template_path(record: Mapping, *, plan: Mapping,
     payload = (json.dumps(template, sort_keys=True, indent=2) + "\n").encode()
     path = (_band_serial_root(output_root)
             / f"{quantum_id}.handoff-template.{_sha_bytes(payload)[:16]}.json")
+    return path, payload
+
+
+def handoff_template_path(record: Mapping, *, plan: Mapping,
+                          adjoint_slice: Mapping, tier: str,
+                          output_root: Path,
+                          template_id: str | None = None) -> Path:
+    """Write and return a producer row's handoff template (:func:`handoff_template`)."""
+    path, payload = handoff_template(
+        record, plan=plan, adjoint_slice=adjoint_slice, tier=tier,
+        output_root=output_root, template_id=template_id)
     return _publish_control_bytes(path, payload, what="handoff template")
 
 
 def bind_consumer_handoff(record: Mapping, *, path: str, sha256: str,
-                          producer: str, output_root: Path) -> dict:
+                          producer: str, output_root: Path,
+                          publish: bool = True) -> dict:
     """Bind a published handoff to its consumer row, or refuse.
 
     Runs the consumer's own checks (:func:`load_quantum_handoff`) and
     derives, then writes, the band-serial readset the row stages. A handoff
     the consumer would refuse is refused here: publishing it would only exit
     3 on a GPU box.
+
+    ``publish=False`` (a dry run, PQ #1200) derives the same readset and
+    writes nothing: the result names the path it would be published at and
+    carries its bytes as ``manifest_wire``, which the row's grace derivation
+    and the source-coverage check read instead of the file.
     """
     from prismaquant.joint_quantum_handoff import (
         QuantumHandoffRefused, band_serial_manifest_bytes, load_quantum_handoff)
@@ -2762,10 +2859,11 @@ def bind_consumer_handoff(record: Mapping, *, path: str, sha256: str,
         raise DispatchRefused(
             f"quantum {quantum_id!r} refuses the handoff {producer!r} "
             f"published: {exc}") from exc
-    manifest_path = _publish_control_bytes(
+    manifest_path = (
         _band_serial_root(output_root)
-        / f"{quantum_id}.{handoff['handoff_sha256'][:16]}.executable.json.gz",
-        wire, what="band-serial readset")
+        / f"{quantum_id}.{handoff['handoff_sha256'][:16]}.executable.json.gz")
+    if publish:
+        _publish_control_bytes(manifest_path, wire, what="band-serial readset")
     phases = [phase["name"] for phase in
               json.loads(gzip.decompress(wire))["read_plan"]["phases"]]
     return {"path": str(path), "sha256": str(sha256), "producer": str(producer),
@@ -2774,7 +2872,8 @@ def bind_consumer_handoff(record: Mapping, *, path: str, sha256: str,
             "manifest_sha256": _sha_bytes(wire), "phases": phases,
             # The load grace reads the handoff-load phase's bytes from here.
             "phase_bytes": _read_plan_phase_bytes(
-                wire, where=f"quantum {quantum_id!r} band-serial readset")}
+                wire, where=f"quantum {quantum_id!r} band-serial readset"),
+            **({} if publish else {"manifest_wire": wire})}
 
 
 def _producer_handoff(producer: Mapping, *, key: str | None,
@@ -2811,6 +2910,7 @@ def fresh_band_role(record: Mapping, *, roles: Mapping, by_id: Mapping,
                     last_submission: Mapping, submitted_keys: Mapping,
                     gateway: "Gateway", tier: str | None,
                     output_root: Path, capture_batch: int = 1,
+                    publish: bool = True,
                     ) -> tuple[dict | None, str | None]:
     """The band-serial role of a row never submitted before.
 
@@ -2821,6 +2921,10 @@ def fresh_band_role(record: Mapping, *, roles: Mapping, by_id: Mapping,
     the spec's launch regime's (:func:`_spec_capture_batch`): a band runs
     serial only when its slice's chain regime rolls at that batch size
     (PQ #994, #997), the batch the handed-off plane is captured at.
+
+    ``publish=False`` (a dry run, PQ #1200) derives the template and the
+    readset and writes neither; the band carries the template's digest and
+    body so the dry run can print them.
     """
     from prismaquant.joint_quantum_handoff import handoff_chain_regime_refusal
 
@@ -2841,26 +2945,33 @@ def fresh_band_role(record: Mapping, *, roles: Mapping, by_id: Mapping,
         if published is not None:
             band["handoff"] = bind_consumer_handoff(
                 record, path=published["path"], sha256=published["sha256"],
-                producer=source, output_root=output_root)
+                producer=source, output_root=output_root, publish=publish)
     successor = role["hands_to"]
     if successor is not None and successor not in last_submission:
         if tier is None:
             raise DispatchRefused("--band-serial needs --handoff-tier")
         plan = _load_json(Path(record["campaign"]["plan_path"]), where="plan")
-        band["emit_template"] = handoff_template_path(
+        path, payload = handoff_template(
             record, plan=plan, adjoint_slice=adjoint_slice, tier=tier,
             output_root=output_root)
+        if publish:
+            _publish_control_bytes(path, payload, what="handoff template")
+        band["emit_template"] = path
+        band["emit_template_sha256"] = _sha_bytes(payload)
+        band["emit_template_document"] = json.loads(payload)
     return band, None
 
 
 def recorded_band_role(record: Mapping, event: Mapping, *,
-                       output_root: Path) -> dict:
+                       output_root: Path, publish: bool = True) -> dict:
     """Rebuild the role a row was submitted with, from its state event.
 
     A resubmission must be the same sealed action: a row republished in
     another mode would be a second action for the same output space. So a
     row keeps its recorded handoff and template whether or not this run
     passes ``--band-serial``; events written before PQ #996 are chain rows.
+    ``publish=False`` (a dry run) re-derives a consumer's readset without
+    writing it (:func:`bind_consumer_handoff`).
     """
     band: dict = {}
     template = event.get("handoff_template")
@@ -2874,7 +2985,8 @@ def recorded_band_role(record: Mapping, event: Mapping, *,
     if source.get("mode") == "handoff":
         band["handoff"] = bind_consumer_handoff(
             record, path=source["path"], sha256=source["sha256"],
-            producer=source["producer"], output_root=output_root)
+            producer=source["producer"], output_root=output_root,
+            publish=publish)
     return band
 
 
@@ -3006,10 +3118,13 @@ def _coverage_row(record: dict, *, output_root: Path, band: dict | None) -> dict
     handoff = (band or {}).get("handoff")
     if handoff is not None:
         # A band-serial consumer takes its cotangent from the handoff and
-        # installs only its own layer.
+        # installs only its own layer. A dry run's readset is unpublished
+        # and checked from its bytes (PQ #1200).
         return {"record": record, "manifest_path": str(handoff["manifest_path"]),
                 "manifest_sha256": handoff["manifest_sha256"],
-                "order": (record["layer"],)}
+                "order": (record["layer"],),
+                **({"manifest_wire": handoff["manifest_wire"]}
+                   if "manifest_wire" in handoff else {})}
     manifest = Path(record["executable_readset"].get("manifest_path", ""))
     if not manifest.is_absolute():
         manifest = output_root / manifest
@@ -3120,11 +3235,11 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
     parser.add_argument("--compute-ceiling", type=Path, action="append",
                         default=[], metavar="FILE",
                         help="a compute ceiling document "
-                             f"({COMPUTE_CEILING_SCHEMA}) that replaces the "
-                             "built-in ceiling of its kind (repeatable). A "
-                             "compute phase outside every ceiling's scope "
-                             f"takes the blanket {HEAD_PROGRESS_GRACE_S} s "
-                             "for that term")
+                             f"({COMPUTE_CEILING_SCHEMA}) that sets the "
+                             "ceiling of its kind, replacing any built-in "
+                             "one (repeatable). A compute term outside every "
+                             "ceiling's scope takes the blanket "
+                             f"{HEAD_PROGRESS_GRACE_S} s")
     parser.add_argument("--state", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -3260,17 +3375,20 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                 if key is not None and gateway.is_terminal_executed(key):
                     continue
                 band = None
+                # A dry run derives the band's control files and publishes
+                # none of them (PQ #1200).
                 if quantum_id in last_submission:
                     band = recorded_band_role(
                         record, last_submission[quantum_id],
-                        output_root=output_root)
+                        output_root=output_root, publish=not args.dry_run)
                 elif args.band_serial:
                     band, waiting = fresh_band_role(
                         record, roles=roles, by_id=by_id,
                         last_submission=last_submission,
                         submitted_keys=submitted_keys, gateway=gateway,
                         tier=args.handoff_tier, output_root=output_root,
-                        capture_batch=band_capture_batch)
+                        capture_batch=band_capture_batch,
+                        publish=not args.dry_run)
                     if waiting is not None:
                         band_pending.append({"quantum_id": quantum_id,
                                              "reason": waiting})
@@ -3305,6 +3423,16 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                              "cotangent_source": _cotangent_source(band),
                              "handoff_template": (
                                  None if template is None else str(template)),
+                             # What this run derived; a dry run prints it
+                             # instead of publishing it (PQ #1200).
+                             "handoff_template_sha256": (
+                                 band or {}).get("emit_template_sha256"),
+                             "handoff_template_document": (
+                                 band or {}).get("emit_template_document"),
+                             "band_serial_readset": (
+                                 None if handoff is None else {
+                                     "path": handoff["manifest_path"],
+                                     "sha256": handoff["manifest_sha256"]}),
                              "link": link,
                              "progress_grace": progress_grace_of(argv),
                              "argv": argv})
@@ -3327,6 +3455,12 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                                     "manifest_sha256": row.get("manifest_sha256"),
                                     **({"cotangent_source": row["cotangent_source"],
                                         "handoff_template": row["handoff_template"],
+                                        "handoff_template_sha256": row[
+                                            "handoff_template_sha256"],
+                                        "handoff_template_document": row[
+                                            "handoff_template_document"],
+                                        "band_serial_readset": row[
+                                            "band_serial_readset"],
                                         "link": row["link"],
                                         "progress_grace": row["progress_grace"]}
                                        if row["kind"] == "quantum" else {}),
