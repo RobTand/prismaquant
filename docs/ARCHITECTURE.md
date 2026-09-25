@@ -38,7 +38,10 @@ retained_window` now does each of these once per window:
 Loading the next window's renders while this window computes does not fit the
 sealed budget. `retained_render_cap_bytes` (6,023,929,799 bytes on the
 row-041 plan) is the largest window's renders, and the quantum sizes the PWC
-LRU to it, so a second window's renders would be unpriced.
+LRU to it, so a second window's renders would be unpriced. The one charged
+buffer that is idle while a window computes is the load buffer (402,662,764
+bytes on row 041), about 6.8% of a 5,940,033,573-byte window; reading the next
+window's first bytes into it was considered and not built.
 
 Measured with `tools/pwc_window_load_bench.py`: 64 of row 041's window-1
 renders, three windows per child, base and fix children interleaved over six
@@ -57,8 +60,8 @@ rounds in one PrismaBuild action, 12 measured windows per arm, py-spy
   load median 2.354 s to 1.154 s (-51%), standard deviation 2.572 s to
   0.149 s, window wall median 7.780 s to 6.605 s (-15%). Main-thread samples
   in the window's loads 31.9% to 12.4%, loader samples in lease work 38.6% to
-  13.1%. The GPU belonged to the Stage B row, so this run has no power
-  figure.
+  13.1%. The sampler recorded 31.7 W and 34.8 W, but the GPU belonged to
+  the Stage B row, so neither figure is attributable to this change.
 
 Power comes from the bench's own 0.5 s `nvidia-smi` sampler: sparklina's
 Netdata GPU series updates every 10 s, which is too coarse for 20 s children.
