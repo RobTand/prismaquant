@@ -74,6 +74,18 @@ def test_resource_derivation_fixes_indivisible_delta_and_preserves_science(resou
     assert require_plan_resources(original, extended, inputs['original_plan'], inputs['original_prepared']) == policy
 
 
+
+def test_resource_geometry_progress_goes_to_stderr(resource_fixture, capsys):
+    """PQ #1087: ``verify_policy`` runs inside ``dispatch_joint_quanta
+    --dry-run``, whose stdout must parse as one JSON document. The geometry
+    progress lines are logs: stderr, never stdout."""
+    _inputs, _original, _extended, binding, policy = resource_fixture
+    capsys.readouterr()
+    assert verify_policy(binding) == policy
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "resource geometry: reused sealed observations for" in captured.err
+
 @pytest.mark.parametrize('field', ['seed_base', 'n_probes', 'probe_microbatch', 'source_derivative'])
 def test_resource_exception_cannot_change_scientific_execution(resource_fixture, field):
     inputs, original, extended, binding, policy = resource_fixture

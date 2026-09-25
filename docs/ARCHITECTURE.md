@@ -604,7 +604,9 @@ gate and the manifest binding compare with. The execution plan's digest
 against the sealed one goes through `seal_check`: dev mode prints it, and
 certified mode refuses a plan whose bytes differ and runs a byte-identical
 copy. The dry run prints the execution plan's path and digest beside the
-sealed ones under `execution_plan`, and each state event records them. Gate:
+sealed ones under `execution_plan`, and each state event records them. The dry
+run's stdout is that one JSON document; its log lines, `[DEV-MODE]` stamps
+included, go to stderr (PQ #1087). Gate:
 `tests/test_dispatch_execution_plan_1191.py`.
 
 These still refuse in both modes:
@@ -2596,9 +2598,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq-misc`.
+As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq1087`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq1087`) for **a dispatch dry run whose
+stdout is one JSON document** (PQ #1087, item 3). `dispatch_joint_quanta
+--dry-run` sends every line printed while it derives the plan -- the
+`joint_stageb_resources` geometry progress and each `[DEV-MODE]` stamp -- to
+stderr, so its stdout parses as JSON. The geometry progress goes to stderr
+in every caller. Output streams only: no format, pipeline default, stage,
+lane or ship gate changes.
 Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq-misc`) for **one pin per PrismaBuild bundle
 the tests run against** (PQ #1084): the Stage B preparation (#1070), Stage A
 retirement (#1073) and band-serial handoff (#1075) suites read one pin of the

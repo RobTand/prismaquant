@@ -48,7 +48,8 @@ def _redeclare(plan_path: Path, target: Path, *, resource_bound: bool) -> Path:
 
 
 def _rows(out: str) -> list[dict]:
-    return json.loads(out[out.index("{\n"):])
+    # A dry run's stdout is its plan alone, one JSON document (PQ #1087).
+    return json.loads(out)
 
 
 @pytest.mark.parametrize("resource_bound", [True, False],
@@ -64,7 +65,7 @@ def test_dev_mode_row_runs_the_execution_plan_and_keeps_the_sealed_file(
     code, out, err = _main(dispatch, [*argv, "--execution-plan", str(execution)],
                            capsys)
     assert code == 0, err
-    assert "[DEV-MODE] seal execution plan differs" in out
+    assert "[DEV-MODE] seal execution plan differs" in err
     document = _rows(out)
     assert document["execution_plan"] == {
         "path": str(execution), "sha256": _sha(execution),
@@ -91,7 +92,7 @@ def test_certified_mode_refuses_an_execution_plan_that_differs(
     code, out, err = _main(dispatch, [*argv, "--execution-plan", str(execution)],
                            capsys)
     assert code == dispatch.EXIT_PRECONDITION_REFUSED
-    assert "[DEV-MODE]" not in out
+    assert "[DEV-MODE]" not in out + err
     assert "execution plan" in err and "differs from the records' sealed plan" in err
 
 
