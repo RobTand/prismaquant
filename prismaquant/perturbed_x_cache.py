@@ -1189,8 +1189,9 @@ class ExactCotangentScratch:
         fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_DIRECT)
         return memory, offset
 
-    def _drop_pages(self):
-        os.posix_fadvise(self._file.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+    def _drop_pages(self, fd=None):
+        os.posix_fadvise(self._file.fileno() if fd is None else fd, 0, 0,
+                         os.POSIX_FADV_DONTNEED)
 
     def _on_grid(self, tensor):
         return self._direct is None or tensor.data_ptr() % self._direct[0] == 0
@@ -1238,10 +1239,10 @@ class ExactCotangentScratch:
                 f"cotangent scratch cannot seal a slot it does not hold: {missing[0]!r}")
         self._sealed.update(keys)
 
-    def _direct_io(self, call, view, offset, size, what):
+    def _direct_io(self, call, view, offset, size, what, fd):
         done = 0
         while done < size:
-            moved = call(self._file.fileno(), [view[done:]], offset + done)
+            moved = call(fd, [view[done:]], offset + done)
             if moved <= 0 or moved % self._direct[1]:
                 # A resumed direct call would start off the grid.
                 raise RuntimeError(f"cotangent scratch short direct {what}")
@@ -1278,15 +1279,18 @@ class ExactCotangentScratch:
         with self._readers:
             if self._file is None or key not in self._written:
                 raise RuntimeError("cotangent scratch slot is not ready")
+            # The descriptor, taken once: a read that outlives close's wait
+            # keeps reading the file close left open for it (PQ #1263).
+            fd = self._file.fileno()
             self._reading += 1
         try:
-            return self._read_slot(key, out, bounce=bounce)
+            return self._read_slot(key, out, bounce=bounce, fd=fd)
         finally:
             with self._readers:
                 self._reading -= 1
                 self._readers.notify_all()
 
-    def _read_slot(self, key, out, *, bounce):
+    def _read_slot(self, key, out, *, bounce, fd):
         offset, size, shape, dtype = self._slots[key]
         if (out.device.type != 'cpu' or out.dtype != dtype
                 or tuple(out.shape) != shape or not out.is_contiguous()):
@@ -1300,7 +1304,7 @@ class ExactCotangentScratch:
             with (nullcontext() if on_grid else self._bounce_lock):
                 view, bounced = self._device_buffer(out, size)
                 try:
-                    self._direct_io(os.preadv, view, offset, size, "read")
+                    self._direct_io(os.preadv, view, offset, size, "read", fd)
                     if bounced:
                         target = memoryview(out.view(torch.uint8).reshape(-1).numpy())
                         try:
@@ -1314,11 +1318,11 @@ class ExactCotangentScratch:
         try:
             done = 0
             while done < size:
-                got = os.preadv(self._file.fileno(), [view[done:]], offset + done)
+                got = os.preadv(fd, [view[done:]], offset + done)
                 if got <= 0:
                     raise RuntimeError("cotangent scratch slot is truncated")
                 done += got
-            self._drop_pages()
+            self._drop_pages(fd)
         finally:
             view.release()
         return out
@@ -1347,7 +1351,8 @@ class ExactCotangentScratch:
                             view[:] = source
                         finally:
                             source.release()
-                    self._direct_io(os.pwritev, view, offset, size, "write")
+                    self._direct_io(os.pwritev, view, offset, size, "write",
+                                    self._file.fileno())
                     self._written.add(key)
                 finally:
                     view.release()
