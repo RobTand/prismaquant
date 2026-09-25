@@ -1472,7 +1472,7 @@ def test_the_bf16_reduction_setting_is_validated_and_sealed_in_the_spec(
 
 
 @pytest.mark.parametrize('value,message', [
-    (None, None), ('kda_gram_v1', None),
+    (None, None), ('kda_gram_v1', None), ('fallback', None),
     ('kda_gram_fp32_v1', 'names no known capture kernel'), ('', 'names no known capture kernel')])
 def test_the_kda_capture_kernel_setting_is_validated_and_sealed_in_the_spec(
         tmp_path, value, message):

@@ -907,6 +907,34 @@ def resolve_quantum_windows(
 # --------------------------------------------------------------------------
 
 
+def launch_kda_capture_kernel(setting, *, runner, adjoint_handoff, quantum_id="?"):
+    """The KDA capture kernel this launch runs, or ``None`` (the fallback).
+
+    ``setting`` is the launch's ``PRISMAQUANT_STAGE_B_KDA_KERNEL``
+    (``kda_capture_kernel_setting``). An unset one is the default (PQ
+    #1252): a band-serial consumer (``adjoint_handoff`` bound) takes its
+    producer's mode, so a band in flight on the fallback stays on it; any
+    other quantum runs the kernel when a decoder layer of ``runner`` has KDA
+    attention. The line printed names the source of the mode.
+    """
+    from .glm_kda_capture_kernel import FALLBACK, KDA_KERNEL_ENV, resolve_kda_capture_kernel
+
+    producer = None if adjoint_handoff is None else adjoint_handoff["producer"]
+    kernel = resolve_kda_capture_kernel(
+        setting, producer=producer,
+        layers=(runner.layers[index] for index in range(int(runner.num_layers))))
+    if setting is not None:
+        source = f"{KDA_KERNEL_ENV}={setting}"
+    elif producer is not None:
+        source = f"{KDA_KERNEL_ENV} unset: the band-serial producer's mode"
+    else:
+        source = (f"{KDA_KERNEL_ENV} unset: the default for a model "
+                  + ("with" if kernel is not None else "without") + " KDA attention")
+    print(f"[quantum {quantum_id}] KDA capture: "
+          f"{FALLBACK if kernel is None else kernel} ({source})", flush=True)
+    return kernel
+
+
 def quantum_runtime_execution(config, *, replay_regime, kda_capture_kernel=None):
     """The execution block a launched quantum's core runs under.
 
@@ -1637,7 +1665,10 @@ def run_layer_quantum_core(
             kda_kernel = admit_kda_capture_kernel(
                 requested_kda_kernel, runner.model, device=runner.device)
         except KdaCaptureKernelRefused as exc:
-            raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
+            from .glm_kda_capture_kernel import FALLBACK, KDA_KERNEL_ENV
+            raise QuantumIdentityRefused(
+                f"quantum {quantum_id}: {exc} ({KDA_KERNEL_ENV}={FALLBACK} runs the "
+                "image's Torch fallback)") from exc
         counters.kda_capture_kernel = kda_kernel
     if adjoint_handoff is not None:
         # The handoff names its producer's kernel by name and identity (PQ
@@ -3038,15 +3069,17 @@ def run_layer_quantum(
     except MatmulArithmeticRefused as exc:
         raise QuantumIdentityRefused(str(exc)) from exc
     # So is the KDA capture kernel (PQ #1199). The core admits it once and
-    # runs every Stage B layer pass in kernel mode (PQ #1214).
+    # runs every Stage B layer pass in kernel mode (PQ #1214). An unset
+    # setting is the default, resolved once the source's layers are known
+    # (PQ #1252).
     from .glm_kda_capture_kernel import (
-        KDA_KERNEL_ENV, KdaCaptureKernelRefused, kda_capture_kernel_from_environment)
+        KDA_KERNEL_ENV, KdaCaptureKernelRefused, kda_capture_kernel_setting)
     if "kda_capture_kernel" in execution:
         raise QuantumIdentityRefused(
             f"the KDA capture kernel is a launch setting ({KDA_KERNEL_ENV}), "
             "not a plan execution field")
     try:
-        kda_capture_kernel = kda_capture_kernel_from_environment(os.environ)
+        kda_setting = kda_capture_kernel_setting(os.environ)
     except KdaCaptureKernelRefused as exc:
         raise QuantumIdentityRefused(str(exc)) from exc
     # PQ #1065: compare the setting with the slice's stamp before any head
@@ -3298,7 +3331,10 @@ def run_layer_quantum(
                       units=head_units, measured_cells=head_cells)
 
         execution_runtime = quantum_runtime_execution(
-            config, replay_regime=replay_regime, kda_capture_kernel=kda_capture_kernel)
+            config, replay_regime=replay_regime,
+            kda_capture_kernel=launch_kda_capture_kernel(
+                kda_setting, runner=runner, adjoint_handoff=adjoint_handoff,
+                quantum_id=record["quantum_id"]))
         # D2 handshake, before any GPU work or progress: the record seals
         # window indices only, so membership and footprints are recomputed
         # from the sealed budget and handshook here. The chunk frontier,
@@ -3485,11 +3521,13 @@ def main(argv=None) -> int:
                 "--adjoint-handoff and --adjoint-handoff-sha256 go together")
         if args.adjoint_handoff is not None:
             # A consumer binds only a handoff produced in its own launch's
-            # mode (PQ #1214); the core binds the kernel's identity.
+            # mode (PQ #1214), or, with the setting unset, its producer's
+            # (PQ #1252); the core binds the kernel's identity.
             from .glm_kda_capture_kernel import (
-                KdaCaptureKernelRefused, kda_capture_kernel_from_environment)
+                KdaCaptureKernelRefused, consumer_handoff_mode, kda_capture_kernel_setting)
             try:
-                launch_kernel = kda_capture_kernel_from_environment(os.environ)
+                launch_kernel = consumer_handoff_mode(
+                    kda_capture_kernel_setting(os.environ))
             except KdaCaptureKernelRefused as exc:
                 raise QuantumIdentityRefused(str(exc)) from exc
             try:

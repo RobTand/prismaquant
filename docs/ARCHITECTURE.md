@@ -1,5 +1,48 @@
 # PrismaQuant Architecture
 
+The KDA capture kernel is the Stage B default (2026-09-25,
+`perf/1252-kda-kernel-default`, PQ #1252). `kda_gram_v1` passed its relaxed
+gate (PQ #1214) and runs KDA capture 2.54 times as fast, yet a launch ran it
+only when its spec set `PRISMAQUANT_STAGE_B_KDA_KERNEL`. An unset setting
+now resolves once per quantum, in `run_layer_quantum`, after the source
+runner is built (`joint_cost_quantum.launch_kda_capture_kernel`, over
+`glm_kda_capture_kernel.resolve_kda_capture_kernel`):
+
+- A band-serial consumer takes its producer's mode from the handoff's
+  `producer.kda_capture_kernel` stamp: the kernel it names, or the fallback
+  when it names none. A band that started on the fallback before this
+  change therefore stays on it, and hands the fallback on. The consumer's
+  load (`joint_cost_quantum.main`) and the dispatcher's bind
+  (`_spec_kda_capture_kernel`) take the producer's mode the same way
+  (`consumer_handoff_mode` returns `FOLLOW_PRODUCER`).
+- Any other quantum, a chain-mode row or a band-serial producer, runs
+  `kda_gram_v1` in kernel mode when a decoder layer of the model has KDA
+  attention (by class, `layer_runs_kda`), and the fallback when none does.
+  The mode is per launch, not per target layer, so PQ #1214's rules hold
+  unchanged: every quantum of a GLM-5.3 launch stamps the kernel's identity
+  into `arithmetic.kda_capture_kernel`, its chain rolls of KDA layers run
+  the kernel, and a band-serial producer stamps its handoff. A model without
+  KDA attention runs nothing new and stamps nothing.
+- `fallback` is a new explicit value. It runs the image's Torch fallback
+  and adds no key to the execution block or the probe identity, so its rows
+  are an unset launch's rows from before this change, byte for byte. An
+  explicit value, `fallback` or a kernel name, binds only a handoff from its
+  own mode, as before; the refusal now names the setting that binds the
+  handoff (unset, or the producer's mode).
+- An admission refusal in the core names `fallback` as the way to run the
+  fallback, since an unset launch can now reach admission.
+
+The quantum prints one line naming its mode and where the mode came from.
+A campaign whose earlier chain-mode rows ran on the fallback, relaunched
+unset, stamps the kernel on its new rows: dev mode joins the two and prints
+the difference, and certified mode refuses the join. Set `fallback` in the
+spec to finish such a campaign on the fallback. Gates:
+`tests/test_kda_kernel_default_1252.py` (the resolver, and the five-layer
+band-serial CPU campaign through the core with the launcher's resolution),
+`tests/test_band_serial_dispatch.py`, `tests/test_dispatch_joint_quanta.py`
+and `tests/test_kda_capture_kernel.py`. This changes a runtime default. No
+format, pipeline stage, lane or ship gate changes.
+
 Stage B capture groups stage their host bytes in one held buffer
 (2026-09-25, `fix/1246-host-buffer-reuse`, PQ #1246). A capture pass used to
 allocate host memory once per capture group, at three sites: each read of
@@ -115,7 +158,8 @@ campaign, with a fixture kernel that counts real forwards and backwards),
 (#996 within kernel mode at the campaign's batch-4 capture),
 `tests/test_band_serial_dispatch.py` and `tests/test_no_new_seals.py`. No
 format, pipeline default, stage, lane or ship gate changes. A launch
-without the setting runs and records what it did before.
+without the setting runs and records what it did before (until PQ #1252,
+the entry above, made kernel mode the default).
 
 A retained PWC window loads its renders under one reader lease, on one loader
 pool, and parses each archive once (2026-09-24, `perf/1210-render-readahead`,
@@ -222,7 +266,8 @@ capture batch 4.
   `PRISMAQUANT_STAGE_B_REPLAY_REGIME`, and `dispatch_joint_quanta`
   (`_container_wrap`) validates it before it publishes a row. A plan's
   `execution` block may not carry it, an unknown name refuses, and unset
-  runs the fallback.
+  runs the fallback (until PQ #1252, which made the kernel the default and
+  added `fallback`).
 - The contract. The GLM derivative contract declares the kernel
   (`glm_source_derivative.capture_kernel_declaration`).
   `CaptureKernelDispatch` points the modeling module's
@@ -2759,8 +2804,16 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `fix/1246-host-buffer-reuse`.
+As of: 2026-09-25 · `perf/1252-kda-kernel-default`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `perf/1252-kda-kernel-default`) for **the KDA
+capture kernel as the Stage B default** (PQ #1252). An unset
+`PRISMAQUANT_STAGE_B_KDA_KERNEL` runs `kda_gram_v1` in kernel mode on a
+model with KDA attention, a band-serial consumer follows its producer's
+mode, and `fallback` reproduces the old unset rows. See the entry at the
+top. This changes a runtime default; no format, pipeline stage, lane or
+ship gate changes.
 
 Re-stamped (2026-09-25, `fix/1246-host-buffer-reuse`) for **a Stage B
 capture pass that stages its host bytes in one held buffer** (PQ #1246).

@@ -1719,21 +1719,23 @@ def _spec_capture_batch(spec_path: Path) -> int:
 
 
 def _spec_kda_capture_kernel(spec_path: Path) -> str | None:
-    """The KDA capture kernel the sealed spec's launches run, or None (PQ #1214).
+    """The mode the sealed spec's consumers bind a handoff in (PQ #1214, #1252).
 
     One dispatch seals one spec for every row, so a band it publishes runs in
     one mode. A consumer binds a handoff only in the mode of the launch it
-    is published into.
+    is published into: the kernel the spec names, ``None`` for ``fallback``,
+    or ``FOLLOW_PRODUCER`` when the spec leaves the setting unset, since the
+    launch then takes its producer's mode.
     """
     from prismaquant.glm_kda_capture_kernel import (
-        KdaCaptureKernelRefused, kda_capture_kernel_from_environment)
+        KdaCaptureKernelRefused, consumer_handoff_mode, kda_capture_kernel_setting)
 
     try:
         spec = json.loads(Path(spec_path).read_text())
     except (OSError, ValueError) as exc:
         raise DispatchRefused(f"campaign spec {spec_path}: {exc}") from exc
     try:
-        return kda_capture_kernel_from_environment(spec.get("env") or {})
+        return consumer_handoff_mode(kda_capture_kernel_setting(spec.get("env") or {}))
     except KdaCaptureKernelRefused as exc:
         raise DispatchRefused(f"campaign spec {spec_path}: {exc}") from exc
 
@@ -1949,10 +1951,10 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
         # uniform across every quantum of the dispatch (PQ #1028).
         from prismaquant.matmul_arithmetic import bf16_reduction_from_environment
         bf16_reduction_from_environment(spec.get("env", {}))
-        # So is the KDA capture kernel (PQ #1199); each quantum admits it for
-        # its own target layer.
-        from prismaquant.glm_kda_capture_kernel import kda_capture_kernel_from_environment
-        kda_capture_kernel_from_environment(spec.get("env", {}))
+        # So is the KDA capture kernel (PQ #1199): a kernel name, fallback,
+        # or unset for the default each quantum resolves (PQ #1252).
+        from prismaquant.glm_kda_capture_kernel import kda_capture_kernel_setting
+        kda_capture_kernel_setting(spec.get("env", {}))
     except (ValueError, RuntimeError) as exc:
         raise DispatchRefused(str(exc)) from exc
     if resource_policy is not None:
