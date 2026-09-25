@@ -190,7 +190,8 @@ def build_boundary_template(*, output_prefix, tier: str,
                             checkpoint_max_bytes: int | None = None,
                             concurrent_groups: int = 2,
                             template_id: str = BOUNDARY_TEMPLATE_ID,
-                            write_only: bool = False) -> dict:
+                            write_only: bool = False,
+                            export_rate_family: str | None = None) -> dict:
     """The pre-submit produced-output template for a Stage A capture.
 
     Sealed BEFORE submission (it is an input of the owner's own action) and
@@ -214,6 +215,13 @@ def build_boundary_template(*, output_prefix, tier: str,
     are zero and ``concurrent_groups`` does not apply. Its owner commits
     each group at its origin (``commit_origin_batch``), and a later action
     stages the group as an ordinary input.
+
+    ``export_rate_family`` (PrismaBuild #1126, PQ #1254) names the templates
+    whose spool exports share one learned export rate on a host. A template
+    per row is never measured on its own, so the band-serial handoff's
+    templates declare one family and each row starts from what the earlier
+    rows' exports measured. ``None`` declares none, and the template's bytes,
+    and so its id, are what they were before the field existed.
     """
 
     po = _produced_output_module()
@@ -256,6 +264,10 @@ def build_boundary_template(*, output_prefix, tier: str,
         # Only when true: a read-back template keeps the exact bytes, and so
         # the template id, it had before PrismaBuild #912.
         body["write_only"] = True
+    if export_rate_family is not None:
+        # Only when declared, for the same reason (PrismaBuild #1126); the
+        # PrismaBuild module checks that it is an identifier.
+        body["export_rate_family"] = export_rate_family
     return dict(po.validate_template(body))
 
 

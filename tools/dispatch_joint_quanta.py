@@ -2802,13 +2802,12 @@ def band_serial_roles(records: Sequence[tuple[Path, dict]]) -> dict[str, dict]:
 #: The prefix of a Stage B handoff template's derived id.
 HANDOFF_TEMPLATE_ID_PREFIX = "pq-stageb-handoff-"
 
-#: The export-rate family every Stage B handoff producer declares (PQ #1225).
-#: PrismaBuild learns a producer's export slots per template (#999), and each
-#: row's handoff template is new, so no row is ever measured and each runs
-#: its exports one at a time. One family string for every handoff producer
-#: lets PrismaBuild learn the rate across rows instead.
-#: TODO(PB #1126): declare it on the template once PrismaBuild defines the
-#: field (proposed name ``export_rate_family``); nothing reads it before then.
+#: The export-rate family every Stage B handoff template declares (PQ #1225,
+#: #1254). PrismaBuild learns a producer's export slots per template (#999),
+#: and each row's handoff template is new, so no row was ever measured and
+#: each ran its exports one at a time. The template's ``export_rate_family``
+#: (PrismaBuild #1126) keys the learned rate by this one string instead, so
+#: each row starts from what the earlier rows' exports measured.
 HANDOFF_EXPORT_RATE_FAMILY = "pq-stageb-handoff"
 
 
@@ -2884,7 +2883,7 @@ def handoff_template(record: Mapping, *, plan: Mapping,
                 artifact_max_bytes=int(policy["max_artifact_bytes"]),
                 group_size=int(policy["prefetch_batches"]),
                 max_entry_tensor_bytes=max(tensors), template_id=name,
-                write_only=True)
+                write_only=True, export_rate_family=HANDOFF_EXPORT_RATE_FAMILY)
 
         template = build(HANDOFF_TEMPLATE_ID_PREFIX + str(quantum_id)
                          if template_id is None else template_id)
