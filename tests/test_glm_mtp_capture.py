@@ -893,6 +893,20 @@ def test_cli_runs_both_phases_from_the_body_plan(mtp_source, monkeypatch):
     assert report["units"] == len(_mtp_routed(env))
     projection = json.loads(projection_path.read_text())
 
+    # The projection publishes once, and a second run refuses before the
+    # producer hashes the checkpoint again.
+    from prismaquant import tessera_expert_projection
+
+    def producer_again(*_args, **_kwargs):
+        raise AssertionError("the producer was asked again")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(tessera_expert_projection, "request_expert_projection", producer_again)
+        with pytest.raises(RuntimeError, match="publishes once"):
+            cli.main(["--phase", "projection", "--plan", str(plan_path),
+                      "--plan-sha256", _sha(plan_path), "--out", str(projection_dir)])
+    assert json.loads(projection_path.read_text()) == projection
+
     phase2 = env.root / "cli-capture"
     census_path = env.root / "cli-mtp-census.json"
     capture_args = ["--phase", "capture", "--plan", str(plan_path),
