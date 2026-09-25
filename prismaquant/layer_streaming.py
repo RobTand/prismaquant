@@ -238,8 +238,9 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
     ``sealed_head_tensors``), so they cannot disagree unnoticed.
 
     ``source_reads`` reads the model config, the index and each header off
-    the stage (PQ #1092); None opens the files. Profile detection resolves
-    from that staged config (PQ #1139), so it opens no config of its own.
+    the stage (PQ #1092); None opens the files. Profile detection (PQ #1139)
+    and the FP8 scale map's config declarations and index scan (PQ #1219)
+    resolve from those staged bytes, so neither opens a file of its own.
 
     Returns ``{"profile", "multimodal", "layers_prefix", "head_prefixes",
     "head_tensors", "head_spans", "layer_spans", "span_tensors",
@@ -262,9 +263,11 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
     )
 
     config_path = os.path.normpath(os.path.join(model_path, "config.json"))
+    staged_config = None
     if source_reads is not None and os.path.isfile(config_path):
-        profile = detect_profile(model_path, config=json.loads(
-            source_reads.whole(config_path, where="model config")))
+        staged_config = json.loads(
+            source_reads.whole(config_path, where="model config"))
+        profile = detect_profile(model_path, config=staged_config)
     else:
         profile = detect_profile(model_path)
     if _live_tree_head_extras(profile):
@@ -285,7 +288,8 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
         raw, model_path,
         lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal))
     fp8 = _build_fp8_scale_inv_map(model_path, multimodal=multimodal,
-                                   raw_weight_map=raw, profile=profile)
+                                   raw_weight_map=raw, profile=profile,
+                                   config=staged_config)
     head_prefixes = resident_head_prefixes(
         base_prefix_of_layers(layers_prefix),
         profile.head_resident_extra_prefixes(None))
@@ -368,9 +372,21 @@ class Fp8ScaleInvMap(dict):
         self.mxfp4_names = mxfp4_names
 
 
-def _declared_weight_block_size(model_path: str) -> tuple[int, int]:
+def _checkpoint_config(model_path: str, config: dict | None):
+    """The checkpoint's parsed `config.json`: ``config`` when the caller
+    already read it (off the stage under strict reads, PQ #1219), else the
+    file. Raises what `open`/`json.load` raise."""
+    if config is not None:
+        return config
+    with open(os.path.join(model_path, "config.json")) as f:
+        return json.load(f)
+
+
+def _declared_weight_block_size(model_path: str, *,
+                                config: dict | None = None) -> tuple[int, int]:
     """Read `quantization_config.weight_block_size` from the checkpoint
-    config and validate it.
+    config and validate it. ``config`` is the parsed config when the caller
+    already holds it (see `_checkpoint_config`).
 
     Called only when fp8 block-scaled weights were actually found, so a
     missing/null/malformed declaration is a hard error: the dequant grid
@@ -379,10 +395,8 @@ def _declared_weight_block_size(model_path: str) -> tuple[int, int]:
     different block size, and per-tensor-scale fp8 checkpoints — e.g.
     Mistral-Medium's scalar `weight_scale_inv` — are not block-dequantable
     at all)."""
-    cfg_path = os.path.join(model_path, "config.json")
     try:
-        with open(cfg_path) as f:
-            cfg = json.load(f)
+        cfg = _checkpoint_config(model_path, config)
     except Exception as exc:
         raise RuntimeError(
             f"checkpoint at {model_path!r} pairs fp8 weights with scale "
@@ -436,7 +450,7 @@ def _fp8_dequant_block(
 def _build_fp8_scale_inv_map(model_path: str, *,
                              multimodal: bool = False, source_authentication=None,
                              raw_weight_map: dict[str, str] | None = None,
-                             profile=None,
+                             profile=None, config: dict | None = None,
                              ) -> "Fp8ScaleInvMap":
     """Return `{model_weight_key: (scale_shard_path, scale_ckpt_key)}`
     for every native-FP8 weight tensor (fp8_e4m3fn + paired
@@ -460,6 +474,12 @@ def _build_fp8_scale_inv_map(model_path: str, *,
     the stage); None reads the index here, as before. ``profile`` is the
     checkpoint's profile when the caller has already detected it
     (`streaming_source_plan`, from the staged config); None detects it here.
+    ``config`` is the checkpoint's parsed `config.json` when the caller has
+    already read it (`streaming_source_plan`, off the stage, PQ #1219); the
+    block size and the MXFP4 declarations then come from it and the file is
+    not opened. None reads the file, as before. ``raw_weight_map`` also
+    reaches a profile's `fp8_scale_pairs` override, so DeepSeek-V4's pairing
+    scans the caller's index instead of opening its own.
     """
     # Profile-driven dispatch (refactor #32). Profiles that store FP8
     # scales under a non-standard path (DSv4 uses `.scale` siblings)
@@ -470,16 +490,19 @@ def _build_fp8_scale_inv_map(model_path: str, *,
         from .model_profiles import detect_profile
         profile = detect_profile(model_path)
     fp8_scale_pairs = getattr(profile, "fp8_scale_pairs", None)
-    explicit = (
-        fp8_scale_pairs(model_path)
-        if callable(fp8_scale_pairs)
-        else None
-    )
+    if not callable(fp8_scale_pairs):
+        explicit = None
+    elif raw_weight_map is not None:
+        explicit = fp8_scale_pairs(model_path, raw_weight_map=raw_weight_map)
+    else:
+        explicit = fp8_scale_pairs(model_path)
     if explicit is not None:
         return Fp8ScaleInvMap(
             explicit,
-            _declared_weight_block_size(model_path) if explicit else None,
-            mxfp4_names=_declared_mxfp4_names(model_path, explicit),
+            (_declared_weight_block_size(model_path, config=config)
+             if explicit else None),
+            mxfp4_names=_declared_mxfp4_names(model_path, explicit,
+                                              config=config),
         )
 
     index_file = os.path.join(model_path, "model.safetensors.index.json")
@@ -511,12 +534,13 @@ def _build_fp8_scale_inv_map(model_path: str, *,
         out[weight_live] = (os.path.join(model_path, shard), ck_key)
     return Fp8ScaleInvMap(
         out,
-        _declared_weight_block_size(model_path) if out else None,
-        mxfp4_names=_declared_mxfp4_names(model_path, out),
+        _declared_weight_block_size(model_path, config=config) if out else None,
+        mxfp4_names=_declared_mxfp4_names(model_path, out, config=config),
     )
 
 
-def _declared_mxfp4_names(model_path: str, mapping: dict) -> frozenset[str]:
+def _declared_mxfp4_names(model_path: str, mapping: dict, *,
+                          config: dict | None = None) -> frozenset[str]:
     """Mapped weight names the checkpoint explicitly declares MXFP4.
 
     Non-empty only when config.json declares packed-FP4 experts
@@ -532,10 +556,13 @@ def _declared_mxfp4_names(model_path: str, mapping: dict) -> frozenset[str]:
     asserted per tensor by `_check_mxfp4_packed_grid` at decode time, so a
     checkpoint whose shared experts are NOT packed-FP4 fails loudly with
     the exact mismatch rather than being silently reinterpreted.
-    Non-expert tensors stay on the block-FP8 dequant path."""
-    if not mapping or not declared_fp4_expert_dtype(model_path):
+    Non-expert tensors stay on the block-FP8 dequant path.
+
+    ``config`` is the parsed config when the caller already holds it; both
+    declarations are then read from it and the file is not opened."""
+    if not mapping or not declared_fp4_expert_dtype(model_path, config=config):
         return frozenset()
-    _check_declared_mxfp4_scale_fmt(model_path)
+    _check_declared_mxfp4_scale_fmt(model_path, config=config)
     return frozenset(n for n in mapping if declared_expert_dtype_covers(n))
 
 
@@ -544,7 +571,8 @@ def _declared_mxfp4_names(model_path: str, mapping: dict) -> frozenset[str]:
 _E8M0_SCALE_FMTS = frozenset({"ue8m0", "e8m0"})
 
 
-def _check_declared_mxfp4_scale_fmt(model_path: str) -> None:
+def _check_declared_mxfp4_scale_fmt(model_path: str, *,
+                                    config: dict | None = None) -> None:
     """Validate a declared-MXFP4 checkpoint's declared scale format.
 
     Step 3b reads the scale sibling as a raw E8M0 exponent plane
@@ -555,10 +583,12 @@ def _check_declared_mxfp4_scale_fmt(model_path: str) -> None:
     A missing declaration is deliberately NOT fatal: real DSv4-Flash
     checkpoints ship `expert_dtype` with no per-expert scale-format field,
     and the per-tensor dtype allow-list in `_check_mxfp4_packed_grid`
-    still guards the byte-plane reinterpretation."""
+    still guards the byte-plane reinterpretation.
+
+    ``config`` is the parsed config when the caller already holds it (see
+    `_checkpoint_config`); the file is then not opened."""
     try:
-        with open(os.path.join(model_path, "config.json")) as f:
-            cfg = json.load(f)
+        cfg = _checkpoint_config(model_path, config)
     except Exception:
         return
     if not isinstance(cfg, dict):
