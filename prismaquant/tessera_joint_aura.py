@@ -2146,8 +2146,13 @@ def _planned_source_window(config):
     plan without one gives no bound and the note reads the measured budget.
     """
     from .joint_retained_window_plan import planned_source_window_bytes
-    window = planned_source_window_bytes(
-        config.get('execution', {}).get('retained_operator_windows'))
+    try:
+        window = planned_source_window_bytes(
+            config.get('execution', {}).get('retained_operator_windows'))
+    except Exception as exc:  # noqa: BLE001 - a log note must never stop a run
+        print(f"prefetch note: the plan's source window is unreadable ({exc!r}); "
+              f"the note reads the measured budget", flush=True)
+        return {}
     return {} if window is None else {'planned_source_window_bytes': window}
 
 

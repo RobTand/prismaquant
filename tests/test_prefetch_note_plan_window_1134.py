@@ -98,3 +98,13 @@ def test_stage_b_builds_thread_the_plan_window_and_stage_a_plans_do_not():
     assert _planned_source_window(stage_b) == {
         "planned_source_window_bytes": SOURCE_RESERVE}
     assert _planned_source_window({"execution": {}}) == {}
+
+
+def test_an_unreadable_plan_window_drops_the_bound_not_the_run(capsys):
+    """The bound only shapes a log note: a plan window the note cannot read
+    falls back to the measured budget instead of raising into the row."""
+    from prismaquant.tessera_joint_aura import _planned_source_window
+
+    broken = {"execution": {"retained_operator_windows": {"budget": {}}}}
+    assert _planned_source_window(broken) == {}
+    assert "source window is unreadable" in capsys.readouterr().out
