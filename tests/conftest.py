@@ -275,6 +275,47 @@ def _restore_profile_detection_globals():
 
 
 @pytest.fixture(autouse=True)
+def _no_served_quantizer_identity_carried_between_tests():
+    """No test inherits another test's served-quantizer identity binding.
+
+    ``nvfp4_activation_contract._ACTIVE_SERVED_QUANTIZER`` is process-global,
+    and ``bind_served_quantizer_identity`` refuses to quietly re-bind once
+    something has priced under the first identity (the reuse guarantee behind
+    RobTand/prismaquant#567) -- so once one test binds the registered
+    operator, ``StaticActivationContract.quantize_dequantize`` takes the
+    registered-operator branch for every later test in the same process, not
+    only the one that bound it. A per-module reset does not cover every
+    caller: ``tests/test_render_score_served_quantizer_identity.py`` resets
+    *before* binding in most of its tests but never after, so a CPU test that
+    exercises the contract's dynamic fallback
+    (``test_stageb_one_pass_spill.py::
+    test_row_local_qdq_admission_admits_the_nvfp4_activation_paths
+    [served-static-scale]``) fails when it runs after that file in the same
+    shard and passes alone (RobTand/prismaquant#1215) -- the same
+    invisible-in-serial, shard-order-dependent shape as #197's
+    profile-detection leak, on a different global.
+    ``_reset_served_quantizer_identity_for_tests`` also drops the resolution
+    cache (``_RESOLVED_SERVED_QUANTIZER``), so a test that monkeypatches
+    registration or kernel loading to probe resolution
+    (``tests/test_nvfp4_served_dequant_kernel.py``) cannot leave a stale
+    resolved identity behind for the next test to read either.
+
+    Resetting to the unbound state is safe as a suite-wide default: unbound is
+    exactly the state production starts a process in, and it makes a served
+    rung refuse rather than guess. It is not the same thing as
+    ``priced_model_screen.py``'s MODEL default, which stays scoped per-module
+    on purpose (a repository-wide default binding would mask a missing
+    production bind); this fixture only clears what a prior test left behind,
+    it never binds anything itself.
+    """
+    from prismaquant import nvfp4_activation_contract as owner
+
+    owner._reset_served_quantizer_identity_for_tests()
+    yield
+    owner._reset_served_quantizer_identity_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _no_staged_tier_policy_carried_between_tests():
     """No test inherits another test's strict staged-tier policy.
 
