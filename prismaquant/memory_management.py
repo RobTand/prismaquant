@@ -20,13 +20,33 @@ _BUDGET_EVICTORS: "weakref.WeakSet[object]" = weakref.WeakSet()
 #: cgroup rather than the box.
 MIN_HOST_FLOOR_BYTES = 3*1024**3
 
-#: The floor the bounded capture path uses, above the minimum on purpose: the
-#: joint campaign's own declared ``min_free_gib``, which is the floor the cost
-#: pass already refuses to allocate below. It is an inherited DECLARATION, not
-#: a measurement of this path -- no receipt here establishes the streaming
-#: loader's real host working set -- so a plan that declares a different floor
-#: (or a receipt that measures one) is what moves it, and nothing re-derives it.
-DEFAULT_HOST_FLOOR_BYTES = 8*1024**3
+#: ``MemAvailable`` when the Sparks hung on 2026-09-14: a vLLM A8 routed-expert
+#: load (tessera#501) took both GB10s down at 8.5 GiB available, memory PSI
+#: full 89 (PQ #1158). It is the measured edge of the failure the host floor
+#: exists to refuse, so a floor at or below it admits that failure.
+HANG_MEM_AVAILABLE_BYTES = int(8.5*1024**3)
+
+#: The GB10 box watchdog's ``MemAvailable`` floor. The watchdog was set after
+#: that hang, one per box, and acts below 16 GiB available or at memory PSI
+#: full avg10 20 and above. It is fleet configuration: no repository holds it,
+#: and nothing a row can read at run time publishes its floor (no PrismaBuild
+#: offer field, host announcement or launch environment carries it). So the
+#: value is restated here from the served receipts that record it, Tessera
+#: ``docs/measurements/tessera-glm53-a4-stub-tp2-served-2026-09-14.md`` and
+#: ``tessera-glm53-a4-stub-tp2-world-size-2026-09-15.md`` ("Memory watchdog").
+#: Its scope is the two GB10s; no other box's watchdog is recorded. A watchdog
+#: that moves its floor must move this line with it.
+BOX_WATCHDOG_FLOOR_BYTES = 16*1024**3
+
+#: The floor a capture guard holds unless its caller states one: the box
+#: watchdog's, and this is PrismaQuant's one home of it. A lower floor admits
+#: allocations the watchdog then ends from outside the row, with no refusal
+#: receipt; the 8 GiB this replaced sat below the hang itself. A higher one
+#: refuses memory the box lets a row hold. On an idle GB10 (115.638 GiB
+#: available of 121.627 GiB, PrismaBuild
+#: ``docs/gb10_memory_104_capacity_2026-09-07.md``) a row can hold
+#: 115.638 - 16 = 99.638 GiB before this floor refuses it.
+DEFAULT_HOST_FLOOR_BYTES = BOX_WATCHDOG_FLOOR_BYTES
 
 #: The attribute a memory-guard callback carries when it can hold the CPU and
 #: device sides of a future allocation apart. A callback without it keeps the
