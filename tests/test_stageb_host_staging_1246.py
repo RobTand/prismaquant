@@ -249,9 +249,9 @@ def _instrument(monkeypatch):
     monkeypatch.setattr(scratch_mod.ExactCotangentScratch, "__init__", recorded_init)
     original_direct_io = scratch_mod.ExactCotangentScratch._direct_io
 
-    def counted_direct_io(self, call, view, offset, size, what):
+    def counted_direct_io(self, call, view, offset, size, what, *rest):
         seen.direct[what] += 1
-        return original_direct_io(self, call, view, offset, size, what)
+        return original_direct_io(self, call, view, offset, size, what, *rest)
 
     monkeypatch.setattr(scratch_mod.ExactCotangentScratch, "_direct_io", counted_direct_io)
     return seen
