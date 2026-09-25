@@ -128,9 +128,12 @@ def prepare(root: Path, tier: str) -> dict:
 
     # The dispatcher's default id: derived from the template's body, which
     # names this root's handoff directory, so it is this root's own (PQ #1054).
+    # The template names the handoff directory under the output root it is
+    # given (PQ #1200), so it is given the root the records were cut under,
+    # where the producer writes, as the campaign's dispatch is.
     template = dispatch.handoff_template_path(
         producer, plan={"execution": {"boundary_storage": storage}},
-        adjoint_slice=slice_of(producer), tier=tier, output_root=root / "out")
+        adjoint_slice=slice_of(producer), tier=tier, output_root=root / "run")
 
     # The producer's staged input: its checkpoint plane (boundary 4).
     plane = slice_of(producer)["checkpoint"]["activation_entries"]

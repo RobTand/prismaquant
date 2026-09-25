@@ -112,10 +112,13 @@ def producer_owner(tmp_path, pb_repo, producer, storage, *,
     from prismaquant.joint_quantum_handoff import handoff_root
     from prismaquant.stage_a_produced_output import BoundaryProducedPublication
 
+    # The campaign root the records were cut under (_tiny_records): the
+    # template names the handoff directory under the dispatch's output root
+    # (PQ #1200), and the emitter writes inside the record's output space.
     template_path = dispatch.handoff_template_path(
         producer, plan={"execution": {"boundary_storage": storage}},
         adjoint_slice=_adjoint_slice(producer), tier=chain.TIER,
-        output_root=tmp_path / "out")
+        output_root=tmp_path / "run")
     template = json.loads(template_path.read_text())
     assert template["output_prefix"] == str(
         handoff_root(producer["output_space"]["root"]).resolve())
