@@ -424,14 +424,19 @@ def test_a_second_thread_reads_sealed_slots_while_the_pass_writes(tmp_path):
     writes other slots through the shared bounce buffer: every byte exact."""
     from prismaquant.perturbed_x_cache import ExactCotangentScratch
     count = 12
-    records = [{"name": f"cotangent-0-{i}", "shape": [2, 1024],
-                "dtype": "torch.float32", "tensor_bytes": 8192} for i in range(count)]
+    # One-byte elements, so a source one element into its storage is off
+    # any direct-I/O memory grid wider than a byte. The local disk of a GB10
+    # worker reports a grid of at most 4 bytes (a float32 source one element
+    # in stayed on it and read without the bounce buffer), so float32 would
+    # not exercise the bounce buffer at all.
+    records = [{"name": f"cotangent-0-{i}", "shape": [2, 4096],
+                "dtype": "torch.uint8", "tensor_bytes": 8192} for i in range(count)]
     scratch = ExactCotangentScratch(records, directory=tmp_path, max_bytes=1 << 20)
     direct = _direct_io_supported(tmp_path)
     try:
         def value(i, round_):
-            return (torch.arange(2048, dtype=torch.int32).reshape(2, 1024)
-                    * (i + 1) + round_).view(torch.float32)
+            return ((torch.arange(8192, dtype=torch.int64) * (i + 1) + round_)
+                    % 256).to(torch.uint8).reshape(2, 4096)
 
         # Off the grid: a source one element into its storage.
         def off_grid(tensor):
@@ -439,6 +444,11 @@ def test_a_second_thread_reads_sealed_slots_while_the_pass_writes(tmp_path):
             view = base[1:].view(tensor.shape)
             view.copy_(tensor)
             return view
+
+        if direct:
+            # The premise: these writes go through the shared bounce buffer.
+            assert scratch._direct is not None
+            assert not scratch._on_grid(off_grid(value(0, 0)))
 
         final = {}
         for i in range(0, count, 2):
@@ -453,8 +463,7 @@ def test_a_second_thread_reads_sealed_slots_while_the_pass_writes(tmp_path):
                 for _round in range(40):
                     for key, expected in final.items():
                         out = scratch.read_into(key, buffer, bounce=False)
-                        if not torch.equal(out.view(torch.int32),
-                                           expected.view(torch.int32)):
+                        if not torch.equal(out, expected):
                             failures.append(key)
             except BaseException as exc:            # noqa: BLE001
                 failures.append(repr(exc))
@@ -464,8 +473,7 @@ def test_a_second_thread_reads_sealed_slots_while_the_pass_writes(tmp_path):
         for round_ in range(40):
             for i in range(1, count, 2):
                 scratch[0, i] = off_grid(value(i, round_))
-                assert torch.equal(scratch[0, i].view(torch.int32),
-                                   value(i, round_).view(torch.int32))
+                assert torch.equal(scratch[0, i], value(i, round_))
         thread.join()
         assert failures == []
         if direct:
