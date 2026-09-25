@@ -66,10 +66,11 @@ def _capture_from_logits(logits, bias, routing=ROUTING, *, permute=None):
     mask = torch.zeros_like(group_scores).scatter_(1, group_idx, 1).bool()
     mask = mask.unsqueeze(-1).expand(-1, n_group, experts // n_group).reshape(-1, experts)
     index = choice.masked_fill(~mask, float("-inf")).topk(routing["top_k"], dim=-1)[1]
-    if permute is not None:
-        index = index[:, permute]
     weights = scores.gather(1, index)
     weights = weights / (weights.sum(-1, keepdim=True) + 1e-20) * routing["routed_scaling_factor"]
+    if permute is not None:
+        # The same selection and the same weights, listed in another order.
+        index, weights = index[:, permute], weights[:, permute]
     tokens = logits.shape[0]
     moe = torch.linspace(-1, 1, tokens * 16).view(tokens, 16).to(torch.bfloat16)
     return {"attention_output": moe.clone(), "moe_input": moe, "router_logits": logits,
