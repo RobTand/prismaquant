@@ -12,15 +12,21 @@ the largest element error and ``2 u`` for the relative Frobenius error
 (``u = 2^-24``). The shapes are small; the harness runs the production shape.
 
 The refusal and identity tests need no GPU; the numerics tests skip without
-CUDA.
+CUDA. Every test here calls into ``prismaquant.kernels.kda_chunk``, whose
+kernels are ``@triton.jit`` functions defined at import, so the whole module
+skips where Triton is not installed (hosted CPU CI, #1224); the fleet image
+has Triton and runs all of it.
 """
 import struct
 
 import pytest
 import torch
 
-from experiments import kda_kernel_numerics as numerics
-from prismaquant.kernels import kda_chunk
+pytest.importorskip(
+    "triton", reason="prismaquant.kernels.kda_chunk defines its kernels with Triton at import")
+
+from experiments import kda_kernel_numerics as numerics  # noqa: E402
+from prismaquant.kernels import kda_chunk  # noqa: E402
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="the KDA kernel runs on CUDA")
 
