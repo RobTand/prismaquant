@@ -27,13 +27,21 @@ def _source_digest():
 
 @lru_cache(maxsize=1)
 def load_backend():
-    """Compile/load before the measured projection lease is entered."""
+    """Compile/load before the measured projection lease is entered.
+
+    The build runs under :func:`jit_build_lock`, so a builder killed while it
+    held torch's build lock cannot leave every later load waiting (PQ #1174).
+    """
     from torch.utils.cpp_extension import load
 
-    return load(name='pq_joint_projection_reduce_' + _source_digest()[:16],
-                sources=[str(Path(__file__).with_suffix(suffix)) for suffix in ('.cpp', '.cu')],
-                extra_cflags=CPP_FLAGS, extra_cuda_cflags=CUDA_FLAGS,
-                with_cuda=True, verbose=True)
+    from .jit_build_lock import jit_build_lock, torch_build_directory
+
+    name = 'pq_joint_projection_reduce_' + _source_digest()[:16]
+    with jit_build_lock(torch_build_directory(name)):
+        return load(name=name,
+                    sources=[str(Path(__file__).with_suffix(suffix)) for suffix in ('.cpp', '.cu')],
+                    extra_cflags=CPP_FLAGS, extra_cuda_cflags=CUDA_FLAGS,
+                    with_cuda=True, verbose=True)
 
 
 def fast_path_eligible(left, right):
