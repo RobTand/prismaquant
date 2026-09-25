@@ -70,3 +70,57 @@ def test_static_reference_refuses_missing_or_other_quality_quantizer_build():
     assert require_reference_quantizer(data,activation,{'arithmetic':{'served_quantizer':identity}})==identity
     with pytest.raises(ValueError,match='differs from actual joint quality arithmetic'):
         require_reference_quantizer(data,activation,{'arithmetic':{'served_quantizer':{**identity,'image_content_sha256':'b'*64}}})
+
+
+def _registered_record(**overrides):
+    from prismaquant.nvfp4_activation_contract import SERVED_QUANTIZER_IDENTITY_SCHEMA
+    record = {'schema': SERVED_QUANTIZER_IDENTITY_SCHEMA,
+              'backend': 'registered_scaled_fp4_quant', 'op': 'scaled_fp4_quant',
+              'platform': 'cuda:sm_121', 'torch': '2.13.0+cu130', 'torch_git': 'abc',
+              'vllm': '0.20.0', 'image_content_sha256': 'a' * 64}
+    record.update(overrides)
+    return record
+
+
+@pytest.mark.parametrize('reference_has_kernel', [False, True])
+def test_static_reference_ignores_the_dequant_kernel_field(reference_has_kernel):
+    """PQ #1211: ``dequant_kernel`` is recorded but is not a reuse axis.
+
+    A native reference recorded before the field existed must still bind a
+    joint row that carries it, and the other way round: the fused and the
+    Torch dequantisation give bit-identical output, so they price one number.
+    """
+    from prismaquant.native_execution_binding import require_reference_quantizer
+    from prismaquant.nvfp4_activation_contract import SERVED_QUANTIZER_DEQUANT_KERNEL
+    activation = {'static_contract': {'measured_as_served': True}}
+    with_kernel = _registered_record(dequant_kernel=SERVED_QUANTIZER_DEQUANT_KERNEL)
+    without_kernel = _registered_record()
+    reference, probe = ((with_kernel, without_kernel) if reference_has_kernel
+                        else (without_kernel, with_kernel))
+    data = {'reference_served_quantizer': reference}
+    assert require_reference_quantizer(
+        data, activation, {'arithmetic': {'served_quantizer': probe}}) == reference
+
+
+@pytest.mark.parametrize('axis', ['schema', 'backend', 'op', 'platform', 'torch',
+                                  'torch_git', 'vllm', 'image_content_sha256'])
+def test_static_reference_still_refuses_a_reuse_axis_difference(axis):
+    from prismaquant.native_execution_binding import require_reference_quantizer
+    from prismaquant.nvfp4_activation_contract import SERVED_QUANTIZER_DEQUANT_KERNEL
+    activation = {'static_contract': {'measured_as_served': True}}
+    reference = _registered_record()
+    probe = _registered_record(dequant_kernel=SERVED_QUANTIZER_DEQUANT_KERNEL,
+                               **{axis: 'other'})
+    with pytest.raises(ValueError, match='differs from actual joint quality arithmetic'):
+        require_reference_quantizer({'reference_served_quantizer': reference}, activation,
+                                    {'arithmetic': {'served_quantizer': probe}})
+
+
+@pytest.mark.parametrize('probe', [{}, {'arithmetic': {}},
+                                   {'arithmetic': {'served_quantizer': None}}])
+def test_static_reference_refuses_a_probe_without_a_served_quantizer(probe):
+    from prismaquant.native_execution_binding import require_reference_quantizer
+    activation = {'static_contract': {'measured_as_served': True}}
+    with pytest.raises(ValueError, match='differs from actual joint quality arithmetic'):
+        require_reference_quantizer({'reference_served_quantizer': _registered_record()},
+                                    activation, probe)

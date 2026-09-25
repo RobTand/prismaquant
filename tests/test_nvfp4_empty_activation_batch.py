@@ -152,9 +152,26 @@ def test_the_empty_path_still_refuses_what_the_guards_refuse(monkeypatch):
     assert calls == []
 
 
+def _cpu_dequant_kernels(monkeypatch):
+    """The fused kernels (#1211) are CUDA-only; this file's tensors are CPU.
+
+    What is priced here is which call the leg makes, so the kernels are
+    replaced by CPU functions with their contracts; their arithmetic is held
+    bit-identical to the Torch composition in
+    ``tests/test_nvfp4_served_dequant_kernel.py``.
+    """
+    group = owner.FP4_GROUP_SIZE
+    monkeypatch.setattr(owner, "_served_dequant_kernels", lambda: types.SimpleNamespace(
+        group_abs_max=lambda rows: rows.float().reshape(
+            rows.shape[0], -1, group).abs().amax(-1),
+        dequantize_codes=lambda packed, stored, used, table, dtype: torch.zeros(
+            packed.shape[0], packed.shape[1] * 2, dtype=dtype)))
+
+
 def test_a_real_batch_still_launches_the_operator_once(monkeypatch):
     """The guard is a short-circuit, not a replacement for the operator."""
     calls = _op_spy(monkeypatch, rows=4, columns=1024)
+    _cpu_dequant_kernels(monkeypatch)
 
     out = owner._nvfp4_activation_qdq_registered_op(_FakeCudaActivation((4, 1024)), 1.0)
 

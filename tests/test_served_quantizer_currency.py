@@ -36,7 +36,8 @@ def _registered_identity(**overrides) -> owner.ServedQuantizerIdentity:
     fields = {"backend": owner.SERVED_QUANTIZER_BACKEND_REGISTERED_OP,
               "op": owner.SERVED_QUANTIZER_OP, "platform": "sm_121",
               "torch": "2.13.0+cu130", "vllm": "0.1.dev20073",
-              "image_content_sha256": "d" * 64}
+              "image_content_sha256": "d" * 64,
+              "dequant_kernel": owner.SERVED_QUANTIZER_DEQUANT_KERNEL}
     fields.update(overrides)
     return owner.ServedQuantizerIdentity(**fields)
 
@@ -227,7 +228,8 @@ def test_rebinding_a_different_arithmetic_after_pricing_refuses():
                 backend=owner.SERVED_QUANTIZER_BACKEND_REGISTERED_OP,
                 op=owner.SERVED_QUANTIZER_OP, platform="sm_121",
                 torch="2.13.0+cu130", vllm="0.1.dev20073",
-                image_content_sha256="d" * 64),
+                image_content_sha256="d" * 64,
+                dequant_kernel=owner.SERVED_QUANTIZER_DEQUANT_KERNEL),
             require=False)
 
 
@@ -240,7 +242,8 @@ def test_a_served_binding_without_provenance_is_refused():
     for missing in ("platform", "vllm", "image_content_sha256"):
         fields = {"op": owner.SERVED_QUANTIZER_OP, "platform": "sm_121",
                   "torch": "2.13.0+cu130", "vllm": "0.1.dev20073",
-                  "image_content_sha256": "d" * 64}
+                  "image_content_sha256": "d" * 64,
+                  "dequant_kernel": owner.SERVED_QUANTIZER_DEQUANT_KERNEL}
         fields.pop(missing)
         owner._reset_served_quantizer_identity_for_tests()
 
@@ -296,7 +299,8 @@ def test_the_identity_carries_the_axes_a_reader_needs(monkeypatch):
     assert record["image_content_sha256"] == "a" * 64
     assert record["torch"] == str(torch.__version__)
     assert set(record) == {"schema", "backend", "op", "platform", "torch",
-                           "torch_git", "vllm", "image_content_sha256"}
+                           "torch_git", "vllm", "image_content_sha256",
+                           "dequant_kernel"}
 
 
 def test_the_operator_leg_derives_the_block_scale_in_fp32():
