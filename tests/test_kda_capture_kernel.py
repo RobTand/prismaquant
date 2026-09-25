@@ -226,6 +226,7 @@ def test_admission_compares_the_runtime_with_the_packaged_qualification(
     assert "qualification_sha256" not in admitted.identity
     assert admitted.identity["declaration"] == derivative.capture_kernel_declaration("kda_gram_v1")
     assert admitted.record()["qualification_sha256"] == admitted.qualification_sha256
+    assert admitted.record()["qualification_matched"] is True
 
     _admitted(monkeypatch, tmp_path, qualified={"probe": {"shape": [1], "sha256": "0" * 64}})
     with pytest.raises(capture.KdaCaptureKernelRefused, match="outside its packaged qualification: probe"):
@@ -238,7 +239,32 @@ def test_admission_compares_the_runtime_with_the_packaged_qualification(
     admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(),
                                                 device="cpu")
     assert admitted.qualification_sha256 is None
+    assert admitted.record()["qualification_matched"] is False
     assert "seal KDA capture kernel qualification differs" in capsys.readouterr().out
+
+
+def test_a_dev_mode_mismatch_records_that_the_runtime_is_not_the_qualified_one(
+        bound_model, modeling, monkeypatch, tmp_path, capsys):
+    """Dev mode runs a kernel that differs from its qualification, and says so (#1199 D5)."""
+    import hashlib
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    path = _admitted(monkeypatch, tmp_path, qualified={"probe": {"shape": [1], "sha256": "0" * 64}})
+    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(),
+                                                device="cpu")
+    assert "seal KDA capture kernel qualification differs" in capsys.readouterr().out
+    record = admitted.record()
+    # The digest names the file this runtime was compared with; the flag says
+    # whether it matched, so the record never claims a qualification it lacks.
+    assert record["qualification_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert record["qualification_matched"] is False
+    assert admitted.qualification_matched is False
+
+    _admitted(monkeypatch, tmp_path, qualified={})
+    admitted = capture.admit_kda_capture_kernel("kda_gram_v1", bound_model, kda_layer(),
+                                                device="cpu")
+    assert "seal KDA capture kernel qualification" not in capsys.readouterr().out
+    assert admitted.record()["qualification_matched"] is True
 
 
 # ---- the pass scope ---------------------------------------------------------
@@ -385,7 +411,8 @@ def test_the_core_runs_every_target_pass_on_the_kernel_and_stamps_its_identity(
 
     def admit(name, model, layer_module, *, device, emits_handoff=False):
         admissions.append((name, emits_handoff))
-        return capture.AdmittedKdaKernel(dispatch, identity, "q" * 64)
+        return capture.AdmittedKdaKernel(dispatch, identity, "q" * 64,
+                                         qualification_matched=True)
 
     monkeypatch.setattr(capture, "admit_kda_capture_kernel", admit)
     events = _passes(monkeypatch, dispatch)
@@ -398,6 +425,7 @@ def test_the_core_runs_every_target_pass_on_the_kernel_and_stamps_its_identity(
     record = counters["kda_capture_kernel"]
     assert record["executed"] is True and record["name"] == "kda_gram_v1"
     assert record["qualification_sha256"] == "q" * 64
+    assert record["qualification_matched"] is True
     assert record["passes"] == record["calls"] == len(target) == dispatch.entered
     # The fixture dispatch changes no arithmetic, so the rows are the baseline's.
     assert _rows(payload) == _rows(baseline)
