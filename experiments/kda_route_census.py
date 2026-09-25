@@ -487,6 +487,20 @@ def group_checks(captures: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def declared_layer_kda(text_config, layer: int) -> bool:
+    """Whether the model config declares ``layer`` a KDA (linear attention) layer.
+
+    GLM-5.3 lists every layer's attention kind in ``layer_types``
+    (``model_profiles/glm5_next.py``). A config without the list, or without
+    an entry for the layer, is a refusal: the census never guesses which
+    attention a layer runs.
+    """
+    layer_types = getattr(text_config, "layer_types", None)
+    if not isinstance(layer_types, (list, tuple)) or not 0 <= int(layer) < len(layer_types):
+        raise CensusRefused(f"the model config declares no attention kind for layer {layer}")
+    return layer_types[int(layer)] == "linear_attention"
+
+
 def phase_names(layer: int) -> tuple[str, str, str]:
     return ("head", f"layer-{int(layer):03d}-source", f"layer-{int(layer):03d}-bound")
 
@@ -847,6 +861,10 @@ def run_census(args) -> int:
         "allow_bf16_reduced_precision_reduction": bool(allow_bf16),
     }
 
+    # Read before the source install, so a config the census cannot classify
+    # refuses in the head phase rather than after the layer's bytes.
+    declared_kda = declared_layer_kda(runner.model.config.get_text_config(), layer)
+
     # ---- the layer's source --------------------------------------------------
     progress.enter(names[1])
     source_started = time.time()
@@ -859,7 +877,6 @@ def run_census(args) -> int:
                               where="kda route census")
     layer_module = runner.layers[layer]
     kda_layer = layer_runs_kda(layer_module)
-    declared_kda = runner.model.config.get_text_config().layer_types[layer] == "linear_attention"
     if kda_layer != declared_kda:
         raise CensusRefused(f"layer {layer}: KDA by class {kda_layer}, by config {declared_kda}")
     router = layer_module.mlp.gate

@@ -22,7 +22,8 @@ from torch import nn
 from experiments import kda_route_census as census
 from experiments.kda_route_census import (
     CensusRefused, LayerCapture, PlaneStats, build_census_manifest, changed_experts,
-    compare_modes, derive_census_spec, group_checks, recompute_selection, run_group,
+    compare_modes, declared_layer_kda, derive_census_spec, group_checks, recompute_selection,
+    run_group,
     sorted_routes, summarize)
 
 
@@ -514,3 +515,24 @@ def test_the_census_spec_drops_what_the_census_does_not_write():
                               "PRISMAQUANT_DEV_MODE": "1"}
     assert derived["cpu_memory_gb"] == 28 and spec["env"]["PRISMAQUANT_STAGE_B_SPILL_ROOT"]
     assert len(changes) == 8
+
+
+# GLM-5.3-Flash's layer_types: every fourth layer, from layer 3, is DSA.
+GLM_LAYER_TYPES = ["deepseek_sparse_attention" if layer % 4 == 3 else "linear_attention"
+                   for layer in range(45)]
+
+
+def test_the_declared_attention_kind_is_read_from_layer_types():
+    config = types.SimpleNamespace(layer_types=GLM_LAYER_TYPES)
+    assert declared_layer_kda(config, 44) is True
+    assert declared_layer_kda(config, 43) is False
+
+
+@pytest.mark.parametrize("config", [
+    types.SimpleNamespace(),
+    types.SimpleNamespace(layer_types=None),
+    types.SimpleNamespace(layer_types=GLM_LAYER_TYPES[:44]),
+])
+def test_a_config_without_the_layer_kind_is_a_refusal(config):
+    with pytest.raises(CensusRefused, match="declares no attention kind for layer 44"):
+        declared_layer_kda(config, 44)
