@@ -21986,7 +21986,12 @@ RobTand/tessera has been public since 2026-09-05, and the first receipt is run
 pinned Tessera` fetched `1221d2a4…` and `Install pinned Tessera` reported
 `Successfully installed tessera-quant-0.1.0` in both jobs, and the suite ran
 green (4698 passed, 136 skipped, 3 xfailed, 21m20s). No repository secret
-exists or is wanted for this step (#175). §12 D11.
+exists or is wanted for this step (#175). Only PR runs cancel a superseded
+run: a push to `main` gets a concurrency group of its own and is never
+cancelled or replaced by the next merge, so every merged tree gets a complete
+hosted run (#962; `tests/test_ci_concurrency.py`). The test job is still not a
+required check on `main`, which is branch protection rather than the workflow.
+§12 D11.
 
 ### 8.7 A fourth plug-in point: `FormatCostPlugin` (formats, not models)
 
