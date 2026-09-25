@@ -421,6 +421,8 @@ class StreamedBoundaryArtifacts:
             "produced_groups_prewritten": 0, "produced_groups_published": 0,
             "produced_file_groups": 0,
             "produced_groups_committed_at_origin": 0,
+            # Seconds spent in PrismaBuild's origin commits (PQ #1225).
+            "produced_commit_origin_s": 0.0,
             "produced_groups_materialized": 0, "produced_groups_retired": 0,
             "produced_groups_rematerialized": 0,
             "produced_group_release_failures": 0,
@@ -1044,9 +1046,17 @@ class StreamedBoundaryArtifacts:
         self._reserve(nbytes)
         try:
             with torch.profiler.record_function("aura.exact_activation.write"):
+                # A spool entry is never the only copy of committed work, so
+                # it is written without fsync (PQ #1225). Nothing counts it
+                # until PrismaBuild acknowledges the export's own fsynced
+                # copy, the export hashes every byte it copies against this
+                # reference, and a same-box read (PQ #1110) checks the size
+                # and the sha256 of every byte it reads. A crash that tears
+                # the local file fails those checks; it never lands.
                 reference = write_exact_activation_cache_entry(write_directory, name, tensor,
                     identity=identity, max_tensor_bytes=nbytes, max_file_bytes=file_limit,
-                    preallocate=self._local_output_spool is not None)
+                    preallocate=self._local_output_spool is not None,
+                    durable=self._local_output_spool is None)
                 if self._local_output_spool is not None:
                     # ``read_back`` keeps the group's local copy after its
                     # export lands, for this box's own reads (PQ #1110).
@@ -1164,12 +1174,20 @@ class StreamedBoundaryArtifacts:
         ProducedExportRefused`, recorded in the spool's report). Nothing may
         be read back through the spool after it.
 
-        A write-only owner then commits every complete group at its origin
+        A write-only owner commits every complete group at its origin
         (PrismaBuild #912), in the order it wrote them, against the
         identities each export receipt recorded. A group already committed
-        is not committed again.
+        is not committed again. Each group commits as soon as its own export
+        lands, while the later exports are still copying, so the commits
+        overlap the wait instead of following it (PQ #1225).
         """
         if self._local_output_spool is not None:
+            if self._produced_plan is not None and self._produced_plan["write_only"]:
+                for group in list(self._produced_groups.values()):
+                    if len(group["references"]) == len(group["planned"]) // 2:
+                        self._local_output_spool.await_group(
+                            group["batch_id"], where="drain")
+                        self._produced_commit_origin(group)
             # The action's end: every export lands (a wait on each export's
             # own state, no clock, PQ #1110), no read follows here, so every
             # local copy goes, and then every retired entry's canonical file.
@@ -1190,6 +1208,8 @@ class StreamedBoundaryArtifacts:
         and digests the writer recorded. Through the spool, PrismaBuild
         checks them against the export it landed. Returns the batch ref.
         """
+        import time
+
         if group.get("origin_ref") is not None:
             return group["origin_ref"]
         batch_id = group["batch_id"]
@@ -1197,12 +1217,14 @@ class StreamedBoundaryArtifacts:
                            reference, producer_generation=batch_id)
                        for reference in group["references"]]
         lifetime = self._produced_plan["origin_lifetime"]
+        started = time.monotonic()
         if self._local_output_spool is None:
             out = self._produced.commit_origin(
                 batch_id=batch_id, descriptors=descriptors, lifetime=lifetime)
         else:
             out = self._local_output_spool.commit_origin(
                 batch_id, descriptors, lifetime=lifetime)
+        self.telemetry["produced_commit_origin_s"] += time.monotonic() - started
         group["origin_ref"] = dict(out["ref"])
         self._produced_origin_batches.append(dict(out["ref"]))
         self.telemetry["produced_groups_committed_at_origin"] += 1

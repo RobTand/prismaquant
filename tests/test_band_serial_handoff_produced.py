@@ -154,7 +154,7 @@ def producer_owner(tmp_path, pb_repo, producer, storage, *,
     return publication, q, env
 
 
-def emit_handoff(producer, storage, publication):
+def emit_handoff(producer, storage, publication, *, emitters=None):
     from prismaquant.joint_quantum_handoff import HandoffEmitter
 
     plane = {(p, b): torch.full((2, 4), 10.0 * p + b)
@@ -164,6 +164,8 @@ def emit_handoff(producer, storage, publication):
     emitter = HandoffEmitter(record=producer, adjoint_slice=_adjoint_slice(producer),
                              boundary_storage=storage, capture_batch=1,
                              publication=publication)
+    if emitters is not None:
+        emitters.append(emitter)
     published = emitter.emit(grad_plane=plane, cotangent_owners=owners,
                              n_probes=N_PROBES, n_batches=N_BATCHES)
     return published, plane
