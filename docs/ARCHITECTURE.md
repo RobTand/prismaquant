@@ -40,8 +40,36 @@ sealed budget. `retained_render_cap_bytes` (6,023,929,799 bytes on the
 row-041 plan) is the largest window's renders, and the quantum sizes the PWC
 LRU to it, so a second window's renders would be unpriced.
 
+Measured with `tools/pwc_window_load_bench.py`: 64 of row 041's window-1
+renders, three windows per child, base and fix children interleaved over six
+rounds in one PrismaBuild action, 12 measured windows per arm, py-spy
+`--nonblocking` on every child. Base first, then fix:
+
+- **sparklina, GPU consumer, idle box** (PB `88c2b1705f1c`): window load
+  median 1.213 s to 0.658 s (-46%), window wall median 4.727 s to 4.157 s
+  (-12%). Main-thread samples in the window's loads 20.2% to 12.3%. Loader
+  samples in lease work 43.3% to 16.5%, and loader samples overall 3342 to
+  1946. GPU power per window 65.9 W to 73.7 W mean (47% to 53% of the 140 W
+  envelope) for 311.7 J to 305.1 J per window at the same GPU work. NFS
+  `LOCK` operations per child (192 loads) 414.5 to 36 (medians; the box's
+  background rate was 0.7 per second).
+- **sparky, sleep consumer beside a Stage B row** (PB `fc7776229114`): window
+  load median 2.354 s to 1.154 s (-51%), standard deviation 2.572 s to
+  0.149 s, window wall median 7.780 s to 6.605 s (-15%). Main-thread samples
+  in the window's loads 31.9% to 12.4%, loader samples in lease work 38.6% to
+  13.1%. The GPU belonged to the Stage B row, so this run has no power
+  figure.
+
+Power comes from the bench's own 0.5 s `nvidia-smi` sampler: sparklina's
+Netdata GPU series updates every 10 s, which is too coarse for 20 s children.
+The fixture's lease root has one consumer, while production's has every
+action's, so the base arm's lease cost is a lower bound.
+
 The loaded tensors, file-load receipts and render identities are
-byte-identical with and without the window lease. Gates:
+byte-identical with and without the window lease: one digest across both arms
+of both runs. The layer-1 joint quantum's 185 numeric leaves are identical on
+base and fix, with the producer source digest pinned (PB `0215f2eeb9ac`).
+Gates:
 `tests/test_pwc_window_load_1210.py`, `tests/test_pwc_resident_windows.py`,
 `tests/test_render_identity_once_1192.py`. No format, pipeline default, stage
 or ship gate changes.
