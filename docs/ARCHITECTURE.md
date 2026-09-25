@@ -24265,7 +24265,9 @@ range-bound produced-output owner against PrismaBuild.
 
 A split round is submitted as plain `pbrun` rows until `pbcampaign` carries
 the residency fields (PB #1082): `--tag gb10 --priority -10`, never a host.
-`pbrun --after` does not order them. It defers a consumer on a producer's
+`seal --priority` sets another band for every row of a round (Stage A split
+round 4 seals `0`, above the Stage B rows at `-10`); `round.json` records it
+as `priority`. `pbrun --after` does not order them. It defers a consumer on a producer's
 write-only template and builds the consumer's manifest from the batches the
 producer committed, and a prep commits nothing.
 
