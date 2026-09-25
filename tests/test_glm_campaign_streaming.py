@@ -1,5 +1,8 @@
 """Campaign source qualification uses the real GLM skeleton and shard loader."""
 import os
+import subprocess
+import sys
+import xml.etree.ElementTree as ElementTree
 
 import pytest
 import torch
@@ -166,9 +169,79 @@ def test_streamed_resource_plan_prices_layer_capture_and_packer_transients(glm_c
     assert result['disk_bytes'] > result['full_hessian_bytes']+result['full_prefix_bytes']
 
 
+def bounded_capture_child_needed(capture_policy, *, cuda, environ):
+    """Whether this process lacks the bounded-capture release policy it needs.
+
+    ``tessera_campaign.main`` refuses a bounded CUDA capture unless
+    ``autoscale.BOUNDED_CAPTURE_ENV`` holds; on CPU it does not check. The
+    policy has to be in the environment before the process starts --
+    ``MIMALLOC_PURGE_DELAY`` is read when the allocator initialises -- so a
+    ``monkeypatch.setenv`` after Torch has loaded would satisfy the check
+    without the policy it stands for (RobTand/prismaquant#1096).
+    """
+    from prismaquant.autoscale import BOUNDED_CAPTURE_ENV
+    return (capture_policy == 'shared-inputs-bounded-v1' and cuda
+            and any(environ.get(name) != value for name, value in BOUNDED_CAPTURE_ENV.items()))
+
+
+def run_in_bounded_capture_child(request, tmp_path):
+    """Run this test's node id in a child pytest that starts with the policy.
+
+    Reports the child's outcome as this test's: a failure carries the child's
+    output, a skip its reason. The child inherits the parent's per-test bound
+    the way an ``own_process`` module's child does.
+    """
+    from conftest import _own_process_bound_args
+    from prismaquant.autoscale import BOUNDED_CAPTURE_ENV
+    config = request.config
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('PYTEST_XDIST_')
+           and name not in ('PYTEST_ADDOPTS', 'PYTEST_CURRENT_TEST')}
+    env.update(BOUNDED_CAPTURE_ENV)
+    junit = tmp_path/'bounded-child.junit.xml'
+    argv = [sys.executable, '-m', 'pytest', '-q', '--no-header', '-p', 'no:cacheprovider',
+            '--rootdir', str(config.rootpath), '--basetemp', str(tmp_path/'bounded-child'),
+            '--junitxml', str(junit)]
+    if config.inipath is not None:
+        argv += ['-c', str(config.inipath)]
+    argv += [*_own_process_bound_args(config), request.node.nodeid]
+    completed = subprocess.run(argv, cwd=str(config.rootpath), env=env,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    output = completed.stdout[-20000:]
+    cases = (ElementTree.parse(junit).getroot().iter('testcase') if junit.exists() else ())
+    case = next(iter(cases), None)
+    if case is not None and completed.returncode == 0:
+        skipped = case.find('skipped')
+        if skipped is not None:
+            pytest.skip(skipped.get('message') or 'skipped in the bounded-capture child')
+        return
+    pytest.fail(f'bounded-capture child pytest exited {completed.returncode}:\n{output}',
+                pytrace=False)
+
+
+def test_bounded_capture_child_is_needed_only_where_main_checks_the_policy():
+    """#1096: the bounded CUDA case must not run in a process that lacks the policy."""
+    from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
+    bounded, release = 'shared-inputs-bounded-v1', 'shared-inputs-release-v1'
+    assert bounded_capture_child_needed(bounded, cuda=True, environ={})
+    partial = dict(BOUNDED_CAPTURE_ENV, MIMALLOC_PURGE_DELAY='1')
+    assert bounded_capture_child_needed(bounded, cuda=True, environ=partial)
+    # Exactly the environments the campaign's own check refuses.
+    with pytest.raises(RuntimeError, match='before process startup'):
+        require_bounded_capture_environment(partial)
+    require_bounded_capture_environment(dict(BOUNDED_CAPTURE_ENV))
+    assert not bounded_capture_child_needed(bounded, cuda=True, environ=dict(BOUNDED_CAPTURE_ENV))
+    assert not bounded_capture_child_needed(bounded, cuda=False, environ={})
+    assert not bounded_capture_child_needed(release, cuda=True, environ={})
+
+
 @pytest.mark.parametrize('capture_policy', ['shared-inputs-release-v1', 'shared-inputs-bounded-v1'])
-def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_checkpoint, tmp_path, monkeypatch, capture_policy):
+def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_checkpoint, tmp_path, monkeypatch, capture_policy, request):
     """The CLI publishes a complete capture from real GLM source forwards."""
+    if bounded_capture_child_needed(capture_policy, cuda=torch.cuda.is_available(),
+                                    environ=os.environ):
+        run_in_bounded_capture_child(request, tmp_path)
+        return
     import json
     from pathlib import Path
     from prismaquant import tessera_campaign as campaign
