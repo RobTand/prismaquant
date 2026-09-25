@@ -17,6 +17,7 @@ import pickle
 
 from .cluster_campaign import _atomic_write_new_bytes as atomic_write_bytes
 from .cost_stage_checkpoint import canonical_json_sha256
+from .dev_mode import seal_check
 from .joint_aura import (
     prepare_joint_aura_identities, release_joint_aura_identities, validated_identity_memo,
 )
@@ -115,8 +116,17 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
     checked_probes = {}
     result = copy.deepcopy(joint, validated_identity_memo(joint))
     policy_binding = prepared.get('served_activation_policy')
-    _same(joint['provenance'].get('stage_b_resource_policy'), prepared.get('stage_b_resource_policy'),
-          'joint Stage B resource policy')
+    # The resource policy names the execution regime the rows ran under, not
+    # their bytes: a policy seal, so it stamps in dev mode (PQ #1147). Rows
+    # repeat one policy, so each distinct one is compared, and stamped, once.
+    resource_policy = prepared.get('stage_b_resource_policy')
+
+    def _resource_policy_seal(ran, label):
+        seal_check('Stage B resource policy', resource_policy, ran, where=label,
+                   refusal=ValueError(f'{label}: identity mismatch'))
+
+    _resource_policy_seal(joint['provenance'].get('stage_b_resource_policy'), 'joint Stage B resource policy')
+    checked_resource_policies = []
     _same(joint['provenance'].get('served_activation_policy'), policy_binding, 'joint served activation policy')
     policy = None
     if policy_binding is not None:
@@ -142,8 +152,10 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
             operator, probe = row['joint_operator_identity'], row['probe_identity']
             _same(operator['arithmetic'].get('served_activation_policy'), policy_binding,
                   f'{name}@{fmt}: priced served policy arithmetic')
-            _same(operator['arithmetic'].get('stage_b_resource_policy'), prepared.get('stage_b_resource_policy'),
-                  f'{name}@{fmt}: priced resource policy arithmetic')
+            ran = operator['arithmetic'].get('stage_b_resource_policy')
+            if ran not in checked_resource_policies:
+                _resource_policy_seal(ran, f'{name}@{fmt}: priced resource policy arithmetic')
+                checked_resource_policies.append(ran)
             if id(probe) not in checked_probes:
                 source_model = probe['source_model']
                 _same(source_model, prepared['source_model_identity'], f'{name}: source model')
@@ -305,8 +317,11 @@ def handoff(*, joint_binding, plan_binding, output_path):
     cache = pickle.loads(_read_bound(prepared['production_cache'], 'prepared cache'))
     _require(isinstance(cache, ProductionWeightCache), 'prepared cache owner is not ProductionWeightCache')
     # This joins historical identities; it does not re-read all decoded model
-    # tensors or weaken the exporter's current-byte verification.
-    data = load_measured_anchor_input(plan['inputs'], verify_payloads=False)
+    # tensors or weaken the exporter's current-byte verification. The plan's
+    # named historical encoder seals travel with its inputs: the anchor
+    # checkpoint was priced by the package the plan names, not the installed one.
+    data = load_measured_anchor_input(plan['inputs'], verify_payloads=False,
+                                      historical_encoder_reuse=plan.get('historical_encoder_reuse'))
     _same(cache.weights, {pair: cell['render'] for pair, cell in data.cells.items()}, 'prepared render paths')
     # Every row's currency check re-validates its probe identity; validate and
     # hash each shared identity once instead (PQ #1256), as the allocator does.
