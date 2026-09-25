@@ -3,12 +3,14 @@
 PQ #1300 moved the strict-JSON loaders and the ``_require`` / ``_fail`` /
 ``_exact_mapping`` / ``_string`` / ``_integer`` / ``_sha256`` / path checks of
 many modules onto ``prismaquant.schemas`` (``strict_json_loads`` and
-``Contract``). Each ``_old_*`` function below is the pre-#1300 code, copied
-verbatim except that module globals are reached through the module. Every
-case runs the old copy and the migrated site on the same input and requires
-the same outcome: the same returned value, or the same exception type with the
-same text, and the same chained cause. The accepting paths are also covered by
-each module's own tests.
+``Contract``). Each ``_old_*`` loader below is the pre-#1300 code, copied
+verbatim except that module globals are reached through the module. The
+``_require`` copies and the cluster-campaign / quality-prefill check family
+are one parametrized copy per family, because the per-module copies differed
+only in exception class and message prefix. Every case runs the old copy and
+the migrated site on the same input and requires the same outcome: the same
+returned value, or the same exception type with the same text, and the same
+chained cause. The accepting paths are also covered by each module's own tests.
 """
 
 from __future__ import annotations
