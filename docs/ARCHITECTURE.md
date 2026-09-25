@@ -55,6 +55,31 @@ whole quantum in kernel mode:
   whose producer ran in the other mode therefore refuses at dispatch
   (exit 3). A band runs in one mode: the dispatcher does not move such a
   consumer to chain mode.
+- Changing a campaign's mode. The mode comes from the spec, so changing
+  the spec changes the mode of every row the dispatcher publishes next.
+  A handoff binds only a consumer in its producer's mode, and the
+  dispatcher binds handoffs while it builds its rows, before it submits
+  any. So one handoff from the old mode that is still to be consumed makes
+  the whole dispatch exit 3 with nothing submitted
+  (`test_a_band_runs_in_one_kda_kernel_mode`). Two kinds of row bind a
+  handoff. A consumer that was never submitted binds its executed
+  producer's handoff when the dispatch passes `--band-serial`. A consumer
+  that was submitted with a handoff and has not executed rebinds it on
+  every dispatch, with or without `--band-serial`, because a resubmitted
+  row keeps its recorded role (`recorded_band_role`). A row whose action
+  executed is skipped and binds nothing. To change the mode, take each
+  consumer of an old-mode handoff out of the way first:
+  - Let it finish in the old mode: dispatch with the old spec until the
+    consumer has executed. A consumer that failed is resubmitted with its
+    recorded handoff, so it also runs under the old spec.
+  - Or, for a consumer that was never submitted, publish it in chain mode
+    under the new spec: name it with `--quantum` and leave out
+    `--band-serial`. It then rolls its own chain in the new mode, and later
+    dispatches keep it in chain mode.
+
+  Until then, a dispatch under the new spec that names only other rows
+  with `--quantum` does not bind those consumers' handoffs, because it
+  skips every row it does not name before it binds anything.
 
 Gates: `tests/test_kda_kernel_mode.py` (the five-layer band-serial CPU
 campaign, with a fixture kernel that counts real forwards and backwards),
