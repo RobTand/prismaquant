@@ -86,6 +86,7 @@ from .joint_layer_quanta import (
 from .source_read_plan import chain_prefetch_window
 from .joint_quantum_handoff import (
     HANDOFF_LOAD_PHASE,
+    HANDOFF_TEE_GROUPS,
     HandoffEmitter,
     QuantumHandoffRefused,
     bind_handoff_publication,
@@ -2806,6 +2807,24 @@ def run_layer_quantum_core(
                 n_batches=len(row_offsets),
                 kda_capture_kernel=(None if kda_kernel is None
                                     else kda_kernel.handoff_stamp()))
+            from .perturbed_x_cache import ExactCotangentScratch
+            if isinstance(grad_plane, ExactCotangentScratch):
+                # The tee ring: HANDOFF_TEE_GROUPS capture groups of final
+                # rows, so the writer rarely reads a final slot back from
+                # the scratch. Charged to the guard before it is allocated,
+                # then touched, as the plane staging is (PQ #1246).
+                import mmap
+
+                from .joint_replay_spill import _aligned_buffer
+                slot_bytes = int(grad_plane.max_slot_bytes)
+                slots = HANDOFF_TEE_GROUPS * max(1, int(capture_batch))
+                if guard is not None:
+                    check_operator_allocation(
+                        guard, "before_stage_b_handoff_tee",
+                        reserve_bytes=slots * (slot_bytes + mmap.PAGESIZE))
+                handoff_stream.attach_tee(
+                    [_aligned_buffer(slot_bytes, mmap.PAGESIZE, False).zero_()
+                     for _ in range(slots)])
             handoff_exit.callback(keep_handoff_counters)
             handoff_exit.enter_context(handoff_stream)
 

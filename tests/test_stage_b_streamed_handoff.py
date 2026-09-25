@@ -176,6 +176,64 @@ def test_streamed_bytes_equal_the_all_final_bytes(tmp_path, monkeypatch):
     assert not _writers()
 
 
+def test_a_scratch_plane_through_the_tee_ring_writes_the_same_bytes(
+        tmp_path, monkeypatch):
+    """A cotangent scratch plane, with final rows through a one-slot tee ring:
+    one row per call fits the ring, and the second of two rows in one call
+    finds it full, so the writer reads that slot back from the scratch. The
+    files are the dict plane's, byte for byte."""
+    import mmap
+
+    from prismaquant.joint_replay_spill import _aligned_buffer
+    from prismaquant.perturbed_x_cache import ExactCotangentScratch
+
+    record, adjoint_slice = _producer(tmp_path)
+    _pin_generations(monkeypatch, 1251)
+    root = handoff_root(record["output_space"]["root"])
+    serial = _emitter(tmp_path, record, adjoint_slice).emit(
+        grad_plane=_plane(), cotangent_owners=_owners(), n_probes=N_PROBES,
+        n_batches=N_BATCHES, kda_capture_kernel=None)
+    generation = Path(serial["path"]).parent
+    expected = _digest(generation)
+    root.rename(tmp_path / "all-final")
+
+    records = [{"name": f"cotangent-{p}-{b}", "shape": [2, 4],
+                "dtype": "torch.float32", "tensor_bytes": 32} for p, b in _keys()]
+    (tmp_path / "scratch").mkdir()
+    scratch = ExactCotangentScratch(records, directory=tmp_path / "scratch",
+                                    max_bytes=1 << 20)
+    try:
+        emitter = _emitter(tmp_path, record, adjoint_slice)
+        stream = emitter.stream(grad_plane=scratch, n_probes=N_PROBES,
+                                n_batches=N_BATCHES, kda_capture_kernel=None)
+        stream.attach_tee([_aligned_buffer(32, mmap.PAGESIZE, False).zero_()])
+        with stream:
+            keys = _keys()
+            first, rest = keys[:1], keys[1:]
+            for key in first:
+                scratch[key] = _plane()[key]
+                stream.mark_final([key], [_plane()[key]])
+            deadline = time.monotonic() + 30
+            while stream.telemetry["tee_hits"] < 1 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            for pair in (rest[i:i + 2] for i in range(0, len(rest), 2)):
+                for key in pair:
+                    scratch[key] = _plane()[key]
+                stream.mark_final(pair, [_plane()[key] for key in pair])
+            streamed = stream.finish(_owners())
+        with pytest.raises(RuntimeError, match="sealed"):
+            scratch[keys[0]] = torch.zeros(2, 4)
+    finally:
+        scratch.close()
+    assert streamed == serial
+    assert _digest(generation) == expected
+    telemetry = stream.telemetry
+    assert telemetry["tee_slots"] == 1
+    assert telemetry["tee_hits"] + telemetry["scratch_reads"] == N_PROBES * N_BATCHES
+    assert telemetry["tee_hits"] >= 1 and telemetry["tee_misses"] >= 1
+    assert telemetry["tee_misses"] == telemetry["scratch_reads"]
+
+
 def test_a_handoff_generation_digest_line(tmp_path, monkeypatch, capsys):
     """The all-final writer's file digests, printed for a before/after
     comparison across trees (PQ #1251): run with a fixed ``--basetemp``."""
@@ -536,8 +594,15 @@ def test_the_handoff_is_written_while_the_final_passes_run(tmp_path, monkeypatch
     assert emitted["entries_after_finish"] == 0
     assert emitted["cancelled"] is False and emitted["error"] is None
     if plane == "scratch":
-        assert emitted["scratch_reads"] == n_entries
+        # Each entry came from the tee ring or, when it was full, a scratch
+        # read on the writer's own buffer.
+        assert emitted["tee_slots"] >= 2
+        assert emitted["tee_hits"] + emitted["scratch_reads"] == n_entries
+        assert emitted["tee_misses"] == emitted["scratch_reads"]
+        assert emitted["tee_hits"] > 0
         assert list(scratch.iterdir()) == []
+    else:
+        assert emitted["tee_slots"] == 0 and emitted["scratch_reads"] == 0
     assert len(_records(record)) == 1
     assert not _writers()
 

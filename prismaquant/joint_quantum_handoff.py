@@ -93,6 +93,11 @@ HANDOFF_SCHEMA = "prismaquant.joint_quantum_handoff.v1"
 HANDOFF_OWNER_STATES_SCHEMA = "prismaquant.joint_quantum_handoff.owner_states.v1"
 HANDOFF_SESSION_SCHEMA = "prismaquant.joint_quantum_handoff.session.v1"
 HANDOFF_DIRECTORY = "handoff"
+#: Capture groups of final rows the streamed writer's tee ring holds (PQ
+#: #1251). The writer takes an entry in well under a group's pass time, so
+#: two groups keep the ring nearly always free; a full ring costs a scratch
+#: read, never a wait.
+HANDOFF_TEE_GROUPS = 2
 HANDOFF_RECORD_NAME = "handoff.json"
 HANDOFF_OWNER_STATES_NAME = "owner-states.pkl"
 #: The produced-output group kind of ``owner-states.pkl`` and
@@ -397,6 +402,12 @@ class HandoffStream:
         self._thread: threading.Thread | None = None
         self._buffer = None
         self._started = None
+        # The tee ring (:meth:`attach_tee`): host slots that keep a final
+        # row's bytes until the writer takes them, so a scratch plane's
+        # final slots are not read back from the device.
+        self._tee_slots: list = []
+        self._tee_free: list = []
+        self._tee: dict = {}
         #: The row's ``handoff_emit`` counters (PQ #1251). Written by the
         #: writer while it runs and read by the main thread after the join.
         self.telemetry = {
@@ -409,6 +420,9 @@ class HandoffStream:
             "finality_wait_s": 0.0,
             "max_lag_entries": 0,
             "scratch_reads": 0,
+            "tee_slots": 0,
+            "tee_hits": 0,
+            "tee_misses": 0,
             "finish_wait_s": 0.0,
             "writer_s": 0.0,
             "cancelled": False,
@@ -430,6 +444,24 @@ class HandoffStream:
             raise error
         return self
 
+    def attach_tee(self, slots):
+        """Give the writer a ring of host slots for final rows (PQ #1251).
+
+        ``slots`` are flat ``uint8`` CPU tensors the caller allocated after
+        its guard admitted them. :meth:`mark_final` copies each final row
+        into a free slot, when one is free and the row fits, and the writer
+        writes the entry from that copy instead of reading the slot back
+        from the cotangent scratch. The bytes are the row's either way. A
+        dict plane already holds its rows in memory and takes no ring.
+        """
+        if self._thread is not None or self._final:
+            raise RuntimeError("the tee ring is attached before the stream starts")
+        if self._scratch is None:
+            raise RuntimeError("only a cotangent scratch plane takes a tee ring")
+        self._tee_slots = list(slots)
+        self._tee_free = list(range(len(self._tee_slots)))
+        self.telemetry["tee_slots"] = len(self._tee_slots)
+
     def mark_final(self, keys, rows=None):
         """Record that a final pass stored each of ``keys`` (PQ #1251).
 
@@ -437,7 +469,9 @@ class HandoffStream:
         next store rather than at its tail. A key stored twice by a final
         pass refuses: its streamed bytes may already be on their way. A
         cotangent scratch seals each key, so a later write to it refuses
-        before it lands.
+        before it lands. ``rows``, the stored tensors (valid only during
+        this call), fill the tee ring when it has a free slot; the main
+        thread never waits for one.
         """
         keys = [(int(probe), int(batch)) for probe, batch in keys]
         with self._cond:
@@ -453,6 +487,9 @@ class HandoffStream:
                         f"a final pass stored handoff key {key!r} twice")
             if self._scratch is not None:
                 self._scratch.seal(keys)
+            if rows is not None and self._tee_slots:
+                for key, row in zip(keys, rows):
+                    self._tee_row(key, row)
             self._final.update(keys)
             written = (self.telemetry["entries_before_finish"]
                        + self.telemetry["entries_after_finish"])
@@ -497,6 +534,9 @@ class HandoffStream:
                 self._cancelled = True
                 self._cond.notify_all()
             self._thread.join()
+        # The ring and the read buffer go with the writer.
+        self._tee_slots, self._tee_free, self._tee = [], [], {}
+        self._buffer = None
         self.telemetry["cancelled"] = self._cancelled
         if self._error is not None and not isinstance(self._error,
                                                       HandoffEmitCancelled):
@@ -533,12 +573,39 @@ class HandoffStream:
                     "the quantum failed before its handoff was complete")
         return time.monotonic() - started
 
+    def _tee_row(self, key, row):
+        """Copy one final row into a free tee slot, or count a miss.
+
+        The caller holds ``_cond``. The copy is one host memcpy of the row.
+        """
+        nbytes = row.numel() * row.element_size()
+        if not self._tee_free or nbytes > self._tee_slots[self._tee_free[-1]].numel():
+            self.telemetry["tee_misses"] += 1
+            return
+        index = self._tee_free.pop()
+        view = self._tee_slots[index].narrow(0, 0, nbytes).view(row.dtype).view(
+            tuple(row.shape))
+        view.copy_(row)
+        self._tee[key] = (index, view)
+
+    def _release_tee(self, key):
+        with self._cond:
+            held = self._tee.pop(key, None)
+            if held is not None:
+                self._tee_free.append(held[0])
+
     def _read(self, key):
-        """The final bytes of ``key``: a dict plane's tensor, or a scratch read
-        into the writer's own buffer on the direct-I/O grid (never the
-        shared bounce buffer, which the passes use)."""
+        """The final bytes of ``key``: a dict plane's tensor, the tee's copy
+        of a scratch row, or a scratch read into the writer's own buffer on
+        the direct-I/O grid (never the shared bounce buffer, which the
+        passes use)."""
         if self._scratch is None:
             return self._plane[key]
+        with self._cond:
+            held = self._tee.get(key)
+        if held is not None:
+            self.telemetry["tee_hits"] += 1
+            return held[1]
         if self._buffer is None or self._scratch.slot_layout(key)[:2] != (
                 tuple(self._buffer.shape), self._buffer.dtype):
             self._buffer = self._scratch.aligned_buffer(key)
@@ -586,6 +653,7 @@ class HandoffStream:
                         tensor, batch_index=batch, boundary_index=layer,
                         probe_index=probe, read_back=False))
                     tensor = None
+                    self._release_tee(key)
                     self.telemetry["writer_busy_s"] += time.monotonic() - busy
                     phase = ("after" if self._states is not None else "before")
                     self.telemetry[f"entries_{phase}_finish"] += 1

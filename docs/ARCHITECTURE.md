@@ -32,6 +32,15 @@ probe-major with batches ascending, with the same arguments.
   shared bounce buffer. A lock now serializes the pass's own off-grid reads
   and writes through that buffer, and `close` waits, bounded, for a read in
   flight. A workspace-profile row never emits, so it starts no writer.
+- The tee ring. On a scratch plane the writer takes most final rows from a
+  ring of host slots instead of reading them back from the scratch:
+  `HANDOFF_TEE_GROUPS` (2) capture groups of the scratch's largest slot.
+  The core charges the ring to the capture guard at
+  `before_stage_b_handoff_tee`, then allocates and touches it, as it does
+  the plane staging (PQ #1246). `mark_final` copies each stored row into a
+  free slot, and the writer frees the slot once the entry is written. A
+  full ring costs a scratch read, never a wait. The scratch write still
+  happens, and an entry's bytes are the same from either source.
 - Failure. A writer error is raised on the main thread at the next store or
   at the finish. A failure on the main thread cancels the writer: it stops
   between entries, and a spool wait ends at once
@@ -51,8 +60,9 @@ probe-major with batches ascending, with the same arguments.
   them.
 - Counters. `counters.json` gains `handoff_emit`: the entries and bytes
   written before and after the finish, the writer's busy and finality-wait
-  seconds, the largest lag in entries, the scratch reads, the finish's wait,
-  and whether the writer was cancelled or failed. `handoff-out` now measures
+  seconds, the largest lag in entries, the scratch reads, the tee ring's
+  slots, hits and misses, the finish's wait, and whether the writer was
+  cancelled or failed. `handoff-out` now measures
   the finish only: the entries not yet written, the settle and the record
   group.
 
