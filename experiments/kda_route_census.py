@@ -48,6 +48,7 @@ import json
 import math
 import os
 from pathlib import Path
+import resource
 import socket
 import sys
 import time
@@ -1008,6 +1009,10 @@ def run_census(args) -> int:
         "gpu_power_loop": loop_block,
         "gpu_power_run": power.stop(),
         "gpu_memory_peak": peak,
+        # The process's own host peak, next to its GPU peak: on unified memory the
+        # two together are what a later census reserves (Linux reports KiB).
+        "host_memory_peak": {"ru_maxrss_bytes":
+                             int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024},
         "residency": residency_report(),
         "journal": {"path": "journal.json",
                     "sha256": sha256_bytes((output_root / "journal.json").read_bytes())
