@@ -1189,7 +1189,7 @@ row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
 (`prismaquant/joint_adjoint_checkpoints.py:1869`,
-`prismaquant/joint_quantum_handoff.py:1015`), so the phase waits at most W in
+`prismaquant/joint_quantum_handoff.py:1034`), so the phase waits at most W in
 total outside a PrismaBuild landing record. Since PQ #1143 a spill
 consumer's `handoff-load` holds only the owner states and the shared-pass
 entries; each probe's plane is read in its `spill-pP` phase, whose waits
@@ -2982,6 +2982,75 @@ pass profiler** (PQ #1269), an opt-in development instrument:
 spill row's capture passes and of a bounded windowed-replay shadow. Unset, the
 row runs the same code as before. No format, pipeline default or ship gate
 changes.
+
+Re-stamped (2026-09-25, `claude/aura-topology-1278`) for **per-unit topology
+on AURA stats rows** (PQ #1278, P1). A scoped Tessera allocation classifies
+each unit from facts its stats row carries
+(`tessera_serving_scope.unit_structure_from_stats`, `:108`). The incremental
+probe writes them; AURA stats rows did not, so every scoped allocation over
+an AURA table, the joined GLM-5.3 `joint-allocation.pkl` (d490a96d, 36,423
+units) included, stopped at `context_by_unit_from_stats` with "missing
+per-unit router_path/expert_id topology". Two changes:
+
+- The producer writes the probe's facts from the probe's sources.
+  `aura_cost.aura_unit_topology` (`:650`) gives an nn.Linear
+  `router_path`/`expert_id` from `sensitivity_probe.discover_moe_structure`
+  (`None`/`None` when no router places it) and a packed expert's per-expert
+  view `_packed_experts_module` + `num_experts`, the count of the full profile
+  split, as `tessera_campaign` records for the same members. Both assemblers
+  merge it into every row (`aura_cost.py:1759`, `:1898`); the Stage B layer
+  quantum computes it with its roster, off the skeleton, before any window
+  loads (`joint_cost_quantum.py:1042`). A Linear the profile declares routed
+  that the walk cannot place gets no keys, so the scope reports it missing
+  instead of recording an unobserved dense fact.
+- A table built before this is re-stamped, never guessed.
+  `tessera_serving_scope.restamp_unit_topology` (`:156`) stamps each row
+  without producer topology with `unit_structure` from
+  `unit_structure_from_profile` and `unit_topology_source="profile_grammar"`,
+  writes no router, expert id, packed module or expert count, and records
+  per-source and per-structure counts under
+  `provenance.unit_topology_restamp`. `python -m
+  prismaquant.unit_topology_restamp` reads a table by path and SHA-256 and
+  publishes a new table plus a receipt binding both digests; the input is
+  never modified. The scope reader accepts that stamp only with its source
+  label, only on a row with no producer facts, and only when it equals the
+  live profile's classification; a row with no source of either kind still
+  refuses. Stage B does not re-run.
+
+Gates: `tests/test_aura_unit_topology_1278.py` plus the existing AURA,
+Stage B quantum and scope suites. Allocation defaults, menus, costs and
+bytes are unchanged; the stats rows gain keys.
+
+Re-stamped (2026-09-25, `claude/glm-mtp-layer45-1271`) for **a priced
+forward for GLM's MTP layer** (PQ #1283, part 1 of #1271, P1).
+GLM-5.3-Flash ships its MTP head as `model.language_model.layers.45.*`.
+Transformers stops at `num_hidden_layers` and the streamed runner does not
+install it, so until now nothing could price it, and it shipped BF16.
+`prismaquant/glm_mtp.py` builds it from Transformers' GLM modules, wired as
+vLLM's `Glm5NextMTP` drafter runs it:
+- `fused_eh_norm` with the position-0 embedding zeroed, as fp32 RMS times fp32
+  weight with one cast;
+- `eh_proj`, then the non-mHC MLA and MoE block;
+- `shared_head.norm` over the fused residual;
+- the target `lm_head`, which the proposer binds into `shared_head.head`
+  because the checkpoint has none.
+
+The DSA indexer is refused outside the regime where it keeps every key:
+`ceil(T/kpool) <= index_topk // kpool`, with tail selection on. GLM's
+511-row calibration is in that regime.
+
+The MTP seed is `fisher_probe_scalar`, unchanged, over draft rows
+`0..T-2`, normalized by `n·(T−1)`. It estimates the draft distribution's
+second-order self-KL per row, in the same unit as the body's per-token rows.
+An MTP row's probe identity carries an `objective` block
+(`prismaquant.joint_aura.mtp_objective.v1`), so
+`probe_identity_walls_differ` separates it from body rows and a body join
+refuses it. Draft KL buys throughput, not quality: rejection sampling keeps
+the output distribution. So the two currencies are not summed.
+
+Nothing is wired into a stage yet. No format, pipeline default, stage, lane
+or ship gate changes. Gate: `tests/test_glm_mtp_layer.py` (float64
+drafter-reference parity, seed convergence, join guard).
 
 Re-stamped (2026-09-25, `claude/hessian-gate-content-equal-1270`) for **the
 Hessian-identity gate over content-equal reference seals** (PQ #1270, P1).
@@ -19796,6 +19865,17 @@ mode cannot, and removing a unit's last candidate produces a named refusal.
 The development reader also refuses non-empty cell predicates: its family/rate
 menu lookup has no unit facts with which to evaluate a shape constraint.
 Export's `resolve_unit_route` has those facts and evaluates the predicates.
+
+**Per-unit topology on a stats row** (PQ #1278). `context_by_unit_from_stats`
+reads one of three forms per row (`tessera_serving_scope.py:108`), each
+naming its source: `_packed_experts_module` + `num_experts` (the producer
+recorded a packed stack or one expert's view of it), `router_path` +
+`expert_id` (the producer's module walk; both `None` is dense), or
+`unit_structure` + `unit_topology_source="profile_grammar"` (a pre-#1278
+table re-stamped by `prismaquant.unit_topology_restamp`). The probe and AURA
+(`aura_cost.aura_unit_topology`) write the first two; only the re-stamp tool
+writes the third, and the reader re-checks it against the live profile. A
+row with none of the three refuses; nothing guesses a model-wide structure.
 
 **The boundary has an export arm, not a second codec.**
 `prismaquant/run-pipeline.sh` selects `EXPORT_CONTAINER=tessera`, preflights

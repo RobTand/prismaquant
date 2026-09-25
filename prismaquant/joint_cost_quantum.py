@@ -1010,7 +1010,7 @@ def quantum_layer_roster(runner, formats_by_qname, layer):
     One roster shared by window resolution and the replay core: resolution
     hands these modules to the preflight, the core replays them.
     """
-    from .aura_cost import _ZERO_COST_FORMATS, _target_linears
+    from .aura_cost import _ZERO_COST_FORMATS, _target_linears, aura_unit_topology
     from .routed_experts import profile_declared_packed_expert_projections
 
     layer = int(layer)
@@ -1036,10 +1036,16 @@ def quantum_layer_roster(runner, formats_by_qname, layer):
     }
     if any(not render_formats[name] for name in names):
         raise RuntimeError("layer quantum requires a measured candidate per unit")
+    # Per-unit topology for the stats rows (PQ #1278), read off the skeleton
+    # before any window loads or unloads a layer: module names and the packed
+    # split only, never a tensor's values.
+    unit_topology = aura_unit_topology(
+        runner.model, {name: linears[name] for name in names},
+        profile=profile, packed_members=packed_members)
     return SimpleNamespace(
         layer=layer, profile=profile, linears=linears, names=names,
         unit_formats=unit_formats, fmts=fmts, render_formats=render_formats,
-        packed_members=packed_members)
+        packed_members=packed_members, unit_topology=unit_topology)
 
 
 # --------------------------------------------------------------------------
@@ -1652,6 +1658,7 @@ def run_layer_quantum_core(
     unit_formats, fmts, render_formats = (
         roster.unit_formats, roster.fmts, roster.render_formats)
     packed_members = roster.packed_members
+    unit_topology = roster.unit_topology
     served_quantizer = bind_joint_served_quantizer(unit_formats)
     from .joint_served_activation import joint_activation_maxima, operator_policy_record
     pricing_maxima = joint_activation_maxima(production_cache)
@@ -3054,7 +3061,7 @@ def run_layer_quantum_core(
         omitted_packed_experts=[], cb_provenance=cb_provenance,
         checkpoint_git_commit=checkpoint_git_commit, collect_col_energy=False,
         s2=s2, s4=s4, x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
-        col_energy={}, weight_mse_diagnostic={})
+        col_energy={}, weight_mse_diagnostic={}, unit_topology=unit_topology)
     payload["costs"] = joint_rows
     probe_identity_sha256 = identity_sha256(joint_probe_identity)
     if probe_identity_sha256 != identity_sha256(joint_probe):

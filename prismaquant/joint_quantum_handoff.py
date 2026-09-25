@@ -450,6 +450,10 @@ class HandoffStream:
             error = self._error
         if error is not None:
             self._thread.join()
+            # ``with`` runs no ``__exit__`` when ``__enter__`` raises, so the
+            # refusal is recorded, and the ring let go, here (PQ #1263).
+            self._release()
+            self.telemetry["error"] = repr(error)[:400]
             raise error
         return self
 
@@ -488,12 +492,16 @@ class HandoffStream:
                 raise self._error
             if self._done:
                 raise RuntimeError("the handoff writer already ended")
+            seen = set()
             for key in keys:
                 if key not in self._expected:
                     raise RuntimeError(f"handoff key {key!r} is outside the plane")
-                if key in self._final:
+                # Twice within this call too: a second tee copy of one key
+                # would hold a slot nothing frees (PQ #1263).
+                if key in self._final or key in seen:
                     raise RuntimeError(
                         f"a final pass stored handoff key {key!r} twice")
+                seen.add(key)
             if self._scratch is not None:
                 self._scratch.seal(keys)
             if rows is not None and self._tee_slots:
@@ -543,14 +551,17 @@ class HandoffStream:
                 self._cancelled = True
                 self._cond.notify_all()
             self._thread.join()
-        # The ring and the read buffer go with the writer.
-        self._tee_slots, self._tee_free, self._tee = [], [], {}
-        self._buffer = None
+        self._release()
         self.telemetry["cancelled"] = self._cancelled
         if self._error is not None and not isinstance(self._error,
                                                       HandoffEmitCancelled):
             self.telemetry["error"] = repr(self._error)[:400]
         return False
+
+    def _release(self):
+        """The ring and the read buffer go with the writer."""
+        self._tee_slots, self._tee_free, self._tee = [], [], {}
+        self._buffer = None
 
     # -- the writer thread -------------------------------------------------
 

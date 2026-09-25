@@ -110,3 +110,35 @@ def test_a_manifest_naming_a_script_it_does_not_carry_is_refused(tmp_path: Path)
     manifest["patches"][0]["script"] = "patch_that_lives_in_a_scratch_dir.py"
     with pytest.raises(ServingRuntimePatchSetError, match="image tag problem again"):
         load_serving_runtime_patch_set(NAME, root=_write(tmp_path, manifest))
+
+
+MTP_MAPPER = "glm53_mtp_mapper"
+
+
+def test_the_mtp_mapper_set_names_its_image_by_registry_digest() -> None:
+    patch_set = load_serving_runtime_patch_set(MTP_MAPPER)
+    reference = patch_set.serve_image_reference()
+    assert reference == (
+        "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:"
+        "f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5")
+    # Built FROM the image the routed Tessera cells name, by digest, not a tag.
+    assert patch_set.base_image.endswith(
+        "@sha256:a5424378322071f4c33e63d1372a2bb028e46b03f0da0e5edb0cdd7418e2cebb")
+
+
+def test_the_mtp_mapper_script_is_the_bytes_the_image_ran() -> None:
+    patch_set = load_serving_runtime_patch_set(MTP_MAPPER)
+    (patch,) = patch_set.patches
+    body = (patch_set.directory / patch["script"]).read_bytes()
+    assert hashlib.sha256(body).hexdigest() == patch["sha256"]
+    # The script refuses any mtp.py but the base image's, by this exact hash.
+    assert patch["base_sha256"].encode() in body
+    assert {e["tag"] for e in patch["edits"]} == {
+        "import_weights_mapper", "glm5next_mtp_hf_to_vllm_mapper"}
+
+
+def test_an_unserved_mtp_mapper_set_qualifies_no_layers() -> None:
+    patch_set = load_serving_runtime_patch_set(MTP_MAPPER)
+    assert patch_set.qualified_model_layers == 0
+    with pytest.raises(ServingRuntimePatchSetError, match="qualified on 0 layers"):
+        patch_set.require_qualified_for(model_layers=4)
