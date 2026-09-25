@@ -96,7 +96,7 @@ class PassProfileRequest:
             with_stack=stack, identity=identity, stop_after=stop_after)
 
 
-def _int(spec, key, minimum=0):
+def _spec_int(spec, key, minimum=0):
     value = int(spec[key])
     if value < minimum:
         raise ValueError(f"{SPEC_ENV}: {key}={value} is below {minimum}")
@@ -125,12 +125,12 @@ def pass_profile_request(environ=None) -> PassProfileRequest | None:
     windowed = None if spec["windowed"] in ("", "none") else int(spec["windowed"])
     return PassProfileRequest(
         out_dir=Path(raw_dir), capture_probes=captures, windowed_probe=windowed,
-        shadow_batches=_int(spec, "shadow_batches", 1),
-        wait=_int(spec, "wait"), warmup=_int(spec, "warmup"),
-        active=_int(spec, "active", 1),
-        shadow_wait=_int(spec, "shadow_wait"),
-        shadow_warmup=_int(spec, "shadow_warmup"),
-        shadow_active=_int(spec, "shadow_active", 1))
+        shadow_batches=_spec_int(spec, "shadow_batches", 1),
+        wait=_spec_int(spec, "wait"), warmup=_spec_int(spec, "warmup"),
+        active=_spec_int(spec, "active", 1),
+        shadow_wait=_spec_int(spec, "shadow_wait"),
+        shadow_warmup=_spec_int(spec, "shadow_warmup"),
+        shadow_active=_spec_int(spec, "shadow_active", 1))
 
 
 @dataclass
