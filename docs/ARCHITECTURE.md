@@ -1212,7 +1212,10 @@ blanket until a `--compute-ceiling` document of kind `tail` is supplied (an
 R13 spill row's last `render-NN` gains 1800 s over its pass's grace), and
 the rows' action keys move with it. The row context gains `emits_handoff`,
 so a tail measured on rows that write no band-serial handoff can be scoped
-away from a producer's.
+away from a producer's. Since PQ #1251 a producer writes its handoff's
+entries during its passes, so its tail holds only the handoff's finish (the
+entries not yet written, the settle and the record group), not the whole
+handoff write.
 Gate: `tests/test_compute_tail_grace_1190.py`, which also drives the real
 quantum and checks that the `payload` span opens with the last declared
 phase in effect and that nothing commits after it. A dispatcher default (the
