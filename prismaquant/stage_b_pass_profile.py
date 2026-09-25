@@ -152,6 +152,7 @@ class PassProfileSession:
     _trace_paths: list = field(default_factory=list)
     _errors: list = field(default_factory=list)
     export_s: float = 0.0
+    _annotation: object = None
 
     @property
     def stem(self) -> str:
@@ -205,10 +206,19 @@ class PassProfileSession:
             self._errors.append(f"key_averages: {exc!r}")
 
     def unit_begin(self) -> None:
+        # A CPU annotation per unit, so the trace separates the units from
+        # the gaps between them (the prefetch and staging waits).
+        from torch.profiler import record_function
+
+        self._annotation = record_function(f"pq_stage_b_{self.kind}_unit")
+        self._annotation.__enter__()
         self._unit_start = time.perf_counter()
 
     def unit_end(self) -> None:
         end = time.perf_counter()
+        if self._annotation is not None:
+            self._annotation.__exit__(None, None, None)
+            self._annotation = None
         start = self._unit_start if self._unit_start is not None else end
         index = len(self.units)
         wait, warmup, active = self.schedule
@@ -226,6 +236,9 @@ class PassProfileSession:
     def __exit__(self, exc_type, exc, tb):
         end_perf = time.perf_counter()
         self._pass_end = time.time()
+        if self._annotation is not None:  # a unit that raised
+            self._annotation.__exit__(None, None, None)
+            self._annotation = None
         try:
             self._profiler.__exit__(None, None, None)
         except Exception as error:
