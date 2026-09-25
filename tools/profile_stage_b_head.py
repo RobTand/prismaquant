@@ -29,25 +29,11 @@ from pathlib import Path
 
 def mount_ops(mount_point: str = "/mnt/shared") -> dict:
     """Per-operation NFS client counts for one mount (``ops`` column)."""
-    ops: dict = {}
-    current = None
-    with open("/proc/self/mountstats") as handle:
-        for line in handle:
-            if line.startswith("device "):
-                parts = line.split()
-                current = parts[4] if len(parts) > 4 else None
-                continue
-            if current != mount_point:
-                continue
-            stripped = line.strip()
-            if ":" not in stripped or stripped.startswith(("device", "opts", "age", "caps", "sec", "events", "bytes", "RPC", "xprt", "nfsv", "per-op")):
-                if stripped.startswith("bytes:"):
-                    ops["_bytes"] = [int(v) for v in stripped.split()[1:]]
-                continue
-            name, _, rest = stripped.partition(":")
-            fields = rest.split()
-            if fields and fields[0].isdigit():
-                ops[name] = int(fields[0])
+    from prismaquant.io_spans import read_mountstats
+
+    row = read_mountstats().get(mount_point, {"bytes": None, "ops": {}})
+    ops = {"_bytes": row["bytes"]} if row["bytes"] is not None else {}
+    ops.update({name: fields[0] for name, fields in row["ops"].items()})
     return ops
 
 
@@ -184,7 +170,7 @@ def main(argv=None) -> int:
     if str(args.scratch).startswith("/mnt/shared"):
         parser.error("--scratch must be host-local, never the pool")
     args.scratch.mkdir(parents=True, exist_ok=True)
-    from prismaquant.io_spans import read_proc_io
+    from prismaquant.io_spans import read_proc_io, read_proc_status
     from prismaquant.tessera_joint_aura import _load_plan
 
     record = load_record(args.quantum, args.quantum_sha256)
@@ -215,15 +201,13 @@ def main(argv=None) -> int:
             if path.is_file():
                 written["files"] += 1
                 written["bytes"] += path.stat().st_size
-    with open("/proc/self/status") as handle:
-        peak = next((line.split()[1] for line in handle
-                     if line.startswith("VmHWM:")), None)
+    peak = read_proc_status().get("VmHWM")
     report = {
         "schema": "prismaquant.stage_b_head_profile.v1",
         "mode": args.mode, "layer": record["layer"],
         "quantum_sha256": args.quantum_sha256, "host": os.uname().nodename,
         "wall_s": round(wall, 3), "cpu_s": round(cpu, 3),
-        "peak_rss_kib": int(peak) if peak else None,
+        "peak_rss_kib": None if peak is None else peak // 1024,
         "loadavg_before": load_before, "loadavg_after": os.getloadavg(),
         "proc_io": delta(io_after, io_before),
         "nfs_ops_mnt_shared": delta(nfs_after, nfs_before),

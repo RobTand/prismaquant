@@ -81,6 +81,7 @@ except ModuleNotFoundError:
             yield
 from safetensors.torch import save_file
 
+from . import io_spans
 from . import nvfp4_activation_contract as _nvfp4_activation_contract
 from .allocator_candidates import (
     PASSTHROUGH_SOURCE_REQUIREMENTS,
@@ -5869,10 +5870,8 @@ def _quantize_2d_nvfp4_group_batched(
 
 
 def _host_mem_available_bytes() -> int:
-    from .io_spans import mem_available_bytes
-
     try:
-        return mem_available_bytes()
+        return io_spans.mem_available_bytes()
     except (OSError, RuntimeError):
         return 1 << 30
 

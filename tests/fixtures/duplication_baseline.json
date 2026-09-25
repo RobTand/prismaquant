@@ -233,10 +233,6 @@
    "tools/resolve_tessera_dev_pin.py::resolve_tessera_dev_pin"
   ],
   [
-   "tools/stage_fed_demonstration.py::mount_bytes",
-   "tools/staged_read_stream_ab.py::mount_bytes"
-  ],
-  [
    "tools/tp2_budget_plan.py::_git_sha",
    "tools/tp_decode_feasibility.py::_git_sha"
   ]
@@ -1152,10 +1148,6 @@
   "merge_identity_migrations": [
    "prismaquant/cost_stage_checkpoint.py",
    "tools/dispatch_tessera_campaign.py"
-  ],
-  "mount_bytes": [
-   "tools/stage_fed_demonstration.py",
-   "tools/staged_read_stream_ab.py"
   ],
   "nvfp4_activation_qdq_served": [
    "prismaquant/format_registry.py",

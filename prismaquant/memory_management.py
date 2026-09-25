@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 import torch
+from . import io_spans
 
 
 _BUDGET_EVICTORS: "weakref.WeakSet[object]" = weakref.WeakSet()
@@ -672,10 +673,8 @@ def _use_host_available_for_uma(device: torch.device | None = None) -> bool:
 
 def _host_memory_info() -> tuple[int, int] | None:
     """``(MemAvailable, MemTotal)`` in bytes, or ``None`` when unreadable."""
-    from .io_spans import read_meminfo
-
     try:
-        values = read_meminfo()
+        values = io_spans.read_meminfo()
         return values["MemAvailable"], values["MemTotal"]
     except Exception:
         return None

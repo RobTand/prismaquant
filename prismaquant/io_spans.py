@@ -509,6 +509,46 @@ def mem_available_bytes(path: str | Path = "/proc/meminfo") -> int:
     return value
 
 
+def read_mountstats(path: str | Path = "/proc/self/mountstats") -> dict[str, dict]:
+    """Per mount point, the NFS client's ``bytes`` row and every per-op row.
+
+    ``{mount: {"bytes": [...] or None, "ops": {OP: [...]}}}``, every value
+    an integer in the kernel's column order. ``bytes`` columns 0 and 4 are
+    the client's and the server's read bytes; an op's columns are ops,
+    transmissions, timeouts, bytes sent, bytes received, and queue, RTT and
+    execute milliseconds, with an error count on newer kernels. A mount that
+    is not NFS has neither. Raises ``OSError`` when the file cannot be read.
+    """
+    out: dict[str, dict] = {}
+    row, per_op = None, False
+    for line in Path(path).read_text().splitlines():
+        if line.startswith("device "):
+            parts = line.split()
+            row = (out.setdefault(parts[parts.index("on") + 1], {"bytes": None, "ops": {}})
+                   if "on" in parts[:-1] else None)
+            per_op = False
+            continue
+        if row is None:
+            continue
+        text = line.strip()
+        if text.startswith("bytes:"):
+            row["bytes"] = [int(value) for value in text.split()[1:]]
+        elif text.startswith("per-op statistics"):
+            per_op = True
+        elif per_op:
+            name, sep, rest = text.partition(":")
+            fields = rest.split()
+            if sep and fields and all(field.isdigit() for field in fields):
+                row["ops"][name] = [int(field) for field in fields]
+    return out
+
+
+def nfs_read_bytes(path: str | Path = "/proc/self/mountstats") -> dict[str, tuple[int, int]]:
+    """``{mount: (client_read_bytes, server_read_bytes)}`` for every NFS mount."""
+    return {mount: (row["bytes"][0], row["bytes"][4])
+            for mount, row in read_mountstats(path).items() if row["bytes"]}
+
+
 # -- the sampler thread (PQ #1299) -----------------------------------------
 
 
@@ -608,17 +648,19 @@ class MemAvailableFloor:
 
 
 class GpuPowerSampler:
-    """1 Hz ``nvidia-smi --query-gpu=power.draw`` sampling in-process.
+    """``nvidia-smi --query-gpu=power.draw`` sampling in-process, 1 Hz by default.
 
     ``nvidia_smi.gpu_utilization`` is non-diagnostic on GB10 (AGENTS.md
     principle 13), so the counters carry joules, watts and the kernel-active
     ratio instead. A missing or failing sampler is recorded, never silent and
-    never zero.
+    never zero. ``times`` holds each sample's host ``time.time()``, so
+    :meth:`watts_between` can read the watts over any span of a run.
     """
 
     def __init__(self, interval_s: float = 1.0):
         self.interval_s = float(interval_s)
         self.samples: list[float] = []
+        self.times: list[float] = []
         self.error: str | None = None
         self._process = None
         self._sampler = None
@@ -626,10 +668,13 @@ class GpuPowerSampler:
     def start(self) -> "GpuPowerSampler":
         import subprocess
 
+        # ``-l`` takes whole seconds; a shorter interval needs ``-lms``.
+        loop = (["-l", str(int(self.interval_s))] if self.interval_s == int(self.interval_s)
+                else ["-lms", str(round(self.interval_s * 1000))])
         try:
             self._process = subprocess.Popen(
                 ["nvidia-smi", "--query-gpu=power.draw",
-                 "--format=csv,noheader,nounits", "-l", str(int(self.interval_s))],
+                 "--format=csv,noheader,nounits", *loop],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
             )
         except (OSError, ValueError) as exc:
@@ -652,10 +697,17 @@ class GpuPowerSampler:
             return False
         value = line.strip().split(",")[0].strip()
         try:
-            self.samples.append(float(value))
+            watts = float(value)
         except ValueError:
-            pass
+            return True
+        self.times.append(time.time())
+        self.samples.append(watts)
         return True
+
+    def watts_between(self, start: float, end: float) -> list[float]:
+        """The watts sampled at host times ``start <= t <= end``."""
+        return [watts for when, watts in zip(self.times, self.samples)
+                if start <= when <= end]
 
     def stop(self) -> dict:
         if self._sampler is not None:
@@ -669,26 +721,14 @@ class GpuPowerSampler:
         if self._sampler is not None:
             self._sampler.join(timeout=2)
         watts = sorted(self.samples)
-        if watts:
-            joules = sum(watts) * self.interval_s
-            p95 = watts[max(0, int(0.95 * len(watts)) - 1)]
-            block = {
-                "sample_count": len(watts),
-                "interval_s": self.interval_s,
-                "gpu_joules": joules,
-                "gpu_power_w_p50": watts[len(watts) // 2],
-                "gpu_power_w_p95": p95,
-                "gpu_power_w_max": watts[-1],
-            }
-        else:
-            block = {
-                "sample_count": 0,
-                "interval_s": self.interval_s,
-                "gpu_joules": None,
-                "gpu_power_w_p50": None,
-                "gpu_power_w_p95": None,
-                "gpu_power_w_max": None,
-            }
+        block = {
+            "sample_count": len(watts),
+            "interval_s": self.interval_s,
+            "gpu_joules": sum(watts) * self.interval_s if watts else None,
+            "gpu_power_w_p50": watts[len(watts) // 2] if watts else None,
+            "gpu_power_w_p95": watts[max(0, int(0.95 * len(watts)) - 1)] if watts else None,
+            "gpu_power_w_max": watts[-1] if watts else None,
+        }
         if self.error:
             block["sampler_error"] = self.error
         return block
@@ -700,6 +740,6 @@ __all__ = [
     "MemAvailableFloor", "PROC_IO_FIELDS", "PeriodicSampler",
     "READ_RATE_MARKER", "READ_RATE_SCHEMA", "RESIDENCY_TIER_KEYS",
     "ReadRateReporter", "counter_delta", "failure_outcome",
-    "mem_available_bytes", "read_meminfo", "read_proc_io", "read_proc_status",
-    "residency_tier_bytes", "stage_span_log",
+    "mem_available_bytes", "nfs_read_bytes", "read_meminfo", "read_mountstats",
+    "read_proc_io", "read_proc_status", "residency_tier_bytes", "stage_span_log",
 ]

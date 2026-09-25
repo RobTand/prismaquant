@@ -61,7 +61,6 @@ import re
 import struct
 import subprocess
 import sys
-import threading
 import time
 import urllib.request
 from collections import Counter, defaultdict
@@ -288,39 +287,26 @@ def cmd_drive(args) -> int:
 
 # -- child (in the container) -------------------------------------------------------------
 
-def _meminfo():
-    fields = {}
-    for line in Path("/proc/meminfo").read_text().splitlines():
-        key, value = line.split(":", 1)
-        fields[key] = int(value.split()[0]) * 1024
-    return fields
-
-
 class _MemoryWatch:
     """MemAvailable low-water mark and the CUDA reservation, every 0.2 s."""
 
     def __init__(self, torch):
-        self.torch = torch
-        self.min_available = _meminfo()["MemAvailable"]
-        self.baseline = self.min_available
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True, name="memwatch")
-        self._thread.start()
+        from prismaquant.io_spans import MemAvailableFloor
 
-    def _run(self):
-        while not self._stop.wait(0.2):
-            self.min_available = min(self.min_available, _meminfo()["MemAvailable"])
+        self.torch = torch
+        self._floor = MemAvailableFloor(0.2, name="memwatch").__enter__()
 
     def stop(self):
-        self._stop.set()
-        self._thread.join()
-        status = {line.split(":")[0]: line.split(":", 1)[1].strip()
-                  for line in Path("/proc/self/status").read_text().splitlines()
-                  if line.startswith(("VmHWM", "VmRSS"))}
+        from prismaquant.io_spans import read_proc_status
+
+        self._floor.__exit__(None, None, None)
+        status = {key: f"{value // 1024} kB" for key, value in read_proc_status().items()
+                  if key in ("VmHWM", "VmRSS")}
         cuda = self.torch.cuda
-        return {"mem_available_baseline_bytes": self.baseline,
-                "mem_available_min_bytes": self.min_available,
-                "mem_available_drop_bytes": self.baseline - self.min_available,
+        baseline, low = self._floor.first["bytes"], self._floor.minimum["bytes"]
+        return {"mem_available_baseline_bytes": baseline,
+                "mem_available_min_bytes": low,
+                "mem_available_drop_bytes": baseline - low,
                 "cuda_max_reserved_bytes": cuda.max_memory_reserved(),
                 "cuda_max_allocated_bytes": cuda.max_memory_allocated(),
                 "process": status}
