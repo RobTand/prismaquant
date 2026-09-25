@@ -3001,6 +3001,37 @@ Gates: `tests/test_aura_unit_topology_1278.py` plus the existing AURA,
 Stage B quantum and scope suites. Allocation defaults, menus, costs and
 bytes are unchanged; the stats rows gain keys.
 
+Re-stamped (2026-09-25, `claude/glm-mtp-layer45-1271`) for **a priced
+forward for GLM's MTP layer** (PQ #1283, part 1 of #1271, P1).
+GLM-5.3-Flash ships its MTP head as `model.language_model.layers.45.*`.
+Transformers stops at `num_hidden_layers` and the streamed runner does not
+install it, so until now nothing could price it, and it shipped BF16.
+`prismaquant/glm_mtp.py` builds it from Transformers' GLM modules, wired as
+vLLM's `Glm5NextMTP` drafter runs it:
+- `fused_eh_norm` with the position-0 embedding zeroed, as fp32 RMS times fp32
+  weight with one cast;
+- `eh_proj`, then the non-mHC MLA and MoE block;
+- `shared_head.norm` over the fused residual;
+- the target `lm_head`, which the proposer binds into `shared_head.head`
+  because the checkpoint has none.
+
+The DSA indexer is refused outside the regime where it keeps every key:
+`ceil(T/kpool) <= index_topk // kpool`, with tail selection on. GLM's
+511-row calibration is in that regime.
+
+The MTP seed is `fisher_probe_scalar`, unchanged, over draft rows
+`0..T-2`, normalized by `n·(T−1)`. It estimates the draft distribution's
+second-order self-KL per row, in the same unit as the body's per-token rows.
+An MTP row's probe identity carries an `objective` block
+(`prismaquant.joint_aura.mtp_objective.v1`), so
+`probe_identity_walls_differ` separates it from body rows and a body join
+refuses it. Draft KL buys throughput, not quality: rejection sampling keeps
+the output distribution. So the two currencies are not summed.
+
+Nothing is wired into a stage yet. No format, pipeline default, stage, lane
+or ship gate changes. Gate: `tests/test_glm_mtp_layer.py` (float64
+drafter-reference parity, seed convergence, join guard).
+
 Re-stamped (2026-09-25, `claude/hessian-gate-content-equal-1270`) for **the
 Hessian-identity gate over content-equal reference seals** (PQ #1270, P1).
 `tessera_menu.assert_uniform_hessian_identity` (#204) refused the joined
