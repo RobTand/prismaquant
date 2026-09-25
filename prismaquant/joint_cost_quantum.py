@@ -1419,13 +1419,17 @@ def bind_joint_served_quantizer(formats_by_qname):
 
 
 def build_quantum_source_runner(config, *, offload_folder,
-                                sealed_head_tensors=None):
+                                sealed_head_tensors=None, source_authentication=None):
     """Rebuild the same sealed BF16 source used by Stage A.
 
     ``sealed_head_tensors`` is the resident head the quantum's executable
     readset declares (``executable_readset.head_source.tensors``, PQ #1095):
     the streaming context refuses before its first head read when the head
     it selects differs.
+
+    ``source_authentication`` is a capture source owner
+    (``tessera_calibration_cache.authenticate_selected_capture_source``);
+    given one, every shard the runner reads is authenticated through it.
     """
     from .cost_streaming import build_streamed_causal_lm
     from .model_profiles import detect_profile
@@ -1434,7 +1438,7 @@ def build_quantum_source_runner(config, *, offload_folder,
     return build_streamed_causal_lm(
         config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
         offload_folder=str(offload_folder), profile=detect_profile(config["model"]),
-        attn_implementation="eager", source_authentication=None,
+        attn_implementation="eager", source_authentication=source_authentication,
         source_derivative=config["execution"].get("source_derivative"),
         **({"sealed_head_tensors": sealed_head_tensors}
            if sealed_head_tensors is not None else {}),

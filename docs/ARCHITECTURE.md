@@ -2973,8 +2973,48 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/stageb-pass-profile-1269`.
+As of: 2026-09-25 · `claude/glm-mtp-capture-1271`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/glm-mtp-capture-1271`) for **the GLM MTP
+layer's calibration capture** (PQ #1290, part 2 of #1271, P1). The MTP
+layer (`layers.45`) now gets a capture in the canonical format, on the body's
+calibration draw, in two PrismaBuild actions (`tools/glm_mtp_capture.py`,
+`prismaquant/glm_mtp_capture.py`):
+
+- Phase `final-hidden` reads Stage A's layer-44 input entries through a
+  hash-bound boundary manifest, runs layer 44 on the plan's streamed BF16
+  source (`build_quantum_source_runner`, which now takes a
+  `source_authentication` owner), then the collapse and the final norm. It
+  writes each sequence's post-norm hidden state as an exact entry and records
+  the target head's top-1 and NLL on it as a check. Its witness is
+  `prismaquant.streaming_selected_initialization.v1`
+  (`StreamingContext.source_selected_initialization_witness`): the installed
+  state of the layers it ran, with the same `source_map_sha256` a complete
+  traversal names. It is a record, not a load contract.
+- Phase `capture` loads the MTP layer with the experts dispatch the body's
+  last MoE layer ran (`prepared.json` `source_execution`; `load_mtp_layer`
+  now requires it by name) and runs the body's collector over it
+  (`_collect_activations`, unchanged). The feed runs the layer at its
+  weights' dtype.
+- The capture's load contract is `prismaquant.mtp_layer_initialization.v1`
+  (`streaming_model.validate_mtp_layer_initialization_contract`, routed by
+  `validate_source_initialization_contract`): each state tensor's shape,
+  dtype and payload hash, the checkpoint source map, the dispatch, and the
+  hash-bound final-hidden manifest. `SELECTED_SOURCE_LOAD_SCHEMAS` admits it
+  for a selected consumer.
+- The MTP census (`mtp_extension`) is derived from the body census. A source
+  owner admits a derived census only over the same model and producer roster
+  (`CaptureSourceAuthentication.admit_derived_census`); the capture then
+  inherits the canonical capture's source roster, and every shard either
+  phase reads is authenticated through that owner. The owner's receipt names
+  each admitted census (`derived_census_sha256`).
+
+No format, pipeline default, stage, lane or ship gate changes; nothing reads
+the MTP capture yet. `stage_a_chain_seed.tensor_payload_sha256` now hashes in
+bounded host chunks (same digest). Gate: `tests/test_glm_mtp_capture.py`
+(both phases end to end on a tiny checkpoint, the CLI from a body-shaped
+plan, the derived-census and load-contract refusals).
 
 Re-stamped (2026-09-25, `claude/stageb-pass-profile-1269`) for **the Stage B
 pass profiler** (PQ #1269), an opt-in development instrument:
@@ -10501,7 +10541,9 @@ activation-cache writer/journal before the source layer unloads.
 
 This route produces `prismaquant.streaming_initialization.v1` only after actual
 installed source state has been observed across every decoder layer. Its scope
-is the text source forward; vision/MTP are outside that witness. A streamed
+is the text source forward; vision/MTP are outside that witness. The GLM MTP
+layer's capture carries its own load contract,
+`prismaquant.mtp_layer_initialization.v1` (PQ #1290). A streamed
 capture requires a census from the same route and verifies its own completed
 initialization witness before publishing the full manifest. Legacy pretrained
 contracts remain readable through the strict schema dispatcher. Interrupted
