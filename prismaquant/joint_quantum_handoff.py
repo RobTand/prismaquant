@@ -56,7 +56,9 @@ Transport:
 * The consumer streams the plane through ``stream_exact_entry_tensors``
   (windows of the verified exact-entry reader, strict-tier staged when the
   policy is active) and the owner states through the checkpoint's staged small-file
-  reader. The forward shared-pass states come from the consumer's own
+  reader. Under the one-pass spill each probe's plane is streamed during
+  that probe's final pass instead of at the head (:class:`HandoffIncoming`,
+  PQ #1143). The forward shared-pass states come from the consumer's own
   Stage A slice checkpoint, exactly as chain mode reads them.
 
 The consumer refuses (``QuantumHandoffRefused``) any handoff that is not
@@ -79,7 +81,7 @@ fallback stays on it after the default moved to the kernel.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextlib import closing
+from contextlib import closing, contextmanager
 import hashlib
 import json
 import os
@@ -112,7 +114,10 @@ HANDOFF_ORIGIN_LIFETIME = "consumed"
 #: in place of the checkpoint load and the chain phases.
 HANDOFF_LOAD_PHASE = "handoff-load"
 #: The ``annotations.band_serial`` block of a derived band-serial readset.
-BAND_SERIAL_READSET_SCHEMA = "prismaquant.joint_quantum_handoff.readset.v1"
+#: v2 (PQ #1143): a spill-sealed readset stages each probe's incoming plane
+#: in that probe's spill phase and names the moved counts in
+#: ``streamed_incoming``.
+BAND_SERIAL_READSET_SCHEMA = "prismaquant.joint_quantum_handoff.readset.v2"
 
 _SEALED_FIELDS = (
     "schema", "boundary", "producer", "source", "session", "n_probes",
@@ -889,23 +894,55 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
     return handoff
 
 
-def handoff_read_entries(handoff: Mapping, checkpoint_record: Mapping) -> list[dict]:
+def _read_row(entry: Mapping) -> dict:
+    """A whole staged file as an executable manifest entry."""
+    return {"path": entry["path"], "offset": 0, "bytes": int(entry["file_bytes"]),
+            "sha256": entry["sha256"]}
+
+
+def handoff_read_entries(handoff: Mapping, checkpoint_record: Mapping, *,
+                         streamed_incoming: bool = False) -> list[dict]:
     """Every staged file a band-serial quantum reads at its head, in order.
 
     The plane entries, the owner-state file, and the slice checkpoint's
     forward shared-pass states: the ``handoff-load`` phase of the
     consumer's executable readset. A packed (v3) checkpoint (PQ #1037)
     holds those in its one shared-state pack, staged whole.
+
+    ``streamed_incoming`` (PQ #1143) leaves the plane out: a spill consumer
+    reads each probe's plane during that probe's final pass
+    (:func:`handoff_incoming_entries`), not at its head.
     """
-    rows = [{"path": entry["path"], "offset": 0, "bytes": int(entry["file_bytes"]),
-             "sha256": entry["sha256"]} for entry in handoff["activation_entries"]]
-    states = handoff["owner_states"]
-    rows.append({"path": states["path"], "offset": 0,
-                 "bytes": int(states["file_bytes"]), "sha256": states["sha256"]})
-    rows.extend({"path": entry["path"], "offset": 0,
-                 "bytes": int(entry["file_bytes"]), "sha256": entry["sha256"]}
-                for entry in _shared_pass_entries(checkpoint_record))
+    rows = ([] if streamed_incoming else
+            [_read_row(entry) for entry in handoff["activation_entries"]])
+    rows.append(_read_row(handoff["owner_states"]))
+    rows.extend(_read_row(entry) for entry in _shared_pass_entries(checkpoint_record))
     return rows
+
+
+def handoff_incoming_entries(handoff: Mapping, probe: int) -> list[dict]:
+    """Probe ``probe``'s plane entries in batch order: what its pass reads.
+
+    Each batch appears once, from 0 to ``n_batches - 1``; anything else
+    refuses. The entries are the handoff's own records, which
+    :func:`load_quantum_handoff` has checked against the checkpoint plane.
+    """
+    probe = int(probe)
+    if not 0 <= probe < int(handoff["n_probes"]):
+        raise QuantumHandoffRefused(f"the handoff carries no probe {probe}")
+    by_batch = {}
+    for entry in handoff["activation_entries"]:
+        entry_probe, batch, _at = _plane_coordinates(entry)
+        if entry_probe != probe:
+            continue
+        if batch in by_batch:
+            raise QuantumHandoffRefused(
+                f"the handoff repeats probe {probe} batch {batch}")
+        by_batch[batch] = entry
+    if sorted(by_batch) != list(range(int(handoff["n_batches"]))):
+        raise QuantumHandoffRefused(
+            f"the handoff does not cover probe {probe}'s batches")
+    return [by_batch[batch] for batch in range(int(handoff["n_batches"]))]
 
 
 def _shared_pass_entries(checkpoint_record: Mapping) -> list[dict]:
@@ -925,7 +962,8 @@ def _shared_pass_entries(checkpoint_record: Mapping) -> list[dict]:
 def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                         n_probes: int, n_batches: int, cotangent_factory=None,
                         shared_state_max_bytes: int | None = None,
-                        max_resident_bytes: int | None = None, residency_check=None):
+                        max_resident_bytes: int | None = None, residency_check=None,
+                        stream_incoming: bool = False):
     """Read what chain mode would hold after the chain, from the handoff.
 
     Returns ``(grad_plane, shared_adjoint, shared_pass)`` in
@@ -943,6 +981,11 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     The plane streams in windows under ``max_resident_bytes``, charged to
     ``residency_check``, exactly as a checkpoint load streams its own
     (:func:`~prismaquant.joint_adjoint_checkpoints.stream_exact_entry_tensors`).
+
+    ``stream_incoming`` (PQ #1143) returns the plane empty, as
+    ``cotangent_factory`` built it: each probe's final pass reads its
+    incoming rows through :class:`HandoffIncoming`, and the pass's stores
+    fill the plane.
     """
     from .cost_streaming import _state_storage_bytes
     from .io_spans import ReadRateReporter
@@ -979,20 +1022,21 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                              "shape": entry["shape"], "dtype": entry["dtype"],
                              "tensor_bytes": entry["tensor_bytes"]})
     plane = {} if cotangent_factory is None else cotangent_factory(scratch_rows)
-    # The rate and ETA lines of the checkpoint loader; no PrismaBuild units.
-    rate = ReadRateReporter(
-        "handoff-load", total_entries=len(entries),
-        total_bytes=sum(_entry_bytes(entry) for entry in entries))
-    with closing(stream_exact_entry_tensors(
-            entries, expected_session=handoff["session"],
-            max_resident_bytes=max_resident_bytes, residency_check=residency_check,
-            deadline=deadline)) as stream:
-        for entry, tensor in stream:
-            probe, batch, _at = _plane_coordinates(entry)
-            plane[(probe, batch)] = tensor
-            del tensor
-            rate.entry(_entry_bytes(entry))
-    rate.done()
+    if not stream_incoming:
+        # The rate and ETA lines of the checkpoint loader; no PrismaBuild units.
+        rate = ReadRateReporter(
+            "handoff-load", total_entries=len(entries),
+            total_bytes=sum(_entry_bytes(entry) for entry in entries))
+        with closing(stream_exact_entry_tensors(
+                entries, expected_session=handoff["session"],
+                max_resident_bytes=max_resident_bytes, residency_check=residency_check,
+                deadline=deadline)) as stream:
+            for entry, tensor in stream:
+                probe, batch, _at = _plane_coordinates(entry)
+                plane[(probe, batch)] = tensor
+                del tensor
+                rate.entry(_entry_bytes(entry))
+        rate.done()
 
     def staged(path, entry, label):
         _await_checkpoint_entry(entry, deadline=deadline)
@@ -1035,6 +1079,135 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     return plane, shared_adjoint, shared_pass
 
 
+class HandoffIncomingStream:
+    """One probe's incoming rows, read from the handoff in capture order.
+
+    Returned by :meth:`HandoffIncoming.open`. ``take(keys)`` returns the
+    next rows as verified CPU tensors and refuses any key out of the
+    capture's batch order, so each row is the entry of its own
+    coordinates. ``layout(key)`` reads nothing. ``telemetry`` counts the
+    rows taken, their tensor bytes and the seconds the pass waited for
+    them.
+    """
+
+    def __init__(self, probe, entries, stream):
+        import torch
+
+        self.probe = int(probe)
+        self._entries = list(entries)
+        self._stream = stream
+        self._next = 0
+        self._layouts = {}
+        for batch, entry in enumerate(self._entries):
+            dtype = getattr(torch, str(entry["dtype"]).removeprefix("torch."), None)
+            if not isinstance(dtype, torch.dtype):
+                raise QuantumHandoffRefused(
+                    f"handoff entry {entry['name']!r} has no torch dtype")
+            self._layouts[(self.probe, batch)] = (tuple(entry["shape"]), dtype)
+        self.telemetry = {"probe": self.probe, "entries": 0, "tensor_bytes": 0,
+                          "wait_s": 0.0}
+
+    def layout(self, key):
+        """``(shape, dtype)`` of the row at ``key``; reads nothing."""
+        try:
+            return self._layouts[tuple(key)]
+        except KeyError:
+            raise RuntimeError(
+                f"probe {self.probe}'s incoming stream has no row {key!r}") from None
+
+    def take(self, keys):
+        """The rows at ``keys``, which must be the next ones in batch order."""
+        rows = []
+        for key in keys:
+            key = tuple(key)
+            if self._next >= len(self._entries) or key != (self.probe, self._next):
+                raise RuntimeError(
+                    f"probe {self.probe}'s incoming stream is read in capture "
+                    f"order: row {key!r} was asked for, the next is "
+                    f"{(self.probe, self._next)!r}")
+            started = time.monotonic()
+            entry, tensor = next(self._stream)
+            self.telemetry["wait_s"] += time.monotonic() - started
+            if entry is not self._entries[self._next] or \
+                    _plane_coordinates(entry)[:2] != key:
+                raise RuntimeError(
+                    f"probe {self.probe}'s incoming stream yielded "
+                    f"{entry.get('name')!r} for row {key!r}")
+            self._next += 1
+            self.telemetry["entries"] += 1
+            self.telemetry["tensor_bytes"] += int(entry["tensor_bytes"])
+            rows.append(tensor)
+            tensor = None
+        return rows
+
+    def materialize(self, plane):
+        """Write every remaining row into ``plane`` at its own key."""
+        while self._next < len(self._entries):
+            key = (self.probe, self._next)
+            (plane[key],) = self.take([key])
+
+    @property
+    def exhausted(self):
+        return self._next == len(self._entries)
+
+
+class HandoffIncoming:
+    """A spill consumer's incoming plane, read probe by probe (PQ #1143).
+
+    Under the one-pass spill each incoming row is read exactly once, by its
+    probe's final pass. A spill-sealed consumer's derived readset stages
+    probe ``p``'s entries in ``spill-p{p}`` (:func:`band_serial_manifest`),
+    and the pass reads them through :meth:`open`, a verified
+    ``stream_exact_entry_tensors`` over exactly those entries in batch
+    order, instead of the cotangent scratch the head used to fill. The
+    bytes are the entries' own, as the head's load wrote them.
+    """
+
+    def __init__(self, handoff: Mapping, *, n_probes: int, n_batches: int):
+        if (handoff["n_probes"], handoff["n_batches"]) != (int(n_probes), int(n_batches)):
+            raise QuantumHandoffRefused(
+                "the handoff's probe and batch counts differ from this quantum's")
+        self.session = handoff["session"]
+        self._entries = {probe: handoff_incoming_entries(handoff, probe)
+                         for probe in range(int(n_probes))}
+        self.max_entry_bytes = max(int(entry["tensor_bytes"])
+                                   for rows in self._entries.values()
+                                   for entry in rows)
+
+    def entries(self, probe: int) -> list[dict]:
+        return list(self._entries[int(probe)])
+
+    @contextmanager
+    def open(self, probe: int, *, max_resident_bytes: int, residency_check):
+        """Stream probe ``probe``'s rows under ``max_resident_bytes``.
+
+        The windows are charged to ``residency_check`` and each window's
+        staged wait has its own bound, as a boundary prefetch window's does.
+        Nothing is read until the first :meth:`HandoffIncomingStream.take`.
+        A clean exit refuses when a row was left unread; any exit closes
+        the stream, which waits for a read in flight and releases its charge.
+        """
+        from .joint_adjoint_checkpoints import stream_exact_entry_tensors
+
+        entries = self.entries(probe)
+        generator = stream_exact_entry_tensors(
+            entries, expected_session=self.session,
+            max_resident_bytes=int(max_resident_bytes),
+            residency_check=residency_check, deadline_per_window=True)
+        stream = HandoffIncomingStream(probe, entries, generator)
+        failed = True
+        try:
+            yield stream
+            failed = False
+        finally:
+            generator.close()
+            if not failed and not stream.exhausted:
+                raise RuntimeError(
+                    f"probe {int(probe)}'s pass left "
+                    f"{len(entries) - stream.telemetry['entries']} incoming "
+                    "rows unread")
+
+
 def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
                          checkpoint_record: Mapping, *,
                          sealed_manifest_sha256: str) -> dict:
@@ -1048,6 +1221,15 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
     builder's ``(path, offset)`` deduplication, so the phase byte counts and
     the prepared-input window indices follow the new index space.
 
+    A spill-sealed readset (``annotations.replay_mode == "spill"``) streams
+    the incoming plane (PQ #1143): ``handoff-load`` keeps the owner states
+    and the shared-pass entries, and each ``spill-p{p}`` phase stages probe
+    ``p``'s plane entries, each right after the boundary entry of its batch,
+    the order its final pass reads them and the order PrismaBuild's movers
+    walk a phase. The phase sequence is unchanged.
+    ``annotations.band_serial.streamed_incoming`` names each phase's moved
+    count, so the dispatcher still counts a capture by its stored batches.
+
     The record is not re-sealed: its ``executable_readset`` still names the
     chain manifest, and the dispatcher and the quantum both re-derive this
     document from it. ``annotations.band_serial`` names what it was derived
@@ -1060,6 +1242,7 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
         MANIFEST_SCHEMA_V2,
         executable_bound_phase_name,
         executable_source_phase_name,
+        executable_spill_phase_name,
     )
 
     if not isinstance(sealed_manifest, Mapping) or \
@@ -1125,11 +1308,34 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
         read_phases.append({"name": name, "entry_indices": list(indices),
                             "bytes": size, "cumulative_bytes": cumulative})
 
+    streamed = annotations.get("replay_mode") == "spill"
+    incoming: dict[str, list[dict]] = {}
+    if streamed:
+        n_batches = int(handoff["n_batches"])
+        by_name = {phase["name"]: phase for phase in phases}
+        for probe in range(int(handoff["n_probes"])):
+            name = executable_spill_phase_name(probe)
+            if name not in by_name:
+                raise QuantumHandoffRefused(
+                    f"the spill-sealed readset has no {name} phase for the "
+                    f"handoff's probe {probe}")
+            if len(by_name[name]["entry_indices"]) != n_batches:
+                raise QuantumHandoffRefused(
+                    f"{name} does not stage one boundary entry per stored batch")
+            incoming[name] = [_read_row(entry)
+                              for entry in handoff_incoming_entries(handoff, probe)]
     seal("head", [kept(index) for index in phases[0]["entry_indices"]])
     seal(HANDOFF_LOAD_PHASE,
-         [take(row) for row in handoff_read_entries(handoff, checkpoint_record)])
+         [take(row) for row in handoff_read_entries(
+             handoff, checkpoint_record, streamed_incoming=streamed)])
     for phase in phases[len(replaced) + 1:]:
-        seal(phase["name"], [kept(index) for index in phase["entry_indices"]])
+        indices = [kept(index) for index in phase["entry_indices"]]
+        rows = incoming.get(phase["name"])
+        if rows is not None:
+            # Batch b's incoming row right after its boundary entry.
+            indices = [index for pair in zip(indices, (take(row) for row in rows))
+                       for index in pair]
+        seal(phase["name"], indices)
     derived_annotations = copy.deepcopy(dict(annotations))
     prepared = derived_annotations.get("prepared_input")
     if prepared is not None:
@@ -1147,6 +1353,8 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
         "producer": handoff["producer"]["quantum_id"],
         "generation": handoff["session"]["generation"],
         "replaced_phases": replaced,
+        **({"streamed_incoming": {name: len(rows) for name, rows in incoming.items()}}
+           if streamed else {}),
     }
     derived = {"schema": MANIFEST_SCHEMA_V2}
     for key in ("produced_by", "mount_prefix"):
@@ -1270,9 +1478,11 @@ __all__ = [
     "HANDOFF_ORIGIN_LIFETIME", "HANDOFF_OWNER_STATES_NAME",
     "HANDOFF_RECORD_BATCH_KIND",
     "HANDOFF_RECORD_NAME", "HANDOFF_SCHEMA",
-    "HandoffEmitter", "QuantumHandoffRefused", "band_serial_manifest",
+    "HandoffEmitter", "HandoffIncoming", "HandoffIncomingStream",
+    "QuantumHandoffRefused", "band_serial_manifest",
     "band_serial_manifest_bytes", "bind_handoff_publication",
-    "handoff_chain_regime_refusal", "handoff_read_entries", "handoff_root",
+    "handoff_chain_regime_refusal", "handoff_incoming_entries",
+    "handoff_read_entries", "handoff_root",
     "handoff_seal_sha256",
     "load_handoff_inputs", "load_quantum_handoff", "require_band_serial_readset",
 ]
