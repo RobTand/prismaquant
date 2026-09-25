@@ -439,6 +439,12 @@ def _meta_wrapper(text_config):
     return glm_mtp.MtpCheckpointModel(glm_mtp.mtp_layer_skeleton(text_config))
 
 
+def _mtp_routed(env):
+    """The tiny checkpoint's routed MTP units (its own expert count)."""
+    return {f"{PREFIX}mlp.experts.{e}.{p}"
+            for e in range(int(env.text_config.n_routed_experts)) for p in PROJECTIONS}
+
+
 @pytest.fixture
 def mtp_source(tmp_path, monkeypatch):
     """A two-layer GLM checkpoint plus its MTP layer (index 2), a body census
@@ -625,7 +631,7 @@ def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
             out_path=env.root / "projection" / "producer-answer.json")
         checked = glm_mtp_capture.check_mtp_expert_projection(
             carried, wrapper, PROFILE, model_path=str(env.source), source_authentication=owner)
-        assert set(checked) == _routed_names()
+        assert set(checked) == _mtp_routed(env)
         read, stream = glm_mtp_capture.final_hidden_stream(
             final_manifest, N_SEQUENCES, read_ahead_bytes=2 * SEQ_LEN * 64 * 4)
         moe_inputs, finals = [], []
@@ -720,12 +726,12 @@ def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
         reused, projected = _project_expert_population(
             population, weights={member.qname: member.weight for member in population.members},
             menus={}, model_path=str(env.source), cache_dir=env.root / "campaign-cache",
-            measured=_routed_names(), projection=census["expert_projection"],
+            measured=_mtp_routed(env), projection=census["expert_projection"],
             source_authentication=consumer)
     finally:
         consumer.close()
     assert reused == carried
-    assert set(projected) == _routed_names()
+    assert set(projected) == _mtp_routed(env)
     assert not (env.root / "campaign-cache" / "expert_projection.json").exists()
 
 
@@ -739,8 +745,8 @@ def test_projection_is_the_body_census_question_about_the_mtp_stack(mtp_source):
         str(env.source), _meta_wrapper(env.text_config), PROFILE, base_census=env.census,
         out_path=env.root / "answer.json")
     assert set(carried["stacks"]) == {stack}
-    assert set(carried["stacks"][stack]) == _routed_names()
-    assert carried["producer"]["stacks"][stack]["experts"] == EXPERTS
+    assert set(carried["stacks"][stack]) == _mtp_routed(env)
+    assert carried["producer"]["stacks"][stack]["experts"] == env.text_config.n_routed_experts
     assert carried["plan_attempts"] == [{"request": {stack: BODY_REQUEST}, "refused": None}]
 
     mixed = json.loads(json.dumps(env.census))
@@ -765,7 +771,7 @@ def test_projection_check_refuses_a_layer_the_producer_did_not_read(mtp_source):
                                       dtype=torch.float32, experts_implementation="eager")
     wrapper = glm_mtp.MtpCheckpointModel(layer)
     assert set(glm_mtp_capture.check_mtp_expert_projection(
-        carried, wrapper, PROFILE, model_path=str(env.source))) == _routed_names()
+        carried, wrapper, PROFILE, model_path=str(env.source))) == _mtp_routed(env)
     with torch.no_grad():
         layer.mlp.experts.down_proj[2, 0, 0] += 1.0
     with pytest.raises(RuntimeError, match="byte-for-byte"):
@@ -876,7 +882,7 @@ def test_cli_runs_both_phases_from_the_body_plan(mtp_source, monkeypatch):
     report = json.loads((projection_dir / "projection-run.json").read_text())
     projection_path = projection_dir / "mtp-projection.json"
     assert report["projection"]["sha256"] == _sha(projection_path)
-    assert report["units"] == len(_routed_names())
+    assert report["units"] == len(_mtp_routed(env))
     projection = json.loads(projection_path.read_text())
 
     phase2 = env.root / "cli-capture"
@@ -901,7 +907,7 @@ def test_cli_runs_both_phases_from_the_body_plan(mtp_source, monkeypatch):
     assert census["model_load_contract"]["experts_implementation"] == "eager"
     assert census["mtp_extension"]["final_hidden"]["sha256"] == _sha(final_path)
     assert census["expert_projection"] == projection
-    assert report["projection_checked_units"] == len(_routed_names())
+    assert report["projection_checked_units"] == len(_mtp_routed(env))
     consumer = cc.authenticate_selected_capture_source(
         census_path, report["capture"]["path"], expected_sha256=report["capture"]["sha256"],
         model=str(env.source), max_act_rows=MAX_ROWS, attention_implementation="eager")
