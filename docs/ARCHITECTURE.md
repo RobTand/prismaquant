@@ -826,7 +826,7 @@ row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
 (`prismaquant/joint_adjoint_checkpoints.py:1856`,
-`prismaquant/joint_quantum_handoff.py:552`), so the phase waits at most W in
+`prismaquant/joint_quantum_handoff.py:586`), so the phase waits at most W in
 total outside a PrismaBuild landing record. The bytes are the phase's count
 in the row's read plan. The built-in floor, 62,954,973 B/s, is the slowest
 30 s read window of the R13 layer-044 v4 and v5 gates (action keys
