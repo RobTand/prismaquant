@@ -43,6 +43,7 @@ from .prismasnap_moe import (
     packed_post_norm_consumers,
     search_packed_up_down_scales,
 )
+from .prismasnap_checkpoint import _require_exact_keys
 
 
 MOE_PLAN_SCHEMA = "prismaquant.prismasnap.moe_plan.v1"
@@ -243,15 +244,6 @@ def _moe_producer_identity() -> dict[str, object]:
     }
 
 
-def _exact_keys(value: Mapping[str, object], expected: frozenset[str], where: str) -> None:
-    actual = set(value)
-    if actual != set(expected):
-        raise RuntimeError(
-            f"{where} fields differ: missing={sorted(set(expected) - actual)} "
-            f"extra={sorted(actual - set(expected))}"
-        )
-
-
 def _source_name(profile, recipe_name: str) -> str:
     result = profile.source_tensor_name(recipe_name)
     if not isinstance(result, str) or not result:
@@ -272,7 +264,7 @@ def _validate_profile_contract(
         raise RuntimeError(
             f"profile {profile.name!r} does not declare PrismaSnap MoE layer {layer}"
         )
-    _exact_keys(raw, _PROFILE_KEYS, "PrismaSnap MoE profile contract")
+    _require_exact_keys(raw, _PROFILE_KEYS, where="PrismaSnap MoE profile contract")
     if (
         raw.get("schema") != MOE_PROFILE_SCHEMA
         or raw.get("layer") != layer
@@ -289,8 +281,8 @@ def _validate_profile_contract(
     per_expert = raw.get("per_expert_routed")
     if not isinstance(packed, Mapping) or not isinstance(per_expert, Mapping):
         raise RuntimeError("PrismaSnap MoE routed layout declarations are malformed")
-    _exact_keys(packed, _PACKED_PROFILE_KEYS, "PrismaSnap packed profile")
-    _exact_keys(per_expert, _PER_EXPERT_PROFILE_KEYS, "PrismaSnap per-expert profile")
+    _require_exact_keys(packed, _PACKED_PROFILE_KEYS, where="PrismaSnap packed profile")
+    _require_exact_keys(per_expert, _PER_EXPERT_PROFILE_KEYS, where="PrismaSnap per-expert profile")
     if (
         any(not isinstance(packed.get(key), str) or not packed.get(key) for key in ("gate_up", "down"))
         or packed.get("expert_axis") != 0
@@ -311,7 +303,7 @@ def _validate_profile_contract(
     for index, value in enumerate(shared):
         if not isinstance(value, Mapping):
             raise RuntimeError(f"PrismaSnap shared expert {index} is malformed")
-        _exact_keys(value, _SHARED_PROFILE_KEYS, f"PrismaSnap shared expert {index}")
+        _require_exact_keys(value, _SHARED_PROFILE_KEYS, where=f"PrismaSnap shared expert {index}")
         if any(not isinstance(value.get(key), str) or not value.get(key) for key in _SHARED_PROFILE_KEYS):
             raise RuntimeError(f"PrismaSnap shared expert {index} roles are malformed")
         normalized_shared.append({key: str(value[key]) for key in sorted(_SHARED_PROFILE_KEYS)})
@@ -1776,7 +1768,7 @@ def _validate_stat(
 ) -> None:
     if not isinstance(value, Mapping):
         raise RuntimeError(f"{where} is malformed")
-    _exact_keys(value, _STATS_KEYS, where)
+    _require_exact_keys(value, _STATS_KEYS, where=where)
     if value.get("algorithm") != PRISMASNAP_MOE_ALGORITHM:
         raise RuntimeError(f"{where} algorithm differs")
     for key in ("error_baseline", "error_final", "improvement_fraction"):
@@ -1959,7 +1951,7 @@ def validate_moe_plan_semantics(
     scales: Mapping[str, torch.Tensor],
 ) -> None:
     schema = plan.get("schema")
-    _exact_keys(plan, _PLAN_KEYS if schema == MOE_PLAN_SCHEMA else _PLAN_SET_KEYS, "PrismaSnap MoE plan")
+    _require_exact_keys(plan, _PLAN_KEYS if schema == MOE_PLAN_SCHEMA else _PLAN_SET_KEYS, where="PrismaSnap MoE plan")
     if (
         schema not in {MOE_PLAN_SCHEMA, MOE_PLAN_SET_SCHEMA}
         or plan.get("state") != "PLANNED"
@@ -1972,7 +1964,7 @@ def validate_moe_plan_semantics(
     model = plan.get("model")
     if not isinstance(model, Mapping):
         raise RuntimeError("PrismaSnap MoE model contract is malformed")
-    _exact_keys(model, _MODEL_KEYS, "PrismaSnap MoE model")
+    _require_exact_keys(model, _MODEL_KEYS, where="PrismaSnap MoE model")
     hidden = model.get("hidden_size")
     layers = model.get("planned_layers")
     layer_count = model.get("layer_count")
@@ -2023,7 +2015,7 @@ def validate_moe_plan_semantics(
             expected_keys = _PACKED_ROUTED_KEYS if row.get("layout") == "packed_3d" else _PER_EXPERT_ROUTED_KEYS
         if expected_keys is None:
             raise RuntimeError(f"PrismaSnap MoE seam {index} has unknown kind")
-        _exact_keys(row, expected_keys, f"PrismaSnap MoE seam {index}")
+        _require_exact_keys(row, expected_keys, where=f"PrismaSnap MoE seam {index}")
         by_layer[int(row["layer"])].append(row)
     for layer in layers:
         rows = by_layer[layer]
@@ -2156,7 +2148,7 @@ def validate_moe_plan_semantics(
             for expert, role in enumerate(roles):
                 if not isinstance(role, Mapping):
                     raise RuntimeError("PrismaSnap per-expert role is malformed")
-                _exact_keys(role, _PER_EXPERT_ROLE_KEYS, "PrismaSnap per-expert role")
+                _require_exact_keys(role, _PER_EXPERT_ROLE_KEYS, where="PrismaSnap per-expert role")
                 if role["expert"] != expert:
                     raise RuntimeError("PrismaSnap per-expert role order differs")
                 role_names = [str(role[name]) for name in ("gate", "up", "down")]
@@ -2277,7 +2269,7 @@ def validate_moe_plan_semantics(
     verification = plan.get("verification")
     if not isinstance(verification, Mapping):
         raise RuntimeError("PrismaSnap MoE verification is malformed")
-    _exact_keys(verification, _VERIFICATION_KEYS, "PrismaSnap MoE verification")
+    _require_exact_keys(verification, _VERIFICATION_KEYS, where="PrismaSnap MoE verification")
     numeric = ("fp64_invariance_max_abs", "router_logit_max_abs", "route_weight_max_abs", "routed_output_max_abs", "routing_changed", "threshold", "required_bf16_fold_kl_max")
     if any(isinstance(verification.get(key), bool) or not isinstance(verification.get(key), (int, float)) or not math.isfinite(float(verification[key])) for key in numeric):
         raise RuntimeError("PrismaSnap MoE verification numbers are malformed")

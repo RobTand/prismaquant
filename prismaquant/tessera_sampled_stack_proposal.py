@@ -26,14 +26,13 @@ from .cluster_campaign import _atomic_write_new_bytes
 from .joint_aura import assignment_probe_summary
 from .tessera_formats import (family_q256_bounds, get_tessera_family,
                               parse_tessera_format_name, realisable_rungs)
+from .schemas import Contract
 
 SCHEMA = 'prismaquant.tessera_sampled_stack_proposal.v1'
 PRIMARY_FAMILIES = frozenset({'TESSERA_E4M3_K1', 'TESSERA_BF16_K1'})
 
 
-def _require(ok, message):
-    if not ok:
-        raise ValueError(message)
+_require = Contract(ValueError).require
 
 
 def _domain(families, costs, stats):

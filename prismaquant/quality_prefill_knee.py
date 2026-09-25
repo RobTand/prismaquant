@@ -40,6 +40,7 @@ from .quality_prefill_contract import (
     QualityPrefillContractError,
     canonical_sha256,
 )
+from .schemas import Contract
 
 __all__ = [
     "KneeSelectionError",
@@ -178,8 +179,7 @@ class KneeSelection:
         return canonical_sha256(self.as_dict())
 
 
-def _fail(message: str) -> None:
-    raise KneeSelectionError(message)
+_fail = Contract(KneeSelectionError).fail
 
 
 def read_points(values: Iterable[Mapping[str, object]]) -> tuple[FrontierPoint, ...]:

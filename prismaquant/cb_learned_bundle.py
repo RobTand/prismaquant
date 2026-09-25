@@ -54,6 +54,7 @@ from prismaquant.routed_moe_codebooks import (
     ROUTED_STACK_KEYS,
     normalize_routed_book_keying,
 )
+from .schemas import strict_json_loads
 
 
 CB_LEARNED_BUNDLE_SCHEMA = "prismaquant.cb_learned_codebook_bundle.v1"
@@ -847,16 +848,9 @@ def _nonempty_binding(value: object, *, where: str) -> str:
 
 
 def _strict_json_loads(raw: str, *, where: str) -> object:
-    def reject_duplicates(pairs):
-        out = {}
-        for key, value in pairs:
-            if key in out:
-                raise ValueError(f"{where}: duplicate JSON member {key!r}")
-            out[key] = value
-        return out
-
     try:
-        return json.loads(raw, object_pairs_hook=reject_duplicates)
+        return strict_json_loads(raw, duplicate=lambda key: ValueError(
+            f"{where}: duplicate JSON member {key!r}"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"{where}: malformed bundle metadata: {exc}") from exc
 

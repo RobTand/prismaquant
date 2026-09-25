@@ -35,6 +35,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from .schemas import Contract
 
 
 #: The schema one quantum descriptor carries. Bumped only by a change to the
@@ -54,9 +55,7 @@ def roster_digest(names) -> str:
     return hashlib.sha256("\n".join(roster).encode("utf-8")).hexdigest()
 
 
-def _require(condition, message):
-    if not condition:
-        raise ValueError(message)
+_require = Contract(ValueError).require
 
 
 def _checked_names(names) -> list:

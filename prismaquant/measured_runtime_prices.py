@@ -23,6 +23,7 @@ from typing import Any, Mapping, Sequence
 
 from .lane_eligibility import ServingContext
 from .serve_dispatch_table import DispatchTableError
+from .schemas import strict_json_loads
 
 SCHEMA = "prismaquant.measured_runtime_prices.v1"
 CONTEXT_SCHEMA = "prismaquant.measured_runtime_context.v1"
@@ -166,15 +167,9 @@ def _timestamp(value: Any, where: str) -> datetime:
 
 
 def _json(path: str | Path) -> dict:
-    def unique(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise RuntimePriceError(f"{path}: duplicate JSON key {key!r}")
-            result[key] = value
-        return result
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=unique)
+        return strict_json_loads(Path(path).read_text(encoding="utf-8"), duplicate=lambda key:
+                                 RuntimePriceError(f"{path}: duplicate JSON key {key!r}"))
     except (OSError, ValueError) as exc:
         raise RuntimePriceError(f"cannot load {path}: {exc}") from exc
 

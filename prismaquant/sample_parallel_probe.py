@@ -37,6 +37,7 @@ from prismaquant.sample_parallel_probe_contract import (
     validate_activation_priority_domain,
 )
 from prismaquant.sensitivity_probe import load_calibration
+from .schemas import strict_json_loads
 
 
 CALIBRATION_SCHEMA = "prismaquant.sample_parallel_probe.calibration.v1"
@@ -149,18 +150,9 @@ def _strict_json_loads(payload: str, *, where: str) -> object:
     duplicate object key.  Contract digests and closed schemas must instead
     have one unambiguous parse at every nesting level.
     """
-    def _object_from_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, value in pairs:
-            if key in result:
-                raise SampleParallelProbeError(
-                    f"{where} contains duplicate JSON member {key!r}"
-                )
-            result[key] = value
-        return result
-
     try:
-        return json.loads(payload, object_pairs_hook=_object_from_pairs)
+        return strict_json_loads(payload, duplicate=lambda key: SampleParallelProbeError(
+            f"{where} contains duplicate JSON member {key!r}"))
     except SampleParallelProbeError:
         raise
     except (TypeError, ValueError) as exc:
