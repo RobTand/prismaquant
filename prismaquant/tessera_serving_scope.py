@@ -4,6 +4,19 @@ The target describes the requested runtime, not the model. Structure is read
 separately for every unit from probe/discovery facts, checked against the model
 profile's declarations. Neither a model name nor the calibration device is a
 serving target.
+
+A stats row carries its unit's topology in one of three forms, each naming its
+source (PQ #1278):
+
+* ``_packed_experts_module`` + ``num_experts`` -- the producer recorded a
+  packed expert stack (or one expert's view of it);
+* ``router_path`` + ``expert_id`` -- the producer walked the module tree
+  (``sensitivity_probe.discover_moe_structure``); both ``None`` means dense;
+* ``unit_structure`` + ``unit_topology_source="profile_grammar"`` -- a table
+  built before its producer wrote either fact, re-stamped by
+  :func:`restamp_unit_topology` from the model profile's declared grammar.
+
+A row with none of the three is refused; nothing here guesses a structure.
 """
 from __future__ import annotations
 
@@ -12,6 +25,14 @@ import re
 from typing import Mapping
 
 from .lane_eligibility import ServingContext, STRUCTURE_DENSE, STRUCTURE_ROUTED_MOE
+
+#: Row key of a structure stamped from the profile grammar, never by a producer.
+UNIT_STRUCTURE_KEY = "unit_structure"
+#: Row key naming where a stamped structure came from.
+UNIT_TOPOLOGY_SOURCE_KEY = "unit_topology_source"
+#: The one stamp source this reader accepts.
+PROFILE_GRAMMAR_SOURCE = "profile_grammar"
+RESTAMP_SCHEMA = "prismaquant.unit_topology_restamp.v1"
 
 
 @dataclass(frozen=True)
@@ -79,9 +100,27 @@ def unit_structure_from_profile(qname: str, profile) -> str:
     return STRUCTURE_DENSE
 
 
+def _has_producer_topology(row: Mapping) -> bool:
+    return (row.get("_packed_experts_module") is not None or row.get("num_experts") is not None
+            or "router_path" in row or "expert_id" in row)
+
+
 def unit_structure_from_stats(qname: str, row: Mapping, profile) -> str:
     """Use owned probe facts, never tensor shape or a model-wide MoE guess."""
     declared_structure = unit_structure_from_profile(qname, profile)
+    if UNIT_STRUCTURE_KEY in row or UNIT_TOPOLOGY_SOURCE_KEY in row:
+        stamped = row.get(UNIT_STRUCTURE_KEY)
+        if row.get(UNIT_TOPOLOGY_SOURCE_KEY) != PROFILE_GRAMMAR_SOURCE \
+                or stamped not in (STRUCTURE_DENSE, STRUCTURE_ROUTED_MOE):
+            stamp = {key: row.get(key) for key in (UNIT_STRUCTURE_KEY, UNIT_TOPOLOGY_SOURCE_KEY)}
+            raise ValueError(f"{qname}: unrecognised unit topology stamp {stamp!r}")
+        if _has_producer_topology(row):
+            raise ValueError(f"{qname}: row carries both producer topology and a "
+                             "profile-grammar stamp; one source per unit")
+        if stamped != declared_structure:
+            raise ValueError(f"{qname}: profile-grammar stamp {stamped!r} differs from the live "
+                             f"profile's {declared_structure!r}; re-stamp against this profile")
+        return stamped
     packed_module = row.get("_packed_experts_module")
     count = row.get("num_experts")
     if packed_module is not None or count is not None:
@@ -112,6 +151,49 @@ def context_by_unit_from_stats(target: ServingTarget | None, stats: Mapping[str,
         return None
     return {name: target.context(unit_structure_from_stats(name, row, profile))
             for name, row in stats.items()}
+
+
+def restamp_unit_topology(payload: Mapping, profile, *, input_sha256: str | None = None
+                          ) -> tuple[dict, dict]:
+    """Stamp every row that lacks producer topology from the profile grammar.
+
+    For a cost table built before its producer wrote per-unit topology (the
+    AURA payload before PQ #1278). A row whose producer recorded topology is
+    left exactly as it is. Every other row gains ``unit_structure`` from
+    :func:`unit_structure_from_profile` and ``unit_topology_source`` naming
+    that source; no probe fact (router, expert id, packed module, expert count)
+    is written, because none was observed. The payload's provenance records
+    the counts per source and per structure. The input mapping is not
+    modified: rows, the stats mapping and the provenance mapping are copied,
+    and every other value is shared with the input.
+    """
+    stats = payload.get("stats")
+    if not isinstance(stats, Mapping) or not stats:
+        raise ValueError("unit topology restamp needs a non-empty stats mapping")
+    new_stats, sources, structures = {}, {"producer": 0, PROFILE_GRAMMAR_SOURCE: 0}, {}
+    for name, row in stats.items():
+        if _has_producer_topology(row):
+            structure = unit_structure_from_stats(name, row, profile)
+            new_stats[name] = row
+            sources["producer"] += 1
+        else:
+            if UNIT_STRUCTURE_KEY in row or UNIT_TOPOLOGY_SOURCE_KEY in row:
+                raise ValueError(f"{name}: already stamped; restamp its unstamped source table")
+            structure = unit_structure_from_profile(name, profile)
+            new_stats[name] = {**row, UNIT_STRUCTURE_KEY: structure,
+                               UNIT_TOPOLOGY_SOURCE_KEY: PROFILE_GRAMMAR_SOURCE}
+            sources[PROFILE_GRAMMAR_SOURCE] += 1
+        structures[structure] = structures.get(structure, 0) + 1
+    summary = {"schema": RESTAMP_SCHEMA, "profile": getattr(profile, "name", type(profile).__name__),
+               "sources": sources, "structures": dict(sorted(structures.items())),
+               **({"input_sha256": input_sha256} if input_sha256 is not None else {})}
+    result = dict(payload)
+    provenance = dict(payload.get("provenance") or {})
+    if "unit_topology_restamp" in provenance:
+        raise ValueError("table already carries a unit topology restamp")
+    provenance["unit_topology_restamp"] = summary
+    result["stats"], result["provenance"] = new_stats, provenance
+    return result, summary
 
 
 def scope_provenance(target: ServingTarget | None,

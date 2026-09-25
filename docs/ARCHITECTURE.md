@@ -2960,8 +2960,46 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/glm-mtp-layer45-1271`.
+As of: 2026-09-25 · `claude/aura-topology-1278`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/aura-topology-1278`) for **per-unit topology
+on AURA stats rows** (PQ #1278, P1). A scoped Tessera allocation classifies
+each unit from facts its stats row carries
+(`tessera_serving_scope.unit_structure_from_stats`, `:108`). The incremental
+probe writes them; AURA stats rows did not, so every scoped allocation over
+an AURA table, the joined GLM-5.3 `joint-allocation.pkl` (d490a96d, 36,423
+units) included, stopped at `context_by_unit_from_stats` with "missing
+per-unit router_path/expert_id topology". Two changes:
+
+- The producer writes the probe's facts from the probe's sources.
+  `aura_cost.aura_unit_topology` (`:650`) gives an nn.Linear
+  `router_path`/`expert_id` from `sensitivity_probe.discover_moe_structure`
+  (`None`/`None` when no router places it) and a packed expert's per-expert
+  view `_packed_experts_module` + `num_experts`, the count of the full profile
+  split, as `tessera_campaign` records for the same members. Both assemblers
+  merge it into every row (`aura_cost.py:1759`, `:1898`); the Stage B layer
+  quantum computes it with its roster, off the skeleton, before any window
+  loads (`joint_cost_quantum.py:1042`). A Linear the profile declares routed
+  that the walk cannot place gets no keys, so the scope reports it missing
+  instead of recording an unobserved dense fact.
+- A table built before this is re-stamped, never guessed.
+  `tessera_serving_scope.restamp_unit_topology` (`:156`) stamps each row
+  without producer topology with `unit_structure` from
+  `unit_structure_from_profile` and `unit_topology_source="profile_grammar"`,
+  writes no router, expert id, packed module or expert count, and records
+  per-source and per-structure counts under
+  `provenance.unit_topology_restamp`. `python -m
+  prismaquant.unit_topology_restamp` reads a table by path and SHA-256 and
+  publishes a new table plus a receipt binding both digests; the input is
+  never modified. The scope reader accepts that stamp only with its source
+  label, only on a row with no producer facts, and only when it equals the
+  live profile's classification; a row with no source of either kind still
+  refuses. Stage B does not re-run.
+
+Gates: `tests/test_aura_unit_topology_1278.py` plus the existing AURA,
+Stage B quantum and scope suites. Allocation defaults, menus, costs and
+bytes are unchanged; the stats rows gain keys.
 
 Re-stamped (2026-09-25, `claude/glm-mtp-layer45-1271`) for **a priced
 forward for GLM's MTP layer** (PQ #1283, part 1 of #1271, P1).
@@ -19807,6 +19845,17 @@ mode cannot, and removing a unit's last candidate produces a named refusal.
 The development reader also refuses non-empty cell predicates: its family/rate
 menu lookup has no unit facts with which to evaluate a shape constraint.
 Export's `resolve_unit_route` has those facts and evaluates the predicates.
+
+**Per-unit topology on a stats row** (PQ #1278). `context_by_unit_from_stats`
+reads one of three forms per row (`tessera_serving_scope.py:108`), each
+naming its source: `_packed_experts_module` + `num_experts` (the producer
+recorded a packed stack or one expert's view of it), `router_path` +
+`expert_id` (the producer's module walk; both `None` is dense), or
+`unit_structure` + `unit_topology_source="profile_grammar"` (a pre-#1278
+table re-stamped by `prismaquant.unit_topology_restamp`). The probe and AURA
+(`aura_cost.aura_unit_topology`) write the first two; only the re-stamp tool
+writes the third, and the reader re-checks it against the live profile. A
+row with none of the three refuses; nothing guesses a model-wide structure.
 
 **The boundary has an export arm, not a second codec.**
 `prismaquant/run-pipeline.sh` selects `EXPORT_CONTAINER=tessera`, preflights
