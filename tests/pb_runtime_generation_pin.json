@@ -1,24 +1,25 @@
 {
   "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
-  "bundle_root": "/mnt/shared/prismabuild-fleet/runtime-generations/81d95cba8d91-1790160372-5d100532e024",
-  "candidate_commit": "81d95cba8d911907ca85db5618d34c0c0855e7bf",
-  "runtime_generation": "81d95cba8d91-1790160372-5d100532e024",
-  "qualification": "PUBLISHED RUNTIME GENERATION 81d95cba8d91-1790160372-5d100532e024",
+  "bundle_root": "/mnt/shared/prismabuild-fleet/runtime-generations/68cd6233b179-1790347882-953848afb6b9",
+  "candidate_commit": "68cd6233b179fad4b2ff50fa411ca4a9dd5edbb6",
+  "runtime_generation": "68cd6233b179-1790347882-953848afb6b9",
+  "qualification": "PUBLISHED RUNTIME GENERATION 68cd6233b179-1790347882-953848afb6b9",
   "files": {
-    "src/prismabuild/action_edges.py": "d9d5bba03815c6a60b359475539263a33fe7b24eaa09cbcea9701dcb1a88eafb",
-    "src/prismabuild/core.py": "4f2d0347a9a6ee1a2122b43107849f8851956c594a66f21a10c528032c1c6860",
-    "src/prismabuild/movement_actions.py": "fd3a76883033c4e955a9e6e5a939536390671064ed44132fd90835003683d2af",
-    "src/prismabuild/pool.py": "281706fef8e7e8d76b8b01cf2b7e9578ca58b6ce5aedcc4eee07f92183ddf796",
-    "src/prismabuild/produced_output.py": "0dba5805c613b753fa5cf796b21855fbe876125b6599e1caa15b00ead4a04a45",
-    "src/prismabuild/produced_spool.py": "cb1a7e08a102b977ece19cae6d6e535ffbba2f73205a63bb4b1ce4d54817806b",
-    "src/prismabuild/reader_lease.py": "954047b289a711524340bfd3d441600f06951965dbfe070444c8293146bd8773",
-    "src/prismabuild/residency_map.py": "c8ac11e8b657cb3a9bd60fe574de13f9e125794c608c10e658f9f7c23ff9f3c0",
+    "src/prismabuild/action_edges.py": "ab4ae4347403b609470fe45943dc2730496c11c6fb226d59affb33547a479d50",
+    "src/prismabuild/adaptive_cpu.py": "52ad857f4907f635aeae5be95c0495c54ca9dfcc48bf2ad4109c7ca2296f1e64",
+    "src/prismabuild/core.py": "06a4591af15c022a14ab8f104197fb7b750e869cb83ced981784b72b933e3183",
+    "src/prismabuild/movement_actions.py": "30ef5dfb3014e39ea3c99a47c942e28a188098df9ace2de24579a62c678b94f5",
+    "src/prismabuild/pool.py": "ac3742666901025a2cefe9df98556af7bfeb49bbdb9daa2f7ccfd7f7b850c644",
+    "src/prismabuild/produced_output.py": "10586f680acdcae38fe591c331e09ffdfbb1de979e8722646ecc176c5c897b3a",
+    "src/prismabuild/produced_spool.py": "c82e36fdfe4458c32fc5f02008306e5838035753bf4350adb8416bfba532e8e0",
+    "src/prismabuild/reader_lease.py": "c10be75030f40cab09416695f4442a41b279b066a173faf6b1c19f279d579699",
+    "src/prismabuild/residency_map.py": "10ce7f4f654fab46d45f64ffa5a85768df5dafa12bd8343a61b5abb0363d7b99",
     "src/prismabuild/resource_scope.py": "49a6f78e0c20cc68f3b6cd002e51b7dbe5943d5d21d4ba1dbca18b5d2563898c",
-    "src/prismabuild/storage_tiers.py": "3896d09dc2aa4e94e09e9cb697716c13bfd8517f208e320bcf35a1f4c3f51319",
-    "tools/fleet/prewarm_loop.py": "638f2aeda817037df4c2ea99c557ab9104172823351553849ad0cc3244b9634f",
+    "src/prismabuild/storage_tiers.py": "e0c4a99195966fd1eb6ae6b33714ab873de4b9618dcd75f6e2c694401b83088d",
+    "tools/fleet/prewarm_loop.py": "d4e886aaf8da7983545a944252f031e8b9822e59d85e15a038a1a17088726cc4",
     "tools/fleet/produced_export.py": "0bc4159cf5d4d4955bc83c10d6676df42108a281a4b0b6e9024d5c4c73a30efc",
-    "tools/fleet/stage_move.py": "b7358fd768bf7b4ee4fdced8665b0ce12b977d3eb822f1bf7420e4f9f4e18aa7",
-    "tools/fleet/stage_release.py": "972212519a1e26b9b05bb17ea6fc9b0ba3cb06a7bd8c762e06eeaa69181100f6",
+    "tools/fleet/stage_move.py": "bf7a7d72fbd0b84dd6679f8090afb3aa8482abadcf415921a5f9c2d784a83279",
+    "tools/fleet/stage_release.py": "76ad8d52cb5752a7394205c9572c6676f1656035e7f6391c9f5aad8ee6f3b9d1",
     "tools/prismabuild_worker.py": "9d6851f927ddf09e75d7eb187b49be9dbfba05274536d765077d93e26ec79418"
   },
   "search_paths": [
@@ -26,7 +27,7 @@
       "env": "PRISMAQUANT_PB_GENERATION_SRC"
     },
     {
-      "path": "/mnt/shared/prismabuild-fleet/runtime-generations/81d95cba8d91-1790160372-5d100532e024"
+      "path": "/mnt/shared/prismabuild-fleet/runtime-generations/68cd6233b179-1790347882-953848afb6b9"
     }
   ],
   "consumers": [

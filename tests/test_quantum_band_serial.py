@@ -446,17 +446,21 @@ def test_the_emitter_refuses_layer_zero_and_a_capture_batch_off_the_chains(
 
 
 def test_a_failed_emission_publishes_no_record(tmp_path, monkeypatch):
-    """The record is written last: a write that fails leaves no handoff.json."""
+    """The record is written last: a write that fails leaves no handoff.json.
+
+    The quantum streams its handoff (PQ #1251): the writer thread's read
+    fails, and the quantum raises that error at its next store or finish.
+    """
     single, receipt, output_root = _campaign(tmp_path, monkeypatch)
 
     class Broken(HandoffEmitter):
-        def emit(self, *, grad_plane, **kwargs):
+        def stream(self, *, grad_plane, **kwargs):
             class Plane(dict):
                 def __getitem__(self, key):
                     if key == (1, 2):
                         raise RuntimeError("fixture: plane read failed")
                     return grad_plane[key]
-            return super().emit(grad_plane=Plane(), **kwargs)
+            return super().stream(grad_plane=Plane(), **kwargs)
 
     def broken(record, adjoint_slice, execution):
         return Broken(record=record, adjoint_slice=adjoint_slice,

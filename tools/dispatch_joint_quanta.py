@@ -118,8 +118,8 @@ HEAD_PROGRESS_GRACE_S = 1800
 #:
 #: * W is the spec's ``PRISMAQUANT_STAGED_RANGE_WAIT_S``, read with the
 #:   reader's own rules. The reader sets one deadline, start + W, for every
-#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1856 in
-#:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:655 in
+#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1869 in
+#:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:1015 in
 #:   load_handoff_inputs). Without a PrismaBuild landing record the phase
 #:   waits at most W in total; with one (PB #989) its waits are declared and
 #:   exempt from the no-progress clock.
@@ -133,7 +133,7 @@ LOAD_PHASE_FLOOR_SCHEMA = "prismaquant.load_phase_floor.v1"
 LOAD_PHASE_BOUND = (
     "grace = W + ceil(bytes / floor). The reader sets one deadline, start + W, "
     "for every staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py"
-    ":1856 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:655 "
+    ":1869 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:1015 "
     "load_handoff_inputs), so without a PrismaBuild landing record the phase "
     "waits at most W in total, and with one (PB #989) the waits are declared "
     "and exempt. At or above the floor rate the transfer takes at most "
@@ -1386,6 +1386,25 @@ _RENDER_PHASE = re.compile(r"render-(\d{2,})")
 _REPLAY_PHASE = re.compile(r"replay-(\d{2,})-p(\d+)")
 
 
+def phase_work_entries(name: str, fact: Mapping, annotations: Mapping):
+    """The entries a phase's pass counts its work by, from its read-plan facts.
+
+    A phase's entry count, less the incoming plane entries a band-serial
+    spill readset moved into it (``annotations.band_serial.streamed_incoming``,
+    PQ #1143): those add read bytes to ``spill-pP``, not capture groups.
+    ``None`` when the plan does not count the phase's entries.
+    """
+    entries = fact.get("entries") if isinstance(fact, Mapping) else None
+    band = annotations.get("band_serial") if isinstance(annotations, Mapping) else None
+    streamed = band.get("streamed_incoming") if isinstance(band, Mapping) else None
+    moved = streamed.get(name) if isinstance(streamed, Mapping) else None
+    if type(entries) is not int or moved is None:
+        return entries
+    if type(moved) is not int or not 0 <= moved <= entries:
+        return None
+    return entries - moved
+
+
 def compute_phase_work(name: str, *, replay_mode: str, entries,
                        n_probes, capture_batch,
                        runs_tail: bool = False) -> list[dict] | None:
@@ -2250,7 +2269,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         work = compute_phase_work(
             name, replay_mode=normalize_replay_mode(
                 (executable or {}).get("replay_mode")),
-            entries=fact.get("entries"), n_probes=context.get("n_probes"),
+            entries=phase_work_entries(name, fact, annotations),
+            n_probes=context.get("n_probes"),
             capture_batch=context.get("replay_regime.capture_batch"),
             runs_tail=name == tail_phase)
         if work is None:
@@ -2802,13 +2822,12 @@ def band_serial_roles(records: Sequence[tuple[Path, dict]]) -> dict[str, dict]:
 #: The prefix of a Stage B handoff template's derived id.
 HANDOFF_TEMPLATE_ID_PREFIX = "pq-stageb-handoff-"
 
-#: The export-rate family every Stage B handoff producer declares (PQ #1225).
-#: PrismaBuild learns a producer's export slots per template (#999), and each
-#: row's handoff template is new, so no row is ever measured and each runs
-#: its exports one at a time. One family string for every handoff producer
-#: lets PrismaBuild learn the rate across rows instead.
-#: TODO(PB #1126): declare it on the template once PrismaBuild defines the
-#: field (proposed name ``export_rate_family``); nothing reads it before then.
+#: The export-rate family every Stage B handoff template declares (PQ #1225,
+#: #1254). PrismaBuild learns a producer's export slots per template (#999),
+#: and each row's handoff template is new, so no row was ever measured and
+#: each ran its exports one at a time. The template's ``export_rate_family``
+#: (PrismaBuild #1126) keys the learned rate by this one string instead, so
+#: each row starts from what the earlier rows' exports measured.
 HANDOFF_EXPORT_RATE_FAMILY = "pq-stageb-handoff"
 
 
@@ -2884,7 +2903,7 @@ def handoff_template(record: Mapping, *, plan: Mapping,
                 artifact_max_bytes=int(policy["max_artifact_bytes"]),
                 group_size=int(policy["prefetch_batches"]),
                 max_entry_tensor_bytes=max(tensors), template_id=name,
-                write_only=True)
+                write_only=True, export_rate_family=HANDOFF_EXPORT_RATE_FAMILY)
 
         template = build(HANDOFF_TEMPLATE_ID_PREFIX + str(quantum_id)
                          if template_id is None else template_id)

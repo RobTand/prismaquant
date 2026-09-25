@@ -56,7 +56,9 @@ Transport:
 * The consumer streams the plane through ``stream_exact_entry_tensors``
   (windows of the verified exact-entry reader, strict-tier staged when the
   policy is active) and the owner states through the checkpoint's staged small-file
-  reader. The forward shared-pass states come from the consumer's own
+  reader. Under the one-pass spill each probe's plane is streamed during
+  that probe's final pass instead of at the head (:class:`HandoffIncoming`,
+  PQ #1143). The forward shared-pass states come from the consumer's own
   Stage A slice checkpoint, exactly as chain mode reads them.
 
 The consumer refuses (``QuantumHandoffRefused``) any handoff that is not
@@ -79,19 +81,25 @@ fallback stays on it after the default moved to the kernel.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextlib import closing
+from contextlib import closing, contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import pickle
 import re
+import threading
 import time
 
 HANDOFF_SCHEMA = "prismaquant.joint_quantum_handoff.v1"
 HANDOFF_OWNER_STATES_SCHEMA = "prismaquant.joint_quantum_handoff.owner_states.v1"
 HANDOFF_SESSION_SCHEMA = "prismaquant.joint_quantum_handoff.session.v1"
 HANDOFF_DIRECTORY = "handoff"
+#: Capture groups of final rows the streamed writer's tee ring holds (PQ
+#: #1251). The writer takes an entry in well under a group's pass time, so
+#: two groups keep the ring nearly always free; a full ring costs a scratch
+#: read, never a wait.
+HANDOFF_TEE_GROUPS = 2
 HANDOFF_RECORD_NAME = "handoff.json"
 HANDOFF_OWNER_STATES_NAME = "owner-states.pkl"
 #: The produced-output group kind of ``owner-states.pkl`` and
@@ -106,7 +114,10 @@ HANDOFF_ORIGIN_LIFETIME = "consumed"
 #: in place of the checkpoint load and the chain phases.
 HANDOFF_LOAD_PHASE = "handoff-load"
 #: The ``annotations.band_serial`` block of a derived band-serial readset.
-BAND_SERIAL_READSET_SCHEMA = "prismaquant.joint_quantum_handoff.readset.v1"
+#: v2 (PQ #1143): a spill-sealed readset stages each probe's incoming plane
+#: in that probe's spill phase and names the moved counts in
+#: ``streamed_incoming``.
+BAND_SERIAL_READSET_SCHEMA = "prismaquant.joint_quantum_handoff.readset.v2"
 
 _SEALED_FIELDS = (
     "schema", "boundary", "producer", "source", "session", "n_probes",
@@ -239,6 +250,10 @@ def _owner_export_report(owner) -> dict | None:
         return {"report_error": repr(exc)[:400]}
 
 
+class HandoffEmitCancelled(RuntimeError):
+    """The quantum failed first: the handoff writer stops and writes no record."""
+
+
 class HandoffEmitter:
     """Publish one quantum's final plane and owner states for ``L - 1``.
 
@@ -246,10 +261,13 @@ class HandoffEmitter:
     produced-output binding, or a capture batch the slice's chain regime
     does not roll at, refuses before any GPU work. ``capture_batch`` is the
     launch regime's (``joint_replay_regime``); it is stamped into the
-    handoff's ``producer`` block. The core calls :meth:`emit` inside its
-    storage context, after the retained-window driver returns: the final
-    pass has then written the boundary-``L`` plane and harvested every
-    owner.
+    handoff's ``producer`` block.
+
+    The core opens :meth:`stream` before its retained-window driver runs
+    (PQ #1251): a writer thread binds the handoff generation, then writes
+    each ``(probe, batch)`` entry as soon as a final pass has stored it,
+    while the later passes still run. :meth:`emit` is the same writer for a
+    plane whose every slot is final already.
     """
 
     def __init__(self, *, record: Mapping, adjoint_slice: Mapping,
@@ -274,28 +292,41 @@ class HandoffEmitter:
         self.capture_batch = int(capture_batch)
         self.publication = publication
         self.published: dict | None = None
-        #: The owner's export report once :meth:`emit` returned or raised
+        #: The owner's export report once the writer ended, however it ended
         #: (PQ #1225); the row's counters keep it.
         self.export_report: dict | None = None
+        self._streamed = False
 
     def emit(self, *, grad_plane, cotangent_owners, n_probes: int,
              n_batches: int, kda_capture_kernel) -> dict:
-        """Publish the plane; ``kda_capture_kernel`` is the producer's mode.
+        """Publish a plane whose every slot is final already.
 
-        ``None`` for a fallback launch, else the admitted kernel's
-        ``handoff_stamp()`` (PQ #1214). It has no default, so no caller
-        publishes a mode it did not state.
+        ``kda_capture_kernel`` is ``None`` for a fallback launch, else the
+        admitted kernel's ``handoff_stamp()`` (PQ #1214). It has no default,
+        so no caller publishes a mode it did not state.
         """
-        from .cost_streaming import StreamedBoundaryArtifacts, normalize_boundary_storage
+        with self.stream(grad_plane=grad_plane, n_probes=n_probes,
+                         n_batches=n_batches,
+                         kda_capture_kernel=kda_capture_kernel) as stream:
+            stream.mark_final([(probe, batch) for probe in range(int(n_probes))
+                               for batch in range(int(n_batches))])
+            return stream.finish(cotangent_owners)
 
-        if self.published is not None:
+    def stream(self, *, grad_plane, n_probes: int, n_batches: int,
+               kda_capture_kernel) -> "HandoffStream":
+        """The handoff writer for a plane whose slots become final as it runs.
+
+        Refuses a kernel stamp that is not one before any thread starts.
+        """
+        from .cost_streaming import normalize_boundary_storage
+
+        if self.published is not None or self._streamed:
             raise RuntimeError("a quantum emits its handoff once")
         if kda_capture_kernel is not None:
             refusal = _kernel_stamp_refusal(kda_capture_kernel)
             if refusal is not None:
                 raise QuantumHandoffRefused(f"cannot emit a handoff: {refusal}")
         record, layer = self.record, int(self.record["layer"])
-        source = _source_binding(record, self.adjoint_slice)
         producer = {
             "quantum_id": str(record["quantum_id"]),
             "layer": layer,
@@ -312,67 +343,343 @@ class HandoffEmitter:
         policy = normalize_boundary_storage({
             **self.boundary_storage,
             "directory": str(handoff_root(record["output_space"]["root"]))})
-        owner = StreamedBoundaryArtifacts(policy)
+        self._streamed = True
+        return HandoffStream(self, grad_plane=grad_plane, n_probes=int(n_probes),
+                             n_batches=int(n_batches), policy=policy,
+                             producer=producer,
+                             source=_source_binding(record, self.adjoint_slice),
+                             layer=layer)
+
+
+class HandoffStream:
+    """One handoff written on a thread of its own while the passes run.
+
+    PQ #1251. The writer thread owns the handoff's ``StreamedBoundaryArtifacts``
+    for its whole life: the bind, every entry write, the settle, the record
+    group and the exit. No other thread calls that owner. It writes the
+    entries in the order the serial emitter wrote them, probe-major and
+    batch-ascending, with the same arguments, so every entry's bytes and
+    name, every produced group and its commit order, and ``handoff.json``
+    are the serial emitter's. Each entry waits until a final pass has
+    stored its slot (:meth:`mark_final`); the main thread keeps computing.
+
+    What does not change: every entry group is durable before the record
+    group exists (``settle_local_output`` runs before
+    ``write_produced_files``, on the writer), the groups commit at their
+    origin only in that settle, and ``handoff.json`` is the record group's
+    last file. A failure on either thread leaves no record.
+
+    * ``__enter__`` starts the writer and waits until it has bound the
+      generation and its produced output, so a binding refusal stops the
+      quantum before its passes run.
+    * :meth:`mark_final` records keys whose slots a final pass has stored.
+      It raises the writer's error, if the writer failed, on the main
+      thread.
+    * :meth:`finish` hands over the pickled owner states, waits for the
+      writer, and returns what the serial emitter returned.
+    * ``__exit__`` without a finish cancels the writer and joins it: the
+      writer stops between entries, and its owner exits on its failure path.
+    """
+
+    def __init__(self, emitter, *, grad_plane, n_probes, n_batches, policy,
+                 producer, source, layer):
+        from .perturbed_x_cache import ExactCotangentScratch
+
+        self._emitter = emitter
+        self._plane = grad_plane
+        self._scratch = grad_plane if isinstance(grad_plane, ExactCotangentScratch) \
+            else None
+        self._n_probes = n_probes
+        self._n_batches = n_batches
+        self._policy = policy
+        self._producer = producer
+        self._source = source
+        self._layer = layer
+        self._expected = {(probe, batch) for probe in range(n_probes)
+                          for batch in range(n_batches)}
+        self._cond = threading.Condition()
+        self._final: set = set()
+        self._states: bytes | None = None
+        self._cancelled = False
+        self._ready = False
+        self._done = False
+        self._error: BaseException | None = None
+        self._thread: threading.Thread | None = None
+        self._buffer = None
+        self._started = None
+        # The tee ring (:meth:`attach_tee`): host slots that keep a final
+        # row's bytes until the writer takes them, so a scratch plane's
+        # final slots are not read back from the device.
+        self._tee_slots: list = []
+        self._tee_free: list = []
+        self._tee: dict = {}
+        #: The row's ``handoff_emit`` counters (PQ #1251). Written by the
+        #: writer while it runs and read by the main thread after the join.
+        self.telemetry = {
+            "entries": len(self._expected),
+            "entries_before_finish": 0,
+            "bytes_before_finish": 0,
+            "entries_after_finish": 0,
+            "bytes_after_finish": 0,
+            "writer_busy_s": 0.0,
+            "finality_wait_s": 0.0,
+            "max_lag_entries": 0,
+            "scratch_reads": 0,
+            "tee_slots": 0,
+            "tee_hits": 0,
+            "tee_misses": 0,
+            "finish_wait_s": 0.0,
+            "writer_s": 0.0,
+            "cancelled": False,
+            "error": None,
+        }
+
+    # -- the main thread ---------------------------------------------------
+
+    def __enter__(self):
+        self._started = time.monotonic()
+        self._thread = threading.Thread(target=self._run, name="handoff-writer",
+                                        daemon=True)
+        self._thread.start()
+        with self._cond:
+            self._cond.wait_for(lambda: self._ready or self._done)
+            error = self._error
+        if error is not None:
+            self._thread.join()
+            raise error
+        return self
+
+    def attach_tee(self, slots):
+        """Give the writer a ring of host slots for final rows (PQ #1251).
+
+        ``slots`` are flat ``uint8`` CPU tensors the caller allocated after
+        its guard admitted them. :meth:`mark_final` copies each final row
+        into a free slot, when one is free and the row fits, and the writer
+        writes the entry from that copy instead of reading the slot back
+        from the cotangent scratch. The bytes are the row's either way. A
+        dict plane already holds its rows in memory and takes no ring.
+        """
+        if self._thread is not None or self._final:
+            raise RuntimeError("the tee ring is attached before the stream starts")
+        if self._scratch is None:
+            raise RuntimeError("only a cotangent scratch plane takes a tee ring")
+        self._tee_slots = list(slots)
+        self._tee_free = list(range(len(self._tee_slots)))
+        self.telemetry["tee_slots"] = len(self._tee_slots)
+
+    def mark_final(self, keys, rows=None):
+        """Record that a final pass stored each of ``keys`` (PQ #1251).
+
+        Raises the writer's error, if it failed, so the quantum stops at its
+        next store rather than at its tail. A key stored twice by a final
+        pass refuses: its streamed bytes may already be on their way. A
+        cotangent scratch seals each key, so a later write to it refuses
+        before it lands. ``rows``, the stored tensors (valid only during
+        this call), fill the tee ring when it has a free slot; the main
+        thread never waits for one.
+        """
+        keys = [(int(probe), int(batch)) for probe, batch in keys]
+        with self._cond:
+            if self._error is not None:
+                raise self._error
+            if self._done:
+                raise RuntimeError("the handoff writer already ended")
+            for key in keys:
+                if key not in self._expected:
+                    raise RuntimeError(f"handoff key {key!r} is outside the plane")
+                if key in self._final:
+                    raise RuntimeError(
+                        f"a final pass stored handoff key {key!r} twice")
+            if self._scratch is not None:
+                self._scratch.seal(keys)
+            if rows is not None and self._tee_slots:
+                for key, row in zip(keys, rows):
+                    self._tee_row(key, row)
+            self._final.update(keys)
+            written = (self.telemetry["entries_before_finish"]
+                       + self.telemetry["entries_after_finish"])
+            self.telemetry["max_lag_entries"] = max(
+                self.telemetry["max_lag_entries"], len(self._final) - written)
+            self._cond.notify_all()
+
+    def finish(self, cotangent_owners) -> dict:
+        """Hand over the owner states, wait for the writer, return ``published``.
+
+        The states are pickled here, on the main thread, from the harvested
+        owners the serial emitter pickled: the same bytes. A key no final
+        pass stored refuses: the writer never reads a slot that is not final.
+        """
+        missing = sorted(self._expected - self._final)
+        if missing:
+            raise RuntimeError(
+                f"{len(missing)} handoff key(s) were never stored by a final pass, "
+                f"first {missing[0]!r}")
+        states = pickle.dumps(
+            {"schema": HANDOFF_OWNER_STATES_SCHEMA,
+             "states": [((probe, batch),
+                         cotangent_owners[probe][batch].state_dict())
+                        for probe in range(self._n_probes)
+                        for batch in range(self._n_batches)]},
+            protocol=pickle.HIGHEST_PROTOCOL)
+        started = time.monotonic()
+        with self._cond:
+            if self._error is not None:
+                raise self._error
+            self._states = states
+            self._cond.notify_all()
+        self._thread.join()
+        self.telemetry["finish_wait_s"] = time.monotonic() - started
+        if self._error is not None:
+            raise self._error
+        return self._emitter.published
+
+    def __exit__(self, exc_type, exc, traceback):
+        if self._thread is not None and self._thread.is_alive():
+            with self._cond:
+                self._cancelled = True
+                self._cond.notify_all()
+            self._thread.join()
+        # The ring and the read buffer go with the writer.
+        self._tee_slots, self._tee_free, self._tee = [], [], {}
+        self._buffer = None
+        self.telemetry["cancelled"] = self._cancelled
+        if self._error is not None and not isinstance(self._error,
+                                                      HandoffEmitCancelled):
+            self.telemetry["error"] = repr(self._error)[:400]
+        return False
+
+    # -- the writer thread -------------------------------------------------
+
+    def _run(self):
+        from .cost_streaming import StreamedBoundaryArtifacts
+
+        owner = StreamedBoundaryArtifacts(self._policy)
         try:
-            return self._emit_through(
-                owner, policy, grad_plane=grad_plane,
-                cotangent_owners=cotangent_owners,
-                n_probes=n_probes, n_batches=n_batches, record=record,
-                layer=layer, source=source, producer=producer)
+            self._write(owner)
+        except BaseException as exc:            # noqa: BLE001 - handed over
+            with self._cond:
+                self._error = exc
         finally:
             # Kept on success and on failure alike (PQ #1225): the counters
             # of a row that died in its export drain name the exports it
             # waited on.
-            self.export_report = _owner_export_report(owner)
+            self._emitter.export_report = _owner_export_report(owner)
+            self.telemetry["writer_s"] = time.monotonic() - self._started
+            with self._cond:
+                self._done = True
+                self._cond.notify_all()
 
-    def _emit_through(self, owner, policy, *, grad_plane, cotangent_owners, n_probes,
-                      n_batches, record, layer, source, producer) -> dict:
+    def _await(self, ready):
+        started = time.monotonic()
+        with self._cond:
+            self._cond.wait_for(lambda: self._cancelled or ready())
+            if self._cancelled:
+                raise HandoffEmitCancelled(
+                    "the quantum failed before its handoff was complete")
+        return time.monotonic() - started
+
+    def _tee_row(self, key, row):
+        """Copy one final row into a free tee slot, or count a miss.
+
+        The caller holds ``_cond``. The copy is one host memcpy of the row.
+        """
+        nbytes = row.numel() * row.element_size()
+        if not self._tee_free or nbytes > self._tee_slots[self._tee_free[-1]].numel():
+            self.telemetry["tee_misses"] += 1
+            return
+        index = self._tee_free.pop()
+        view = self._tee_slots[index].narrow(0, 0, nbytes).view(row.dtype).view(
+            tuple(row.shape))
+        view.copy_(row)
+        self._tee[key] = (index, view)
+
+    def _release_tee(self, key):
+        with self._cond:
+            held = self._tee.pop(key, None)
+            if held is not None:
+                self._tee_free.append(held[0])
+
+    def _read(self, key):
+        """The final bytes of ``key``: a dict plane's tensor, the tee's copy
+        of a scratch row, or a scratch read into the writer's own buffer on
+        the direct-I/O grid (never the shared bounce buffer, which the
+        passes use)."""
+        if self._scratch is None:
+            return self._plane[key]
+        with self._cond:
+            held = self._tee.get(key)
+        if held is not None:
+            self.telemetry["tee_hits"] += 1
+            return held[1]
+        if self._buffer is None or self._scratch.slot_layout(key)[:2] != (
+                tuple(self._buffer.shape), self._buffer.dtype):
+            self._buffer = self._scratch.aligned_buffer(key)
+        self.telemetry["scratch_reads"] += 1
+        return self._scratch.read_into(key, self._buffer, bounce=False)
+
+    def _write(self, owner):
         from .joint_adjoint_checkpoints import exact_entry_record
 
+        emitter, layer = self._emitter, self._layer
         references = []
         with owner:
-            owner.bind({"schema": HANDOFF_SESSION_SCHEMA, "producer": producer,
-                        "source": source, "boundary": layer},
-                       n_probes=int(n_probes), published=True)
-            if self.publication is not None:
+            owner.bind({"schema": HANDOFF_SESSION_SCHEMA, "producer": self._producer,
+                        "source": self._source, "boundary": layer},
+                       n_probes=self._n_probes, published=True)
+            if emitter.publication is not None:
                 owner.bind_produced_output(
-                    self.publication,
-                    group_size=int(policy["prefetch_batches"]),
-                    n_batches=int(n_batches),
+                    emitter.publication,
+                    group_size=int(self._policy["prefetch_batches"]),
+                    n_batches=self._n_batches,
                     max_entry_tensor_bytes=max(
                         int(entry["tensor_bytes"]) for entry in
-                        self.adjoint_slice["checkpoint"]["activation_entries"]),
-                    origin_lifetime=HANDOFF_ORIGIN_LIFETIME)
-            for probe in range(int(n_probes)):
-                for batch in range(int(n_batches)):
-                    tensor = grad_plane[(probe, batch)]
+                        emitter.adjoint_slice["checkpoint"]["activation_entries"]),
+                    origin_lifetime=HANDOFF_ORIGIN_LIFETIME,
+                    # A failed handoff's landed, uncommitted entries are this
+                    # producer's to remove before it aborts their prewrites
+                    # (PQ #1251): no record names them.
+                    dispose_on_failure=True)
+            # A spool wait ends when the quantum fails, so the join that
+            # follows a failure is bounded by the work in hand.
+            owner.cancel_waits_when(lambda: self._cancelled)
+            with self._cond:
+                self._ready = True
+                self._cond.notify_all()
+            for probe in range(self._n_probes):
+                for batch in range(self._n_batches):
+                    key = (probe, batch)
+                    self.telemetry["finality_wait_s"] += self._await(
+                        lambda key=key: key in self._final)
+                    busy = time.monotonic()
+                    tensor = self._read(key)
                     # No read follows in this action: the successor quantum
                     # reads these entries as its own declared inputs.
                     references.append(owner.write(
                         tensor, batch_index=batch, boundary_index=layer,
                         probe_index=probe, read_back=False))
                     tensor = None
+                    self._release_tee(key)
+                    self.telemetry["writer_busy_s"] += time.monotonic() - busy
+                    phase = ("after" if self._states is not None else "before")
+                    self.telemetry[f"entries_{phase}_finish"] += 1
+                    self.telemetry[f"bytes_{phase}_finish"] += int(
+                        references[-1].file_bytes)
+            self._await(lambda: self._states is not None)
+            states = self._states
             # Every entry is durable at its canonical path before the
             # record that names it exists.
             owner.settle_local_output()
             directory = owner.directory
             session = dict(owner.session)
-            states = pickle.dumps(
-                {"schema": HANDOFF_OWNER_STATES_SCHEMA,
-                 "states": [((probe, batch),
-                             cotangent_owners[probe][batch].state_dict())
-                            for probe in range(int(n_probes))
-                            for batch in range(int(n_batches))]},
-                protocol=pickle.HIGHEST_PROTOCOL)
             states_path = directory / HANDOFF_OWNER_STATES_NAME
             handoff = {
                 "schema": HANDOFF_SCHEMA,
                 "boundary": layer,
-                "producer": producer,
-                "source": source,
+                "producer": self._producer,
+                "source": self._source,
                 "session": session,
-                "n_probes": int(n_probes),
-                "n_batches": int(n_batches),
+                "n_probes": self._n_probes,
+                "n_batches": self._n_batches,
                 "activation_entries": [exact_entry_record(reference)
                                        for reference in references],
                 "owner_states": {
@@ -392,16 +699,16 @@ class HandoffEmitter:
                  (HANDOFF_RECORD_NAME, payload)],
                 kind=HANDOFF_RECORD_BATCH_KIND, boundary_index=layer)
             origin_batches = owner.produced_origin_batches()
-        self.published = {"path": str(path),
-                          "sha256": hashlib.sha256(payload).hexdigest(),
-                          "handoff_sha256": handoff["handoff_sha256"],
-                          "boundary": layer,
-                          "generation": session["generation"]}
-        if self.publication is not None:
+        published = {"path": str(path),
+                     "sha256": hashlib.sha256(payload).hexdigest(),
+                     "handoff_sha256": handoff["handoff_sha256"],
+                     "boundary": layer,
+                     "generation": session["generation"]}
+        if emitter.publication is not None:
             # Every entry group, then the record group: the batches a
             # consumer declares, each pinned by its manifest digest.
-            self.published["origin_batches"] = origin_batches
-        return self.published
+            published["origin_batches"] = origin_batches
+        emitter.published = published
 
 
 def _kernel_stamp_refusal(stamp) -> str | None:
@@ -587,23 +894,55 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
     return handoff
 
 
-def handoff_read_entries(handoff: Mapping, checkpoint_record: Mapping) -> list[dict]:
+def _read_row(entry: Mapping) -> dict:
+    """A whole staged file as an executable manifest entry."""
+    return {"path": entry["path"], "offset": 0, "bytes": int(entry["file_bytes"]),
+            "sha256": entry["sha256"]}
+
+
+def handoff_read_entries(handoff: Mapping, checkpoint_record: Mapping, *,
+                         streamed_incoming: bool = False) -> list[dict]:
     """Every staged file a band-serial quantum reads at its head, in order.
 
     The plane entries, the owner-state file, and the slice checkpoint's
     forward shared-pass states: the ``handoff-load`` phase of the
     consumer's executable readset. A packed (v3) checkpoint (PQ #1037)
     holds those in its one shared-state pack, staged whole.
+
+    ``streamed_incoming`` (PQ #1143) leaves the plane out: a spill consumer
+    reads each probe's plane during that probe's final pass
+    (:func:`handoff_incoming_entries`), not at its head.
     """
-    rows = [{"path": entry["path"], "offset": 0, "bytes": int(entry["file_bytes"]),
-             "sha256": entry["sha256"]} for entry in handoff["activation_entries"]]
-    states = handoff["owner_states"]
-    rows.append({"path": states["path"], "offset": 0,
-                 "bytes": int(states["file_bytes"]), "sha256": states["sha256"]})
-    rows.extend({"path": entry["path"], "offset": 0,
-                 "bytes": int(entry["file_bytes"]), "sha256": entry["sha256"]}
-                for entry in _shared_pass_entries(checkpoint_record))
+    rows = ([] if streamed_incoming else
+            [_read_row(entry) for entry in handoff["activation_entries"]])
+    rows.append(_read_row(handoff["owner_states"]))
+    rows.extend(_read_row(entry) for entry in _shared_pass_entries(checkpoint_record))
     return rows
+
+
+def handoff_incoming_entries(handoff: Mapping, probe: int) -> list[dict]:
+    """Probe ``probe``'s plane entries in batch order: what its pass reads.
+
+    Each batch appears once, from 0 to ``n_batches - 1``; anything else
+    refuses. The entries are the handoff's own records, which
+    :func:`load_quantum_handoff` has checked against the checkpoint plane.
+    """
+    probe = int(probe)
+    if not 0 <= probe < int(handoff["n_probes"]):
+        raise QuantumHandoffRefused(f"the handoff carries no probe {probe}")
+    by_batch = {}
+    for entry in handoff["activation_entries"]:
+        entry_probe, batch, _at = _plane_coordinates(entry)
+        if entry_probe != probe:
+            continue
+        if batch in by_batch:
+            raise QuantumHandoffRefused(
+                f"the handoff repeats probe {probe} batch {batch}")
+        by_batch[batch] = entry
+    if sorted(by_batch) != list(range(int(handoff["n_batches"]))):
+        raise QuantumHandoffRefused(
+            f"the handoff does not cover probe {probe}'s batches")
+    return [by_batch[batch] for batch in range(int(handoff["n_batches"]))]
 
 
 def _shared_pass_entries(checkpoint_record: Mapping) -> list[dict]:
@@ -623,7 +962,8 @@ def _shared_pass_entries(checkpoint_record: Mapping) -> list[dict]:
 def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                         n_probes: int, n_batches: int, cotangent_factory=None,
                         shared_state_max_bytes: int | None = None,
-                        max_resident_bytes: int | None = None, residency_check=None):
+                        max_resident_bytes: int | None = None, residency_check=None,
+                        stream_incoming: bool = False):
     """Read what chain mode would hold after the chain, from the handoff.
 
     Returns ``(grad_plane, shared_adjoint, shared_pass)`` in
@@ -641,6 +981,11 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     The plane streams in windows under ``max_resident_bytes``, charged to
     ``residency_check``, exactly as a checkpoint load streams its own
     (:func:`~prismaquant.joint_adjoint_checkpoints.stream_exact_entry_tensors`).
+
+    ``stream_incoming`` (PQ #1143) returns the plane empty, as
+    ``cotangent_factory`` built it: each probe's final pass reads its
+    incoming rows through :class:`HandoffIncoming`, and the pass's stores
+    fill the plane.
     """
     from .cost_streaming import _state_storage_bytes
     from .io_spans import ReadRateReporter
@@ -677,20 +1022,21 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                              "shape": entry["shape"], "dtype": entry["dtype"],
                              "tensor_bytes": entry["tensor_bytes"]})
     plane = {} if cotangent_factory is None else cotangent_factory(scratch_rows)
-    # The rate and ETA lines of the checkpoint loader; no PrismaBuild units.
-    rate = ReadRateReporter(
-        "handoff-load", total_entries=len(entries),
-        total_bytes=sum(_entry_bytes(entry) for entry in entries))
-    with closing(stream_exact_entry_tensors(
-            entries, expected_session=handoff["session"],
-            max_resident_bytes=max_resident_bytes, residency_check=residency_check,
-            deadline=deadline)) as stream:
-        for entry, tensor in stream:
-            probe, batch, _at = _plane_coordinates(entry)
-            plane[(probe, batch)] = tensor
-            del tensor
-            rate.entry(_entry_bytes(entry))
-    rate.done()
+    if not stream_incoming:
+        # The rate and ETA lines of the checkpoint loader; no PrismaBuild units.
+        rate = ReadRateReporter(
+            "handoff-load", total_entries=len(entries),
+            total_bytes=sum(_entry_bytes(entry) for entry in entries))
+        with closing(stream_exact_entry_tensors(
+                entries, expected_session=handoff["session"],
+                max_resident_bytes=max_resident_bytes, residency_check=residency_check,
+                deadline=deadline)) as stream:
+            for entry, tensor in stream:
+                probe, batch, _at = _plane_coordinates(entry)
+                plane[(probe, batch)] = tensor
+                del tensor
+                rate.entry(_entry_bytes(entry))
+        rate.done()
 
     def staged(path, entry, label):
         _await_checkpoint_entry(entry, deadline=deadline)
@@ -733,6 +1079,135 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     return plane, shared_adjoint, shared_pass
 
 
+class HandoffIncomingStream:
+    """One probe's incoming rows, read from the handoff in capture order.
+
+    Returned by :meth:`HandoffIncoming.open`. ``take(keys)`` returns the
+    next rows as verified CPU tensors and refuses any key out of the
+    capture's batch order, so each row is the entry of its own
+    coordinates. ``layout(key)`` reads nothing. ``telemetry`` counts the
+    rows taken, their tensor bytes and the seconds the pass waited for
+    them.
+    """
+
+    def __init__(self, probe, entries, stream):
+        import torch
+
+        self.probe = int(probe)
+        self._entries = list(entries)
+        self._stream = stream
+        self._next = 0
+        self._layouts = {}
+        for batch, entry in enumerate(self._entries):
+            dtype = getattr(torch, str(entry["dtype"]).removeprefix("torch."), None)
+            if not isinstance(dtype, torch.dtype):
+                raise QuantumHandoffRefused(
+                    f"handoff entry {entry['name']!r} has no torch dtype")
+            self._layouts[(self.probe, batch)] = (tuple(entry["shape"]), dtype)
+        self.telemetry = {"probe": self.probe, "entries": 0, "tensor_bytes": 0,
+                          "wait_s": 0.0}
+
+    def layout(self, key):
+        """``(shape, dtype)`` of the row at ``key``; reads nothing."""
+        try:
+            return self._layouts[tuple(key)]
+        except KeyError:
+            raise RuntimeError(
+                f"probe {self.probe}'s incoming stream has no row {key!r}") from None
+
+    def take(self, keys):
+        """The rows at ``keys``, which must be the next ones in batch order."""
+        rows = []
+        for key in keys:
+            key = tuple(key)
+            if self._next >= len(self._entries) or key != (self.probe, self._next):
+                raise RuntimeError(
+                    f"probe {self.probe}'s incoming stream is read in capture "
+                    f"order: row {key!r} was asked for, the next is "
+                    f"{(self.probe, self._next)!r}")
+            started = time.monotonic()
+            entry, tensor = next(self._stream)
+            self.telemetry["wait_s"] += time.monotonic() - started
+            if entry is not self._entries[self._next] or \
+                    _plane_coordinates(entry)[:2] != key:
+                raise RuntimeError(
+                    f"probe {self.probe}'s incoming stream yielded "
+                    f"{entry.get('name')!r} for row {key!r}")
+            self._next += 1
+            self.telemetry["entries"] += 1
+            self.telemetry["tensor_bytes"] += int(entry["tensor_bytes"])
+            rows.append(tensor)
+            tensor = None
+        return rows
+
+    def materialize(self, plane):
+        """Write every remaining row into ``plane`` at its own key."""
+        while self._next < len(self._entries):
+            key = (self.probe, self._next)
+            (plane[key],) = self.take([key])
+
+    @property
+    def exhausted(self):
+        return self._next == len(self._entries)
+
+
+class HandoffIncoming:
+    """A spill consumer's incoming plane, read probe by probe (PQ #1143).
+
+    Under the one-pass spill each incoming row is read exactly once, by its
+    probe's final pass. A spill-sealed consumer's derived readset stages
+    probe ``p``'s entries in ``spill-p{p}`` (:func:`band_serial_manifest`),
+    and the pass reads them through :meth:`open`, a verified
+    ``stream_exact_entry_tensors`` over exactly those entries in batch
+    order, instead of the cotangent scratch the head used to fill. The
+    bytes are the entries' own, as the head's load wrote them.
+    """
+
+    def __init__(self, handoff: Mapping, *, n_probes: int, n_batches: int):
+        if (handoff["n_probes"], handoff["n_batches"]) != (int(n_probes), int(n_batches)):
+            raise QuantumHandoffRefused(
+                "the handoff's probe and batch counts differ from this quantum's")
+        self.session = handoff["session"]
+        self._entries = {probe: handoff_incoming_entries(handoff, probe)
+                         for probe in range(int(n_probes))}
+        self.max_entry_bytes = max(int(entry["tensor_bytes"])
+                                   for rows in self._entries.values()
+                                   for entry in rows)
+
+    def entries(self, probe: int) -> list[dict]:
+        return list(self._entries[int(probe)])
+
+    @contextmanager
+    def open(self, probe: int, *, max_resident_bytes: int, residency_check):
+        """Stream probe ``probe``'s rows under ``max_resident_bytes``.
+
+        The windows are charged to ``residency_check`` and each window's
+        staged wait has its own bound, as a boundary prefetch window's does.
+        Nothing is read until the first :meth:`HandoffIncomingStream.take`.
+        A clean exit refuses when a row was left unread; any exit closes
+        the stream, which waits for a read in flight and releases its charge.
+        """
+        from .joint_adjoint_checkpoints import stream_exact_entry_tensors
+
+        entries = self.entries(probe)
+        generator = stream_exact_entry_tensors(
+            entries, expected_session=self.session,
+            max_resident_bytes=int(max_resident_bytes),
+            residency_check=residency_check, deadline_per_window=True)
+        stream = HandoffIncomingStream(probe, entries, generator)
+        failed = True
+        try:
+            yield stream
+            failed = False
+        finally:
+            generator.close()
+            if not failed and not stream.exhausted:
+                raise RuntimeError(
+                    f"probe {int(probe)}'s pass left "
+                    f"{len(entries) - stream.telemetry['entries']} incoming "
+                    "rows unread")
+
+
 def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
                          checkpoint_record: Mapping, *,
                          sealed_manifest_sha256: str) -> dict:
@@ -746,6 +1221,15 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
     builder's ``(path, offset)`` deduplication, so the phase byte counts and
     the prepared-input window indices follow the new index space.
 
+    A spill-sealed readset (``annotations.replay_mode == "spill"``) streams
+    the incoming plane (PQ #1143): ``handoff-load`` keeps the owner states
+    and the shared-pass entries, and each ``spill-p{p}`` phase stages probe
+    ``p``'s plane entries, each right after the boundary entry of its batch,
+    the order its final pass reads them and the order PrismaBuild's movers
+    walk a phase. The phase sequence is unchanged.
+    ``annotations.band_serial.streamed_incoming`` names each phase's moved
+    count, so the dispatcher still counts a capture by its stored batches.
+
     The record is not re-sealed: its ``executable_readset`` still names the
     chain manifest, and the dispatcher and the quantum both re-derive this
     document from it. ``annotations.band_serial`` names what it was derived
@@ -758,6 +1242,7 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
         MANIFEST_SCHEMA_V2,
         executable_bound_phase_name,
         executable_source_phase_name,
+        executable_spill_phase_name,
     )
 
     if not isinstance(sealed_manifest, Mapping) or \
@@ -823,11 +1308,34 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
         read_phases.append({"name": name, "entry_indices": list(indices),
                             "bytes": size, "cumulative_bytes": cumulative})
 
+    streamed = annotations.get("replay_mode") == "spill"
+    incoming: dict[str, list[dict]] = {}
+    if streamed:
+        n_batches = int(handoff["n_batches"])
+        by_name = {phase["name"]: phase for phase in phases}
+        for probe in range(int(handoff["n_probes"])):
+            name = executable_spill_phase_name(probe)
+            if name not in by_name:
+                raise QuantumHandoffRefused(
+                    f"the spill-sealed readset has no {name} phase for the "
+                    f"handoff's probe {probe}")
+            if len(by_name[name]["entry_indices"]) != n_batches:
+                raise QuantumHandoffRefused(
+                    f"{name} does not stage one boundary entry per stored batch")
+            incoming[name] = [_read_row(entry)
+                              for entry in handoff_incoming_entries(handoff, probe)]
     seal("head", [kept(index) for index in phases[0]["entry_indices"]])
     seal(HANDOFF_LOAD_PHASE,
-         [take(row) for row in handoff_read_entries(handoff, checkpoint_record)])
+         [take(row) for row in handoff_read_entries(
+             handoff, checkpoint_record, streamed_incoming=streamed)])
     for phase in phases[len(replaced) + 1:]:
-        seal(phase["name"], [kept(index) for index in phase["entry_indices"]])
+        indices = [kept(index) for index in phase["entry_indices"]]
+        rows = incoming.get(phase["name"])
+        if rows is not None:
+            # Batch b's incoming row right after its boundary entry.
+            indices = [index for pair in zip(indices, (take(row) for row in rows))
+                       for index in pair]
+        seal(phase["name"], indices)
     derived_annotations = copy.deepcopy(dict(annotations))
     prepared = derived_annotations.get("prepared_input")
     if prepared is not None:
@@ -845,6 +1353,8 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
         "producer": handoff["producer"]["quantum_id"],
         "generation": handoff["session"]["generation"],
         "replaced_phases": replaced,
+        **({"streamed_incoming": {name: len(rows) for name, rows in incoming.items()}}
+           if streamed else {}),
     }
     derived = {"schema": MANIFEST_SCHEMA_V2}
     for key in ("produced_by", "mount_prefix"):
@@ -968,9 +1478,11 @@ __all__ = [
     "HANDOFF_ORIGIN_LIFETIME", "HANDOFF_OWNER_STATES_NAME",
     "HANDOFF_RECORD_BATCH_KIND",
     "HANDOFF_RECORD_NAME", "HANDOFF_SCHEMA",
-    "HandoffEmitter", "QuantumHandoffRefused", "band_serial_manifest",
+    "HandoffEmitter", "HandoffIncoming", "HandoffIncomingStream",
+    "QuantumHandoffRefused", "band_serial_manifest",
     "band_serial_manifest_bytes", "bind_handoff_publication",
-    "handoff_chain_regime_refusal", "handoff_read_entries", "handoff_root",
+    "handoff_chain_regime_refusal", "handoff_incoming_entries",
+    "handoff_read_entries", "handoff_root",
     "handoff_seal_sha256",
     "load_handoff_inputs", "load_quantum_handoff", "require_band_serial_readset",
 ]

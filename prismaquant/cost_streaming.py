@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from types import SimpleNamespace
 from typing import Any, Iterator
 
@@ -347,6 +348,8 @@ class StreamedBoundaryArtifacts:
         #: Groups read only on this box and kept past the owner's close, so
         #: their charge stays a prewrite (PQ #1110): what the receipt names.
         self._produced_retained_uncommitted = []
+        # Each uncommitted group a failing exit disposed of (PQ #1251).
+        self._produced_disposed_uncommitted = []
         self._produced_window_keys = ()
         self._produced_release_pending = {}
         self._produced_release_abandoned = {}
@@ -1164,6 +1167,19 @@ class StreamedBoundaryArtifacts:
                 coordinates = identity["coordinates"]
                 self._progress.entry(layer=coordinates["boundary"],
                                      partition=coordinates["batch"], kind=identity["kind"])
+
+    def cancel_waits_when(self, predicate):
+        """End this owner's spool waits once ``predicate()`` is true (PQ #1251).
+
+        A writer on a thread of its own (the streamed handoff) is cancelled
+        when its quantum fails; a wait on a window or an export would
+        otherwise last as long as PrismaBuild's evidence does. The wait then
+        raises :class:`~prismaquant.produced_output_spool.
+        ProducedOutputWaitCancelled` and the owner exits on its failure
+        path. Without a spool there is no wait to end.
+        """
+        if self._local_output_spool is not None:
+            self._local_output_spool.cancelled = predicate
 
     def settle_local_output(self):
         """Finish PB durable exports before a successful capture receipt.
@@ -2347,7 +2363,7 @@ class StreamedBoundaryArtifacts:
                              max_entry_tensor_bytes,
                              staging_timeout_s=900.0, window_groups=None,
                              read_order="probe_major", origin_lifetime=None,
-                             batch_range=None):
+                             batch_range=None, dispose_on_failure=False):
         """Stage this generation's entries through ``publication``.
 
         Called after :meth:`bind`, because the entry directory this owner
@@ -2416,6 +2432,15 @@ class StreamedBoundaryArtifacts:
         lifetime of those commits (#914) and is required for a write-only
         publication and refused for any other: ``retain`` or ``consumed``.
 
+        ``dispose_on_failure`` (write-only only; the band-serial handoff,
+        PQ #1251): when the owner exits on a failure, it removes the files of
+        each of its own uncommitted groups, exactly the group's planned
+        paths, before it aborts the group's prewrite. PrismaBuild's
+        ``abort_prewrite`` proves every planned path absent and leaves that
+        disposal to the producer; without it, a group whose export landed
+        keeps its prewrite and its files. A group whose export is still live
+        is left alone: its files may still land.
+
         ``batch_range`` (a chain split quantum, PQ #738) is the ``(start,
         stop)`` of global batches this owner writes, out of ``n_batches``.
         ``start`` is a whole number of groups and ``stop`` is too, or is
@@ -2478,6 +2503,11 @@ class StreamedBoundaryArtifacts:
                 raise ValueError(
                     "only a write-only produced output commits its groups at "
                     "their origin; a read-back one stages them for its reads")
+            if dispose_on_failure:
+                raise ValueError(
+                    "only a write-only produced output disposes of its own "
+                    "uncommitted files on failure: a read-back one's groups "
+                    "are read on this box")
             if window_groups is None:
                 window_groups = self._sealed_window_groups(
                     publication, group_size=int(group_size),
@@ -2509,7 +2539,8 @@ class StreamedBoundaryArtifacts:
                                "ahead_groups": int(window_groups) - read_groups,
                                "write_only": write_only,
                                "origin_lifetime": (str(origin_lifetime)
-                                                   if write_only else None)}
+                                                   if write_only else None),
+                               "dispose_on_failure": bool(dispose_on_failure)}
 
         from .produced_output_spool import ProducedOutputSpool
         self._local_output_spool = ProducedOutputSpool.from_publication(
@@ -3308,6 +3339,9 @@ class StreamedBoundaryArtifacts:
                         -self.PRODUCED_AHEAD_REFUSAL_LOG:]],
                 "retained_uncommitted_count": len(
                     self._produced_retained_uncommitted),
+                **({"disposed_uncommitted": [
+                        dict(entry) for entry in self._produced_disposed_uncommitted]}
+                   if self._produced_plan.get("dispose_on_failure") else {}),
                 "deferred_unlinks": {
                     batch_id: [reference.path for reference in references]
                     for batch_id, references in self._deferred_unlinks.items()}}
@@ -4127,7 +4161,7 @@ class StreamedBoundaryArtifacts:
                  "origin_reclaimed": group["origin_reclaimed"]}
                 for group in self._produced_groups.values()]
 
-    def _release_unpublished_prewrites(self):
+    def _release_unpublished_prewrites(self, *, failing=False):
         """Give back the durable headroom of groups that produced nothing.
 
         A prewrite that was claimed and never committed would otherwise
@@ -4138,10 +4172,18 @@ class StreamedBoundaryArtifacts:
         one, so this never turns a crashed write into freed budget. A
         published (committed) group is deliberately skipped: its entries
         are durable and its charge ends at ``reclaim_origin``, not here.
+
+        ``failing`` with ``dispose_on_failure`` bound (PQ #1251): the owner
+        first removes its own uncommitted group's files, only the group's
+        planned paths, which PrismaBuild's ``abort_prewrite`` leaves to the
+        producer. Each such abort is recorded (``disposed_uncommitted`` in
+        :meth:`produced_output_report`).
         """
 
         if self._produced is None:
             return
+        dispose = failing and bool(self._produced_plan
+                                   and self._produced_plan.get("dispose_on_failure"))
         for group in self._produced_groups.values():
             if group["published"] is not None or group.get("origin_ref") is not None:
                 # Committed, staged or at its origin: the commit consumed the
@@ -4152,7 +4194,18 @@ class StreamedBoundaryArtifacts:
                 continue
             if group.get("origin_reclaimed"):
                 continue  # Its prewrite went with its last file (PQ #1110).
+            # A live export may still land its files: they are left alone,
+            # as before (PQ #1251).
+            live = bool(dispose and self._local_output_spool is not None
+                        and self._local_output_spool.export_live(group["batch_id"]))
+            removed = (self._dispose_uncommitted_group(group)
+                       if dispose and not live else None)
             out = self._produced.abort_prewrite(batch_id=group["batch_id"])
+            if dispose:
+                self._produced_disposed_uncommitted.append(
+                    {"batch_id": group["batch_id"], "files_removed": removed,
+                     "export_live": live, "abort_ok": bool(out.get("ok")),
+                     "refusal": out.get("refusal")})
             if (not out.get("ok") and self._local_output_spool is not None
                     and group["live_references"]):
                 # Read only on this box and kept (a retained boundary, a
@@ -4163,6 +4216,40 @@ class StreamedBoundaryArtifacts:
                     {"batch_id": group["batch_id"],
                      "refusal": out.get("refusal"),
                      "live_references": group["live_references"]})
+
+    def _dispose_uncommitted_group(self, group):
+        """Remove one uncommitted group's own files: its planned paths only.
+
+        The planned paths are this generation's own entry names under its
+        own directory (``_produced_planned_paths``), so no other writer's
+        file is among them. A path that is not a regular file, or not in
+        this generation's ``entries``, is left for ``abort_prewrite`` to
+        refuse on, and recorded. Returns how many files went.
+        """
+        own = self.directory / "entries"
+        removed = 0
+        for planned in group["planned"]:
+            path = Path(planned)
+            if path.parent != own:
+                # Never raised: this runs on an exit that is already failing.
+                self._produced_release_errors.append(
+                    {"batch_id": group["batch_id"], "step": "dispose-uncommitted",
+                     "reason": {"error": f"{path} is outside this generation's "
+                                         "entries"}})
+                continue
+            try:
+                if not stat.S_ISREG(os.lstat(path).st_mode):
+                    raise OSError(f"{path} is not a regular file")
+                os.unlink(path)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                self._produced_release_errors.append(
+                    {"batch_id": group["batch_id"], "step": "dispose-uncommitted",
+                     "reason": {"error": repr(exc)}})
+                continue
+            removed += 1
+        return removed
 
     def release_produced_group(self, reference):
         """Release the stage copy of the group holding ``reference``.
@@ -4802,7 +4889,7 @@ class StreamedBoundaryArtifacts:
                 self._slots.clear()
             self._reclaim_retained_checkpoints()
             self._settle_produced_releases_at_exit(exc)
-            self._release_unpublished_prewrites()
+            self._release_unpublished_prewrites(failing=exc_type is not None)
         except BaseException:
             self._status = "failed"
             raise
