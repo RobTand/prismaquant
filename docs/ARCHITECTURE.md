@@ -1168,7 +1168,7 @@ row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
 (`prismaquant/joint_adjoint_checkpoints.py:1869`,
-`prismaquant/joint_quantum_handoff.py:1000`), so the phase waits at most W in
+`prismaquant/joint_quantum_handoff.py:1015`), so the phase waits at most W in
 total outside a PrismaBuild landing record. Since PQ #1143 a spill
 consumer's `handoff-load` holds only the owner states and the shared-pass
 entries; each probe's plane is read in its `spill-pP` phase, whose waits
