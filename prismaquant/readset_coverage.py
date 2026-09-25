@@ -199,8 +199,9 @@ def quantum_record_gaps(record: Mapping, manifest: Mapping,
     return gaps
 
 
-def _read_verified(path: str, sha256: str | None, *, where: str) -> bytes:
-    raw = Path(path).read_bytes()
+def _read_verified(path: str, sha256: str | None, *, where: str,
+                   wire: bytes | None = None) -> bytes:
+    raw = Path(path).read_bytes() if wire is None else bytes(wire)
     if sha256 is not None and hashlib.sha256(raw).hexdigest() != sha256:
         raise ValueError(f"{where} at {path} does not hash to its sealed digest")
     return raw
@@ -235,13 +236,7 @@ def load_manifest(path: str, sha256: str | None = None, *,
     publish them (a dispatch dry run's band-serial readset, PQ #1200); they
     are checked the same way and ``path`` only names them.
     """
-    if wire is None:
-        raw = _read_verified(path, sha256, where="read manifest")
-    else:
-        raw = bytes(wire)
-        if sha256 is not None and hashlib.sha256(raw).hexdigest() != sha256:
-            raise ValueError(
-                f"read manifest for {path} does not hash to its sealed digest")
+    raw = _read_verified(path, sha256, where="read manifest", wire=wire)
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
     return json.loads(raw)
