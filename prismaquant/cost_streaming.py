@@ -286,7 +286,16 @@ class StreamedBoundaryArtifacts:
     does. Only completed signed cost shards are resumable measurement state.
     """
 
-    def __init__(self, config):
+    #: Which thread drives an owner's PrismaBuild work, and so whose time its
+    #: blocked spans are (PQ #1262). ``compute``: the quantum's compute
+    #: thread, the GPU's cost. ``writer``: the handoff writer thread, which
+    #: runs beside the passes, so its waits are not the GPU's.
+    PRODUCED_DRIVERS = ("compute", "writer")
+
+    def __init__(self, config, *, driven_by="compute"):
+        if driven_by not in self.PRODUCED_DRIVERS:
+            raise ValueError(f"unknown owner driver {driven_by!r}")
+        self._produced_driver = driven_by
         self.config = normalize_boundary_storage(config)
         self.identity = {key: value for key, value in self.config.items() if key != "directory"}
         self.session = None
@@ -426,6 +435,11 @@ class StreamedBoundaryArtifacts:
             "produced_groups_committed_at_origin": 0,
             # Seconds spent in PrismaBuild's origin commits (PQ #1225).
             "produced_commit_origin_s": 0.0,
+            # Origins PrismaBuild's origin commit hashed again because their
+            # timestamps moved after the spool's poll checked the export
+            # receipt (PQ #1262, PB #1111). A move before that poll is
+            # re-pinned in the spool's receipt, and no answer names it.
+            "produced_landed_repins": 0,
             "produced_groups_materialized": 0, "produced_groups_retired": 0,
             "produced_groups_rematerialized": 0,
             "produced_group_release_failures": 0,
@@ -476,6 +490,13 @@ class StreamedBoundaryArtifacts:
             "produced_compute_blocked_s": 0.0,
             **{f"produced_compute_blocked_{reason}_s": 0.0
                for reason in self.PRODUCED_BLOCKED_REASONS}}
+        if driven_by == "writer":
+            # The writer's own names (PQ #1262): the compute counters stay
+            # zero, because the compute thread never waits on this owner.
+            self.telemetry.update({
+                "produced_writer_blocked_s": 0.0,
+                **{f"produced_writer_blocked_{reason}_s": 0.0
+                   for reason in self.PRODUCED_BLOCKED_REASONS}})
 
     #: Why the compute thread was blocked on this owner's PrismaBuild work.
     #: One telemetry counter each (``produced_compute_blocked_<reason>_s``),
@@ -1241,6 +1262,12 @@ class StreamedBoundaryArtifacts:
             out = self._local_output_spool.commit_origin(
                 batch_id, descriptors, lifetime=lifetime)
         self.telemetry["produced_commit_origin_s"] += time.monotonic() - started
+        # PrismaBuild names each origin its commit hashed again because its
+        # timestamps moved after the spool's poll (PB #1111): a finding in
+        # itself, and a read the commit paid for (PQ #1262).
+        repins = len(out.get("landed_repins") or ())
+        group["landed_repins"] = repins
+        self.telemetry["produced_landed_repins"] += repins
         group["origin_ref"] = dict(out["ref"])
         self._produced_origin_batches.append(dict(out["ref"]))
         self.telemetry["produced_groups_committed_at_origin"] += 1
@@ -2679,11 +2706,14 @@ class StreamedBoundaryArtifacts:
 
     @contextmanager
     def _produced_blocked(self, reason):
-        """Count the compute thread's time inside this span under ``reason``.
+        """Count the driving thread's time inside this span under ``reason``.
 
         Exclusive: a span nested in another is taken out of the outer one,
         so the reasons add up to ``produced_compute_blocked_s``. The stager
         thread's time is never counted here; it is ``produced_stager_busy_s``.
+        An owner the handoff writer drives (``driven_by="writer"``, PQ #1262)
+        counts the same spans as ``produced_writer_blocked_<reason>_s`` and
+        ``produced_writer_blocked_s``: the writer's time, not the GPU's.
         """
 
         import time
@@ -2704,8 +2734,9 @@ class StreamedBoundaryArtifacts:
             own = max(elapsed - frame[1], 0.0)
             if stack:
                 stack[-1][1] += elapsed
-            self.telemetry[f"produced_compute_blocked_{reason}_s"] += own
-            self.telemetry["produced_compute_blocked_s"] += own
+            prefix = f"produced_{self._produced_driver}_blocked"
+            self.telemetry[f"{prefix}_{reason}_s"] += own
+            self.telemetry[f"{prefix}_s"] += own
 
     def _produced_submit(self, kind, label, call, *, keys=(), reason,
                          wait=False, on_drop=None, keep_on_close=False):

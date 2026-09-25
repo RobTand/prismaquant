@@ -430,6 +430,10 @@ class HandoffStream:
             "tee_misses": 0,
             "finish_wait_s": 0.0,
             "writer_s": 0.0,
+            # Origins PrismaBuild's origin commit hashed again because their
+            # timestamps moved after the spool's poll (PQ #1262, PB #1111).
+            # The spool's own re-pins are in its receipts, not here.
+            "landed_repins": 0,
             "cancelled": False,
             "error": None,
         }
@@ -553,7 +557,9 @@ class HandoffStream:
     def _run(self):
         from .cost_streaming import StreamedBoundaryArtifacts
 
-        owner = StreamedBoundaryArtifacts(self._policy)
+        # The writer drives this owner, so its waits are the writer's own
+        # (PQ #1262), not the compute thread's.
+        owner = StreamedBoundaryArtifacts(self._policy, driven_by="writer")
         try:
             self._write(owner)
         except BaseException as exc:            # noqa: BLE001 - handed over
@@ -564,6 +570,8 @@ class HandoffStream:
             # of a row that died in its export drain name the exports it
             # waited on.
             self._emitter.export_report = _owner_export_report(owner)
+            self.telemetry["landed_repins"] = int(
+                owner.telemetry.get("produced_landed_repins", 0))
             self.telemetry["writer_s"] = time.monotonic() - self._started
             with self._cond:
                 self._done = True

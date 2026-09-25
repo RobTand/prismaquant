@@ -125,8 +125,16 @@ probe-major with batches ascending, with the same arguments.
 - Counters. `counters.json` gains `handoff_emit`: the entries and bytes
   written before and after the finish, the writer's busy and finality-wait
   seconds, the largest lag in entries, the scratch reads, the tee ring's
-  slots, hits and misses, the finish's wait, and whether the writer was
-  cancelled or failed. `handoff-out` now measures
+  slots, hits and misses, the finish's wait, whether the writer was
+  cancelled or failed, and `landed_repins` (PQ #1262): the origins
+  PrismaBuild's origin commit hashed again because their timestamps moved
+  after the spool's poll checked the export receipt (PB #1111). An origin
+  whose timestamps moved before that poll is re-pinned in the spool group's
+  `receipt.json` (`repinned`, PB #1096), which no answer to PQ names, so
+  `landed_repins` is a floor on the re-pins, not their count. The handoff
+  owner's own waits are in
+  `handoff_export.telemetry` as `produced_writer_blocked_*_s`, never as
+  compute-thread time. `handoff-out` now measures
   the finish only: the entries not yet written, the settle and the record
   group.
 
@@ -2952,8 +2960,18 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `perf/1143-stream-handoff-load`.
+As of: 2026-09-25 · `fix/1262-handoff-telemetry`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `fix/1262-handoff-telemetry`) for **the handoff
+writer's own telemetry** (PQ #1262). The owner the handoff writer thread
+drives books its settle, close and prewrite waits as
+`produced_writer_blocked_*_s` instead of `produced_compute_blocked_*_s`, and
+the re-pins each origin commit returns are counted (`produced_landed_repins`,
+`handoff_emit.landed_repins`); the spool's poll re-pins stay in its receipts.
+See the counters of the PQ #1251 entry at the top and the produced-output
+owner's telemetry. No format, pipeline default, stage, lane or ship gate
+changes.
 
 Re-stamped (2026-09-25, `perf/1143-stream-handoff-load`) for **a
 band-serial spill consumer that reads each probe's incoming plane during
@@ -5400,6 +5418,15 @@ says exactly that.
   `stage_ahead`, `read_fund`, `stage_wait`, `compose`, `release`,
   `copy_before_unlink`, `reclaim_origin`, `queue_full`, `settle`, `close`),
   and it is counted inline too, so an `inline` run reports the same figure.
+  An owner the handoff writer thread drives (`driven_by="writer"`, PQ #1262)
+  counts the same spans as `produced_writer_blocked_s` and
+  `produced_writer_blocked_<reason>_s`. That thread runs beside the passes,
+  so its waits are not the GPU's, and that owner's `produced_compute_blocked_*`
+  counters stay zero. `produced_landed_repins` counts the re-pins
+  PrismaBuild's origin commits return for this owner: origins whose
+  timestamps moved after the spool's poll checked the export receipt
+  (PB #1111). The spool's own poll re-pins (PB #1096) are recorded only in
+  the group's `receipt.json`.
   It includes the settle, which the cycle driver's external clock does not:
   in the cycles below the owner reports 37.4 s and 38.2 s where the driver
   reports 29.8 s and 31.1 s, and the difference is `settle` (8.5 s and 8.0 s)
