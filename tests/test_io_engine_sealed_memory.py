@@ -20,9 +20,13 @@ capture guard admits against (``memory_management.committed_cgroup_bytes``),
 read from this process's own cgroup. It checks both ways bytes are freed: a
 reclaim of entries read ahead, and a consumer that takes a group, drops it and
 releases it. Each drop must be the freed files' pages, to within the page
-rounding each memfd carries. It must run where it can read its cgroup; a
-missing cgroup fails it rather than skipping it, because a skipped probe
-certifies nothing.
+rounding each memfd carries, and it must come out of ``shmem``, where the
+memfd pages live, and not out of ``anon``: the committed reading counts
+``shmem`` as it counts ``anon``, so the depth and the reclaim see these bytes.
+A take alone frees nothing, which is why the stream charges a taken group to
+its budget until the consumer releases it. It must run where it can read its
+cgroup; a missing cgroup fails it rather than skipping it, because a skipped
+probe certifies nothing.
 """
 from __future__ import annotations
 
@@ -66,7 +70,8 @@ def _committed(scope: Path) -> dict:
     stat = mm.read_memory_stat(scope / "memory.stat")
     current = int((scope / "memory.current").read_text())
     return {"committed": mm.committed_cgroup_bytes(current, stat),
-            "anon_shmem": stat["anon"] + stat["shmem"]}
+            "anon_shmem": stat["anon"] + stat["shmem"],
+            "shmem": stat["shmem"], "anon": stat["anon"]}
 
 
 def _pages(nbytes: int) -> int:
@@ -76,8 +81,8 @@ def _pages(nbytes: int) -> int:
 def _renders(tmp_path, count):
     paths = {}
     for index in range(count):
-        key = (f"model.layers.0.unit{index}", "NVFP4")
-        paths[key] = tmp_path / f"unit{index}.pt"
+        key = (f"model.layers.0.unit{index:02d}", "NVFP4")
+        paths[key] = tmp_path / f"unit{index:02d}.pt"
         torch.save(torch.full(RENDER_SHAPE, float(index), dtype=torch.bfloat16), paths[key])
         # Written back before anything is measured: a dirty page is
         # committed, and writeback during a reading would read as a drop.
@@ -113,12 +118,19 @@ def test_freed_read_ahead_leaves_the_committed_reading(tmp_path):
         # the grain of the reading.
         low = dropped * each - READING_GRAIN
         high = dropped * _pages(each) + READING_GRAIN
-        for measure in ("committed", "anon_shmem"):
+        assert dropped == 0 or low > 0, "the reading's grain hides the freed pages"
+        for measure in ("committed", "anon_shmem", "shmem"):
             drop = before[measure] - after[measure]
             assert low <= drop <= high, (
                 f"{label}: {measure} dropped {drop} bytes; freeing {dropped} "
                 f"entries of {each} bytes must drop between {low} and {high} "
                 f"(cgroup {scope}, {len(procs)} processes; before {before}, after {after})")
+        # The pages were shared memory, not anonymous memory the allocator
+        # could keep: anon does not move beyond the reading's grain.
+        moved = before["anon"] - after["anon"]
+        assert abs(moved) <= READING_GRAIN, (
+            f"{label}: anon moved {moved} bytes; the freed pages must be shmem "
+            f"(before {before}, after {after})")
 
     with io_engine.read_stream(entries, budget=budget) as stream:
         held = _quiet(stream)
@@ -131,8 +143,16 @@ def test_freed_read_ahead_leaves_the_committed_reading(tmp_path):
             after = _committed(scope)
         assert freed == PER_GROUP // 2 * each
         check("reclaim", before, after, PER_GROUP // 2)
-        # A consumer takes a group, drops it, and releases it.
+        _quiet(stream)
+        # A consumer takes a group: the take alone frees nothing, since the
+        # consumer holds the values it was handed.
+        with stream.paused():
+            before = _committed(scope)
         delivered = stream.take(0)
+        with stream.paused():
+            after = _committed(scope)
+        check("take", before, after, 0)
+        # The consumer drops the group, and releases it.
         assert [float(item.value[0, 0]) for item in delivered] == \
             [float(index) for index in range(PER_GROUP)]
         with stream.paused():

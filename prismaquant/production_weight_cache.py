@@ -781,9 +781,11 @@ class ProductionWeightCache:
         :meth:`resident_render_identity` (a hash) and copies it to the device
         (``.to(..., copy=True)``) before it subtracts the source. The
         identity's guard includes the tensor's version counter, so a
-        ``torch`` write in place fails the next probe's identity read; a
-        write that bypasses the counter (through NumPy or a raw pointer) is
-        not seen, and none exists on this path.
+        ``torch`` write in place fails the next probe's identity read
+        (``tests/test_render_identity_once_1192.py`` writes a streamed render
+        in place and requires that refusal); a write that bypasses the
+        counter (through NumPy or a raw pointer) is not seen, and none exists
+        on this path.
         """
         from .io_engine import ReadEntry
         expected = getattr(self, "_expected_file_sha256", None)
