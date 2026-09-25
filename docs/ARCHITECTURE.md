@@ -1106,6 +1106,19 @@ replay, which still charges the operator windows' declared reserve. Gates: `test
 `tests/test_stage_b_workspace_profile.py`. No format, pipeline default or
 ship gate changes.
 
+A Stage B spill row can also record a torch.profiler timeline of its own
+passes (2026-09-25, PQ #1269, `prismaquant/stage_b_pass_profile.py`). It is
+off unless `PRISMAQUANT_STAGE_B_PASS_PROFILE` names an output directory;
+`PRISMAQUANT_STAGE_B_PASS_PROFILE_SPEC` picks the probes and the schedule
+(for example `capture=1+2:stack,windowed=1,shadow_batches=48`). A capture
+pass traces a bounded run of capture groups and times every group and every
+gap between groups. `windowed=P` first runs a bounded windowed-replay shadow
+of probe P under a throwaway lease on window 0, whose statistics are
+discarded. Each traced pass writes `<quantum>-p<probe>-<kind>.trace.json.gz`,
+`.key_averages.txt` and `.timing.json`. Unset, the row runs the same code as
+before. It is a development instrument: no format, pipeline default or ship
+gate changes. Gate: `tests/test_stage_b_pass_profile.py`.
+
 Checkpoint planes stream in leased windows (2026-09-24,
 `ws-rd/1142-grouped-reads`, PQ #1142). Stage B checkpoint-load and
 handoff-load, the Stage A seed comparison and `checkpoint_plane_distance`
@@ -2960,8 +2973,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/hessian-gate-content-equal-1270`.
+As of: 2026-09-25 · `claude/stageb-pass-profile-1269`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/stageb-pass-profile-1269`) for **the Stage B
+pass profiler** (PQ #1269), an opt-in development instrument:
+`PRISMAQUANT_STAGE_B_PASS_PROFILE` records a torch.profiler timeline of a
+spill row's capture passes and of a bounded windowed-replay shadow. Unset, the
+row runs the same code as before. No format, pipeline default or ship gate
+changes.
 
 Re-stamped (2026-09-25, `claude/hessian-gate-content-equal-1270`) for **the
 Hessian-identity gate over content-equal reference seals** (PQ #1270, P1).
