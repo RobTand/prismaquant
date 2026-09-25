@@ -476,7 +476,8 @@ def _write_only_owner(adapter, groups):
         descriptor_for=lambda reference, producer_generation: {"path": reference.path})
     owner._produced_origin_batches = []
     owner.telemetry = {"produced_groups_committed_at_origin": 0,
-                       "produced_commit_origin_s": 0.0}
+                       "produced_commit_origin_s": 0.0,
+                       "produced_landed_repins": 0}
     owner._produced_flush_deferred_unlinks = lambda **_: None
     owner._commit_local_output_progress = lambda: None
     return owner
