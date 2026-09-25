@@ -663,6 +663,46 @@ gate changes. Gates: `tests/test_sealing_off_1147.py`,
 `tests/test_dev_mode_provenance_gates.py`,
 `tests/test_source_identity_portable_device.py`.
 
+The capture guard's host floor is the GB10 box watchdog's 16 GiB (2026-09-25,
+`claude/non-gpu-issues-repos-vl3e30`, PQ #1158). On 2026-09-14 a vLLM A8 routed-expert load
+(tessera#501) hung both Sparks at 8.5 GiB `MemAvailable`, memory PSI full 89.
+The box watchdog set after that hang acts below 16 GiB available, or at memory
+PSI full avg10 20 and above. The guard's default floor was 8 GiB, a
+campaign's `min_free_gib` carried over, so `CaptureMemoryGuard` admitted
+allocations that left the box inside the range it hung in.
+`memory_management.DEFAULT_HOST_FLOOR_BYTES` is now `BOX_WATCHDOG_FLOOR_BYTES`,
+and `HANG_MEM_AVAILABLE_BYTES` records the hang beside it. The watchdog is
+fleet configuration. No repository holds it, and no PrismaBuild offer field,
+host announcement or launch environment publishes its floor, so
+`memory_management` restates the value from the Tessera receipts that record
+it (`docs/measurements/tessera-glm53-a4-stub-tp2-served-2026-09-14.md`,
+"Memory watchdog") and is PrismaQuant's one home of it. All three guard
+shapes (un-split, split, aggregate) take the default, and no production caller
+states its own. `MIN_HOST_FLOOR_BYTES`, the lowest floor a caller may state,
+stays 3 GiB.
+
+What it costs a row: an idle GB10 has 115.638 GiB available of 121.627 GiB
+(PrismaBuild `docs/gb10_memory_104_capacity_2026-09-07.md`, sparklina, no
+jobs), so a guarded row can now hold at most 99.638 GiB, down from 107.638 GiB.
+Each shape at the most its own guard admits:
+
+- The split Stage A pilot shape, 21 GiB cgroup cap and 80 GiB envelope, admits
+  99 GiB and leaves 0.638 GiB above the floor.
+- The R13 Stage B aggregate, 28 + 66 GiB, admits 92 GiB and leaves 7.638 GiB.
+- The 2026-09-18 COST aggregate, 24 + 80 GiB, can no longer reach its 102 GiB
+  ceiling. It refuses 2.362 GiB short of it. The old floor admitted it at
+  13.638 GiB available, below the watchdog's floor.
+
+Two floors this does not move. The Stage A adjoint capture row
+(`joint_adjoint_capture`, a 101 GiB reservation) builds no capture guard, so
+its only `MemAvailable` floor is its plan's `min_free_gib`
+(`_chain_free_floor`), which is also the Stage B roll's second check. The
+streaming prefetch's automatic floor
+(`streaming_model._auto_prefetch_min_available_bytes`) is still 8 GiB. Gates:
+`tests/test_host_floor_watchdog_1158.py`. This changes a runtime default, the
+host floor every capture guard holds. No format, pipeline stage, lane or ship
+gate changes.
+
 The capture guard counts committed memory, not page cache (2026-09-24,
 `ws-sb4/1157-committed-memory`, PQ #1157, part of #1141). One definition,
 `memory_management.committed_cgroup_bytes`, now feeds every admission in
@@ -687,8 +727,8 @@ read (`joint_retained_window_plan.OBSERVED_BASELINE_KEY`). `baseline_bytes()`
 and `peak_conservative_bytes` stay raw, because the Tessera lane subtracts the
 baseline from its cap; `baseline.committed_bytes` and `peak_committed_bytes`
 are recorded beside them. The margins do not change: 2 GiB under the cgroup
-cap and the 8 GiB host floor (#1158 tracks that floor against the 8.5 GiB
-MemAvailable of the 2026-09-14 hang). The device split:
+cap and the host floor, 8 GiB at the time (PQ #1158 has since raised it to the
+box watchdog's 16 GiB; see the entry above). The device split:
 `check_operator_allocation` takes `reserve_device_bytes`, and the Stage B
 window backward and spill capture charge their CUDA allocations there (the
 retained budget's backward workspace, PQ #1151, times the stored batches, the
@@ -2598,6 +2638,15 @@ allowance. This is progress-write coalescing, not relaxed authentication.
 
 As of: 2026-09-25 · `claude/non-gpu-issues-repos-vl3e30`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/non-gpu-issues-repos-vl3e30`) for **the capture guard's host floor
+held at the GB10 box watchdog's 16 GiB** (PQ #1158). The 8 GiB default sat
+below the 8.5 GiB `MemAvailable` at which both Sparks hung on 2026-09-14.
+`memory_management.DEFAULT_HOST_FLOOR_BYTES` is now `BOX_WATCHDOG_FLOOR_BYTES`,
+restated from the Tessera receipts that record the watchdog, because nothing
+publishes it. A guarded row on an idle GB10 now holds at most 99.638 GiB. See
+the entry before "The capture guard counts committed memory". This changes a
+runtime default; no format, pipeline stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/non-gpu-issues-repos-vl3e30`) for **a Stage A owner's wait on
 its own exports declared to PrismaBuild's `no_progress` rung** (PQ #1240,
