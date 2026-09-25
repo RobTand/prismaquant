@@ -24,7 +24,7 @@ import threading
 import zipfile
 from collections import OrderedDict, defaultdict
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait as wait_futures
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import partial
 from dataclasses import dataclass, field, replace as _dataclass_replace
 from pathlib import Path
@@ -1087,7 +1087,19 @@ class ExactCotangentScratch:
     fresh one, and a write keeps no reference to its source, so a caller
     that stages rows in one held host buffer allocates nothing per slot
     (PQ #1246).
+
+    A second thread may read slots while the pass writes others (the
+    streamed handoff writer, PQ #1251). ``preadv`` and ``pwritev`` take
+    explicit offsets, so distinct slots never share a file position. The
+    one shared buffer is the bounce buffer: a lock serializes its users, and
+    a reader that must not wait behind the pass reads into
+    :meth:`aligned_buffer` with ``bounce=False``, which refuses rather than
+    bounce. :meth:`seal` makes a slot write-once, and :meth:`close` waits,
+    bounded, for reads in flight.
     """
+
+    #: How long :meth:`close` waits for a read in flight on another thread.
+    CLOSE_READER_WAIT_S = 60.0
 
     @staticmethod
     def _require_local_disk(root):
@@ -1117,6 +1129,10 @@ class ExactCotangentScratch:
         self._file = None
         self._slots = {}
         self._written = set()
+        self._sealed = set()
+        self._bounce_lock = threading.Lock()
+        self._readers = threading.Condition()
+        self._reading = 0
         self.tensor_bytes = 0
         self.max_slot_bytes = 0
         for entry in records:
@@ -1176,9 +1192,15 @@ class ExactCotangentScratch:
     def _drop_pages(self):
         os.posix_fadvise(self._file.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
 
+    def _on_grid(self, tensor):
+        return self._direct is None or tensor.data_ptr() % self._direct[0] == 0
+
     def _device_buffer(self, tensor, size):
         """A view the device may fill or drain: the tensor's own bytes when
-        its address is on the memory grid, else the reused bounce buffer."""
+        its address is on the memory grid, else the reused bounce buffer.
+
+        The caller holds ``_bounce_lock`` whenever the tensor is off the
+        grid: the bounce buffer is one buffer for every thread."""
         import mmap
         if tensor.data_ptr() % self._direct[0] == 0:
             return memoryview(tensor.view(torch.uint8).reshape(-1).numpy()), False
@@ -1186,6 +1208,35 @@ class ExactCotangentScratch:
             # Page-aligned, which is on any memory grid a device reports.
             self._bounce = mmap.mmap(-1, max(self.max_slot_bytes, mmap.PAGESIZE))
         return memoryview(self._bounce)[:size], True
+
+    def aligned_buffer(self, key):
+        """A CPU tensor of the slot's shape and dtype on the direct-I/O grid.
+
+        ``read_into(key, buffer, bounce=False)`` then reads straight into
+        it. The bytes of a read are the same whichever buffer takes them.
+        """
+        import mmap
+
+        from .joint_replay_spill import _aligned_buffer
+
+        _offset, size, shape, dtype = self._slots[key]
+        block = mmap.PAGESIZE if self._direct is None else max(
+            int(self._direct[0]), 1)
+        return _aligned_buffer(size, block, False).view(dtype).view(shape)
+
+    def seal(self, keys):
+        """Make each written slot write-once: a later write to it refuses.
+
+        The streamed handoff writer (PQ #1251) reads a slot once its final
+        pass stored it; a second store would change bytes it may be
+        reading.
+        """
+        keys = list(keys)
+        missing = [key for key in keys if key not in self._written]
+        if missing:
+            raise RuntimeError(
+                f"cotangent scratch cannot seal a slot it does not hold: {missing[0]!r}")
+        self._sealed.update(keys)
 
     def _direct_io(self, call, view, offset, size, what):
         done = 0
@@ -1213,7 +1264,7 @@ class ExactCotangentScratch:
         _offset, _size, shape, dtype = self._slots[key]
         return self.read_into(key, torch.empty(shape, dtype=dtype, device='cpu'))
 
-    def read_into(self, key, out):
+    def read_into(self, key, out, *, bounce=True):
         """Read the slot at ``key`` into ``out`` and return ``out``.
 
         ``out`` is a contiguous CPU tensor of the slot's shape and dtype,
@@ -1221,26 +1272,43 @@ class ExactCotangentScratch:
         so a read allocates nothing. The device fills it in place when its
         address is on the direct-I/O memory grid, and the reused bounce
         buffer stages it otherwise. ``__getitem__`` reads a fresh tensor
-        this way, so the bytes are the same.
+        this way, so the bytes are the same. ``bounce=False`` refuses a
+        target off the grid instead of taking the shared bounce buffer.
         """
-        if self._file is None or key not in self._written:
-            raise RuntimeError("cotangent scratch slot is not ready")
+        with self._readers:
+            if self._file is None or key not in self._written:
+                raise RuntimeError("cotangent scratch slot is not ready")
+            self._reading += 1
+        try:
+            return self._read_slot(key, out, bounce=bounce)
+        finally:
+            with self._readers:
+                self._reading -= 1
+                self._readers.notify_all()
+
+    def _read_slot(self, key, out, *, bounce):
         offset, size, shape, dtype = self._slots[key]
         if (out.device.type != 'cpu' or out.dtype != dtype
                 or tuple(out.shape) != shape or not out.is_contiguous()):
             raise ValueError("cotangent scratch read target differs from its slot")
         if self._direct is not None:
-            view, bounced = self._device_buffer(out, size)
-            try:
-                self._direct_io(os.preadv, view, offset, size, "read")
-                if bounced:
-                    target = memoryview(out.view(torch.uint8).reshape(-1).numpy())
-                    try:
-                        target[:] = view
-                    finally:
-                        target.release()
-            finally:
-                view.release()
+            on_grid = self._on_grid(out)
+            if not on_grid and not bounce:
+                raise RuntimeError(
+                    "cotangent scratch read target is off the direct-I/O grid and "
+                    "the caller refused the shared bounce buffer")
+            with (nullcontext() if on_grid else self._bounce_lock):
+                view, bounced = self._device_buffer(out, size)
+                try:
+                    self._direct_io(os.preadv, view, offset, size, "read")
+                    if bounced:
+                        target = memoryview(out.view(torch.uint8).reshape(-1).numpy())
+                        try:
+                            target[:] = view
+                        finally:
+                            target.release()
+                finally:
+                    view.release()
             return out
         view = memoryview(out.view(torch.uint8).reshape(-1).numpy())
         try:
@@ -1258,6 +1326,10 @@ class ExactCotangentScratch:
     def __setitem__(self, key, tensor):
         if self._file is None:
             raise RuntimeError("cotangent scratch is closed")
+        if key in self._sealed:
+            raise RuntimeError(
+                f"cotangent scratch slot {key!r} is sealed: a final pass stored it "
+                "already, and its streamed handoff may be reading it")
         offset, size, shape, dtype = self._slots[key]
         if (tensor.device.type != 'cpu' or tensor.dtype != dtype
                 or tuple(tensor.shape) != shape):
@@ -1266,18 +1338,19 @@ class ExactCotangentScratch:
         # At most one slot-sized compaction, as in the exact-entry writer.
         compact = tensor.detach().contiguous()
         if self._direct is not None:
-            view, bounced = self._device_buffer(compact, size)
-            try:
-                if bounced:
-                    source = memoryview(compact.view(torch.uint8).reshape(-1).numpy())
-                    try:
-                        view[:] = source
-                    finally:
-                        source.release()
-                self._direct_io(os.pwritev, view, offset, size, "write")
-                self._written.add(key)
-            finally:
-                view.release()
+            with (nullcontext() if self._on_grid(compact) else self._bounce_lock):
+                view, bounced = self._device_buffer(compact, size)
+                try:
+                    if bounced:
+                        source = memoryview(compact.view(torch.uint8).reshape(-1).numpy())
+                        try:
+                            view[:] = source
+                        finally:
+                            source.release()
+                    self._direct_io(os.pwritev, view, offset, size, "write")
+                    self._written.add(key)
+                finally:
+                    view.release()
             return
         view = memoryview(compact.view(torch.uint8).reshape(-1).numpy())
         try:
@@ -1294,13 +1367,34 @@ class ExactCotangentScratch:
             view.release()
 
     def close(self):
-        if self._file is not None:
-            self._file.close()
-            self._file = None
+        """Close the file once no read on another thread is in flight.
+
+        The streamed handoff writer joins before its storage closes this
+        scratch (PQ #1251), so the wait is a guard, bounded by
+        ``CLOSE_READER_WAIT_S``. A read still running after it keeps the file
+        open: closing its descriptor could hand the number to another file
+        under that read. It never raises, since it runs in its owner's
+        ``finally``, where a new exception would replace the real one.
+        """
+        with self._readers:
+            self._readers.wait_for(lambda: self._reading == 0,
+                                   timeout=self.CLOSE_READER_WAIT_S)
+            reading = self._reading
+            file, self._file = self._file, None
+        if reading:
+            # Held, so the descriptor outlives the read that is using it.
+            self._open_under_read = file
+            print(f"[cotangent-scratch] {reading} read(s) still in flight after "
+                  f"{self.CLOSE_READER_WAIT_S:.0f} s; the scratch file stays open "
+                  "until the process exits", file=sys.stderr, flush=True)
+            return
+        if file is not None:
+            file.close()
         if self._bounce is not None:
             self._bounce.close()
             self._bounce = None
         self._written.clear()
+        self._sealed.clear()
 
 
 class SpillGridRefused(RuntimeError):

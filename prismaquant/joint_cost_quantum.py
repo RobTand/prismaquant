@@ -560,6 +560,10 @@ class QuantumCounters:
         # PrismaBuild export key, the bytes, the submitted and landed times
         # and the wait at the drain. ``None`` when the row emits no handoff.
         self.handoff_export = None
+        # The streamed handoff writer's own counters (PQ #1251): entries and
+        # bytes written before and after the finish, its busy and waiting
+        # seconds, the largest finality lag, and the finish's wait.
+        self.handoff_emit = None
         self.phases = [{"name": str(chunk["name"]),
                         "start_bytes": int(chunk["start_bytes"]),
                         "end_bytes": int(chunk["end_bytes"]),
@@ -699,6 +703,8 @@ class QuantumCounters:
                else {"kda_capture_kernel": self.kda_capture_kernel_record()}),
             **({} if self.handoff_export is None
                else {"handoff_export": self.handoff_export}),
+            **({} if self.handoff_emit is None
+               else {"handoff_emit": self.handoff_emit}),
             "phases": self.phases,
             "windows": self.windows,
             # Every closed span, in close order (prismaquant.io_spans).
@@ -1932,7 +1938,7 @@ def run_layer_quantum_core(
     # bound is geometry only and the scratch is allocated here, before the
     # chain or any GPU work, so an undersized ceiling or disk refuses first.
     # A resume recaptures the spill for its pending targets.
-    from contextlib import contextmanager, nullcontext
+    from contextlib import ExitStack, contextmanager, nullcontext
 
     from .joint_replay_spill import (
         REPLAY_SPILL,
@@ -2034,7 +2040,13 @@ def run_layer_quantum_core(
     if executable:
         progress.enter_read_phase(CHECKPOINT_LOAD_PHASE if adjoint_handoff is None
                                   else HANDOFF_LOAD_PHASE)
-    with storage, (spill if spill is not None else nullcontext()):
+    # The streamed handoff writer (PQ #1251), once it starts below. Its exit
+    # stack is the last context of this ``with``, so it exits first: the
+    # writer is joined before the spill and the storage (and with it the
+    # cotangent scratch the writer reads) close, on every path.
+    handoff_stream = None
+    with storage, (spill if spill is not None else nullcontext()), \
+            ExitStack() as handoff_exit:
         with counters.io.span(CHECKPOINT_LOAD_PHASE if adjoint_handoff is None
                               else HANDOFF_LOAD_PHASE):
             if adjoint_handoff is None:
@@ -2363,15 +2375,16 @@ def run_layer_quantum_core(
         capture_group_cache: dict = {}
 
         @contextmanager
-        def held_plane_staging(active_probe, group_batches):
+        def held_plane_staging(active_probe, group_batches, on_store=None):
             # PQ #1246: one host buffer per pass for the plane's traffic,
             # charged to the guard before it is allocated. ``held`` touches
             # every page, so the admissions that follow, this pass's backward
             # admission first, read it as committed, as they read the spill's
-            # pinned arenas.
+            # pinned arenas. ``on_store`` is the streamed handoff's finality
+            # signal, passed only for a final pass (PQ #1251).
             staging = PlaneHostStaging(
                 grad_plane, [(active_probe, index) for index in range(len(batches))],
-                group_batches=group_batches, dtype=runner.dtype)
+                group_batches=group_batches, dtype=runner.dtype, on_store=on_store)
             if guard is not None and staging.reserve_host_bytes:
                 check_operator_allocation(guard, "before_stage_b_plane_staging",
                                           reserve_bytes=staging.reserve_host_bytes)
@@ -2447,10 +2460,17 @@ def run_layer_quantum_core(
                     "the spill capture is the probe's one final pass, with no "
                     "statistics lease")
             grouped = observer is not None and capture_batch > 1
+            # A final pass's stores are the plane's final bytes: each one
+            # signals the streamed handoff writer (PQ #1251). No other pass
+            # stores, and the workspace profile's pass builds its staging
+            # without this signal.
+            on_store = (handoff_stream.mark_final
+                        if final and handoff_stream is not None else None)
             # The pass's staging buffer is admitted and committed before its
             # backward admission reads the guard (PQ #1246).
             with held_plane_staging(active_probe,
-                                    capture_batch if grouped else 1) as stage:
+                                    capture_batch if grouped else 1,
+                                    on_store=on_store) as stage:
                 replay_pass(stage, final=final, lease=lease, active_probe=active_probe,
                             observer=observer, grouped=grouped)
             counters.replay["layer_passes"] += 1
@@ -2767,6 +2787,28 @@ def run_layer_quantum_core(
 
             spill_driver = SimpleNamespace(capture=spill_capture, replay=spill_replay)
 
+        # ---- band-serial handoff for layer - 1, streamed (PQ #996, #1251) --
+        # The writer binds the handoff generation now, so a refused binding
+        # stops the quantum before its passes, and then writes each entry as
+        # soon as its final pass stores it. A workspace-profile row stops
+        # inside its first capture and never emits, so it starts no writer.
+        if handoff_emitter is not None and workspace_profile is None:
+            def keep_handoff_counters():
+                # After the writer's join, whatever ended the quantum: the
+                # export report of a row that died in its passes survives
+                # (PQ #1225), and so do the writer's own counters.
+                counters.handoff_export = getattr(
+                    handoff_emitter, "export_report", None)
+                counters.handoff_emit = dict(handoff_stream.telemetry)
+
+            handoff_stream = handoff_emitter.stream(
+                grad_plane=grad_plane, n_probes=n_probes,
+                n_batches=len(row_offsets),
+                kda_capture_kernel=(None if kda_kernel is None
+                                    else kda_kernel.handoff_stamp()))
+            handoff_exit.callback(keep_handoff_counters)
+            handoff_exit.enter_context(handoff_stream)
+
         counters.open()
         try:
             observe_and_project_retained_windows(
@@ -2809,11 +2851,17 @@ def run_layer_quantum_core(
         payload_span = counters.io.open(
             "payload", units=len(joint_rows),
             rows=sum(len(rows) for rows in joint_rows.values()))
-        # ---- band-serial handoff for layer - 1 (PQ #996) ------------------
-        # The final pass above wrote the boundary-``layer`` plane and
-        # harvested every owner; both stay readable until ``storage`` closes
-        # (the plane may live in its cotangent scratch).
-        if handoff_emitter is not None:
+        # ---- band-serial handoff for layer - 1: the finish (PQ #996) -----
+        # The final passes above stored every slot of the boundary-``layer``
+        # plane, and the writer has been writing them since. Here it gets
+        # the harvested owner states and finishes: the rest of the entries,
+        # the settle, then the record group. ``handoff-out`` measures that.
+        if handoff_stream is not None:
+            with counters.io.span("handoff-out"):
+                handoff_stream.finish(cotangent_owners)
+        elif handoff_emitter is not None:
+            # No stream was started (a workspace-profile row, which never
+            # gets here): the serial writer, as before PQ #1251.
             with counters.io.span("handoff-out"):
                 try:
                     handoff_emitter.emit(grad_plane=grad_plane,

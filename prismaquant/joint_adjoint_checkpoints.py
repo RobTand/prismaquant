@@ -2202,13 +2202,17 @@ class PlaneHostStaging:
     buffer, and none is allocated.
     """
 
-    def __init__(self, plane, keys, *, group_batches, dtype):
+    def __init__(self, plane, keys, *, group_batches, dtype, on_store=None):
         from .perturbed_x_cache import ExactCotangentScratch
 
         group_batches = int(group_batches)
         if group_batches < 1:
             raise ValueError("a Stage B capture group holds at least one stored batch")
         self.plane = plane
+        #: Called as ``on_store(keys, rows)`` after each store has written
+        #: every key: the streamed handoff's finality signal (PQ #1251).
+        #: ``rows`` are the stored CPU tensors, valid only during the call.
+        self.on_store = on_store
         self.copies_out = isinstance(plane, ExactCotangentScratch)
         compute = torch.empty((), dtype=dtype).element_size()
         entry = 0
@@ -2312,19 +2316,25 @@ class PlaneHostStaging:
         if len(keys) != len(rows) or sum(rows) != int(gradient.shape[0]):
             raise RuntimeError("Stage B capture split its cotangent into the wrong rows")
         start = 0
+        stored = []
         if not self.copies_out:
             for key, count in zip(keys, rows):
                 part = gradient.narrow(0, start, count)
                 kept = torch.empty(tuple(part.shape), dtype=part.dtype, device="cpu")
                 kept.copy_(part)
                 self.plane[key] = kept
+                stored.append(kept)
                 start += count
-            return
-        host = self._view(tuple(gradient.shape), gradient.dtype)
-        host.copy_(gradient)
-        for key, count in zip(keys, rows):
-            self.plane[key] = host.narrow(0, start, count)
-            start += count
+        else:
+            host = self._view(tuple(gradient.shape), gradient.dtype)
+            host.copy_(gradient)
+            for key, count in zip(keys, rows):
+                part = host.narrow(0, start, count)
+                self.plane[key] = part
+                stored.append(part)
+                start += count
+        if self.on_store is not None:
+            self.on_store(keys, stored)
 
 
 class _RollPipeline:
