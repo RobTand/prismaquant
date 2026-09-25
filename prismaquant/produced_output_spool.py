@@ -66,6 +66,13 @@ says so (``StreamedBoundaryArtifacts._retire``, the deferred unlink). A group
 released for room before its reads are done keeps its retired files until
 its last live entry is retired too (PQ #1236): that entry's read publishes
 or restages the whole group, and PB stats every origin in it.
+
+A wait commits nothing, so to PrismaBuild's ``no_progress`` rung it looks
+quiet. Every wait that waits therefore declares itself (PQ #1240, PB #1035):
+``<progress path>.export-wait`` names the export keys it waits on, the
+barrier's group or every live export a full window waits on, and is
+removed when the wait ends, however it ends. The rung leaves the wait out
+of the quiet only while a named export shows progress.
 """
 from __future__ import annotations
 
@@ -74,6 +81,8 @@ import dataclasses
 from pathlib import Path
 import threading
 import time
+
+from . import prismabuild_progress
 
 ROOT_ENV = "PRISMABUILD_PRODUCED_SPOOL_ROOT"
 MAX_ENV = "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"
@@ -84,6 +93,52 @@ ARTIFACT_CLASSES = ("payload", "checkpoint")
 #: one this adapter always polled at (PQ #989's stager deferral uses the same
 #: order), and a poll is two small local reads (``poll_group``).
 POLL_S = 0.1
+
+#: One process can have several waits on its own exports at once: the compute
+#: thread's and the stager's, on every spool the action holds. PrismaBuild
+#: reads one export-wait record per action and a declaration replaces the
+#: last, so the record is the union of every live wait's export keys, dated
+#: from the earliest of them, and goes only when the last wait ends. Every
+#: write and removal happens under this lock, so the file on disk is always
+#: the union of the waits as the last one to change left it.
+_EXPORT_WAITS_LOCK = threading.Lock()
+_EXPORT_WAITS: dict[int, tuple[float, frozenset]] = {}
+
+
+def _declare_export_waits() -> None:
+    """Write the union of live waits to PrismaBuild, or clear it. Lock held."""
+    exports = set()
+    for _since, keys in _EXPORT_WAITS.values():
+        exports.update(keys)
+    if exports:
+        since = min(since for since, _keys in _EXPORT_WAITS.values())
+        prismabuild_progress.declare_export_wait(exports, since_unix=since)
+    else:
+        prismabuild_progress.clear_export_wait()
+
+
+def _export_wait(token: int, since_unix: float | None, export_keys) -> None:
+    """Record (or, with no keys, end) one wait on this action's own exports.
+
+    ``since_unix`` is when this wait began and stays the same for all of it:
+    PrismaBuild carries a named export's evidence only within one wait, and
+    a wait is one ``since_unix``. A key PrismaBuild did not return is not
+    named; a wait that can name none is not declared, and counts as quiet,
+    as every wait did before PQ #1240.
+    """
+    keys = frozenset(str(key) for key in export_keys if key)
+    with _EXPORT_WAITS_LOCK:
+        before = _EXPORT_WAITS.get(token)
+        if keys:
+            now = (float(since_unix), keys)
+            if before == now:
+                return
+            _EXPORT_WAITS[token] = now
+        elif before is None:
+            return
+        else:
+            del _EXPORT_WAITS[token]
+        _declare_export_waits()
 
 
 #: The writer's per-entry file envelope over the tensor bytes: the ``nbytes +
@@ -268,8 +323,12 @@ class ProducedOutputSpool:
         at once. ``wait=False`` neither waits nor takes a live group's copy:
         the stager's claim ahead of the writer must not hold its lane on an
         export, nor push out a copy the writer may read before it gets there.
+        While it waits, the live exports are declared to PrismaBuild's
+        ``no_progress`` rung (PQ #1240).
         """
         waited = None
+        since_unix = None
+        token = object()
         try:
             while True:
                 with self._lock:
@@ -305,6 +364,10 @@ class ProducedOutputSpool:
                                 self.telemetry["window_declines"] += 1
                                 self.telemetry["last_window_decline"] = reason
                             raise ProducedWindowRefused(reason)
+                        # The window waits until one of these lands; the
+                        # set is read again at every look.
+                        live_keys = [self._groups[live_id].get("export_key")
+                                     for live_id in live]
                     else:
                         self._sequence += 1
                         self._groups[batch_id] = dict(
@@ -318,11 +381,15 @@ class ProducedOutputSpool:
                         return Path(directory)
                 if waited is None:
                     waited = time.monotonic()
+                    since_unix = time.time()
                     with self._lock:
                         waiting_on = self._live_exports_locked()
+                _export_wait(id(token), since_unix, live_keys)
                 time.sleep(POLL_S)
         finally:
             if waited is not None:
+                # However the wait ends: room, a refusal, or an exception.
+                _export_wait(id(token), None, ())
                 seconds = time.monotonic() - waited
                 self.telemetry["window_wait_s"] += seconds
                 self.telemetry["window_waits"] += 1
@@ -545,9 +612,13 @@ class ProducedOutputSpool:
         No clock: the wait lasts while PrismaBuild reports the export live
         (queued, admitted or copying) and ends the moment it reports it
         landed or refused. A refusal raises :class:`ProducedExportRefused`
-        naming the export action and its state, and is recorded.
+        naming the export action and its state, and is recorded. While it
+        waits, the export is declared to PrismaBuild's ``no_progress`` rung
+        (PQ #1240).
         """
         started = None
+        since_unix = None
+        token = object()
         try:
             while True:
                 with self._lock:
@@ -557,11 +628,16 @@ class ProducedOutputSpool:
                             "incomplete local group has no export submission")
                     if self._poll_locked(batch_id, group, where=where):
                         return
+                    export_key = group.get("export_key")
                 if started is None:
                     started = time.monotonic()
+                    since_unix = time.time()
+                _export_wait(id(token), since_unix, (export_key,))
                 time.sleep(POLL_S)
         finally:
             if started is not None:
+                # However the wait ends: landed, refused, or an exception.
+                _export_wait(id(token), None, ())
                 seconds = time.monotonic() - started
                 self.telemetry["export_wait_s"] += seconds
                 self.telemetry["export_waits"] += 1

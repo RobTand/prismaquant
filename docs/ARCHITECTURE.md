@@ -2596,8 +2596,18 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `fix/1236-deferred-unlink-publish`.
+As of: 2026-09-25 · `claude/non-gpu-issues-repos-vl3e30`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/non-gpu-issues-repos-vl3e30`) for **a Stage A owner's wait on
+its own exports declared to PrismaBuild's `no_progress` rung** (PQ #1240,
+PrismaBuild #1035): while a barrier or a full window of the produced-output
+spool waits, it writes `<progress path>.export-wait`
+(`prismabuild.export_wait.v1`, `prismabuild_progress.declare_export_wait`)
+naming the export keys it waits on, the union across the process's waits,
+and removes it when the last ends. See "The wait is declared" under
+"Same-box readback and write-behind export (#1110)", and its Limits. No
+format, pipeline default, stage, lane or ship gate changes.
 
 Re-stamped (2026-09-25, `fix/1236-deferred-unlink-publish`) for **a retired
 entry that keeps its file while its group can still be read** (PQ #1236). A
@@ -24528,6 +24538,21 @@ them, with its error, as one line to
 slow is waited on; PrismaBuild's dead-producer recovery (PB #1001) owns an
 export whose worker dies.
 
+**The wait is declared** (PQ #1240, PrismaBuild #1035). A wait commits
+nothing, so PrismaBuild's `no_progress` rung saw it as quiet. While a
+barrier (`await_group`) or a full window (`reserve`) waits, the spool writes
+`<progress path>.export-wait` (`prismabuild.export_wait.v1`,
+`prismabuild_progress.declare_export_wait`): the barrier names its group's
+`export_key`, and a full window names every live export, read again at each
+look. The record is the union of every live wait in the process (the
+compute thread's and the stager's, on every spool), dated from the earliest
+of them (`produced_output_spool._EXPORT_WAITS`, written and removed under one
+lock), and is removed when the last wait ends: landed, refused or raised.
+The rung checks each named export is the owner's own and leaves the wait out
+of the quiet only while one shows progress (claimed and writing, or queued
+for at most one evidence window). Without a progress channel nothing is
+written, as before.
+
 **Deferred unlink.** PrismaBuild's `release_group` re-checks each landed
 destination against the export's receipt, so a retired entry's canonical
 file must outlive its group's local release. `_retire` of an entry in a held
@@ -24585,10 +24610,19 @@ the two allowances are equal.
   the set shrank as read groups were committed; now the forward's boundary
   prewrites stay outstanding through the reverse chain, so each prewrite
   reads them all. An index or fingerprint in PrismaBuild is the remedy.
-- A barrier wait is not declared to PrismaBuild's `no_progress` rung: the
-  staged-wait declaration names movers in the consumer's residency plan, and
-  an export action is not one. A barrier that waits longer than the row's
-  grace ends as a no-progress kill.
+- A declared export wait (PQ #1240) is exempt only on PrismaBuild's evidence
+  about the named export itself. A barrier on a group whose export is queued
+  behind the owner's other exports names that group alone, so PrismaBuild
+  gives it one evidence window from its first look (PB #1035's bound). A
+  PrismaBuild before #1035 does not read the record, and there a wait longer
+  than the row's grace still ends as a no-progress kill. As of this change
+  neither PQ's PrismaBuild dev pin (`461728e`, which the PrismaBuild test
+  interpreter carries) nor the runtime generation the produced-output tests
+  pin (`tests/pb_runtime_generation_pin.json`, `81d95cba8d91`) carries
+  #1035. The PrismaBuild round-trip in
+  `tests/test_export_wait_record_reads_in_prismabuild.py` skips on an
+  interpreter whose `prismabuild` predates #1035, naming the one it found;
+  its wire-format tests run everywhere.
 - PrismaBuild charges the spool to a box's `spool_gb` only with
   `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1`. The Stage A row seals it
   (PQ #1120); a quantum row does not, so its spool is refused at bind, not

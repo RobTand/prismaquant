@@ -199,8 +199,13 @@ def _isolated_launch_context(monkeypatch):
     bind the fixture's publication to the wrong owner.
     """
 
+    # The outer action's progress channel too: a spool that waits declares
+    # the wait on it (PQ #1240), and a fixture's wait is not the outer
+    # action's.
     for name in ("PRISMABUILD_ACTION_NONCE", "PRISMABUILD_ACTION_SCOPE",
-                 "PRISMABUILD_READER_HELPER_ROOT", "PRISMABUILD_ACTION_KEY"):
+                 "PRISMABUILD_READER_HELPER_ROOT", "PRISMABUILD_ACTION_KEY",
+                 "PRISMABUILD_ACTION_PROGRESS_PATH",
+                 "PRISMABUILD_ACTION_PROGRESS_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     from prismaquant.residency_map import reset_residency_resolver_for_tests
     from prismaquant.staged_lease import set_lease_helper_root
