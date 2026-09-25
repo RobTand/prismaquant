@@ -2057,10 +2057,14 @@ def run_layer_quantum_core(
     # its probe's final pass, so a band-serial consumer streams each probe's
     # plane there instead of loading the whole plane here. The read plan
     # stages it in the probe's spill phase (``band_serial_manifest``); a
-    # sealed plan's mode equals the launch's, checked above.
+    # sealed plan's mode equals the launch's, checked above. The launch's
+    # mode decides, not whether a spill opened: a resume with every unit
+    # committed opens none, and its final passes still run one per probe
+    # under that probe's spill phase, where its rows are staged.
     handoff_incoming = (HandoffIncoming(adjoint_handoff, n_probes=n_probes,
                                         n_batches=len(row_offsets))
-                        if adjoint_handoff is not None and spill is not None else None)
+                        if adjoint_handoff is not None and spill_config is not None
+                        else None)
     incoming_budget = None
     with storage, (spill if spill is not None else nullcontext()), \
             ExitStack() as handoff_exit:

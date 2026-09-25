@@ -28,7 +28,10 @@ final pass, so a spill consumer now streams each probe's rows there.
   verified `stream_exact_entry_tensors` over that probe's entries in batch
   order, in the staging it builds (`held_plane_staging`), so the capture
   and a complete resume's final pass (which runs outside any capture) both
-  read through it. `PlaneHostStaging(..., incoming=stream)` takes each
+  read through it. The launch's replay mode decides, not an open spill: a
+  resume with every unit committed opens no spill, and its final passes
+  still run one per probe under that probe's spill phase, where the read
+  plan stages its rows. `PlaneHostStaging(..., incoming=stream)` takes each
   group's rows from the stream and copies them where the plane's rows went:
   the same bytes, moved to the device by the same copy. The pass's stores
   still write the plane, so the streamed handoff writer (PQ #1251) is
