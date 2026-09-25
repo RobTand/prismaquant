@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-PrismaQuant-Attribution-1.0
 """Fixed-scale product-codebook LDLQ atoms for Gridbook CB fields.
 
 Its outer-buffer recurrence comes from PrismaQuant's Apache-2.0 GPTQ
