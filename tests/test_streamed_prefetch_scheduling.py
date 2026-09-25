@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import torch
 
+import prismaquant.layer_streaming as layer_streaming
 import prismaquant.streaming_model as streaming_model
 from prismaquant.layer_streaming import LayerCache
 from prismaquant.streaming_model import StreamingContext
@@ -301,12 +302,11 @@ def test_pressure_trim_prefers_unpinned_victims(monkeypatch):
     # re-check then sees the pressure relieved, as it would on a real box.
     calls = {"n": 0}
 
-    def _vm():
+    def _available():
         calls["n"] += 1
-        avail = 0 if calls["n"] == 1 else 2 * LAYER_BYTES
-        return type("_VM", (), {"available": avail})()
+        return 0 if calls["n"] == 1 else 2 * LAYER_BYTES
 
-    monkeypatch.setattr("psutil.virtual_memory", _vm)
+    monkeypatch.setattr(layer_streaming, "mem_available_bytes", _available)
     cache._pressure_threshold_bytes = LAYER_BYTES  # need one layer freed
     cache._maybe_pressure_shrink()
 
@@ -319,10 +319,7 @@ def test_pressure_trim_clears_the_pin_when_it_does_evict(monkeypatch):
     cache = LayerCache(max_bytes=64 * LAYER_BYTES)
     cache.put(0, _layer_tensors(0), pinned_until_read=True)
 
-    class _VM:
-        available = 0
-
-    monkeypatch.setattr("psutil.virtual_memory", lambda: _VM())
+    monkeypatch.setattr(layer_streaming, "mem_available_bytes", lambda: 0)
     cache._pressure_threshold_bytes = LAYER_BYTES
     cache._maybe_pressure_shrink()
 

@@ -49,6 +49,7 @@ from prismaquant.cb_warm_state import (
     build_warm_record,
     tensor_value_identity,
 )
+from prismaquant.io_spans import PeriodicSampler, mem_available_bytes, read_proc_status
 from prismaquant.nvfp4_cb_footprint import cb_serialization_context_stamp
 from prismaquant.nvfp4_cb_formats import nvfp4_cb_reconstruct
 from tools.dsv4_ldlq_cost_campaign import (
@@ -182,19 +183,10 @@ class RSSLimitExceeded(RuntimeError):
 
 
 def _rss_bytes() -> int:
-    with open("/proc/self/status", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith("VmRSS:"):
-                return int(line.split()[1]) * 1024
-    raise RuntimeError("/proc/self/status has no VmRSS")
-
-
-def _host_available_bytes() -> int:
-    with open("/proc/meminfo", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) * 1024
-    raise RuntimeError("/proc/meminfo has no MemAvailable")
+    rss = read_proc_status().get("VmRSS")
+    if rss is None:
+        raise RuntimeError("/proc/self/status has no VmRSS")
+    return rss
 
 
 def _malloc_trim() -> None:
@@ -214,7 +206,7 @@ def _unit_boundary_reclaim(*, unit: str) -> dict[str, Any]:
     """Release host garbage and shed CUDA cache when unified memory is low."""
     gc.collect()
     _malloc_trim()
-    available = _host_available_bytes()
+    available = mem_available_bytes()
     released_cuda_cache = available < HOST_AVAILABLE_CACHE_RELEASE_BYTES
     if released_cuda_cache:
         torch.cuda.empty_cache()
@@ -242,17 +234,14 @@ class RSSGuard:
         self.peak_bytes = 0
         self.stage = "initializing"
         self._tripped = threading.Event()
-        self._stop = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run, name="afast-rss-guard", daemon=True,
-        )
+        self._sampler = PeriodicSampler(self._poll, interval_s=RSS_POLL_SECONDS,
+                                        name="afast-rss-guard", tick_first=False)
 
     def start(self) -> None:
-        self._thread.start()
+        self._sampler.start()
 
     def stop(self) -> None:
-        self._stop.set()
-        self._thread.join(timeout=RSS_POLL_SECONDS * 2)
+        self._sampler.stop(timeout=RSS_POLL_SECONDS * 2)
 
     def set_stage(self, stage: str) -> None:
         self.stage = str(stage)
@@ -286,18 +275,18 @@ class RSSGuard:
             "action": "flush_and_abort_at_next_safe_checkpoint",
         })
 
-    def _run(self) -> None:
-        while not self._stop.wait(RSS_POLL_SECONDS):
-            try:
-                rss = _rss_bytes()
-                self.peak_bytes = max(self.peak_bytes, rss)
-                if rss > self.limit_bytes:
-                    self._trip(rss)
-                    return
-            except Exception:
-                # The foreground checkpoints remain authoritative.  A sampler
-                # read failure must not manufacture a memory-limit crossing.
-                return
+    def _poll(self) -> bool:
+        try:
+            rss = _rss_bytes()
+            self.peak_bytes = max(self.peak_bytes, rss)
+            if rss > self.limit_bytes:
+                self._trip(rss)
+                return False
+        except Exception:
+            # The foreground checkpoints remain authoritative.  A sampler
+            # read failure must not manufacture a memory-limit crossing.
+            return False
+        return True
 
 
 def utc_now() -> str:

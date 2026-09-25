@@ -45,6 +45,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from . import io_spans
 from prismaquant import format_registry as fr
 from prismaquant.cb_layout import (
     VEC_DIM,
@@ -2160,14 +2161,9 @@ def measure_expert_unit_costs_forked(
     num_layers = runner.num_layers
 
     def _avail_swap_gb() -> tuple[float, float]:
-        vals = {}
-        with open("/proc/meminfo") as fh:
-            for line in fh:
-                key = line.split(":", 1)[0]
-                if key in ("MemAvailable", "SwapTotal", "SwapFree"):
-                    vals[key] = int(line.split()[1])
-        swap = (vals.get("SwapTotal", 0) - vals.get("SwapFree", 0)) / 1048576
-        return vals.get("MemAvailable", 0) / 1048576, swap
+        vals = io_spans.read_meminfo()
+        swap = (vals.get("SwapTotal", 0) - vals.get("SwapFree", 0)) / 1024 ** 3
+        return vals.get("MemAvailable", 0) / 1024 ** 3, swap
 
     unit_kl_means: dict[str, dict[str, float]] = {qn: {} for qn in pending}
     unit_kl_windows: dict[str, dict[str, list[float]]] = {

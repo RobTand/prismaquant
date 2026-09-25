@@ -43,12 +43,12 @@ import torch
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .cost_currency import probe_identity_seals, probe_identity_walls_differ
 from .dev_mode import seal_check
-from .io_spans import IoSpanLog, failure_outcome, read_proc_io, stage_span_log
+from .io_spans import (GpuPowerSampler, IoSpanLog, failure_outcome, read_proc_io,
+                       stage_span_log)
 from .joint_adjoint_checkpoints import (
     QUANTUM_COUNTERS_SCHEMA,
     QUANTUM_RECORD_SCHEMA,
     QUANTUM_STATUS_SCHEMA,
-    GpuPowerSampler,
     KernelTimeProfiler,
     PlaneHostStaging,
     adjoint_space,

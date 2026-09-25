@@ -35,7 +35,6 @@ import json
 import os
 import statistics
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -44,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import torch  # noqa: E402
 
 from prismaquant import nvfp4_activation_contract as owner  # noqa: E402
+from prismaquant.io_spans import PeriodicSampler  # noqa: E402
 
 ARMS = {
     "unfused": owner._nvfp4_activation_qdq_registered_op_unfused,
@@ -58,7 +58,6 @@ class PowerSampler:
     def __init__(self, hz: float = 50.0):
         self.samples: list[tuple[float, float]] = []
         self.source = None
-        self._stop = threading.Event()
         try:
             import pynvml
 
@@ -70,23 +69,20 @@ class PowerSampler:
         except Exception as exc:  # noqa: BLE001 -- reported, never guessed
             self._read = None
             self.source = f"unavailable: {type(exc).__name__}: {exc}"
-        self._period = 1.0 / hz
-        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._sampler = PeriodicSampler(self._tick, interval_s=1.0 / hz, name="nvml-power")
 
-    def _run(self):
-        while not self._stop.is_set():
-            try:
-                self.samples.append((time.perf_counter(), float(self._read())))
-            except Exception:  # noqa: BLE001
-                pass
-            time.sleep(self._period)
+    def _tick(self):
+        try:
+            self.samples.append((time.perf_counter(), float(self._read())))
+        except Exception:  # noqa: BLE001
+            pass
 
     def start(self):
         if self._read is not None:
-            self._thread.start()
+            self._sampler.start()
 
     def stop(self):
-        self._stop.set()
+        self._sampler.request_stop()
 
     def window(self, t0: float, t1: float):
         values = [w for t, w in self.samples if t0 <= t <= t1]
