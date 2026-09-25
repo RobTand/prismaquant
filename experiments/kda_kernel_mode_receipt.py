@@ -170,6 +170,11 @@ def main(argv=None) -> int:
             return False
 
     layer = build_layer(config, layer_index, device, dtype, seed=layer_index)
+    # build_layer constructs the layer in FP32 before casting it to BF16. Give
+    # the freed FP32 blocks back so that the process holds what the arms use.
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    layer_resident_bytes = torch.cuda.memory_allocated()
     runner = Runner(layer)
     generator = torch.Generator().manual_seed(1214)
     count = int(args.batches)
@@ -233,6 +238,9 @@ def main(argv=None) -> int:
 
     def arm(name, run):
         torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        resident_before = torch.cuda.memory_allocated()
         before = kda_chunk.counts()
         start = time.time()
         plane = run()
@@ -243,7 +251,10 @@ def main(argv=None) -> int:
         arms[name] = {"wall_s": end - start, "window_unix": [start, end],
                       "kernel_counts": {key: after[key] - before[key] for key in after},
                       "power_w_mean": (sum(watts) / len(watts)) if watts else None,
-                      "power_samples": len(watts), "plane_sha256": _plane_digest(plane)}
+                      "power_samples": len(watts), "plane_sha256": _plane_digest(plane),
+                      "resident_before_bytes": resident_before,
+                      "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+                      "peak_reserved_bytes": torch.cuda.max_memory_reserved()}
         planes[name] = plane
 
     from contextlib import nullcontext
@@ -302,6 +313,9 @@ def main(argv=None) -> int:
         "geometry": {"batches": count, "capture_batch": group_size,
                      "chain_batch": group_size, "probe_fusion": True,
                      "probes": n_probes, "seqlen": seq, "hc_mult": hc, "hidden": hidden},
+        "layer_resident_bytes": layer_resident_bytes,
+        "peak_reserved_bytes": max(a["peak_reserved_bytes"] for a in arms.values()),
+        "peak_allocated_bytes": max(a["peak_allocated_bytes"] for a in arms.values()),
         "arms": arms, "comparisons": comparisons,
         "kernel_record": record, "expected_record": expected_record,
         "checks": checks, "pass": all(checks.values()),
