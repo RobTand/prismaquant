@@ -2562,10 +2562,10 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `wip2/pq-misc`.
+As of: 2026-09-25 · `claude/gpu-availability-i1azgo-pq-misc`.
 Stamps follow, newest first, each recording its own branch and date.
 
-Re-stamped (2026-09-25, `wip2/pq-misc`) for **one pin per PrismaBuild bundle
+Re-stamped (2026-09-25, `claude/gpu-availability-i1azgo-pq-misc`) for **one pin per PrismaBuild bundle
 the tests run against** (PQ #1084): the Stage B preparation (#1070), Stage A
 retirement (#1073) and band-serial handoff (#1075) suites read one pin of the
 published generation, `tests/pb_runtime_generation_pin.json`, holding the
