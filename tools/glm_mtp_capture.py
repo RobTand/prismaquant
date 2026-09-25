@@ -220,12 +220,15 @@ def projection_phase(args):
     base, _ = cap.read_bound_json(plan["inputs"]["census"]["path"],
                                   plan["inputs"]["census"]["sha256"])
     out = Path(args.out)
+    path = out / "mtp-projection.json"
+    # Refuse before the producer hashes the whole checkpoint, not after.
+    if path.exists():
+        raise RuntimeError(f"{path} exists; the projection publishes once")
     out.mkdir(parents=True, exist_ok=True)
     wrapper = glm_mtp.MtpCheckpointModel(glm_mtp.mtp_layer_skeleton(_text_config(plan["model"])))
     print(f"[mtp-projection] asking the producer for {plan['model']}", flush=True)
     carried = cap.mtp_expert_projection(plan["model"], wrapper, detect_profile(plan["model"]),
                                         base_census=base, out_path=out / "producer-answer.json")
-    path = out / "mtp-projection.json"
     if path.exists():
         raise RuntimeError(f"{path} exists; the projection publishes once")
     raw = (json.dumps(carried, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
