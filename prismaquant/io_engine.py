@@ -30,6 +30,18 @@ states a depth or a worker count:
   plus the CUDA reservation, against the row's caps and host floor, less the
   reservation of the phase the consumer is in. Serialized buffers in flight are
   also held to ``budget.buffer_bytes``, the load buffer the plan sealed.
+* **Owned bytes.** A stream's reads land in memfds the engine owns
+  (:class:`SealedBuffer`), hashed on the pass that reads them and sealed
+  against writes before a decoder sees them. A decoder maps the memfd rather
+  than copying it, so the decoded value holds exactly the file's pages, and
+  dropping the value returns them to the cgroup. A copy into a ``torch``
+  CPU tensor would not return them on this platform (see
+  :class:`SealedBuffer`), and the depth and the reclaim below both depend on
+  freed bytes leaving the reading.
+* **Release, not take.** A taken group's bytes stay charged to the budget
+  until the consumer calls ``ReadStream.release`` (or takes the next group):
+  the consumer holds the values until then, and on unified memory a stream
+  that counted them free at the take would read past the row's memory.
 * **Reclaim.** An entry read ahead is reclaimable until the consumer takes it.
   ``ReadStream.reclaim`` drops the farthest-ahead ones first, and a budget
   that can refuse (the capture guard) calls it before it would refuse, so a
@@ -58,10 +70,14 @@ writes to its counters (Stage B: ``counters.json``'s ``io_engine`` block).
 from __future__ import annotations
 
 from concurrent.futures import CancelledError, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
+import fcntl
 from functools import partial
 import hashlib
+import io
 import math
+import mmap
 import os
 from pathlib import Path
 import stat
@@ -85,9 +101,128 @@ class EntryError(RuntimeError):
 # One file, read once
 # --------------------------------------------------------------------------
 
+_SEALS = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
+
+
+class SealedBuffer:
+    """One file's bytes in a memfd this process owns, sealed once hashed.
+
+    A stream holds what it reads ahead, so those bytes must leave the
+    process's committed memory the moment the stream or its consumer drops
+    them: the stream's depth is a live reading of that memory, and its
+    reclaim frees bytes so a check can pass. A tensor that ``torch.load``
+    allocates does not do that on this platform. Torch 2.11 on aarch64 bundles
+    mimalloc in ``libc10``, which keeps freed CPU pages: freeing 3.84 GB of
+    ``torch.empty`` tensors left 3.85 GB in RssAnon, where the same bytes in a
+    ``bytearray`` were returned (PQ #1291, PrismaBuild probe on a GB10).
+    Decoded tensors held ahead then pinned the row's committed memory: an
+    eviction of 1.95 GB did not move the guard's reading, and the row was
+    refused.
+
+    So a stream's read lands in a memfd: its pages are shared memory charged
+    to the reading cgroup (``committed_cgroup_bytes`` counts ``shmem``), and
+    they are freed when the last descriptor and mapping go. The bytes are
+    hashed on the one pass that reads them, then the memfd is sealed against
+    every write, so the bytes a decoder sees are the bytes the digest names.
+    A decoder maps it instead of copying it (``path`` names the memfd for
+    ``torch.load(..., mmap=True)``, a private copy-on-write view): the decoded
+    tensor owns the pages, and dropping the tensor returns them.
+    """
+
+    __slots__ = ("size", "_fd", "_map")
+
+    def __init__(self, size: int):
+        self.size = int(size)
+        self._map = None
+        self._fd = os.memfd_create("pq-io", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        try:
+            os.ftruncate(self._fd, self.size)
+            if self.size:
+                self._map = mmap.mmap(
+                    self._fd, self.size,
+                    flags=mmap.MAP_SHARED | getattr(mmap, "MAP_POPULATE", 0))
+        except BaseException:
+            os.close(self._fd)
+            raise
+
+    def fill(self, fd: int) -> bool:
+        """Read ``fd`` from offset 0 into the buffer; whether it held exactly ``size`` bytes."""
+        offset = 0
+        if self.size:
+            view = memoryview(self._map)
+            try:
+                while offset < self.size:
+                    got = os.preadv(fd, [view[offset:]], offset)
+                    if got <= 0:
+                        break
+                    offset += got
+            finally:
+                view.release()
+        return offset == self.size and os.pread(fd, 1, self.size) == b""
+
+    def seal(self) -> str:
+        """Hash the bytes read, drop the writable mapping and seal; the SHA-256 hex."""
+        digest = hashlib.sha256()
+        if self._map is not None:
+            view = memoryview(self._map)
+            try:
+                digest.update(view)
+            finally:
+                view.release()
+            self._map.close()
+            self._map = None
+        fcntl.fcntl(self._fd, fcntl.F_ADD_SEALS, _SEALS)
+        return digest.hexdigest()
+
+    @property
+    def path(self) -> str:
+        """A path that opens this memfd (``/proc/self/fd``), for decoders that map files."""
+        if self._fd is None:
+            raise RuntimeError("sealed io buffer is closed")
+        return f"/proc/self/fd/{self._fd}"
+
+    @contextmanager
+    def readonly(self):
+        """A read-only, seekable view of the bytes (an ``mmap``), without a copy."""
+        if self._fd is None:
+            raise RuntimeError("sealed io buffer is closed")
+        if not self.size:
+            yield io.BytesIO(b"")
+            return
+        view = mmap.mmap(self._fd, self.size, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ)
+        try:
+            yield view
+        finally:
+            view.close()
+
+    def __bytes__(self) -> bytes:
+        with self.readonly() as view:
+            return view.read()
+
+    def __len__(self) -> int:
+        return self.size
+
+    def close(self) -> None:
+        """Drop this buffer's descriptor; a decoder's mapping keeps the pages it maps."""
+        if self._map is not None:
+            self._map.close()
+            self._map = None
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+
+
+def _close_sealed(raw) -> None:
+    if isinstance(raw, SealedBuffer):
+        raw.close()
+
+
 def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
-              lease=None, timing: dict | None = None):
+              lease=None, timing: dict | None = None, sealed: bool = False):
     """Read one declared file's bytes once: ``(raw, receipt, signature)``.
+
+    ``raw`` is ``bytes``, or with ``sealed`` a :class:`SealedBuffer` the
+    caller closes.
 
     ``path`` is always the declared file. A staged read opens another copy,
     and every fence that belongs to the declared object still runs on the
@@ -188,79 +323,100 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
         return (StagedReadRefused(f'staged copy {message}') if staged is not None
                 else RuntimeError(f"PWC file {message}"))
 
-    if pinned is None:
-        try:
-            with source.open("rb") as handle:
-                if _stat_signature(os.fstat(handle.fileno())) != source_signature:
+    buffer = SealedBuffer(source_before.st_size) if sealed else None
+    try:
+        if pinned is None:
+            try:
+                with source.open("rb") as handle:
+                    if _stat_signature(os.fstat(handle.fileno())) != source_signature:
+                        raise changed("changed before its content read")
+                    if buffer is None:
+                        raw = handle.read(source_before.st_size + 1)
+                        exact = len(raw) == source_before.st_size
+                    else:
+                        exact = buffer.fill(handle.fileno())
+                    if (not exact
+                            or _stat_signature(os.fstat(handle.fileno())) != source_signature
+                            or _stat_signature(source.lstat()) != source_signature):
+                        raise changed("changed during its content read")
+            except OSError as error:
+                if staged is None:
+                    raise
+                raise StagedReadRefused(
+                    f'staged copy is unreadable: {error.strerror}') from None
+        else:
+            window, fd, serving, shared = pinned
+            try:
+                first = os.fstat(fd)
+                if first.st_size != source_before.st_size:
                     raise changed("changed before its content read")
-                raw = handle.read(source_before.st_size + 1)
-                if (len(raw) != source_before.st_size
-                        or _stat_signature(os.fstat(handle.fileno())) != source_signature
-                        or _stat_signature(source.lstat()) != source_signature):
+                if buffer is None:
+                    parts = []
+                    remaining = source_before.st_size + 1
+                    offset = 0
+                    while remaining > 0:
+                        block = os.pread(fd, min(remaining, 8 << 20), offset)
+                        if not block:
+                            break
+                        parts.append(block)
+                        offset += len(block)
+                        remaining -= len(block)
+                    raw = b"".join(parts)
+                    exact = len(raw) == source_before.st_size
+                else:
+                    exact = buffer.fill(fd)
+                if not exact or _stat_signature(os.fstat(fd)) != _stat_signature(first):
                     raise changed("changed during its content read")
-        except OSError as error:
-            if staged is None:
-                raise
-            raise StagedReadRefused(
-                f'staged copy is unreadable: {error.strerror}') from None
-    else:
-        window, fd, serving, shared = pinned
-        try:
-            first = os.fstat(fd)
-            if first.st_size != source_before.st_size:
-                raise changed("changed before its content read")
-            parts = []
-            remaining = source_before.st_size + 1
-            offset = 0
-            while remaining > 0:
-                block = os.pread(fd, min(remaining, 8 << 20), offset)
-                if not block:
-                    break
-                parts.append(block)
-                offset += len(block)
-                remaining -= len(block)
-            raw = b"".join(parts)
-            if (len(raw) != source_before.st_size
-                    or _stat_signature(os.fstat(fd)) != _stat_signature(first)):
-                raise changed("changed during its content read")
-        finally:
-            # The owned buffer is fully read above: the descriptor is
-            # closed and the exact ref released before deserialization,
-            # on success and on failure alike. A group pin outlives this
-            # read: its owner releases it.
-            if shared:
-                window.close_fd(fd)
-            else:
-                window.__exit__(None, None, None)
-    if timing is not None:
-        timing["read_s"] = time.monotonic() - started
-    if staged is not None and _stat_signature(path.lstat()) != signature:
-        raise StagedReadRefused('declared file changed during the staged read')
-    # The serialized buffer is private to this read and released after its
-    # decoder returns. No whole-cache byte store.
-    receipt = {"path": str(path), "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
-    if staged is not None:
-        # Serving-tier provenance (ID-07) rides the staged receipt;
-        # the pool receipt keeps its pinned shape.
-        receipt["serving_tier"] = serving_tier
-    if staged is not None and receipt["sha256"] != staged["sha256"]:
-        # The read is already digested, so the staged bytes are held to the
-        # digest the map published for them. This is the check that makes
-        # the redirect safe rather than trusted, and on a prepare -- where
-        # the caller has no expected digest yet -- it is the only one.
-        raise StagedReadRefused('staged bytes differ from the map digest')
+            finally:
+                # The owned buffer is fully read above: the descriptor is
+                # closed and the exact ref released before deserialization,
+                # on success and on failure alike. A group pin outlives this
+                # read: its owner releases it.
+                if shared:
+                    window.close_fd(fd)
+                else:
+                    window.__exit__(None, None, None)
+        if timing is not None:
+            timing["read_s"] = time.monotonic() - started
+        if staged is not None and _stat_signature(path.lstat()) != signature:
+            raise StagedReadRefused('declared file changed during the staged read')
+        # The serialized buffer is private to this read and released after its
+        # decoder returns. No whole-cache byte store. A sealed buffer is hashed
+        # on the pass that sealed it: the bytes a decoder maps are the bytes
+        # this digest names, and nothing can write them after.
+        if buffer is None:
+            digest = hashlib.sha256(raw).hexdigest()
+        else:
+            digest, raw = buffer.seal(), buffer
+        receipt = {"path": str(path), "bytes": len(raw), "sha256": digest}
+        if staged is not None:
+            # Serving-tier provenance (ID-07) rides the staged receipt;
+            # the pool receipt keeps its pinned shape.
+            receipt["serving_tier"] = serving_tier
+        if staged is not None and receipt["sha256"] != staged["sha256"]:
+            # The read is already digested, so the staged bytes are held to the
+            # digest the map published for them. This is the check that makes
+            # the redirect safe rather than trusted, and on a prepare -- where
+            # the caller has no expected digest yet -- it is the only one.
+            raise StagedReadRefused('staged bytes differ from the map digest')
+    except BaseException:
+        if buffer is not None:
+            buffer.close()
+        raise
     return raw, receipt, signature
 
 
 def load_file(path: Path, limit: int, *, binding, decode, declared_signature=None,
-              lease=None, timing: dict | None = None):
+              lease=None, timing: dict | None = None, sealed: bool = False):
     """Read one declared file from the tier that serves it, then decode it.
 
     Returns ``(value, (receipt, signature, detail))`` where ``decode(raw,
     receipt, staged)`` returned ``(value, detail)``. The decoder runs on the
     bytes :func:`read_file` just hashed; for a staged copy it raises
     ``StagedReadRefused`` on a fence of its own, which falls back like a read
-    fence does.
+    fence does. With ``sealed`` the decoder gets a :class:`SealedBuffer`,
+    closed here once it returns or raises: a value that maps it keeps its
+    pages, and nothing else does.
 
     The redirect lives here because this is the one place a shard's bytes are
     opened with a digest fused to the read: whatever copy is read, the same
@@ -296,8 +452,11 @@ def load_file(path: Path, limit: int, *, binding, decode, declared_signature=Non
         try:
             raw, receipt, signature = read_file(
                 path, limit, declared_signature=declared_signature, staged=staged,
-                lease=lease if strict else None, timing=timing)
-            value, detail = decode(raw, receipt, True)
+                lease=lease if strict else None, timing=timing, sealed=sealed)
+            try:
+                value, detail = decode(raw, receipt, True)
+            finally:
+                _close_sealed(raw)
         except StagedReadRefused as refusal:
             if resolver is not None:
                 resolver.record_fallback(path, str(refusal))
@@ -315,8 +474,12 @@ def load_file(path: Path, limit: int, *, binding, decode, declared_signature=Non
             str(path), "readset-not-staged" if resolver is None
             else "staged-not-serving")
     raw, receipt, signature = read_file(
-        path, limit, declared_signature=declared_signature, staged=None, timing=timing)
-    value, detail = decode(raw, receipt, False)
+        path, limit, declared_signature=declared_signature, staged=None, timing=timing,
+        sealed=sealed)
+    try:
+        value, detail = decode(raw, receipt, False)
+    finally:
+        _close_sealed(raw)
     if resolver is not None:
         resolver.record_pool_read(path, receipt["bytes"])
     return value, (receipt, signature, detail)
@@ -419,6 +582,12 @@ class ReadEntry:
     is the bytes the decoded value actually holds, at most ``held_bytes``;
     without it the charge is taken as held. ``tier_hint`` names the tier the
     caller expects (reporting only; the residency map decides).
+
+    The decoder receives a :class:`SealedBuffer`, which the engine closes
+    when the decoder returns. A decoder that maps it (``path``) holds the
+    file's pages in its value; one that copies it holds its copy. The read in
+    flight is charged ``size + held_bytes`` either way, which overstates a
+    mapping decoder by ``size`` for the reads in flight only.
     """
 
     key: Hashable
@@ -449,9 +618,10 @@ class ReadBudget(Protocol):
     """What a stream may hold, read live.
 
     ``headroom_bytes(held_bytes)`` is how many more bytes the stream may read
-    ahead now, given the ``held_bytes`` it already holds read ahead and not
-    taken; a budget that reads the process sees those bytes in its reading
-    already. ``buffer_bytes`` bounds the serialized buffers in flight at once.
+    ahead now, given the ``held_bytes`` its entries hold: read ahead and not
+    taken, plus taken and not yet released. A budget that reads the process
+    sees those bytes in its reading already. ``buffer_bytes`` bounds the
+    serialized buffers in flight at once.
     """
 
     buffer_bytes: int
@@ -513,6 +683,9 @@ class ReadStream:
         self._inflight_charge = 0
         self._held = 0
         self._held_actual = 0
+        # Bytes of the group taken last, until the consumer releases it: its
+        # values are the consumer's, and they hold memory until then.
+        self._unreleased = 0
         self._actual = [0] * len(entries)
         self._paused = 0
         self._cond = threading.Condition()
@@ -645,11 +818,16 @@ class ReadStream:
             self._taken += 1
             self._took_at = time.monotonic()
             self._took_bytes = nbytes
+            self._unreleased = sum(self._entries[i].held_bytes for i in indices)
             self._pump()
             return delivered
 
     def release(self) -> None:
-        """The consumer is done with the group it took last."""
+        """The consumer is done with the group it took last, and has dropped it.
+
+        The budget charges a taken group until here, so the consumer drops
+        its values first; taking the next group releases the last one too.
+        """
         with self._cond:
             if self._took_at is not None:
                 self._release_locked(time.monotonic())
@@ -658,6 +836,7 @@ class ReadStream:
     def _release_locked(self, now) -> None:
         busy = now - self._took_at
         self._took_at = None
+        self._unreleased = 0
         self.counters["consumed_bytes"] += self._took_bytes
         self.counters["consumer_busy_s"] += busy
         self._busy_min_s = busy if self._busy_min_s is None else min(self._busy_min_s, busy)
@@ -712,7 +891,7 @@ class ReadStream:
             while self._active or self._gating or any(self._releasing.values()):
                 self._cond.wait()
             self._values = [None] * len(self._entries)
-            self._held = self._held_actual = 0
+            self._held = self._held_actual = self._unreleased = 0
             groups = list(self._groups)
         failure = None
         for group in groups:
@@ -753,7 +932,8 @@ class ReadStream:
 
     def _fits(self, entry) -> bool:
         need = entry.size + entry.held_bytes
-        return need <= self._budget.headroom_bytes(self._held) - self._inflight_charge
+        held = self._held + self._unreleased
+        return need <= self._budget.headroom_bytes(held) - self._inflight_charge
 
     def _pump(self) -> None:
         if self._closed or self._paused:
@@ -850,7 +1030,7 @@ class ReadStream:
                 decode=decode,
                 declared_signature=(None if entry.declared_stat is None
                                     else _stat_signature(entry.declared_stat)),
-                lease=leases.get(entry.path), timing=timing)
+                lease=leases.get(entry.path), timing=timing, sealed=True)
             derived = entry.derive(value, observed) if entry.derive is not None else None
             actual = entry.held_bytes if entry.measure is None else int(entry.measure(value))
             if not 0 <= actual <= entry.held_bytes:
@@ -1003,7 +1183,8 @@ class FixedBudget:
 
     For a caller with no live reading to consult (a CPU run, or a single
     window read on demand, where ``headroom`` is 0 and only demanded groups
-    read). What the stream holds read ahead counts against ``headroom``.
+    read). What the stream's entries hold, read ahead or taken and not yet
+    released, counts against ``headroom``.
     """
 
     def __init__(self, *, buffer_bytes: int, headroom: int = 0):

@@ -105,7 +105,14 @@ def test_without_headroom_only_the_demanded_group_is_read(tmp_path):
 
 
 def test_the_headroom_is_the_read_ahead_depth(tmp_path):
-    """Read ahead only while the next entry fits; taking frees room again."""
+    """Read ahead only while the next entry fits; a release frees room, a take does not.
+
+    A taken group's values are the consumer's until it releases them, and
+    they hold memory until then (a sealed read's pages live as long as the
+    value that maps them), so the stream charges them to its budget until the
+    release. Counting them free at the take would read a further group into
+    memory the consumer still holds.
+    """
     entries, _contents = _stream_files(tmp_path)
     # Each entry charges its serialized buffer plus its decoded bytes while it
     # reads, and holds its decoded bytes once read: 3 * SIZE of headroom holds
@@ -116,10 +123,21 @@ def test_the_headroom_is_the_read_ahead_depth(tmp_path):
         held, read = _quiet(stream)
         assert (held, read) == (2 * SIZE, 2)
         assert stream.demand(0) == (0, 0)
-        stream.take(0)
+        taken = stream.take(0)
+        # Taken, not released: nothing more fits beside the consumer's group.
+        held, read = _quiet(stream)
+        assert (held, read) == (0, 2)
+        taken = None
+        stream.release()
         held, read = _quiet(stream)
         assert (held, read) == (2 * SIZE, 4)
         assert stream.demand(1) == (0, 0)
+        # The same for the next group.
+        stream.take(1)
+        assert _quiet(stream) == (0, 4)
+        stream.release()
+        assert _quiet(stream) == (2 * SIZE, 6)
+    assert taken is None
 
 
 def test_reclaim_drops_the_farthest_ahead_first_and_they_are_read_again(tmp_path):

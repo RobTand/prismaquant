@@ -770,6 +770,20 @@ class ProductionWeightCache:
         tensor it decoded (PQ #1192), before the consumer sees it. A stream of
         these entries can run ahead of the window that will admit them
         (:meth:`retained_window` with ``stream=``, PQ #1291).
+
+        The engine reads each file into a sealed memfd and the decoder maps it
+        (:meth:`_decode_file_tensor`), so a decoded render holds exactly its
+        file's pages (to within one 4 KiB page) until it is dropped: the
+        entry's charge is its file length, with no separate measure. The
+        mapping is private, so a write to a render would copy pages into
+        anonymous memory rather than touch the sealed bytes. Nothing on the
+        Stage B path writes one: a probe reads each render through
+        :meth:`resident_render_identity` (a hash) and copies it to the device
+        (``.to(..., copy=True)``) before it subtracts the source. The
+        identity's guard includes the tensor's version counter, so a
+        ``torch`` write in place fails the next probe's identity read; a
+        write that bypasses the counter (through NumPy or a raw pointer) is
+        not seen, and none exists on this path.
         """
         from .io_engine import ReadEntry
         expected = getattr(self, "_expected_file_sha256", None)
@@ -788,8 +802,7 @@ class ProductionWeightCache:
                 held_bytes=file_bytes,
                 expected_sha256=None if expected is None else expected.get(key),
                 decoder=partial(self._decode_file_tensor, window_entry),
-                group=group, declared_stat=observed, derive=derive,
-                measure=lambda tensor: self._window_storage(tensor)[1]))
+                group=group, declared_stat=observed, derive=derive))
         return entries
 
     @contextmanager
@@ -898,14 +911,17 @@ class ProductionWeightCache:
                    'file_pages_advised': len(advised_paths),
                    'load_quanta': quanta}
         finally:
+            # The window's tensors go first: the stream charges them to its
+            # budget until it is released, so releasing it while they were
+            # still alive would let it read into memory they hold.
             try:
-                if own is not None:
-                    own.close()
-                elif stream is not None and file_costs:
-                    stream.release()
+                self.release_resident_tensors(keys)
             finally:
                 try:
-                    self.release_resident_tensors(keys)
+                    if own is not None:
+                        own.close()
+                    elif stream is not None and file_costs:
+                        stream.release()
                 finally:
                     self._resident_window_files = None
                     self._resident_window_receipt_keys = frozenset()
@@ -1439,12 +1455,25 @@ class ProductionWeightCache:
         window charged the file's length, which this total must not exceed
         (``_window_file_bound``, PQ #1210). A staged copy that fails a fence
         raises ``StagedReadRefused``, which falls back like a read fence does.
+
+        A stream's read arrives as an ``io_engine.SealedBuffer`` (PQ #1291):
+        the archive is parsed through the memfd and the tensor is loaded with
+        ``mmap=True`` from it, so the tensor maps the verified pages instead of
+        copying them into a ``torch`` allocation, which on this platform would
+        not return its pages to the cgroup when freed. The mapping is
+        private: nothing written to the tensor reaches the sealed bytes.
         """
+        from .io_engine import SealedBuffer
         from .residency_map import StagedReadRefused
         del receipt
+        sealed = isinstance(raw, SealedBuffer)
         if window_entry is not None:
             _observed, _buffer, storage_bound, exact = window_entry
-            storage_bytes = self._window_archive_storage_bytes(io.BytesIO(raw))
+            if sealed:
+                with open(raw.path, "rb") as archive:
+                    storage_bytes = self._window_archive_storage_bytes(archive)
+            else:
+                storage_bytes = self._window_archive_storage_bytes(io.BytesIO(raw))
             if exact and storage_bytes != storage_bound:
                 if staged:
                     raise StagedReadRefused(
@@ -1455,7 +1484,10 @@ class ProductionWeightCache:
                     raise StagedReadRefused(
                         'staged archive storage exceeds the window charge')
                 raise RuntimeError('PWC window archive storage exceeds its charged bound')
-        tensor = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)
+        if sealed:
+            tensor = torch.load(raw.path, mmap=True, map_location="cpu", weights_only=True)
+        else:
+            tensor = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)
         if not isinstance(tensor, torch.Tensor):
             if staged:
                 raise StagedReadRefused('staged copy is not a tensor shard')

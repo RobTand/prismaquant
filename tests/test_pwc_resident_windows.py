@@ -651,9 +651,11 @@ def test_retained_window_guard_refusal_releases_read_ahead_and_selected_owners(
     with stream:
         with stream._cond:
             # Read ahead in full: nothing in flight and nothing left to start.
+            # Each render maps its whole sealed file, so each holds its
+            # file's length, not only its 32 storage bytes.
             while stream._active or stream._gating:
                 assert stream._cond.wait(30)
-            assert stream._held_actual == 3 * 32
+            assert stream._held_actual == 3 * size
         refused(stream=stream, stream_group=0)
         assert guards[-1] == {'resident_bytes': 0, 'remaining_incoming_storage_bytes': 0,
                               'next_serialized_bytes': 0}
