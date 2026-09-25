@@ -1453,6 +1453,10 @@ def require_priced_export_inputs(
         carried_units, expand_stack_decision_assignment,
     )
     assignment = load_assignment(assignment_path)
+    # The names the allocation stamped, before any stack expansion: a
+    # per-unit seal map (#1270) is keyed by the cost table's own names.
+    stamped_names = {name for name, fmt in assignment.items()
+                     if str(fmt).startswith("TESSERA_")}
     metadata = read_layer_config_metadata(assignment_path)
     population = metadata.get(POPULATION_KEY)
     if isinstance(population, Mapping) and population.get("stack_decisions"):
@@ -1554,9 +1558,10 @@ def require_priced_export_inputs(
                            'a canonical Hessian reference can bind')
             elif not isinstance(rebound, Mapping):
                 problem = 'is not a mapping of unit to capture_sha256'
-            elif not set(rebound) <= set(selected):
+            elif not set(rebound) <= set(selected) | stamped_names:
                 problem = ('names units the allocation does not select: '
-                           + ', '.join(sorted(set(rebound) - set(selected))[:5]))
+                           + ', '.join(sorted(set(rebound) - set(selected)
+                                              - stamped_names)[:5]))
             elif not all(isinstance(value, str) and len(value) == 64
                          and all(c in '0123456789abcdef' for c in value)
                          and value != priced_digest for value in rebound.values()):
