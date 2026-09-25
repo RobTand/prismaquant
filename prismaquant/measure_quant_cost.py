@@ -39,6 +39,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from . import io_spans
 from . import format_registry as fr
 from .name_projection import strip_weight_leaf
 from .render_score import (
@@ -1211,14 +1212,12 @@ def start_mem_watchdog(swap_grow_limit_mb: int = 256,
     bypassing any Python-level cleanup that could itself allocate memory.
     Returns the running :class:`io_spans.PeriodicSampler`.
     """
-    from .io_spans import PeriodicSampler, read_meminfo
-
-    baseline = read_meminfo()
+    baseline = io_spans.read_meminfo()
     swap_baseline = baseline.get("SwapTotal", 0) - baseline.get("SwapFree", 0)
 
     def check():
         try:
-            info = read_meminfo()
+            info = io_spans.read_meminfo()
             swap_used = info.get("SwapTotal", 0) - info.get("SwapFree", 0)
             mem_avail = info.get("MemAvailable", 0)
             swap_grow_mb = (swap_used - swap_baseline) / (1024 * 1024)
@@ -1238,7 +1237,7 @@ def start_mem_watchdog(swap_grow_limit_mb: int = 256,
         except Exception:
             pass
 
-    t = PeriodicSampler(check, interval_s=interval_s, name="mem-watchdog").start()
+    t = io_spans.PeriodicSampler(check, interval_s=interval_s, name="mem-watchdog").start()
     print(f"[watchdog] armed: swap_grow_limit={swap_grow_limit_mb}MB "
           f"min_mem_avail={min_mem_available_mb}MB interval={interval_s}s  "
           f"baseline swap_used={swap_baseline//(1024*1024)}MB "

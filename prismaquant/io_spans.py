@@ -721,26 +721,14 @@ class GpuPowerSampler:
         if self._sampler is not None:
             self._sampler.join(timeout=2)
         watts = sorted(self.samples)
-        if watts:
-            joules = sum(watts) * self.interval_s
-            p95 = watts[max(0, int(0.95 * len(watts)) - 1)]
-            block = {
-                "sample_count": len(watts),
-                "interval_s": self.interval_s,
-                "gpu_joules": joules,
-                "gpu_power_w_p50": watts[len(watts) // 2],
-                "gpu_power_w_p95": p95,
-                "gpu_power_w_max": watts[-1],
-            }
-        else:
-            block = {
-                "sample_count": 0,
-                "interval_s": self.interval_s,
-                "gpu_joules": None,
-                "gpu_power_w_p50": None,
-                "gpu_power_w_p95": None,
-                "gpu_power_w_max": None,
-            }
+        block = {
+            "sample_count": len(watts),
+            "interval_s": self.interval_s,
+            "gpu_joules": sum(watts) * self.interval_s if watts else None,
+            "gpu_power_w_p50": watts[len(watts) // 2] if watts else None,
+            "gpu_power_w_p95": watts[max(0, int(0.95 * len(watts)) - 1)] if watts else None,
+            "gpu_power_w_max": watts[-1] if watts else None,
+        }
         if self.error:
             block["sampler_error"] = self.error
         return block
@@ -753,7 +741,5 @@ __all__ = [
     "READ_RATE_MARKER", "READ_RATE_SCHEMA", "RESIDENCY_TIER_KEYS",
     "ReadRateReporter", "counter_delta", "failure_outcome",
     "mem_available_bytes", "nfs_read_bytes", "read_meminfo", "read_mountstats",
-    "read_proc_io",
-    "read_proc_status",
-    "residency_tier_bytes", "stage_span_log",
+    "read_proc_io", "read_proc_status", "residency_tier_bytes", "stage_span_log",
 ]

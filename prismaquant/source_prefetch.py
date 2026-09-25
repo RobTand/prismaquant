@@ -6,16 +6,15 @@ import json
 import os
 from pathlib import Path
 import time
+from . import io_spans
 
 
 DEFAULT_HEADROOM_GB = 16.0
 
 
 def _available_memory_bytes() -> int | None:
-    from .io_spans import mem_available_bytes
-
     try:
-        return mem_available_bytes()
+        return io_spans.mem_available_bytes()
     except (OSError, RuntimeError):
         pass
     try:
