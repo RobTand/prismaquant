@@ -397,3 +397,31 @@ def test_file_handoff_passes_the_plans_historical_encoder_allowance(tmp_path, mo
     assert hashlib.sha256(output.read_bytes()).hexdigest() == receipt['output']['sha256']
     assert data.encoder_source_reuse['recorded_encoder_source_sha256'] == recorded
     assert data.encoder_source_reuse['observed_current_encoder_source_sha256'] == installed
+
+
+@pytest.mark.parametrize('certified', [False, True])
+def test_bind_stamps_the_resource_policy_the_rows_ran_under(monkeypatch, capsys, certified):
+    """Every GLM-5.3 Stage B row ran under the approved chain resource policy,
+    while prepared.json still names the one it was prepared with. Sealing is
+    off (PQ #1147): the handoff stamps each distinct mismatch once and binds.
+    Certified mode refuses exactly as before."""
+    from prismaquant.tessera_joint_allocation import bind_allocation_payload
+    joint, data, prepared, metadata, kwargs = fixture()
+    prepared['stage_b_resource_policy'] = {'path': '/fixture/prepared-policy.json', 'sha256': '4'*64}
+    ran = {'path': '/fixture/chain-policy.json', 'sha256': '5'*64}
+    joint['provenance']['stage_b_resource_policy'] = ran
+    for rows in joint['costs'].values():
+        for fmt, row in list(rows.items()):
+            rows[fmt] = _rebuild(row, probe_change=lambda probe: probe['arithmetic'].update(
+                stage_b_resource_policy=copy.deepcopy(ran)))
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
+    if certified:
+        with pytest.raises(ValueError, match='joint Stage B resource policy: identity mismatch'):
+            bind_allocation_payload(joint, data, prepared, metadata, **kwargs)
+        return
+    result = bind_allocation_payload(joint, data, prepared, metadata, **kwargs)
+    stamps = [line for line in capsys.readouterr().out.splitlines() if line.startswith('[DEV-MODE]')]
+    # One for the joined provenance, one for the rows' single distinct policy.
+    assert len(stamps) == 2, stamps
+    assert all('Stage B resource policy' in line for line in stamps)
+    assert result['provenance']['stage_b_resource_policy'] == ran
