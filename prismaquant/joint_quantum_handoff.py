@@ -211,6 +211,22 @@ def _checkpoint_coordinates(entry: Mapping) -> tuple[int, int]:
     return probe, batch
 
 
+def _owner_export_report(owner) -> dict | None:
+    """What the handoff owner's exports did, for the row's counters.
+
+    The owner's ``produced_output_report``: per group the export action's
+    key, bytes, and when it was submitted, seen landed and released, with
+    the seconds the end-of-action drain waited on it (``local_spool.
+    exports``), and the owner's origin-commit seconds (PQ #1225). None for
+    an unbound owner. A report that cannot be read is recorded as that,
+    never raised: it must not replace the error the emit is raising.
+    """
+    try:
+        return owner.produced_output_report()
+    except Exception as exc:  # noqa: BLE001 - telemetry must not mask
+        return {"report_error": repr(exc)[:400]}
+
+
 class HandoffEmitter:
     """Publish one quantum's final plane and owner states for ``L - 1``.
 
@@ -246,11 +262,13 @@ class HandoffEmitter:
         self.capture_batch = int(capture_batch)
         self.publication = publication
         self.published: dict | None = None
+        #: The owner's export report once :meth:`emit` returned or raised
+        #: (PQ #1225); the row's counters keep it.
+        self.export_report: dict | None = None
 
     def emit(self, *, grad_plane, cotangent_owners, n_probes: int,
              n_batches: int) -> dict:
         from .cost_streaming import StreamedBoundaryArtifacts, normalize_boundary_storage
-        from .joint_adjoint_checkpoints import exact_entry_record
 
         if self.published is not None:
             raise RuntimeError("a quantum emits its handoff once")
@@ -270,6 +288,22 @@ class HandoffEmitter:
             **self.boundary_storage,
             "directory": str(handoff_root(record["output_space"]["root"]))})
         owner = StreamedBoundaryArtifacts(policy)
+        try:
+            return self._emit_through(
+                owner, policy, grad_plane=grad_plane,
+                cotangent_owners=cotangent_owners,
+                n_probes=n_probes, n_batches=n_batches, record=record,
+                layer=layer, source=source, producer=producer)
+        finally:
+            # Kept on success and on failure alike (PQ #1225): the counters
+            # of a row that died in its export drain name the exports it
+            # waited on.
+            self.export_report = _owner_export_report(owner)
+
+    def _emit_through(self, owner, policy, *, grad_plane, cotangent_owners, n_probes,
+                      n_batches, record, layer, source, producer) -> dict:
+        from .joint_adjoint_checkpoints import exact_entry_record
+
         references = []
         with owner:
             owner.bind({"schema": HANDOFF_SESSION_SCHEMA, "producer": producer,

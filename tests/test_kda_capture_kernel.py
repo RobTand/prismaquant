@@ -8,7 +8,11 @@ scope, stamps its identity into the probe arithmetic and records it in the
 counters. Every step refuses rather than fall back to Torch.
 
 These tests need no GPU. The kernel's numerics are
-``tests/test_kda_chunk_kernel.py``'s.
+``tests/test_kda_chunk_kernel.py``'s. The tests that touch
+``prismaquant.kernels.kda_chunk`` (directly, or through the dispatch, the
+admission or the pass scope, which import it) need Triton importable, because
+that module defines its kernels with ``@triton.jit`` at import; they are marked
+``needs_triton`` and skip on hosted CPU CI (#1224). The rest run everywhere.
 """
 import copy
 import json
@@ -21,8 +25,18 @@ import torch
 
 from prismaquant import glm_kda_capture_kernel as capture
 from prismaquant import glm_source_derivative as derivative
-from prismaquant.kernels import kda_chunk
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+
+try:
+    from prismaquant.kernels import kda_chunk
+except ModuleNotFoundError as exc:  # only a missing Triton is a skip; anything else fails
+    if exc.name != "triton" and not str(exc.name).startswith("triton."):
+        raise
+    kda_chunk = None
+
+needs_triton = pytest.mark.skipif(
+    kda_chunk is None,
+    reason="prismaquant.kernels.kda_chunk defines its kernels with Triton at import")
 
 EVIDENCE = (Path(__file__).resolve().parents[1]
             / "experiments/measurements/glm-derivative-contract-20260908")
@@ -98,6 +112,7 @@ def test_the_launch_setting_names_a_known_kernel_or_nothing():
             capture.kda_capture_kernel_from_environment({capture.KDA_KERNEL_ENV: text})
 
 
+@needs_triton
 def test_every_launchable_kernel_is_declared_by_the_derivative_contract():
     for name in capture.KERNELS:
         declaration = derivative.capture_kernel_declaration(name)
@@ -114,6 +129,7 @@ def test_every_launchable_kernel_is_declared_by_the_derivative_contract():
 
 # ---- the dispatch ----------------------------------------------------------
 
+@needs_triton
 def test_dispatch_substitutes_the_kernel_for_one_block_and_restores_the_fallback(
         bound_model, modeling):
     dispatch = derivative.CaptureKernelDispatch(bound_model, "kda_gram_v1")
@@ -128,6 +144,7 @@ def test_dispatch_substitutes_the_kernel_for_one_block_and_restores_the_fallback
     assert modeling.chunk_kimi_delta_attention is fallback
 
 
+@needs_triton
 def test_dispatch_refuses_a_global_changed_outside_or_inside_its_block(bound_model, modeling):
     dispatch = derivative.CaptureKernelDispatch(bound_model, "kda_gram_v1")
 
@@ -156,6 +173,7 @@ def test_dispatch_requires_the_bound_derivative(modeling):
 
 # ---- admission --------------------------------------------------------------
 
+@needs_triton
 def test_admission_skips_a_target_without_kda_before_any_kernel_work(monkeypatch):
     monkeypatch.setattr(kda_chunk, "probe_digest", lambda device: pytest.fail("probed"))
     layer = torch.nn.Sequential(torch.nn.Linear(2, 2))
@@ -166,6 +184,7 @@ def test_admission_skips_a_target_without_kda_before_any_kernel_work(monkeypatch
         capture.admit_kda_capture_kernel("other", None, layer, device="cpu")
 
 
+@needs_triton
 def test_admission_refuses_a_band_serial_handoff(monkeypatch):
     monkeypatch.setattr(kda_chunk, "probe_digest", lambda device: pytest.fail("probed"))
     with pytest.raises(capture.KdaCaptureKernelRefused, match="band-serial producer"):
@@ -173,6 +192,7 @@ def test_admission_refuses_a_band_serial_handoff(monkeypatch):
                                          emits_handoff=True)
 
 
+@needs_triton
 def test_admission_refuses_an_unbound_model_and_a_kernel_that_cannot_run(
         bound_model, modeling, monkeypatch):
     with pytest.raises(capture.KdaCaptureKernelRefused, match="bound GLM derivative"):
@@ -213,6 +233,7 @@ def _admitted(monkeypatch, tmp_path, *, qualified):
     return path
 
 
+@needs_triton
 def test_admission_compares_the_runtime_with_the_packaged_qualification(
         bound_model, modeling, monkeypatch, tmp_path, capsys):
     import hashlib
@@ -243,6 +264,7 @@ def test_admission_compares_the_runtime_with_the_packaged_qualification(
     assert "seal KDA capture kernel qualification differs" in capsys.readouterr().out
 
 
+@needs_triton
 def test_a_dev_mode_mismatch_records_that_the_runtime_is_not_the_qualified_one(
         bound_model, modeling, monkeypatch, tmp_path, capsys):
     """Dev mode runs a kernel that differs from its qualification, and says so (#1199 D5)."""
@@ -289,6 +311,7 @@ class CountingDispatch:
         return False
 
 
+@needs_triton
 def test_a_pass_must_run_the_kernel_exactly_once():
     admitted = capture.AdmittedKdaKernel(CountingDispatch(), {"name": "kda_gram_v1"}, None)
     with admitted.scope():
@@ -399,6 +422,7 @@ def _probe(payload):
     return payload["provenance"]["probe_identity"]
 
 
+@needs_triton
 def test_the_core_runs_every_target_pass_on_the_kernel_and_stamps_its_identity(
         tmp_path, monkeypatch):
     baseline, _, baseline_counters = _quantum(tmp_path / "baseline", monkeypatch)
@@ -431,6 +455,7 @@ def test_the_core_runs_every_target_pass_on_the_kernel_and_stamps_its_identity(
     assert _rows(payload) == _rows(baseline)
 
 
+@needs_triton
 def test_the_core_refuses_a_pass_the_kernel_did_not_run(tmp_path, monkeypatch):
     silent = CountingDispatch(calls=0)
     monkeypatch.setattr(capture, "admit_kda_capture_kernel",

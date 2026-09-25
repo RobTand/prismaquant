@@ -188,3 +188,31 @@ def test_the_single_run_reporter_names_where_its_units_commit():
     notes = [line for line in lines if "'layer-009'" in line]
     assert len(notes) == 1, lines
     assert "'head'" in notes[0] and "committing nothing" not in notes[0], notes[0]
+
+
+def test_the_handoff_export_record_is_kept_in_the_counters(tmp_path, monkeypatch):
+    """PQ #1225: the handoff's export keys, bytes, times and drain wait are
+    in the row's counters, so PrismaBuild's record of each export can be
+    read after its spool namespace is retired."""
+    report = {"local_spool": {"exports": [
+        {"batch_id": "g0", "export_key": "e" * 64, "entries": 64,
+         "bytes": 1 << 30, "reserved_unix": 1.0, "submitted_unix": 2.0,
+         "landed_unix": 3.0, "released_unix": 4.0, "export_wait_s": 1.0,
+         "drain_wait_s": 1.0}]}}
+
+    def emitter(record, adjoint_slice, execution):
+        from prismaquant.joint_replay_regime import normalize_replay_regime
+
+        stub = SimpleNamespace(published={}, export_report=None,
+                               capture_batch=normalize_replay_regime(
+                                   execution.get("replay_regime"))["capture_batch"])
+
+        def emit(**kwargs):
+            stub.export_report = report
+            return {}
+        stub.emit = emit
+        return stub
+
+    _payload, _record, block = _quantum(tmp_path, monkeypatch, handoff_emitter=emitter)
+    assert block.get("handoff_export") == report
+    json.dumps(block)

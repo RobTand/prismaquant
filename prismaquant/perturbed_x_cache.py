@@ -489,7 +489,7 @@ def _advise_activation_descriptor(descriptor, path, expected_stat, *, offset=0,
     os.posix_fadvise(descriptor, offset, length, os.POSIX_FADV_DONTNEED)
 
 
-def release_activation_cache_file_pages(path, *, expected_stat):
+def release_activation_cache_file_pages(path, *, expected_stat, durable=True):
     """Advise a verified unchanged file extent at a reader/writer boundary.
 
     Readers check completed-entry hashes first. A serializer may also pause
@@ -498,11 +498,17 @@ def release_activation_cache_file_pages(path, *, expected_stat):
     The artifact and tensor owners remain intact, and final publication still
     requires the complete seal. Advice is not proof of physical release; the
     caller's guard remains final.
+
+    ``durable=False`` skips the fsync fence for a file that is never the
+    only copy of committed work (a produced-output spool entry, PQ #1225).
+    The advice then starts the file's writeback without waiting for it, and
+    pages still dirty or under writeback stay cached until they are clean.
     """
     flags = os.O_RDONLY | os.O_NOFOLLOW
     descriptor = os.open(path, flags)
     try:
-        _advise_activation_descriptor(descriptor, path, expected_stat, durable=True)
+        _advise_activation_descriptor(descriptor, path, expected_stat,
+                                      durable=durable)
     finally:
         os.close(descriptor)
 
@@ -987,7 +993,8 @@ def _is_compact_host_tensor(tensor, nbytes):
 
 def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
                                        max_tensor_bytes, max_file_bytes,
-                                       release_file_pages=True, preallocate=False):
+                                       release_file_pages=True, preallocate=False,
+                                       durable=True):
     """Extend the ordinary atomic writer with an exact tensor/identity receipt.
 
     The caller reserves the one compact CPU copy before entering. No dtype,
@@ -996,6 +1003,13 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
     that already is one compact host storage (``_is_compact_host_tensor``)
     is serialized as it is: the copy would be the same bytes
     (RobTand/prismaquant#1162).
+
+    ``durable`` fsyncs the file and its directory before the entry is
+    returned. Only a writer whose file is never the only copy of committed
+    work may pass False: the produced-output spool (PQ #1225), whose every
+    reader checks the size and the sha256 of every byte against the
+    reference this returns, and whose work counts as committed only once
+    PrismaBuild acknowledged the export's own fsynced copy.
     """
     if not isinstance(inputs, torch.Tensor) or inputs.layout != torch.strided or inputs.is_meta:
         raise TypeError("exact activation entry requires a materialized strided Tensor")
@@ -1016,7 +1030,7 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
                                            memory_format=torch.contiguous_format))
         digest = SerializedEntryDigest(max_bytes=max_file_bytes if preallocate else None)
         path = write_activation_cache_entry(cache_dir, name, compact,
-            source="exact_activation", durable=True, exact=metadata,
+            source="exact_activation", durable=durable, exact=metadata,
             serialized_digest=digest,
             preallocate_bytes=max_file_bytes if preallocate else None)
         del compact
@@ -1030,7 +1044,8 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
         if _activation_file_signature(path) != signature:
             raise RuntimeError("exact activation entry changed during publication")
         if release_file_pages:
-            release_activation_cache_file_pages(path, expected_stat=published_stat)
+            release_activation_cache_file_pages(path, expected_stat=published_stat,
+                                                durable=durable)
         return ExactActivationReference(str(path), name, encoded, tuple(inputs.shape),
             str(inputs.dtype), nbytes, signature[2], digest.hexdigest())
     except BaseException:

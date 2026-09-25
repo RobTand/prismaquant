@@ -19,6 +19,7 @@ import types
 import pytest
 
 from experiments import pq_frontier_native_cells as driver
+from nvfp4_served_qdq_fixtures import cpu_kernels
 from prismaquant import nvfp4_activation_contract as owner
 
 
@@ -33,9 +34,12 @@ def _registers(monkeypatch):
     """Everything a box that CAN price these rows reports, and nothing more.
 
     The axes are stubbed because a CPU test box has no sm_121 device and no vLLM
-    build; what is under test is the driver's declaration, not this host.
+    build; what is under test is the driver's declaration, not this host.  That
+    includes the leg's Triton dequantisation kernels (#1211): a box that can
+    price these rows loads them, so they are stood in for too (#1224).
     """
     monkeypatch.setattr(owner, "_register_served_quantizer_op", lambda: True)
+    monkeypatch.setattr(owner, "_served_dequant_kernels", cpu_kernels)
     monkeypatch.setattr(owner, "_served_quantizer_platform", lambda: "sm_121")
     monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(__version__="0.28.1rc1"))
     monkeypatch.setenv("PRISMAQUANT_CONTAINER_CONTENT_SHA256", "a" * 64)

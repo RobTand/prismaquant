@@ -34,10 +34,19 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A second push to a PR makes the first run's result irrelevant.
+# A second push to a PR makes the first run's result irrelevant, so PR runs
+# share a per-ref group and cancel. A push to main (or a manual dispatch) does
+# NOT: each merge is its own tree, and cancelling its run when the next merge
+# landed left main with no hosted run certifying any tree on a busy day
+# (2026-09-22: five consecutive main runs cancelled, #962). Those runs get a
+# group of their own (the run id), because a shared group without
+# cancel-in-progress still keeps only ONE pending run and silently cancels the
+# others queued behind it; a unique group is what gives every merge a complete
+# run. Making `tests (py3.12, cpu)` a required check on main is the other half
+# of #962 and is a branch-protection setting, not something this file can do.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
