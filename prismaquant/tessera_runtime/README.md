@@ -90,11 +90,12 @@ The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e-tf516`
 is the interpreter above with transformers 5.16.1, tokenizers 0.23.1 and
 safetensors 0.8.0, the versions in the campaign's `prismaquant-tf516` venv.
 Tessera, PrismaBuild, torch and every other package are the same, so
-`pbtest`'s pin check passes unchanged. It exists on **sparky only**, from
-PrismaBuild action `fa510fbf5a02`. sparklina has none yet, and dl380g10's
-interpreter of the base name is a different base (`pq881`, Python 3.14, CPU
-torch). Pin a run that uses it with `--tag sparky`. It is built the same way
-as its base, so a Tessera pin move re-provisions it too:
+`pbtest`'s pin check passes unchanged. It exists on **both Sparks**: on
+sparky from PrismaBuild action `fa510fbf5a02`, on sparklina from action
+`29ec7048687b` (2026-09-25). dl380g10's interpreter of the base name is a
+different base (`pq881`, Python 3.14, CPU torch), so pin a run that uses it
+with `--tag gb10`. It is built the same way as its base, so a Tessera pin
+move re-provisions it too:
 
 ```bash
 SRC=/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e
@@ -115,7 +116,7 @@ A PR that touches those six modules, or what they test, runs them there:
 
 ```bash
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
-  --checkout <this worktree> --tag sparky --priority -10 \
+  --checkout <this worktree> --tag gb10 --priority -10 \
   --python /home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e-tf516/bin/python \
   --threads-per-shard 2 --mem-gb 8 --shards 6 \
   tests/test_glm5_next_streamed_forward_parity.py \
