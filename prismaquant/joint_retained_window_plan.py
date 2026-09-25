@@ -500,6 +500,29 @@ def normalize_retained_execution(value, *, operator_windows, boundary_storage):
             'source_reserve_bytes': source, 'source_loading_reserve_bytes': load}
 
 
+def planned_source_window_bytes(retained_execution):
+    """The source window a sealed retained COST plan's memory rule admits.
+
+    ``None`` for a plan with no retained execution: it budgets nothing after
+    the head phase. Otherwise the plan's cap less its safety margin and every
+    non-source owner it reserves bounds the source, and the plan gives the
+    source exactly ``source_reserve_bytes`` of that; the rest is the
+    statistics/PWC window (:meth:`RetainedWindowBudget.available_window_bytes`).
+    A wider source window takes bytes the plan already gave another owner, so
+    the admitted window is the smaller of the two (PQ #1134).
+    """
+    if retained_execution is None:
+        return None
+    budget = RetainedWindowBudget.from_dict(retained_execution['budget'])
+    source = _integer(retained_execution['source_reserve_bytes'],
+                      'source_reserve_bytes', positive=True)
+    others = budget.fixed_bytes(source) - source
+    cap_share = budget.physical_limit_bytes - budget.safety_margin_bytes - others
+    if cap_share <= 0:
+        raise RuntimeError('retained COST non-source owners exhaust the physical budget')
+    return min(source, cap_share)
+
+
 def _roster_maximum(targets, field):
     """The largest declared value of ``field``, and the target that sets it."""
     winner = max(targets, key=lambda target: (getattr(target, field), target.name))

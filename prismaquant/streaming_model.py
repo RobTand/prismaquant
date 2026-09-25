@@ -1692,6 +1692,44 @@ def _module_has_meta_tensors(module: nn.Module) -> bool:
     )
 
 
+def _prefetch_widening_note(*, max_cache_slots, cache_slots, memory_slots,
+                            estimated_layer_bytes, planned_source_window_bytes=None):
+    """The prefetch note, or None when the sealed window is not underused.
+
+    Observability only (PQ #737): the note says the sealed ``max_cache_slots``
+    caps the window below what could run, so the settle waits are a plan
+    choice, not a machine limit. Nothing here overrides the seal.
+
+    ``cache_slots`` is idle head-time memory divided by one layer: measured
+    before the rest of the run allocates anything. A plan that budgets later
+    owners inside its cap (Stage B's retained replay) admits only the source
+    window its memory rule reserves, ``planned_source_window_bytes``; the
+    note's slot count is bounded by that window, so it never recommends a
+    slot count the sealed memory rule does not admit (PQ #1134). ``None``
+    means the plan budgets nothing after the head phase (Stage A, #737) and
+    the measured budget alone bounds the note, as before.
+    """
+    if max_cache_slots is None or estimated_layer_bytes <= 0:
+        return None
+    admitted = cache_slots
+    basis = "the measured budget"
+    if planned_source_window_bytes is not None:
+        if (isinstance(planned_source_window_bytes, bool)
+                or not isinstance(planned_source_window_bytes, int)
+                or planned_source_window_bytes < 1):
+            raise ValueError("planned_source_window_bytes must be a positive integer or None")
+        plan_slots = int(planned_source_window_bytes // estimated_layer_bytes)
+        if plan_slots < admitted:
+            admitted = plan_slots
+            basis = "the sealed plan's source window"
+    if admitted <= max_cache_slots:
+        return None
+    return (f"prefetch note: sealed max_cache_slots={max_cache_slots} "
+            f"underuses {basis} (admitted_slots={admitted}, "
+            f"cache_slots={cache_slots}, memory_slots={memory_slots}); re-seal with "
+            f"recommend_source_prefetch numbers to widen the window")
+
+
 def _build_streaming_context(model_path: str, *,
                              device: torch.device, dtype: torch.dtype,
                              offload_folder: str,
@@ -1706,6 +1744,7 @@ def _build_streaming_context(model_path: str, *,
                              source_authentication=None,
                              source_snapshot_only: bool = False,
                              sealed_head_tensors=None,
+                             planned_source_window_bytes: int | None = None,
                              ) -> StreamingContext:
     """One-time setup: AutoConfig + empty skeleton, then manually
     materialize only the always-resident head pieces. Decoder layers
@@ -1748,7 +1787,12 @@ def _build_streaming_context(model_path: str, *,
     ``sealed_head_tensors`` is the resident head a read manifest declared,
     as ``source_read_plan.selection_checkpoint_names`` (PQ #1095). The head
     selection this context computes from its skeleton must equal it before
-    any head tensor is read; a difference refuses, naming both sides."""
+    any head tensor is read; a difference refuses, naming both sides.
+
+    ``planned_source_window_bytes`` is the source window the sealed plan's
+    memory rule admits, when the plan budgets one after the head phase
+    (Stage B's ``retained_operator_windows``, PQ #1134). It only bounds the
+    prefetch note: see :func:`_prefetch_widening_note`."""
     if type(source_snapshot_only) is not bool:
         raise TypeError('source_snapshot_only must be a bool')
     if source_snapshot_only and source_authentication is None:
@@ -2060,15 +2104,12 @@ def _build_streaming_context(model_path: str, *,
           f"est_layer={estimated_layer_bytes/(1024**3):.1f} GB, "
           f"min_avail={min_available_bytes/(1024**3):.1f} GB "
           f"({min_available_src})", flush=True)
-    if (max_cache_slots is not None and estimated_layer_bytes > 0
-            and cache_slots > max_cache_slots):
-        # Observability only (PQ #737): the sealed plan caps the window below
-        # what the measured budget admits, so the run's settle waits are a
-        # plan choice, not a machine limit. Nothing here overrides the seal.
-        print(f"{log_prefix} prefetch note: sealed max_cache_slots={max_cache_slots} "
-              f"underuses the measured budget (cache_slots={cache_slots}, "
-              f"memory_slots={memory_slots}); re-seal with "
-              f"recommend_source_prefetch numbers to widen the window", flush=True)
+    note = _prefetch_widening_note(
+        max_cache_slots=max_cache_slots, cache_slots=cache_slots,
+        memory_slots=memory_slots, estimated_layer_bytes=estimated_layer_bytes,
+        planned_source_window_bytes=planned_source_window_bytes)
+    if note is not None:
+        print(f"{log_prefix} {note}", flush=True)
 
     prefetch_pool = ThreadPoolExecutor(
         max_workers=worker_count, thread_name_prefix="prefetch")
