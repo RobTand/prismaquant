@@ -29,6 +29,15 @@ byte-equal; a second run of each is byte-equal to the first; and, across
 modes, the kernel's planes differ from the fallback's (so the kernel ran and
 the equality is not vacuous). The kernel record must count every pass.
 
+Every plane comparison also records its scale (PQ #1214 E4): the reference
+plane's mean and largest magnitude and the count of elements whose bits
+differ, next to the largest absolute difference. A pre-hook on the layer's
+packed experts records the top-k experts each forward sent its tokens to, and
+the receipt compares them per group across arms: the tokens whose selected
+experts differ and the expert slots that changed. These are recorded, not
+checked; the weights are synthetic, so the counts show the mechanism, not
+GLM's rate.
+
 Not covered here: ``CaptureKernelDispatch`` (it needs a whole bound model;
 the receipt swaps the module global for each block, as the #1199 scope smoke
 did), the spill hooks, and the quantum core around the passes. The CPU
@@ -39,7 +48,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
+import math
 import subprocess
 import threading
 import time
@@ -71,14 +82,84 @@ def _plane_digest(plane) -> str:
     return digest.hexdigest()
 
 
+def _bits(tensor):
+    """The elements as same-width integers: -0.0 differs from 0.0, a NaN equals itself."""
+    if not tensor.is_floating_point():
+        return tensor
+    width = {1: torch.uint8, 2: torch.int16, 4: torch.int32, 8: torch.int64}
+    return tensor.contiguous().view(width[tensor.element_size()])
+
+
 def _compare(first, second) -> dict:
+    """Compare ``first`` with the reference plane ``second``.
+
+    Besides equality and the largest absolute difference, records what gives
+    that difference a scale (PQ #1214 E4): the reference's mean and largest
+    magnitude, and how many elements differ bit for bit.
+    """
     if sorted(first) != sorted(second):
         return {"equal": False, "keys": "differ"}
+    if any(first[key].shape != second[key].shape or first[key].dtype != second[key].dtype
+           for key in first):
+        return {"equal": False, "keys": "shapes or dtypes differ"}
     unequal = [list(key) for key in sorted(first) if not torch.equal(first[key], second[key])]
     worst = max((float((first[key].float() - second[key].float()).abs().max())
-                 for key in first), default=0.0)
+                 for key in first if first[key].numel()), default=0.0)
+    elements = sum(int(second[key].numel()) for key in second)
+    differing = sum(int((_bits(first[key]) != _bits(second[key])).sum()) for key in first)
+    mean_abs = (math.fsum(float(second[key].double().abs().sum()) for key in second) / elements
+                if elements else None)
+    max_abs = max((float(second[key].float().abs().max()) for key in second
+                   if second[key].numel()), default=0.0)
     return {"equal": not unequal, "unequal_keys": unequal[:8],
-            "unequal_count": len(unequal), "max_abs_diff": worst}
+            "unequal_count": len(unequal), "max_abs_diff": worst,
+            "elements": elements, "differing_elements": differing,
+            "differing_fraction": differing / elements if elements else None,
+            "reference_mean_abs": mean_abs, "reference_max_abs": max_abs,
+            "max_abs_diff_over_reference_mean_abs": (worst / mean_abs) if mean_abs else None}
+
+
+def _route_sets(index):
+    """Each token's selected experts, sorted: an int64 ``[tokens, k]`` tensor."""
+    return index.reshape(-1, index.shape[-1]).to(torch.int64).sort(dim=-1).values
+
+
+def _compare_routes(first, second) -> dict:
+    """Compare two arms' top-k selections, group by group (PQ #1214 E4).
+
+    ``first`` and ``second`` hold one ``[tokens, k]`` index tensor per group,
+    in the same group order. A token is changed when its set of selected
+    experts differs; ``changed_expert_slots`` counts the experts that the
+    token selects in ``first`` and not in ``second``.
+    """
+    if first is None or second is None or len(first) != len(second) or any(
+            a.shape != b.shape for a, b in zip(first, second)):
+        return {"comparable": False}
+    tokens = changed_tokens = changed_slots = 0
+    for a, b in zip(first, second):
+        sa, sb = _route_sets(a), _route_sets(b)
+        tokens += int(sa.shape[0])
+        changed_tokens += int((sa != sb).any(dim=-1).sum())
+        changed_slots += int((~(sa.unsqueeze(-1) == sb.unsqueeze(-2)).any(dim=-1)).sum())
+    return {"comparable": True, "tokens": tokens,
+            "tokens_with_a_changed_expert": changed_tokens,
+            "changed_expert_slots": changed_slots}
+
+
+def _group_routes(forwards, groups: int, passes_per_group: int):
+    """One route tensor per group, and whether every pass over a group chose the same.
+
+    ``forwards`` holds each forward's top-k index in the order the arm ran
+    them: the capture runs every group once per probe, probe-major; the fused
+    roll runs each group once. Returns ``(None, False)`` when the arm ran
+    another number of forwards.
+    """
+    if len(forwards) != groups * passes_per_group:
+        return None, False
+    first = list(forwards[:groups])
+    stable = all(torch.equal(forwards[p * groups + g], first[g])
+                 for p in range(passes_per_group) for g in range(groups))
+    return first, stable
 
 
 def main(argv=None) -> int:
@@ -231,10 +312,21 @@ def main(argv=None) -> int:
             raise RuntimeError(f"the roll ran {backwards} backwards, not {n_probes * count}")
         return plane
 
+    # The experts' own arguments, by the class's signature: the top-k each
+    # forward routed its tokens to. Kept on the device until the arm's clock
+    # stops, so recording them adds no synchronization inside a timed arm.
+    route_log = []
+    experts_signature = inspect.signature(type(layer.mlp.experts).forward)
+
+    def record_route(module, args, kwargs):
+        bound = experts_signature.bind(module, *args, **kwargs)
+        route_log.append(bound.arguments["top_k_index"].detach().clone())
+
+    route_hook = layer.mlp.experts.register_forward_pre_hook(record_route, with_kwargs=True)
     samples, stop = [], threading.Event()
     sampler = threading.Thread(target=_power_sampler, args=(stop, samples), daemon=True)
     sampler.start()
-    arms, planes = {}, {}
+    arms, planes, routes = {}, {}, {}
 
     def arm(name, run):
         torch.cuda.synchronize()
@@ -242,11 +334,15 @@ def main(argv=None) -> int:
         torch.cuda.reset_peak_memory_stats()
         resident_before = torch.cuda.memory_allocated()
         before = kda_chunk.counts()
+        route_log.clear()
         start = time.time()
         plane = run()
         torch.cuda.synchronize()
         end = time.time()
         after = kda_chunk.counts()
+        forwards = [index.to("cpu") for index in route_log]
+        route_log.clear()
+        routes[name] = forwards
         watts = [w for t, w in samples if start <= t <= end]
         arms[name] = {"wall_s": end - start, "window_unix": [start, end],
                       "kernel_counts": {key: after[key] - before[key] for key in after},
@@ -254,7 +350,10 @@ def main(argv=None) -> int:
                       "power_samples": len(watts), "plane_sha256": _plane_digest(plane),
                       "resident_before_bytes": resident_before,
                       "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
-                      "peak_reserved_bytes": torch.cuda.max_memory_reserved()}
+                      "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
+                      "route_forwards": len(forwards),
+                      "routes_sha256": _plane_digest(
+                          {(position,): index for position, index in enumerate(forwards)})}
         planes[name] = plane
 
     from contextlib import nullcontext
@@ -268,6 +367,23 @@ def main(argv=None) -> int:
         arm(f"kernel_roll_{run}", lambda: roll_plane(chain_pass))
     stop.set()
     sampler.join(timeout=5)
+    route_hook.remove()
+    per_group = {}
+    for name, forwards in routes.items():
+        passes = n_probes if "_capture_" in name else 1
+        per_group[name] = _group_routes(forwards, len(groups), passes)
+    route_comparisons = {
+        f"kernel_vs_fallback_{site}": _compare_routes(per_group[f"kernel_{site}_1"][0],
+                                                      per_group[f"fallback_{site}_1"][0])
+        for site in ("capture", "roll")}
+    route_comparisons.update({
+        f"{mode}_capture_vs_roll_run{run}": _compare_routes(per_group[f"{mode}_capture_{run}"][0],
+                                                            per_group[f"{mode}_roll_{run}"][0])
+        for mode in ("fallback", "kernel") for run in (1, 2)})
+    route_comparisons.update({
+        f"{mode}_{site}_run1_vs_run2": _compare_routes(per_group[f"{mode}_{site}_1"][0],
+                                                       per_group[f"{mode}_{site}_2"][0])
+        for mode in ("fallback", "kernel") for site in ("capture", "roll")})
 
     comparisons = {
         f"{mode}_capture_vs_roll_run{run}": _compare(planes[f"{mode}_capture_{run}"],
@@ -317,6 +433,10 @@ def main(argv=None) -> int:
         "peak_reserved_bytes": max(a["peak_reserved_bytes"] for a in arms.values()),
         "peak_allocated_bytes": max(a["peak_allocated_bytes"] for a in arms.values()),
         "arms": arms, "comparisons": comparisons,
+        "routes": {"comparisons": route_comparisons,
+                   "stable_within_each_arm": {name: per_group[name][1] for name in per_group},
+                   "note": ("recorded, not checked: synthetic weights, so the counts show "
+                            "the route-flip mechanism, not GLM's rate")},
         "kernel_record": record, "expected_record": expected_record,
         "checks": checks, "pass": all(checks.values()),
     }
