@@ -23,9 +23,16 @@ def require_reference_quantizer(data, activation, probe=None):
     reference=data.get('reference_served_quantizer')
     if not isinstance(reference,dict) or reference.get('backend')!='registered_scaled_fp4_quant':
         raise ValueError('static native references require their registered served quantizer identity')
-    if probe is not None and identity_sha256(reference)!=identity_sha256(
-            probe.get('arithmetic',{}).get('served_quantizer')):
-        raise ValueError('native reference quantizer differs from actual joint quality arithmetic')
+    if probe is not None:
+        # Compared on the fields that change the priced number (schema and
+        # the reuse axes), not as a whole record: ``dequant_kernel`` (#1211)
+        # names bit-identical implementations, so a reference recorded before
+        # the field existed still binds a row that carries it.
+        from .nvfp4_activation_contract import served_quantizer_reuse_differences
+        actual = (probe.get('arithmetic') or {}).get('served_quantizer')
+        if (not isinstance(actual, dict)
+                or served_quantizer_reuse_differences(reference, actual)):
+            raise ValueError('native reference quantizer differs from actual joint quality arithmetic')
     return copy.deepcopy(reference)
 
 
