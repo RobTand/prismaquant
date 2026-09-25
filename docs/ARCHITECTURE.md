@@ -12,8 +12,10 @@ batches made seven host allocations of at least one slot, and a batch at
 `capture_batch=1` made two. The CPU allocator's purge delay is zero under
 the bounded capture contract (#366), so each freed block gave its pages
 back, and the next group faulted them in again. With transparent huge pages
-on `madvise`, a huge-page fault on a fragmented box compacts memory first.
-Each Stage B backward pass over the plane now holds one pageable buffer,
+at `defrag=madvise`, as the Sparks ran until 2026-09-25, a huge-page fault
+on a fragmented box compacts memory first. They have run `defrag=defer`
+since, where a fault doesn't compact but still zeroes each page it faults
+in. Each Stage B backward pass over the plane now holds one pageable buffer,
 `joint_adjoint_checkpoints.PlaneHostStaging`, sized for one group: one plane
 entry per stored batch, at the wider of the plane's dtype and the compute
 dtype.
