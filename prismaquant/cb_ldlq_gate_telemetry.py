@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-PrismaQuant-Attribution-1.0
 """Canonical artifact telemetry for gated fixed-codebook LDLQ exports."""
 
 from __future__ import annotations

@@ -238,3 +238,27 @@ The AURA paper (*AURA: Production-Faithful KL–Fisher Allocation*) is at [`pape
 ## Acknowledgements
 
 PrismaQuant is assembled on top of a decade of quantization research. Key influences: CLADO (Deng et al. 2023) for the cross-layer decision-unit framing (whose interaction-modeling half our head-to-head then retired); HAWQ-V1–V3 (Dong et al. 2019–2021), CoopQ, and AMQ on mixed-precision allocation; GPTQ (Frantar et al. 2022) and its Babai-nearest-plane interpretation (Chen et al. 2026) for rounding; the llama.cpp/ggml project for the GGUF formats and reference implementations; Kneedle (Satopää et al. 2011); and Cover & Thomas ch. 13 on rate-distortion bit allocation. Full bibliography in [`paper/main.tex`](paper/main.tex).
+
+## License
+
+**The code.** Use, modify and redistribute PrismaQuant for any purpose,
+commercial included. Models you make with it are yours: license them however
+you like and host them anywhere. The one condition is credit. A model or
+service you publish that was made with PrismaQuant must say, in its model card
+or README:
+
+> Made with PrismaQuant by Robert Tand - https://github.com/RobTand/prismaquant
+
+The terms are the Apache License 2.0 with the Attribution Addendum in
+[LICENSE](LICENSE) (`LicenseRef-PrismaQuant-Attribution-1.0`). With the
+addendum, the license is not plain Apache-2.0. Commits and releases made
+before the addendum remain under plain Apache-2.0.
+
+**The published models.** The quantized models under
+[huggingface.co/rdtand](https://huggingface.co/rdtand) use the
+[PrismaQuant Weights License](licenses/PRISMAQUANT-WEIGHTS-LICENSE-1.0.md).
+Use them for anything, but don't re-host copies: exact copies on other sites
+split the download count that tells people how widely a model is used.
+Download from Hugging Face, and have your applications pull from the original
+repository. If you want to host a model yourself, make your own with
+PrismaQuant and release it wherever you like.

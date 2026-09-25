@@ -1453,6 +1453,10 @@ def require_priced_export_inputs(
         carried_units, expand_stack_decision_assignment,
     )
     assignment = load_assignment(assignment_path)
+    # The names the allocation stamped, before any stack expansion: a
+    # per-unit seal map (#1270) is keyed by the cost table's own names.
+    stamped_names = {name for name, fmt in assignment.items()
+                     if str(fmt).startswith("TESSERA_")}
     metadata = read_layer_config_metadata(assignment_path)
     population = metadata.get(POPULATION_KEY)
     if isinstance(population, Mapping) and population.get("stack_decisions"):
@@ -1539,6 +1543,36 @@ def require_priced_export_inputs(
                 raise TesseraExportLaneError('canonical Hessian commitments do not cover every selected unit')
             report.update(hessian_reference_binding=reference_binding,
                           hessian_payload_verification='deferred_to_consumption', hessian_verified_units=[])
+        # Units the allocation priced under another reference file's seal over
+        # the same per-unit H (RobTand/prismaquant#1270). The allocation-time
+        # gate proved this file commits the same digest for each of them, and
+        # the reader authenticates every consumed tensor against that
+        # commitment, so the encoder reads exactly the H that priced them.
+        # Export checks only that the claim is well formed; completeness is
+        # the allocator's, which holds the cost table this gate does not.
+        rebound = block.get('unit_capture_sha256')
+        if rebound is not None:
+            problem = None
+            if reference_binding is None:
+                problem = ('names units priced under another capture, which only '
+                           'a canonical Hessian reference can bind')
+            elif not isinstance(rebound, Mapping):
+                problem = 'is not a mapping of unit to capture_sha256'
+            elif not set(rebound) <= set(selected) | stamped_names:
+                problem = ('names units the allocation does not select: '
+                           + ', '.join(sorted(set(rebound) - set(selected)
+                                              - stamped_names)[:5]))
+            elif not all(isinstance(value, str) and len(value) == 64
+                         and all(c in '0123456789abcdef' for c in value)
+                         and value != priced_digest for value in rebound.values()):
+                problem = ("carries a value that is not another capture's "
+                           'SHA-256')
+            if problem is not None:
+                if _is_hessian_reference(hessians):
+                    hessians.close()
+                raise TesseraExportLaneError(
+                    'the allocation\'s tessera_hessian.unit_capture_sha256 ' + problem)
+            report['hessian_unit_capture_sha256'] = dict(sorted(rebound.items()))
         try:
             role = identity.get("hessian_role")
             if role is not None and role != "fit":

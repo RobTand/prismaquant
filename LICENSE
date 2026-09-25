@@ -15,3 +15,44 @@
    limitations under the License.
 
 Copyright 2026 Rob Tand.
+
+
+---------------------------------------------------------------------------
+
+ATTRIBUTION ADDENDUM, VERSION 1.0
+
+The license above is granted on the following conditions. Failing any of them
+ends your rights under it (see A6). With this addendum the license is no longer
+the unmodified license above and must not be described as it. Its identifier
+is LicenseRef-PrismaQuant-Attribution-1.0. Commits and releases made before this
+addendum was added remain under the license above alone.
+
+    Project:  PrismaQuant
+    Author:   Robert Tand <robert.tand@icloud.com>
+    Home:     https://github.com/RobTand/prismaquant
+
+A1. Your outputs are yours. The Author claims no rights in models,
+    checkpoints or other artifacts you produce, build or serve with the
+    Project. You may license them on any terms and host them anywhere, subject
+    only to A2 and to the licenses of the models you started from.
+
+A2. Credit the runtime. When you publish, distribute or offer as a service a
+    model or artifact produced, built or served with the Project, its model
+    card or README must state:
+
+        Made with PrismaQuant by Robert Tand - https://github.com/RobTand/prismaquant
+
+A3. Redistributing the Project. Copies of the Project, modified or not, must
+    keep this addendum, the license above, and the Author's copyright notice.
+
+A4. No misrepresentation. You must not present the Project, or a modified
+    version of it, as your own work, and you must not remove or obscure the
+    Author's credit.
+
+A5. Names. You may use the name "PrismaQuant" to give the credit in A2 and to
+    describe compatibility accurately. You may not use it as the name of your
+    own product, fork or model. This license grants no trademark rights.
+
+A6. Termination and cure. Your rights end automatically when you breach a
+    condition. If you cure a first breach within 30 days of learning of it,
+    your rights are reinstated.

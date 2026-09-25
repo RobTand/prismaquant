@@ -422,7 +422,9 @@ def validation_layer_config(bound_payload, proposal, *, proposal_sha256,
     """
     from .layer_config import LAYER_CONFIG_META_KEY
     from .tessera_expert_projection import allocation_expert_projection_block
-    from .tessera_menu import assert_uniform_hessian_identity, priced_static_scales
+    from .joint_catalog_extension import hessian_references
+    from .tessera_menu import (assert_uniform_hessian_identity, priced_static_scales,
+                               project_hessian_identity)
     from .tessera_serving_scope import (ServingTarget, context_by_unit_from_stats,
                                         scope_provenance)
     _require(len(proposal_sha256) == 64 and all(c in '0123456789abcdef' for c in proposal_sha256),
@@ -438,7 +440,9 @@ def validation_layer_config(bound_payload, proposal, *, proposal_sha256,
         'schema': 'prismaquant.layer_config_meta.v1',
         'target_profile': proposal['target_profile'],
         'tessera_serving_scope': scope_provenance(serving_target, contexts),
-        'tessera_hessian': assert_uniform_hessian_identity(bound_payload['costs']),
+        'tessera_hessian': project_hessian_identity(assert_uniform_hessian_identity(
+            bound_payload['costs'], references=lambda: hessian_references(bound_payload)),
+            assignment),
         'tessera_activation_static_scales': priced_static_scales(
             {name: fmt for name, fmt in assignment.items() if fmt.startswith('TESSERA_')},
             bound_payload['costs'],

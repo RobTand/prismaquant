@@ -1879,7 +1879,7 @@ def family_anchor_rule(family: "str | TesseraFamily") -> str:
     return ANCHOR_FRESH_ENCODE
 
 
-def assert_uniform_hessian_identity(costs: "dict") -> dict:
+def assert_uniform_hessian_identity(costs: "dict", *, references=None) -> dict:
     """Every Tessera row in one cost table must share one Hessian identity.
 
     The encoder's shipping default consumes a per-unit ``XᵀX``; a row priced
@@ -1949,11 +1949,38 @@ def assert_uniform_hessian_identity(costs: "dict") -> dict:
     value, never wildcarded against a digest: the returned ``capture_sha256``
     is what the export gate binds the payload to, and a table without one
     yields an allocation the gate refuses as unbound.
+
+    **A differing seal over equal content is one Hessian**
+    (RobTand/prismaquant#1270).  ``capture_sha256`` of a
+    ``hessian_capture.references.json`` seals the unit roster that file
+    commits, so two workspaces that reference one canonical capture and
+    census under different rosters carry different seals for identical H.
+    ``joint_catalog_extension.attach_candidate_overlay`` admits such overlay
+    rows after comparing per-unit content (PQ #985), and this gate refused
+    the table that produced.  Rows under more than one seal are now accepted
+    when every other field of the key (triple, legacy fields, kwarg,
+    ``reference_binding``) is uniform and ``reference_binding`` is present,
+    and, for each row under a seal other than the table's own, both
+    reference files are opened through ``_overlay_hessian_commitments`` and
+    the row's unit carries the same per-unit H digest in each.  A unit either
+    file does not commit, or whose digests differ, is refused by
+    ``qname[format]``.  ``references`` is
+    ``joint_catalog_extension.hessian_references(payload)`` (or a callable
+    returning it, resolved only when a second seal appears): the table's own
+    seal as ``primary`` and every seal it can reach through hash-bound
+    inputs under ``captures``; without it a second seal refuses as before.
+    The return keeps ``capture_sha256`` = the primary seal, the file export
+    and materialization open, and adds ``captures`` (rows per seal) and
+    ``row_capture_sha256`` (``{qname: {format: seal}}`` for rows under a
+    non-primary seal).  :func:`project_hessian_identity` reduces the row map
+    to the selected units before it is stamped.  A table under one seal
+    returns exactly what it did before.
     """
     from .tessera_hessian import HESSIAN_IDENTITY_FIELDS
 
     required = tuple(HESSIAN_IDENTITY_FIELDS)
     seen: dict[tuple, int] = {}
+    capture_rows: dict = {}
     unstamped = 0
     legacy_rows = 0
     for _qname, rows in (costs or {}).items():
@@ -1991,21 +2018,18 @@ def assert_uniform_hessian_identity(costs: "dict") -> dict:
                    ident.get("text_sha"), ident.get("token_count"),
                    ident.get("kwarg"), ident.get("capture_sha256"), reference)
             seen[key] = seen.get(key, 0) + 1
+            capture_rows.setdefault(key[6], []).append((_qname, fmt))
+    bases = {key[:6] + key[7:] for key in seen}
+    if len(bases) == 1 and len(seen) > 1:
+        return _content_equal_hessian_identity(
+            seen, capture_rows, references, required, legacy_rows, unstamped)
     if len(seen) > 1:
-        raise ValueError(
-            "Tessera cost table mixes Hessian identities: "
-            + "; ".join(
-                f"{k[0]} triple={None if k[1] is None else tuple(str(v)[:12] for v in k[1])} "
-                f"supplied={k[2]} text_sha={str(k[3])[:12]} "
-                f"tokens={k[4]} kwarg={k[5]} "
-                f"capture_sha256={None if k[6] is None else str(k[6])[:12]} "
-                f"reference_binding={k[7]} ({n} rows)"
-                for k, n in sorted(seen.items(), key=lambda kv: -kv[1]))
-            + ". Rows priced with and without a Hessian, on different "
-              "calibration draws, or against different captures of one draw, "
-              "are not comparable prices of the same bytes. Rebuild the cost "
-              "table with one campaign, or allocate them separately."
-        )
+        raise ValueError(_mixed_hessian_message(
+            seen, "Rows priced with and without a Hessian, on different "
+                  "calibration draws, with different encoder kwargs, or against "
+                  "different canonical captures, are not comparable prices of "
+                  "the same bytes. Rebuild the cost table with one campaign, or "
+                  "allocate them separately."))
     (key,) = tuple(seen) if seen else (None,)
     triple = dict(zip(required, key[1])) if key is not None and key[1] is not None \
         else {field: None for field in required}
@@ -2022,6 +2046,120 @@ def assert_uniform_hessian_identity(costs: "dict") -> dict:
         "legacy_rows": int(legacy_rows),
         "unstamped_rows": int(unstamped),
     }
+
+
+def _mixed_hessian_message(seen, detail):
+    return (
+        "Tessera cost table mixes Hessian identities: "
+        + "; ".join(
+            f"{k[0]} triple={None if k[1] is None else tuple(str(v)[:12] for v in k[1])} "
+            f"supplied={k[2]} text_sha={str(k[3])[:12]} "
+            f"tokens={k[4]} kwarg={k[5]} "
+            f"capture_sha256={None if k[6] is None else str(k[6])[:12]} "
+            f"reference_binding={k[7]} ({n} rows)"
+            for k, n in sorted(seen.items(), key=lambda kv: -kv[1]))
+        + ". " + detail)
+
+
+def _content_equal_hessian_identity(seen, capture_rows, references, required,
+                                    legacy_rows, unstamped):
+    """One draw, one kwarg set, one binding, several seals: compare content (#1270)."""
+    import json
+    (key, *_) = sorted(seen, key=lambda k: -seen[k])
+    binding = key[7]
+
+    def refuse(detail):
+        raise ValueError(_mixed_hessian_message(seen, detail))
+
+    if binding is None or any(k[6] is None for k in seen):
+        refuse("The rows agree on the draw but name different captures and "
+               "carry no reference_binding, so their per-unit Hessian content "
+               "cannot be compared. Rebuild the cost table with one campaign, "
+               "or allocate them separately.")
+    if callable(references):
+        # Resolved only when a table actually carries two seals: the chain
+        # reads the overlay cost payload, which a one-seal table never needs.
+        references = references()
+    if not isinstance(references, Mapping) or not isinstance(
+            references.get("captures"), Mapping):
+        refuse("The rows agree on the draw and the reference binding but name "
+               f"{len(capture_rows)} reference files, and no reference file was "
+               "supplied to compare their per-unit content "
+               "(joint_catalog_extension.hessian_references).")
+    primary = references.get("primary")
+    files = references["captures"]
+    if primary not in capture_rows:
+        refuse(f"The table's own capture {str(primary)[:12]} prices none of its "
+               "rows, so export would bind a file no row names.")
+    for digest in capture_rows:
+        hessian = files.get(digest)
+        if not isinstance(hessian, Mapping) or hessian.get("capture_sha256") != digest:
+            refuse(f"The table names no reference file for capture "
+                   f"{str(digest)[:12]}, so its rows' Hessian content cannot be "
+                   "compared with the table's own capture.")
+    from tessera.hessian_capture import normalize_reference_binding
+    primary_binding = files[primary].get("reference_binding")
+    if primary_binding is None or json.dumps(
+            normalize_reference_binding(primary_binding), sort_keys=True) != binding:
+        refuse("The table's own reference file binds a different canonical "
+               "capture or census than its rows.")
+    from .joint_catalog_extension import _overlay_hessian_commitments
+    row_captures: dict = {}
+    for digest in sorted(capture_rows):
+        if digest == primary:
+            continue
+        secondary_units, primary_units = _overlay_hessian_commitments(
+            dict(files[digest]), dict(files[primary]))
+        for name, fmt in capture_rows[digest]:
+            if name not in secondary_units or name not in primary_units:
+                refuse(f"Capture {str(digest if name not in secondary_units else primary)[:12]} "
+                       f"commits no Hessian for {name}[{fmt}], so that row's "
+                       "content cannot be compared across the reference files.")
+            if secondary_units[name] != primary_units[name]:
+                refuse(f"Per-unit Hessian content differs for {name}[{fmt}]: "
+                       f"capture {str(digest)[:12]} and the table's own capture "
+                       f"{str(primary)[:12]} commit different H for it. That row "
+                       "was priced under a different Hessian than the rest.")
+            row_captures.setdefault(name, {})[fmt] = digest
+    triple = dict(zip(required, key[1])) if key[1] is not None \
+        else {field: None for field in required}
+    return {
+        "supplied": key[2],
+        "text_sha": key[3],
+        "token_count": key[4],
+        "kwarg": key[5],
+        **triple,
+        "capture_sha256": primary,
+        "reference_binding": json.loads(binding),
+        "identity_schema": key[0],
+        "stamped_rows": sum(seen.values()),
+        "legacy_rows": int(legacy_rows),
+        "unstamped_rows": int(unstamped),
+        "captures": {digest: len(rows) for digest, rows in sorted(capture_rows.items())},
+        "row_capture_sha256": {name: dict(sorted(rows.items()))
+                               for name, rows in sorted(row_captures.items())},
+    }
+
+
+def project_hessian_identity(identity: "Mapping", assignment: "Mapping[str, str]") -> dict:
+    """The ``tessera_hessian`` stamp for one selection (RobTand/prismaquant#1270).
+
+    A table under one seal returns its identity unchanged. A table whose rows
+    carry several content-equal seals (:func:`assert_uniform_hessian_identity`)
+    drops the per-row map and the per-seal counts, and names, for each selected
+    unit whose chosen row was priced under a seal other than ``capture_sha256``,
+    that seal in ``unit_capture_sha256``. Export binds the file whose seal is
+    ``capture_sha256``; the gate proved it commits the same H for those units.
+    """
+    stamp = dict(identity)
+    rows = stamp.pop("row_capture_sha256", None)
+    stamp.pop("captures", None)
+    if rows is None:
+        return stamp
+    stamp["unit_capture_sha256"] = {
+        name: rows[name][str(fmt)] for name, fmt in sorted((assignment or {}).items())
+        if str(fmt) in rows.get(name, {})}
+    return stamp
 
 
 def priced_static_scales(assignment: "Mapping[str, str]",
@@ -2122,7 +2260,7 @@ def priced_static_scales(assignment: "Mapping[str, str]",
 
 
 __all__ = list(__all__) + ["assert_uniform_hessian_identity",
-                           "priced_static_scales"]
+                           "priced_static_scales", "project_hessian_identity"]
 
 
 # ---------------------------------------------------------------------------

@@ -63,8 +63,10 @@ unit set (``tessera.hessian_capture.capture_sha256_from_units``).  Two tables
 over different unit sets therefore carry different files and digests even
 when every shared Hessian is identical, and every cost row carries its own
 table's digest in ``hessian_identity.capture_sha256``.  The allocator refuses
-a table holding two digests (``tessera_menu.assert_uniform_hessian_identity``,
-called at ``allocator.py:2552``).  So instead of asserting the files
+a table holding two digests (``tessera_menu.assert_uniform_hessian_identity``)
+unless it can open both reference files through the table's own hash-bound
+inputs and finds equal per-unit content (RobTand/prismaquant#1270); a union
+has no such chain to follow.  So instead of asserting the files
 identical, the union requires equal ``schema``, ``canonical_capture``,
 ``provenance``, ``counts``, ``load_policy`` and ``census.sha256``; equal
 commitments on every shared unit; each table's rows and provenance to carry
