@@ -60,6 +60,7 @@ from prismaquant.nvfp4_cb_footprint import (
 )
 from prismaquant.routed_experts import (
     PackedExpertProjection,
+    ProfileRoutedExpertClassifier,
     profile_declared_packed_expert_projections,
     profile_declared_routed_expert_targets,
     profile_declared_unpacked_expert_linears,
@@ -644,6 +645,65 @@ def _stored_production_anchor_delta(
     if storage_dtype == torch.float32:
         return delta_fp32
     return delta_fp32.to(dtype=storage_dtype)
+
+
+def aura_unit_topology(
+    model: nn.Module,
+    linears: Mapping[str, object],
+    *,
+    profile,
+    packed_members: Sequence[PackedExpertProjection] = (),
+) -> dict[str, dict]:
+    """Per-unit topology for AURA stats rows, from the probe's own sources.
+
+    ``tessera_serving_scope.unit_structure_from_stats`` reads these facts to
+    classify a unit under an explicit serving target (PQ #1278). They are the
+    fields the incremental probe writes, taken from the same places:
+
+    * an nn.Linear gets ``router_path``/``expert_id`` from
+      ``sensitivity_probe.discover_moe_structure`` -- ``(None, None)`` when the
+      walk places it under no router;
+    * a packed expert's per-expert view gets ``_packed_experts_module`` and
+      ``num_experts``, as ``tessera_campaign`` records for the same members.
+      The count is the number of experts the profile split out of that packed
+      parameter (``packed_members`` is the full, unfiltered split), never the
+      subset a format plan or unit filter kept.
+
+    A Linear the profile declares routed but the walk cannot place gets no
+    keys at all: writing ``None``/``None`` would record a dense fact nobody
+    observed, and the scope reader then refuses it as missing, not as a
+    conflict.
+    """
+    from prismaquant.sensitivity_probe import discover_moe_structure
+
+    routed = discover_moe_structure(model, profile=profile)
+    classifier = ProfileRoutedExpertClassifier(profile)
+    experts_by_packed: dict[str, set[int]] = {}
+    for member in packed_members:
+        experts_by_packed.setdefault(member.packed_qname, set()).add(int(member.expert_id))
+    counts: dict[str, int] = {}
+    for packed_qname, experts in experts_by_packed.items():
+        if experts != set(range(len(experts))):
+            raise RuntimeError(
+                f"packed expert split of {packed_qname} is not experts 0..N-1")
+        counts[packed_qname] = len(experts)
+    out: dict[str, dict] = {}
+    for name, module in linears.items():
+        if isinstance(module, PackedExpertProjection):
+            if module.packed_qname not in counts:
+                raise RuntimeError(
+                    f"{name}: packed expert view without its full split; "
+                    "pass the unfiltered packed_members")
+            out[name] = {"_packed_experts_module": module.module_qname,
+                         "num_experts": counts[module.packed_qname]}
+        elif name in routed:
+            router_path, expert_id = routed[name]
+            out[name] = {"router_path": router_path, "expert_id": expert_id}
+        elif classifier.classify(name) is not None:
+            out[name] = {}
+        else:
+            out[name] = {"router_path": None, "expert_id": None}
+    return out
 
 
 def _target_linears(
@@ -1304,6 +1364,7 @@ def compute_aura_cost(
                 f"unit_filter {unit_filter!r} matched no AURA Linear qnames"
             )
     names = list(linears.keys())
+    unit_topology = aura_unit_topology(model, linears, profile=profile)
     fmts = [fr.canonical_format_name(f) for f in formats]
     nonzero_fmts = [f for f in fmts if f not in _ZERO_COST_FORMATS]
     cb_provenance: dict[str, object] = {}
@@ -1695,6 +1756,7 @@ def compute_aura_cost(
             "in_features": int(getattr(mod, "in_features", mod.weight.shape[1])),
             "out_features": int(getattr(mod, "out_features", mod.weight.shape[0])),
             "n_probes": int(n_probes),
+            **unit_topology[n],
         }
         if collect_col_energy and n in col_energy:
             # Per-column KL-Fisher energy, mean over probes (× inv) so its sum
@@ -1820,6 +1882,7 @@ def _assemble_streamed_aura_payload(
     g_trace: Mapping[str, float],
     col_energy: Mapping[str, torch.Tensor],
     weight_mse_diagnostic: Mapping[tuple[str, str], float],
+    unit_topology: Mapping[str, Mapping[str, object]],
 ) -> dict:
     inv = 1.0 / float(n_probes)
     stats: dict[str, dict] = {}
@@ -1832,6 +1895,7 @@ def _assemble_streamed_aura_payload(
             "in_features": int(getattr(mod, "in_features", mod.weight.shape[1])),
             "out_features": int(getattr(mod, "out_features", mod.weight.shape[0])),
             "n_probes": int(n_probes),
+            **unit_topology[name],
         }
         if collect_col_energy and name in col_energy:
             stats[name]["fisher_col"] = (
@@ -2252,6 +2316,8 @@ def compute_aura_cost_streamed(
     names = list(linears)
     if not names:
         raise RuntimeError("streamed AURA found no smooth Linear targets")
+    unit_topology = aura_unit_topology(
+        runner.model, linears, profile=profile, packed_members=packed_projections)
     names_by_layer: dict[int, list[str]] = {}
     for name in names:
         layer = runner.layer_index_for_qname(name)
@@ -2788,6 +2854,7 @@ def compute_aura_cost_streamed(
 
     def _finish_streamed_payload() -> dict:
         payload = _assemble_streamed_aura_payload(
+            unit_topology=unit_topology,
             linears=linears,
             names=names,
             formats=fmts,
