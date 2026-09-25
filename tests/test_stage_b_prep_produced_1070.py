@@ -14,7 +14,7 @@ PrismaBuild then holds is checked against the metadata root on disk:
   second group of one kind refuse before a byte is written.
 
 PrismaBuild comes from the published runtime generation pinned in
-``stage_b_prep_pb_pin.json``: the Stage A pin predates the write-only
+``pb_runtime_generation_pin.json`` (shared, PQ #1084): the Stage A pin predates the write-only
 template (PB #912). Marked ``own_process`` because resolving a pinned
 candidate leaves ``prismabuild`` in ``sys.modules`` (PQ #1008).
 """
@@ -41,7 +41,7 @@ from test_stage_a_produced_boundary_chain import (  # noqa: E402,F401
 from test_stage_b_prep_io_1070 import (  # noqa: E402
     generator_args, prep_fixture, write_submission)
 
-PIN_PATH = Path(__file__).resolve().parent / "stage_b_prep_pb_pin.json"
+PIN_PATH = chain.PB_GENERATION_PIN
 
 
 def _pb(monkeypatch):
