@@ -23,6 +23,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+from nvfp4_served_qdq_fixtures import cpu_kernels
 from prismaquant import nvfp4_activation_contract as owner
 
 
@@ -264,6 +265,10 @@ def test_resolution_is_cached_and_probes_the_extension_once(monkeypatch):
         return True
 
     monkeypatch.setattr(owner, "_register_served_quantizer_op", _probe)
+    # A registered operator also needs the leg's Triton dequantisation kernels
+    # (#1211); the CPU stand-in keeps this resolution logic tested without
+    # Triton (#1224).
+    monkeypatch.setattr(owner, "_served_dequant_kernels", cpu_kernels)
     first = owner.resolve_served_quantizer_identity(require=True, context="test")
     second = owner.resolve_served_quantizer_identity(require=True, context="test")
 
@@ -291,6 +296,7 @@ def test_require_refuses_an_unregistered_operator_by_name(monkeypatch):
 def test_the_identity_carries_the_axes_a_reader_needs(monkeypatch):
     owner._reset_served_quantizer_identity_for_tests()
     monkeypatch.setattr(owner, "_register_served_quantizer_op", lambda: True)
+    monkeypatch.setattr(owner, "_served_dequant_kernels", cpu_kernels)
     monkeypatch.setenv("PRISMAQUANT_CONTAINER_CONTENT_SHA256", "a" * 64)
 
     record = owner.resolve_served_quantizer_identity(
