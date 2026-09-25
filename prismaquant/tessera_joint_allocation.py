@@ -305,8 +305,11 @@ def handoff(*, joint_binding, plan_binding, output_path):
     cache = pickle.loads(_read_bound(prepared['production_cache'], 'prepared cache'))
     _require(isinstance(cache, ProductionWeightCache), 'prepared cache owner is not ProductionWeightCache')
     # This joins historical identities; it does not re-read all decoded model
-    # tensors or weaken the exporter's current-byte verification.
-    data = load_measured_anchor_input(plan['inputs'], verify_payloads=False)
+    # tensors or weaken the exporter's current-byte verification. The plan's
+    # named historical encoder seals travel with its inputs: the anchor
+    # checkpoint was priced by the package the plan names, not the installed one.
+    data = load_measured_anchor_input(plan['inputs'], verify_payloads=False,
+                                      historical_encoder_reuse=plan.get('historical_encoder_reuse'))
     _same(cache.weights, {pair: cell['render'] for pair, cell in data.cells.items()}, 'prepared render paths')
     # Every row's currency check re-validates its probe identity; validate and
     # hash each shared identity once instead (PQ #1256), as the allocator does.
