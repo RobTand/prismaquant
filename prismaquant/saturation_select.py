@@ -41,6 +41,31 @@ import math
 from typing import Callable, Mapping, Sequence
 
 
+def log_error_values(values: Sequence[float]) -> list[float]:
+    """Map measured distortion (KL or predicted dloss) to log10 for a kneedle.
+
+    Non-positive values are floored at the smallest positive value itself. A
+    measured distortion <= 0 (fp32 round-off on a near-passthrough assignment,
+    or an all-passthrough rung on an FP8-native source whose total dloss is
+    exactly 0) means "at the floor of what this run can resolve", not "orders
+    of magnitude better than every real point". Flooring at min_positive puts
+    such points exactly 0 decades below the smallest real point; any lower
+    floor (the old ``min_positive * 1e-6``) fabricates a multi-decade cliff in
+    normalized log-space that compresses the real curve and drags the kneedle
+    to the curve start, the worst point on the ship path. The allocator's
+    surrogate knee and the validated frontier's measured knee share this one
+    axis (#1394).
+    """
+    finite_positive = [
+        float(value) for value in values
+        if math.isfinite(float(value)) and float(value) > 0.0
+    ]
+    if not finite_positive:
+        return [0.0 for _ in values]
+    floor = min(finite_positive)
+    return [math.log10(max(float(value), floor)) for value in values]
+
+
 def bootstrap_mean_ci(
     samples: Sequence[float], *, n_boot: int = 1000, seed: int = 0,
 ) -> tuple[float, float]:

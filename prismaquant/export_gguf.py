@@ -39,6 +39,7 @@ from gguf import GGMLQuantizationType as QT
 
 from prismaquant.gguf_formats import GGUF_BLOCK_BYTES, gguf_pack
 from prismaquant.layer_config import load_assignment
+from prismaquant.moe_imatrix import build_imatrix_from_act_cache
 from prismaquant.export_output_safety import (
     prepare_fresh_export_file,
     transactional_file_output,
@@ -186,23 +187,6 @@ def _load_act_inputs(act_dir: str | Path,
     if inputs is None or inputs.ndim != 2:
         return None
     return inputs.float()
-
-
-def build_imatrix_from_act_cache(act_dir: str | Path) -> dict[str, torch.Tensor]:
-    """Per-input-column importance (mean squared activation) per Linear,
-    from the pipeline's activation cache — llama.cpp imatrix semantics,
-    computed on the same calibration corpus the probe/cost stages used."""
-    out: dict[str, torch.Tensor] = {}
-    for p in sorted(Path(act_dir).glob("*.pt")):
-        blob = torch.load(p, map_location="cpu", weights_only=False)
-        inputs = blob.get("inputs") if isinstance(blob, dict) else None
-        if inputs is None or inputs.ndim != 2:
-            continue
-        name = (blob.get("name") if isinstance(blob, dict) else None) or (
-            p.stem.replace("__", ".")
-        )
-        out[name] = inputs.float().pow(2).mean(dim=0)
-    return out
 
 
 @transactional_file_output(

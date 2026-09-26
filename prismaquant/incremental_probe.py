@@ -54,6 +54,7 @@ from typing import Any, Callable
 from . import io_spans
 from prismaquant.incremental_shards import (
     annotate_incremental_shard as annotate_probe_shard,
+    build_layer_shard_regexes,
     read_pickle as _read_pickle,
 )
 
@@ -95,8 +96,8 @@ def _env_flag(name: str, *, default: bool) -> bool:
 # site already materializes, so they cost no extra matmul AND satisfy
 # sum(fisher_row) == sum(fisher_col) == chunk_h.sum() by construction —
 # that identity is the wiring check (tests/test_probe_marginals.py).
-_MARGINAL_KEYS = (
-    "fisher_row", "fisher_col", "g_sq_sum", "act_sq_sum", "act_absmax")
+# The key tuple is the dense Fisher schema's own (one owner, #1394).
+from .sensitivity_probe import _DENSE_FISHER_MARGINAL_KEYS as _MARGINAL_KEYS  # noqa: E402
 # act_absmax is a BOUND, not a total: it merges by elementwise maximum
 # across chunks/shards. Summing it would inflate it without bound.
 _MARGINAL_MAX_KEYS = frozenset({"act_absmax"})
@@ -112,35 +113,6 @@ _PACKED_MARGINAL_KEYS = (
 
 def _marginals_enabled() -> bool:
     return _env_flag("PRISMAQUANT_PROBE_MARGINALS", default=True)
-
-
-def _marginal_chunk(gy2_sq: torch.Tensor, x2_sq: torch.Tensor,
-                    x2: torch.Tensor,
-                    chunk_h: torch.Tensor) -> list[torch.Tensor]:
-    """Five per-channel reductions of one (gy², x², H) chunk, in
-    `_MARGINAL_KEYS` order, device-resident fp32.
-
-    Reductions force fp32 accumulation: the inputs are bf16 and a
-    T-long running sum in bf16 loses real precision for free.
-    act_absmax comes off `x2` directly via amax/amin rather than
-    sqrt(x2_sq.amax) — same value, but exact in the input dtype and
-    without materializing a [T, in] abs() copy on the hot path.
-    """
-    if x2.size(0) == 0:
-        # A routed expert can be handed zero tokens; the sums are all
-        # zero anyway but amax/amin raise on an empty reduction dim.
-        absmax = torch.zeros(x2.size(1), dtype=torch.float32,
-                             device=x2.device)
-    else:
-        absmax = torch.maximum(x2.amax(dim=0).abs(),
-                               x2.amin(dim=0).abs()).to(torch.float32)
-    return [
-        chunk_h.sum(dim=1, dtype=torch.float32),
-        chunk_h.sum(dim=0, dtype=torch.float32),
-        gy2_sq.sum(dim=0, dtype=torch.float32),
-        x2_sq.sum(dim=0, dtype=torch.float32),
-        absmax,
-    ]
 
 
 def _marginal_accumulate(slot: dict, name: str,
@@ -231,6 +203,7 @@ from .layer_streaming import (
 from .perturbed_x_cache import calibration_data_hash
 from .sensitivity_probe import (
     FisherAccumulator,
+    dense_marginal_chunk as _marginal_chunk,
     RouterTracker,
     SharedStateCotangents,
     discover_moe_structure,
@@ -539,19 +512,6 @@ def _print_mem_snapshot(label: str, log_prefix: str = "[incremental]"):
 # ---------------------------------------------------------------------------
 # Shard regex builders (unchanged public API)
 # ---------------------------------------------------------------------------
-def build_layer_shard_regexes(num_hidden_layers: int,
-                              layers_per_shard: int,
-                              layer_prefix: str = "model.layers") -> list[str]:
-    regexes: list[str] = []
-    for start in range(0, num_hidden_layers, layers_per_shard):
-        end = min(start + layers_per_shard, num_hidden_layers)
-        if end - start == 1:
-            body = rf"{re.escape(layer_prefix)}\.{start}\."
-        else:
-            idxs = "|".join(str(i) for i in range(start, end))
-            body = rf"{re.escape(layer_prefix)}\.(?:{idxs})\."
-        regexes.append(body)
-    return regexes
 
 
 def _detect_profile_for_shards(model_path: str):

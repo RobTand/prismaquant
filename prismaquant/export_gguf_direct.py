@@ -47,32 +47,13 @@ from safetensors import safe_open
 
 from prismaquant.gguf_formats import GGUF_BLOCK_BYTES, gguf_pack
 from prismaquant.layer_config import load_assignment
+from prismaquant.moe_imatrix import build_imatrix_from_act_cache as build_direct_imatrix
 from prismaquant.model_profiles import detect_profile
 from prismaquant.prismasnap_contract import refuse_prismasnap_for_unvalidated_lane
 
 _EXPERT_RE = re.compile(
     r"^(model\.layers\.\d+\.mlp)\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$"
 )
-
-
-def build_direct_imatrix(act_dir: str | Path) -> dict[str, torch.Tensor]:
-    """Per-column mean squared activation per cached module, from the
-    probe's activation cache. Dense Linears key by their recipe qname;
-    packed-experts module snapshots key by the experts module qname
-    (``…mlp.experts``) — the exact input of gate/up projections. Ops are
-    IDENTICAL to the cost path's derivation (full rows, fp32, mean over
-    dim 0): measured cost and shipped bytes stay in lockstep."""
-    out: dict[str, torch.Tensor] = {}
-    for p in sorted(Path(act_dir).glob("*.pt")):
-        blob = torch.load(p, map_location="cpu", weights_only=False)
-        inputs = blob.get("inputs") if isinstance(blob, dict) else None
-        if inputs is None or inputs.ndim != 2:
-            continue
-        name = (blob.get("name") if isinstance(blob, dict) else None) or (
-            p.stem.replace("__", ".")
-        )
-        out[name] = inputs.float().pow(2).mean(dim=0)
-    return out
 
 
 def _imatrix_vector_for(

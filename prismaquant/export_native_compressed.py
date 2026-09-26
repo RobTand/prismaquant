@@ -82,6 +82,7 @@ except ModuleNotFoundError:
 from safetensors.torch import save_file
 
 from . import io_spans
+from .format_registry import _mx_rounded_amax_power2
 from . import nvfp4_activation_contract as _nvfp4_activation_contract
 from .allocator_candidates import (
     PASSTHROUGH_SOURCE_REQUIREMENTS,
@@ -3772,25 +3773,6 @@ def _fp8_dequantize(
         device=quant.device,
         dtype=torch.float32,
     )
-
-
-def _mx_rounded_amax_power2(amax: torch.Tensor) -> torch.Tensor:
-    """Match compressed-tensors' MX scale power-of-two rounding.
-
-    compressed-tensors derives MXFP4/MXFP8 E8M0 scales by first rounding the
-    block amax to a power of two with the FP4 mantissa-aware bit-mask rule,
-    then subtracting the element-format exponent offset. Reusing that rule
-    keeps PrismaQuant's stored scales byte-identical to the served consumer.
-    """
-    x = amax.to(torch.float32).clamp_min(torch.finfo(torch.float32).tiny)
-    raw = x.view(torch.int32).to(torch.int64)
-    val_to_add = 1 << (23 - 1 - 1)
-    sign_exponent_mask = ((1 << (8 + 1)) - 1) << 23
-    rounded = torch.bitwise_and(
-        raw + val_to_add,
-        sign_exponent_mask,
-    )
-    return rounded.to(torch.int32).view(torch.float32)
 
 
 def _mx_base_exponent_from_amax(

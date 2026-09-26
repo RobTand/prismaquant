@@ -170,6 +170,7 @@ from .serve_constraints import (
 from .serve_dispatch_table import DispatchTableError, load_dispatch_table
 from .decision_units import block_id_from_qname
 from .layer_config import LAYER_CONFIG_META_KEY
+from .saturation_select import log_error_values as _log_error_values
 from .schemas import validate_cost_payload, validate_probe_payload
 from .tessera_expert_projection import (
     ExpertProjectionError,
@@ -251,28 +252,6 @@ def _kneedle_convex_decreasing(x: list[float], y: list[float]) -> int:
     diffs = [yn - (1.0 - xn) for xn, yn in zip(x_norm, y_norm)]
     # Convex-decreasing, so we want the most-negative diff (max dip).
     return min(range(len(diffs)), key=lambda i: diffs[i])
-
-
-def _log_error_values(y: list[float]) -> list[float]:
-    """Return log10(dloss) with non-positive values floored at the smallest
-    positive point.
-
-    A measured dloss <= 0 means "at the measurement floor" (realistic: an
-    all-passthrough rung on an FP8-native source has total dloss exactly 0),
-    not "10^6x better than the best positive point". The old floor of
-    ``min_positive * 1e-6`` injected a ~6-decade fake cliff below the real
-    curve, compressing it and dragging the Kneedle to the curve start.
-    Flooring at ``min_positive`` itself keeps such points 0 decades below
-    the smallest real point, so the knee stays on the measured curve.
-    """
-    finite_positive = [
-        float(v) for v in y
-        if math.isfinite(float(v)) and float(v) > 0.0
-    ]
-    if not finite_positive:
-        return [0.0 for _ in y]
-    floor = min(finite_positive)
-    return [math.log10(max(float(v), floor)) for v in y]
 
 
 def _log_error_tail_start(y: list[float]) -> int:

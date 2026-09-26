@@ -21,6 +21,7 @@ from prismaquant.layer_config import (
     layer_config_metadata,
 )
 from prismaquant.saturation_select import find_saturation_bpp
+from prismaquant.saturation_select import log_error_values as _log_error_values
 from prismaquant.footprint import (
     assignment_serialization_sha256,
     whole_artifact_budget_from_assignment_payload,
@@ -132,30 +133,6 @@ def _layer_config_from_assignment(assignment: Mapping[str, str]) -> dict:
     for name, fmt in sorted(assignment.items()):
         out[str(name)] = fr.get_format(str(fmt).strip().upper()).autoround_config()
     return out
-
-
-def _log_error_values(values: Sequence[float]) -> list[float]:
-    """Map measured KL values to log10 for the kneedle.
-
-    Non-positive values are floored at the smallest positive measured value
-    itself. A measured KL <= 0 (fp32 round-off on a near-passthrough
-    assignment; realistic on FP8-native sources) is indistinguishable from
-    "at the floor of what this validation run can resolve" — it is *not*
-    evidence the point is orders of magnitude better than every real point.
-    Flooring at min_positive places such points exactly 0 decades below the
-    smallest real point; any lower floor (the old ``min_positive * 1e-6``)
-    fabricates a multi-decade cliff in normalized log-space that compresses
-    the real curve and flips the kneedle to the curve start, i.e. the worst
-    point on the ship path.
-    """
-    finite_positive = [
-        float(value) for value in values
-        if math.isfinite(float(value)) and float(value) > 0.0
-    ]
-    if not finite_positive:
-        return [0.0 for _ in values]
-    floor = min(finite_positive)
-    return [math.log10(max(float(value), floor)) for value in values]
 
 
 def _kneedle_convex_decreasing(

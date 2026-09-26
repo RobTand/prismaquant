@@ -31,6 +31,8 @@ from pathlib import Path
 
 import torch.nn as nn
 
+from ..incremental_shards import build_layer_shard_regexes
+
 
 @dataclass(frozen=True)
 class SourceScope:
@@ -1680,13 +1682,6 @@ class ModelProfile(ABC):
 def _build_layer_shard_regexes(num_layers: int,
                                layers_per_shard: int,
                                *, layer_prefix: str) -> list[str]:
-    out: list[str] = []
-    for start in range(0, num_layers, layers_per_shard):
-        end = min(start + layers_per_shard, num_layers)
-        if end - start == 1:
-            body = rf"{re.escape(layer_prefix)}\.{start}\."
-        else:
-            idxs = "|".join(str(i) for i in range(start, end))
-            body = rf"{re.escape(layer_prefix)}\.(?:{idxs})\."
-        out.append(body)
-    return out
+    # The recipe lives in ``incremental_shards`` (#1394); this name keeps its
+    # keyword-only prefix.
+    return build_layer_shard_regexes(num_layers, layers_per_shard, layer_prefix)
