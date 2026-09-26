@@ -2,6 +2,7 @@
 from types import ModuleType, SimpleNamespace
 import json
 import os
+from pathlib import Path
 import pickle
 import sys
 
@@ -235,8 +236,69 @@ def test_main_refuses_a_packed_parameter_the_profile_does_not_split(monkeypatch,
 HIDDEN, INTER, EXPERTS = 64, 64, 2
 STACK = "model.layers.2.feed_forward.experts"
 RUNG = "TESSERA_E4M3_K1_R1024"
-#: A rung whose family the pinned producer has no expert route for.
+#: A rung whose family the witness producer below has no expert route for.
+#: Until the af7a86d43 pin the PINNED producer refused it too; Tessera #606
+#: added the BF16 expert builder, so the refusal is now constructed
+#: (``_producer_without_the_bf16_expert_route``).
 UNROUTED_RUNG = "TESSERA_BF16_K1_R1792"
+
+#: Wraps the pinned producer's plan tool with ``TESSERA_BF16`` removed from
+#: ``scheme.MOE_BUILDERS`` -- the pre-#606 build -- and runs it unchanged.
+_NO_BF16_EXPERT_ROUTE_TOOL = """\
+import runpy, sys
+from tessera.serving import scheme
+scheme.MOE_BUILDERS.pop(scheme.TESSERA_BF16, None)
+real = {real!r}
+sys.argv[0] = real
+runpy.run_path(real, run_name="__main__")
+"""
+
+
+def _producer_without_the_bf16_expert_route(monkeypatch, tmp_path):
+    """Point ``TESSERA_REPO`` at the pinned checkout with one route removed.
+
+    At the af7a86d43 pin every Tessera route has an expert builder, so the
+    real producer refuses no family for lack of one and the #280 walk has no
+    natural witness. This builds one the way the pre-#606 build refused: the
+    plan tool is the pinned one, run in-process after ``TESSERA_BF16`` is
+    dropped from ``MOE_BUILDERS``, so the refusal is Tessera's own
+    ``refuse_a_family_with_no_expert_route`` and the accepted plan is the
+    pinned producer's real answer. Every other file is the pinned checkout's.
+    """
+    import os
+    from prismaquant.tessera_expert_projection import PRODUCER_PLAN_TOOL
+
+    real_root = Path(os.environ["TESSERA_REPO"])
+    witness = tmp_path / "tessera-without-bf16-expert-route"
+    experiments = witness / "experiments"
+    experiments.mkdir(parents=True)
+    for entry in (real_root / "experiments").iterdir():
+        (experiments / entry.name).symlink_to(entry)
+    tool = witness / PRODUCER_PLAN_TOOL
+    tool.unlink()
+    tool.write_text(_NO_BF16_EXPERT_ROUTE_TOOL.format(
+        real=str(real_root / PRODUCER_PLAN_TOOL)))
+    monkeypatch.setenv("TESSERA_REPO", str(witness))
+
+
+def test_the_pinned_producer_routes_a_bf16_expert_stack(monkeypatch, tmp_path):
+    """What changed at af7a86d43: the BF16 stack plans on the first ask."""
+    from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
+
+    campaign, _argv, model, _encoded = _bridge_main_fixture(monkeypatch, tmp_path)
+    population = campaign._require_campaign_population(model, Lfm2MoeProfile(), 1)
+    weights = {member.qname: member.weight.detach() for member in population.members}
+    ladder = [SimpleNamespace(format_name=UNROUTED_RUNG, family="TESSERA_BF16_K1",
+                              body_rate_q256=1792, bpp=7.0),
+              SimpleNamespace(format_name=RUNG, family="TESSERA_E4M3_K1",
+                              body_rate_q256=1024, bpp=4.0)]
+    carried, projected = campaign._project_expert_population(
+        population, weights=weights, menus={name: list(ladder) for name in weights},
+        model_path=str(tmp_path / "source"), cache_dir=tmp_path / "cache")
+    assert projected
+    attempts = carried["plan_attempts"]
+    assert len(attempts) == 1 and attempts[0]["refused"] is None, attempts
+    assert {row["grid"] for row in carried["request"].values()} == {_grid(UNROUTED_RUNG)}
 
 
 def _grid(format_name):
@@ -591,15 +653,17 @@ def test_wire_backed_units_keep_only_measured_rows():
 def test_projection_walks_the_menu_to_a_family_with_an_expert_route(monkeypatch, tmp_path):
     """The cheapest rung's family need not have an expert route (#280).
 
-    The menu's first rung is BF16 here.  The pinned producer refuses a BF16
-    expert stack -- ``scheme.MOE_BUILDERS`` names ``TESSERA_FP8`` and
-    ``TESSERA_NVFP4`` only on this build -- and the campaign must ask the next
-    family rather than refuse the whole population.  The refusal is the
-    producer's real one: nothing about the route is mocked.
+    The menu's first rung is BF16 here, asked of a producer with no BF16
+    expert route (``_producer_without_the_bf16_expert_route``: the pinned
+    tool with ``TESSERA_BF16`` removed from ``MOE_BUILDERS``, which is what
+    the pinned build itself did until Tessera #606).  The campaign must ask
+    the next family rather than refuse the whole population.  The refusal is
+    Tessera's own ``refuse_a_family_with_no_expert_route``.
     """
     from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 
     campaign, _argv, model, _encoded = _bridge_main_fixture(monkeypatch, tmp_path)
+    _producer_without_the_bf16_expert_route(monkeypatch, tmp_path)
     population = campaign._require_campaign_population(model, Lfm2MoeProfile(), 1)
     assert population.declared, "fixture must declare a packed expert stack"
     weights = {member.qname: member.weight.detach() for member in population.members}
@@ -632,6 +696,9 @@ def test_projection_matches_family_names_across_different_stack_menus(monkeypatc
     from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 
     campaign, _argv, model, _encoded = _bridge_main_fixture(monkeypatch, tmp_path)
+    # A producer that refuses BF16 experts, as the pinned build did before
+    # Tessera #606; see ``_producer_without_the_bf16_expert_route``.
+    _producer_without_the_bf16_expert_route(monkeypatch, tmp_path)
     second_stack = STACK.replace("layers.2", "layers.3")
     layer = torch.nn.Module()
     layer.feed_forward = _RoutedBlock()

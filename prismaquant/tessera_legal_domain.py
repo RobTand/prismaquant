@@ -458,18 +458,26 @@ def live_pins() -> DomainPins:
 #: pin moved ``acf9eafa`` -> ``07bfcc0e`` with the contract unchanged (v34,
 #: ``d37c9448…``); ``export.py`` is still ``d9c89d92…`` and ``grammar.py``
 #: still ``9ae1f824…`` at the new commit, so only the two commit fields move.
+#:
+#: **Re-taken 2026-09-26 for ``af7a86d43`` (contract v38), a re-transcription.**
+#: The pin moved ``07bfcc0e`` -> ``af7a86d43`` (contract v34 -> v38,
+#: ``04d5a20a…``).  ``export.py`` is still ``d9c89d92…`` and ``grammar.py``
+#: still ``9ae1f824…`` at the new commit, so no source-state entry is added.
+#: What v35-v38 changed -- a quantiser row, withdrawn and minted cells and
+#: the family rows' attested rungs -- is serving scope, which no number here
+#: reads.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="07bfcc0e9b7da13276938cb722bc7dcd893e6c63",
+    reader_dev_pin_commit="af7a86d43da3487179b7d16606ef0f5a3046d73c",
     reader_dev_pin_contract_sha256=(
-        "d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472"
+        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
     ),
-    serving_runtime_pinned_commit="07bfcc0e9b7da13276938cb722bc7dcd893e6c63",
+    serving_runtime_pinned_commit="af7a86d43da3487179b7d16606ef0f5a3046d73c",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472"
+        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
     ),
     producer_installed_contract_sha256=(
-        "d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472"
+        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
     ),
 )
 

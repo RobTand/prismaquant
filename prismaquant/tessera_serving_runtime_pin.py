@@ -268,12 +268,19 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: now calls).  The packaged contract is byte-identical to ``acf9eafa6``'s
 #: (v34, digest ``d37c9448…``), so admission does not move: this is a
 #: commit-only move and the answer diff is empty.
+#: Re-pinned 2026-09-26 to af7a86d43 -- Tessera master's merge of #621,
+#: contract v38 (digest ``04d5a20a…``, lane schema v10).  v35-v38 add an fp4
+#: activation-quantiser row for the spark-vllm-nccl230@a5424378 image,
+#: withdraw the dense BF16_K1 q1792 pair (#614), mint dense and routed
+#: E4M3_K1/BF16_K1 cells on spark-vllm-nccl230@f8dbe1a0 (#604), and reuse the
+#: two routed E4M3_K1 cell ids for q896 on that image in place of the
+#: withdrawn q1024 claim on eugr/spark-vllm@0afec8d4.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+    "af7a86d43da3487179b7d16606ef0f5a3046d73c"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "d37c9448a751feb3e65db1807a7dff1fbacc767a2ce419dfee70f458dbf03472"
+    "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
 )
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the

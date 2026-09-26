@@ -219,15 +219,16 @@ def test_support_facts_has_exactly_the_five_named_fields():
 
 
 def test_the_five_facts_disagree_on_a_natively_qualified_candidate():
-    """E4M3 R1024 routed: producer/reader/route/native yes, served-validation no.
+    """E4M3 R896 routed: producer/reader/route/native yes, served-validation no.
 
     A candidate whose five facts all agreed would prove nothing.  This one is
     qualified natively by a cell and still has no complete assignment through
     export plus served validation in this artifact scope, which is the shape of
     disagreement the ledger exists to be able to record.  (Dense until the
-    v31 withdrawals; the routed pair is the family's surviving cell.)
+    v31 withdrawals; routed R1024 until contract v38 moved the routed pair's
+    claim to R896 under the same cell ids.)
     """
-    facts = _candidate(E4, 1024, "routed_moe").support
+    facts = _candidate(E4, 896, "routed_moe").support
     assert facts.disagree()
     assert facts.producer_legal.value is True
     assert facts.reader_supported.value is True
@@ -287,39 +288,46 @@ def test_every_fact_names_the_table_that_answered_it():
 # Native qualification is exact membership, and does not shrink the domain
 # ---------------------------------------------------------------------------
 
-def test_native_qualification_is_exactly_three_cells_for_the_primary_families():
-    """Exact membership at the pin: E4 R1024 dense and routed, BF R1792 dense.
+def test_native_qualification_is_exactly_the_v38_cells_for_the_primary_families():
+    """Exact membership at the pin (contract v38, Tessera #604).
 
-    Until the v31 withdrawals this was the same three triples; the withdrawal
-    removed the dense E4 rows and the whole BF16 roster, leaving E4 R1024
-    routed alone through the v32 pin.  v34 (Tessera #579) re-mints the two
-    dense rows on ``tessera::window_gemm_dense``, so the set is three again.
-    Nothing else, and in particular no neighbouring rate: attestation does
-    not extrapolate from a singleton.
+    Until the v31 withdrawals this was three triples; the withdrawal removed
+    the dense E4 rows and the whole BF16 roster, leaving E4 R1024 routed alone
+    through the v32 pin.  v34 (Tessera #579) re-minted E4 R1024 and BF R1792
+    dense; v37 withdrew BF R1792 dense again; v38 minted the GLM image's
+    resident dense pairs at {832, 1024, 1088} for both families, the BF
+    routed pair at 1024, and moved the routed E4 pair from 1024 to 896 under
+    the same cell ids.  Nothing else, and in particular no neighbouring rate:
+    attestation does not extrapolate from the rungs a cell names.
     """
     triples = domain.native_qualification_set()
     primary = {t for t in triples if t[0] in domain.PRIMARY_FAMILIES}
     assert primary == {
-        (E4, 1024, "routed_moe"),
-        (E4, 1024, "dense"),
-        (BF, 1792, "dense"),
+        (E4, 832, "dense"), (E4, 1024, "dense"), (E4, 1088, "dense"),
+        (E4, 896, "routed_moe"),
+        (BF, 832, "dense"), (BF, 1024, "dense"), (BF, 1088, "dense"),
+        (BF, 1024, "routed_moe"),
     }
+    assert (E4, 1024, "routed_moe") not in primary
+    assert (BF, 1792, "dense") not in primary
 
 
 def test_the_native_set_does_not_shrink_the_legal_domain(rates):
     """The count is computed without the attestation and is unaffected by it.
 
-    The strong form: the rates that are natively qualified are a two-element
-    subset of a 5,634-element domain (E4 R1024 and BF R1792 at the v34 pin),
-    and the domain walk never reads the attestation.  A regression that let the menu's attested mode leak into the
-    domain would collapse these counts to 0.
+    The strong form: the rates that are natively qualified are a seven-element
+    subset of a 5,634-element domain at the v38 pin, and the domain walk never
+    reads the attestation.  A regression that let the menu's attested mode
+    leak into the domain would collapse these counts to 0.
     """
     triples = domain.native_qualification_set()
     qualified_rates = {
         (family, rate) for (family, rate, _s) in triples
         if family in domain.PRIMARY_FAMILIES
     }
-    assert qualified_rates == {(E4, 1024), (BF, 1792)}
+    assert qualified_rates == {
+        (E4, 832), (E4, 896), (E4, 1024), (E4, 1088),
+        (BF, 832), (BF, 1024), (BF, 1088)}
     total = sum(len(legal) for legal, _holes in rates.values())
     assert total == 1793 + 3841
     for family, rate in qualified_rates:
@@ -344,10 +352,18 @@ def test_routed_moe_attestation_uses_its_own_runtime_image():
     rather than lost.
     """
     cells = domain.attested_cells()
+    default = domain.packaged_contract_payload()["versions"]["default_serve_image"]
     routed = {c.runtime_image for c in cells if c.structure == "routed_moe"}
     dense = {c.runtime_image for c in cells if c.structure == "dense"}
     assert routed and dense
-    assert routed.isdisjoint(dense)
+    assert default not in routed
+    # Since contract v38 the dense scopes span the default image and the GLM
+    # image, and the GLM image also carries routed cells: each cell keeps its
+    # own image, so neither structure collapses onto the default.
+    assert default in dense and len(dense) > 1
+    e4_routed = {c.runtime_image for c in cells
+                 if c.family == E4 and c.structure == "routed_moe"}
+    assert e4_routed and default not in e4_routed
 
 
 # ---------------------------------------------------------------------------

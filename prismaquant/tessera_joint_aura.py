@@ -2349,6 +2349,27 @@ def _prepare_source_owner(config, data, *, resource_check=None):
         raise
 
 
+def _adopt_built_source_identity(owner, identity_cache_path):
+    """Give the capture owner the identity proof this pass just wrote.
+
+    ``_prepare_source_owner`` adopts a cache only if one is already in the
+    output root. With none bound, ``build_streamed_model_identity`` hashes
+    every shard and writes one, and the owner then hashed every shard a second
+    time in ``authenticate_complete_source``: two serial passes over about
+    640 GB for the GLM-5.3 MTP prepare (PQ #1363). Adoption runs the owner's
+    own checks, so a shard that changed since it was hashed still refuses.
+    Returns the count adopted, or 0 when a cache was already adopted or none
+    was written.
+    """
+    if (identity_cache_path is None or not Path(identity_cache_path).is_file()
+            or owner.adopted_identity_cache_sha256 is not None):
+        return 0
+    adopted = owner.adopt_streamed_identity_cache(identity_cache_path)
+    print(f"tessera_joint_aura: adopted {adopted} full source SHA proofs "
+          f"this pass wrote to {identity_cache_path}", flush=True)
+    return adopted
+
+
 def _seed_source_identity_cache(config, root):
     """Carry an explicitly bound old digest record into this pass's cache slot.
 
@@ -2794,6 +2815,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         result["source_prefetch"] = source_prefetch
         source = build_streamed_model_identity(runner, config["model"],
                                                identity_cache_path=identity_cache_path)
+        if source_authentication is not None:
+            _adopt_built_source_identity(source_authentication, identity_cache_path)
         source_execution = source_execution_identity(runner.model)
         layer_bytes = data.layer_render_bytes(runner.layer_index_for_qname)
         operator_policy = _admit_candidate_phase(command, config, data, layer_bytes)

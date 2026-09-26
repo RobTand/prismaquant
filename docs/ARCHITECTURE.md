@@ -1,5 +1,130 @@
 # PrismaQuant Architecture
 
+Tessera pin (2026-09-26, `ws-serve/1274-tessera-pin-v38`, PQ #1274): the
+serving-runtime pin and the reader dev pin move from `07bfcc0e9b…` to
+`af7a86d43d…`, Tessera master after #621. The packaged contract moves from v34
+to **v38** (digest `04d5a20a…9d22e4`, lane schema still v10), and admission
+moves with it:
+
+- **Minted (v38, tessera#604):** dense `TESSERA_E4M3_K1` and `TESSERA_BF16_K1`
+  cells at q832, q1024 and q1088, and routed cells for `TESSERA_E4M3_K1` at
+  q896 and `TESSERA_BF16_K1` at q1024. All are on
+  `localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a0…`, eager,
+  resident, `route_only`, smoke `not_recorded`, so they resolve
+  `backed_with_serve_flag` only under that image's scope.
+- **Withdrawn (v37, tessera#614):** the dense `TESSERA_BF16_K1` q1792 pair.
+  `TESSERA_BF16_K1_R1792` answers `unattested`/`no_cell` on every platform
+  again, so admission shrinks there.
+- **Reused ids (v38):** `tessera_e4m3_k1_routed_moe_sm121_{decode,batch}_resident`
+  no longer mean q1024 on `eugr/spark-vllm@sha256:0afec8d4…` through the
+  materialising kernel. They mean q896 on the new image through the compact
+  window MoE adapter. Routed `TESSERA_E4M3_K1_R1024` is unattested under
+  every scope. The route resolver keys on scope and rung, and the reviewed
+  answer compares cells field by field under their ids, so neither carries
+  the old claim over (`tests/test_tessera_pin_v38_scope.py`).
+- **Added (v35, tessera#607):** a third `sm_121` fp4 activation-quantiser row,
+  for `spark-vllm-nccl230@sha256:a5424378…`, the image the routed
+  `TESSERA_E2M1_K2` cells name.
+
+The two GLM serving images are different builds. `a5424378…` (2026-09-14)
+carries the routed `TESSERA_E2M1_K2` cells, and `f8dbe1a0…` (2026-09-25,
+tagged `a5424378-mtpmap1`) carries every v38 cell. Under one serving scope an
+allocation can admit one set or the other, not both. `export.py` and
+`grammar.py` are byte-identical to the previous pin, so the legal domain is a
+re-transcription. The PrismaBuild test interpreters are
+`/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4` on sparky, sparklina and
+dl380g10, and `…-af7a86d4-tf516` on both Sparks. No format, default, stage or
+ship gate changes. Gate: `tests/test_tessera_pin_v38_scope.py`.
+
+Stage B's spill replay reads through the IO engine, and each retained window
+keeps its renders on the device across its probes (2026-09-26,
+`claude/stageb-render-window-profile-1348`, PQ #1348). On GLM-5.3 layer 7
+(the #1291 after arm) a render window averaged 20.8 s, 47% of it spill replay
+and 42% projections. The replay read 272 GB in 804,674 calls on its own four
+reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
+143.5 s replay wall.
+
+- **Spill chunks are range entries.** `io_engine.ReadEntry.reader`
+  (`io_engine.py:619`) makes an entry that is not a file: the stream calls it
+  on the engine's pool and delivers what it returns. It has no path to pin
+  and no serialized buffer, so it is charged its held bytes only.
+  `StageBReplaySpill._open_replay_stream` (`joint_replay_spill.py:1064`)
+  opens one stream at the first replay, over every chunk of every pending
+  window and probe in replay order, one group per chunk. A chunk is read only
+  once its probe's capture has ended (`_chunk_ready`, `:1090`). Each chunk's
+  reader allocates its own pinned buffer and issues its 1 MiB direct reads in
+  order (`_read_chunk`, `:1095`); the engine reads as many chunks at once as
+  its measured rates ask for. `READ_WORKERS`, the reader thread and its
+  buffer queue are gone, and `tests/test_io_site_freeze.py` drops `_chunks`
+  and `_start_read_buffers`.
+- **The spill yields to the next window's renders.** Its budget is
+  `GuardReadBudget` (`joint_statistics_replay.py:231`) with `yield_to` and
+  `floor_bytes`: the guard's live headroom less what the render stream's next
+  group will still hold (`ReadStream.unread_bytes`, `io_engine.py:760`), and
+  never less than the two chunk buffers the replay phase reserves.
+- **One pool, one reclaim order.** On a GB10 the host and the device share
+  one pool, so a shortfall on it picks the reclaimer by the term that binds.
+  A host shortfall (the cgroup budget or the `MemAvailable` floor) asks
+  `memory_management.ordered_reclaimer` (`:787`, registered at
+  `joint_cost_quantum.py:2386`) for its bytes in order of refill cost: spill
+  chunks read ahead (`reclaim_replay`, `joint_replay_spill.py:1024`, which
+  also hands the pinned allocator's idle blocks back; a 64 MiB re-read from
+  local NVMe), then the render cache (a device copy of a render already
+  resident on the host), then renders read ahead (GBs re-read from the
+  stage). Each reclaimer is asked only for what the ones before it left. A
+  device-envelope shortfall asks the render cache alone
+  (`joint_cost_quantum.py:2390`), since nothing else frees device bytes.
+- **Pinned buffers charged what they hold.** torch's pinned allocator rounds
+  a request up to a power of two. A buffer asks one grid block over its size,
+  to align its start (`_aligned_buffer`, `joint_replay_spill.py:642`), so the
+  old 64 MiB read buffer held 128 MiB and each 256 MiB arena 512 MiB, while
+  the guard was charged the request: half of what was held. The read buffers
+  and arenas are now one grid block under `READ_BYTES` and `ARENA_BYTES`, so
+  their requests are those powers of two exactly, and the charge is the
+  rounded request (`_host_buffer_bytes`, `:630`). The block over stays: the
+  GB10 pinned allocator returns small blocks off the 4 KiB grid.
+- **Renders kept on the device.** `RetainedRenderDeviceCache`
+  (`joint_statistics_replay.py:273`) keeps each render a window's first probe
+  copies to the device, in the render's own dtype, while
+  `CaptureMemoryGuard.device_headroom_bytes` (`memory_management.py:626`)
+  admits it. That reading is the guard's own envelope, never
+  `torch.cuda.mem_get_info`: the device envelope less the CUDA caching
+  allocator's reservation, the host floor against `MemAvailable` (a CUDA
+  allocation on unified memory takes host pages and bypasses the memcg), and
+  the aggregate envelope of cgroup bytes plus the reservation, each less the
+  phase's reservations; the smallest wins. Later probes widen the kept copy to FP32 instead of copying the
+  host render again. The copy and the widening are exact, so every delta has
+  the same bytes. A render the headroom does not admit takes the old path.
+  The cache is a device-side reclaimer: the guard now also calls reclaimers
+  registered with `device=True` (`:652`) on a device-envelope shortfall
+  (`:443`), and the cache empties the CUDA caching allocator after it drops
+  renders. Unguarded, it keeps nothing (`UNGUARDED_RENDER_CACHE_BYTES`).
+- **Operator records once per window.** `record_operator` runs on a window's
+  first probe and once more after its last probe, before `after_window`
+  commits; the probes between read the resident render the first probe
+  recorded. An in-place write to a render fails the window's close instead of
+  the next probe, still before the commit.
+- **Counters.** Each window block in `counters.json` gains `reads`: the
+  spill's bytes, read calls, consumer wait (`reader_wait_s`) and reclaims,
+  the render stream's consumer wait, and the render cache's hits, misses,
+  admitted, refused, reclaims and peak bytes held.
+  `replay.spill.replay_stream` carries the spill stream's engine counters.
+- **What checks the spill's bytes.** The spill file is unlinked, job-local
+  and `O_DIRECT`. `StageBSpillScratch.read_into`
+  (`perturbed_x_cache.py:1608`) refuses a read outside the allocation or off
+  the direct-I/O grid (`_aligned`, `:1575`) and a short read, and `_fill`
+  refuses a tensor off its replay residue and overlapping envelopes. Probe
+  inputs are digested on the device at capture, and each later probe's are
+  compared with probe 0's (`_check_inputs`, `joint_replay_spill.py:1429`).
+  Nothing compares the bytes read back from the file with the bytes written;
+  PQ #1369 tracks a per-range checksum verified in the engine at read.
+
+Gate: `tests/test_io_engine.py`, `tests/test_stageb_one_pass_spill.py`
+(bitwise replay; chunks dropped ahead and read again; the render cache on the
+quantum), `tests/test_joint_retained_statistics_replay.py`,
+`tests/test_io_site_freeze.py`. No format, pipeline default, stage or ship
+gate changes.
+
 Stage B reads each retained window's renders while the window before it
 computes (2026-09-25, `claude/stageb-window-readahead-1291`, PQ #1291), through
 one IO engine, `prismaquant/io_engine.py` (the first version of PQ #1294).
@@ -57,9 +182,10 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   storage bytes), and freeing it returns them to the cgroup at once. The
   mapping is private: a write copies pages into anonymous memory and never
   reaches the sealed bytes. No Stage B consumer writes a render; the
-  identity read on every probe (`resident_render_identity`) compares the
-  tensor's version counter with the one recorded at load, so a `torch`
-  write in place fails the next probe. The PWC's other loads (`prefetch`,
+  identity read at a window's first probe and at its close
+  (`resident_render_identity`, PQ #1348) compares the tensor's version
+  counter with the one recorded at load, so a `torch` write in place fails
+  the window before it commits. The PWC's other loads (`prefetch`,
   a lazy `get`) and `tools/qualify_t4_overlay.py` keep the bytes path; they
   are PQ #1295 consolidation items.
 - **Release, not take.** A taken window's renders stay charged to the
@@ -1239,9 +1365,15 @@ pass traces a bounded run of capture groups and times every group and every
 gap between groups. `windowed=P` first runs a bounded windowed-replay shadow
 of probe P under a throwaway lease on window 0, whose statistics are
 discarded. Each traced pass writes `<quantum>-p<probe>-<kind>.trace.json.gz`,
-`.key_averages.txt` and `.timing.json`. Unset, the row runs the same code as
-before. It is a development instrument: no format, pipeline default or ship
-gate changes. Gate: `tests/test_stage_b_pass_profile.py`.
+`.key_averages.txt` and `.timing.json`. `render=W` (2026-09-26, PQ #1348)
+traces retained window W instead: one unit per probe, spanning the probe's
+spill replay, operator records and projections, each unit carrying the spill
+reader's counter deltas; it writes `<quantum>-w<window>-render.*`, and that
+window's kernel-time session is not opened. Unset, the row runs the same code
+as before. It is a development instrument: no format, pipeline default or ship
+gate changes. Gate: `tests/test_stage_b_pass_profile.py`,
+`tests/test_stageb_one_pass_spill.py`
+(`test_render_pass_profile_times_each_probe_of_its_window_and_changes_no_byte`).
 
 Checkpoint planes stream in leased windows (2026-09-24,
 `ws-rd/1142-grouped-reads`, PQ #1142). Stage B checkpoint-load and
@@ -1960,9 +2092,9 @@ run in a PrismaBuild test run. PrismaBuild #941's reconciliation named them:
 they were the six outcomes by which a full-suite summary exceeded its
 collection.
 
-The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e-tf516`
+The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4-tf516`
 carries transformers 5.16.1 and is otherwise the same interpreter. It exists
-on sparky only. `prismaquant/tessera_runtime/README.md` has the recipe and the
+on both Sparks. `prismaquant/tessera_runtime/README.md` has the recipe and the
 `pbtest` command for a PR that touches these modules. The full suite also
 passes on it (12,040 tests), and no skip names transformers.
 
@@ -2200,11 +2332,12 @@ and no page cache. A read chunk holds its inputs first and then each Linear's
 gradients together, in file order, so tensors that abut in the file land as
 one read. A buffer position never changes the arithmetic, only the residue
 does, and the residue is kept. Writes go out `WRITE_CALL_BYTES` (1 MiB) per
-call from the writer thread. Reads go out `READ_CALL_BYTES` (1 MiB) per call
-over `READ_WORKERS` (4) threads. On lina, from pinned memory, one 1 MiB write
-in flight ran 4.8 GB/s at an average queue of 4 and 0.11 ms await, against
-5.9 GB/s at a queue of 811 and 18 ms for a whole arena at once; four 1 MiB
-reads ran 6.9 GB/s (PB `f6733604db33`, `b55e4305076c`). An empty tensor takes
+call from the writer thread. Reads go out `READ_CALL_BYTES` (1 MiB) per call,
+one read chunk per IO engine read (PQ #1348; see the entry at the top). On
+lina, from pinned memory, one 1 MiB write in flight ran 4.8 GB/s at an
+average queue of 4 and 0.11 ms await, against 5.9 GB/s at a queue of 811 and
+18 ms for a whole arena at once; four 1 MiB reads ran 6.9 GB/s (PB
+`f6733604db33`, `b55e4305076c`). An empty tensor takes
 no slot and no run. The file reserves slot padding for at most
 `SpillGeometry.max_parts` tensors, (probes + 1) x targets x samples, each at
 most 512 bytes plus one grid block; the ceiling covers the reservation, and a
@@ -3112,6 +3245,65 @@ digest and its refusals. Modules that must stay free of the package import, such
 as `cluster_campaign` (loaded by path so it stays torch-free), keep their own
 copy. Citations into the touched modules are shifted. No stored digest, format,
 pipeline default, stage or ship gate changes.
+
+Re-stamped (2026-09-26, `ws-serve/1274-tessera-pin-v38`) for the **Tessera pin
+move to `af7a86d43d…`** (contract v34 -> v38, PQ #1274): the GLM serving
+image's window cells, the dense BF16 q1792 withdrawal, and the two reused
+routed E4M3 cell ids.
+
+Re-stamped (2026-09-25, `claude/identity-cache-portable-1363`) for **source
+identity proofs that survive another NFS mount, checked by one predicate**
+(PQ #1363, P2). This amends the PQ #843 stamp below.
+
+- **The reuse rule.** `cost_streaming.stat_fingerprint_reuse` returns
+  `exact`, `mount`, `dev` or `None`.
+  - `mount` means only `st_dev` differs and the live file is on NFS (`nfs`
+    or `nfs4` in `/proc/self/mountinfo`). There, the device number is the
+    client's anonymous number for the mount, and the inode is the server's
+    file id. Certified mode now admits it.
+  - `dev` means only `st_dev` differs on any other filesystem. Only dev mode
+    admits it. Only `dev` reuse prints the uncertified `[DEV-MODE]` line.
+  - Any other field difference refuses in both modes: path, inode, size,
+    mtime or ctime.
+- **Measured.** The pool read `st_dev` 64 and 66 on two mounts, with
+  identical inode, size, mtime and ctime on all 120 GLM-5.3 shards. The
+  capture owner refused its proof with "names another object", and the M4
+  prepare re-hashed about 640 GB.
+- **One predicate and one constructor.** `stat_fingerprint(path, stat)`
+  builds the record, and the predicate checks it, for:
+  - the identity cache build and validation;
+  - the export digest memo, whose portable index is no longer dev-only;
+  - the capture owner's `adopt_streamed_identity_cache`, which had its own
+    exact-tuple comparison;
+  - Tessera digest adoption.
+- **Parallel hashing.** `build_streamed_model_identity` now hashes uncovered
+  shards through `_hash_source_shards`, over the admitted CPUs, instead of a
+  serial loop in the main thread.
+
+The record format and the identity bytes are unchanged. Gates:
+`tests/test_source_identity_portable_device.py` (two NFS mounts of one
+object reuse in certified mode; a same-inode object that differs in size,
+mtime or ctime refuses; mountinfo longest-prefix parsing) and
+`tests/test_selected_source_authentication.py` (owner adoption across
+mounts).
+
+Re-stamped (2026-09-26, `claude/stageb-render-window-profile-1348`) for
+**Stage B spill replay through the IO engine and the device render cache**
+(PQ #1348): spill chunks become IO engine range entries that yield to the
+next window's renders, pinned spill buffers are charged what the pinned
+allocator holds (the guard had been charged half), each window keeps its
+renders on the device across its probes, operator records run once per
+window and once at its close, and the capture guard gains
+`device_headroom_bytes` (read from its own envelope and `MemAvailable`, never
+`torch.cuda.mem_get_info`) and device-side reclaimers. A host shortfall
+reclaims spill read-ahead, then the render cache, then render read-ahead; a
+device shortfall reclaims the render cache alone. See the entry at the top. No format, pipeline default or ship gate changes.
+
+Re-stamped (2026-09-26, `claude/stageb-render-window-profile-1348`) for
+**the Stage B render window profile** (PQ #1348), an opt-in development
+instrument: `render=W` in `PRISMAQUANT_STAGE_B_PASS_PROFILE_SPEC` traces one
+retained window's probes. Unset, the row runs the same code as before. No
+format, pipeline default or ship gate changes.
 
 Re-stamped (2026-09-26, `ws-ra/spool-window-1364`) for **charging every
 row's produced spool at placement** (PQ #1364, P2). `dispatch_joint_quanta.
@@ -23854,16 +24046,18 @@ top-1024 intersection bound, because no instrument in either repository
 produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `07bfcc0e9b7da13276938cb722bc7dcd893e6c63` (master after #580, #582, #583, #585 and
-#596, re-pinned 2026-09-22; version `0.1.0`, contract v34, lane schema v10 — unchanged:
-v25-v34 are additive for a v10 reader. v34 was first pinned at `acf9eafa6a…`
+Tessera `af7a86d43da3487179b7d16606ef0f5a3046d73c` (master after #621, re-pinned
+2026-09-26; version `0.1.0`, contract v38, lane schema v10, which v35-v38 keep.
+v35-v38 are not additive: v37 withdraws the dense BF16 q1792 pair and v38 reuses
+the two routed E4M3 cell ids for q896 on a different image. v34 was pinned at
+`07bfcc0e9b…` and first at `acf9eafa6a…`
 (master after #588, #590 and #592, same contract bytes), v32 at `cc739a55…`
 (the #562/#563 union head, 2026-09-19), v29 at `4c384e6049…`, v24 at `7dbbacbd…`, v23 at
 `1c827abc…`, v22 at `387eda36…` and `ba582d4…`, v21 landed at `b8b1cb38`
 in Tessera #313 and the release `e78959ed…` carried v20; first pinned
 2026-09-04 at `5acc2a6f…`, contract v17)
 and the SHA-256 of the `runtime_contract.json` it packages
-(`d37c9448…03472`);
+(`04d5a20a…9d22e4`);
 `require_pinned_tessera_runtime` refuses unless the pin equals the reader's
 three constants AND the installed contract hashes to that digest, and
 `tessera_lane_attested` ANDs that in (§5.7), as does the container arm's
