@@ -33,6 +33,7 @@ caller names outside it.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import hashlib
 import json
 import os
@@ -79,6 +80,7 @@ from .stage_a_chain_resume import (
     resume_declarations,
 )
 from .stage_a_chain_seed import seed_marker_path, seed_receipt_path
+from .digests import file_sha256hex
 
 BAND_TOOL_ENTRY_POINT = "prismaquant.joint_adjoint_band"
 BAND_RESULT_SCHEMA = "prismaquant.joint_adjoint_band.result.v1"
@@ -91,12 +93,7 @@ class BandRefused(RuntimeError):
     """The sealed sources do not reconstruct one checkpoint band."""
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+_sha256_file = partial(file_sha256hex, block_size=1 << 20)
 
 
 def _json_file(path, sha256=None, *, where: str):

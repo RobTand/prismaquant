@@ -182,7 +182,6 @@ def test_expanded_selection_resolves_and_caches_routes_by_explicit_unit_context(
     assert Counter(calls) == Counter({context.key(): 1 for context in contexts.values()})
     assert report["by_format"][_FORMAT]["units"] == len(assignment)
     assert report["by_format"][_FORMAT]["route"] is None
-    assert report["units_without_declared_lane"] == 0
     assert report["route_status_counts"] == {"backed": len(assignment)}
 
 

@@ -1513,9 +1513,9 @@ def build_shipcard(
         # bpp claim rather than only inside quant_config.  The exporters that
         # stamped ``provenance.cb_route_status`` were the retired Gridbook
         # lane's, and both the field and its two summarisers went into
-        # ``archive/gridbook_lane_2026-09-02/`` with them.  A live lane that
-        # needs the same stamp adds its own summariser here rather than
-        # inheriting a retired schema.
+        # ``archive/gridbook_lane_2026-09-02/`` with them.  The live stamp is
+        # ``build.route_histogram`` (``route_histogram_claim``, #1377), which
+        # the exporter writes into the build block beside ``achieved_bpp``.
     return card
 
 
@@ -1716,6 +1716,7 @@ def verify(
     # The exporter stamps ten build-lane keys; the cross-check above read one.
     # The rest of the forensic block is replayed here (#158).
     problems.extend(_verify_build_block(card))
+    problems.extend(_verify_route_histogram(card, model_dir=model_dir))
 
     if required is None:
         required = required_slots(card, model_dir=model_dir)
@@ -3447,6 +3448,83 @@ def required_slots(
 # ---------------------------------------------------------------------------
 # Build-lane fact collection (used by export_native_compressed)
 # ---------------------------------------------------------------------------
+#: ``build.route_histogram``: the recipe's route-status and activation-contract
+#: counts, copied onto the card beside ``achieved_bpp`` (principle 12, #1377).
+ROUTE_HISTOGRAM_SCHEMA = "prismaquant.route_histogram.v1"
+
+
+def route_histogram_claim(provenance: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The card's copy of an allocation's route histogram, or None.
+
+    ``provenance`` is the ``serving_lane_provenance`` the allocator writes
+    into the recipe's metadata (``allocator_candidates.
+    selection_serving_lane_provenance``). Only its counts travel: the per-unit
+    rows would not fit the card's byte reservation, and the recipe keeps them.
+    A recipe without provenance has no claim; the card's ``verify`` decides
+    whether that artifact owed one.
+    """
+    if not isinstance(provenance, Mapping) or "route_status_counts" not in provenance:
+        return None
+    return {
+        "schema": ROUTE_HISTOGRAM_SCHEMA,
+        "units_total": provenance.get("units_total"),
+        "route_status_counts": dict(provenance.get("route_status_counts") or {}),
+        "activation_contracts": dict(provenance.get("activation_contracts") or {}),
+    }
+
+
+def _count_table(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, Mapping):
+        return None
+    if not all(isinstance(key, str) and key and type(count) is int and count > 0
+               for key, count in value.items()):
+        return None
+    return dict(value)
+
+
+def _verify_route_histogram(
+    card: Mapping[str, Any], *, model_dir: str | os.PathLike | None = None,
+) -> list[str]:
+    """Replay ``build.route_histogram``, and require it on a Tessera card.
+
+    Every Tessera allocation writes ``serving_lane_provenance`` into its
+    recipe, so a Tessera card that carries no histogram lost it between the
+    recipe and the card. The obligation is read the way the uniform-control
+    obligation is (``_is_rate_axis_artifact``): from the card's lane, its build
+    block or the artifact's own config, OR-ed, so one erasure does not remove
+    it. A native compressed-tensors card owes none yet, because its allocation
+    writes no provenance (#1387). A histogram, wherever present, must be
+    self-consistent: positive integer counts under string keys, route statuses
+    summing to ``units_total``, and no more contracted units than units.
+    """
+    build = card.get("build")
+    histogram = build.get("route_histogram") if isinstance(build, Mapping) else None
+    if histogram is None:
+        owed = (str(card.get("lane") or "").strip().lower() == "tessera"
+                or _is_rate_axis_artifact(card, model_dir=model_dir))
+        if owed:
+            return ["build.route_histogram is missing: a Tessera card carries the "
+                    "recipe's route-status and activation-contract counts beside "
+                    "its bpp (principle 12); re-open the card from the exporter's "
+                    "build anchor"]
+        return []
+    if not isinstance(histogram, Mapping) or histogram.get("schema") != ROUTE_HISTOGRAM_SCHEMA:
+        return [f"build.route_histogram is not a {ROUTE_HISTOGRAM_SCHEMA} record"]
+    total = histogram.get("units_total")
+    statuses = _count_table(histogram.get("route_status_counts"))
+    contracts = _count_table(histogram.get("activation_contracts"))
+    if type(total) is not int or total <= 0 or statuses is None or contracts is None:
+        return ["build.route_histogram carries no positive units_total or a "
+                "count table that is not positive integers under names"]
+    if sum(statuses.values()) != total:
+        return [f"build.route_histogram route_status_counts sum to "
+                f"{sum(statuses.values())}, not units_total {total}"]
+    if sum(contracts.values()) > total:
+        return [f"build.route_histogram activation_contracts count "
+                f"{sum(contracts.values())} units, more than units_total {total}"]
+    return []
+
+
 def kv_shared_fisher_echo(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Echo the KV-cotangent / shared-Fisher flag state (D24 caveat).
 

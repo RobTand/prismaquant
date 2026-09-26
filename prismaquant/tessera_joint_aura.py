@@ -37,6 +37,7 @@ from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
 from .schemas import Contract
+from .digests import file_sha256hex
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -147,9 +148,7 @@ _HEAD_WALK_SYNTHESIS_LOCK = threading.Lock()
 _require = Contract(ValueError).require
 
 
-def _sha(path):
-    with Path(path).open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
+_sha = file_sha256hex
 
 
 def _stat_signature(value):
@@ -2242,15 +2241,18 @@ def _load_plan(path, digest, *, projection_runtime=True, defer_pool_reads=False)
     path = _bound({"path": str(path), "sha256": digest}, "joint anchor plan")
     config = json.loads(path.read_text())
     _same(config.get("schema"), SCHEMA, "joint anchor plan schema")
-    if config.get("source_identity_cache") is not None:
-        binding = config["source_identity_cache"]
+    for key, label in (("source_identity_cache", "source identity cache"),
+                       ("source_digest_cache", "source digest cache")):
+        if config.get(key) is None:
+            continue
+        binding = config[key]
         if defer_pool_reads:
             _require(isinstance(binding, dict) and set(binding) == {"path", "sha256"}
                      and isinstance(binding["path"], str)
                      and isinstance(binding["sha256"], str),
-                     "source identity cache: independently bound path/SHA256 required")
+                     f"{label}: independently bound path/SHA256 required")
         else:
-            _bound(binding, "source identity cache")
+            _bound(binding, label)
     # A plan that names a historical encoder seal is the only place one may be
     # admitted; the strict default is the same as before this field existed.
     normalize_historical_encoder_reuse(config.get("historical_encoder_reuse"))
@@ -2371,6 +2373,39 @@ def _adopt_built_source_identity(owner, identity_cache_path):
     return adopted
 
 
+#: What a GPU pass says when its source proof does not cover the source
+#: (PQ #1374). Hashing is CPU and IO work; under a GPU reservation it idled
+#: the device for about 70 minutes on GLM-5.3, so the pass refuses and names
+#: the CPU-only quantum that produces the proof instead.
+IDENTITY_QUANTUM_REFUSAL = (
+    "a GPU pass does not hash its source. Produce the proof in a CPU-only "
+    "quantum upstream of this row -- `python -m prismaquant.tessera_joint_aura "
+    "identity --model {model} --out <digest cache>` -- and bind it as the "
+    "plan's source_digest_cache (PQ #1374)")
+
+
+def build_source_digest_cache(model, out):
+    """The CPU-only identity quantum: hash every source shard into ``out``.
+
+    Writes :func:`cost_streaming.build_source_checkpoint_identity`'s digest
+    cache, which a GPU pass binds as ``source_digest_cache`` and seeds its
+    streamed identity from without reading a payload byte. An existing
+    ``out`` is read first, so a rerun hashes only shards whose stat
+    fingerprint changed. No runner, lease or device is touched.
+    """
+    from .cost_streaming import build_source_checkpoint_identity
+
+    before = _io_counters()
+    identity = build_source_checkpoint_identity(model, digest_cache_path=out)
+    after = _io_counters()
+    _require(Path(out).is_file(), f"source digest cache was not written to {out}")
+    return {"out": str(out), "sha256": _sha(Path(out)),
+            "shards": len(identity["shards"]),
+            "source_bytes": sum(int(row["size"]) for row in identity["shards"]),
+            "read_bytes": int(after.get("read_bytes", 0)) - int(before.get("read_bytes", 0)),
+            "content_sha256": identity["content_sha256"]}
+
+
 def _seed_source_identity_cache(config, root):
     """Carry an explicitly bound old digest record into this pass's cache slot.
 
@@ -2378,10 +2413,25 @@ def _seed_source_identity_cache(config, root):
     the whole source again before it can compare the live model. This copies
     only its existing identity JSON, never a weight or a render, and refuses
     any pre-existing different local cache rather than mixing two proofs.
+
+    With nothing bound, a pass after the prepare starts from the proof the
+    prepare wrote in the same output root -- the capture owner already adopts
+    that file (``_prepare_source_owner``), and without this the run's streamed
+    identity build rehashed the whole source under its GPU reservation
+    (PQ #1374). The copy is a starting point, not an admission: every
+    digest in it is still reused only where the live stat fingerprint admits it.
     """
     destination = Path(root) / "source-identity.json"
     binding = config.get("source_identity_cache")
     if binding is None:
+        prepared = (None if config.get("output_root") is None else
+                    Path(config["output_root"]) / "prepare" / "source-identity.json")
+        if (prepared is not None and prepared.is_file() and not destination.exists()
+                and prepared.resolve() != destination.resolve()):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_bytes(destination, prepared.read_bytes())
+            print(f"tessera_joint_aura: seeded {destination} from the prepare's "
+                  f"identity proof {prepared}", flush=True)
         return destination
     source = _bound(binding, "source identity cache")
     if source.resolve() == destination.resolve():
@@ -2814,8 +2864,11 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         require_capture_compatibility(config.get('source_capture_compatibility'),
                                       capture=config['canonical_capture'], model=runner.model)
         result["source_prefetch"] = source_prefetch
-        source = build_streamed_model_identity(runner, config["model"],
-                                               identity_cache_path=identity_cache_path)
+        source = build_streamed_model_identity(
+            runner, config["model"], identity_cache_path=identity_cache_path,
+            digest_cache_path=(None if config.get("source_digest_cache") is None
+                               else _bound(config["source_digest_cache"], "source digest cache")),
+            refuse_uncovered=IDENTITY_QUANTUM_REFUSAL.format(model=config["model"]))
         if source_authentication is not None:
             _adopt_built_source_identity(source_authentication, identity_cache_path)
         source_execution = source_execution_identity(runner.model)
@@ -3111,9 +3164,14 @@ def _compare_mirrored_renders(data):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "run", "synthesize"))
-    parser.add_argument("--plan", type=Path, required=True)
-    parser.add_argument("--plan-sha256", required=True)
+    parser.add_argument("command", choices=("prepare", "run", "synthesize", "identity"))
+    parser.add_argument("--plan", type=Path)
+    parser.add_argument("--plan-sha256")
+    parser.add_argument("--model", type=Path,
+                        help="identity: the source checkpoint to hash (no plan: the "
+                             "digest cache is an input to the plan, PQ #1374)")
+    parser.add_argument("--out", type=Path,
+                        help="identity: where to write the source digest cache")
     parser.add_argument("--prepared", type=Path)
     parser.add_argument("--prepared-sha256")
     parser.add_argument("--resume", action="store_true")
@@ -3145,6 +3203,16 @@ def main(argv=None):
                         help="synthesize: publish into the campaign row caches")
     parser.add_argument("--receipt", type=Path)
     args = parser.parse_args(argv)
+    if args.command == "identity":
+        # The CPU-only quantum: no plan, lease, runner or device (PQ #1374).
+        if args.model is None or args.out is None or args.plan is not None:
+            parser.error("identity takes --model and --out, and no --plan")
+        print(json.dumps(build_source_digest_cache(args.model, args.out)))
+        return 0
+    if args.plan is None or args.plan_sha256 is None:
+        parser.error("--plan and --plan-sha256 are required")
+    if args.model is not None or args.out is not None:
+        parser.error("--model and --out apply only to identity")
     if bool(args.source_transition) != bool(args.source_transition_sha256):
         parser.error("--source-transition and --source-transition-sha256 are required together")
     if bool(args.prepared) != bool(args.prepared_sha256):

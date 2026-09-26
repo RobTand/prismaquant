@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager, nullcontext
 import dataclasses
 from dataclasses import dataclass
+from functools import partial
 import hashlib
 import json
 import os
@@ -28,7 +29,7 @@ from prismaquant.layer_streaming import (
     _compute_position_embeddings,
     _get_final_norm,
 )
-from .digests import DIRECT_ASCII_LAX
+from .digests import DIRECT_ASCII_LAX, file_sha256hex
 
 
 STREAMED_MODEL_IDENTITY_SCHEMA = "prismaquant.streamed_model.identity.v1"
@@ -5883,15 +5884,7 @@ def build_streamed_causal_lm(
     return runner
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(16 * 1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
+_file_sha256 = partial(file_sha256hex, block_size=16 * 1024 * 1024)
 
 
 def stat_fingerprint(path: str | Path, observed: os.stat_result) -> dict[str, object]:
@@ -6222,6 +6215,55 @@ def _hash_source_shards(
         pool.shutdown(wait=True, cancel_futures=True)
 
 
+def _digest_cache_digests(
+    reusable: dict[str, dict[str, object]],
+    fingerprints: list[dict[str, object]],
+) -> list[str | None]:
+    """The recorded digest for each live fingerprint, or ``None`` where none is admitted.
+
+    ``reusable`` is a parsed source digest cache
+    (:func:`_read_source_checkpoint_digest_cache`). It is the one lookup for
+    both of its readers: :func:`build_source_checkpoint_identity`, and the
+    seed of :func:`build_streamed_model_identity` (PQ #1374).
+    """
+    # A digest cache written on another mount of the same export keys every
+    # entry under that host's device number. Re-index by the portable key
+    # without touching the file format; two entries that agree on everything
+    # but bytes taint the key instead of reusing. Malformed stored rows are
+    # skipped outright: without the exact six-field shape a row must never
+    # match, or a cache missing `device` would reuse against every host.
+    # Whether a portable match is admitted is ``stat_fingerprint_reuse``'s
+    # decision (PQ #1363), not this index's.
+    portable_index: dict[str, dict[str, object]] = {}
+    tainted: set[str] = set()
+    for entry in reusable.values():
+        stored = entry.get("fingerprint") if isinstance(entry, dict) else None
+        if not _well_formed_fingerprint(stored):
+            continue
+        try:
+            key = portable_fingerprint_key(stored)
+        except (TypeError, ValueError):
+            continue
+        if key in tainted:
+            continue
+        prior = portable_index.get(key)
+        if prior is None:
+            portable_index[key] = entry
+        elif prior.get("sha256") != entry.get("sha256"):
+            tainted.add(key)
+            portable_index.pop(key, None)
+    digests: list[str | None] = []
+    for fingerprint in fingerprints:
+        cached = reusable.get(canonical_fingerprint_key(fingerprint))
+        if cached is None and _well_formed_fingerprint(fingerprint):
+            candidate = portable_index.get(portable_fingerprint_key(fingerprint))
+            if candidate is not None and stat_fingerprint_reusable(
+                    fingerprint, candidate.get("fingerprint")):
+                cached = candidate
+        digests.append(str(cached["sha256"]) if cached is not None else None)
+    return digests
+
+
 def build_source_checkpoint_identity(
     source_model: str | Path,
     *,
@@ -6300,41 +6342,7 @@ def build_source_checkpoint_identity(
     )
 
     fingerprints = [_streamed_identity_stat_fingerprint(path) for path in ordered]
-    # A digest cache written on another mount of the same export keys every
-    # entry under that host's device number. Re-index by the portable key
-    # without touching the file format; two entries that agree on everything
-    # but bytes taint the key instead of reusing. Malformed stored rows are
-    # skipped outright: without the exact six-field shape a row must never
-    # match, or a cache missing `device` would reuse against every host.
-    # Whether a portable match is admitted is ``stat_fingerprint_reuse``'s
-    # decision (PQ #1363), not this index's.
-    portable_index: dict[str, dict[str, object]] = {}
-    tainted: set[str] = set()
-    for entry in reusable.values():
-        stored = entry.get("fingerprint") if isinstance(entry, dict) else None
-        if not _well_formed_fingerprint(stored):
-            continue
-        try:
-            key = portable_fingerprint_key(stored)
-        except (TypeError, ValueError):
-            continue
-        if key in tainted:
-            continue
-        prior = portable_index.get(key)
-        if prior is None:
-            portable_index[key] = entry
-        elif prior.get("sha256") != entry.get("sha256"):
-            tainted.add(key)
-            portable_index.pop(key, None)
-    digests: list[str | None] = []
-    for fingerprint in fingerprints:
-        cached = reusable.get(canonical_fingerprint_key(fingerprint))
-        if cached is None and _well_formed_fingerprint(fingerprint):
-            candidate = portable_index.get(portable_fingerprint_key(fingerprint))
-            if candidate is not None and stat_fingerprint_reusable(
-                    fingerprint, candidate.get("fingerprint")):
-                cached = candidate
-        digests.append(str(cached["sha256"]) if cached is not None else None)
+    digests = _digest_cache_digests(reusable, fingerprints)
     misses = [index for index, digest in enumerate(digests) if digest is None]
     if misses and dev_mode_enabled():
         # The digests key every cache, so a miss is hashed in both modes
@@ -6477,6 +6485,8 @@ def build_streamed_model_identity(
     *,
     identity_cache_path: str | Path | None = None,
     identity_cache_bytes: bytes | None = None,
+    digest_cache_path: str | Path | None = None,
+    refuse_uncovered: str | None = None,
 ) -> dict[str, object]:
     """Hash the complete checkpoint backing a streamed cost run.
 
@@ -6490,6 +6500,14 @@ def build_streamed_model_identity(
     ``identity_cache_bytes`` is a read-only cache the caller already read
     and bound by digest (the Stage B head slice, PQ #1010): it is parsed and
     reused exactly like a cache file, and nothing is ever written back.
+
+    ``digest_cache_path`` is a runner-free source digest cache
+    (:func:`build_source_checkpoint_identity`'s format), made by a CPU-only
+    quantum upstream of this pass (PQ #1374). A shard the identity cache
+    does not cover reuses its digest when the same fingerprint predicate
+    admits it. ``refuse_uncovered`` turns any shard still uncovered after
+    both caches into a refusal before a byte is hashed; its text names the
+    quantum that should have produced the proof.
     """
     from prismaquant.cost_stage_checkpoint import (
         canonical_json,
@@ -6619,10 +6637,32 @@ def build_streamed_model_identity(
             f"{len(portable_paths)} recorded shard digests across a "
             "client device-number difference (dev-only portable reuse; "
             "certified mode would rehash): uncertified")
-    if dev_mode_enabled():
+    seeded = 0
+    if digest_cache_path is not None:
+        pending = [fingerprint for fingerprint in fingerprints
+                   if str(fingerprint["path"]) not in reusable_sha]
+        seed = _read_source_checkpoint_digest_cache(Path(digest_cache_path))
+        for fingerprint, digest in zip(
+                pending, _digest_cache_digests(seed, pending), strict=True):
+            if digest is not None:
+                reusable_sha[str(fingerprint["path"])] = digest
+                seeded += 1
+    uncovered = [
+        (str(fingerprint["path"]), int(fingerprint["size"]))
+        for fingerprint in fingerprints
+        if str(fingerprint["path"]) not in reusable_sha
+    ]
+    if uncovered and refuse_uncovered is not None:
+        raise RuntimeError(
+            f"source identity would hash {sum(size for _, size in uncovered)} "
+            f"bytes across {len(uncovered)} shard(s) (first: "
+            f"{uncovered[0][0]}) inside this pass: neither the identity cache "
+            f"{cache_path} nor the digest cache {digest_cache_path} covers "
+            f"them; {refuse_uncovered}")
+    if uncovered and dev_mode_enabled():
         # The digests key every cache, so uncovered shards are hashed below in
         # both modes (PQ #1147): dev mode only says so, loudly.
-        if not have_cache:
+        if not have_cache and not seeded:
             total_live = sum(
                 int(fingerprint["size"]) for fingerprint in fingerprints)
             where = (f"at the declared {cache_path}" if cache_path is not None
@@ -6631,20 +6671,14 @@ def build_streamed_model_identity(
                 f"source rehash of {total_live} bytes: no usable identity "
                 f"cache {where}; hashing every shard now")
         else:
-            uncovered = [
-                (str(fingerprint["path"]), int(fingerprint["size"]))
-                for fingerprint in fingerprints
-                if str(fingerprint["path"]) not in reusable_sha
-            ]
-            if uncovered:
-                total = sum(size for _, size in uncovered)
-                new_paths = [path for path, _ in uncovered
-                             if path not in mutated_paths]
-                dev_warning(
-                    f"source rehash of {total} bytes across {len(uncovered)} "
-                    f"shard(s) ({len(mutated_paths)} mutated, {len(new_paths)} "
-                    f"new; first: {uncovered[0][0]}): the declared cache "
-                    f"{cache_path} does not cover them; hashing them now")
+            total = sum(size for _, size in uncovered)
+            new_paths = [path for path, _ in uncovered
+                         if path not in mutated_paths]
+            dev_warning(
+                f"source rehash of {total} bytes across {len(uncovered)} "
+                f"shard(s) ({len(mutated_paths)} mutated, {len(new_paths)} "
+                f"new; first: {uncovered[0][0]}): the declared cache "
+                f"{cache_path} does not cover them; hashing them now")
 
     # Uncovered shards go through the one source hasher, in parallel over the
     # admitted CPUs. This loop used to hash them one at a time in the main

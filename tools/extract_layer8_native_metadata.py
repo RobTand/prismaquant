@@ -1,14 +1,15 @@
 """Bounded whole-operator inputs: metadata only, no wire/render/H payload reads."""
-import argparse,hashlib,json,pickle,os
+import argparse,json,pickle,os
 from pathlib import Path
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_aura import activation_identity
 from prismaquant import format_registry as fr
+from prismaquant.digests import bytes_sha256hex
 ROOT=Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/t4-reuse-20260922')
 BASE=Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911')
 PREP=ROOT.parent/'allocation/joint-panel/complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02/prepare/prepared.json'
 FORMATS=('TESSERA_E4M3_K1_R1024','TESSERA_BF16_K1_R1024','TESSERA_E2M1_K2_R896')
-def sha(raw):return hashlib.sha256(raw).hexdigest()
+sha = bytes_sha256hex
 def binding(path):return {'path':str(path),'sha256':sha(path.read_bytes())}
 def unit(root,q):
  path=root/'cost.anchors.json.parts/units'/(sha(q.encode())+'.pkl');raw=path.read_bytes();env=pickle.loads(raw);assert sha(env['payload'])==env['payload_sha256'];return pickle.loads(env['payload']),{'path':str(path),'sha256':sha(raw),'payload_sha256':env['payload_sha256']}

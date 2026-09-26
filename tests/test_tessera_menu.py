@@ -1245,7 +1245,7 @@ def test_selection_provenance_counts_tessera_units_by_route_status():
     prov = selection_serving_lane_provenance(
         {"a": "TESSERA_E2M1_K2_R896", "b": "TESSERA_E4M3_K1_R896"},
         None, "tessera_research_sm121")
-    assert prov["units_without_declared_lane"] == 0
+    assert "no_declared_lane" not in prov["route_status_counts"]
     assert prov["route_status_counts"].get(tm.ROUTE_STATUS_UNATTESTED) == 2
 
 

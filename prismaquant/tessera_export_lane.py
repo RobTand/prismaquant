@@ -2143,7 +2143,7 @@ def preflight(model_path: str | Path, *, target=None,
     priced_inputs = None
     if assignment_path is not None:
         from .layer_config import read_layer_config_metadata
-        from .shipcard import file_sha256
+        from .shipcard import file_sha256, route_histogram_claim
 
         assignment_sha = file_sha256(assignment_path)
         if assignment_sha is None:
@@ -2165,6 +2165,13 @@ def preflight(model_path: str | Path, *, target=None,
                    if priced_inputs.get('hessian_reference_binding') is not None else {}),
             },
         }
+        # Principle 12: the recipe's route-status and activation-contract
+        # counts travel on the card beside its bpp, and `lane_shipcard open
+        # --build-json` stamps this anchor whole onto the card (#1377).
+        route_histogram = route_histogram_claim(
+            read_layer_config_metadata(assignment_path).get("serving_lane_provenance"))
+        if route_histogram is not None:
+            build["route_histogram"] = route_histogram
         if priced_inputs.get("input_global_scale_policy") is not None:
             # The formula the artifact's own activation scalars came out of.
             # BESIDE priced_inputs for the same reason the grouping block is:

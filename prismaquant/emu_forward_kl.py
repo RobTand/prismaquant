@@ -30,7 +30,6 @@ tool's number.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import inspect
 import json
 from pathlib import Path
@@ -41,6 +40,7 @@ import torch
 from . import format_registry as fr
 from .allocator_candidates import PASSTHROUGH_SOURCE_REQUIREMENTS
 from .measure_quant_cost import canonical_linear_name
+from .digests import bytes_sha256hex
 
 # Teacher-confident threshold: teacher top-1 prob must strictly exceed this
 # for a position to enter the clean confident lane.
@@ -65,8 +65,7 @@ def _git_commit() -> str | None:
     return _git_head_commit()
 
 
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+_sha256 = bytes_sha256hex
 
 
 # ---------------------------------------------------------------------------

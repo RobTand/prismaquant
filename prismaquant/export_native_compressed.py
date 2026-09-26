@@ -8658,6 +8658,16 @@ def _write_shipcard(
         "render_levers": _render_lever_provenance(),
         "kv_shared_fisher": _shipcard.kv_shared_fisher_echo(),
     }
+    # Principle 12: the recipe's route histogram travels beside the bpp. A
+    # native allocation writes no serving_lane_provenance yet (#1387), so this
+    # stamps only when the recipe carries one.
+    if layer_config_path:
+        from .layer_config import read_layer_config_metadata
+
+        route_histogram = _shipcard.route_histogram_claim(
+            read_layer_config_metadata(layer_config_path).get("serving_lane_provenance"))
+        if route_histogram is not None:
+            build["route_histogram"] = route_histogram
     # Stamp the lane the card was opened on.  This exporter writes exactly
     # one container, and until #631 it stamped none -- so `lane_gate_slots`
     # answered `()` for every native card and the lane's own declarations

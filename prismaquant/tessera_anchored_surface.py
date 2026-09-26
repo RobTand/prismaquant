@@ -7,6 +7,7 @@ the neutral numerical core never turns that quantity into AURA.
 """
 from __future__ import annotations
 
+from functools import partial
 import hashlib
 import json
 import math
@@ -23,6 +24,7 @@ from .cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, canonical_json_sha256, unit_path,
 )
 from .schemas import Contract
+from .digests import file_sha256hex
 
 PLAN_SCHEMA = "prismaquant.tessera_anchored_replay.plan.v1"
 REPORT_SCHEMA = "prismaquant.tessera_anchored_replay.report.v1"
@@ -41,12 +43,7 @@ def _digest(value):
     return canonical_json_sha256(value, where="anchored replay identity")
 
 
-def _sha(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+_sha = partial(file_sha256hex, block_size=1024 * 1024)
 
 
 def _positive(value):

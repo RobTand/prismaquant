@@ -17,7 +17,6 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import json
-import hashlib
 import math
 import os
 from pathlib import Path
@@ -42,6 +41,7 @@ from prismaquant.cost_stage_checkpoint import (
     prepare_journal,
     write_unit,
 )
+from .digests import file_sha256hex
 
 
 # Re-exported, not redefined: the allocator's admission branch keys off these
@@ -71,12 +71,7 @@ class AnchoredCostError(RuntimeError):
     """A fail-closed plugin, fit, render, or pricing contract violation."""
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(8 * 1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
+_sha256_file = file_sha256hex
 
 
 def _allocator_invocation_identity(
