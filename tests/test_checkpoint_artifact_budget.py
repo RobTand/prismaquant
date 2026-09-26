@@ -723,14 +723,14 @@ def test_borrowed_snapshot_shares_backing_where_state_dict_copies():
     assert torch.equal(borrowed_tensor, original)
     assert borrowed["enabled"] == copied["enabled"]
     assert borrowed["counters"] == copied["counters"]
-    # Portable bytes: same length and same reloaded values (torch view vs
-    # base pickling may differ by metadata byte-for-byte, so the writer
-    # gate below pins sizes plus loaded equality, not raw dump identity).
+    # A borrowed view may serialize its whole backing storage, whereas the
+    # copy serializes only its own storage. Check both loaded values; their
+    # byte counts are not a semantic promise.
     dumped_borrowed = pickle.dumps(borrowed, protocol=pickle.HIGHEST_PROTOCOL)
     dumped_copied = pickle.dumps(copied, protocol=pickle.HIGHEST_PROTOCOL)
-    assert len(dumped_borrowed) == len(dumped_copied)
-    reloaded = pickle.loads(dumped_borrowed)
-    assert torch.equal(reloaded["accumulators"][0]["tensor"], original)
+    for payload in (dumped_borrowed, dumped_copied):
+        reloaded = pickle.loads(payload)
+        assert torch.equal(reloaded["accumulators"][0]["tensor"], original)
 
 
 def test_borrowed_snapshot_refuses_live_owner_like_state_dict():
@@ -781,12 +781,26 @@ def test_stage_a_snapshot_boundary_makes_no_bulk_copies(tmp_path, monkeypatch):
         assert state["accumulators"][0]["tensor"].data_ptr() == original.data_ptr()
 
 
-def test_stage_a_borrowed_snapshot_writes_unchanged_loadable_checkpoint(tmp_path):
-    """A fitting borrowed snapshot writes equal-sized loadable bytes with equal values."""
+@pytest.mark.parametrize("extra_backing_elements", [0, 1])
+def test_stage_a_borrowed_snapshot_writes_unchanged_loadable_checkpoint(
+        tmp_path, extra_backing_elements):
+    """Both snapshot forms load equally and commit their own actual file bytes."""
     from prismaquant.joint_adjoint_checkpoints import load_adjoint_checkpoint
     from prismaquant.joint_cost_stage_a import shared_adjoint_snapshot
 
     owners = [[_accumulated_cotangent(3.0)], [_accumulated_cotangent(5.0)]]
+    if extra_backing_elements:
+        # A contiguous view can hold more backing than logical elements.
+        # Borrowing serializes that backing; copying owns only the elements.
+        owner = owners[0][0]
+        slot, tensor = next(iter(owner._acc.items()))
+        backing = torch.empty(tensor.numel() + extra_backing_elements,
+                              dtype=tensor.dtype)
+        backing[:tensor.numel()].copy_(tensor.reshape(-1))
+        owner._acc[slot] = backing[:tensor.numel()].view(tensor.shape)
+        assert owner._acc[slot].is_contiguous()
+        assert (owner._acc[slot].untyped_storage().nbytes()
+                > tensor.numel() * tensor.element_size())
     borrowed = shared_adjoint_snapshot(owners)
     copied = {(probe, batch): owners[probe][batch].state_dict()
               for probe in range(len(owners)) for batch in range(len(owners[probe]))}
@@ -801,17 +815,34 @@ def test_stage_a_borrowed_snapshot_writes_unchanged_loadable_checkpoint(tmp_path
     record_c = write_adjoint_checkpoint(
         space_c, boundary=5, session=_session(), cotangents=dict(plane),
         shared_adjoint=copied, shared_pass=_shared_pass(), owner=owner_c)
-    bytes_b = {row["name"]: row["file_bytes"]
-               for row in record_b["shared_state_entries"] if row["name"].startswith("shared-adjoint")}
-    bytes_c = {row["name"]: row["file_bytes"]
-               for row in record_c["shared_state_entries"] if row["name"].startswith("shared-adjoint")}
-    assert bytes_b == bytes_c
-    _cotangents, shared_b, _pass = load_adjoint_checkpoint(space_b, record_b)
-    assert torch.equal(_cotangents[(0, 0)], plane[(0, 0)])
+    for space, owner, record in ((space_b, owner_b, record_b),
+                                 (space_c, owner_c, record_c)):
+        for entry in record["shared_state_entries"]:
+            assert Path(entry["path"]).stat().st_size == entry["file_bytes"]
+        actual = (sum(row["file_bytes"] for row in record["activation_entries"])
+                  + sum(row["file_bytes"] for row in record["shared_state_entries"])
+                  + (Path(space) / "checkpoints" / "boundary-005"
+                     / "checkpoint.json").stat().st_size)
+        commitment = owner.checkpoint_commitment(record["cotangent_sha256"])
+        assert commitment["actual_bytes"] == actual
+        assert commitment["envelope_bytes"] - actual == commitment["unused_bytes"]
+        assert commitment["unused_bytes"] >= 0
+    if extra_backing_elements:
+        sizes_b = {row["name"]: row["file_bytes"]
+                   for row in record_b["shared_state_entries"]}
+        sizes_c = {row["name"]: row["file_bytes"]
+                   for row in record_c["shared_state_entries"]}
+        assert sizes_b["shared-adjoint-0-0"] > sizes_c["shared-adjoint-0-0"]
+    cotangents_b, shared_b, pass_b = load_adjoint_checkpoint(space_b, record_b)
+    cotangents_c, shared_c, pass_c = load_adjoint_checkpoint(space_c, record_c)
+    assert pass_b == pass_c
+    for key in plane:
+        assert torch.equal(cotangents_b[key], plane[key])
+        assert torch.equal(cotangents_c[key], plane[key])
     for key, state in borrowed.items():
         want = state["accumulators"][0]["tensor"]
-        got = shared_b[key]["accumulators"][0]["tensor"]
-        assert torch.equal(got, want)
+        assert torch.equal(shared_b[key]["accumulators"][0]["tensor"], want)
+        assert torch.equal(shared_c[key]["accumulators"][0]["tensor"], want)
 
 
 def test_borrowed_snapshot_refuses_noncontiguous_before_copying(tmp_path, monkeypatch):
