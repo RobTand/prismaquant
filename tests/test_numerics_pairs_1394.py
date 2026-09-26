@@ -39,11 +39,17 @@ def _one_thread():
 
 
 def _site(ref):
-    module, _, name = ref.rpartition(".")
-    owner = importlib.import_module(module)
-    for part in name.split("."):
-        owner = getattr(owner, part)
-    return owner
+    """Resolve ``package.module.name[.attr]`` through the old site's path."""
+    parts = ref.split(".")
+    for split in range(len(parts) - 1, 0, -1):
+        try:
+            owner = importlib.import_module(".".join(parts[:split]))
+        except ModuleNotFoundError:
+            continue
+        for part in parts[split:]:
+            owner = getattr(owner, part)
+        return owner
+    raise ModuleNotFoundError(ref)
 
 
 def _bits(value):
