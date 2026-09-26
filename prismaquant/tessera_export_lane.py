@@ -565,12 +565,23 @@ def _source_unit_shapes(model_path: str | Path, profile,
                         shards: dict[str, str] | None = None) -> dict[str, list[tuple[str, tuple]]]:
     """Read source headers and the shared name projection; never load weights.
 
+    Keyed by the SOURCE unit: the checkpoint tensor name without its
+    ``.weight`` leaf.  That is the lane's join key -- Tessera's
+    ``plan_from_layer_config.py`` and its exporter match allocation names to
+    checkpoint tensors directly, with no recipe rewrite -- so the shapes an
+    allocation is checked against must be looked up in the same namespace.
+    The recipe namespace (``NameProjection.recipe_unit``) differs from it on
+    every profile whose ``live_to_recipe`` rewrites a prefix: glm5_next folds
+    ``model.language_model.`` to ``model.``, and a GLM allocation keyed by
+    source units then found no shape at all (PrismaQuant #1388).  The name
+    projection still decides which tensors are body units (``MAPPED``).
+
     ``shards``, when given, is filled with ``{tensor: shard basename}`` for
     every mapped tensor, so a carried producer roster can be checked against
     the shard each source tensor actually lives in.
     """
     from .footprint import _read_safetensors_header
-    from .name_projection import MAPPED, NameProjection
+    from .name_projection import MAPPED, NameProjection, strip_weight_leaf
     from .source_prefetch import _unique_safetensor_shards
 
     paths = _unique_safetensor_shards(model_path)
@@ -591,7 +602,7 @@ def _source_unit_shapes(model_path: str | Path, profile,
             projected = projection.checkpoint_to_live(name)
             if projected.outcome != MAPPED:
                 continue
-            unit = projection.recipe_unit(projected.target)
+            unit = strip_weight_leaf(name)
             shape = metadata.get("shape") if isinstance(metadata, Mapping) else None
             if not isinstance(shape, list) or any(
                     isinstance(dim, bool) or not isinstance(dim, int) or dim <= 0
@@ -2006,16 +2017,35 @@ def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
     report["activation_scale_grouping_routed_units"] = len(routed_units)
 
 
-def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str) -> dict:
-    """A producer-facing source-unit view of a verified packed allocation.
+def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
+                           profile) -> dict:
+    """A producer-facing source-unit view of a verified allocation.
 
-    The allocator's decision keys and file stay intact. This derived input only
-    resolves the existing population member map; Tessera still owns conversion
-    from layer-config entries to wire plans. Called after scope/wire admission.
+    The allocator's decision keys and file stay intact. This derived input
+    resolves the population member map when the allocation packs decisions,
+    and spells every BF16 choice ``"BF16"``, the string the producer's
+    translator reads as a plain BF16 module. The allocation's own BF16 entry
+    (``{"bits": 16, "data_type": "float"}``) is not in the translator's grammar
+    and was refused as a quantised non-Tessera choice (PrismaQuant #1388).
+
+    Units the model profile declares outside the text graph (GLM's
+    ``model.visual.*`` tower) are left out of the view when they are BF16:
+    the translator plans the decoder body only and refuses a name outside it,
+    and the exporter already writes every non-body tensor at source precision
+    and names it in ``ignore``, so the omitted choice and the written bytes
+    agree.  A non-BF16 choice on such a unit is refused -- the exporter would
+    write it BF16, which is not what the allocation priced.  The omitted names
+    are recorded in the view's metadata.
+
+    Tessera still owns conversion from layer-config entries to wire plans.
+    Called after scope/wire admission.
     """
     import hashlib
     from .cost_stage_checkpoint import atomic_write_bytes
-    from .layer_config import canonicalize_assignment, layer_config_metadata, strip_weight
+    from .layer_config import (
+        canonicalize_assignment, canonicalize_format, layer_config_metadata, strip_weight,
+    )
+    from .name_projection import DECLARED_OUT_OF_GRAPH, NameProjection
     from .tessera_expert_projection import (
         POPULATION_KEY, PROJECTION_KEY, ExpertProjectionError,
         carried_units, expand_stack_decision_assignment,
@@ -2028,17 +2058,38 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str)
     original = json.loads(raw)
     metadata = layer_config_metadata(original)
     population = metadata.get(POPULATION_KEY)
-    if not isinstance(population, Mapping) or not population.get("stack_decisions"):
-        return {}
-    try:
-        _source, units, stack_of = carried_units(metadata.get(PROJECTION_KEY))
-        expanded, owners = expand_stack_decision_assignment(
-            canonicalize_assignment(original), population, units=units, stack_of=stack_of)
-    except ExpertProjectionError as exc:
-        raise TesseraExportLaneError(f"expert projection: {exc}") from exc
     entries = {strip_weight(name): entry for name, entry in original.items()
                if name != "__prismaquant__"}
-    projected = {name: entries[owners.get(name, name)] for name in sorted(expanded)}
+    owners: dict = {}
+    names = sorted(entries)
+    if isinstance(population, Mapping) and population.get("stack_decisions"):
+        try:
+            _source, units, stack_of = carried_units(metadata.get(PROJECTION_KEY))
+            expanded, owners = expand_stack_decision_assignment(
+                canonicalize_assignment(original), population, units=units, stack_of=stack_of)
+        except ExpertProjectionError as exc:
+            raise TesseraExportLaneError(f"expert projection: {exc}") from exc
+        names = sorted(expanded)
+
+    def producer_entry(entry):
+        return "BF16" if canonicalize_format(entry) == "BF16" else entry
+
+    name_projection = NameProjection(profile)
+    projected: dict = {}
+    outside_graph: list[str] = []
+    for name in names:
+        entry = producer_entry(entries[owners.get(name, name)])
+        if (name_projection.checkpoint_to_live(name + ".weight").outcome
+                == DECLARED_OUT_OF_GRAPH):
+            if entry != "BF16":
+                raise TesseraExportLaneError(
+                    f"{name}: the model profile declares this unit outside the text "
+                    f"graph, and the allocation chose {entry!r} for it; the producer "
+                    "plans the decoder body only and writes this unit at source "
+                    "precision, so the priced choice would not be the written one")
+            outside_graph.append(name)
+            continue
+        projected[name] = entry
     projected["__prismaquant__"] = {
         **metadata,
         "tessera_export_assignment": {
@@ -2046,6 +2097,7 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str)
             "source_layer_config": str(source_path),
             "source_sha256": expected_sha256,
             "member_owners": dict(sorted(owners.items())),
+            "source_precision_outside_graph": outside_graph,
         },
     }
     output = source_path.with_name(source_path.stem + ".tessera-source-units.json")
@@ -2175,7 +2227,10 @@ def preflight(model_path: str | Path, *, target=None,
                     build["cached_expert_units"] = str(
                         write_cached_expert_units(projection))
         if scope is not None:
-            build.update(_write_plan_assignment(assignment_path, expected_sha256=assignment_sha))
+            from .model_profiles import detect_profile
+            build.update(_write_plan_assignment(
+                assignment_path, expected_sha256=assignment_sha,
+                profile=detect_profile(str(model_path))))
         if file_sha256(assignment_path) != assignment_sha:
             raise TesseraExportLaneError(
                 "allocation changed during scoped preflight; no build anchor was produced")
