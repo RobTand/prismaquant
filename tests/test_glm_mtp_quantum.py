@@ -356,3 +356,30 @@ def test_only_the_mtp_scope_prices_operator_windows_without_exact_boundaries():
     with pytest.raises(ValueError, match="exact boundary storage"):
         bridge._operator_window_policy(body)
     assert bridge._operator_window_policy({**body, "source_scope": "mtp"}) == windows
+
+
+def test_the_source_model_identity_is_validated_once_not_per_row(env, monkeypatch):
+    """PQ #1396: a published row swaps in the ordinary probe identity.
+
+    Validating each row again after that swap re-hashed the whole streamed
+    source identity once per row, about 4 GPU-idle minutes for GLM-5.3's
+    1734 rows. The count must not grow with the rows.
+    """
+    from prismaquant import cost_streaming
+
+    original = cost_streaming.validate_streamed_model_identity
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get("where"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity", counted)
+    payload = env.run()
+    rows = [row for rows in payload["costs"].values() for row in rows.values()]
+    assert len(rows) > 2
+    assert len(calls) <= 1, calls
+    for row in rows:
+        assert type(row["probe_identity"]) is dict
+    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity", original)
+    assert all(joint.validate_joint_aura_entry(row) for row in rows)
