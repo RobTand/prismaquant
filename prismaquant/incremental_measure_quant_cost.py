@@ -59,14 +59,11 @@ from .measure_quant_cost import (
     ActivationIndex,
     HDetailIndex,
     _accumulate_result,
-    _cb_col_weights_lookup,
     _expert_cost_sample_split,
     _extrapolate_expert_costs,
     _finalize_results,
     _measure_packed_experts,
     _normalize_fisher_output_mse_row_weights,
-    cost_payload_provenance,
-    cb_render_provenance_for_results,
     h_detail_expected_norm_tokens,
     measure_batched_gpu,
     measure_unbatched,
@@ -79,10 +76,6 @@ from .streaming_model import (
     _build_streaming_context,
     _classify_shard,
 )
-from .nvfp4_cb_footprint import (
-    cb_serialization_context_from_env,
-    validate_cb_cost_provenance,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -94,20 +87,14 @@ from .nvfp4_cb_footprint import (
 _PIPELINE_COST_MODE = ""
 
 
-def _cost_mode_provenance(
-    specs: list[fr.FormatSpec] | None = None,
-) -> dict:
-    out = {"cost_mode": _PIPELINE_COST_MODE} if _PIPELINE_COST_MODE else {}
-    if specs:
-        out.update(cost_payload_provenance(specs))
-    return out
+def _cost_mode_provenance() -> dict:
+    return {"cost_mode": _PIPELINE_COST_MODE} if _PIPELINE_COST_MODE else {}
 
 
 def merge_cost_pickles(paths: list[Path], output_path: Path):
     merged_costs = {}
     merged_formats = None
     shard_metas = []
-    cb_render_identities: list[dict[str, object]] = []
     for path in paths:
         with open(path, "rb") as f:
             data = pickle.load(f)
@@ -123,58 +110,11 @@ def merge_cost_pickles(paths: list[Path], output_path: Path):
                 f"cost shard {path} format menu differs from the first "
                 f"shard: {data.get('formats', [])!r} != {merged_formats!r}"
             )
-        has_cb = any(
-            fr.get_format(name).family in {"nvfp4_cb", "fp8_cb"}
-            for name in data.get("formats", [])
-        )
-        if has_cb:
-            validate_cb_cost_provenance(
-                data,
-                data.get("formats", []),
-                context=cb_serialization_context_from_env(
-                    require_explicit=True,
-                    where="incremental cost merge",
-                ),
-                where=f"incremental cost shard {path}",
-            )
-        identity = (data.get("provenance") or {}).get(
-            "cb_render_identity"
-        )
-        if has_cb and costs and not isinstance(identity, dict):
-            raise ValueError(
-                f"incremental cost shard {path} has measured CB rows but no "
-                "source/imatrix-complete render identity"
-            )
-        if isinstance(identity, dict):
-            cb_render_identities.append(identity)
+        # Resolve every format so a shard naming a retired codebook rung
+        # refuses here rather than merging into the table.
+        for name in data.get("formats", []):
+            fr.get_format(name)
         shard_metas.append(data.get("meta", {}))
-
-    merged_cb_identity = None
-    if cb_render_identities:
-        from .production_weight_cache import merge_cb_render_identities
-
-        qnames = sorted({
-            str(name)
-            for identity in cb_render_identities
-            for name in identity["col_weights_qnames"]
-        })
-        current_col_weights = {
-            name: _cb_col_weights_lookup(name) for name in qnames
-        }
-        missing_col = sorted(
-            name for name, value in current_col_weights.items()
-            if value is None
-        )
-        if missing_col:
-            raise ValueError(
-                "incremental cost merge is missing current CB col_weights; "
-                f"sample={missing_col[:8]}"
-            )
-        merged_cb_identity = merge_cb_render_identities(
-            cb_render_identities,
-            col_weights=current_col_weights,
-            where="incremental cost merge",
-        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "wb") as f:
@@ -189,16 +129,7 @@ def merge_cost_pickles(paths: list[Path], output_path: Path):
                     h_detail_dir = nested.get("h_detail_dir")
             if h_detail_dir is not None:
                 h_detail_dirs.add(h_detail_dir)
-        merged_provenance = _cost_mode_provenance(
-            [fr.get_format(name) for name in (merged_formats or [])]
-        )
-        if merged_cb_identity is not None:
-            merged_provenance.update({
-                "cb_serialized_payload": dict(
-                    merged_cb_identity["cb_serialized_payload"]
-                ),
-                "cb_render_identity": merged_cb_identity,
-            })
+        merged_provenance = _cost_mode_provenance()
         pickle.dump({
             "costs": merged_costs,
             "formats": merged_formats or [],
@@ -239,10 +170,6 @@ def _expected_cost_shard_meta(*,
         "shard_idx": shard_idx,
         "formats": list(formats),
         "n_linears_expected": int(n_linears_expected),
-        # Persisted in each shard's annotated metadata, so changing the FP4
-        # layout or codebook-sharing policy invalidates shard reuse before a
-        # merged cost table can be stamped with a different identity.
-        **cost_payload_provenance([fr.get_format(name) for name in formats]),
     }
     if render_path != "registry":
         meta["render_path"] = render_path
@@ -269,16 +196,6 @@ def cost_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
     if "costs" not in data or "meta" not in data:
         return False
     if not isinstance(data["costs"], dict):
-        return False
-    if data["costs"] and any(
-        fr.get_format(name).family in {"nvfp4_cb", "fp8_cb"}
-        for name in data.get("formats", [])
-    ):
-        # A reusable measured-CB shard would need its exact decoded source
-        # tensors reloaded and re-hashed before acceptance. The skip path has
-        # deliberately not materialized that layer yet, so fail closed and
-        # rebuild. Empty visual/MTP slots remain reusable because they carry
-        # no CB row/value claim.
         return False
     # Empty-costs guard: a shard whose target regex is known to match at
     # least one probed Linear but produced zero entries is the signature
@@ -414,16 +331,6 @@ def _measure_production_render_dense(
               f"{n_total} measured, {len(expert_extrapolate)} extrapolated",
               flush=True)
     levers = _production_cost_render_levers()
-    cb_context = (
-        cb_serialization_context_from_env(
-            require_explicit=True,
-            where="incremental production render cost",
-        )
-        if any(
-            spec.family in {"nvfp4_cb", "fp8_cb"} for spec in specs
-        )
-        else None
-    )
 
     for name, mod in module.named_modules():
         canonical_name = resolve_cost_target_name(name, target_names, profile)
@@ -471,12 +378,6 @@ def _measure_production_render_dense(
                         activations=activations,
                         levers=levers,
                         fisher_row_weights=gq_rows,
-                        col_weights=(
-                            _cb_col_weights_lookup(canonical_name)
-                            if spec.family in {"nvfp4_cb", "fp8_cb"}
-                            else None
-                        ),
-                        cb_serialization_context=cb_context,
                         gate_trace=gate_trace,
                     )
                     gptq_steps = [
@@ -632,7 +533,7 @@ def _run_body_cost_shard(
             pickle.dump({
                 "costs": {},
                 "formats": [s.name for s in specs],
-                "provenance": _cost_mode_provenance(specs),
+                "provenance": _cost_mode_provenance(),
                 "meta": {
                     "model": model_name,
                     "probe": probe_path,
@@ -674,17 +575,6 @@ def _run_body_cost_shard(
             profile=profile,
             render_path=render_path,
         )
-        shard_provenance = cb_render_provenance_for_results(
-            model,
-            results,
-            specs,
-            profile=profile,
-            render_levers=(
-                _production_cost_render_levers()
-                if render_path == "production" else None
-            ),
-            where=f"incremental {shard_kind} CB cost shard",
-        )
     finally:
         for L in installed:
             pressure_trim_bytes += int(ctx.unload(L) or 0)
@@ -709,7 +599,6 @@ def _run_body_cost_shard(
             "formats": [s.name for s in specs],
             "provenance": {
                 **_cost_mode_provenance(),
-                **shard_provenance,
             },
             "meta": {
                 "model": model_name,
@@ -769,7 +658,7 @@ def _run_mtp_cost_shard(
             pickle.dump({
                 "costs": {},
                 "formats": [s.name for s in specs],
-                "provenance": _cost_mode_provenance(specs),
+                "provenance": _cost_mode_provenance(),
                 "meta": {
                     "model": model_name,
                     "probe": probe_path,
@@ -831,7 +720,7 @@ def _run_mtp_cost_shard(
             pickle.dump({
                 "costs": {},
                 "formats": [s.name for s in specs],
-                "provenance": _cost_mode_provenance(specs),
+                "provenance": _cost_mode_provenance(),
                 "meta": {
                     "model": model_name,
                     "probe": probe_path,
@@ -861,17 +750,6 @@ def _run_mtp_cost_shard(
             profile=profile,
             render_path=render_path,
         )
-        shard_provenance = cb_render_provenance_for_results(
-            mtp_wrapper,
-            results,
-            specs,
-            profile=profile,
-            render_levers=(
-                _production_cost_render_levers()
-                if render_path == "production" else None
-            ),
-            where="incremental MTP CB cost shard",
-        )
     finally:
         del mtp_wrapper, inner_mtp, raw
         gc.collect()
@@ -886,7 +764,6 @@ def _run_mtp_cost_shard(
             "formats": [s.name for s in specs],
             "provenance": {
                 **_cost_mode_provenance(),
-                **shard_provenance,
             },
             "meta": {
                 "model": model_name,
@@ -916,7 +793,7 @@ def _write_empty_cost_shard(
         pickle.dump({
             "costs": {},
             "formats": [s.name for s in specs],
-            "provenance": _cost_mode_provenance(specs),
+            "provenance": _cost_mode_provenance(),
             "meta": {
                 "model": model_name,
                 "probe": probe_path,
@@ -1071,17 +948,6 @@ def _run_visual_cost_shard(
         profile=profile,
         render_path=render_path,
     )
-    shard_provenance = cb_render_provenance_for_results(
-        model,
-        results,
-        specs,
-        profile=profile,
-        render_levers=(
-            _production_cost_render_levers()
-            if render_path == "production" else None
-        ),
-        where="incremental visual CB cost shard",
-    )
     if device.startswith("cuda"):
         torch.cuda.empty_cache()
 
@@ -1093,7 +959,6 @@ def _run_visual_cost_shard(
             "formats": [s.name for s in specs],
             "provenance": {
                 **_cost_mode_provenance(),
-                **shard_provenance,
             },
             "meta": {
                 "model": model_name,

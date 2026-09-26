@@ -307,16 +307,10 @@ class WeightSession:
             return None
         try:
             spec = fr.get_format(fmt_canon)
+        except fr.RetiredFormatError:
+            raise
         except Exception:
             return None
-        from .nvfp4_cb_footprint import is_cb_format
-
-        if is_cb_format(fmt_canon):
-            raise RuntimeError(
-                f"production_weight_cache is required for CB fallback "
-                f"({qname!r}, {fmt_canon!r}) in WeightSession; the direct "
-                "registry render is unweighted and layout-stale"
-            )
         return spec.quantize_dequantize(bf16.detach().clone())
 
     # ------------------------------------------------------------------

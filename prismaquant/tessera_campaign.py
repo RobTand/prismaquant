@@ -797,7 +797,8 @@ def _anchor_batches(pending, *, weights, expert_members, batch_size):
 #
 # A per-expert member's Fisher weight is ``h_trace_per_expert[e] / R``, where R
 # is the number of projections the packed parameter splits into -- the SAME
-# split ``tier2_per_expert_counterfactual.expand_packed_expert_rows`` uses, and
+# split the retired codebook lane's ``expand_packed_expert_rows`` used
+# (archived 2026-09-25 with ``tier2_per_expert_counterfactual``, #1304), and
 # R comes from the profile's ``packed_expert_projection_names``, never from a
 # hardcoded ``gate_up_proj -> 2``.
 

@@ -54,10 +54,6 @@ from prismaquant.kl_fisher import (
     token_count_for_logits,
 )
 from prismaquant.perturbed_x_cache import calibration_data_hash
-from prismaquant.nvfp4_cb_footprint import (
-    cb_cost_provenance,
-    is_cb_format,
-)
 from prismaquant.routed_experts import (
     PackedExpertProjection,
     ProfileRoutedExpertClassifier,
@@ -785,12 +781,6 @@ def _delta_w(
             "``strict`` defaults off, so nothing else would say so."
         )
     spec = fr.get_format(fmt)
-    if is_cb_format(spec.name):
-        raise RuntimeError(
-            f"{name}={spec.name}: AURA CB delta requires a production-cache "
-            "render with the production col_weights/codebook contract; "
-            "refusing the unweighted direct fallback"
-        )
     qdq = getattr(spec, "quantize_dequantize", None)
     if qdq is None:
         return None
@@ -923,7 +913,6 @@ def _build_aura_checkpoint_identity(
     collect_col_energy: bool,
     require_production_cache: bool,
     production_cache: object,
-    cb_provenance: Mapping[str, object],
     git_commit: str,
     extra_identity: Mapping[str, object] | None,
 ) -> dict[str, object]:
@@ -966,101 +955,16 @@ def _build_aura_checkpoint_identity(
         "collect_col_energy": bool(collect_col_energy),
         "require_production_cache": bool(require_production_cache),
         "production_cache_calib_hash": cache_metadata.get("calib_hash"),
-        "production_cache_pair_identity": cache_metadata.get(
-            "cb_cache_pair_identity"
-        ),
-        # The complete value-bearing identity is intentionally embedded, not
-        # reduced to a cache filename. It binds codebooks, source/column
-        # weights, scale/layout/sweep/LDLQ, and every qname/rung format scope.
-        "cb_render_identity": cb_provenance.get("cb_render_identity"),
+        # These two keys carried the retired codebook lane's cache-pair and
+        # render identities (archived 2026-09-25, #1304). They are always null
+        # now, and they stay in the identity so a checkpoint written before
+        # the removal still matches under a source transition, which refuses
+        # any non-source identity change.
+        "production_cache_pair_identity": None,
+        "cb_render_identity": None,
         "extra": dict(extra_identity or {}),
     }
     return _canonical_json(identity, where="AURA checkpoint identity")
-
-
-def _validate_aura_checkpoint_cache_identity(production_cache: object) -> None:
-    metadata = getattr(production_cache, "metadata", None)
-    if not isinstance(metadata, Mapping):
-        raise RuntimeError(
-            "AURA durable checkpointing requires production-cache metadata; "
-            "refusing model/cache name-gated resume"
-        )
-    calibration_hash = metadata.get("calib_hash")
-    if not isinstance(calibration_hash, str) or not calibration_hash:
-        raise RuntimeError(
-            "AURA durable checkpointing requires the production cache's exact "
-            "calib_hash; refusing model/cache name-gated resume"
-        )
-    pair_set = metadata.get("cb_cache_pair_identity")
-    if not isinstance(pair_set, Mapping):
-        raise RuntimeError(
-            "AURA durable checkpointing requires identity-bound CB pair "
-            "artifacts; refusing model/cache name-gated resume"
-        )
-    if pair_set.get("schema") != (
-        "prismaquant.production_weight_cache.cb_pair_set.v1"
-    ):
-        raise RuntimeError(
-            "AURA durable checkpointing found an unsupported CB pair identity "
-            f"schema {pair_set.get('schema')!r}"
-        )
-    try:
-        entries = int(pair_set["entries"])
-        published_entries = int(pair_set["published_entries"])
-    except Exception as exc:
-        raise RuntimeError(
-            "AURA durable checkpointing found malformed CB pair entry counts"
-        ) from exc
-    if entries < 1 or published_entries != entries:
-        raise RuntimeError(
-            "AURA durable checkpointing requires every identity-bound CB pair "
-            f"artifact to be published; entries={entries} "
-            f"published_entries={published_entries}"
-        )
-    for field in ("identity_sha256", "artifact_sha256"):
-        digest = str(pair_set.get(field, "")).lower()
-        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-            raise RuntimeError(
-                "AURA durable checkpointing found an invalid CB pair "
-                f"{field}"
-            )
-    calibration_hashes = pair_set.get("calibration_hashes")
-    if (
-        not isinstance(calibration_hashes, Sequence)
-        or isinstance(calibration_hashes, (str, bytes))
-        or list(calibration_hashes) != [calibration_hash]
-    ):
-        raise RuntimeError(
-            "AURA durable checkpointing found a production-cache calibration "
-            "hash that differs from its CB pair artifacts"
-        )
-    commits = pair_set.get("git_commits")
-    if (
-        not isinstance(commits, Sequence)
-        or isinstance(commits, (str, bytes))
-        or len(commits) != 1
-        or re.fullmatch(
-            r"(?:[0-9a-f]{40}|[0-9a-f]{64})",
-            str(commits[0]).lower(),
-        ) is None
-    ):
-        raise RuntimeError(
-            "AURA durable checkpointing requires one exact CB pair producer "
-            "git commit"
-        )
-    source_digests = pair_set.get("producer_source_sha256")
-    if (
-        not isinstance(source_digests, Sequence)
-        or isinstance(source_digests, (str, bytes))
-        or len(source_digests) != 1
-        or re.fullmatch(
-            r"[0-9a-f]{64}", str(source_digests[0]).lower()
-        ) is None
-    ):
-        raise RuntimeError(
-            "AURA durable checkpointing requires one exact CB renderer "
-            "source SHA-256 identity"
-        )
 
 
 def _aura_unit_state(
@@ -1367,30 +1271,16 @@ def compute_aura_cost(
     unit_topology = aura_unit_topology(model, linears, profile=profile)
     fmts = [fr.canonical_format_name(f) for f in formats]
     nonzero_fmts = [f for f in fmts if f not in _ZERO_COST_FORMATS]
-    cb_provenance: dict[str, object] = {}
-    if any(is_cb_format(fmt) for fmt in fmts):
-        if production_cache is None:
-            raise RuntimeError(
-                "AURA CB cost requires a ProductionWeightCache with a "
-                "persisted CB render identity"
-            )
-        from prismaquant.production_weight_cache import (
-            production_cache_cb_render_provenance,
-        )
-
-        cb_provenance = production_cache_cb_render_provenance(
-            production_cache,
-            require_for_formats=fmts,
-            where="AURA production cache",
-        )
-    if checkpoint_dir is not None and not cb_provenance:
-        raise RuntimeError(
-            "AURA durable checkpointing requires a value-bearing CB "
-            "ProductionWeightCache identity; refusing model/cache name-gated "
-            "resume"
-        )
     if checkpoint_dir is not None:
-        _validate_aura_checkpoint_cache_identity(production_cache)
+        # The resident path checkpointed only against the retired codebook
+        # lane's pair-bound cache identity (archived 2026-09-25, #1304); no
+        # other identity binds its renders. The streamed path checkpoints on
+        # its production-anchor renderer's identity instead.
+        raise RuntimeError(
+            "resident AURA has no value-bearing render identity to checkpoint "
+            "against; refusing model/cache name-gated resume. Use the streamed "
+            "path (AURA_COST_STREAMING=1) for durable checkpoints."
+        )
     # Passthrough-rule guard (opt-in; default off keeps the output byte-for-byte
     # identical). BF16 zero-cost is only valid when the source weight is already
     # bf16/fp16 -- on an fp32-source model loaded as fp32, casting W to BF16 is a
@@ -1447,82 +1337,9 @@ def compute_aura_cost(
     col_energy: dict[str, torch.Tensor] = {}
     inv = 1.0 / float(n_probes)
 
-    checkpoint_root: Path | None = None
-    checkpoint_identity_sha256: str | None = None
-    completed_checkpoint_units: set[str] = set()
-    checkpoint_git_commit: str | None = None
-    if checkpoint_dir is not None:
-        checkpoint_git_commit = _checkpoint_git_commit()
-        checkpoint_identity = _build_aura_checkpoint_identity(
-            model=model,
-            calib_ids=calib_ids,
-            names=names,
-            linears=linears,
-            formats=fmts,
-            chunks=chunks,
-            n_probes=n_probes,
-            token_scope=token_scope,
-            temperature=temperature,
-            seed_base=seed_base,
-            dw_dtype=dw_dtype,
-            include_lm_head=include_lm_head,
-            hook_harvest=hook_harvest,
-            allow_packed_expert_omission=allow_packed_expert_omission,
-            probe_microbatch=probe_microbatch,
-            collect_col_energy=collect_col_energy,
-            require_production_cache=require_production_cache,
-            production_cache=production_cache,
-            cb_provenance=cb_provenance,
-            git_commit=checkpoint_git_commit,
-            extra_identity=checkpoint_identity_extra,
-        )
-        checkpoint_root, checkpoint_identity_sha256, completed_states = (
-            _prepare_aura_checkpoints(
-                checkpoint_dir,
-                resume=resume,
-                identity=checkpoint_identity,
-                names=names,
-            )
-        )
-        for name in names:
-            state = completed_states.get(name)
-            if state is None:
-                continue
-            _restore_aura_unit_state(
-                name,
-                state,
-                nonzero_formats=nonzero_fmts,
-                n_probes=n_probes,
-                collect_col_energy=collect_col_energy,
-                s2=s2,
-                s4=s4,
-                x2_probe=x2_probe,
-                dw_src=dw_src,
-                g_trace=g_trace,
-                col_energy=col_energy,
-            )
-            completed_checkpoint_units.add(name)
-        if completed_checkpoint_units:
-            _log(
-                f"checkpoint resume: validated {len(completed_checkpoint_units)}/"
-                f"{len(names)} completed Linear units"
-            )
-
     for ci, original_chunk in enumerate(chunks):
-        pending_chunk = [
-            name for name in original_chunk
-            if name not in completed_checkpoint_units
-        ]
-        if not pending_chunk:
-            if checkpoint_root is not None:
-                _log(f"chunk {ci+1}/{len(chunks)}: fully checkpointed; skip")
-            continue
-        # A process can die between the atomic publication of two unit shards
-        # from the same completed chunk. Re-arm the complete original chunk so
-        # each pending unit sees the identical autograd topology/kernel work it
-        # saw uninterrupted; already-published siblings are harvested and then
-        # discarded, never accumulated twice.
         chunk = list(original_chunk)
+        pending_chunk = chunk
         pending_names = set(pending_chunk)
         for n in chunk:
             linears[n].weight.requires_grad_(True)
@@ -1713,28 +1530,6 @@ def compute_aura_cost(
                      f"free={_free_gib():.1f}")
         for h in hook_handles:
             h.remove()
-        if checkpoint_root is not None:
-            assert checkpoint_identity_sha256 is not None
-            # Publish one durable accumulator shard per completed Linear only
-            # after all of its probes have been harvested. A kill between unit
-            # renames loses at most the unpublished units in this chunk.
-            for n in pending_chunk:
-                state = _aura_unit_state(
-                    n,
-                    nonzero_fmts,
-                    s2=s2,
-                    s4=s4,
-                    x2_probe=x2_probe,
-                    dw_src=dw_src,
-                    g_trace=g_trace,
-                    col_energy=col_energy,
-                )
-                _write_aura_unit_checkpoint(
-                    checkpoint_root,
-                    qname=n,
-                    identity_sha256=checkpoint_identity_sha256,
-                    state=state,
-                )
         # Release this chunk's dW + grad enablement before the next chunk.
         del dW
         for n in chunk:
@@ -1842,16 +1637,7 @@ def compute_aura_cost(
             "omitted_packed_experts": omitted_packed_experts,
             "dw_rendered_rows": n_rendered,
             "dw_rtn_fallback_rows": n_rtn,
-            "git_commit": (
-                checkpoint_git_commit
-                if checkpoint_git_commit is not None
-                else _git_commit()
-            ),
-            **(
-                cb_provenance
-                if cb_provenance
-                else cb_cost_provenance(fmts)
-            ),
+            "git_commit": _git_commit(),
         },
     }
 
@@ -1872,7 +1658,6 @@ def _assemble_streamed_aura_payload(
     n_linear_chunks: int,
     calib_ids: torch.Tensor,
     omitted_packed_experts: Sequence[str],
-    cb_provenance: Mapping[str, object],
     checkpoint_git_commit: str | None,
     collect_col_energy: bool,
     s2: Mapping[tuple[str, str], float],
@@ -1992,11 +1777,6 @@ def _assemble_streamed_aura_payload(
             ),
             "streamed_cotangent_rollover": "in_place_per_probe",
             "streamed_boundary_release": "progressive_reverse",
-            **(
-                dict(cb_provenance)
-                if cb_provenance
-                else cb_cost_provenance(formats)
-            ),
         },
     }
 
@@ -2372,10 +2152,6 @@ def compute_aura_cost_streamed(
         render_formats[name] = measured
     if operator_windows is not None and any(not render_formats[name] for name in names):
         raise ValueError('joint operator windows require a measured candidate for every target')
-    nonzero_fmts = list(dict.fromkeys(
-        fmt for name in names for fmt in render_formats[name]
-    ))
-
     joint_probe_identity = None
     joint_run_identity = None
     joint_rows: dict[str, dict[str, dict]] = {}
@@ -2574,48 +2350,17 @@ def compute_aura_cost_streamed(
                 "diagnostic weight-MSE requests unrendered anchor cells; "
                 f"sample={unexpected[:8]}"
             )
-    cb_provenance: dict[str, object] = {}
-    if any(is_cb_format(fmt) for fmt in nonzero_fmts):
-        if anchor_renderer is not None:
-            cb_provenance = {
-                "cb_cost_provenance_schema": (
-                    "prismaquant.aura.production_anchor.v1"
-                ),
-                "cb_render_identity": anchor_identity.get(
-                    "cb_render_identity"
-                ),
-                "production_anchor_renderer": dict(anchor_identity),
-            }
-        elif production_cache is None:
-            raise RuntimeError(
-                "streamed AURA CB cost requires an identity-bound "
-                "ProductionWeightCache"
-            )
-        else:
-            from prismaquant.production_weight_cache import (
-                production_cache_cb_render_provenance,
-            )
-
-            cb_provenance = production_cache_cb_render_provenance(
-                production_cache,
-                require_for_formats=fmts,
-                where="streamed AURA production cache",
-            )
     if checkpoint_dir is not None:
-        # The checkpoint identity must embed a value-bearing render identity.
-        # Two sources qualify: CB provenance (CB menus), or the production-
-        # anchor renderer's exact identity (bound below as
+        # The checkpoint identity must embed a value-bearing render identity:
+        # the production-anchor renderer's exact identity (bound below as
         # extra["production_anchor_renderer"], with the qname->format plan
-        # asserted equal above). A non-CB menu has no CB identity to bear, so
-        # an anchored non-CB run checkpoints on the anchor identity alone.
-        if not cb_provenance and anchor_identity is None and not joint_activation:
+        # asserted equal above), or a joint-activation run's own identity.
+        if anchor_identity is None and not joint_activation:
             raise RuntimeError(
                 "streamed AURA durable checkpointing requires a value-bearing "
-                "render identity: a CB ProductionWeightCache identity or a "
-                "production-anchor renderer with exact identity"
+                "render identity: a production-anchor renderer with exact "
+                "identity"
             )
-        if anchor_renderer is None and not joint_activation:
-            _validate_aura_checkpoint_cache_identity(production_cache)
     if assert_bf16_passthrough and "BF16" in fmts:
         if runner.dtype not in (torch.bfloat16, torch.float16):
             raise RuntimeError(
@@ -2733,7 +2478,6 @@ def compute_aura_cost_streamed(
             collect_col_energy=collect_col_energy,
             require_production_cache=require_production_cache,
             production_cache=production_cache,
-            cb_provenance=cb_provenance,
             git_commit=checkpoint_git_commit,
             extra_identity=extra,
         )
@@ -2869,7 +2613,6 @@ def compute_aura_cost_streamed(
             n_linear_chunks=len(ordered_layer_chunks),
             calib_ids=calib_ids,
             omitted_packed_experts=omitted_packed_experts,
-            cb_provenance=cb_provenance,
             checkpoint_git_commit=checkpoint_git_commit,
             collect_col_energy=collect_col_energy,
             s2=s2,
@@ -2953,13 +2696,6 @@ def compute_aura_cost_streamed(
             payload["provenance"]["production_anchor_renderer"] = (
                 completed_renderer_identity
             )
-            completed_cb_identity = completed_renderer_identity.get(
-                "cb_render_identity"
-            )
-            if isinstance(completed_cb_identity, Mapping):
-                payload["provenance"]["cb_render_identity"] = dict(
-                    completed_cb_identity
-                )
             expected_renders = sum(
                 len(render_formats[name]) for name in names
             )
@@ -3778,7 +3514,6 @@ def run_streamed_production_anchor_aura(
     activation_index,
     render_levers: Mapping[str, object],
     col_weights: Mapping[str, torch.Tensor],
-    cb_serialization_context,
     calibration_hash: str,
     arm_identity: Mapping[str, object],
     model_identity: Mapping[str, object],
@@ -3938,7 +3673,6 @@ def run_streamed_production_anchor_aura(
         profile=profile,
         device=runner.device,
         col_weights=col_weights,
-        cb_serialization_context=cb_serialization_context,
         calibration_hash=calibration_hash,
         arm_identity=arm_identity,
         model_identity=model_identity,

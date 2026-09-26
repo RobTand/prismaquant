@@ -21,13 +21,6 @@ from prismaquant.layer_config import (
     layer_config_metadata,
 )
 from prismaquant.saturation_select import find_saturation_bpp
-from prismaquant.nvfp4_cb_footprint import (
-    CB_ASSIGNMENT_IDENTITIES_FIELD,
-    CB_TENSOR_IDENTITY_FIELD,
-    cb_serialization_metadata_from_assignment_payload,
-    cb_serialization_context_from_stamp,
-    is_cb_format,
-)
 from prismaquant.footprint import (
     assignment_serialization_sha256,
     whole_artifact_budget_from_assignment_payload,
@@ -134,18 +127,10 @@ def _assignment_from_payload(
     }
 
 
-def _layer_config_from_assignment(
-    assignment: Mapping[str, str],
-    *,
-    cb_serialization_stamps: Mapping[str, object] | None = None,
-) -> dict:
+def _layer_config_from_assignment(assignment: Mapping[str, str]) -> dict:
     out = {}
     for name, fmt in sorted(assignment.items()):
         out[str(name)] = fr.get_format(str(fmt).strip().upper()).autoround_config()
-        if cb_serialization_stamps is not None and name in cb_serialization_stamps:
-            out[str(name)][CB_TENSOR_IDENTITY_FIELD] = str(
-                cb_serialization_stamps[name]
-            )
     return out
 
 
@@ -1241,69 +1226,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if rate_axis else None
     )
-    selected_cb_context, selected_cb_stamps = (
-        cb_serialization_metadata_from_assignment_payload(selected_payload)
-        if isinstance(selected_payload, Mapping)
-        else (None, {})
-    )
-    selected_cb_names = {
-        str(name) for name, fmt in assignment.items() if is_cb_format(fmt)
-    }
-    if selected_cb_names and selected_cb_context is None:
-        raise ValueError(
-            "selected CB assignment is missing its global serialized-payload "
-            "context"
-        )
-    if selected_cb_context is not None and not selected_cb_stamps:
-        raise ValueError(
-            "selected CB assignment carries a global serialized-payload "
-            "context but no per-layer identities; refusing to carry a stale "
-            "global stamp onto unverifiable tensors"
-        )
-    if selected_cb_names and not selected_cb_stamps:
-        raise ValueError(
-            "selected CB assignment is missing its per-layer serialization "
-            "identities"
-        )
-    if selected_cb_stamps and selected_cb_context is None:
-        raise ValueError(
-            "selected CB assignment carries per-layer serialization identities "
-            "without their global context"
-        )
-    if selected_cb_stamps:
-        stamped_names = set(selected_cb_stamps)
-        missing = sorted(selected_cb_names - stamped_names)
-        extra = sorted(stamped_names - selected_cb_names)
-        if missing or extra:
-            raise ValueError(
-                "selected CB assignment serialization identities do not match "
-                f"its CB tensors: missing={missing[:8]}, extra={extra[:8]}"
-            )
-    selected_cb_render_identity = selected_payload.get("cb_render_identity")
-    if selected_cb_names:
-        from prismaquant.production_weight_cache import (
-            validate_cb_render_provenance,
-        )
-
-        selected_context_object = cb_serialization_context_from_stamp(
-            selected_cb_context,
-            where="selected frontier CB context",
-        )
-        _render_context, selected_cb_render_identity = (
-            validate_cb_render_provenance(
-                selected_payload,
-                expected_context=selected_context_object,
-                expected_formats_by_qname={
-                    name: (assignment[name],)
-                    for name in sorted(selected_cb_names)
-                },
-                where="selected frontier CB render identity",
-            )
-        )
-    elif selected_cb_render_identity is not None:
-        raise ValueError(
-            "selected non-CB assignment carries a stale CB render identity"
-        )
     selected_budget = whole_artifact_budget_from_assignment_payload(
         selected_payload,
         where=f"selected frontier assignment {selected['path']}",
@@ -1333,11 +1255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"with its assignment stamp: row={selected_upper!r}, "
                 f"stamp={stamped_upper}B"
             )
-    selected_cb_stamps_arg = selected_cb_stamps or None
-    layer_config = _layer_config_from_assignment(
-        assignment,
-        cb_serialization_stamps=selected_cb_stamps_arg,
-    )
+    layer_config = _layer_config_from_assignment(assignment)
 
     layer_config_path = Path(args.output_layer_config)
     # This stage OVERWRITES the allocator's layer_config.json, so it must carry
@@ -1346,9 +1264,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     # re-open the allocator/export profile split this run just closed.
     carried = _destination_metadata_for_assignment(layer_config_path, assignment)
     # The selected payload, not the overwritten destination file, owns
-    # assignment-coupled identities.  Otherwise selecting a non-CB point after
-    # a CB allocator run carries a stale global stamp while dropping every
-    # per-layer identity, which exporters previously accepted via truthiness.
+    # assignment-coupled identities. A destination written by the retired
+    # codebook lane (archived 2026-09-25, #1304) may still carry its stamps;
+    # they are dropped rather than carried onto this selection.
     carried.pop("cb_serialized_payload", None)
     carried.pop("cb_render_identity", None)
     carried.pop("whole_artifact_budget", None)
@@ -1356,15 +1274,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         carried["uniform_control"] = uniform_control_status
     if (
         carried
-        or selected_cb_context is not None
         or selected_budget is not None
     ):
         carried["selected_by"] = f"validated_frontier:{args.mode}"
         carried["selected_label"] = selected.get("label")
         carried["selected_achieved_bits"] = selected.get("bpp")
-        if selected_cb_context is not None:
-            carried["cb_serialized_payload"] = dict(selected_cb_context)
-            carried["cb_render_identity"] = selected_cb_render_identity
         if selected_budget is not None:
             carried["whole_artifact_budget"] = dict(selected_budget)
         layer_config[LAYER_CONFIG_META_KEY] = carried
@@ -1376,16 +1290,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "selection_mode": args.mode,
         "selected": selected,
         "assignment": dict(sorted(assignment.items())),
-        **({
-            "cb_serialized_payload": dict(selected_cb_context),
-            "cb_render_identity": selected_cb_render_identity,
-        } if selected_cb_context is not None else {}),
-        **({
-            CB_ASSIGNMENT_IDENTITIES_FIELD: dict(sorted(
-                (str(name), str(value))
-                for name, value in selected_cb_stamps.items()
-            )),
-        } if selected_cb_stamps else {}),
         **({
             "whole_artifact_budget": dict(selected_budget),
         } if selected_budget is not None else {}),

@@ -82,9 +82,8 @@ def _sha256(data: bytes) -> str:
 # Families whose served path quantizes activations (W4A4 / W8A8 style).
 # GGUF/IQ serve weight-only (dequant to fp16), so they get NO activation
 # emulation — this asymmetry is deliberate: each format is measured with its
-# served activation behaviour. fp8_cb decodes to FP8 and serves FP8-dynamic
-# activations (registered spec: act_bits=8, fp8_e4m3).
-_ACT_EMULATION_FAMILIES = {"nv", "mx", "nvfp4_cb", "fp8_cb"}
+# served activation behaviour.
+_ACT_EMULATION_FAMILIES = {"nv", "mx"}
 
 
 def _qdq_accepts_col_weights(spec: fr.FormatSpec) -> bool:
@@ -99,8 +98,6 @@ def weighted_quantize_dequantize(
     spec: fr.FormatSpec,
     w: torch.Tensor,
     col_weights: torch.Tensor | None,
-    *,
-    qname: str | None = None,
 ) -> torch.Tensor:
     """THE single weighted-render definition: reconstruct ``w`` in ``spec``'s
     format, applying the per-input-column imatrix when the family's exporter
@@ -118,21 +115,6 @@ def weighted_quantize_dequantize(
         from .gguf_formats import gguf_quantize_dequantize
         cw = None if col_weights is None else col_weights.to(w.device)
         return gguf_quantize_dequantize(w.clone(), spec.name, col_weights=cw)
-    if spec.family in {"nvfp4_cb", "fp8_cb"}:
-        from .nvfp4_cb_footprint import (
-            cb_quantize_dequantize_for_context,
-            cb_serialization_context_from_env,
-        )
-
-        return cb_quantize_dequantize_for_context(
-            spec,
-            w.clone(),
-            context=cb_serialization_context_from_env(),
-            qname=qname,
-            col_weights=(
-                None if col_weights is None else col_weights.to(w.device)
-            ),
-        )
     if col_weights is not None and _qdq_accepts_col_weights(spec):
         return spec.quantize_dequantize(w.clone(), col_weights=col_weights.to(w.device))
     return spec.quantize_dequantize(w.clone())
@@ -168,13 +150,6 @@ class _WeightSwapper:
 
     def __enter__(self):
         for qname, mod, spec, cw, smooth in self._targets:
-            if spec.family in {"nvfp4_cb", "fp8_cb"} and cw is None:
-                raise RuntimeError(
-                    f"{qname}={spec.name}: direct CB KL render has no "
-                    "production col_weights. CB export is imatrix-weighted; "
-                    "use a production cache/materialized render instead of "
-                    "validating an unweighted fallback."
-                )
             w = mod.weight.data
             # SmoothQuant fold: quantize W' = W·diag(s) (s over the input dim);
             # the inverse activation scale x→x/s is applied in the act hook so
@@ -183,7 +158,7 @@ class _WeightSwapper:
             # (E[x'^2]=E[x^2]/s^2) are recomputed in lockstep by the caller.
             w_in = w if smooth is None else w * smooth.to(w.device, w.dtype)
             w_hat = _render_weight(
-                spec, w_in, cw, qname=qname
+                spec, w_in, cw
             ).to(dtype=w.dtype, device=w.device)
             self._orig.append((mod, w))  # keep original tensor (still resident)
             mod.weight.data = w_hat
