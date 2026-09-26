@@ -81,18 +81,44 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   `floor_bytes`: the guard's live headroom less what the render stream's next
   group will still hold (`ReadStream.unread_bytes`, `io_engine.py:760`), and
   never less than the two chunk buffers the replay phase reserves.
-- **One pool, one reclaim order.** On a GB10 the host and the device share
-  one pool, so a shortfall on it picks the reclaimer by the term that binds.
-  A host shortfall (the cgroup budget or the `MemAvailable` floor) asks
-  `memory_management.ordered_reclaimer` (`:787`, registered at
-  `joint_cost_quantum.py:2386`) for its bytes in order of refill cost: spill
-  chunks read ahead (`reclaim_replay`, `joint_replay_spill.py:1024`, which
-  also hands the pinned allocator's idle blocks back; a 64 MiB re-read from
-  local NVMe), then the render cache (a device copy of a render already
-  resident on the host), then renders read ahead (GBs re-read from the
-  stage). Each reclaimer is asked only for what the ones before it left. A
-  device-envelope shortfall asks the render cache alone
-  (`joint_cost_quantum.py:2390`), since nothing else frees device bytes.
+- **One pool, one reclaim order, and each step read (PQ #1383).** On a GB10
+  the host and the device share one pool, so a shortfall can have several
+  reclaimers. `register_replay_reclaimers` (`joint_statistics_replay.py:386`,
+  called at `joint_cost_quantum.py:2383`) registers them in order of refill
+  cost: spill chunks read ahead (`reclaim_replay`,
+  `joint_replay_spill.py:1024`, which also hands the pinned allocator's idle
+  blocks back; a 64 MiB re-read from local NVMe), then renders kept on the
+  device (a device copy of a render already resident on the host), then
+  renders read ahead (GBs re-read from the stage).
+  - Each reclaimer declares which of the guard's three readings its frees
+    lower: the cgroup's committed bytes, the CUDA reservation, or
+    `MemAvailable` (`*_RECLAIM_LOWERS`, `joint_statistics_replay.py:367`).
+    Each refusal term reads some of them (`TERM_READINGS`,
+    `memory_management.py:65`). For example, the cgroup term reads only
+    committed bytes, and the device envelope only the reservation.
+  - Measured on the GB10, read at once after the free: the spill chunks and
+    the renders read ahead lower committed bytes, since pinned buffers and
+    sealed memfds are both shmem charged to the cgroup. The renders kept on
+    the device lower the reservation and `MemAvailable`. `MemAvailable` does
+    not show a shmem free at once (805 MB of memfds freed, `MemAvailable`
+    moved by -28 MB), so a host-term shortfall asks only the render cache.
+  - A check that would refuse makes one pass in order
+    (`CaptureMemoryGuard._reclaim`, `:702`). A reclaimer is asked only while
+    a term that reads one of its readings is exceeded, and for the largest
+    such excess. After each ask, the guard reads the process again.
+  - The pass stops only when no term is exceeded. What a reclaimer reports
+    freeing is recorded, never counted.
+  - Why it is built this way: #1348's `ordered_reclaimer` stopped once the
+    reported frees covered the shortfall. On a GB10, a CUDA free does not
+    lower the cgroup's committed bytes. So prof-2 was refused 60 MB over the
+    cgroup term after the render cache reported its frees, while gigabytes
+    of memfd read-ahead were still held.
+  - `tests/test_reclaim_readings_gb10.py` measures each declaration on the
+    GB10.
+  - A check that reclaimed records its trail under `reclaims` in its `last`
+    record. The guard's snapshot records each reclaimer's cumulative asks,
+    skips and reading deltas, and so does each window's read counters
+    (`guard_reclaim_*`).
 - **Pinned buffers charged what they hold.** torch's pinned allocator rounds
   a request up to a power of two. A buffer asks one grid block over its size,
   to align its start (`_aligned_buffer`, `joint_replay_spill.py:642`), so the
@@ -231,13 +257,26 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   per-CPU accounting batch. *A reclaim frees only what the allocator gives
   back; measure the drop, not the `del`.*
 - **Reclaim.** Renders read ahead belong to the stream, not to the PWC, until
-  their window takes them. `ReadStream.reclaim` (`:854`) drops the
-  farthest-ahead ones first, and the guard calls it
-  (`CaptureMemoryGuard.add_reclaimer`, `:614`) before any check would refuse
-  on the cgroup, aggregate or host term, then reads the process again. A
-  dropped render is read again later. The layer quantum's source baseline is
-  taken with the stream paused and its measured bytes left out
-  (`ReadStream.paused`, `:744`).
+  their window takes them. `ReadStream.reclaim` (`:908`) drops the
+  farthest-ahead ones first.
+  - The guard asks it (`CaptureMemoryGuard.add_reclaimer`,
+    `memory_management.py:677`) before a check would refuse on a term that
+    reads committed bytes: the cgroup, aggregate or combined term. Then it
+    reads the process again.
+  - A dropped render is read again later.
+  - The layer quantum's source baseline is taken with the stream paused and
+    its measured bytes left out (`ReadStream.paused`, `:798`).
+- **Depth and the cgroup term (PQ #1383).** The stream's depth is
+  `GuardReadBudget.headroom_bytes` → `CaptureMemoryGuard.headroom_bytes`
+  (`memory_management.py:648`). That is the room under every term that a
+  host allocation moves, and the cgroup term is one of them, with the
+  current phase's host reservation held against the cap.
+  - The depth is read each time a read is admitted, and it knows only the
+    current phase's reservation.
+  - Anon memory that a later phase allocates can therefore push the row's
+    committed bytes past the cap while the memfds read earlier are still
+    held.
+  - Reclaim is what gives that room back.
 - **Order and staging.** The quantum builds one stream over every pending
   window's renders, in window order, after the own-source phase starts
   (`joint_cost_quantum.py:2353`); window 0 loads while the own source
@@ -3251,8 +3290,25 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/dedup-digests-files-1361`.
+As of: 2026-09-26 · `ws-ra/reclaim-observe-1383`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `ws-ra/reclaim-observe-1383`) for **a capture-guard
+reclaim pass that reads each step** (PQ #1383, P1, a regression from #1348).
+`memory_management.ordered_reclaimer` is removed.
+
+- **Registration.** `CaptureMemoryGuard.add_reclaimer(reclaim, *, lowers,
+  name)` replaces `device=`. `joint_statistics_replay.register_replay_reclaimers`
+  replaces the quantum's two registrations.
+- **The pass.** `_reclaim` asks each reclaimer only for a term that reads
+  what its frees lower. It reads the process again after each ask, and stops
+  only when no term is exceeded.
+- **Declarations.** Measured on the GB10 (`tests/test_reclaim_readings_gb10.py`):
+  the spill replay and the render stream lower committed bytes; the render
+  cache lowers the reservation and `MemAvailable`.
+- **Headroom.** `headroom_bytes` and `device_headroom_bytes` read the same
+  term table, `_room`. Their values do not change.
+- **Unchanged.** No pipeline default, stage, format or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/dedup-digests-files-1361`) for **one owner per
 file, bytes and text digest** (PQ #1361, #1301 part 2, P1, part of epic #1295).
