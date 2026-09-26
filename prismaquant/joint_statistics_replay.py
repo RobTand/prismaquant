@@ -364,6 +364,51 @@ class RetainedRenderDeviceCache:
         self.last_window_peak_bytes, self._window_peak = self._window_peak, 0
 
 
+#: The capture guard readings each Stage B reclaimer's frees lower
+#: (``CaptureMemoryGuard.add_reclaimer``, PQ #1383), read the way the guard
+#: reads them: at once, after the free. Each is what the GB10 measures
+#: (``tests/test_reclaim_readings_gb10.py``), which fails when a free moves a
+#: reading its declaration leaves out, or leaves one it names.
+#: Renders read ahead are sealed memfds (#1315), shmem charged to the cgroup.
+#: MemAvailable does not show their freed pages at once: freeing 805 MB of
+#: them moved it by -28 MB.
+RENDER_STREAM_RECLAIM_LOWERS = frozenset({'committed'})
+#: Renders kept on the device are CUDA allocations, which the GB10 does not
+#: charge to the memcg. They are unified memory, so MemAvailable rises by
+#: what the reservation returns.
+RENDER_CACHE_RECLAIM_LOWERS = frozenset({'reserved', 'available'})
+#: Spill chunks read ahead are pinned host buffers. On the GB10 torch's
+#: pinned allocator returns shmem charged to the cgroup, and MemAvailable
+#: does not show those pages at once either.
+SPILL_REPLAY_RECLAIM_LOWERS = frozenset({'committed'})
+
+
+def register_replay_reclaimers(guard, *, spill, render_cache, render_stream):
+    """Register the Stage B replay's reclaimers with ``guard``; returns their remover.
+
+    In the order cheapest to restore first: spill chunks read ahead (a
+    64 MiB local read each), renders kept on the device (a copy from the
+    resident host render), then renders read ahead (gigabytes of stage).
+    The guard asks each only for a refused term that reads what its frees
+    lower, and reads the process again after each (PQ #1383). ``spill`` and
+    ``render_stream`` may be ``None``.
+    """
+    removes = []
+    if spill is not None:
+        removes.append(guard.add_reclaimer(
+            spill.reclaim_replay, lowers=SPILL_REPLAY_RECLAIM_LOWERS, name='spill_replay'))
+    removes.append(guard.add_reclaimer(
+        render_cache.reclaim, lowers=RENDER_CACHE_RECLAIM_LOWERS, name='render_cache'))
+    if render_stream is not None:
+        removes.append(guard.add_reclaimer(
+            render_stream.reclaim, lowers=RENDER_STREAM_RECLAIM_LOWERS, name='render_stream'))
+
+    def remove():
+        for each in reversed(removes):
+            each()
+    return remove
+
+
 def retained_admission_targets(statistics_plan, specs, cache):
     """Join a statistics plan to the PWC's declared candidate file sizes.
 

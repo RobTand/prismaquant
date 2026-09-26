@@ -30,22 +30,14 @@ probe certifies nothing.
 """
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
-import torch
 
-import prismaquant.production_weight_cache as pwc
 from prismaquant import io_engine
-from prismaquant import memory_management as mm
 
-PAGE = os.sysconf("SC_PAGE_SIZE")
-# How exact a cgroup reading is: the kernel charges ``memory.current`` in
-# per-CPU batches of MEMCG_CHARGE_BATCH (64) pages and flushes ``memory.stat``
-# once the per-CPU deltas pass that batch on every CPU, so a reading is exact
-# to within this many bytes and no closer.
-READING_GRAIN = 64 * PAGE * os.cpu_count()
+from cgroup_readings import READING_GRAIN, own_cgroup as _own_cgroup
+from cgroup_readings import committed as _committed, pages as _pages
+from cgroup_readings import quiet as _quiet, renders
+
 # A Stage B render file: 16 MiB of storage, as the GLM layer's renders are.
 RENDER_SHAPE = (2048, 4096)
 PER_GROUP = 8
@@ -56,57 +48,10 @@ def _no_residency_map(monkeypatch):
     monkeypatch.delenv("PRISMABUILD_RESIDENCY_MAP", raising=False)
 
 
-def _own_cgroup() -> Path:
-    lines = Path("/proc/self/cgroup").read_text().splitlines()
-    unified = [line.split("::", 1)[1] for line in lines if line.startswith("0::")]
-    assert unified, f"no cgroup v2 membership in /proc/self/cgroup: {lines}"
-    scope = Path("/sys/fs/cgroup") / unified[0].lstrip("/")
-    assert (scope / "memory.stat").is_file(), f"cannot read {scope}/memory.stat"
-    return scope
-
-
-def _committed(scope: Path) -> dict:
-    """The guard's reading: stat first, then ``memory.current``."""
-    stat = mm.read_memory_stat(scope / "memory.stat")
-    current = int((scope / "memory.current").read_text())
-    return {"committed": mm.committed_cgroup_bytes(current, stat),
-            "anon_shmem": stat["anon"] + stat["shmem"],
-            "shmem": stat["shmem"], "anon": stat["anon"]}
-
-
-def _pages(nbytes: int) -> int:
-    return -(-nbytes // PAGE) * PAGE
-
-
-def _renders(tmp_path, count):
-    paths = {}
-    for index in range(count):
-        key = (f"model.layers.0.unit{index:02d}", "NVFP4")
-        paths[key] = tmp_path / f"unit{index:02d}.pt"
-        torch.save(torch.full(RENDER_SHAPE, float(index), dtype=torch.bfloat16), paths[key])
-        # Written back before anything is measured: a dirty page is
-        # committed, and writeback during a reading would read as a drop.
-        with open(paths[key], "rb") as handle:
-            os.fsync(handle.fileno())
-    cache = pwc.ProductionWeightCache(
-        weights={key: str(path) for key, path in paths.items()}, levers={})
-    each = paths[next(iter(paths))].stat().st_size
-    assert all(path.stat().st_size == each for path in paths.values())
-    cache.enable_lru(count * each)
-    return cache, list(paths), each
-
-
-def _quiet(stream, timeout=60.0):
-    with stream._cond:
-        while stream._active or stream._gating:
-            assert stream._cond.wait(timeout), "the stream never went quiet"
-        return stream._held_actual
-
-
 def test_freed_read_ahead_leaves_the_committed_reading(tmp_path):
     scope = _own_cgroup()
     procs = (scope / "cgroup.procs").read_text().split()
-    cache, keys, each = _renders(tmp_path, 2 * PER_GROUP)
+    cache, keys, each = renders(tmp_path, 2 * PER_GROUP, RENDER_SHAPE)
     entries = [entry for group in range(2)
                for entry in cache.retained_read_entries(
                    keys[group * PER_GROUP:(group + 1) * PER_GROUP], group=group)]
