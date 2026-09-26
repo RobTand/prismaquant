@@ -9,10 +9,13 @@ This module owns three things and performs no I/O:
   they share;
 * the section 4 phase DAG and its explicit legal-transition table.
 
-It follows ``cluster_campaign_contract.py``, which is the house exemplar for a
-closed, strictly typed, canonically hashed contract, and it reuses that
-module's hasher (``cost_stage_checkpoint.canonical_json_sha256``) rather than
-introducing a second canonical JSON encoding.
+It is a closed, strictly typed, canonically hashed contract.  It reuses the
+package's one hasher (``cost_stage_checkpoint.canonical_json_sha256``) and its
+one strict reader and field checks (``schemas.strict_json_loads`` and
+``schemas.Contract``) rather than introducing second copies.
+:mod:`prismaquant.quality_prefill_pb_adapter` is this experiment's other half,
+not a copy: it turns one phase into a PrismaBuild logical request, and its
+wrappers raise its own error with PrismaBuild's id grammar (PQ #1302).
 
 Three rules the specification states and this module enforces mechanically:
 

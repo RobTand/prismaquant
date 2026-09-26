@@ -3,6 +3,10 @@
 Legacy exports conflate several byte and unit scopes.  This adapter preserves
 the recorded producer inventory, independently observes the current package,
 and names each census explicitly.  It never repairs or rewrites an artifact.
+
+It is a layer on :mod:`prismaquant.artifact_collection`, not a copy: every
+envelope, reference and strict-JSON primitive it uses is imported from there
+(PQ #1302).
 """
 from __future__ import annotations
 

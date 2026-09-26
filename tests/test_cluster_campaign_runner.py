@@ -367,7 +367,7 @@ def _load_state(path: Path, manifest: dict[str, object]) -> dict[str, object]:
     return campaign.validate_campaign_state_v2(raw, manifest)
 
 
-def test_v2_manifest_is_strict_canonical_and_preserves_v1_contract(tmp_path):
+def test_v2_manifest_is_strict_and_canonical(tmp_path):
     receipt = _receipt(tmp_path / "done.json", "done")
     stage = _stage(
         tmp_path,
@@ -381,9 +381,6 @@ def test_v2_manifest_is_strict_canonical_and_preserves_v1_contract(tmp_path):
 
     assert manifest["schema"] == campaign.CAMPAIGN_MANIFEST_SCHEMA_V2
     assert campaign.validate_campaign_manifest_v2(manifest) == manifest
-    from prismaquant.cluster_campaign_contract import CAMPAIGN_MANIFEST_SCHEMA
-
-    assert CAMPAIGN_MANIFEST_SCHEMA == "prismaquant.cluster_campaign.manifest.v1"
 
     argv_string = copy.deepcopy(manifest)
     argv_string["stages"][0]["argv"] = "python -c bad"
