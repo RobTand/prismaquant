@@ -5,6 +5,11 @@ algebra.  It deliberately does not call that output numerically VERIFIED.
 This module consumes the standard ``measure_vllm_full_kl.py`` student result
 against the original BF16 teacher and performs the only MATERIALIZED ->
 VERIFIED transition admitted by the native exporter.
+
+:mod:`prismaquant.prismasnap_checkpoint` owns every earlier state; this module
+is not a copy of it (PQ #1302).  The private helpers the two share by name
+differ in their refusal text, and the file digest they both carry moves to its
+owner with PQ #1301.
 """
 from __future__ import annotations
 

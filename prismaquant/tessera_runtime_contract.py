@@ -95,6 +95,7 @@ from .lane_eligibility import (
     cell_matches_serving_context,
     parse_lane_claim,
 )
+from .tessera_serving_runtime_pin import native_extension_contract_row
 
 __all__ = [
     "FUSED_MODULE_FIELD_LICENCES",
@@ -1791,19 +1792,9 @@ class TesseraNativeExtension:
     #: admits a rung on exactly the terms the pinned one does.
     lane: LaneClaim
 
-    def as_contract_row(self) -> dict:
-        """The four fields a residency predicate -- and the reading of an
-        absent library -- is made of, as published."""
-        return {
-            "module_name_prefix": self.module_name_prefix,
-            "filename_glob": self.filename_glob,
-            "match": self.match,
-            "when_unavailable": {
-                mode: {"status": behaviour["status"],
-                       "decoder": behaviour["decoder"]}
-                for mode, behaviour in sorted(self.when_unavailable.items())
-            },
-        }
+    #: The four fields a residency predicate -- and the reading of an absent
+    #: library -- is made of, as published. One spelling with the pin's row.
+    as_contract_row = native_extension_contract_row
 
 
 @dataclass(frozen=True, slots=True)

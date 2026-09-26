@@ -54,10 +54,6 @@
    "prismaquant/union_production_cache.py::_file_sha256"
   ],
   [
-   "prismaquant/cluster_campaign.py::validate_campaign_manifest_v2",
-   "prismaquant/cluster_campaign_contract.py::validate_campaign_manifest"
-  ],
-  [
    "prismaquant/cost_streaming.py::_file_sha256",
    "prismaquant/union_production_cache.py::_file_sha256"
   ],
@@ -92,14 +88,6 @@
   [
    "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
    "prismaquant/sample_parallel_probe_merge.py::_reference_mullo32_scalar"
-  ],
-  [
-   "prismaquant/tessera_runtime_contract.py::TesseraNativeExtension.as_contract_row",
-   "prismaquant/tessera_serving_runtime_pin.py::TesseraServingNativeExtension.as_contract_row"
-  ],
-  [
-   "tools/resolve_prismabuild_dev_pin.py::resolve_prismabuild_dev_pin",
-   "tools/resolve_tessera_dev_pin.py::resolve_tessera_dev_pin"
   ]
  ],
  "same_name_helpers": {
@@ -368,18 +356,6 @@
    "prismaquant/export_native_compressed.py",
    "prismaquant/format_registry.py"
   ],
-  "_normalize_host": [
-   "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py"
-  ],
-  "_normalize_manifest_body": [
-   "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py"
-  ],
-  "_normalize_transport": [
-   "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py"
-  ],
   "_number": [
    "prismaquant/measured_runtime_prices.py",
    "prismaquant/native_operator_panel.py"
@@ -614,10 +590,6 @@
    "prismaquant/kernels/joint_projection_reduce.py",
    "prismaquant/runtime_provenance.py"
   ],
-  "_state_body": [
-   "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py"
-  ],
   "_strict_json": [
    "prismaquant/runtime_provenance.py",
    "tools/measure_vllm_wikitext_ppl.py"
@@ -680,7 +652,6 @@
   ],
   "canonical_sha256": [
    "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py",
    "prismaquant/dsv4_campaign_completion.py",
    "prismaquant/joint_layer_quanta.py",
    "prismaquant/quality_prefill_contract.py",

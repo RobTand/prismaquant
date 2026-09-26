@@ -8,6 +8,11 @@ Every transition is content-bound.  Outputs are written to a sibling
 ``.prismasnap-incomplete`` directory, each shard is atomically published with
 a digest receipt, and the requested output path appears only after the full
 tensor census and provenance checks pass.
+
+:mod:`prismaquant.prismasnap_validation` owns the one later step, the numerical
+MATERIALIZED -> VERIFIED gate; it is not a copy of this module (PQ #1302).  The
+private helpers the two share by name differ in their refusal text, and the
+file digest they both carry moves to its owner with PQ #1301.
 """
 from __future__ import annotations
 

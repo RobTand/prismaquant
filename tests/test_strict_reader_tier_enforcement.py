@@ -57,11 +57,6 @@ EPOCH = '1789771929-aba6e46e41fb03ef'
 STALE_EPOCH = '1789788888-9c1d2e3f4a5b'
 STAGE_TIER = 'prismabuild-stage:dl380g10'
 
-PB_PIN_NOTE = (
-    "portable reviewed install: tests import the pbtest-pinned "
-    "prismabuild distribution (tools/resolve_prismabuild_dev_pin.py), "
-    "never a private worktree")
-
 
 @pytest.fixture(autouse=True)
 def _forget_state(monkeypatch):

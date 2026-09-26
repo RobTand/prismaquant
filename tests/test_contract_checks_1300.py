@@ -21,7 +21,6 @@ import pytest
 from prismaquant import (
     artifact_collection,
     artifact_collection_legacy,
-    cluster_campaign_contract,
     joint_catalog_extension,
     joint_cost_read_schedule,
     joint_head_walk_quanta,
@@ -74,7 +73,6 @@ BYTE_DOCUMENTS = tuple(text.encode("utf-8") for text in DOCUMENTS) + (b"\xff\xfe
 
 
 TEXT_LOADERS = {
-    "cluster_campaign_contract": cluster_campaign_contract.parse_campaign_manifest,
     "quality_prefill_contract": lambda text: quality_prefill_contract.decode_strict_json(text, where="manifest"),
     "quality_prefill_pb_adapter": lambda text: quality_prefill_pb_adapter.load_strict_json(text, where="adapter"),
     "runtime_provenance": lambda text: runtime_provenance._strict_json(text, "/p/m.json", "manifest"),
@@ -147,11 +145,6 @@ _ALL_SIX = {name: name for name in (
 # module -> (module, its exception, {old helper: the name the module binds it to}).
 # The PB adapter moved only these two; its own _integer and _sha256 differ.
 CONTRACT_MODULES = {
-    "cluster_campaign_contract": (
-        cluster_campaign_contract,
-        cluster_campaign_contract.ClusterCampaignContractError,
-        {**_ALL_SIX, "_absolute_posix_path": "_safe_absolute_path"},
-    ),
     "quality_prefill_contract": (
         quality_prefill_contract,
         quality_prefill_contract.QualityPrefillContractError,

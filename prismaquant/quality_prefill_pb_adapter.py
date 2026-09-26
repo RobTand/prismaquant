@@ -2,21 +2,17 @@
 
 DEPLOYMENT DEPENDENCY -- READ BEFORE USING THIS MODULE
 =====================================================
-This adapter targets PrismaBuild's pre-execution decomposition (PB issue #517).
-That work lives on an **unmerged draft pull request, PB #518**, and is **not
-deployed to the fleet**: the published runtime generation under
-``/mnt/shared/prismabuild-fleet/repo`` carries ``tools/fleet/pbcampaign.py``
-without a ``decompose`` entry point and carries no
-``src/prismabuild/decomposition.py`` at all.  Two separate things must happen
-before a phase emitted here can be submitted for real:
-
-1. PB #518 is merged, and
-2. a PrismaBuild runtime generation carrying it is **published** -- which needs
-   Rob's explicit word and an idle queue, and is not something an agent does.
-
-A source merge alone does not establish deployed support.  Until both hold, the
-only place this adapter is exercised is **in process**, against a checkout of
-the #518 branch, by ``tests/test_quality_prefill_pb_adapter_serve_once.py``.
+This adapter targets PrismaBuild's pre-execution decomposition (PB issue #517),
+which PB #518 merged.  A source merge alone does not establish deployed support:
+a phase emitted here can be submitted for real only once the published runtime
+generation under ``/mnt/shared/prismabuild-fleet/repo`` carries both
+``src/prismabuild/decomposition.py`` and a ``def decompose(`` entry point in
+``tools/fleet/pbcampaign.py``, which :func:`decomposition_support` probes.  On
+2026-09-25 the published generation carried the module but not that entry
+point, so the probe still reports it unsupported: decomposition is not
+deployed to the fleet.  Until it is, the only place this adapter is exercised
+is **in process**, against a PB checkout, by
+``tests/test_quality_prefill_pb_adapter_serve_once.py``.
 
 PrismaBuild advertises no capability token for decomposition the way it does for
 progress reporting (``prismabuild.core.PROGRESS_TAG == "progress-v1"``), so
@@ -48,37 +44,25 @@ measured its setup cost, or has not resolved its wall limit, is refused before a
 parent record can exist (specification §3.1: "phase resource/cost limits must be
 resolved from measured work estimates before that phase is submitted").
 
-Reuse and duplication, honestly recorded
-========================================
-Canonical JSON and its digest come from
-:mod:`prismaquant.cost_stage_checkpoint` (``canonical_json``,
-``canonical_json_sha256``), which is PrismaQuant's one canonicalizer/hasher.
-The strict *reader* below -- closed key sets, duplicate-key refusal, non-finite
-refusal -- is local because PrismaQuant has no single home for one: at least
-fifteen modules carry a private copy, each raising its own module's error type
-(``runtime_provenance``, ``measured_runtime_prices``, ``cluster_campaign_contract``,
-``shipcard`` and others).  Consolidating them is a repo-wide change and is not
-this work package's scope; this note is the debt line.
-
-``prismaquant/schemas.py`` is the nearest existing home and is reused as far as
-it goes: :class:`QualityPrefillAdapterError` subclasses its
-:class:`~prismaquant.schemas.SchemaValidationError` (``schemas.py:38``).  Its
-validators stop there -- ``_fail`` (``:46``), ``_as_non_negative_int`` (``:58``)
-and ``_as_finite_cost_number`` (``:76``) check one field at a time against an
-*open* mapping, by design ("older artifacts with extra fields still load",
-``schemas.py:1-7``).  This adapter needs the opposite: closed key sets, refusal
-of a repeated JSON key, and a canonical byte spelling, because its documents are
-hashed into a sealed action key.  Extending ``schemas.py`` with that machinery
-would collide head-on with the experiment-manifest schema being built in
-parallel, so the strict reader stays here and the two meet at the exception
-type.
+Reuse and duplication, honestly recorded (PQ #1302)
+===================================================
+This module and :mod:`prismaquant.quality_prefill_contract` are one experiment's
+two halves, not two copies: the contract owns the frozen manifest, the evidence
+envelopes and the phase DAG and performs no I/O; this adapter owns the one
+PrismaBuild logical request a phase becomes.  Their shared primitives already
+have one owner each: canonical JSON and its digest come from
+:mod:`prismaquant.cost_stage_checkpoint`, and the strict reader and the closed
+field checks from :mod:`prismaquant.schemas` (``strict_json_loads``,
+``Contract``, PQ #1300).  The thin wrappers left in each module differ on
+purpose: each raises its own module's error, with its own text, and this
+adapter's ids follow PrismaBuild's grammar, not PrismaQuant's.
 
 The identifier grammar is **PrismaBuild's**, not PrismaQuant's: roster ids reach
 a sealed action key, so they must satisfy ``prismabuild.core._ID_RE``
 (``[a-z0-9][a-z0-9._/-]{0,255}``), which admits ``/`` and 256 characters where
-``cluster_campaign_contract._ID_RE`` admits neither.  Validating against the
-wrong one would refuse legal ids or, worse, accept ids PB refuses after a plan
-was already frozen.
+PrismaQuant's own contract ids admit neither.  Validating against the wrong one
+would refuse legal ids or, worse, accept ids PB refuses after a plan was
+already frozen.
 
 Like :mod:`prismaquant.prismabuild_progress`, this module is written against
 PrismaBuild's **wire format** rather than by importing ``prismabuild``; the

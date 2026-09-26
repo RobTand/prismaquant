@@ -348,9 +348,36 @@ class TesseraServingRuntimePinError(ValueError):
     """The Tessera serving pin is missing, pending, or malformed."""
 
 
+def native_extension_contract_row(row) -> dict:
+    """One native-extension row as the contract spells it (PQ #1302).
+
+    The single owner of this four-field row. The pin's transcription and the
+    development contract's parsed row
+    (``tessera_runtime_contract.TesseraNativeExtension``) both bind it as
+    ``as_contract_row``, so a field-level comparison between them compares
+    one spelling. It lives here because this module imports nothing from the
+    package.
+    """
+    return {
+        "module_name_prefix": row.module_name_prefix,
+        "filename_glob": row.filename_glob,
+        "match": row.match,
+        "when_unavailable": {
+            mode: {"status": behaviour["status"],
+                   "decoder": behaviour["decoder"]}
+            for mode, behaviour in sorted(row.when_unavailable.items())
+        },
+    }
+
+
 @dataclass(frozen=True)
 class TesseraServingNativeExtension:
     """One row of the runtime's ``native_extensions`` table, transcribed.
+
+    The development contract's ``TesseraNativeExtension`` parses the same
+    table row with three more identity fields and a lane claim; the two classes
+    differ in what they carry, and share one row spelling,
+    :func:`native_extension_contract_row` (PQ #1302).
 
     Four fields and no fifth, because these four are what a residency
     decision -- and the reading of an ABSENT library -- is made of: WHICH
@@ -389,18 +416,7 @@ class TesseraServingNativeExtension:
     #: sorted order, so the transcription compares field for field.
     when_unavailable: Mapping[str, Mapping[str, str | None]]
 
-    def as_contract_row(self) -> dict:
-        """The row as the contract spells it, for a field-level comparison."""
-        return {
-            "module_name_prefix": self.module_name_prefix,
-            "filename_glob": self.filename_glob,
-            "match": self.match,
-            "when_unavailable": {
-                mode: {"status": behaviour["status"],
-                       "decoder": behaviour["decoder"]}
-                for mode, behaviour in sorted(self.when_unavailable.items())
-            },
-        }
+    as_contract_row = native_extension_contract_row
 
 
 @dataclass(frozen=True)
