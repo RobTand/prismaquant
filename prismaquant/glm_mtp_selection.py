@@ -41,6 +41,71 @@ def load_mtp_cost(path) -> dict:
     return dict(payload)
 
 
+MERGE_SCHEMA = "prismaquant.glm_mtp_cost.merge.v1"
+
+
+def merge_mtp_costs(payloads, *, sources=()) -> dict:
+    """One payload from several priced on the same MTP probe (PQ #1409).
+
+    A rung is priced where it is measured, and one quantum prices one Tessera
+    rate: GLM-5.3's routed E4M3 is attested at R896 and its routed BF16 at
+    R1024, so the layer's menu comes from two runs. The allocator reads one
+    ``--mtp-joint-cost``. The parts must describe the same layer on the same
+    probe identity (same units, groups, parameter counts and source dtypes),
+    and no rung may be priced twice; anything else refuses, by field. Rows are
+    carried unchanged. ``sources`` (for example path and sha256 per part) is
+    recorded beside each part's own provenance.
+    """
+    payloads = [dict(payload) for payload in payloads]
+    sources = list(sources)
+    if len(payloads) < 2:
+        raise ValueError("merging MTP cost payloads needs at least two parts")
+    if sources and len(sources) != len(payloads):
+        raise ValueError(f"{len(sources)} sources for {len(payloads)} MTP cost parts")
+    for index, payload in enumerate(payloads):
+        if payload.get("schema") != SCHEMA:
+            raise ValueError(f"MTP cost part {index} is not {SCHEMA}")
+    first = payloads[0]
+    for field in ("mtp_layer", "groups", "params", "source_dtype"):
+        for index, payload in enumerate(payloads[1:], start=1):
+            if payload[field] != first[field]:
+                raise ValueError(f"MTP cost part {index} disagrees with part 0 on {field!r}")
+    probes = [payload.get("provenance", {}).get("probe_identity_sha256") for payload in payloads]
+    if None in probes or len(set(probes)) != 1:
+        raise ValueError(f"MTP cost parts must name one probe identity, got {probes}")
+    costs = {unit: {} for unit in first["costs"]}
+    wire = {unit: {} for unit in first["costs"]}
+    for index, payload in enumerate(payloads):
+        if set(payload["costs"]) != set(costs):
+            raise ValueError(f"MTP cost part {index} prices a different unit set")
+        for unit, by_rung in payload["costs"].items():
+            if set(payload["wire_bytes"].get(unit, {})) != set(by_rung):
+                raise ValueError(f"MTP cost part {index}, unit {unit}: wire bytes and costs "
+                                 "name different rungs")
+            twice = sorted(set(by_rung) & set(costs[unit]))
+            if twice:
+                raise ValueError(f"MTP unit {unit}: rung(s) {twice} priced by more than one part")
+            costs[unit].update(by_rung)
+            wire[unit].update(payload["wire_bytes"][unit])
+    return {
+        "schema": SCHEMA,
+        "mtp_layer": first["mtp_layer"],
+        "costs": costs,
+        "wire_bytes": wire,
+        "params": dict(first["params"]),
+        "source_dtype": dict(first["source_dtype"]),
+        "groups": {name: list(members) for name, members in first["groups"].items()},
+        "provenance": {
+            "schema": MERGE_SCHEMA,
+            "probe_identity_sha256": probes[0],
+            "parts": [{**({"source": sources[index]} if sources else {}),
+                       "rungs": sorted({rung for rows in payload["costs"].values() for rung in rows}),
+                       "provenance": payload.get("provenance", {})}
+                      for index, payload in enumerate(payloads)],
+        },
+    }
+
+
 def _mtp_probe(payload) -> tuple[str, dict]:
     """The one MTP probe identity every row carries, validated."""
     from .glm_mtp import MTP_OBJECTIVE, MTP_OBJECTIVE_SCHEMA
@@ -142,4 +207,5 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     }
 
 
-__all__ = ["SCHEMA", "RECORD_SCHEMA", "load_mtp_cost", "select_mtp_rungs"]
+__all__ = ["SCHEMA", "RECORD_SCHEMA", "MERGE_SCHEMA", "load_mtp_cost", "merge_mtp_costs",
+           "select_mtp_rungs"]

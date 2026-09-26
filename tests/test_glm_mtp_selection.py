@@ -277,3 +277,99 @@ def test_allocator_refuses_an_mtp_name_the_body_assigned(tmp_path, monkeypatch):
                                       "--mtp-serve-constants", str(constants)])
     with pytest.raises(SystemExit, match="MTP"):
         allocator.main()
+
+
+# PQ #1409: one quantum prices one Tessera rate, so a layer whose attested
+# rungs sit at two rates is priced by two runs. They merge into one payload.
+
+def _part(payload, rungs, *, probe_sha=None):
+    part = dict(payload)
+    part["costs"] = {unit: {r: row for r, row in rows.items() if r in rungs}
+                     for unit, rows in payload["costs"].items()}
+    part["wire_bytes"] = {unit: {r: b for r, b in rows.items() if r in rungs}
+                          for unit, rows in payload["wire_bytes"].items()}
+    digest = probe_sha or next(row["probe_identity_sha256"] for rows in payload["costs"].values()
+                               for row in rows.values())
+    part["provenance"] = {"probe_identity_sha256": digest, "rungs": sorted(rungs)}
+    return part
+
+
+def test_merged_parts_select_what_the_whole_payload_selects():
+    from prismaquant.glm_mtp_selection import MERGE_SCHEMA, merge_mtp_costs, select_mtp_rungs
+
+    whole = _payload()
+    merged = merge_mtp_costs([_part(whole, {R1024}), _part(whole, {R832})],
+                             sources=[{"path": "a.pkl"}, {"path": "b.pkl"}])
+    assert merged["costs"] == whole["costs"]
+    assert merged["wire_bytes"] == whole["wire_bytes"]
+    assert merged["provenance"]["schema"] == MERGE_SCHEMA
+    assert [p["source"]["path"] for p in merged["provenance"]["parts"]] == ["a.pkl", "b.pkl"]
+    assert merged["provenance"]["parts"][1]["rungs"] == [R832]
+
+    def eligible(unit, rung):
+        return not (rung == R1024 and unit in ROUTED)
+
+    for budget in (_bytes(R1024, "BF16"), _bytes(R832, E4M3_SHARED)):
+        for gate in (None, eligible):
+            got = select_mtp_rungs(merged, byte_budget=budget, constants=CONSTANTS, eligible=gate)
+            want = select_mtp_rungs(whole, byte_budget=budget, constants=CONSTANTS, eligible=gate)
+            assert got == want
+
+
+def test_the_merged_payload_loads_as_a_cost_file(tmp_path):
+    from prismaquant.glm_mtp_selection import load_mtp_cost, merge_mtp_costs
+
+    whole = _payload()
+    path = tmp_path / "merged.pkl"
+    path.write_bytes(pickle.dumps(merge_mtp_costs([_part(whole, {R1024}), _part(whole, {R832})])))
+    assert load_mtp_cost(path)["costs"] == whole["costs"]
+
+
+@pytest.mark.parametrize("field", ["mtp_layer", "groups", "params", "source_dtype"])
+def test_parts_that_describe_different_layers_are_refused(field):
+    from prismaquant.glm_mtp_selection import merge_mtp_costs
+
+    whole = _payload()
+    other = _part(whole, {R832})
+    other[field] = {"mtp_layer": 46, "groups": {"routed": list(ROUTED)},
+                    "params": {**whole["params"], ROUTED[0]: PARAMS + 1},
+                    "source_dtype": {**whole["source_dtype"], ROUTED[0]: "float32"}}[field]
+    with pytest.raises(ValueError, match=repr(field)):
+        merge_mtp_costs([_part(whole, {R1024}), other])
+
+
+def test_parts_on_different_probes_are_refused():
+    from prismaquant.glm_mtp_selection import merge_mtp_costs
+
+    whole = _payload()
+    with pytest.raises(ValueError, match="one probe identity"):
+        merge_mtp_costs([_part(whole, {R1024}), _part(whole, {R832}, probe_sha="e" * 64)])
+    unnamed = _part(whole, {R832})
+    del unnamed["provenance"]
+    with pytest.raises(ValueError, match="one probe identity"):
+        merge_mtp_costs([_part(whole, {R1024}), unnamed])
+
+
+def test_a_rung_priced_twice_is_refused():
+    from prismaquant.glm_mtp_selection import merge_mtp_costs
+
+    whole = _payload()
+    with pytest.raises(ValueError, match="more than one part"):
+        merge_mtp_costs([_part(whole, {R1024, R832}), _part(whole, {R832})])
+
+
+def test_parts_over_different_units_are_refused():
+    from prismaquant.glm_mtp_selection import merge_mtp_costs
+
+    whole = _payload()
+    short = _part(whole, {R832})
+    del short["costs"][ROUTED[0]]
+    with pytest.raises(ValueError, match="different unit set"):
+        merge_mtp_costs([_part(whole, {R1024}), short])
+
+
+def test_a_single_part_is_not_a_merge():
+    from prismaquant.glm_mtp_selection import merge_mtp_costs
+
+    with pytest.raises(ValueError, match="at least two"):
+        merge_mtp_costs([_part(_payload(), {R1024})])
