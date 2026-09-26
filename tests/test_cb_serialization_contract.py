@@ -34,12 +34,14 @@ from prismaquant.nvfp4_cb_footprint import (
     cb_serialization_context_from_env,
     cb_serialization_context_from_stamp,
     cb_serialization_context_stamp,
-    enforce_whole_artifact_budget,
     finalize_cb_export_artifact_inventory,
     load_cb_codebook_digest_manifest,
     lattice_codebook_content_sha256,
-    whole_artifact_budget_stamp,
     validate_cb_cost_provenance,
+)
+from prismaquant.footprint import (
+    enforce_whole_artifact_budget,
+    whole_artifact_budget_stamp,
 )
 from prismaquant.validate_assignments_kl import _assignment_bpp_details
 
@@ -1174,7 +1176,7 @@ def test_sizing_mode_matches_banked_bytes_and_marks_identity_unproven():
 
 
 def _stamp(assignment, *, excluded=()):
-    from prismaquant.nvfp4_cb_footprint import whole_artifact_budget_stamp
+    from prismaquant.footprint import whole_artifact_budget_stamp
 
     return whole_artifact_budget_stamp(
         budget_bytes=1000,
@@ -1195,7 +1197,7 @@ def test_budget_stamp_without_exclusions_is_byte_identical():
 
 
 def test_budget_stamp_records_and_dedupes_exclusions():
-    from prismaquant.nvfp4_cb_footprint import budget_stamp_excluded_prefixes
+    from prismaquant.footprint import budget_stamp_excluded_prefixes
 
     stamp = _stamp({"layer.q_proj": "BF16"}, excluded=["mtp.", " mtp.", "visual."])
     assert stamp["excluded_source_prefixes"] == ["mtp.", "visual."]
@@ -1203,9 +1205,7 @@ def test_budget_stamp_records_and_dedupes_exclusions():
 
 
 def test_exclusions_must_match_the_price_that_bought_them():
-    from prismaquant.nvfp4_cb_footprint import (
-        assert_exclusions_match_budget_stamp,
-    )
+    from prismaquant.footprint import assert_exclusions_match_budget_stamp
 
     assignment = {"layer.q_proj": "BF16"}
     priced = _stamp(assignment, excluded=["mtp."])
@@ -1229,7 +1229,7 @@ def test_exclusions_must_match_the_price_that_bought_them():
 
 
 def test_a_malformed_exclusion_record_is_loud():
-    from prismaquant.nvfp4_cb_footprint import (
+    from prismaquant.footprint import (
         whole_artifact_budget_from_assignment_payload,
     )
 

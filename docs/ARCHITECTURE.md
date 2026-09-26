@@ -2973,8 +2973,67 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/glm-mtp-projection-1319`.
+As of: 2026-09-25 · `claude/glm-mtp-encode-1271`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/glm-mtp-encode-1271`) for **a
+profile-declared source scope, and the GLM MTP layer priced through it**
+(PQ #1316, M3 of #1271, P1). Plugin contract: a profile may declare an
+out-of-body source that selected snapshots read
+(`ModelProfile.source_scope(name, model_path)` returning a `SourceScope`; the
+base refuses by name). GLM declares `mtp`, the layer `num_hidden_layers`
+names, kept under its checkpoint names with `glm_mtp.MtpCheckpointModel` as
+its meta skeleton. The scope rides the one loader:
+
+- `_build_streaming_context(source_scope=)` builds the scope's skeleton and
+  maps keys through its `live_name` (`layer_streaming._build_weight_map`'s
+  `live_name` hook). The weight map, packer, authentication, layer cache and
+  prefetch pool are the body's, with no new thread site. A scope requires
+  `source_snapshot_only`, so it has no forward and no initialization audit.
+  `StreamingContext.source_layers` names the readable layers.
+- `SelectedSource` (`cost_streaming`) names what selected-source consumers
+  may use of a runner. Both the body runner and the scoped runner satisfy it,
+  and a test keeps the campaign's other `runner.` uses to the whole-scope
+  forward.
+- `streamed_calibration_resources` / `selected_anchor_resources` take
+  `source_scope`, and so does the dispatcher's plan (`--source-scope` in
+  `campaign_argv`).
+- The campaign takes `--source-scope NAME`. It requires
+  `--source-snapshot-policy selected-tensors-v1`, and the census must carry
+  the scope's load contract (`prismaquant.mtp_layer_initialization.v1` for
+  `mtp`). Unset, the flag is dropped from the identity settings, so body
+  identities do not change.
+- `census_token_counts`, the single owner of a census's `(max, min)` rows,
+  reads a **derived** census's pair from the hash-bound base census that
+  `mtp_extension.base_census` names. The MTP capture's identity carries the
+  body draw's pair: (262,144, 13) on GLM-5.3-Flash, not the MTP scope's own
+  (261,632, 722). The run's own rows are still checked against the derived
+  census.
+
+Defaults are unchanged: without a scope, every changed function takes its
+old branch. Gates: `tests/test_glm_mtp_source_scope.py` (the scoped
+snapshot equals the MTP loader's bytes, both runners satisfy the protocol,
+and a real two-phase tiny capture prices the shared expert and the routed
+stack in one row) and `tests/test_tessera_campaign_fanout.py` (the derived
+draw).
+
+Re-stamped (2026-09-25, `claude/dedup-gridbook-move-1304`) for **moving the
+live helpers out of the retired codebook lane's modules** (PQ #1304, P2, part
+of epic #1295; step 1 of 2, before the D34 remainder is archived). The
+whole-artifact byte budget (`whole_artifact_budget_stamp`,
+`whole_artifact_budget_from_assignment_payload`, `enforce_whole_artifact_budget`,
+`recursive_regular_file_bytes`, `budget_stamp_excluded_prefixes`,
+`assert_exclusions_match_budget_stamp`, `assignment_serialization_sha256`)
+moved from `nvfp4_cb_footprint.py` to `footprint.py`. The allocator writes the
+stamp and both the compressed-tensors and GGUF exporters enforce it, so it was
+never the lane's. The probe-derived imatrix helpers (`imatrix_from_probe_stats`,
+`imatrix_from_probe_file`, `canonical_imatrix_sha256`) moved from
+`cb_imatrix.py`, now deleted, to `moe_imatrix.py`. They feed the col-weights
+harvest in `run-pipeline.sh`, which the GGUF lane and every imatrix-weighted
+render read. Outputs are unchanged: persisted schema strings keep their
+historical values, and `tests/test_lane_independent_moves_1304.py` pins every
+moved function's output against values computed on `origin/main` 253cc885c28.
+No default, stage, format, or gate changed.
 
 Re-stamped (2026-09-25, `claude/glm-mtp-projection-1319`) for **the GLM MTP
 census's producer projection** (PQ #1319, part of #1271, P1). The campaign
@@ -15318,7 +15377,7 @@ which is what the rows touched since are keyed on.
 | **1/4×N (manual)** | Exact sample-axis probe map/reduce. Every worker processes the complete dense text qname census over one canonical contiguous sample partition. Stage 1 publishes raw shifted-token CE; a global scalar barrier closes the cover; stage 2 reruns phase 1 with that global mean, then the strict reducer finalizes raw Fisher/marginals once and publishes the deterministic dense-body activation union (§4.1) | `prismaquant.sample_parallel_probe` + `prismaquant.incremental_probe` + `prismaquant.sample_parallel_probe_merge` | immutable calibration/run contract and digest-bound sample cover; per-worker CE/probe/cache shards; global CE receipt; ordinary merged `probe.pkl` + `act/` | committed read-only source snapshot + host-verified immutable registry RepoDigest; source/config/header/content identity; exact sample cover replayed before GPU setup; duplicate-key-free trusted JSON; marginal-to-trace and independently replayed global top-R/fused-row checks; no-follow same-byte probe and committed-identity lazy activation consumption; no-clobber output | opt-in operator workflow; no `torch.distributed`, qname/layer partitioning, alternate cache, serving-runtime change, h-detail, visual, routed, or packed path |
 | **2/4** | Baseline per-(Linear,format) RTN cost. The measured menu is derived `COST_FORMATS`; `lm_head` is included only for a fixed non-BF16 or DP-unpinned head | `prismaquant.incremental_measure_quant_cost --[no-]include-lm-head` | `artifacts/cost.pkl` (`COST_MODE=local`) or `artifacts/cost_baseline.pkl`; `logs/cost.log` | settings-hash `base-cost`, including all three resolved head-policy axes and `COST_FORMATS` | — |
 | **2a-CB** | imatrix column-weight harvest | `harvest_cb_col_weights` — ONE shell function, four call sites (`[2/4] pre-cost`, `[2b/4] cost-cache`, `[2d-CB]`, `[4/4]`) → `export_gguf.build_imatrix_from_act_cache` + `moe_imatrix.synthesize_packed_expert_col_weights` | `artifacts/cb_col_weights.pkl` | settings-hash `cb-col-weights` | CB lane; called by whichever stage needs the vector first |
-| **pre-2-CBL** | Train/verify the immutable value-bearing codebook bundle. Historical trainer v1 keeps its measured rung policy. Trainer v2 derives the existing probe imatrix and emits lattice for every FP8 producer rung unless an independently validated per-rung promotion receipt authorizes the exact learned candidate | `ensure_cb_learned_bundle` → `prismaquant.build_cb_learned_bundle` → streaming source reader; v2 additionally uses `cb_imatrix` + `cb_learned_promotion` | `artifacts/cb_learned_bundle.pqcb`; optional external `prismaquant.fp8_cbl_promotion_receipt.v1` input is embedded and digest-bound | settings-hash `cb-learned-bundle` includes the calibration/imatrix input identity; bundle load revalidates complete source, role, candidate-table, and receipt bindings | CB lane, learned scope only; runs before the first cost/cache/KL render. V2 without a valid receipt is all-lattice, never a guessed learned/lattice crossover |
+| **pre-2-CBL** | Train/verify the immutable value-bearing codebook bundle. Historical trainer v1 keeps its measured rung policy. Trainer v2 derives the existing probe imatrix and emits lattice for every FP8 producer rung unless an independently validated per-rung promotion receipt authorizes the exact learned candidate | `ensure_cb_learned_bundle` → `prismaquant.build_cb_learned_bundle` → streaming source reader; v2 additionally uses `moe_imatrix.imatrix_from_probe_file` (moved from `cb_imatrix` 2026-09-25, #1304) + `cb_learned_promotion` | `artifacts/cb_learned_bundle.pqcb`; optional external `prismaquant.fp8_cbl_promotion_receipt.v1` input is embedded and digest-bound | settings-hash `cb-learned-bundle` includes the calibration/imatrix input identity; bundle load revalidates complete source, role, candidate-table, and receipt bindings | CB lane, learned scope only; runs before the first cost/cache/KL render. V2 without a valid receipt is all-lattice, never a guessed learned/lattice crossover |
 | **2b/4** | Format-menu production render for allocator cost. Materialized mode retains render shards; streamed CB mode synchronously renders each full-menu pair, checkpoints the consumer acknowledgement, then discards the tensor (§5.4). The probe activation directory enables profile-synthesized MTP append; remaining profile pins are skipped | `build_production_cache --render-scope format-menu --activation-cache-dir act/` using derived `COST_FORMATS`; transient lifetime is implemented by `streaming_production_cache.py` through the existing `ProductionWeightCache` | `artifacts/production_render_score_cache.pkl`; `…_weight_cache/` contains tensors only for materialized mode, while transient CB pairs retain identity/digest/consumer sidecars but no rendered-weight shard | settings-hash `render-cost-cache`, including the resolved head policy | `production-render-score`; transient mode is CB-only and must cover the complete requested menu |
 | **2c/4** | Synthesize allocator cost from render scores | `prismaquant.production_render_cost` (`704-711`) | `artifacts/cost.pkl` | settings-hash `render-cost` (`858`) + cost-mode provenance (`859`) | `production-render-score` |
 | **2b/4** | Format-menu render for AURA dW. A materialized cache exposes dW later; the streamed CB lifetime exposes each canonical render to the synchronous cost consumer and discards it only after that row is durably acknowledged (§5.4). It uses the same activation-cache/MTP and remaining-pin policy as the cost cache | `build_production_cache … --render-scope format-menu --activation-cache-dir act/` | frontier cache under validated-surrogate, else `production_render_score_cache.pkl`; transient CB mode retains pair attestations rather than loser weight shards | settings-hash `aura-dw-cache`, including the resolved head policy | `aura`; `exit 2` if the menu is BF16-only; every requested candidate must be consumed |
@@ -15545,7 +15604,8 @@ process-global policy after context creation cannot reinterpret that artifact;
 
 **Learned-v2 has no assumed crossover.** Its domain is the exact twelve-rung
 FP8 producer ladder K4..K48 step 4, and every rung starts on the committed
-lattice. `cb_imatrix.py` derives dense `act_sq_sum / n_tokens_seen` and routed
+lattice. `moe_imatrix.imatrix_from_probe_stats` (was `cb_imatrix.py` until
+2026-09-25) derives dense `act_sq_sum / n_tokens_seen` and routed
 `expert_act_sq_sum / expert_tokens` values from the existing sensitivity probe;
 it creates no calibration cache. A rung becomes learned only when
 `prismaquant.fp8_cbl_promotion_receipt.v1` passes both held-out result gates and
@@ -15553,7 +15613,7 @@ binds the complete source checkpoint/tensor map, training calibration and
 imatrix values, role census, exact candidate FP16 table digests, and all rung
 decisions. Missing calibration, a density shortfall, a tie, or a missing,
 tampered, substituted, or incomplete receipt keeps the rung lattice or refuses;
-one rung's result is never transferred to another (`cb_imatrix.py`,
+one rung's result is never transferred to another (`moe_imatrix.py`,
 `cb_learned_promotion.py`, `build_cb_learned_bundle.py`). Trainer v1 remains the
 compatibility default; choosing v2 changes no production default by itself.
 
@@ -22517,6 +22577,16 @@ streaming-probe adapters (`:823-947` — `checkpoint_to_live_name`, `fp8_scale_p
 KV-cotangent path now grafts through — §7.5), `register_vendored_modeling()` (`:974-979`).
 `vllm_fused_moe_scheme_projection_names` (`:443-468`) is intentionally hardcoded to vLLM's
 canonical names — §6.2.
+
+**`source_scope` — an out-of-body source for selected snapshots (PQ #1316).**
+`checkpoint_to_live_name` drops layers outside the decoder body, such as GLM's
+MTP layer. A profile that needs one priced declares it by name:
+`source_scope(name, model_path)` returns a `SourceScope` (`base.py`) with the
+checkpoint layers, the index bound, the live layer prefix, the census load
+contract, a `live_name` key map and a meta-skeleton builder. The base refuses
+every name. `glm5_next` declares `mtp`. The streaming context, resource
+planners and campaign take the name (`--source-scope`), and the scope is
+snapshot-only: it has no forward.
 
 Routed-expert classification for the AURA hybrid is also a profile boundary, not a shape
 heuristic. `routed_experts.py` treats `packed_expert_format_group(qname)` as the membership

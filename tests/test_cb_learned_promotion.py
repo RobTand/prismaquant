@@ -5,7 +5,7 @@ import hashlib
 
 import pytest
 
-from prismaquant.cb_imatrix import CB_IMATRIX_FROM_PROBE_SCHEMA
+from prismaquant.moe_imatrix import IMATRIX_FROM_PROBE_SCHEMA
 from prismaquant.cb_layout import FP8_PRODUCT_RUNGS
 from prismaquant.cb_learned_promotion import (
     CBL_PROMOTION_RECEIPT_SCHEMA,
@@ -76,7 +76,7 @@ def promotion_receipt(
         },
         "trainer": {"schema": CBL_V2_TRAINER_SCHEMA},
         "imatrix": {
-            "schema": CB_IMATRIX_FROM_PROBE_SCHEMA,
+            "schema": IMATRIX_FROM_PROBE_SCHEMA,
             "calibration_hash": CALIBRATION_HASH,
             "value_sha256": imatrix_sha256,
         },

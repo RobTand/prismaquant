@@ -242,6 +242,48 @@ def test_census_supplies_the_scope_s_counts_and_verifies_the_run_s_own():
         census_max_abs(census, {"a": 2.0})
 
 
+def test_a_derived_census_names_its_base_census_s_draw(tmp_path):
+    """The GLM MTP census covers units the body census never ran, over the
+    body's draw. Its capture identity carries the body's (max, min) rows, so
+    the pair is read off the hash-bound base census it names, and the run's
+    own rows are still checked against the derived census's counts."""
+    import hashlib
+    from prismaquant.glm_mtp_capture import CENSUS_EXTENSION_SCHEMA
+    from prismaquant.tessera_campaign import census_token_counts
+
+    draw = {"text_sha256": "corpus", "fit_ids_sha256": "ids",
+            "nsamples": 512, "seqlen": 512, "seed": 0}
+    base = dict(_census({"a": 262144, "b": 13}), **draw)
+    base_path = tmp_path / "census.json"
+    base_path.write_text(json.dumps(base))
+    ref = {"path": str(base_path), "sha256": hashlib.sha256(base_path.read_bytes()).hexdigest()}
+    derived = dict(_census({"m": 261632, "n": 722}), **draw,
+                   mtp_extension={"schema": CENSUS_EXTENSION_SCHEMA, "layer": 45,
+                                  "base_census": ref})
+    assert census_token_counts(derived, {}) == (262144, 13)
+    assert census_token_counts(derived, {"m": 261632}) == (262144, 13)
+    with pytest.raises(RuntimeError, match="disagrees"):
+        census_token_counts(derived, {"m": 262144})
+    with pytest.raises(RuntimeError, match="does not cover"):
+        census_token_counts(derived, {"a": 262144})
+
+    # The base is bound by its bytes, and must be the same draw.
+    with pytest.raises(RuntimeError, match="sha256"):
+        census_token_counts(dict(derived, mtp_extension=dict(
+            derived["mtp_extension"], base_census=dict(ref, sha256="0" * 64))), {})
+    other = dict(base, fit_ids_sha256="other")
+    other_path = tmp_path / "other.json"
+    other_path.write_text(json.dumps(other))
+    with pytest.raises(RuntimeError, match="another draw"):
+        census_token_counts(dict(derived, mtp_extension=dict(
+            derived["mtp_extension"], base_census={
+                "path": str(other_path),
+                "sha256": hashlib.sha256(other_path.read_bytes()).hexdigest()})), {})
+    with pytest.raises(RuntimeError, match="extension"):
+        census_token_counts(dict(derived, mtp_extension=dict(
+            derived["mtp_extension"], schema="another")), {})
+
+
 def test_a_census_of_another_draw_is_refused():
     from prismaquant.tessera_campaign import require_census_draw
 

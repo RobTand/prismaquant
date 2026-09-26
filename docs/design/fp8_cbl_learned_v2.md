@@ -14,7 +14,7 @@ probe:
 - routed population: `expert_act_sq_sum / expert_tokens`, independently for
   each expert.
 
-`prismaquant.cb_imatrix` converts those existing fields into the qname-to-tensor
+`prismaquant.moe_imatrix` (was `prismaquant.cb_imatrix` until 2026-09-25) converts those existing fields into the qname-to-tensor
 mapping accepted by the renderer and records a canonical SHA-256 over sorted
 qnames, shapes, and little-endian FP32 values. It creates no cache and reads no
 external corpus. A zero-token routed expert must first go through the existing

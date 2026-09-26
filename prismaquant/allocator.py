@@ -156,8 +156,8 @@ from .nvfp4_cb_footprint import (
     cb_tensor_payload_breakdown,
     is_cb_format,
     validate_cb_cost_provenance,
-    whole_artifact_budget_stamp,
 )
+from .footprint import whole_artifact_budget_stamp
 from .production_weight_cache import (
     project_cb_render_identity,
     validate_cb_render_provenance,

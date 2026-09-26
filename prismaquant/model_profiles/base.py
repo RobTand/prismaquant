@@ -25,10 +25,40 @@ from __future__ import annotations
 import json
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch.nn as nn
+
+
+@dataclass(frozen=True)
+class SourceScope:
+    """Checkpoint layers outside the decoder body that selected snapshots read.
+
+    A profile declares one by name (:meth:`ModelProfile.source_scope`). The
+    streamed source context builds ``build_skeleton``'s meta model in place of
+    the body skeleton and maps checkpoint keys through ``live_name``, so the
+    one loader (weight map, packer, authentication, layer cache and prefetch
+    pool) reads these layers. A scope is snapshot-only: it has no forward and
+    no initialization audit.
+
+    * ``layers``: the checkpoint layer indices the scope covers.
+    * ``num_layers``: the index bound the loader checks layers against.
+    * ``layers_prefix``: the live-name prefix before the layer index.
+    * ``load_contract_schema``: the census load contract a capture over this
+      scope carries.
+    * ``live_name``: checkpoint key to live name, or None to drop the key.
+    * ``build_skeleton``: ``attn_implementation`` to the meta model.
+    """
+
+    name: str
+    layers: tuple[int, ...]
+    num_layers: int
+    layers_prefix: str
+    load_contract_schema: str
+    live_name: Callable[[str], str | None]
+    build_skeleton: Callable[[str | None], nn.Module]
 
 
 class ModelProfile(ABC):
@@ -1123,6 +1153,13 @@ class ModelProfile(ABC):
         if spec is not None and spec.body_layer_prefix is not None:
             return spec.body_layer_prefix
         return "model.layers"
+
+    def source_scope(self, name: str, model_path) -> SourceScope:
+        """The out-of-body source ``name`` that selected snapshots may read.
+
+        No profile declares one by default, so the base refuses by name.
+        """
+        raise ValueError(f"profile {self.name} declares no source scope {name!r}")
 
     def mtp_layer_prefix(self) -> str:
         """Prefix used for MTP-layer names in the checkpoint."""

@@ -13,9 +13,9 @@ import torch
 
 from prismaquant.nvfp4_cb_footprint import (
     CBSerializationContext,
-    assignment_serialization_sha256,
     cb_serialization_context_stamp,
 )
+from prismaquant.footprint import assignment_serialization_sha256
 from prismaquant.production_weight_cache import (
     bind_cb_render_identity_source_weights,
     build_production_cache_cb_render_identity,

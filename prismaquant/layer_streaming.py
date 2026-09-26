@@ -158,6 +158,7 @@ def _safe_open_kwargs(device: torch.device) -> dict:
 
 def _build_weight_map(model_path: str, *,
                       multimodal: bool = False, source_authentication=None,
+                      live_name=None,
                       ) -> tuple[dict[str, str], dict[str, str]]:
     """Return ({model_key: shard_path}, {model_key: checkpoint_key}).
 
@@ -177,7 +178,11 @@ def _build_weight_map(model_path: str, *,
     streaming skeleton (body at `model.language_model.layers.X.*`,
     visual at `model.visual.*`); no rename is applied and visual/audio
     keys are preserved so `_materialize` can load them onto the visual
-    tower. MTP stays dropped — MTP has its own synthesis path."""
+    tower. MTP stays dropped — MTP has its own synthesis path.
+
+    ``live_name`` replaces the profile's rename: a source scope
+    (``ModelProfile.source_scope``) maps its own out-of-body keys and drops
+    every other one (None)."""
     # Rename strategy is owned by the model_profile (refactor #32).
     # The default ModelProfile.checkpoint_to_live_name preserves the
     # legacy `_rename_text_only` / `_rename_multimodal` behavior;
@@ -197,7 +202,8 @@ def _build_weight_map(model_path: str, *,
             raw = {k: single for k in f.keys()}
     return live_weight_map(
         raw, model_path,
-        lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal))
+        live_name if live_name is not None else
+        (lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal)))
 
 
 def construction_multimodal(profile, multimodal: bool) -> bool:
