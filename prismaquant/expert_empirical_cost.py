@@ -47,6 +47,7 @@ import torch.nn.functional as F
 
 from . import io_spans
 from prismaquant import format_registry as fr
+from prismaquant.tensor_digests import tensor_value_stamp as _tensor_value_stamp
 from prismaquant.routed_experts import (
     UnpackedExpertLinear,
     _profile_call,
@@ -736,16 +737,6 @@ EXPERT_CHECKPOINT_IDENTITY_SCHEMA = (
     "prismaquant.expert_empirical_checkpoint.identity.v1"
 )
 EXPERT_CHECKPOINT_STAGE = "expert empirical cost"
-
-
-def _tensor_value_stamp(tensor: torch.Tensor) -> dict[str, object]:
-    value = torch.as_tensor(tensor).detach().to("cpu").contiguous()
-    raw = value.view(torch.uint8).numpy().tobytes()
-    return {
-        "shape": [int(dim) for dim in value.shape],
-        "dtype": str(value.dtype),
-        "sha256": hashlib.sha256(raw).hexdigest(),
-    }
 
 
 def _streamed_expert_unit_records(model, profile, *, unit_filter, max_units):

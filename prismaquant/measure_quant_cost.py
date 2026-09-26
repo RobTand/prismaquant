@@ -24,7 +24,6 @@ rel_output_mse}. When h-detail is supplied, entries may also include
 from __future__ import annotations
 
 import json
-import hashlib
 import math
 import os
 import pickle
@@ -46,6 +45,7 @@ from .render_score import (
     resolve_fisher_row_weight_clip,
 )
 from .sensitivity_probe import _packed_expert_parent_for_projection, grouped_linear_groups
+from .tensor_digests import tensor_identity
 
 
 def canonical_linear_name(name: str, profile=None) -> str:
@@ -713,13 +713,8 @@ class ActivationIndex:
                 raise ValueError(
                     f"{resolved_name}: verified activation tensor differs"
                 )
-            tensor = value.detach().to("cpu").contiguous()
-            raw = tensor.view(torch.uint8).numpy().tobytes()
-            return {
-                "dtype": str(tensor.dtype),
-                "shape": [int(dim) for dim in tensor.shape],
-                "sha256": hashlib.sha256(raw).hexdigest(),
-            }
+            # The same recipe the merge committed (#1384).
+            return tensor_identity(value)
 
         identity = {
             "inputs": _tensor_identity(blob["inputs"]),
