@@ -225,27 +225,35 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
 def _mtp_probe(payload) -> tuple[str, dict]:
     """The one MTP probe identity every row carries, validated."""
     from .glm_mtp import MTP_OBJECTIVE, MTP_OBJECTIVE_SCHEMA
-    from .joint_aura import validate_joint_aura_entry
+    from .joint_aura import (prepare_joint_aura_identities, release_joint_aura_identities,
+                             validate_joint_aura_entry)
 
-    digests, probe = set(), None
-    for unit, by_rung in payload["costs"].items():
-        for rung, row in by_rung.items():
-            if not validate_joint_aura_entry(row):
-                raise ValueError(f"MTP row {unit} @ {rung} is not a joint-AURA entry")
-            operator = row["joint_operator_identity"]
-            if operator["qname"] != unit or operator["format"] != rung:
-                raise ValueError(f"MTP row {unit} @ {rung} names {operator['qname']} @ {operator['format']}")
-            objective = row["probe_identity"].get("objective")
-            if (not isinstance(objective, Mapping) or objective.get("schema") != MTP_OBJECTIVE_SCHEMA
-                    or objective.get("objective") != MTP_OBJECTIVE):
-                raise ValueError(f"MTP row {unit} @ {rung} was not priced on the MTP objective")
-            if objective.get("mtp_layer") != payload["mtp_layer"]:
-                raise ValueError(f"MTP row {unit} @ {rung} names MTP layer {objective.get('mtp_layer')}")
-            digests.add(row["probe_identity_sha256"])
-            probe = row["probe_identity"]
+    digests, last_row = set(), None
+    try:
+        # Pickle retains shared probe objects. The joint validator already
+        # owns a content-bound immutable wrapper that validates each distinct
+        # source model once while continuing to validate every row/operator.
+        prepare_joint_aura_identities(payload)
+        for unit, by_rung in payload["costs"].items():
+            for rung, row in by_rung.items():
+                if not validate_joint_aura_entry(row):
+                    raise ValueError(f"MTP row {unit} @ {rung} is not a joint-AURA entry")
+                operator = row["joint_operator_identity"]
+                if operator["qname"] != unit or operator["format"] != rung:
+                    raise ValueError(f"MTP row {unit} @ {rung} names {operator['qname']} @ {operator['format']}")
+                objective = row["probe_identity"].get("objective")
+                if (not isinstance(objective, Mapping) or objective.get("schema") != MTP_OBJECTIVE_SCHEMA
+                        or objective.get("objective") != MTP_OBJECTIVE):
+                    raise ValueError(f"MTP row {unit} @ {rung} was not priced on the MTP objective")
+                if objective.get("mtp_layer") != payload["mtp_layer"]:
+                    raise ValueError(f"MTP row {unit} @ {rung} names MTP layer {objective.get('mtp_layer')}")
+                digests.add(row["probe_identity_sha256"])
+                last_row = row
+    finally:
+        release_joint_aura_identities(payload)
     if len(digests) != 1:
         raise ValueError(f"MTP rows must share one probe identity, got {len(digests)}")
-    return digests.pop(), probe
+    return digests.pop(), last_row["probe_identity"]
 
 
 def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
@@ -399,8 +407,6 @@ def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
                 selected[key][name] = payload[key][name][fmt]
             except KeyError as exc:
                 raise ValueError(f"MTP {name}@{fmt} has no bound {key}") from exc
-    if hashlib.sha256(Path(cost_path).read_bytes()).hexdigest() != cost_sha256:
-        raise ValueError("MTP merged cost changed during selection backfill")
     enriched_record = {**record, "mtp_joint_cost_sha256": cost_sha256,
                        "mtp_expert_projection": payload["mtp_expert_projection"],
                        **selected, "mtp_expert_wire_binding_schema": WIRE_BINDING_SCHEMA}

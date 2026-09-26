@@ -373,3 +373,35 @@ def test_a_single_part_is_not_a_merge():
 
     with pytest.raises(ValueError, match="at least two"):
         merge_mtp_costs([_part(_payload(), {R1024})])
+
+
+def test_shared_probe_is_released_as_plain_data_after_mtp_selection():
+    from prismaquant.glm_mtp_selection import _mtp_probe, select_mtp_rungs
+
+    payload = _payload()
+    assert len({id(row["probe_identity"]) for rows in payload["costs"].values()
+                for row in rows.values()}) == 1
+    _digest, probe = _mtp_probe(payload)
+    assert type(probe) is dict
+    select_mtp_rungs(payload, byte_budget=10**12, constants=CONSTANTS)
+    assert {type(row["probe_identity"]) for rows in payload["costs"].values()
+            for row in rows.values()} == {dict}
+
+
+def test_invalid_second_source_probe_refuses_and_releases_first():
+    from prismaquant.glm_mtp_selection import select_mtp_rungs
+
+    payload = _payload()
+    bad_probe = _probe()
+    bad_row = _row(ROUTED[-1], R832, [0.03] * 4, bad_probe)
+    bad_probe["source_model"]["content_sha256"] = "f" * 64
+    bad_row["probe_identity_sha256"] = joint.identity_sha256(bad_probe)
+    bad_row["joint_operator_identity"]["probe_identity_sha256"] = bad_row[
+        "probe_identity_sha256"]
+    bad_row["joint_operator_identity_sha256"] = joint.identity_sha256(
+        bad_row["joint_operator_identity"])
+    payload["costs"][ROUTED[-1]][R832] = bad_row
+    with pytest.raises(RuntimeError, match="content_sha256"):
+        select_mtp_rungs(payload, byte_budget=10**12, constants=CONSTANTS)
+    assert {type(row["probe_identity"]) for rows in payload["costs"].values()
+            for row in rows.values()} == {dict}

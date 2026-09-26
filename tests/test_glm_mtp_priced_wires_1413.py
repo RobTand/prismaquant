@@ -114,6 +114,8 @@ def test_completed_allocation_backfills_only_selected_metadata(bound_parts, tmp_
         **selection, "cost_path": str(cost_path), "units": len(assignment)},
         "body_bit_accounting": "unchanged"}
     result = backfill_mtp_selection_wires(config, cost_path)
+    assert result["__prismaquant__"]["mtp_selection"]["mtp_joint_cost_sha256"] == hashlib.sha256(
+        cost_path.read_bytes()).hexdigest()
     assert config["__prismaquant__"]["mtp_selection"] == {
         **selection, "cost_path": str(cost_path), "units": len(assignment)}
     assert result["body.weight"] == config["body.weight"]
