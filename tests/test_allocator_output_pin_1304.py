@@ -14,6 +14,16 @@ One key changed on purpose. ``format_applicability.json`` carried
 codebook rung, and step 2 dropped it. Its two digests were computed on
 1b29d4a6aff with that null key removed before hashing; every other file's
 digest is the unmodified 1b29d4a6aff digest.
+
+The Tessera ``layer.json`` digest was re-taken on 2026-09-26 for the Tessera
+pin move to af7a86d43 (contract v38, PQ #1274). Diffing the normalised file
+before and after, the allocation is unchanged and exactly three provenance
+fields move: ``contract_version`` (34 to 38), ``reviewed_contract_sha256``, and
+the routed unit's attesting cells. The last is the fixture's doing: since v38
+``_v5_contract`` keeps only the default image's roster before flattening
+images, so the routed unit is attested by the dense E2M1 pair's routed
+projection (``resident|streamed``) instead of the routed E2M1 pair on its own
+image (``resident``).
 """
 from __future__ import annotations
 
@@ -58,7 +68,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "329e9cbac3da8fbc4336459152757dc892dbbb276d11995ba05574bb693db114"
+        "658e614fe614281454b535be5b44bd631e2bdaf84d187fe15f3d75b928382ad2"
     ),
     "pareto.csv": (
         "0abb6a82a89d9cd9686c6a250368bb77603d3904dc2707ccb69a13c9eec70c5a"

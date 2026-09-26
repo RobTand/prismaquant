@@ -1,0 +1,312 @@
+{
+ "what": "The two routed_moe cells contract v38 withdrew (tessera#604), as contract v37 published them, field for field. They named (vllm.fused_moe.modular_kernel, torch_materialize_stock), which this build cannot make for an FP8 expert stack. Their evidence -- the LFM batch KL lower bound and the recorded greedy smoke -- is real and measured on the materialised arithmetic; it is quoted here, outside the published document, so the evidence grammar's tests keep a real record to run on. Nothing resolves this file as a contract.",
+ "source": "src/tessera/serving/runtime_contract.json at contract_version 37 (origin/master d044dd545)",
+ "cells": [
+  {
+   "id": "tessera_e4m3_k1_routed_moe_sm121_decode_resident",
+   "runtime": {
+    "image": "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c",
+    "execution_modes": [
+     "eager"
+    ],
+    "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904",
+    "torch": "2.13.0+cu130"
+   },
+   "platform": "sm_121",
+   "family": "TESSERA_E4M3_K1",
+   "structure": "routed_moe",
+   "regime": "decode",
+   "rungs_q256": [
+    1024
+   ],
+   "activation_contract": "fp8_per_token_dynamic",
+   "executes": [
+    {
+     "symbol": "vllm.fused_moe.modular_kernel",
+     "decoder": "torch_materialize_stock"
+    }
+   ],
+   "route_status": "backed_with_serve_flag",
+   "qualification": "device_qualified",
+   "requires_plugin": "tessera",
+   "requires_serve_flags": [
+    "TESSERA_SERVE_MODE=resident"
+   ],
+   "predicates": [],
+   "evidence": {
+    "artifact": null,
+    "grade": "route_only",
+    "kl": [],
+    "smoke": {
+     "status": "recorded",
+     "receipt": "docs/measurements/moe-smoke-recorded-2026-09-05.md",
+     "attribution": "shared_with_reference",
+     "control": null,
+     "record": {
+      "instrument": "experiments/moe_greedy_smoke.py",
+      "rule": "repetitive iff the completion ends in a cycle: some period p with 2p <= L has a p-periodic suffix holding >= 2 full periods (s >= 2p), whatever its share of the completion; not_recorded iff the completion is empty (L = 0), which is no completion for a verdict to be true of; recorded otherwise; tokens are the artifact tokenizer's canonical encoding of the returned text",
+      "reference": "bf16_source",
+      "rows": [
+       {
+        "prompt": "P0",
+        "form": "campaign",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P1",
+        "form": "campaign",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P2",
+        "form": "campaign",
+        "interface": "raw_completion",
+        "status": "recorded",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P3",
+        "form": "campaign",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P4",
+        "form": "campaign",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P5",
+        "form": "campaign",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P6",
+        "form": "campaign",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P0",
+        "form": "pure_greedy",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P1",
+        "form": "pure_greedy",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P2",
+        "form": "pure_greedy",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P3",
+        "form": "pure_greedy",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P4",
+        "form": "pure_greedy",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P5",
+        "form": "pure_greedy",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P6",
+        "form": "pure_greedy",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "tessera_e4m3_k1_routed_moe_sm121_batch_resident",
+   "runtime": {
+    "image": "eugr/spark-vllm@sha256:0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c",
+    "execution_modes": [
+     "eager"
+    ],
+    "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904",
+    "torch": "2.13.0+cu130"
+   },
+   "platform": "sm_121",
+   "family": "TESSERA_E4M3_K1",
+   "structure": "routed_moe",
+   "regime": "batch",
+   "rungs_q256": [
+    1024
+   ],
+   "activation_contract": "fp8_per_token_dynamic",
+   "executes": [
+    {
+     "symbol": "vllm.fused_moe.modular_kernel",
+     "decoder": "torch_materialize_stock"
+    }
+   ],
+   "route_status": "backed_with_serve_flag",
+   "qualification": "device_qualified",
+   "requires_plugin": "tessera",
+   "requires_serve_flags": [
+    "TESSERA_SERVE_MODE=resident"
+   ],
+   "predicates": [],
+   "evidence": {
+    "artifact": null,
+    "grade": "kl_lower_bound",
+    "kl": [
+     {
+      "kind": "topk_intersection_lower_bound",
+      "top_k": 1024,
+      "regime": "batch",
+      "execution_modes": [
+       "eager"
+      ],
+      "receipt": "docs/measurements/tessera-lfm-campaign-2026-09-04.md"
+     }
+    ],
+    "smoke": {
+     "status": "recorded",
+     "receipt": "docs/measurements/moe-smoke-recorded-2026-09-05.md",
+     "attribution": "shared_with_reference",
+     "control": null,
+     "record": {
+      "instrument": "experiments/moe_greedy_smoke.py",
+      "rule": "repetitive iff the completion ends in a cycle: some period p with 2p <= L has a p-periodic suffix holding >= 2 full periods (s >= 2p), whatever its share of the completion; not_recorded iff the completion is empty (L = 0), which is no completion for a verdict to be true of; recorded otherwise; tokens are the artifact tokenizer's canonical encoding of the returned text",
+      "reference": "bf16_source",
+      "rows": [
+       {
+        "prompt": "P0",
+        "form": "campaign",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P1",
+        "form": "campaign",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P2",
+        "form": "campaign",
+        "interface": "raw_completion",
+        "status": "recorded",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P3",
+        "form": "campaign",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P4",
+        "form": "campaign",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P5",
+        "form": "campaign",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P6",
+        "form": "campaign",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P0",
+        "form": "pure_greedy",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P1",
+        "form": "pure_greedy",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P2",
+        "form": "pure_greedy",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P3",
+        "form": "pure_greedy",
+        "interface": "raw_completion",
+        "status": "repetitive",
+        "reference_status": "repetitive"
+       },
+       {
+        "prompt": "P4",
+        "form": "pure_greedy",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P5",
+        "form": "pure_greedy",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       },
+       {
+        "prompt": "P6",
+        "form": "pure_greedy",
+        "interface": "chat_template",
+        "status": "recorded",
+        "reference_status": "recorded"
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

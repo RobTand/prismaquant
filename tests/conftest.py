@@ -119,6 +119,33 @@ def down_convert_lane_table(payload: dict, schema: str) -> dict:
     return payload
 
 
+def lane_cells_on_one_image(payload: dict, image: str | None = None) -> dict:
+    """The installed table's cells measured on ONE runtime image.
+
+    Several fixtures flatten every cell's ``runtime`` onto one fixture image
+    (or down-convert below v6, where the image axis does not exist). That was
+    safe while no two cells of one (platform, family, structure, regime)
+    scope lived on different images. Tessera contract v38 broke it: the stock
+    image's dense ``TESSERA_E4M3_K1`` pair (resident|streamed) and the GLM
+    image's dense ``_resident`` pair are one scope on two images, and the
+    flattened union is a table in which two cells claim the same scope --
+    which the reader correctly refuses. A fixture therefore keeps one real
+    image's roster and never relabels a union.
+
+    ``image`` defaults to ``versions.default_serve_image``, whose roster
+    (the dense E2M1 and E4M3 pairs) is what these fixtures were written
+    against. A FIXTURE, never an attestation.
+    """
+    payload = copy.deepcopy(payload)
+    if image is None:
+        image = payload["versions"]["default_serve_image"]
+    lane = payload["lane_eligibility"]
+    kept = [cell for cell in lane["cells"] if cell["runtime"]["image"] == image]
+    assert kept, f"the installed table publishes no cell on {image!r}"
+    lane["cells"] = kept
+    return payload
+
+
 def project_lane_cells_onto_structures(payload: dict, structures) -> dict:
     """The installed contract's cell coverage, re-addressed to ``structures``.
 
@@ -193,8 +220,13 @@ def project_lane_cells_onto_structures(payload: dict, structures) -> dict:
 
 @pytest.fixture
 def legacy_v4_contract() -> dict:
-    """The installed contract expressed as a v4 lane table."""
-    return down_convert_lane_table(_installed_contract(),
+    """The installed contract expressed as a v4 lane table.
+
+    v4 has no runtime-image axis, so the default image's roster is kept
+    first (``lane_cells_on_one_image``): since contract v38 two images
+    publish the same dense E4M3 scopes, and without the axis they overlap.
+    """
+    return down_convert_lane_table(lane_cells_on_one_image(_installed_contract()),
                                    "tessera.lane-eligibility.v4")
 
 

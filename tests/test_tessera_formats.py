@@ -836,10 +836,10 @@ def test_an_attested_lane_cannot_admit_an_unwritable_rung(monkeypatch):
     context = ServingContext(
         platform="sm_121", structure="dense", residency="resident",
         runtime_image=_default_serve_image(), execution_mode="eager")
-    # E4M3's cells are routed-only since the v31 withdrawals; E2M1 still
-    # ships the dense pair, so the control stays on the dense scope.
+    # E4M3 is asked at its routed scope (q896 since contract v38); E2M1
+    # still ships the dense pair, so the control stays on the dense scope.
     routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
-    name = "TESSERA_E4M3_K1_R1024"
+    name = "TESSERA_E4M3_K1_R896"
     control = "TESSERA_E2M1_K2_R896"
     assert tr.tessera_lane_attested(name, serving_context=routed)
     assert tr.synthesize_tessera_spec(name, serving_context=routed).producer_eligible
@@ -905,10 +905,12 @@ def test_tessera_rungs_are_producer_eligible_by_the_pin_and_only_by_it():
     context = ServingContext(
         platform="sm_121", structure="dense", residency="resident",
         runtime_image=_default_serve_image(), execution_mode="eager")
-    # E4M3 is routed-only since the v31 withdrawals.
+    # E4M3 asked at its routed scope, which attests q896 since contract v38.
     routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
     assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R1024", serving_context=routed) is True
+        "TESSERA_E4M3_K1_R896", serving_context=routed) is True
+    assert tr.tessera_lane_attested(
+        "TESSERA_E4M3_K1_R1024", serving_context=routed) is False
     assert tr.tessera_lane_attested("TESSERA_E4M3_K1_R1024") is False
     assert not synthesize_tessera_spec("TESSERA_E4M3_K1_R1024").producer_eligible
 

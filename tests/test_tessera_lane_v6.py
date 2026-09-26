@@ -41,11 +41,14 @@ from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render
 from prismaquant import tessera_runtime_contract as contract
 from conftest import down_convert_lane_table
+from tessera_withdrawn_v38 import (
+    ROUTED_RUNG, shipped_routed_smoke_statuses, with_quoted_evidence)
 
 
 FAMILY = "TESSERA_E4M3_K1"
-NAME = "TESSERA_E4M3_K1_R1024"
-RATE = 1024
+#: The routed rung v38 attests (it moved from q1024; see tessera_withdrawn_v38).
+NAME = f"TESSERA_E4M3_K1_R{ROUTED_RUNG}"
+RATE = ROUTED_RUNG
 MOE_DECODE = "tessera_e4m3_k1_routed_moe_sm121_decode_resident"
 MOE_BATCH = "tessera_e4m3_k1_routed_moe_sm121_batch_resident"
 
@@ -58,7 +61,13 @@ def _raw() -> tuple[dict, str]:
 
 @pytest.fixture
 def payload():
-    return _raw()[0]
+    """The installed table with the quoted v37 routed evidence spliced on.
+
+    Contract v38 re-minted the routed cells ``route_only`` (no KL, smoke
+    ``not_recorded``); the evidence grammar below is read on the evidence v37
+    published, quoted from outside the document (``tessera_withdrawn_v38``).
+    """
+    return with_quoted_evidence(_raw()[0])
 
 
 @pytest.fixture
@@ -227,6 +236,8 @@ def test_the_installed_table_admits_every_cell_on_its_own_recorded_smoke(table):
         assert moe.evidence.smoke_status == lane.EVIDENCE_SMOKE_RECORDED
         assert moe.evidence.smoke_receipt == (
             "docs/measurements/moe-smoke-recorded-2026-09-05.md")
+    # the recorded smoke above is the quoted v37 evidence; v38 ships none.
+    assert set(shipped_routed_smoke_statuses(_raw()[0]).values()) == {"not_recorded"}
 
 
 def test_the_routed_moe_cells_were_refused_on_the_smoke_v17_through_v20_published(payload):

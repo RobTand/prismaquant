@@ -55,11 +55,14 @@ from importlib.resources import as_file
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_runtime_contract as contract
 from conftest import down_convert_lane_table
+from tessera_withdrawn_v38 import (
+    ROUTED_RUNG, shipped_routed_smoke_statuses, with_quoted_evidence)
 
 
 FAMILY = "TESSERA_E4M3_K1"
-NAME = "TESSERA_E4M3_K1_R1024"
-RATE = 1024
+#: The routed rung v38 attests (it moved from q1024; see tessera_withdrawn_v38).
+NAME = f"TESSERA_E4M3_K1_R{ROUTED_RUNG}"
+RATE = ROUTED_RUNG
 MOE_DECODE = "tessera_e4m3_k1_routed_moe_sm121_decode_resident"
 MOE_BATCH = "tessera_e4m3_k1_routed_moe_sm121_batch_resident"
 #: The dense E4M3 decode cell that carried the encoder-scope artifact until
@@ -114,9 +117,13 @@ def payload():
     ``test_tessera_lane_v6.py`` applies it. Everything v9 did not change
     (families, rungs, route statuses, launches, images, the artifact block)
     is still the installed table's, so these tests still read real cells.
+
+    Contract v38 re-minted the routed cells ``route_only`` with no recorded
+    smoke, so their v37 evidence is spliced back on first, quoted from outside
+    the document (``tessera_withdrawn_v38``).
     """
     return down_convert_lane_table(
-        _raw()[0], lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V8)
+        with_quoted_evidence(_raw()[0]), lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V8)
 
 
 def _table(payload):
@@ -229,6 +236,8 @@ def test_the_routed_moe_cells_read_recorded_with_the_v20_control_retired(table):
         assert evidence.smoke_receipt == RECORDED_RECEIPT
         assert evidence.smoke_control is None
         assert evidence.smoke_attribution == lane.EVIDENCE_ATTRIBUTION_UNATTRIBUTED
+    # the recorded smoke above is the quoted v37 evidence; v38 ships none.
+    assert set(shipped_routed_smoke_statuses(_raw()[0]).values()) == {"not_recorded"}
 
 
 def test_the_v20_control_reads_as_v20_published_it(payload):

@@ -42,6 +42,8 @@ from importlib.resources import as_file
 
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_runtime_contract as contract
+from tessera_withdrawn_v38 import (
+    ROUTED_RUNG, shipped_routed_smoke_statuses, with_quoted_evidence)
 
 
 MOE_DECODE = "tessera_e4m3_k1_routed_moe_sm121_decode_resident"
@@ -69,9 +71,20 @@ RECORD = {
 }
 
 
-def _installed() -> dict:
+def _shipped() -> dict:
     with as_file(contract.contract_path()) as path:
         return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _installed() -> dict:
+    """The installed table with the quoted v37 routed evidence spliced on.
+
+    Contract v38 re-minted the routed cells ``route_only``, ``not_recorded``
+    with ``record: null``; the grammar tests below need the one real record
+    the table ever carried, so it is quoted from outside the published
+    document (``tests/tessera_withdrawn_v38.py``).
+    """
+    return with_quoted_evidence(_shipped())
 
 
 def _cell(payload: dict, cell_id: str) -> dict:
@@ -179,8 +192,24 @@ def tessera_v9(monkeypatch):
 # ---------------------------------------------------------------------------
 # The grammar
 # ---------------------------------------------------------------------------
+def test_the_shipped_table_carries_no_routed_smoke_record():
+    """The splice above is a fixture, and the shipped table says so.
+
+    Contract v38 withdrew the only smoke record the table carried; the routed
+    cells now publish ``not_recorded`` with no record and no receipt, which the
+    status-only admission predicate still admits (it refuses ``repetitive``
+    only).
+    """
+    shipped = _shipped()
+    assert set(shipped_routed_smoke_statuses(shipped).values()) == {"not_recorded"}
+    for cell_id in (MOE_DECODE, MOE_BATCH):
+        smoke = _cell(shipped, cell_id)["evidence"]["smoke"]
+        assert smoke["record"] is None and smoke["receipt"] is None
+    assert set(shipped_routed_smoke_statuses(_installed()).values()) == {"recorded"}
+
+
 def test_a_v9_table_parses_and_a_null_record_is_not_a_crash(tessera_v9):
-    """Eight of the ten cells publish ``record: null``; none of them may throw."""
+    """Every cell but the two routed ones publishes ``record: null``; none may throw."""
     table = _table(_up_convert(_installed()))
     assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V9
     null_records = [cell for cell in table.cells if cell.evidence.smoke_record is None]
@@ -439,8 +468,8 @@ def test_the_export_gate_gives_a_routed_moe_unit_a_real_route_under_v9(tessera_v
     image = _cell(payload, MOE_DECODE)["runtime"]["image"]
     facts = lane.UnitStructuralFacts(
         qname="model.layers.0.mlp.experts.gate_up_proj.weight",
-        format_name="TESSERA_E4M3_K1_R1024", payload_family="TESSERA_E4M3_K1",
-        k=None, n_sub=None, rate_q256=1024, structure="routed_moe",
+        format_name=f"TESSERA_E4M3_K1_R{ROUTED_RUNG}", payload_family="TESSERA_E4M3_K1",
+        k=None, n_sub=None, rate_q256=ROUTED_RUNG, structure="routed_moe",
         role_split=False, in_features=1024, out_features=1024)
     route = lane.resolve_unit_route(
         facts, table, platform="sm_121", residency="resident",
@@ -566,8 +595,8 @@ def test_real_producer_valid_smoke_grammar_and_route(case):
 
     facts = lane.UnitStructuralFacts(
         qname="model.layers.0.mlp.experts.gate_up_proj.weight",
-        format_name="TESSERA_E4M3_K1_R1024", payload_family="TESSERA_E4M3_K1",
-        k=None, n_sub=None, rate_q256=1024, structure="routed_moe",
+        format_name=f"TESSERA_E4M3_K1_R{ROUTED_RUNG}", payload_family="TESSERA_E4M3_K1",
+        k=None, n_sub=None, rate_q256=ROUTED_RUNG, structure="routed_moe",
         role_split=False, in_features=1024, out_features=1024)
     route = lane.resolve_unit_route(
         facts, table, platform="sm_121", residency="resident",

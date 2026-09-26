@@ -491,13 +491,22 @@ def test_the_scoped_table_answers_nothing_without_a_scope(dev_pin):
 
 
 def test_a_rate_the_contract_does_not_publish_is_unattested_not_backed(dev_pin):
-    """One q256 step off the published rung is absence of a claim."""
+    """One q256 step off the published rung is absence of a claim.
+
+    The routed E4M3 cells publish q896 since contract v38 (q1024 before)."""
     context = _routed_context("TESSERA_E4M3_K1")
-    on = tm.route_admission("TESSERA_E4M3_K1_R1024", serving_context=context)
-    off = tm.route_admission("TESSERA_E4M3_K1_R1023", serving_context=context)
+    on = tm.route_admission("TESSERA_E4M3_K1_R896", serving_context=context)
+    off = tm.route_admission("TESSERA_E4M3_K1_R897", serving_context=context)
     assert on.route_status == tm.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
     assert off.route_status == tm.ROUTE_STATUS_UNATTESTED
-    assert "R1023" in off.detail and "[1024]" in off.detail
+    # The detail names the family's published rungs (the formats row), a
+    # union over structures and images, which includes 896.
+    import json as _json
+    rows = _json.loads(trc.contract_path().read_text(encoding="utf-8"))["formats"]
+    published = next(r["attested_rungs_q256"] for r in rows
+                     if r["family"] == "TESSERA_E4M3_K1")
+    assert 896 in published
+    assert "R897" in off.detail and str(published) in off.detail
 
 
 def test_a_prose_only_tessera_edit_does_not_re_stale_the_pin(dev_pin, monkeypatch, tmp_path):
@@ -659,10 +668,13 @@ def test_a_moved_answer_refuses_and_names_the_field(dev_pin, monkeypatch, tmp_pa
     import json as _json
 
     payload = _json.loads(trc.contract_path().read_text(encoding="utf-8"))
+    published = None
     for entry in payload["formats"]:
         if entry["family"] == "TESSERA_E4M3_K1":
+            published = list(entry["attested_rungs_q256"])
             entry["attested_rungs_q256"] = [1024, 1280]
             entry.pop("candidate_rungs_q256", None)
+    assert published and published != [1024, 1280]
     moved = tmp_path / "runtime_contract.json"
     moved.write_text(_json.dumps(payload), encoding="utf-8")
     monkeypatch.setattr(trc, "contract_path", lambda: moved)
@@ -672,7 +684,7 @@ def test_a_moved_answer_refuses_and_names_the_field(dev_pin, monkeypatch, tmp_pa
     msg = str(exc.value)
     assert "re-review" in msg
     assert "families[TESSERA_E4M3_K1].attested_rungs_q256" in msg
-    assert "[1024]" in msg and "[1024, 1280]" in msg
+    assert str(published) in msg and "[1024, 1280]" in msg
     assert "not a corruption warning" in msg
 
 
@@ -1000,8 +1012,9 @@ def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(
 
     Parametrised over both scopes since the v31 withdrawals: the dense scope
     carries the E2M1 dense pair and, since the v34 pin (Tessera #579), the
-    re-minted E4M3 R1024 and BF16 R1792 dense pairs on the fused window GEMM;
-    the routed scope carries the E4M3 and E2M1 routed pairs.  A family the pin
+    re-minted E4M3 R1024 dense pair on the fused window GEMM (its BF16 R1792
+    sibling was withdrawn at v37); the routed scope, on the GLM image since
+    v38, carries the E4M3 R896 and BF16 R1024 routed pairs.  A family the pin
     no longer attests at ANY world size fails the union assert below by name,
     which is the fail-closed reading.
     """
@@ -1017,13 +1030,15 @@ def test_tp2_keeps_every_rung_the_contract_attests_at_tp1(
     assert [r.format_name for r in at_two] == at_one
     families = {r.admission.payload_family for r in at_two}
     if context == "dense":
-        assert families == {"TESSERA_E2M1_K2", "TESSERA_E4M3_K1",
-                            "TESSERA_BF16_K1"}, sorted(families)
+        # The default image's dense roster: E2M1 R896 and E4M3 R1024.  The
+        # BF16 R1792 pair left at v37; the GLM image's dense pairs belong to
+        # that image's scope, not this one.
+        assert families == {"TESSERA_E2M1_K2", "TESSERA_E4M3_K1"}, sorted(families)
     else:
-        # Each routed family serves on its OWN image, so the E4M3 scope
-        # carries exactly the E4M3 pair; the E2M1 routed pair is carried by
-        # its own scope (and the dense leg carries the dense pair).
-        assert families == {"TESSERA_E4M3_K1"}, sorted(families)
+        # Each routed family serves on its OWN image.  The E4M3 routed pair
+        # lives on the GLM image since contract v38, beside the BF16 routed
+        # pair; the E2M1 routed pair is carried by its own image's scope.
+        assert families == {"TESSERA_E4M3_K1", "TESSERA_BF16_K1"}, sorted(families)
     for rung in at_two:
         assert contract.max_world_size[rung.admission.payload_family] >= 2
         legal, reason = tm.tessera_tp_legal(
@@ -1353,7 +1368,8 @@ def test_the_reduction_is_reapplied_after_aggregation():
 PRICED = [
     "TESSERA_E2M1_K2_R896",     # attested
     "TESSERA_E2M1_K2_R640",     # serialisable, unattested rate
-    "TESSERA_E4M3_K1_R1024",    # attested
+    "TESSERA_E4M3_K1_R1024",    # attested (dense, default image)
+    "TESSERA_E4M3_K1_R896",     # attested (routed, GLM image, contract v38)
     "TESSERA_E4M3_K1_R512",     # serialisable, unattested rate
     "TESSERA_E2M1_K1_R256",     # family the contract does not publish
 ]
@@ -1370,7 +1386,7 @@ def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_
         "NVFP4", "TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R1024", "BF16",
     ], menu
     assert sorted(dropped) == sorted([
-        "TESSERA_E2M1_K2_R640",
+        "TESSERA_E2M1_K2_R640", "TESSERA_E4M3_K1_R896",
         "TESSERA_E4M3_K1_R512", "TESSERA_E2M1_K1_R256",
     ]), dropped
     fr.require_producer_formats(menu, where="test", context_by_unit=_scope())
@@ -1381,11 +1397,14 @@ def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_
     e4m3 = tm.expand_menu_tokens_report(
         ["NVFP4", tm.MENU_TOKEN, "BF16"], PRICED,
         context_by_unit={"unit": _routed_context("TESSERA_E4M3_K1")})
+    # Since contract v38 the routed E4M3 pair attests R896 only, so the
+    # routed scope drops the R1024 the dense scope keeps.
     assert e4m3[0] == [
-        "NVFP4", "TESSERA_E4M3_K1_R1024", "BF16",
+        "NVFP4", "TESSERA_E4M3_K1_R896", "BF16",
     ], e4m3[0]
     assert sorted(e4m3[1]) == sorted([
         "TESSERA_E2M1_K2_R896", "TESSERA_E2M1_K2_R640",
+        "TESSERA_E4M3_K1_R1024",
         "TESSERA_E4M3_K1_R512", "TESSERA_E2M1_K1_R256",
     ]), e4m3[1]
     e2m1 = tm.expand_menu_tokens_report(
@@ -1395,8 +1414,8 @@ def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_
         "NVFP4", "TESSERA_E2M1_K2_R896", "TESSERA_E2M1_K2_R640", "BF16",
     ], e2m1[0]
     assert sorted(e2m1[1]) == sorted([
-        "TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R512",
-        "TESSERA_E2M1_K1_R256",
+        "TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896",
+        "TESSERA_E4M3_K1_R512", "TESSERA_E2M1_K1_R256",
     ]), e2m1[1]
 
 

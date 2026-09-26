@@ -278,14 +278,10 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     assert {proof['path'], str(tmp_path/'source-proof-arm.json'), str(tmp_path/'source-fixture.json')} <= reads
     assert {str(Path(package['path'])/'__init__.py') for package in packages.values()} <= reads
     assert {policy_bound['path'], *(policy[key]['path'] for key in ('original_prepared', 'original_cache', 'census'))} <= reads
-    if change == 'v2_extension':
-        # Known gap, recorded rather than asserted away: the pinned Tessera
-        # reader accepts only a v1 extension as rooted cached-unit authority
-        # (tessera/cached_unit.py). A campaign whose extension a band created
-        # cannot export selected cached units until Tessera reads v2.
-        with pytest.raises(ValueError, match='authority schema differs'):
-            CachedUnitBundle(manifest, tmp_path, set(names), source)
-        return
+    # The v2 extension case used to stop here: the pinned Tessera read only a
+    # v1 extension as rooted cached-unit authority. Tessera f46be81f7 (in the
+    # af7a86d43 pin) reads v2 as well, so a band-created extension now binds
+    # through the same reader and the full bundle checks below apply to it.
     bundle = CachedUnitBundle(manifest, tmp_path, set(names), source)
     assert len(bundle.roots) == 2 and bundle.producer_packages == packages
     for name in names:

@@ -26,7 +26,7 @@ import json
 import pytest
 
 from conftest import (
-    down_convert_lane_table, project_lane_cells_onto_structures)
+    down_convert_lane_table, lane_cells_on_one_image, project_lane_cells_onto_structures)
 
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render
@@ -41,7 +41,10 @@ FAMILY = "TESSERA_E4M3_K1"
 def legacy(monkeypatch):
     payload = down_convert_lane_table(
         project_lane_cells_onto_structures(
-            json.loads(contract.contract_path().read_text(encoding="utf-8")),
+            # v4 has no image axis, so two images' cells of one scope would
+            # overlap; keep the default image's roster (contract v38).
+            lane_cells_on_one_image(
+                json.loads(contract.contract_path().read_text(encoding="utf-8"))),
             ("dense",)),
         "tessera.lane-eligibility.v4")
     assert payload["lane_eligibility"]["schema"] == "tessera.lane-eligibility.v4"

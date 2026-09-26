@@ -1,5 +1,41 @@
 # PrismaQuant Architecture
 
+Tessera pin (2026-09-26, `ws-serve/1274-tessera-pin-v38`, PQ #1274): the
+serving-runtime pin and the reader dev pin move from `07bfcc0e9b…` to
+`af7a86d43d…`, Tessera master after #621. The packaged contract moves from v34
+to **v38** (digest `04d5a20a…9d22e4`, lane schema still v10), and admission
+moves with it:
+
+- **Minted (v38, tessera#604):** dense `TESSERA_E4M3_K1` and `TESSERA_BF16_K1`
+  cells at q832, q1024 and q1088, and routed cells for `TESSERA_E4M3_K1` at
+  q896 and `TESSERA_BF16_K1` at q1024. All are on
+  `localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a0…`, eager,
+  resident, `route_only`, smoke `not_recorded`, so they resolve
+  `backed_with_serve_flag` only under that image's scope.
+- **Withdrawn (v37, tessera#614):** the dense `TESSERA_BF16_K1` q1792 pair.
+  `TESSERA_BF16_K1_R1792` answers `unattested`/`no_cell` on every platform
+  again, so admission shrinks there.
+- **Reused ids (v38):** `tessera_e4m3_k1_routed_moe_sm121_{decode,batch}_resident`
+  no longer mean q1024 on `eugr/spark-vllm@sha256:0afec8d4…` through the
+  materialising kernel. They mean q896 on the new image through the compact
+  window MoE adapter. Routed `TESSERA_E4M3_K1_R1024` is unattested under
+  every scope. The route resolver keys on scope and rung, and the reviewed
+  answer compares cells field by field under their ids, so neither carries
+  the old claim over (`tests/test_tessera_pin_v38_scope.py`).
+- **Added (v35, tessera#607):** a third `sm_121` fp4 activation-quantiser row,
+  for `spark-vllm-nccl230@sha256:a5424378…`, the image the routed
+  `TESSERA_E2M1_K2` cells name.
+
+The two GLM serving images are different builds. `a5424378…` (2026-09-14)
+carries the routed `TESSERA_E2M1_K2` cells, and `f8dbe1a0…` (2026-09-25,
+tagged `a5424378-mtpmap1`) carries every v38 cell. Under one serving scope an
+allocation can admit one set or the other, not both. `export.py` and
+`grammar.py` are byte-identical to the previous pin, so the legal domain is a
+re-transcription. The PrismaBuild test interpreters are
+`/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4` on sparky, sparklina and
+dl380g10, and `…-af7a86d4-tf516` on both Sparks. No format, default, stage or
+ship gate changes. Gate: `tests/test_tessera_pin_v38_scope.py`.
+
 Stage B reads each retained window's renders while the window before it
 computes (2026-09-25, `claude/stageb-window-readahead-1291`, PQ #1291), through
 one IO engine, `prismaquant/io_engine.py` (the first version of PQ #1294).
@@ -1960,9 +1996,9 @@ run in a PrismaBuild test run. PrismaBuild #941's reconciliation named them:
 they were the six outcomes by which a full-suite summary exceeded its
 collection.
 
-The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-07bfcc0e-tf516`
+The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4-tf516`
 carries transformers 5.16.1 and is otherwise the same interpreter. It exists
-on sparky only. `prismaquant/tessera_runtime/README.md` has the recipe and the
+on both Sparks. `prismaquant/tessera_runtime/README.md` has the recipe and the
 `pbtest` command for a PR that touches these modules. The full suite also
 passes on it (12,040 tests), and no skip names transformers.
 
@@ -3099,8 +3135,13 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/stream-head-progress-1362`.
+As of: 2026-09-26 · `ws-serve/1274-tessera-pin-v38`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `ws-serve/1274-tessera-pin-v38`) for the **Tessera pin
+move to `af7a86d43d…`** (contract v34 -> v38, PQ #1274): the GLM serving
+image's window cells, the dense BF16 q1792 withdrawal, and the two reused
+routed E4M3 cell ids.
 
 Re-stamped (2026-09-25, `claude/stream-head-progress-1362`) for **progress on
 the stream head before its journal exists** (PQ #1362, P1). Before this
@@ -23829,16 +23870,18 @@ top-1024 intersection bound, because no instrument in either repository
 produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `07bfcc0e9b7da13276938cb722bc7dcd893e6c63` (master after #580, #582, #583, #585 and
-#596, re-pinned 2026-09-22; version `0.1.0`, contract v34, lane schema v10 — unchanged:
-v25-v34 are additive for a v10 reader. v34 was first pinned at `acf9eafa6a…`
+Tessera `af7a86d43da3487179b7d16606ef0f5a3046d73c` (master after #621, re-pinned
+2026-09-26; version `0.1.0`, contract v38, lane schema v10, which v35-v38 keep.
+v35-v38 are not additive: v37 withdraws the dense BF16 q1792 pair and v38 reuses
+the two routed E4M3 cell ids for q896 on a different image. v34 was pinned at
+`07bfcc0e9b…` and first at `acf9eafa6a…`
 (master after #588, #590 and #592, same contract bytes), v32 at `cc739a55…`
 (the #562/#563 union head, 2026-09-19), v29 at `4c384e6049…`, v24 at `7dbbacbd…`, v23 at
 `1c827abc…`, v22 at `387eda36…` and `ba582d4…`, v21 landed at `b8b1cb38`
 in Tessera #313 and the release `e78959ed…` carried v20; first pinned
 2026-09-04 at `5acc2a6f…`, contract v17)
 and the SHA-256 of the `runtime_contract.json` it packages
-(`d37c9448…03472`);
+(`04d5a20a…9d22e4`);
 `require_pinned_tessera_runtime` refuses unless the pin equals the reader's
 three constants AND the installed contract hashes to that digest, and
 `tessera_lane_attested` ANDs that in (§5.7), as does the container arm's

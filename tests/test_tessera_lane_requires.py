@@ -90,9 +90,20 @@ def _claiming_lane(payload):
 def _gated_carrier(payload):
     """A copy whose routed E4M3 decode cell claims the window lane at a rung
     whose plan (rate 4) PASSES the predicate -- the shape the streamed E4M3
-    cells were on the pre-v31 table."""
+    cells were on the pre-v31 table.
+
+    The rung is set to q1024 because the window-GEMV lane's published
+    ``column_rates`` are [1, 2, 4] and q896 plans rate 3.5, which that lane
+    refuses. That refusal applies ONLY to a cell that launches through
+    ``window_gemv``. The shipped v38 routed E4M3 cells launch through
+    ``native_window_moe_compact``, a decoder no lane publishes a predicate
+    for, so they are not lane-gated at all; see
+    ``test_the_shipped_routed_e4m3_q896_cells_are_not_lane_gated`` and the
+    q896 leg of ``test_a_window_lane_graft_is_refused_by_the_published_column_rates``."""
     moved = copy.deepcopy(payload)
-    _cell(moved, GATED_CARRIER)["executes"] = [WINDOW_LAUNCH]
+    cell = _cell(moved, GATED_CARRIER)
+    cell["executes"] = [WINDOW_LAUNCH]
+    cell["rungs_q256"] = [1024]
     return moved
 
 
@@ -421,6 +432,47 @@ def test_every_lane_gated_cell_on_a_synthesised_table_admits_this_producers_plan
             admits, why = lane.cell_lane_admits(cell, rung, table.lanes)
             assert admits, (cell_id, why)
             assert why == ""
+
+
+def test_the_shipped_routed_e4m3_q896_cells_are_not_lane_gated(payload):
+    """The cells GLM's layer-43 pick rides (contract v38) admit q896.
+
+    They execute ``native_window_moe_compact``; the only lane in the table
+    that publishes a predicate is ``tessera_window_gemv`` (decoder
+    ``window_gemv``), so ``lane_claim_for_cell`` answers ``None`` and
+    ``cell_lane_admits`` passes on the rung the cells name.
+    """
+    table = _table(payload)
+    for cell_id in (GATED_CARRIER, GATED_CARRIER.replace("_decode_", "_batch_")):
+        cell = _parsed_cell(table, cell_id)
+        assert tuple(cell.rungs_q256) == (896,)
+        assert {decoder for _symbol, decoder in cell.executes} == {
+            "native_window_moe_compact"}
+        assert lane.lane_claim_for_cell(cell, table.lanes) is None
+        assert lane.cell_lane_admits(cell, 896, table.lanes) == (True, "")
+    gated_decoders = {claim.decoder for claim in table.lanes
+                      if claim.requires is not None}
+    assert gated_decoders == {"window_gemv"}, gated_decoders
+
+
+@pytest.mark.parametrize("rung, admitted", [(1024, True), (896, False)])
+def test_a_window_lane_graft_is_refused_by_the_published_column_rates(
+        payload, rung, admitted):
+    """What refuses q896 is Tessera's window-GEMV predicate, not a PQ list.
+
+    The same synthetic graft at q1024 (rate 4) passes and at q896 (rate 3.5)
+    is refused on ``column_rates``, the field the contract publishes for
+    that lane. A real routed E4M3 q896 unit never meets this predicate,
+    because its cells do not launch through ``window_gemv``.
+    """
+    moved = _gated_carrier(payload)
+    _cell(moved, GATED_CARRIER)["rungs_q256"] = [rung]
+    table = _table(moved)
+    cell = _parsed_cell(table, GATED_CARRIER)
+    admits, why = lane.cell_lane_admits(cell, rung, table.lanes)
+    assert admits is admitted, why
+    if not admitted:
+        assert "column_rates" in why and "tessera_window_gemv" in why, why
 
 
 def _claiming_bf16(payload):
