@@ -1,5 +1,36 @@
 # PrismaQuant Architecture
 
+The Tessera export preflight joins a GLM allocation in the source namespace
+(2026-09-26, `ws-serve/glm-source-unit-shapes`, PQ #1388). The allocation,
+Tessera's `plan_from_layer_config.py` and its exporter all name units by
+source checkpoint tensor. On glm5_next that is `model.language_model.layers.N…`,
+and the recipe namespace folds it to `model.layers.N…`. Three joins in
+`tessera_export_lane.py` failed on the real GLM allocation:
+
+- `_source_unit_shapes` keyed the scope gate's shape map by recipe unit, so
+  every selected unit found no shape. It is now keyed by source unit (the
+  tensor name without `.weight`). The name projection still decides which
+  tensors are body units.
+- The producer plan view (`_write_plan_assignment`) carried the allocator's
+  BF16 entry, `{"bits": 16, "data_type": "float"}`. The translator reads only
+  `"BF16"`, so it refused 238 units as quantised non-Tessera choices. The view
+  is now always written, and every BF16 choice in it is spelled `"BF16"`.
+- The view carried 124 BF16 `model.visual.*` units. The translator plans the
+  decoder body only, so it refused them as absent from its body projection.
+  The view now leaves out units the profile declares outside the text graph
+  (`DECLARED_OUT_OF_GRAPH`), and records them under
+  `source_precision_outside_graph`. The exporter already writes those tensors
+  at source precision and names them in `ignore`. A non-BF16 choice on such a
+  unit is refused, because the exporter would not write it as priced.
+
+The allocator's own `layer_config.json` is unchanged. Gate:
+`tests/test_tessera_glm_source_namespace.py` drives a layer-43 glm5_next
+checkpoint through the lane CLI and the pinned translator's `main`. Before the
+fix, the scope gate refused it with `found []`. On the real GLM-5.3 allocation,
+the preflight passes (36,309 scoped units) and the translator plans 36,309
+Tessera units and 1,384 BF16 units. No format, default, stage or ship-gate
+verdict changes.
+
 The Tessera export preflight no longer reads the priced expert wires
 (2026-09-26, `ws-serve/1378-preflight-no-rehash`, PQ #1378).
 `_carried_expert_projection` (`tessera_export_lane.py`) used to check every
@@ -3253,6 +3284,11 @@ allowance. This is progress-write coalescing, not relaxed authentication.
 
 As of: 2026-09-26 · `claude/route-histogram-card-1377`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `ws-serve/glm-source-unit-shapes`) for **the Tessera
+export preflight joining GLM allocations by source unit** (PQ #1388): the
+scope gate's shape map, the plan view's BF16 spelling, and the plan view's
+out-of-graph units. See the entry at the top.
 
 Re-stamped (2026-09-26, `claude/identity-quantum-1374`) for **the source
 identity built in a CPU-only quantum, not under a GPU** (PQ #1374, P2). A
