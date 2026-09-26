@@ -6,7 +6,7 @@ campaign's wire directory.  Before the external translator runs, the scope
 gate re-binds every selected routed unit to THAT projection -- the producer's
 record, not a source-member guess, attests the executed unit's geometry, so a
 predicated cell resolves on it -- checks the priced bytes against their
-receipts where they are about to be handed over, and the CLI writes the
+receipts' location and size (the exporter's intake hashes the bytes), and the CLI writes the
 producer's ``tessera.cached_units.v1`` bundle into the wire directory for the
 exporter's ``--cached-expert-units`` intake.  A selected routed unit the
 allocation carries no projection for stays refused by name.
@@ -388,12 +388,12 @@ def test_scope_refuses_a_stack_format_stamp_that_disagrees_with_the_selection(ca
         _scope(case)
 
 
-@pytest.mark.parametrize("damage", ["bytes", "missing", "receipt"])
+@pytest.mark.parametrize("damage", ["size", "missing", "receipt"])
 def test_scope_checks_the_priced_bytes_against_their_receipts(case, damage):
     name = f"{STACK}.1.w3"
     path = case.wire_dir / case.receipts[name]["file"]
-    if damage == "bytes":
-        path.write_bytes(b"\0" * case.receipts[name]["blob_bytes"])
+    if damage == "size":
+        path.write_bytes(b"\0" * (case.receipts[name]["blob_bytes"] + 1))
     elif damage == "missing":
         path.unlink()
     else:
@@ -401,6 +401,50 @@ def test_scope_checks_the_priced_bytes_against_their_receipts(case, damage):
         _save(case)
     with pytest.raises(export.TesseraExportLaneError, match=f"{name}.*(receipt|wire)"):
         _scope(case)
+
+
+def test_scope_reads_no_priced_wire_bytes(case, monkeypatch):
+    """The scope gate locates and sizes each wire; it never reads one (#1378).
+
+    The exporter's ``--cached-expert-units`` intake hashes every blob against
+    ``blob_sha256`` before framing it, so a read here hashed each wire twice:
+    153 GB of serial NFS reads before a GLM-5.3 export.  Byte integrity is the
+    intake's, and a same-size wrong blob is left for it to refuse.
+    """
+    import builtins
+    import io
+
+    wire_dir = case.wire_dir.resolve()
+    reads = []
+
+    def under_wire_dir(path) -> bool:
+        try:
+            return Path(path).resolve().parent == wire_dir
+        except (TypeError, ValueError):
+            return False
+
+    real_read_bytes, real_open = Path.read_bytes, builtins.open
+
+    def read_bytes(self):
+        if under_wire_dir(self):
+            reads.append(str(self))
+        return real_read_bytes(self)
+
+    def trapped_open(file, *args, **kwargs):
+        if under_wire_dir(file):
+            reads.append(str(file))
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    monkeypatch.setattr(builtins, "open", trapped_open)
+    monkeypatch.setattr(io, "open", trapped_open)
+    name = f"{STACK}.1.w3"
+    (case.wire_dir / case.receipts[name]["file"]).write_bytes(
+        b"\0" * case.receipts[name]["blob_bytes"])
+    reads.clear()
+    projection = _scope(case)["expert_projection"]
+    assert reads == []
+    assert projection["units"][name] == case.receipts[name]
 
 
 def _isolate_other_gates(monkeypatch):
