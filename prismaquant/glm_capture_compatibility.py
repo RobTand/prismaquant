@@ -15,6 +15,7 @@ from .glm_source_derivative import (
     CORRECTED_MODELING_SHA256, ORIGINAL_EXPRESSION, CORRECTED_EXPRESSION,
     bound_json, _require, source_derivative_identity,
 )
+from .digests import DIRECT_UTF8_STRICT
 
 SCHEMA = 'prismaquant.glm_capture_derivative_compatibility.v1'
 CAPTURE_ACTION = '8740a0b3456bb6cb334ae80b0e35fc3da31c62918abdda8c41ad226020c4e88a'
@@ -30,8 +31,7 @@ def _bytes(binding, label):
     return raw
 
 
-def _digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+_digest = DIRECT_UTF8_STRICT.sha256
 
 
 def _completion_literal(text):

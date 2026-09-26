@@ -1330,7 +1330,7 @@ harvest_cb_col_weights() {
 import json, os, pickle
 from pathlib import Path
 
-from prismaquant.cb_imatrix import (
+from prismaquant.moe_imatrix import (
     canonical_imatrix_sha256,
     imatrix_from_probe_file,
 )

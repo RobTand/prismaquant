@@ -1,0 +1,18 @@
+{
+"test_chain_roll_memory_watch_block_is_unchanged#0": {"returned": "{'VmHWM': '1234567 kB', 'VmRSS': '987654 kB'}"},
+"test_checkpoint_probe_gib_is_bit_identical#0": {"returned": "'0x1.e24dd2f1a9fbep-1'"},
+"test_checkpoint_probe_gib_is_bit_identical#1": {"returned": "'0x1.2d4fdf3b645a2p+0'"},
+"test_power_windows_are_unchanged#0": {"returned": "{'samples': 3, 'mean_w': 27.916666666666668, 'max_w': 41.0}"},
+"test_power_windows_are_unchanged#1": {"returned": "{'samples': 2, 'mean_w': 26.75, 'max_w': 41.0}"},
+"test_power_windows_are_unchanged#2": {"returned": "{'samples': 1, 'mean_w': 12.5, 'max_w': 12.5}"},
+"test_power_windows_are_unchanged#3": {"returned": "{'samples': 0}"},
+"test_profile_head_mount_ops_is_unchanged#0": {"returned": "{'_bytes': [812345678, 2000, 0, 0, 790000000, 1800, 193000, 6], 'NULL': 1, 'READ': 193000, 'WRITE': 0, 'GETATTR': 7, 'LOOKUP': 3, 'ACCESS': 2, 'OPEN': 9}"},
+"test_profile_head_mount_ops_is_unchanged#1": {"returned": "{'_bytes': [7, 8, 9, 10, 11, 12, 13, 14], 'READ': 4, 'CLOSE': 5}"},
+"test_profile_head_mount_ops_is_unchanged#2": {"returned": "{}"},
+"test_profile_head_mount_ops_is_unchanged#3": {"returned": "{}"},
+"test_staged_exact_mountstats_is_unchanged#0": {"returned": "{'/ram/prewarm': {'bytes': None, 'ops': {}}, '/mnt/shared': {'bytes': [812345678, 2000, 0, 0, 790000000, 1800, 193000, 6], 'ops': {'READ': [193000, 193000, 0, 26248000, 790024000, 12, 40011, 45123, 0], 'WRITE': [0, 0, 0, 0, 0, 0, 0, 0, 0], 'GETATTR': [7, 7, 0, 1000, 1500, 0, 5, 6, 0], 'LOOKUP': [3, 3, 0, 400, 600, 1, 2, 3, 1], 'ACCESS': [2, 2, 0, 300, 200, 0, 1, 1], 'OPEN': [9, 9, 0, 1800, 2700, 0, 11, 12, 0]}}, '/stage/prewarm': {'bytes': [7, 8, 9, 10, 11, 12, 13, 14], 'ops': {'READ': [4, 4, 0, 480, 400, 0, 2, 3, 0], 'CLOSE': [5, 5, 0, 600, 500, 0, 1, 2, 0]}}}"},
+"test_unit_journal_memory_sample_is_unchanged[malformed]#0": {"returned": "{'mem_available_bytes': 118108434432, 'memory_current': 12288, 'memory_max': None, 'memory_pressure_some_total_us': 17, 'memory_pressure_full_total_us': 5}"},
+"test_unit_journal_memory_sample_is_unchanged[malformed]#1": {"returned": "{'mem_available_bytes': 118108434432}"},
+"test_unit_journal_memory_sample_is_unchanged[whole]#0": {"returned": "{'mem_available_bytes': 118108434432, 'memory_current': 12288, 'memory_max': None, 'file': 8192, 'anon': 4096, 'pgscan': 11, 'pgsteal': 10, 'workingset_refault_file': 3, 'memory_pressure_some_total_us': 17, 'memory_pressure_full_total_us': 5}"},
+"test_unit_journal_memory_sample_is_unchanged[whole]#1": {"returned": "{'mem_available_bytes': 118108434432}"}
+}

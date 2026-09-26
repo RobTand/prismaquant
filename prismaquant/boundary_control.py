@@ -10,12 +10,11 @@ on each matched pair. It does not replace the production shipping gate.
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import math
 import re
 
 from prismaquant import validate_quantized_model as vqm
+from .digests import DIRECT_UTF8_STRICT
 
 SCHEMA = "prismaquant.boundary_control/1"
 DECLARED_STACK_SCHEMA = "prismaquant.boundary_control/2"
@@ -24,9 +23,7 @@ DECISION_SCHEMA = "prismaquant.boundary_decision/1"
 NO_NEW_FAILURES_POLICY = "prismaquant.no_new_boundary_failures/1"
 
 
-def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
-                                    separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+digest = DIRECT_UTF8_STRICT.sha256
 
 
 def artifact_content_id(content):

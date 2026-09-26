@@ -5,7 +5,8 @@ recomputes ``canonical_json_sha256_normalized(identity)`` over the merged
 campaign checkpoint and compares it to the manifest's declared
 ``identity_sha256``. On the real 7.2 GB checkpoint that single call measured
 302.653 s of a 765.6 s profile (v15 action ``282c61140ba7``, 2026-09-20):
-``run/profile.pstats``, ``cost_stage_checkpoint.py:126``.
+``run/profile.pstats``, ``cost_stage_checkpoint.py:126`` (the function has
+since moved to ``digests.py:143``, PQ #1301).
 
 Under the owner's dev-mode directive the seal is run-gate provenance: dev mode
 skips the computation, requires the declared digest to be a full 64-hex

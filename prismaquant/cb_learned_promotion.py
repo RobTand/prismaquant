@@ -14,9 +14,10 @@ import math
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from .cb_imatrix import CB_IMATRIX_FROM_PROBE_SCHEMA
+from .moe_imatrix import IMATRIX_FROM_PROBE_SCHEMA
 from .cb_layout import FP8_PRODUCT_RUNGS, codebook_subtable_shapes, family_for
 from .schemas import Contract, strict_json_loads
+from .digests import DIRECT_UTF8_STRICT
 
 
 CBL_PROMOTION_RECEIPT_SCHEMA = "prismaquant.fp8_cbl_promotion_receipt.v1"
@@ -73,13 +74,7 @@ class ValidatedCBLPromotionReceipt:
 
 def _canonical_json(value: object, *, where: str) -> str:
     try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
+        return DIRECT_UTF8_STRICT.text(value)
     except (TypeError, ValueError) as exc:
         raise CBLPromotionReceiptError(
             f"{where} is not strict canonical JSON data"
@@ -355,7 +350,7 @@ def validate_promotion_receipt(
         {"schema", "calibration_hash", "value_sha256"},
         where="promotion receipt.imatrix",
     )
-    if imatrix.get("schema") != CB_IMATRIX_FROM_PROBE_SCHEMA:
+    if imatrix.get("schema") != IMATRIX_FROM_PROBE_SCHEMA:
         raise CBLPromotionReceiptError(
             "promotion receipt imatrix must come from full-probe act_sq_sum"
         )

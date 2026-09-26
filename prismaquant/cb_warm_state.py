@@ -38,6 +38,7 @@ from .nvfp4_cb_footprint import (
     codebook_source_for_format,
     lattice_codebook_content_sha256,
 )
+from .digests import DIRECT_UTF8_STRICT
 
 
 CB_WARM_STATE_SCHEMA = "prismaquant.cb_encoder_warm_state.v1"
@@ -172,14 +173,7 @@ def selected_scale_state(fields: Mapping[str, Any]) -> dict[str, torch.Tensor]:
     return out
 
 
-def _canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
+_canonical_json = DIRECT_UTF8_STRICT.text
 
 
 def _record_key(qname: str, format_name: str, source_digest: str) -> str:

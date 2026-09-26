@@ -28,8 +28,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from functools import lru_cache
-import hashlib
-import json
 
 from .tessera_menu import menu_scaled_cache
 from .tessera_formats import (
@@ -44,6 +42,7 @@ from .tessera_formats import (
     tessera_wire_recipe,
     validate_body_rate_q256,
 )
+from .digests import DIRECT_ASCII_LAX_DEFAULT_STR
 
 __all__ = [
     "TESSERA_TENSOR_PAYLOAD_SCHEMA",
@@ -98,9 +97,7 @@ def _recipe_identity(breakdown: Mapping[str, object]) -> str:
     """
     body = {k: v for k, v in breakdown.items()
             if k != "pre_render_recipe_identity_sha256"}
-    payload = json.dumps(body, sort_keys=True, separators=(",", ":"),
-                         default=str).encode()
-    return hashlib.sha256(payload).hexdigest()
+    return DIRECT_ASCII_LAX_DEFAULT_STR.sha256(body)
 
 
 def _alphabet_bytes(

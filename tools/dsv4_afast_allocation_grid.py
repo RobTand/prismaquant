@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import subprocess
@@ -26,6 +25,7 @@ from tools.dsv4_afast_burn import (
     atomic_json,
     sha256_file,
 )
+from prismaquant.digests import DIRECT_ASCII_STRICT
 
 
 GRID_ROOT = BURN_ROOT / "allocation-grid"
@@ -52,10 +52,7 @@ PARETO_TARGETS = (
 )
 
 
-def _content_key(identity: Mapping[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(
-        identity, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")).hexdigest()
+_content_key = DIRECT_ASCII_STRICT.sha256
 
 
 def _cell_identity(
