@@ -37,7 +37,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import json
 import math
-from pathlib import PurePosixPath
 import re
 from types import MappingProxyType
 from typing import Literal
@@ -46,6 +45,7 @@ from prismaquant.cost_stage_checkpoint import (
     canonical_json_bytes as _canonical_json_bytes,
     canonical_json_sha256,
 )
+from prismaquant.schemas import Contract, strict_json_loads
 
 
 MANIFEST_SCHEMA = "prismaquant.quality_prefill_experiment.v1"
@@ -255,68 +255,19 @@ for _spec in PHASE_DAG:  # pragma: no cover - static guard
 
 _ID_RE = re.compile(r"[a-z0-9][a-z0-9._:-]{0,127}\Z")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+-]{0,255}\Z")
-_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _GIT_SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 _IMAGE_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _VERSION_RE = re.compile(r"v[0-9]+(\.[0-9]+){0,2}\Z")
-_PATH_COMPONENT_RE = re.compile(r"[A-Za-z0-9._-]+\Z")
 
 _ARTIFACT_REFERENCE_KEYS = frozenset({"path", "sha256"})
 _UNRESOLVED_KEYS = frozenset({"unresolved"})
 
 
-def _fail(message: str) -> None:
-    raise QualityPrefillContractError(message)
-
-
-def _exact_mapping(
-    value: object,
-    *,
-    keys: frozenset[str],
-    where: str,
-) -> Mapping[str, object]:
-    """Refuse anything but an object whose key set is exactly ``keys``."""
-
-    if not isinstance(value, Mapping):
-        _fail(f"{where} must be an object")
-    if any(type(key) is not str for key in value):
-        _fail(f"{where} keys must be strings")
-    actual = set(value)
-    if actual != keys:
-        missing = sorted(keys - actual)
-        extra = sorted(actual - keys)
-        _fail(f"{where} fields differ: missing={missing}, extra={extra}")
-    return value  # type: ignore[return-value]
-
-
-def _string(
-    value: object,
-    *,
-    where: str,
-    pattern: re.Pattern[str] | None = None,
-) -> str:
-    if type(value) is not str or not value:
-        _fail(f"{where} must be a non-empty string")
-    text = value  # type: ignore[assignment]
-    if text != text.strip() or any(ord(char) < 32 for char in text):
-        _fail(f"{where} contains whitespace padding or control characters")
-    if pattern is not None and pattern.fullmatch(text) is None:
-        _fail(f"{where} has an invalid value")
-    return text
-
-
-def _integer(
-    value: object,
-    *,
-    where: str,
-    minimum: int,
-    maximum: int = 2**63 - 1,
-) -> int:
-    """``type(value) is int`` -- a ``bool`` never satisfies an integer field."""
-
-    if type(value) is not int or not minimum <= value <= maximum:
-        _fail(f"{where} must be an integer in [{minimum}, {maximum}]")
-    return value  # type: ignore[return-value]
+_CHECK = Contract(QualityPrefillContractError)
+_fail = _CHECK.fail
+_exact_mapping = _CHECK.exact_mapping
+_string = _CHECK.string
+_integer = _CHECK.integer
 
 
 def _finite_number(
@@ -335,8 +286,7 @@ def _finite_number(
     return number
 
 
-def _sha256(value: object, *, where: str) -> str:
-    return _string(value, where=where, pattern=_SHA256_RE)
+_sha256 = _CHECK.sha256
 
 
 def _enum(value: object, *, where: str, allowed) -> str:
@@ -364,23 +314,7 @@ def _unique_ids(values: Sequence[object], *, where: str) -> tuple[str, ...]:
     return out
 
 
-def _absolute_posix_path(value: object, *, where: str) -> str:
-    raw = _string(value, where=where)
-    if not raw.startswith("/") or raw == "/":
-        _fail(f"{where} must be a non-root absolute POSIX path")
-    components = raw.split("/")[1:]
-    if (
-        not components
-        or any(
-            not component
-            or component in {".", ".."}
-            or _PATH_COMPONENT_RE.fullmatch(component) is None
-            for component in components
-        )
-        or str(PurePosixPath(raw)) != raw
-    ):
-        _fail(f"{where} must be normalized and traversal-free")
-    return raw
+_absolute_posix_path = _CHECK.absolute_posix_path
 
 
 def _artifact_reference(value: object, *, where: str) -> Mapping[str, object]:
@@ -464,23 +398,13 @@ def decode_strict_json(text: str, *, where: str) -> object:
     if type(text) is not str:
         _fail(f"{where} must be text")
 
-    def object_from_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, item in pairs:
-            if key in result:
-                _fail(f"{where} contains duplicate JSON member {key!r}")
-            result[key] = item
-        return result
-
-    def reject_constant(value: str) -> object:
-        _fail(f"{where} contains non-JSON constant {value}")
-        raise AssertionError  # pragma: no cover - _fail always raises
-
     try:
-        return json.loads(
+        return strict_json_loads(
             text,
-            object_pairs_hook=object_from_pairs,
-            parse_constant=reject_constant,
+            duplicate=lambda key: _CHECK.exception(
+                f"{where} contains duplicate JSON member {key!r}"),
+            constant=lambda value: _CHECK.exception(
+                f"{where} contains non-JSON constant {value}"),
         )
     except QualityPrefillContractError:
         raise

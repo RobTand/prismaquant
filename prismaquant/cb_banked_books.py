@@ -30,6 +30,7 @@ from .routed_moe_codebooks import (
     ROUTED_BOOK_KEY_NAMES,
     ROUTED_MOE_CBL_BANK_RUNGS,
 )
+from .schemas import strict_json_loads
 
 
 BURN_CELL_SCHEMA = "prismaquant.dsv4_afast_burn_cell.v4"
@@ -292,18 +293,9 @@ def _strict_json_loads(raw: object, *, where: str) -> object:
     if not isinstance(raw, str):
         raise BankedCBLBookError(f"{where}: metadata value must be JSON text")
 
-    def reject_duplicates(pairs):
-        out = {}
-        for key, value in pairs:
-            if key in out:
-                raise BankedCBLBookError(
-                    f"{where}: duplicate JSON member {key!r}"
-                )
-            out[key] = value
-        return out
-
     try:
-        return json.loads(raw, object_pairs_hook=reject_duplicates)
+        return strict_json_loads(raw, duplicate=lambda key: BankedCBLBookError(
+            f"{where}: duplicate JSON member {key!r}"))
     except json.JSONDecodeError as exc:
         raise BankedCBLBookError(f"{where}: malformed JSON: {exc}") from exc
 

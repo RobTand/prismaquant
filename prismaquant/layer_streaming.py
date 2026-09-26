@@ -30,6 +30,7 @@ import torch
 import torch.nn as nn
 
 from .autoscale import declared_expert_dtype_covers, declared_fp4_expert_dtype
+from .io_spans import mem_available_bytes
 from .source_read_plan import (
     live_weight_map,
     resident_head_prefixes,
@@ -2320,8 +2321,7 @@ class LayerCache:
         if self._pressure_threshold_bytes <= 0 or not self._cache:
             return 0
         try:
-            import psutil
-            avail = psutil.virtual_memory().available
+            avail = mem_available_bytes()
         except Exception:
             return 0
         if avail >= self._pressure_threshold_bytes:
@@ -2385,7 +2385,7 @@ class LayerCache:
         # if the projected release did not materialize.
         if freed and self._cache:
             try:
-                avail = psutil.virtual_memory().available
+                avail = mem_available_bytes()
             except Exception:
                 avail = self._pressure_threshold_bytes
             if avail < self._pressure_threshold_bytes:
@@ -2469,12 +2469,11 @@ class LayerCache:
         With dynamic budget disabled (default), returns static max_bytes.
         With dynamic budget on, caps such that completing this put will
         leave the system with at least reserve_bytes of MemAvailable.
-        Falls back to static max if psutil is unavailable."""
+        Falls back to static max if MemAvailable is unreadable."""
         if self._dynamic_reserve_bytes <= 0:
             return self.max_bytes
         try:
-            import psutil
-            avail = psutil.virtual_memory().available
+            avail = mem_available_bytes()
         except Exception:
             return self.max_bytes
         # If we evicted everything, MemAvailable would rise by total_bytes.

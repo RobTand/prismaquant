@@ -36,6 +36,7 @@ from .joint_head_walk_quanta import check_quantum_for_roster
 from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
+from .schemas import Contract
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -143,9 +144,7 @@ HEAD_WALK_RECLAIM_GAP_BYTES = 2 * 1024 ** 3
 _HEAD_WALK_SYNTHESIS_LOCK = threading.Lock()
 
 
-def _require(condition, message):
-    if not condition:
-        raise ValueError(message)
+_require = Contract(ValueError).require
 
 
 def _sha(path):
