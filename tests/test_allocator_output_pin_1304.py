@@ -8,6 +8,12 @@ parent commit 1b29d4a6aff (PR #1332), before any branch was removed. They cover
 ``layer_config.json``, the Pareto CSV and, for the stock menu, every Pareto seed
 file. Absolute temporary paths are replaced by ``<TMP>`` and the solver's
 wall time is blanked before hashing.
+
+One key changed on purpose. ``format_applicability.json`` carried
+``cb_ladder_cross_family_verdict``, which was always ``null`` without a
+codebook rung, and step 2 dropped it. Its two digests were computed on
+1b29d4a6aff with that null key removed before hashing; every other file's
+digest is the unmodified 1b29d4a6aff digest.
 """
 from __future__ import annotations
 
@@ -20,7 +26,7 @@ import pytest
 
 STOCK_DIGESTS = {
     "format_applicability.json": (
-        "814cb0b50116aa645717d48d675aba278b8d0268f45a96b2e37c1e201d806547"
+        "d9c224a47508eceafdb39f3f1bbdf1b4c4ee9c37c9b228dff836c063c2743cba"
     ),
     "layer_config.json": (
         "8adac3a9655fbf2b783b98ad04142ee9ddac725ce600ad39bcb7fd312392d6a2"
@@ -49,7 +55,7 @@ STOCK_DIGESTS = {
 }
 TESSERA_DIGESTS = {
     "format_applicability.json": (
-        "f17cc66b659ab6e0087b7c71bb7c61e86595359f08621954767f07fea1b579c0"
+        "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
         "329e9cbac3da8fbc4336459152757dc892dbbb276d11995ba05574bb693db114"
