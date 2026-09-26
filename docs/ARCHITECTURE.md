@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Tessera pin retake (2026-09-26, PQ #1413): the exact reader and serving pin
+moves from `af7a86d43d…` to `d2a6455025…` after Tessera #625, #626 and
+#630. Hessian-reference collections and composed original cached cohorts are
+now available to the selected-wire export path described below. The packaged
+runtime contract remains v38, SHA-256 `04d5a20a…9d22e4`; the reviewed
+admission answer and lane schema v10 do not move. Tessera's serving source at
+`d2a6455025…` is byte-identical to `f790bcc1a…`, which produced the bounded
+GLM text-only TP2 result. This retake alone does not qualify routed E4M3
+R1024, publish an MTP artifact, or alter the selected body assignment.
+
 The GLM MTP selected-wire export preflight accepts a Tessera Hessian reference
 collection (2026-09-26, `astra/mtp-wire-compat-proof-1413`, PQ #1413). The body
 allocation retains its original Hessian stamp; the collection names the
@@ -3525,6 +3535,11 @@ Re-stamped (2026-09-26, `ws-serve/1274-tessera-pin-v38`) for the **Tessera pin
 move to `af7a86d43d…`** (contract v34 -> v38, PQ #1274): the GLM serving
 image's window cells, the dense BF16 q1792 withdrawal, and the two reused
 routed E4M3 cell ids.
+
+Re-stamped (2026-09-26, PQ #1413) for the exact Tessera pin retake to
+`d2a6455025…` after #625, #626 and #630. The packaged v38 digest and
+admission answer are unchanged; the reader gains composed original Hessian
+references and cached-unit cohorts without changing child receipts.
 
 Re-stamped (2026-09-25, `claude/identity-cache-portable-1363`) for **source
 identity proofs that survive another NFS mount, checked by one predicate**
@@ -24364,8 +24379,9 @@ top-1024 intersection bound, because no instrument in either repository
 produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `af7a86d43da3487179b7d16606ef0f5a3046d73c` (master after #621, re-pinned
-2026-09-26; version `0.1.0`, contract v38, lane schema v10, which v35-v38 keep.
+Tessera `d2a6455025040a0826395182c44ea742b582f232` (master after #630,
+re-pinned 2026-09-26; version `0.1.0`, contract v38, lane schema v10, which
+v35-v38 keep). The prior `af7a86d43d…` pin introduced v38.
 v35-v38 are not additive: v37 withdraws the dense BF16 q1792 pair and v38 reuses
 the two routed E4M3 cell ids for q896 on a different image. v34 was pinned at
 `07bfcc0e9b…` and first at `acf9eafa6a…`

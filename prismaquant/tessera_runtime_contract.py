@@ -350,7 +350,12 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: (contract v38: the GLM serving image's window cells, tessera#604).
 #: Contract v34 -> v38, lane schema still v10.  The answer moves, and its
 #: diff is the review: see the v38 note at the head of the literal.
-TESSERA_DEV_PIN_COMMIT = "af7a86d43da3487179b7d16606ef0f5a3046d73c"
+#: Re-pinned 2026-09-26 to d2a645502 -- Tessera master after #625, #626 and
+#: #630. The composed cached-unit reader and Hessian-reference collection are
+#: needed by PQ #1413. Serving files are byte-identical to f790bcc1a, the
+#: completed GLM text-only trial's source. The packaged v38 contract and the
+#: reviewed admission answer below are unchanged from af7a86d43.
+TESSERA_DEV_PIN_COMMIT = "d2a6455025040a0826395182c44ea742b582f232"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and

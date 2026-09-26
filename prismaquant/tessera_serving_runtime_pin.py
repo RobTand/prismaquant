@@ -275,8 +275,11 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: E4M3_K1/BF16_K1 cells on spark-vllm-nccl230@f8dbe1a0 (#604), and reuse the
 #: two routed E4M3_K1 cell ids for q896 on that image in place of the
 #: withdrawn q1024 claim on eugr/spark-vllm@0afec8d4.
+#: Re-pinned 2026-09-26 to d2a645502 after Tessera #625, #626 and #630.
+#: The packaged v38 contract and reviewed answer below are byte-identical to
+#: af7a86d43's; f790bcc1a's serving source is unchanged at this commit.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "af7a86d43da3487179b7d16606ef0f5a3046d73c"
+    "d2a6455025040a0826395182c44ea742b582f232"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
