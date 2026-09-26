@@ -22,6 +22,7 @@ import torch
 
 from prismaquant import io_engine
 from prismaquant import memory_management as mm
+from prismaquant import joint_statistics_replay as replay
 from prismaquant.joint_statistics_replay import GuardReadBudget
 
 SIZE = 4096
@@ -340,7 +341,7 @@ def test_a_check_reclaims_read_ahead_bytes_before_it_would_refuse(tmp_path, monk
         (scope / "memory.current").write_text(str(limit - GiB))
         return shortfall
 
-    remove = guard.add_reclaimer(reclaim)
+    remove = guard.add_reclaimer(reclaim, lowers={"committed"})
     (scope / "memory.current").write_text(str(limit + GiB))
     record = guard.check("phase", reserve_bytes=GiB)
     # The cgroup term is exceeded by the gigabyte committed past the limit.
@@ -514,8 +515,8 @@ def test_a_device_shortfall_asks_only_device_side_reclaimers(tmp_path, monkeypat
         state["reserved"] -= 6 * GiB
         return 6 * GiB
 
-    remove_host = guard.add_reclaimer(host)
-    remove_device = guard.add_reclaimer(device, device=True)
+    remove_host = guard.add_reclaimer(host, lowers={"committed", "available"})
+    remove_device = guard.add_reclaimer(device, lowers={"reserved"})
     # 66 GiB reserved and 4 GiB more asked of a 68 GiB envelope: 2 GiB short
     # on the device alone.
     guard.check("phase", reserve_device_bytes=4 * GiB)
@@ -541,9 +542,9 @@ def test_a_host_shortfall_asks_only_host_reclaimers(tmp_path, monkeypatch):
         (scope / "memory.current").write_text(str(limit - GiB))
         return shortfall
 
-    guard.add_reclaimer(host)
     guard.add_reclaimer(lambda shortfall: asked["device"].append(shortfall) or 0,
-                        device=True)
+                        lowers={"reserved"})
+    guard.add_reclaimer(host, lowers={"committed", "available"})
     (scope / "memory.current").write_text(str(limit + GiB))
     guard.check("phase", reserve_bytes=GiB)
     assert asked == {"host": [GiB], "device": []}
@@ -576,19 +577,153 @@ def test_the_device_headroom_reads_the_host_pool_not_the_cuda_driver(
     guard.check("phase", reserve_bytes=GiB, reserve_device_bytes=4 * GiB)
 
 
-def test_an_ordered_reclaimer_asks_each_in_turn_for_what_is_still_short():
+# -- the reclaim pass reads what each reclaimer freed (PQ #1383) ----------
+
+#: prof-2 of #1348 at its refusal: the cgroup 60 MB past its cap less the
+#: margin, the aggregate envelope 17 GB clear, and 31 GB more requested.
+PROF2_CAP = 30064771072
+PROF2_COMMITTED = 27977605120
+PROF2_RESERVED = 24511512576
+PROF2_REQUESTED = 31083986944
+RENDER = 16 << 20
+
+
+class _Held:
+    """A reclaimer on the mocked guard, holding ``held`` bytes of one kind.
+
+    ``reclaim(need)`` drops whole ``RENDER``-sized values until ``need`` is
+    covered and reports them. It lowers the mocked readings named in
+    ``lowers`` by what it dropped, the way those bytes do on the GB10
+    (``tests/test_reclaim_readings_gb10.py``), and no other reading.
+    """
+
+    def __init__(self, scope, state, held, lowers):
+        self.scope, self.state, self.held, self.lowers = scope, state, held, lowers
+        self.asked = []
+
+    def reclaim(self, need):
+        self.asked.append(need)
+        dropped = min(self.held, -(-need // RENDER) * RENDER)
+        self.held -= dropped
+        if "committed" in self.lowers:
+            current = int((self.scope / "memory.current").read_text())
+            (self.scope / "memory.current").write_text(str(current - dropped))
+        if "reserved" in self.lowers:
+            self.state["reserved"] -= dropped
+        if "available" in self.lowers:
+            self.state["available"] += dropped
+        return dropped
+
+
+def _replay_reclaimers(scope, state, *, spill=0, cache=4 * GiB, stream=4 * GiB):
+    return (_Held(scope, state, spill, replay.SPILL_REPLAY_RECLAIM_LOWERS),
+            _Held(scope, state, cache, replay.RENDER_CACHE_RECLAIM_LOWERS),
+            _Held(scope, state, stream, replay.RENDER_STREAM_RECLAIM_LOWERS))
+
+
+def _register(guard, spill, cache, stream):
+    return replay.register_replay_reclaimers(
+        guard, spill=type("Spill", (), {"reclaim_replay": staticmethod(spill.reclaim)})(),
+        render_cache=cache, render_stream=stream)
+
+
+def test_renders_kept_on_the_device_do_not_stop_a_cgroup_reclaim(tmp_path, monkeypatch):
+    """prof-2's refusal (PQ #1383): a cgroup shortfall reclaims renders read ahead.
+
+    The cgroup is 60 MB past its cap less the margin, and the device render
+    cache holds gigabytes. Freeing a CUDA allocation does not lower the
+    cgroup's committed bytes on the GB10, so the cache is not asked and its
+    renders stay. The renders read ahead are memfd pages the cgroup counts:
+    they are asked for the 60 MB, and the check passes on the reading after.
+    ``main`` asked the cache first, stopped once its report covered the
+    60 MB, and refused on the same committed bytes.
+    """
+    guard, scope, state = _guard(tmp_path, monkeypatch, cap=PROF2_CAP,
+                                 current=PROF2_COMMITTED, reserved=PROF2_RESERVED,
+                                 available=80 * GiB)
+    spill, cache, stream = _replay_reclaimers(scope, state)
+    _register(guard, spill, cache, stream)
+    need = PROF2_COMMITTED - (PROF2_CAP - guard.margin_bytes)
+    assert 0 < need < RENDER * 4
+    record = guard.check("spill-capture", reserve_bytes=GiB,
+                         reserve_device_bytes=PROF2_REQUESTED - GiB)
+    assert cache.asked == [] and cache.held == 4 * GiB
+    assert stream.asked == [need]
+    assert record["cgroup_committed_bytes"] == PROF2_COMMITTED - 4 * RENDER
+    assert [step["reclaimer"] for step in record["reclaims"]] == (
+        ["spill_replay"] if "committed" in replay.SPILL_REPLAY_RECLAIM_LOWERS else []
+    ) + ["render_stream"]
+    assert record["reclaims"][-1]["committed_drop_bytes"] == 4 * RENDER
+    assert record["reclaims"][-1]["exceeded"] == ["cgroup"]
+    assert guard.reclaim_counters["render_cache"]["skipped"] == 1
+    assert guard.snapshot()["reclaims"]["render_stream"]["asked"] == 1
+
+
+def test_a_device_shortfall_asks_the_render_cache_alone(tmp_path, monkeypatch):
+    guard, scope, state = _guard(tmp_path, monkeypatch, cap=28 * GiB,
+                                 current=13 * GiB, reserved=66 * GiB,
+                                 available=80 * GiB)
+    spill, cache, stream = _replay_reclaimers(scope, state, spill=GiB)
+    _register(guard, spill, cache, stream)
+    guard.check("phase", reserve_device_bytes=4 * GiB)
+    assert spill.asked == [] and stream.asked == []
+    assert cache.asked == [2 * GiB]
+    assert guard.last["cuda_reserved_bytes"] == 64 * GiB
+
+
+def test_a_reported_free_the_reading_does_not_show_does_not_end_the_pass(
+        tmp_path, monkeypatch):
+    """What a reclaimer reports is recorded, never counted (PQ #1383).
+
+    The first reclaimer reports the whole shortfall and moves nothing, as a
+    free the allocator keeps would (the mimalloc lesson of #1291). The pass
+    reads the process again, finds the term still exceeded, and asks the
+    next.
+    """
+    guard, scope, _state = _guard(tmp_path, monkeypatch, cap=28 * GiB,
+                                  current=13 * GiB, reserved=20 * GiB,
+                                  available=80 * GiB)
+    limit = 28 * GiB - guard.margin_bytes
     asked = []
 
-    def step(name, frees):
-        def reclaim(shortfall):
-            asked.append((name, shortfall))
-            return frees
-        return reclaim
+    def kept(need):
+        asked.append(("kept", need))
+        return need
 
-    reclaim = mm.ordered_reclaimer(step("spill", 3), None, step("cache", 4),
-                                   step("renders", 10))
-    assert reclaim(6) == 7
-    assert asked == [("spill", 6), ("cache", 3)]
-    asked.clear()
-    assert reclaim(20) == 17
-    assert asked == [("spill", 20), ("cache", 17), ("renders", 13)]
+    def returned(need):
+        asked.append(("returned", need))
+        (scope / "memory.current").write_text(str(limit - GiB))
+        return need
+
+    guard.add_reclaimer(kept, lowers={"committed"}, name="kept")
+    guard.add_reclaimer(returned, lowers={"committed"}, name="returned")
+    (scope / "memory.current").write_text(str(limit + GiB))
+    record = guard.check("phase", reserve_bytes=GiB)
+    assert asked == [("kept", GiB), ("returned", GiB)]
+    assert [(step["reclaimer"], step["reported_bytes"], step["committed_drop_bytes"])
+            for step in record["reclaims"]] == [("kept", GiB, 0), ("returned", GiB, 2 * GiB)]
+
+
+def test_a_pass_that_frees_too_little_refuses_and_says_what_it_asked(
+        tmp_path, monkeypatch):
+    guard, scope, state = _guard(tmp_path, monkeypatch, cap=PROF2_CAP,
+                                 current=PROF2_COMMITTED, reserved=PROF2_RESERVED,
+                                 available=80 * GiB)
+    spill, cache, stream = _replay_reclaimers(scope, state, stream=RENDER)
+    (scope / "memory.current").write_text(str(PROF2_COMMITTED + RENDER))
+    _register(guard, spill, cache, stream)
+    with pytest.raises(RuntimeError, match="aggregate memory refusal"):
+        guard.check("spill-capture", reserve_bytes=GiB,
+                    reserve_device_bytes=PROF2_REQUESTED - GiB)
+    assert stream.held == 0 and cache.held == 4 * GiB
+    assert guard.last["reclaims"][-1]["reclaimer"] == "render_stream"
+    assert guard.last["reclaims"][-1]["committed_drop_bytes"] == RENDER
+
+
+@pytest.mark.parametrize("lowers", [set(), {"committed", "rss"}])
+def test_a_reclaimer_names_what_the_guard_reads(tmp_path, monkeypatch, lowers):
+    guard, _scope, _state = _guard(tmp_path, monkeypatch, cap=28 * GiB,
+                                   current=13 * GiB, reserved=20 * GiB,
+                                   available=80 * GiB)
+    with pytest.raises(ValueError, match="nonempty subset"):
+        guard.add_reclaimer(lambda need: 0, lowers=lowers)

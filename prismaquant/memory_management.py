@@ -54,6 +54,28 @@ DEFAULT_HOST_FLOOR_BYTES = BOX_WATCHDOG_FLOOR_BYTES
 #: conservative single-budget arithmetic it was written against.
 SEPARATE_RESERVATIONS = "separates_cpu_and_device_reservations"
 
+#: What :class:`CaptureMemoryGuard` reads of the process (``_observe``): the
+#: cgroup's committed bytes, the CUDA caching allocator's reservation and the
+#: host's MemAvailable. A reclaimer names the ones its frees lower.
+GUARD_READINGS = frozenset({'committed', 'reserved', 'available'})
+#: The readings each of the guard's refusal terms reads (PQ #1383). The
+#: un-split guard holds ``combined``; the aggregate guard ``aggregate`` and
+#: ``cgroup``; the split guard ``cgroup``; the last two also hold ``device``,
+#: and every guard holds ``host``.
+TERM_READINGS = {
+    'combined': frozenset({'committed', 'reserved'}),
+    'aggregate': frozenset({'committed', 'reserved'}),
+    'cgroup': frozenset({'committed'}),
+    'device': frozenset({'reserved'}),
+    'host': frozenset({'available'}),
+}
+#: A host allocation raises the cgroup's committed bytes and takes host
+#: pages; a CUDA allocation raises the reservation and, on unified memory,
+#: takes host pages too. Each headroom is the room under every term that
+#: reads what its allocation moves.
+HOST_ALLOCATION_READINGS = frozenset({'committed', 'available'})
+DEVICE_ALLOCATION_READINGS = frozenset({'reserved', 'available'})
+
 #: The ``memory.stat`` keys the committed-memory definition reads. Every
 #: cgroup v2 kernel publishes them; a stat without one of them refuses rather
 #: than reading the missing key as zero.
@@ -375,6 +397,9 @@ class CaptureMemoryGuard:
         # process is in: ``headroom_bytes`` leaves room for them (PQ #1291).
         self._reserve = (0, 0)
         self._reclaimers = []
+        # Per reclaimer name, cumulative: how often a check asked it or
+        # skipped it, and what the readings did around each ask (PQ #1383).
+        self.reclaim_counters = {}
         # ``check`` is an INSTANCE ATTRIBUTE holding a closure, not the method:
         # the callers hand ``guard.check`` to a reader as a ``resource_check``
         # callable, and a capability has to travel with THAT object. A bound
@@ -438,26 +463,8 @@ class CaptureMemoryGuard:
                     'the two budgets apart')
             self._reserve = (reserve_bytes, reserve_device_bytes)
             observed = self._observe()
+            observed, trail = self._reclaim(observed, reserve_bytes, reserve_device_bytes)
             deficits = self._deficits(observed, reserve_bytes, reserve_device_bytes)
-            shortfall = max(deficits['budget'], deficits['host'])
-            device_shortfall = deficits['device']
-            if (shortfall > 0 or device_shortfall > 0) and self._reclaimers:
-                # Bytes a reader holds ahead of its consumer are reclaimable
-                # (``io_engine.ReadStream.reclaim``): they are dropped before
-                # this check would refuse, and it reads the process again. A
-                # budget or host-floor shortfall asks the host reclaimers; a
-                # device-envelope shortfall asks the device ones (CUDA tensors
-                # kept for reuse, PQ #1348). On unified memory both sides
-                # draw on one pool, so a host reclaimer that holds CUDA bytes
-                # frees them in its own order (``ordered_reclaimer``).
-                freed = 0
-                for reclaim, device_side in list(self._reclaimers):
-                    need = device_shortfall if device_side else shortfall
-                    if need > 0:
-                        freed += int(reclaim(need))
-                if freed:
-                    observed = self._observe()
-                    deficits = self._deficits(observed, reserve_bytes, reserve_device_bytes)
             cap, stat, current = observed['cap'], observed['stat'], observed['current']
             committed, reserved = observed['committed'], observed['reserved']
             available = observed['available']
@@ -472,6 +479,9 @@ class CaptureMemoryGuard:
                 future_allocation_bytes=reserve_bytes,
                 future_device_allocation_bytes=reserve_device_bytes,
                 refusal_threshold_bytes=cap-self.margin_bytes)
+            if trail:
+                # Which reclaimers this check asked, and what each reading did.
+                self.last['reclaims'] = trail
             if self.device_bytes is None:
                 # The un-split guard: CPU and device charged to one budget, which
                 # is the conservative answer when the caller has not said which
@@ -577,51 +587,77 @@ class CaptureMemoryGuard:
         return dict(cap=cap, stat=stat, current=current, committed=committed,
                     reserved=reserved, available=available)
 
-    def _deficits(self, observed, reserve_bytes, reserve_device_bytes, *,
-                  host_reserve=False):
-        """By how many bytes each refusal of :meth:`_check` is exceeded.
+    def _terms(self, observed, reserve_bytes, reserve_device_bytes, *,
+               host_reserve=False):
+        """By how many bytes each refusal term of :meth:`_check` is exceeded.
 
-        ``budget`` is the cgroup (or aggregate) refusal, ``device`` the device
-        envelope's and ``host`` the host floor's; a positive value refuses.
-        ``host_reserve`` also holds the CPU reservation against the cgroup cap
-        on its own in the aggregate guard, which ``_check`` does not (the plan
-        does not say which side its reservation lands on); ``headroom_bytes``
-        asks for it, because what it admits lands on the host.
+        Keyed as :data:`TERM_READINGS`, with only the terms this guard holds;
+        a positive value refuses. ``host_reserve`` also holds the CPU
+        reservation against the cgroup cap on its own in the aggregate guard,
+        which ``_check`` does not (the plan does not say which side its
+        reservation lands on); ``headroom_bytes`` asks for it, because what it
+        admits lands on the host.
         """
         cap, committed = observed['cap'], observed['committed']
         reserved, available = observed['reserved'], observed['available']
         limit = cap - self.margin_bytes
         if self.device_bytes is None:
-            return {'budget': committed + reserved + reserve_bytes - limit,
-                    'device': 0,
+            return {'combined': committed + reserved + reserve_bytes - limit,
                     'host': self.host_floor_bytes + reserve_bytes - available}
-        host = self.host_floor_bytes + reserve_bytes + reserve_device_bytes - available
-        device = reserved + reserve_device_bytes - self.device_bytes
+        terms = {'cgroup': committed + reserve_bytes - limit,
+                 'device': reserved + reserve_device_bytes - self.device_bytes,
+                 'host': (self.host_floor_bytes + reserve_bytes + reserve_device_bytes
+                          - available)}
         if self.aggregate_envelope:
-            return {'budget': max(
-                        committed + reserved + reserve_bytes + reserve_device_bytes
-                        - (limit + self.device_bytes),
-                        committed + (reserve_bytes if host_reserve else 0) - limit),
-                    'device': device, 'host': host}
-        return {'budget': committed + reserve_bytes - limit, 'device': device, 'host': host}
+            terms['cgroup'] = committed + (reserve_bytes if host_reserve else 0) - limit
+            terms['aggregate'] = (committed + reserved + reserve_bytes + reserve_device_bytes
+                                  - (limit + self.device_bytes))
+        return terms
 
-    def headroom_bytes(self) -> int:
-        """Host bytes that may still be allocated now without a refusal.
+    def _deficits(self, observed, reserve_bytes, reserve_device_bytes, *,
+                  host_reserve=False):
+        """The refusals of :meth:`_check`: ``budget``, ``device`` and ``host``.
 
-        A reading, not a check: it records nothing and never refuses. It is
-        the largest allocation on the host side that keeps every term of the
-        most recent check's reservations (the phase the process is in) within
-        the budget, the aggregate envelope and the host floor, with that
-        reservation also held against the cgroup cap on its own. Negative when
-        the process is already past one of them. A reader that runs ahead of
-        its consumer sizes its depth by it (``io_engine``, PQ #1291).
+        ``budget`` is the cgroup refusal and, where this guard holds one, the
+        combined or aggregate one; ``device`` the device envelope's and
+        ``host`` the host floor's. A positive value refuses.
+        """
+        terms = self._terms(observed, reserve_bytes, reserve_device_bytes,
+                            host_reserve=host_reserve)
+        return {'budget': max(value for term, value in terms.items()
+                              if term in ('combined', 'aggregate', 'cgroup')),
+                'device': terms.get('device', 0), 'host': terms['host']}
+
+    def _room(self, readings, *, host_reserve):
+        """The most an allocation that moves ``readings`` may take now.
+
+        The room under every term of the most recent check's reservations
+        that reads one of ``readings`` (:data:`TERM_READINGS`). A reading,
+        not a check: it records nothing and never refuses. Negative when the
+        process is already past one of those terms; zero once the guard has
+        refused.
         """
         if self.failure is not None:
             return 0
         reserve_bytes, reserve_device_bytes = self._reserve
-        deficits = self._deficits(self._observe(), reserve_bytes, reserve_device_bytes,
-                                  host_reserve=True)
-        return -max(deficits['budget'], deficits['host'])
+        terms = self._terms(self._observe(), reserve_bytes, reserve_device_bytes,
+                            host_reserve=host_reserve)
+        return -max(value for term, value in terms.items()
+                    if TERM_READINGS[term] & readings)
+
+    def headroom_bytes(self) -> int:
+        """Host bytes that may still be allocated now without a refusal.
+
+        The largest allocation on the host side that keeps every term of the
+        most recent check's reservations (the phase the process is in) within
+        the budget, the aggregate envelope and the host floor, with that
+        reservation also held against the cgroup cap on its own. A host
+        allocation moves the committed bytes and MemAvailable
+        (:data:`HOST_ALLOCATION_READINGS`), so the device envelope does not
+        bound it. A reader that runs ahead of its consumer sizes its depth by
+        it (``io_engine``, PQ #1291).
+        """
+        return self._room(HOST_ALLOCATION_READINGS, host_reserve=True)
 
     def device_headroom_bytes(self) -> int:
         """Device bytes that may still be allocated now without a refusal (PQ #1348).
@@ -632,40 +668,90 @@ class CaptureMemoryGuard:
         charged beside the cgroup, so that is the budget; with one it is the
         device envelope, and the aggregate envelope where this guard holds
         one. The host floor counts either way: on unified memory a CUDA
-        allocation takes host pages. A reading, not a check; negative when
-        the process is already past one of them.
+        allocation takes host pages (:data:`DEVICE_ALLOCATION_READINGS`). The
+        cgroup cap on its own does not, since the GB10 charges no CUDA bytes
+        to the memcg.
         """
-        if self.failure is not None:
-            return 0
-        reserve_bytes, reserve_device_bytes = self._reserve
-        observed = self._observe()
-        deficits = self._deficits(observed, reserve_bytes, reserve_device_bytes)
-        if self.device_bytes is None:
-            return -max(deficits['budget'], deficits['host'])
-        terms = [deficits['device'], deficits['host']]
-        if self.aggregate_envelope:
-            terms.append(observed['committed'] + observed['reserved'] + reserve_bytes
-                         + reserve_device_bytes
-                         - (observed['cap'] - self.margin_bytes + self.device_bytes))
-        return -max(terms)
+        return self._room(DEVICE_ALLOCATION_READINGS, host_reserve=False)
 
-    def add_reclaimer(self, reclaim, *, device=False):
-        """Let ``reclaim(shortfall_bytes) -> freed`` drop bytes before a refusal.
+    def add_reclaimer(self, reclaim, *, lowers, name=None):
+        """Let ``reclaim(need_bytes) -> reported`` drop bytes before a refusal.
 
-        Returns a callable that removes it again. A check that would refuse on
-        the budget or the host floor calls every host reclaimer with its
-        shortfall first and then reads the process again. ``device=True``
-        registers a device reclaimer instead (PQ #1348): a check that would
-        refuse on the device envelope calls it with that shortfall, and a
-        host shortfall does not.
+        Returns a callable that removes it again. ``lowers`` names the
+        readings its frees lower (:data:`GUARD_READINGS`), as measured where
+        it runs (PQ #1383). A check that would refuse asks the reclaimers in
+        registration order, cheapest to restore first, and reads the process
+        again after each (:meth:`_reclaim`). The bytes a reclaimer reports are
+        recorded, never counted: only the next reading says what it freed.
         """
-        entry = (reclaim, bool(device))
+        lowers = frozenset(lowers)
+        if not lowers or not lowers <= GUARD_READINGS:
+            raise ValueError(
+                f'a reclaimer lowers a nonempty subset of {sorted(GUARD_READINGS)}, '
+                f'not {sorted(lowers)}')
+        if name is None:
+            name = getattr(reclaim, '__qualname__', None) or repr(reclaim)
+        entry = (reclaim, lowers, str(name))
         self._reclaimers.append(entry)
 
         def remove():
             if entry in self._reclaimers:
                 self._reclaimers.remove(entry)
         return remove
+
+    def _reclaim(self, observed, reserve_bytes, reserve_device_bytes):
+        """Ask the reclaimers for what an exceeded term still needs (PQ #1383).
+
+        One pass in registration order. A reclaimer is asked only while a
+        term that reads one of the readings it lowers is exceeded, and for the
+        largest such excess; one that lowers nothing such a term reads is
+        skipped, because its frees cannot relieve it. After each one the
+        process is read again, and the pass stops once no term is exceeded.
+        What a reclaimer reports freeing never stops the pass: on the GB10 a
+        CUDA free does not move the cgroup's committed bytes, and a pass that
+        stopped on reported bytes refused prof-2 of #1348. Frees only lower
+        readings, so one pass sees every term a later reading could still
+        exceed.
+
+        Returns the last reading and the trail of reclaimers asked: what each
+        was asked for, what it reported, and the three readings around it.
+        """
+        trail = []
+        terms = self._terms(observed, reserve_bytes, reserve_device_bytes)
+        for reclaim, lowers, name in list(self._reclaimers):
+            exceeded = {term: value for term, value in terms.items() if value > 0}
+            if not exceeded:
+                break
+            relieved = [value for term, value in exceeded.items()
+                        if TERM_READINGS[term] & lowers]
+            counters = self.reclaim_counters.setdefault(name, dict(
+                asked=0, skipped=0, asked_bytes=0, reported_bytes=0,
+                committed_drop_bytes=0, reserved_drop_bytes=0,
+                available_rise_bytes=0))
+            if not relieved:
+                counters['skipped'] += 1
+                continue
+            need = max(relieved)
+            reported = int(reclaim(need))
+            after = self._observe()
+            drops = dict(committed=observed['committed'] - after['committed'],
+                         reserved=observed['reserved'] - after['reserved'],
+                         available=after['available'] - observed['available'])
+            counters['asked'] += 1
+            counters['asked_bytes'] += need
+            counters['reported_bytes'] += reported
+            counters['committed_drop_bytes'] += drops['committed']
+            counters['reserved_drop_bytes'] += drops['reserved']
+            counters['available_rise_bytes'] += drops['available']
+            trail.append(dict(reclaimer=name, lowers=sorted(lowers),
+                              exceeded=sorted(exceeded), asked_bytes=need,
+                              reported_bytes=reported,
+                              committed_drop_bytes=drops['committed'],
+                              reserved_drop_bytes=drops['reserved'],
+                              available_rise_bytes=drops['available']))
+            observed = after
+            terms = self._terms(observed, reserve_bytes, reserve_device_bytes)
+        return observed, trail
 
     def snapshot(self):
         return dict(scope=str(self.scope), budget_bytes=self.cap_bytes,
@@ -679,6 +765,8 @@ class CaptureMemoryGuard:
             peak_by_checkpoint_prefix=dict(self.peak_by_checkpoint_prefix),
             baseline=None if self.baseline is None else dict(self.baseline),
             min_host_available_bytes=self.min_available_bytes,
+            reclaims={name: dict(counters)
+                      for name, counters in self.reclaim_counters.items()},
             last_checkpoint=None if self.last is None else dict(self.last))
 
     def baseline_bytes(self):
@@ -782,27 +870,6 @@ def _use_host_available_for_uma(device: torch.device | None = None) -> bool:
     except Exception:
         return False
     return bool(getattr(props, "is_integrated", False))
-
-
-def ordered_reclaimer(*reclaims):
-    """One reclaimer that asks each of ``reclaims`` in turn for what is still short.
-
-    A guard asks every reclaimer it holds for the whole shortfall. Where
-    several draw on one pool (GB10's unified memory: renders and spill
-    chunks read ahead, CUDA tensors kept for reuse), registering them as one
-    ordered reclaimer drops the cheapest to restore first and stops once the
-    shortfall is covered (PQ #1348). ``None`` entries are skipped.
-    """
-    reclaims = tuple(reclaim for reclaim in reclaims if reclaim is not None)
-
-    def reclaim(shortfall_bytes):
-        freed = 0
-        for step in reclaims:
-            if freed >= shortfall_bytes:
-                break
-            freed += int(step(shortfall_bytes - freed))
-        return freed
-    return reclaim
 
 
 def _host_memory_info() -> tuple[int, int] | None:
