@@ -34,9 +34,21 @@ until the journal shards are written, so they land during the loop as they
 always did. A row that fails before finalize leaves wires and render entries
 and none of the six.
 
+**What a killed row keeps (PQ #1403).** Until finalize, each flush also writes
+the flushed units' rows to a stream journal beside the checkpoint
+(``<checkpoint>.stream``). That journal's identity is the run identity with
+every unit's W, X and H receipts deferred to the unit's own shard, which
+records the receipts its reader took. A relaunch opens it before the first
+batch and refuses one written under another identity. For each unit it holds,
+the relaunch reads the entry through the window, requires the entry's receipts
+to equal the recorded ones, and passes every row through the checkpoint
+resume's gates (input identity from the entry, wire receipt from the file).
+Only the remainder is encoded. The stream journal is not ``<checkpoint>.parts``,
+so its presence does not send the row to the load-all head.
+
 **What still needs the load-all head.** ``stream_head_dependency`` names each
-case. A resume or seed adoption needs the finalized run identity before the
-pending work is known; adaptive rounds after the first re-price units chosen
+case. A resume of a finalized checkpoint, or a seed adoption, needs the
+finalized run identity before the pending work is known; adaptive rounds after the first re-price units chosen
 from round one; the legacy ``hessian_capture.pt`` export serializes every H;
 and a run without a verified load policy has no per-entry receipt to fold.
 """
@@ -387,6 +399,12 @@ class RowStream:
         for name in self._names:
             self._store.fold_load_receipt(execution, self._first[name]["load"])
         return execution
+
+    def unit_identity(self, name) -> dict:
+        """One unit's receipts from its first read, before the stream is complete."""
+        if name not in self._first:
+            raise RuntimeError(f"{name} has no receipt: the row stream never read it")
+        return dict(self._first[name]["identities"])
 
     def unit_identities(self) -> dict:
         self._require_complete()

@@ -11,6 +11,7 @@ against them.
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib
 import importlib.util
 from pathlib import Path, PurePosixPath
@@ -299,3 +300,55 @@ def test_digests_imports_only_the_standard_library(monkeypatch):
     assert standalone.DIRECT_ASCII_STRICT.sha256(_SAMPLE) == DIRECT_ASCII_STRICT.sha256(_SAMPLE)
     assert standalone.canonical_json_sha256(_SAMPLE, where="w") == (
         digests.canonical_json_sha256(_SAMPLE, where="w"))
+
+
+# PQ #1403: the pickle profile. A pickle writes a shared object once and refers
+# back to it, so plain ``pickle.dumps`` bytes depend on which equal objects the
+# builder happened to share; a resumed campaign row is exactly such an equal
+# but distinct object.
+
+def _distinct(text):
+    """An equal ``str`` that is not the same object."""
+    copy = "".join([text[:1], text[1:]])
+    assert copy == text and copy is not text
+    return copy
+
+
+def test_canonical_pickle_bytes_do_not_depend_on_string_sharing():
+    import pickle
+    shared = "fp8_e4m3"
+    one, two = {"x": shared, "y": shared}, {"x": shared, "y": _distinct(shared)}
+    assert pickle.dumps(one) != pickle.dumps(two)
+    assert digests.canonical_pickle_bytes(one) == digests.canonical_pickle_bytes(two)
+
+
+def test_canonical_pickle_bytes_do_not_depend_on_container_sharing():
+    import pickle
+    inner = [1, ("x", 2.5)]
+    one, two = {"a": inner, "b": inner}, {"a": [1, ("x", 2.5)], "b": [1, ("x", 2.5)]}
+    assert pickle.dumps(one) != pickle.dumps(two)
+    assert digests.canonical_pickle_bytes(one) == digests.canonical_pickle_bytes(two)
+
+
+def test_canonical_pickle_bytes_keep_the_value_order_and_types():
+    import pickle
+    value = {"b": [1, (2, "z")], "a": {"k": b"\x00"}}
+    assert pickle.loads(digests.canonical_pickle_bytes(value)) == value
+    loaded = pickle.loads(digests.canonical_pickle_bytes(value))
+    assert list(loaded) == ["b", "a"] and type(loaded["b"][1]) is tuple
+    assert digests.canonical_pickle_bytes(value) != digests.canonical_pickle_bytes(
+        {"a": value["a"], "b": value["b"]})
+
+
+def test_canonical_pickle_bytes_are_pinned():
+    value = {"units": {"a": ["fp8_e4m3", ("x", 1.5)], "b": ["fp8_e4m3", ("x", 1.5)]},
+             "blob": b"\x00\x01"}
+    assert hashlib.sha256(digests.canonical_pickle_bytes(value)).hexdigest() == (
+        "9a756781f28fff2028046167fcd6fb9ded1068c0323b996903ff192abeb2dbe7")
+
+
+def test_canonical_pickle_bytes_refuse_a_container_that_contains_itself():
+    loop = []
+    loop.append(loop)
+    with pytest.raises(ValueError, match="contains itself"):
+        digests.canonical_pickle_bytes({"loop": loop})
