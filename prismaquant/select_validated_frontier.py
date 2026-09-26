@@ -24,10 +24,12 @@ from prismaquant.saturation_select import find_saturation_bpp
 from prismaquant.nvfp4_cb_footprint import (
     CB_ASSIGNMENT_IDENTITIES_FIELD,
     CB_TENSOR_IDENTITY_FIELD,
-    assignment_serialization_sha256,
     cb_serialization_metadata_from_assignment_payload,
     cb_serialization_context_from_stamp,
     is_cb_format,
+)
+from prismaquant.footprint import (
+    assignment_serialization_sha256,
     whole_artifact_budget_from_assignment_payload,
 )
 

@@ -106,7 +106,7 @@ from .export_output_safety import (
     transactional_export_directory,
     validate_fresh_export_directory,
 )
-from .nvfp4_cb_footprint import (
+from .footprint import (
     enforce_whole_artifact_budget,
     whole_artifact_budget_from_assignment_payload,
 )

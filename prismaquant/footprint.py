@@ -66,11 +66,13 @@ so an over-budget artifact "fits"). Both are caught in
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import math
 import os
 import re
 import struct
+from pathlib import Path
 from typing import Iterable, Mapping
 
 from . import format_registry as fr
@@ -1345,3 +1347,284 @@ def floor_bytes_for_model(
         "source_manifest": manifest,
         "source_dtype_bytes": by_dtype,
     }
+
+# ---------------------------------------------------------------------------
+# Whole-artifact byte budget: the selection-time stamp, its exporter-side
+# reader, and the final recursive stat. Lane-independent: the allocator writes
+# the stamp and both the compressed-tensors and GGUF exporters enforce it.
+# Moved here from ``nvfp4_cb_footprint`` on 2026-09-25 (#1304), unchanged, so
+# the retired codebook lane's module can be archived without taking the byte
+# budget with it. The schema string is persisted and is not renamed.
+# ---------------------------------------------------------------------------
+
+WHOLE_ARTIFACT_BUDGET_SCHEMA = "prismaquant.whole_artifact_budget.v2"
+WHOLE_ARTIFACT_BUDGET_FIELD = "whole_artifact_budget"
+
+
+def assignment_serialization_sha256(
+    assignment: Mapping[str, str],
+) -> str:
+    """Canonical SHA-256 binding a byte budget to one exact assignment."""
+    normalized = {
+        str(name): fr.canonical_format_name(str(fmt).strip().upper())
+        for name, fmt in assignment.items()
+    }
+    encoded = json.dumps(
+        normalized,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def whole_artifact_budget_stamp(
+    *,
+    budget_bytes: int,
+    selection_tensor_payload_bytes: int,
+    selection_non_tensor_reserve_bytes: int,
+    selection_assignment: Mapping[str, str],
+    excluded_source_prefixes: Iterable[str] = (),
+) -> dict:
+    """Persist the conservative selection contract consumed by exporters.
+
+    ``excluded_source_prefixes`` records the source namespaces this price was
+    computed WITHOUT. It travels because the price and the artifact are two
+    halves of one statement: the allocator can only spend the excluded bytes
+    on the body if the exporter actually omits them, and nothing else in the
+    artifact records that they were meant to be absent. Omitted when empty, so
+    a run that excludes nothing writes a byte-identical stamp.
+    """
+    values = {
+        "budget_bytes": budget_bytes,
+        "selection_tensor_payload_bytes": selection_tensor_payload_bytes,
+        "selection_non_tensor_reserve_bytes": selection_non_tensor_reserve_bytes,
+    }
+    for name, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{name} must be a nonnegative integer")
+    upper_bound = (
+        selection_tensor_payload_bytes + selection_non_tensor_reserve_bytes
+    )
+    if upper_bound > budget_bytes:
+        raise ValueError(
+            "selection whole-artifact upper bound exceeds its hard budget: "
+            f"{upper_bound}B > {budget_bytes}B"
+        )
+    excluded = tuple(
+        dict.fromkeys(
+            str(prefix).strip()
+            for prefix in (excluded_source_prefixes or ())
+            if str(prefix).strip()
+        )
+    )
+    return {
+        "schema": WHOLE_ARTIFACT_BUDGET_SCHEMA,
+        "scope": "all_regular_files_recursive",
+        "budget_bytes": budget_bytes,
+        **({"excluded_source_prefixes": list(excluded)} if excluded else {}),
+        "selection_tensor_payload_bytes": selection_tensor_payload_bytes,
+        "selection_non_tensor_reserve_bytes": selection_non_tensor_reserve_bytes,
+        "selection_whole_artifact_upper_bound_bytes": upper_bound,
+        "selection_assignment_sha256": assignment_serialization_sha256(
+            selection_assignment
+        ),
+        "selection_contract": (
+            "tensor_payload_plus_operator_supplied_non_tensor_reserve"
+        ),
+        "final_contract": "stat_all_regular_files_recursive_fail_closed",
+    }
+
+
+def whole_artifact_budget_from_assignment_payload(
+    payload: Mapping[str, object],
+    *,
+    where: str,
+    assignment: Mapping[str, str] | None = None,
+) -> Mapping[str, object] | None:
+    """Read and validate an optional hard export-directory budget stamp."""
+    meta = payload.get("__prismaquant__")
+    raw = (
+        meta.get(WHOLE_ARTIFACT_BUDGET_FIELD)
+        if isinstance(meta, Mapping)
+        else None
+    )
+    if raw is None:
+        raw = payload.get(WHOLE_ARTIFACT_BUDGET_FIELD)
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{where}: whole-artifact budget stamp is not an object")
+    if raw.get("schema") != WHOLE_ARTIFACT_BUDGET_SCHEMA:
+        raise ValueError(
+            f"{where}: unsupported whole-artifact budget schema "
+            f"{raw.get('schema')!r}"
+        )
+    required = (
+        "budget_bytes",
+        "selection_tensor_payload_bytes",
+        "selection_non_tensor_reserve_bytes",
+        "selection_whole_artifact_upper_bound_bytes",
+    )
+    parsed: dict[str, int] = {}
+    for name in required:
+        value = raw.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(
+                f"{where}: whole-artifact budget field {name!r} must be a "
+                "nonnegative integer"
+            )
+        parsed[name] = value
+    expected_upper = (
+        parsed["selection_tensor_payload_bytes"]
+        + parsed["selection_non_tensor_reserve_bytes"]
+    )
+    if parsed["selection_whole_artifact_upper_bound_bytes"] != expected_upper:
+        raise ValueError(
+            f"{where}: whole-artifact upper bound does not reconcile: "
+            f"stamp={parsed['selection_whole_artifact_upper_bound_bytes']}B, "
+            f"payload+reserve={expected_upper}B"
+        )
+    if expected_upper > parsed["budget_bytes"]:
+        raise ValueError(
+            f"{where}: selected whole-artifact upper bound {expected_upper}B "
+            f"exceeds budget {parsed['budget_bytes']}B"
+        )
+    assignment_digest = raw.get("selection_assignment_sha256")
+    if not isinstance(assignment_digest, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", assignment_digest
+    ):
+        raise ValueError(
+            f"{where}: whole-artifact budget stamp has no valid exact "
+            "selection_assignment_sha256"
+        )
+    if assignment is not None:
+        actual_digest = assignment_serialization_sha256(assignment)
+        if actual_digest != assignment_digest:
+            raise ValueError(
+                f"{where}: whole-artifact budget was priced for assignment "
+                f"{assignment_digest}, but the assignment being consumed "
+                f"hashes to {actual_digest}"
+            )
+    raw_excluded = raw.get("excluded_source_prefixes")
+    if raw_excluded is not None:
+        if not isinstance(raw_excluded, (list, tuple)) or not all(
+            isinstance(p, str) and p.strip() for p in raw_excluded
+        ):
+            raise ValueError(
+                f"{where}: whole-artifact budget field "
+                "'excluded_source_prefixes' must be a list of non-empty "
+                "strings"
+            )
+    return dict(raw)
+
+
+def budget_stamp_excluded_prefixes(
+    stamp: Mapping[str, object] | None,
+) -> tuple[str, ...]:
+    """The source namespaces a budget stamp was priced WITHOUT.
+
+    Absent means "none excluded", which is both the pre-existing behaviour and
+    the correct reading of every stamp written before the field existed: those
+    prices charged the whole checkpoint.
+    """
+
+    if not stamp:
+        return ()
+    return tuple(
+        dict.fromkeys(
+            str(p).strip()
+            for p in (stamp.get("excluded_source_prefixes") or ())
+            if str(p).strip()
+        )
+    )
+
+
+def assert_exclusions_match_budget_stamp(
+    stamp: Mapping[str, object] | None,
+    excluded_namespaces: Iterable[str],
+    *,
+    where: str,
+) -> None:
+    """Refuse an artifact whose contents contradict the price that justified it.
+
+    A namespace exclusion is one statement made in two places: the allocator
+    declines to CHARGE for the namespace, which hands those bytes to the body,
+    and the exporter declines to WRITE it. Make only the first and the artifact
+    overshoots its budget by the excluded mass -- caught, but only by the final
+    recursive stat, hours later. Make only the second and the artifact comes in
+    UNDER budget by that mass, having bought less quality than it paid for, and
+    nothing catches it at all: the selection reconciles, the export passes, the
+    shipcard agrees. That asymmetry is why this is an equality check and not a
+    bound.
+
+    No stamp means no claim: namespace exclusion is a legitimate operation on
+    its own, and an unbudgeted export has nothing to contradict. The check
+    binds only once a price has been asserted.
+    """
+
+    if not stamp:
+        return
+    priced = set(budget_stamp_excluded_prefixes(stamp))
+    written = {
+        str(p).strip() for p in (excluded_namespaces or ()) if str(p).strip()
+    }
+    if priced == written:
+        return
+    raise ValueError(
+        f"{where}: namespace exclusions disagree with the budget stamp that "
+        f"priced this assignment. The price was computed WITHOUT "
+        f"{sorted(priced) or '[]'}; this export omits {sorted(written) or '[]'}. "
+        f"Priced-but-written ({sorted(priced - written) or '[]'}) overshoots "
+        f"the budget by those bytes; written-but-priced "
+        f"({sorted(written - priced) or '[]'}) silently ships under budget, "
+        f"having bought less quality than the budget paid for. Re-run the "
+        f"allocation and the export with the same exclusion set."
+    )
+
+
+def recursive_regular_file_bytes(path: str | Path) -> int:
+    """Measure a completed artifact using the budget stamp's final scope."""
+    root = Path(path)
+    if root.is_file():
+        return int(root.stat().st_size)
+    if not root.is_dir():
+        raise FileNotFoundError(f"export artifact does not exist: {root}")
+    return sum(
+        int(item.stat().st_size)
+        for item in root.rglob("*")
+        if item.is_file()
+    )
+
+
+def enforce_whole_artifact_budget(
+    artifact_path: str | Path,
+    assignment_payload: Mapping[str, object],
+    *,
+    where: str,
+    assignment: Mapping[str, str] | None = None,
+) -> dict | None:
+    """Hard-fail a completed file/directory against its persisted budget."""
+    stamp = whole_artifact_budget_from_assignment_payload(
+        assignment_payload,
+        where=where,
+        assignment=assignment,
+    )
+    if stamp is None:
+        return None
+    actual = recursive_regular_file_bytes(artifact_path)
+    budget = int(stamp["budget_bytes"])
+    attestation = {
+        "scope": "all_regular_files_recursive",
+        "artifact_path": str(artifact_path),
+        "actual_bytes": actual,
+        "budget_bytes": budget,
+        "headroom_bytes": budget - actual,
+        "within_budget": actual <= budget,
+    }
+    if actual > budget:
+        raise RuntimeError(
+            f"{where}: exact completed artifact size is {actual}B, exceeding "
+            f"the hard whole-artifact budget of {budget}B by {actual - budget}B"
+        )
+    return attestation
