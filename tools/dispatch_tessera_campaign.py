@@ -640,6 +640,10 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
         return selected_anchor_resources(spec['model'], **options,
             anchor_batch_size=argument('--anchor-batch-size', 1),
             source_snapshot_policy=argument('--source-snapshot-policy', 'whole-layer-v1', str),
+            # A scoped row (``--source-scope mtp``) is planned over its own
+            # source, as its runner reads it (PQ #1316).
+            **({'source_scope': argument('--source-scope', None, str)}
+               if '--source-scope' in argv else {}),
             # The row's own campaign will hold this many host bytes of staged
             # artifacts, so the box that admits the row has to be told. A
             # dispatcher that planned without it would size a worker for a

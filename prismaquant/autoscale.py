@@ -138,7 +138,8 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    prefetch_workers, headroom_gb,
                                    capture_policy='legacy', capture_load_policy=None,
                                    process_baseline_bytes=0, selected_source_units=None,
-                                   process_baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION):
+                                   process_baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION,
+                                   source_scope=None):
     """Bound canonical capture using the shared loader's actual source layout.
 
     Headers and profile mappings determine source residency. Capture owns one
@@ -148,6 +149,10 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     released source blocks until reuse, so that transient is charged separately
     from the final prefetch window. The
     declared headroom is additional forward/allocator/runtime workspace.
+
+    ``source_scope`` prices a profile-declared out-of-body source (PQ #1316)
+    the way the loader reads it: the scope's own key mapping, layer prefix and
+    layers. A scope is snapshot-only, so it requires ``selected_source_units``.
     """
     # Ahead of every return in this function, including the legacy one
     # below: a caller that declares a malformed reservation must be
@@ -168,9 +173,13 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     if capture_load_policy is not None and capture_policy != 'shared-inputs-bounded-v1':
         raise ValueError('verified capture load admission requires bounded capture phases')
     profile = detect_profile(str(model_path))
+    scope = None if source_scope is None else profile.source_scope(source_scope, model_path)
+    if scope is not None and selected_source_units is None:
+        raise ValueError(f'source scope {source_scope!r} is snapshot-only: '
+                         'it prices selected source units only')
     cfg = json.loads((Path(model_path)/'config.json').read_text())
     text = cfg.get('text_config') or cfg
-    layers = _num_layers(cfg)
+    layers = _num_layers(cfg) if scope is None else scope.num_layers
     hidden = _hidden_size(cfg)
     if layers < 1 or hidden < 1:
         raise ValueError('streamed calibration needs explicit decoder geometry')
@@ -189,16 +198,24 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     dtype_pattern, dtype_groups, _ = build_glob_alternation(list(dtype_plan)) if dtype_plan else (None, {}, None)
     fp4_experts = declared_fp4_expert_dtype(str(model_path))
     multimodal = profile.requires_multimodal_skeleton()
-    body_prefix = profile.body_layer_prefix()+'.'
-    live_probe = profile.checkpoint_to_live_name(body_prefix+'0.weight', multimodal=multimodal)
-    if live_probe is None or '.0.' not in live_probe:
-        raise ValueError('profile cannot map the decoder prefix for resource admission')
-    live_prefix = live_probe.rsplit('.0.', 1)[0]+'.'
+
+    def to_live(key):
+        if scope is not None:
+            return scope.live_name(key)
+        return profile.checkpoint_to_live_name(key, multimodal=multimodal)
+
+    if scope is not None:
+        live_prefix = scope.layers_prefix
+    else:
+        body_prefix = profile.body_layer_prefix()+'.'
+        live_probe = to_live(body_prefix+'0.weight')
+        if live_probe is None or '.0.' not in live_probe:
+            raise ValueError('profile cannot map the decoder prefix for resource admission')
+        live_prefix = live_probe.rsplit('.0.', 1)[0]+'.'
     selected_keys = None
     if selected_source_units is not None:
         from .layer_streaming import selected_weight_source_keys
-        mapped_keys = [profile.checkpoint_to_live_name(key, multimodal=multimodal)
-                       for key in header]
+        mapped_keys = [to_live(key) for key in header]
         selected_keys = set(selected_weight_source_keys(
             selected_source_units, profile, (key for key in mapped_keys if key is not None)))
         if fp4_experts:
@@ -214,7 +231,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         return (2 if match is None else torch.empty((), dtype=
             dtype_plan[dtype_groups[match.lastgroup]]).element_size())
     for key, meta in header.items():
-        name = profile.checkpoint_to_live_name(key, multimodal=multimodal)
+        name = to_live(key)
         if name is None:
             continue
         if name.startswith(live_prefix):
@@ -266,8 +283,9 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             if any(name.endswith(suffix) for suffix in sources):
                 group = (layer, target)
                 concat[group] = concat.get(group, 0)+size
-    if covered_layers != set(range(layers)):
-        raise ValueError('source headers do not cover every decoder layer')
+    if covered_layers != (set(range(layers)) if scope is None else set(scope.layers)):
+        raise ValueError('source headers do not cover every decoder layer'
+                         + ('' if scope is None else f' of source scope {scope.name!r}'))
     # A final group is preallocated and filled directly; no per-expert fused
     # slabs survive. Charge all original packed-source bytes as a conservative
     # physical allocator-cache allowance even after their references drop.
@@ -411,8 +429,12 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                               publication_overlap_bytes=0, campaign_identity_bytes=0,
                               campaign_identity_threads=1,
                               process_baseline_bytes=0, source_snapshot_policy='whole-layer-v1',
-                              process_baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION):
+                              process_baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION,
+                              source_scope=None):
     """Bound selected-source preparation separately from resident encoding.
+
+    ``source_scope`` plans a profile-declared out-of-body source (PQ #1316);
+    it is snapshot-only, so it requires ``selected-tensors-v1``.
 
     This extends the source loader's header/dtype accounting. No source
     forward or calibration accumulation occurs. The existing plane-keyed
@@ -476,6 +498,8 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         raise ValueError('selected anchors require nonempty units and a positive batch size')
     if source_snapshot_policy not in ('whole-layer-v1', 'selected-tensors-v1'):
         raise ValueError('unknown selected source snapshot policy')
+    if source_scope is not None and source_snapshot_policy != 'selected-tensors-v1':
+        raise ValueError(f'source scope {source_scope!r} requires selected-tensors-v1')
     if type(campaign_identity_bytes) is not int or campaign_identity_bytes < 0:
         raise ValueError('campaign identity bytes must be a non-negative int')
     if type(campaign_identity_threads) is not int or campaign_identity_threads < 1:
@@ -485,7 +509,8 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         cache_slots=cache_slots, prefetch_workers=prefetch_workers,
         headroom_gb=headroom_gb,
         **({'selected_source_units': tuple(unit_shapes)}
-           if source_snapshot_policy == 'selected-tensors-v1' else {}))
+           if source_snapshot_policy == 'selected-tensors-v1' else {}),
+        **({'source_scope': source_scope} if source_scope is not None else {}))
     prefix = source['live_layer_prefix']
     layers = sorted({str(int(name[len(prefix):].split('.', 1)[0])) for name in unit_shapes}, key=int)
     weights = sum(source['unit_source_weight_bytes'].values())

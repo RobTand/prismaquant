@@ -1927,6 +1927,9 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     api = _checkpoint_identity_api()
     settings = vars(args).copy()
     restriction = parse_family_restriction(settings.get("family_restriction"))
+    if settings.get("source_scope") is None:
+        # Unset, the body's identity is byte-identical to before the flag.
+        settings.pop("source_scope", None)
     if restriction is None:
         settings.pop("family_restriction", None)
     else:
@@ -5267,6 +5270,10 @@ def _main(argv, *, source_scope) -> int:
     ap.add_argument("--source-snapshot-policy", default="whole-layer-v1",
                     choices=("whole-layer-v1", "selected-tensors-v1"),
                     help="selected-tensors-v1 loads authenticated weight dependencies only; requires selected streaming capture reuse")
+    ap.add_argument("--source-scope", default=None,
+                    help="A profile-declared source outside the decoder body (ModelProfile.source_scope, "
+                         "e.g. GLM's 'mtp'); requires --source-snapshot-policy selected-tensors-v1 and a "
+                         "census carrying the scope's load contract (PQ #1316).")
     ap.add_argument("--streaming-prefetch-workers", type=int, default=1)
     ap.add_argument("--streaming-cache-headroom-gb", type=float, default=24)
     ap.add_argument("--streaming-capture-policy", default="legacy",
@@ -5299,6 +5306,8 @@ def _main(argv, *, source_scope) -> int:
         ap.error('--campaign-identity-bytes requires selected streaming capture reuse')
     if args.source_snapshot_policy != 'whole-layer-v1' and not selected_source:
         ap.error('--source-snapshot-policy requires selected streaming capture reuse')
+    if args.source_scope is not None and args.source_snapshot_policy != 'selected-tensors-v1':
+        ap.error('--source-scope requires --source-snapshot-policy selected-tensors-v1')
     if args.capture_load_policy is not None and not (selected_source or (
             args.streaming and args.capture_calibration_out and
             args.streaming_capture_policy == 'shared-inputs-bounded-v1')):
@@ -5429,6 +5438,7 @@ def _main(argv, *, source_scope) -> int:
             attn_implementation=args.attention_implementation,
             **({'source_snapshot_only': True}
                if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
+            **({'source_scope': args.source_scope} if args.source_scope is not None else {}),
             **({'source_authentication': source_authentication} if source_authentication is not None else {}))
         model = runner.model
     else:
@@ -5608,8 +5618,12 @@ def _main(argv, *, source_scope) -> int:
             runner.shutdown()
     if selected_source:
         from .autoscale import selected_anchor_resources
-        if (census.get('model_load_contract') or {}).get('schema') != 'prismaquant.streaming_initialization.v1':
-            raise RuntimeError('selected source requires the qualified streaming census witness')
+        witness_schema = ('prismaquant.streaming_initialization.v1' if args.source_scope is None
+                          else profile.source_scope(args.source_scope, args.model).load_contract_schema)
+        if (census.get('model_load_contract') or {}).get('schema') != witness_schema:
+            raise RuntimeError('selected source requires the qualified streaming census witness'
+                               + ('' if args.source_scope is None else
+                                  f' of source scope {args.source_scope!r} ({witness_schema})'))
         # This describes the historical complete capture. This sparse source
         # preparation makes no claim to repeat the full initialization audit.
         model_load_contract = census['model_load_contract']
@@ -5624,6 +5638,7 @@ def _main(argv, *, source_scope) -> int:
             campaign_identity_bytes=args.campaign_identity_bytes,
             campaign_identity_threads=identity_threads_requested,
             source_snapshot_policy=args.source_snapshot_policy,
+            **({'source_scope': args.source_scope} if args.source_scope is not None else {}),
             **(dict(capture_load_policy=args.capture_load_policy)
                if args.capture_load_policy is not None else {}))
         if device == 'cuda':

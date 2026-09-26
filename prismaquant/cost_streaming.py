@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 import stat
 from types import SimpleNamespace
-from typing import Any, Iterator
+from typing import Any, Iterator, Protocol, runtime_checkable
 
 import torch
 
@@ -5178,6 +5178,34 @@ def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None,
         iterator.close()
 
 
+#: What a selected-source consumer may use of its source runner (PQ #1316).
+SELECTED_SOURCE_MEMBERS = ("source_layers", "num_layers", "layer_index_for_qname",
+                           "snapshot_selected_weights", "shutdown", "context")
+
+
+@runtime_checkable
+class SelectedSource(Protocol):
+    """A source a selected-source consumer snapshots weights from.
+
+    The body's ``StreamedCausalLM`` satisfies it, and so does one built over a
+    profile-declared source scope (``build_streamed_causal_lm(source_scope=)``),
+    which has no forward. ``SELECTED_SOURCE_MEMBERS`` lists these members; a
+    test pins it and keeps the campaign's ``runner.`` uses inside it.
+    """
+
+    num_layers: int
+    context: Any
+
+    @property
+    def source_layers(self) -> tuple[int, ...]: ...
+
+    def layer_index_for_qname(self, qname: str) -> int: ...
+
+    def snapshot_selected_weights(self, names, *, max_resident_bytes: int, **kwargs): ...
+
+    def shutdown(self) -> None: ...
+
+
 class StreamedCausalLM:
     """Causal-LM forward adapter over an existing ``StreamingContext``.
 
@@ -5217,6 +5245,11 @@ class StreamedCausalLM:
         # speculative prefetch was still held by the runner at install time.
         self.layer_major_prefetch_retries: tuple[int, ...] = ()
 
+    @property
+    def source_layers(self) -> tuple[int, ...]:
+        """The checkpoint layers this runner's context can read."""
+        return tuple(getattr(self.context, "source_layers", range(self.num_layers)))
+
     def layer_index_for_qname(self, qname: str) -> int:
         match = re.match(
             rf"^{re.escape(self.layers_prefix)}([0-9]+)(?:\.|$)",
@@ -5228,7 +5261,7 @@ class StreamedCausalLM:
                 f"{self.layers_prefix!r}"
             )
         layer = int(match.group(1))
-        if not 0 <= layer < self.num_layers:
+        if not 0 <= layer < self.num_layers or layer not in self.source_layers:
             raise RuntimeError(
                 f"streamed cost unit {qname!r} resolved invalid layer {layer}"
             )
@@ -5789,6 +5822,7 @@ def build_streamed_causal_lm(
     source_snapshot_only=False,
     sealed_head_tensors=None,
     planned_source_window_bytes: int | None = None,
+    source_scope: str | None = None,
 ) -> StreamedCausalLM:
     """Build the repository's existing streaming context and wrap it.
 
@@ -5798,6 +5832,9 @@ def build_streamed_causal_lm(
 
     ``planned_source_window_bytes`` bounds the prefetch note by the sealed
     plan's source window (PQ #1134); None leaves the note as before.
+
+    ``source_scope`` names a profile-declared out-of-body source (PQ #1316);
+    it requires ``source_snapshot_only``. None builds the body, as before.
     """
     from prismaquant.streaming_model import _build_streaming_context
 
@@ -5818,6 +5855,7 @@ def build_streamed_causal_lm(
            if sealed_head_tensors is not None else {}),
         **({'planned_source_window_bytes': planned_source_window_bytes}
            if planned_source_window_bytes is not None else {}),
+        **({'source_scope': source_scope} if source_scope is not None else {}),
     )
     runner = None
     try:

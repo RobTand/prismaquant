@@ -2973,8 +2973,49 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/glm-mtp-projection-1319`.
+As of: 2026-09-25 · `claude/glm-mtp-encode-1271`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/glm-mtp-encode-1271`) for **a
+profile-declared source scope, and the GLM MTP layer priced through it**
+(PQ #1316, M3 of #1271, P1). Plugin contract: a profile may declare an
+out-of-body source that selected snapshots read
+(`ModelProfile.source_scope(name, model_path)` returning a `SourceScope`; the
+base refuses by name). GLM declares `mtp`, the layer `num_hidden_layers`
+names, kept under its checkpoint names with `glm_mtp.MtpCheckpointModel` as
+its meta skeleton. The scope rides the one loader:
+
+- `_build_streaming_context(source_scope=)` builds the scope's skeleton and
+  maps keys through its `live_name` (`layer_streaming._build_weight_map`'s
+  `live_name` hook). The weight map, packer, authentication, layer cache and
+  prefetch pool are the body's, with no new thread site. A scope requires
+  `source_snapshot_only`, so it has no forward and no initialization audit.
+  `StreamingContext.source_layers` names the readable layers.
+- `SelectedSource` (`cost_streaming`) names what selected-source consumers
+  may use of a runner. Both the body runner and the scoped runner satisfy it,
+  and a test keeps the campaign's other `runner.` uses to the whole-scope
+  forward.
+- `streamed_calibration_resources` / `selected_anchor_resources` take
+  `source_scope`, and so does the dispatcher's plan (`--source-scope` in
+  `campaign_argv`).
+- The campaign takes `--source-scope NAME`. It requires
+  `--source-snapshot-policy selected-tensors-v1`, and the census must carry
+  the scope's load contract (`prismaquant.mtp_layer_initialization.v1` for
+  `mtp`). Unset, the flag is dropped from the identity settings, so body
+  identities do not change.
+- `census_token_counts`, the single owner of a census's `(max, min)` rows,
+  reads a **derived** census's pair from the hash-bound base census that
+  `mtp_extension.base_census` names. The MTP capture's identity carries the
+  body draw's pair: (262,144, 13) on GLM-5.3-Flash, not the MTP scope's own
+  (261,632, 722). The run's own rows are still checked against the derived
+  census.
+
+Defaults are unchanged: without a scope, every changed function takes its
+old branch. Gates: `tests/test_glm_mtp_source_scope.py` (the scoped
+snapshot equals the MTP loader's bytes, both runners satisfy the protocol,
+and a real two-phase tiny capture prices the shared expert and the routed
+stack in one row) and `tests/test_tessera_campaign_fanout.py` (the derived
+draw).
 
 Re-stamped (2026-09-25, `claude/glm-mtp-projection-1319`) for **the GLM MTP
 census's producer projection** (PQ #1319, part of #1271, P1). The campaign
@@ -22517,6 +22558,16 @@ streaming-probe adapters (`:823-947` — `checkpoint_to_live_name`, `fp8_scale_p
 KV-cotangent path now grafts through — §7.5), `register_vendored_modeling()` (`:974-979`).
 `vllm_fused_moe_scheme_projection_names` (`:443-468`) is intentionally hardcoded to vLLM's
 canonical names — §6.2.
+
+**`source_scope` — an out-of-body source for selected snapshots (PQ #1316).**
+`checkpoint_to_live_name` drops layers outside the decoder body, such as GLM's
+MTP layer. A profile that needs one priced declares it by name:
+`source_scope(name, model_path)` returns a `SourceScope` (`base.py`) with the
+checkpoint layers, the index bound, the live layer prefix, the census load
+contract, a `live_name` key map and a meta-skeleton builder. The base refuses
+every name. `glm5_next` declares `mtp`. The streaming context, resource
+planners and campaign take the name (`--source-scope`), and the scope is
+snapshot-only: it has no forward.
 
 Routed-expert classification for the AURA hybrid is also a profile boundary, not a shape
 heuristic. `routed_experts.py` treats `packed_expert_format_group(qname)` as the membership

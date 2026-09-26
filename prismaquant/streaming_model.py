@@ -803,12 +803,17 @@ class StreamingContext:
                  prefetch_min_available_bytes: int = 0,
                  expert_packer=None,
                  concat_merger=None, source_authentication=None,
-                 source_snapshot_only=False, source_fp4_experts=False):
+                 source_snapshot_only=False, source_fp4_experts=False,
+                 source_layers=None):
         self.model = model
         self.base_model = base_model
         self.layers = layers
         self.layers_prefix = layers_prefix
         self.num_layers = num_layers
+        # The checkpoint layers this context can read: every body layer, or a
+        # source scope's own (``_build_streaming_context(source_scope=...)``).
+        self.source_layers = (tuple(range(num_layers)) if source_layers is None
+                              else tuple(int(index) for index in source_layers))
         self.install_resolvers = install_resolvers
         self.weight_shard = weight_shard
         self.weight_ckpt = weight_ckpt
@@ -1892,6 +1897,7 @@ def _build_streaming_context(model_path: str, *,
                              source_snapshot_only: bool = False,
                              sealed_head_tensors=None,
                              planned_source_window_bytes: int | None = None,
+                             source_scope: str | None = None,
                              ) -> StreamingContext:
     """One-time setup: AutoConfig + empty skeleton, then manually
     materialize only the always-resident head pieces. Decoder layers
@@ -1939,7 +1945,15 @@ def _build_streaming_context(model_path: str, *,
     ``planned_source_window_bytes`` is the source window the sealed plan's
     memory rule admits, when the plan budgets one after the head phase
     (Stage B's ``retained_operator_windows``, PQ #1134). It only bounds the
-    prefetch note: see :func:`_prefetch_widening_note`."""
+    prefetch note: see :func:`_prefetch_widening_note`.
+
+    ``source_scope`` names an out-of-body source the profile declares
+    (:meth:`ModelProfile.source_scope`, e.g. GLM's ``"mtp"``). The context
+    then builds the scope's meta skeleton instead of the body's and maps
+    checkpoint keys through the scope's ``live_name``; the weight map, packer,
+    authentication, cache and prefetch pool are this function's own. A scope
+    is snapshot-only: it requires ``source_snapshot_only``, so it has no
+    forward and no initialization audit."""
     if type(source_snapshot_only) is not bool:
         raise TypeError('source_snapshot_only must be a bool')
     if source_snapshot_only and source_authentication is None:
@@ -1957,6 +1971,12 @@ def _build_streaming_context(model_path: str, *,
                      {'source_authentication': source_authentication})
     if source_authentication is not None:
         source_authentication.require_unchanged()
+    scope = None
+    if source_scope is not None:
+        if not source_snapshot_only:
+            raise RuntimeError(f'source scope {source_scope!r} is snapshot-only')
+        from .model_profiles import detect_profile
+        scope = detect_profile(model_path).source_scope(source_scope, model_path)
 
     from .sensitivity_probe import stage_multimodal, stage_text_only
 
@@ -1991,23 +2011,25 @@ def _build_streaming_context(model_path: str, *,
                   flush=True)
             multimodal = True
 
-    bypass_hf_fp8_rewrite = False
-    if multimodal:
-        staged = stage_multimodal(model_path)
+    if scope is not None:
+        skeleton = scope.build_skeleton(attn_implementation)
+        print(f"{log_prefix} source scope {scope.name!r}: layers {list(scope.layers)} "
+              f"under {scope.layers_prefix!r} (snapshot-only)", flush=True)
     else:
-        bypass_hf_fp8_rewrite = _bypass_hf_fp8_module_rewrite(model_path, **authenticated)
-        staged = stage_text_only(model_path)
-        if bypass_hf_fp8_rewrite:
-            print(f"{log_prefix} manual meta streaming load avoids HF fp8 "
-                  "module rewrite; PrismaQuant will apply weight_scale_inv "
-                  "during layer loads", flush=True)
-    config = AutoConfig.from_pretrained(staged, trust_remote_code=True)
-
-    skeleton = build_streaming_skeleton(config, multimodal=multimodal,
-        log_prefix=log_prefix, attn_implementation=attn_implementation)
+        if multimodal:
+            staged = stage_multimodal(model_path)
+        else:
+            staged = stage_text_only(model_path)
+            if _bypass_hf_fp8_module_rewrite(model_path, **authenticated):
+                print(f"{log_prefix} manual meta streaming load avoids HF fp8 "
+                      "module rewrite; PrismaQuant will apply weight_scale_inv "
+                      "during layer loads", flush=True)
+        config = AutoConfig.from_pretrained(staged, trust_remote_code=True)
+        skeleton = build_streaming_skeleton(config, multimodal=multimodal,
+            log_prefix=log_prefix, attn_implementation=attn_implementation)
     skel_base, skel_layers = _get_layer_list(skeleton)
     base_prefix = _resolve_base_prefix(skeleton, skel_base)
-    num_layers = len(skel_layers)
+    num_layers = len(skel_layers) if scope is None else scope.num_layers
 
     # Find the visual module on the skeleton so we know which names to
     # keep resident in device_map. We rebuild these after `from_pretrained`
@@ -2015,6 +2037,9 @@ def _build_streaming_context(model_path: str, *,
     _skel_visual, skel_visual_prefix = _find_visual_module(skeleton)
 
     layers_prefix = f"{base_prefix}.layers." if base_prefix else "layers."
+    if scope is not None and layers_prefix != scope.layers_prefix:
+        raise RuntimeError(f"source scope {scope.name!r} skeleton puts its layers under "
+                           f"{layers_prefix!r}, not {scope.layers_prefix!r}")
 
     resident_device = 0 if device.type == "cuda" else "cpu"
 
@@ -2031,8 +2056,16 @@ def _build_streaming_context(model_path: str, *,
     for p in model.parameters():
         p.requires_grad_(False)
     base_model, layers = _get_layer_list(model)
+    source_layers = tuple(range(num_layers))
+    if scope is not None:
+        # Sparse: only the scope's layers exist, indexed by checkpoint layer.
+        source_layers = tuple(scope.layers)
+        layers = [layers[str(index)] if index in source_layers else None
+                  for index in range(num_layers)]
 
-    weight_shard, weight_ckpt = _build_weight_map(model_path, multimodal=multimodal, **authenticated)
+    weight_shard, weight_ckpt = _build_weight_map(
+        model_path, multimodal=multimodal, **authenticated,
+        **({'live_name': scope.live_name} if scope is not None else {}))
     # Native-FP8 source dequant map. Populated only for checkpoints that
     # ship `.weight_scale_inv` siblings (MiniMax-M2/M2.7, DeepSeek-V3).
     # Empty dict for plain BF16 checkpoints — `_read_layer_to_device`
@@ -2168,6 +2201,7 @@ def _build_streaming_context(model_path: str, *,
     t_res = time.time()
     install_resolvers = [
         _build_install_resolver(model, f"{layers_prefix}{L}".rstrip("."))
+        if L in source_layers else {}
         for L in range(num_layers)
     ]
     print(f"{log_prefix} resolvers built: "
@@ -2281,5 +2315,6 @@ def _build_streaming_context(model_path: str, *,
         concat_merger=concat_merger,
         source_snapshot_only=source_snapshot_only,
         source_fp4_experts=declared_fp4_expert_dtype(model_path),
+        source_layers=source_layers,
         **authenticated,
     )

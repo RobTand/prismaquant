@@ -121,7 +121,8 @@ def test_scoped_source_snapshots_the_mtp_layer_through_the_body_loader(mtp_sourc
 
     env = mtp_source
     published = _published_mtp_capture(env, monkeypatch)
-    units = [SHARED_DOWN, f"{STACK}.1.gate_proj", f"{STACK}.4.down_proj"]
+    last = int(env.text_config.n_routed_experts) - 1
+    units = [SHARED_DOWN, f"{STACK}.1.gate_proj", f"{STACK}.{last}.down_proj"]
     census = published.census
     resources = selected_anchor_resources(
         str(env.source), unit_shapes={name: census["unit_shapes"][name] for name in units},
@@ -165,7 +166,11 @@ def test_scoped_source_snapshots_the_mtp_layer_through_the_body_loader(mtp_sourc
     assert [row["layer"] for row in receipt["layers"]] == [BACKBONE]
     assert receipt["source_tensor_keys"] == list(resources["source_tensor_keys"])
     assert receipt["nonbody_materialized"] is False
-    assert {row["name"] for row in authentication["verified_files"]} == {"model-mtp.safetensors"}
+    # The scope authenticates the MTP shard and the checkpoint's metadata,
+    # never a body weight shard.
+    verified = {row["name"] for row in authentication["verified_files"]}
+    assert "model-mtp.safetensors" in verified
+    assert "model.safetensors" not in verified, verified
 
 
 #: ``runner.`` uses of the whole-scope streamed calibration, which never runs
@@ -222,7 +227,7 @@ def test_both_runners_satisfy_the_selected_source_protocol(mtp_source, monkeypat
     assert used - WHOLE_SCOPE_RUNNER_USES <= set(SELECTED_SOURCE_MEMBERS), used
 
 
-@pytest.mark.parametrize("mtp_source", [torch.bfloat16], indirect=True)
+@pytest.mark.parametrize("mtp_source", [{"dtype": torch.bfloat16, "wide": True}], indirect=True)
 def test_campaign_row_prices_mtp_units_from_the_mtp_capture(mtp_source, monkeypatch, tmp_path):
     """A ``--source-scope mtp`` row prices the shared expert and the routed
     stack from the MTP capture; its recomputed capture identity is the

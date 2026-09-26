@@ -453,14 +453,31 @@ def _mtp_routed(env):
             for e in range(int(env.text_config.n_routed_experts)) for p in PROJECTIONS}
 
 
+def _build_wide_model():
+    """The tiny model at the widths ``test_glm_campaign_streaming`` prices."""
+    from tests.test_glm5_next_streamed_forward_parity import _build_model, _tiny_config
+
+    config = _tiny_config()
+    config.text_config.hidden_size = 256
+    config.text_config.intermediate_size = 512
+    config.text_config.moe_intermediate_size = 256
+    config.vision_config.out_hidden_size = 256
+    torch.manual_seed(20260826)
+    return _build_model(type(config).from_dict(config.to_dict()))
+
+
 @pytest.fixture
 def mtp_source(request, tmp_path, monkeypatch):
     """A two-layer GLM checkpoint plus its MTP layer (index 2), a body census
     and a complete canonical capture over one body unit.
 
     The MTP layer is stored in float32 unless the test asks for another dtype
-    (``indirect`` parametrization)."""
-    mtp_dtype = getattr(request, "param", torch.float32)
+    (``indirect`` parametrization). A ``{"dtype": ..., "wide": True}``
+    parameter widens the model to 256-column Linears, the narrowest a Tessera
+    superblock encodes, for a test that prices through the real producer."""
+    param = getattr(request, "param", torch.float32)
+    mtp_dtype, wide = ((param["dtype"], param.get("wide", False))
+                       if isinstance(param, dict) else (param, False))
     import prismaquant.model_profiles.glm5_next as glm5_profile
     from safetensors import safe_open
     from transformers import AutoConfig
@@ -476,7 +493,7 @@ def mtp_source(request, tmp_path, monkeypatch):
     monkeypatch.setattr(glm5_profile, "_MTP_LAYER_RE",
                         re.compile(r"^model\.language_model\.layers\.2\."))
     source = tmp_path / "source"
-    write_original_layout_checkpoint(_build_tiny_model(), source)
+    write_original_layout_checkpoint(_build_wide_model() if wide else _build_tiny_model(), source)
     config = json.loads((source / "config.json").read_text())
     # One MTP layer, and an indexer that keeps every key of a 12-row draft.
     config["text_config"].update(num_nextn_predict_layers=1, index_topk=16,
@@ -484,6 +501,7 @@ def mtp_source(request, tmp_path, monkeypatch):
     (source / "config.json").write_text(json.dumps(config))
     text_config = AutoConfig.from_pretrained(source).text_config
     text_config._attn_implementation = "eager"
+    dense_shape = [int(text_config.hidden_size), int(text_config.intermediate_size)]
     with genuine_weight_initialization():
         mtp = glm_mtp.Glm5NextMtpLayer(text_config)
     _randomize(mtp, 20260927)
@@ -524,7 +542,7 @@ def mtp_source(request, tmp_path, monkeypatch):
         args=SimpleNamespace(model=str(source), nsamples=N_SEQUENCES, seqlen=SEQ_LEN,
                              seed=0, layer_stride=1),
         groups={"u:" + DENSE_UNIT: [DENSE_UNIT]}, dense_targets=[DENSE_UNIT],
-        expert_targets=[], shapes={DENSE_UNIT: [64, 128]},
+        expert_targets=[], shapes={DENSE_UNIT: dense_shape},
         identity={key: calibration[key] for key in ("text_sha256", "fit_ids_sha256")},
         expert_projection={"producer": producer, "request": {
             "model.language_model.layers.1.mlp.experts": dict(BODY_REQUEST)}},
@@ -534,7 +552,7 @@ def mtp_source(request, tmp_path, monkeypatch):
     census_path.write_text(json.dumps(census))
     canonical = cc.capture_identity(census_path, calibration=calibration, max_act_rows=MAX_ROWS,
         model_load_contract=contract, attention_implementation="eager")
-    rows = torch.randn(4, 128)
+    rows = torch.randn(4, dense_shape[1])
     capture = cc.publish_capture(tmp_path / "canonical", census_path=census_path,
         identity=canonical, acts={DENSE_UNIT: rows}, hessians={DENSE_UNIT: rows.T @ rows},
         counts=census["counts"], maxima=census["max_abs"])
