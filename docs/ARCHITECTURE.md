@@ -3099,8 +3099,21 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/glm-mtp-quantum-m5`.
+As of: 2026-09-25 · `claude/stream-head-progress-1362`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/stream-head-progress-1362`) for **progress on
+the stream head before its journal exists** (PQ #1362, P1). Before this
+change, `tessera_campaign.flush_checkpoint` returned before reporting while
+`journal is None`. On the stream head that is the whole anchor loop, so a
+row stayed in the `startup` phase until finalize. A 1728-anchor MTP row was
+ended as `no_progress` with 1608 anchors on disk. Each flush now reports
+`pricing` with the cumulative count of anchors in `measured`. An anchor
+reaches `measured` only through the publication ledger, after its wire
+receipt has been read back off the landed file, so the count is durable work
+(PB #480). The journal, its shards and `CAMPAIGN_PROGRESS_PHASES` are
+unchanged. Gate: `tests/test_tessera_row_stream.py`
+(`test_the_stream_head_reports_durable_progress_before_its_journal_exists`).
 
 Re-stamped (2026-09-25, `claude/glm-mtp-quantum-m5`) for **pricing the GLM MTP
 layer** (PQ #1353, M5 of #1271, P1). `tessera_joint_aura run` on a plan whose

@@ -267,6 +267,44 @@ def test_the_first_encode_starts_before_the_late_entries_are_read(monkeypatch, t
     assert state["plans"][-1]["campaign_identity_threads"] == 3
 
 
+def test_the_stream_head_reports_durable_progress_before_its_journal_exists(
+        monkeypatch, tmp_path):
+    """PQ #1362: the stream head opens its journal only at finalize, and a row
+    that reported nothing until then was killed in ``startup`` while its
+    anchors were landing. Each flush before the journal exists now reports
+    the anchors whose wire receipts were read back, and never more than the
+    wires on disk."""
+    campaign, argv, state = stream_fixture(monkeypatch, tmp_path)
+    from prismaquant import cost_stage_checkpoint, prismabuild_progress
+    wire = state["root"] / "cache" / "wire"
+    events = []
+    original_write_unit = cost_stage_checkpoint.write_unit
+
+    def write_unit(*args, **kwargs):
+        events.append(("journal",))
+        return original_write_unit(*args, **kwargs)
+
+    def report(phase, units_completed, **_kwargs):
+        landed = len(list(wire.glob("*.tessera"))) if wire.is_dir() else 0
+        events.append(("report", phase, units_completed, landed))
+        return True
+
+    monkeypatch.setattr(cost_stage_checkpoint, "write_unit", write_unit)
+    monkeypatch.setattr(prismabuild_progress, "report", report)
+    assert campaign.main(argv) == 0
+    first_journal = events.index(("journal",))
+    early = [event for event in events[:first_journal] if event[0] == "report"]
+    # Reports before the journal exists: all "pricing", each for work on
+    # disk. One arrives mid-encode (the scalar cadence flushes at the first
+    # anchor), and the round's drain reports every anchor (one per unit
+    # here), all before finalize.
+    assert {event[1] for event in early} == {"pricing"}
+    assert all(0 < count <= landed for _, _, count, landed in early)
+    assert early[0][2] < len(UNITS) and early[-1][2] == len(UNITS)
+    counts = [event[2] for event in events if event[0] == "report"]
+    assert counts == sorted(counts) and counts[-1] == len(UNITS)
+
+
 def test_a_corrupt_late_entry_refuses_before_any_identity_bound_write(monkeypatch, tmp_path):
     campaign, argv, state = stream_fixture(monkeypatch, tmp_path)
     from prismaquant.perturbed_x_cache import activation_cache_filename
