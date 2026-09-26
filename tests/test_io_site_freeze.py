@@ -53,7 +53,6 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "prismaquant/perturbed_x_cache.py::_exact_read_pool": (1, "reader"),
     "prismaquant/produced_stager.py::ProducedStager.__init__": (1, "writer"),
     "prismaquant/production_weight_cache.py::ProductionWeightCache.prefetch": (1, "reader"),
-    "prismaquant/production_weight_cache.py::ProductionWeightCache.retained_window": (1, "reader"),
     "prismaquant/residency_shard_reader.py::_chunk_pool": (1, "reader"),
     "prismaquant/source_prefetch.py::prefetch_files_to_page_cache": (1, "reader"),
     "prismaquant/streaming_model.py::_build_streaming_context": (1, "reader"),

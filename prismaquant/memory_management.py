@@ -371,6 +371,10 @@ class CaptureMemoryGuard:
         self.baseline = None
         self.min_available_bytes = None
         self.last = None
+        # The reservations of the most recent check, which is the phase the
+        # process is in: ``headroom_bytes`` leaves room for them (PQ #1291).
+        self._reserve = (0, 0)
+        self._reclaimers = []
         # ``check`` is an INSTANCE ATTRIBUTE holding a closure, not the method:
         # the callers hand ``guard.check`` to a reader as a ``resource_check``
         # callable, and a capability has to travel with THAT object. A bound
@@ -432,19 +436,20 @@ class CaptureMemoryGuard:
                     'a device reservation needs a declared device envelope; without '
                     'one the guard charges CUDA to the cgroup cap and cannot tell '
                     'the two budgets apart')
-            raw = (self.scope/'memory.max').read_text().strip()
-            cap = self.cap_bytes if raw == 'max' else min(self.cap_bytes, int(raw))
-            # The stat first, then the charge: see committed_cgroup_bytes.
-            stat = read_memory_stat(self.scope/'memory.stat')
-            current = int((self.scope/'memory.current').read_text())
-            committed = committed_cgroup_bytes(current, stat)
-            reserved = int(torch.cuda.memory_reserved(self.device))
-            host = _host_memory_info()
-            if host is None or current < 0 or reserved < 0:
-                raise RuntimeError('capture memory observations are unavailable')
-            available, total = host
-            if not 0 <= available <= total:
-                raise RuntimeError('capture host memory observations are invalid')
+            self._reserve = (reserve_bytes, reserve_device_bytes)
+            observed = self._observe()
+            deficits = self._deficits(observed, reserve_bytes, reserve_device_bytes)
+            shortfall = max(deficits['budget'], deficits['host'])
+            if shortfall > 0 and self._reclaimers:
+                # Bytes a reader holds ahead of its consumer are reclaimable
+                # (``io_engine.ReadStream.reclaim``): they are dropped before
+                # this check would refuse, and it reads the process again.
+                if sum(int(reclaim(shortfall)) for reclaim in list(self._reclaimers)):
+                    observed = self._observe()
+                    deficits = self._deficits(observed, reserve_bytes, reserve_device_bytes)
+            cap, stat, current = observed['cap'], observed['stat'], observed['current']
+            committed, reserved = observed['committed'], observed['reserved']
+            available = observed['available']
             self.last = dict(label=str(label), cgroup_current_bytes=current,
                 cgroup_committed_bytes=committed,
                 cgroup_clean_file_bytes=clean_file_bytes(stat),
@@ -461,9 +466,6 @@ class CaptureMemoryGuard:
                 # is the conservative answer when the caller has not said which
                 # budget the device residency belongs to.
                 self.last['enforced'] = 'cgroup-plus-cuda-reserved'
-                over_budget = committed+reserved+reserve_bytes > cap-self.margin_bytes
-                over_device = False
-                host_need = self.host_floor_bytes+reserve_bytes
             elif self.aggregate_envelope:
                 # The aggregate guard: the plan's conservative sum against the
                 # sum of the two envelopes, plus the cgroup cap the kernel holds
@@ -475,12 +477,6 @@ class CaptureMemoryGuard:
                     device_refusal_threshold_bytes=self.device_bytes,
                     host_floor_bytes=self.host_floor_bytes,
                     cpu_refusal_threshold_bytes=cap-self.margin_bytes)
-                over_budget = (committed+reserved+reserve_bytes+reserve_device_bytes
-                               > cap+self.device_bytes-self.margin_bytes
-                               or committed > cap-self.margin_bytes)
-                over_device = reserved+reserve_device_bytes > self.device_bytes
-                host_need = (self.host_floor_bytes+reserve_bytes
-                             +reserve_device_bytes)
             else:
                 # The split guard: the kernel's own CPU budget, the device's own
                 # envelope, and the host floor are three separate refusals. The
@@ -493,10 +489,8 @@ class CaptureMemoryGuard:
                     device_refusal_threshold_bytes=self.device_bytes,
                     host_floor_bytes=self.host_floor_bytes,
                     cpu_refusal_threshold_bytes=cap-self.margin_bytes)
-                over_budget = committed+reserve_bytes > cap-self.margin_bytes
-                over_device = reserved+reserve_device_bytes > self.device_bytes
-                host_need = (self.host_floor_bytes+reserve_bytes
-                             +reserve_device_bytes)
+            over_budget = deficits['budget'] > 0
+            over_device = deficits['device'] > 0
             if self.baseline is None:
                 # The FIRST reading is what this process already held before
                 # any planned phase became resident: the interpreter, torch,
@@ -547,12 +541,90 @@ class CaptureMemoryGuard:
                     f'capture device memory refusal: {reserved} bytes are '
                     f'reserved on {self.device} and {reserve_device_bytes} more '
                     f'is requested against a {self.device_bytes}-byte envelope')
-            if available < host_need:
+            if deficits['host'] > 0:
                 raise RuntimeError(f'capture physical memory refusal: {self.last}')
         except Exception as error:
             self.failure = str(error)
             raise
         return dict(self.last)
+
+    def _observe(self):
+        """One reading of the cgroup, the CUDA reservation and the host."""
+        raw = (self.scope/'memory.max').read_text().strip()
+        cap = self.cap_bytes if raw == 'max' else min(self.cap_bytes, int(raw))
+        # The stat first, then the charge: see committed_cgroup_bytes.
+        stat = read_memory_stat(self.scope/'memory.stat')
+        current = int((self.scope/'memory.current').read_text())
+        committed = committed_cgroup_bytes(current, stat)
+        reserved = int(torch.cuda.memory_reserved(self.device))
+        host = _host_memory_info()
+        if host is None or current < 0 or reserved < 0:
+            raise RuntimeError('capture memory observations are unavailable')
+        available, total = host
+        if not 0 <= available <= total:
+            raise RuntimeError('capture host memory observations are invalid')
+        return dict(cap=cap, stat=stat, current=current, committed=committed,
+                    reserved=reserved, available=available)
+
+    def _deficits(self, observed, reserve_bytes, reserve_device_bytes, *,
+                  host_reserve=False):
+        """By how many bytes each refusal of :meth:`_check` is exceeded.
+
+        ``budget`` is the cgroup (or aggregate) refusal, ``device`` the device
+        envelope's and ``host`` the host floor's; a positive value refuses.
+        ``host_reserve`` also holds the CPU reservation against the cgroup cap
+        on its own in the aggregate guard, which ``_check`` does not (the plan
+        does not say which side its reservation lands on); ``headroom_bytes``
+        asks for it, because what it admits lands on the host.
+        """
+        cap, committed = observed['cap'], observed['committed']
+        reserved, available = observed['reserved'], observed['available']
+        limit = cap - self.margin_bytes
+        if self.device_bytes is None:
+            return {'budget': committed + reserved + reserve_bytes - limit,
+                    'device': 0,
+                    'host': self.host_floor_bytes + reserve_bytes - available}
+        host = self.host_floor_bytes + reserve_bytes + reserve_device_bytes - available
+        device = reserved + reserve_device_bytes - self.device_bytes
+        if self.aggregate_envelope:
+            return {'budget': max(
+                        committed + reserved + reserve_bytes + reserve_device_bytes
+                        - (limit + self.device_bytes),
+                        committed + (reserve_bytes if host_reserve else 0) - limit),
+                    'device': device, 'host': host}
+        return {'budget': committed + reserve_bytes - limit, 'device': device, 'host': host}
+
+    def headroom_bytes(self) -> int:
+        """Host bytes that may still be allocated now without a refusal.
+
+        A reading, not a check: it records nothing and never refuses. It is
+        the largest allocation on the host side that keeps every term of the
+        most recent check's reservations (the phase the process is in) within
+        the budget, the aggregate envelope and the host floor, with that
+        reservation also held against the cgroup cap on its own. Negative when
+        the process is already past one of them. A reader that runs ahead of
+        its consumer sizes its depth by it (``io_engine``, PQ #1291).
+        """
+        if self.failure is not None:
+            return 0
+        reserve_bytes, reserve_device_bytes = self._reserve
+        deficits = self._deficits(self._observe(), reserve_bytes, reserve_device_bytes,
+                                  host_reserve=True)
+        return -max(deficits['budget'], deficits['host'])
+
+    def add_reclaimer(self, reclaim):
+        """Let ``reclaim(shortfall_bytes) -> freed`` drop bytes before a refusal.
+
+        Returns a callable that removes it again. A check that would refuse on
+        the budget or the host floor calls every reclaimer with its shortfall
+        first and then reads the process again.
+        """
+        self._reclaimers.append(reclaim)
+
+        def remove():
+            if reclaim in self._reclaimers:
+                self._reclaimers.remove(reclaim)
+        return remove
 
     def snapshot(self):
         return dict(scope=str(self.scope), budget_bytes=self.cap_bytes,

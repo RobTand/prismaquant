@@ -29,6 +29,7 @@ import torch
 import test_strict_reader_tier_enforcement as strict
 from test_strict_reader_tier_enforcement import _forget_state  # noqa: F401
 
+from prismaquant import io_engine
 from prismaquant import perturbed_x_cache as pxc
 from prismaquant import production_weight_cache as pwc
 
@@ -246,50 +247,60 @@ def test_a_retained_window_still_charges_every_file_before_its_first_load(
 
 
 # --------------------------------------------------------------------------
-# One loader pool per window
+# The IO engine's one pool, within the window's buffer cap
 # --------------------------------------------------------------------------
 
-def test_a_retained_window_loads_on_one_pool_of_its_declared_width(
+def test_a_retained_window_loads_on_the_io_engines_one_pool(
         tmp_path, monkeypatch, workers):
+    """Every load runs on the process's one IO pool, never the main thread.
+
+    The pool is the IO engine's (PQ #1294): its width follows the CPUs this
+    process was given, and no caller states a worker count.
+    """
     cache, paths, _expected, _resolver, _consumer, total = _strict_window(
         tmp_path, monkeypatch)
     threads = []
-    original = pwc.ProductionWeightCache._load_file_tensor
+    original = io_engine.load_file
 
-    def counted(self, value, key=None):
+    def counted(path, limit, **kwargs):
         threads.append(threading.current_thread().name)
-        return original(self, value, key)
+        return original(path, limit, **kwargs)
 
-    monkeypatch.setattr(pwc.ProductionWeightCache, "_load_file_tensor", counted)
+    monkeypatch.setattr(io_engine, "load_file", counted)
     with _open_window(cache, paths, total, workers) as receipt:
         assert len(receipt["load_quanta"]) > 1
     assert len(threads) == len(paths)
-    assert len(set(threads)) <= workers, threads
-    assert not [name for name in threads if name == threading.main_thread().name]
+    assert all(name.startswith("pq-io") for name in threads), threads
+    assert len(set(threads)) <= io_engine.ENGINE.width
 
 
-def test_the_load_buffers_in_flight_never_exceed_the_quantum_they_were_charged_to(
+def test_the_load_buffers_in_flight_never_exceed_the_windows_buffer_cap(
         tmp_path, monkeypatch, workers):
-    """One pool for the window keeps each quantum's barrier and its buffer cap."""
+    """A serialized buffer lives from its read to the end of its decode.
+
+    The IO engine starts a read only while the buffers already in flight
+    leave room for it under the window's cap (PQ #1291), so however many
+    reads run at once, their buffers stay within what the window charged.
+    """
     cache, paths, _expected, _resolver, _consumer, total = _strict_window(
         tmp_path, monkeypatch)
     sizes = {str(path.absolute()): path.stat().st_size for path in paths.values()}
     live = []
     peaks = []
     lock = threading.Lock()
-    original = pwc.ProductionWeightCache._read_file_tensor
+    original = io_engine.load_file
 
-    def counted(self, path, limit, window_entry, **kwargs):
+    def counted(path, limit, **kwargs):
         with lock:
             live.append(sizes[str(path)])
             peaks.append(sum(live))
         try:
-            return original(self, path, limit, window_entry, **kwargs)
+            return original(path, limit, **kwargs)
         finally:
             with lock:
                 live.remove(sizes[str(path)])
 
-    monkeypatch.setattr(pwc.ProductionWeightCache, "_read_file_tensor", counted)
+    monkeypatch.setattr(io_engine, "load_file", counted)
     largest = max(sizes.values())
     buffer_cap = workers * largest
     with cache.retained_window(list(paths), max_resident_bytes=2 * total,

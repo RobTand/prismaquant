@@ -8,6 +8,7 @@ import pytest
 import torch
 
 import prismaquant.aura_cost as aura
+from prismaquant import io_engine
 from prismaquant.cost_streaming import StreamedBoundaryArtifacts
 from prismaquant.joint_retained_window_plan import RetainedWindowBudget, EXECUTION_SCHEMA
 from prismaquant.streaming_model import StreamingContext
@@ -53,18 +54,21 @@ def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, pro
     execution = {'schema': EXECUTION_SCHEMA, 'budget': b.as_dict(),
                  'source_reserve_bytes': 1 << 20, 'source_loading_reserve_bytes': 2 << 20}
     paths = []
-    load = cache._load_file_tensor
-    def recorded(path, key=None):
-        paths.append(path)
-        return load(path, key)
-    cache._load_file_tensor = recorded
-    result = aura.compute_aura_cost_streamed(runner, draw(),
-        ['FP8_DYNAMIC', 'NVFP4A16', 'BF16'], n_probes=4, probe_microbatch=1,
-        min_free_gib=0, production_cache=cache, joint_activation=True,
-        prepared_render_identities=proofs,
-        model_identity=_model_identity('joint-source'), operator_windows=operator_policy(),
-        boundary_storage=boundary_policy(tmp_path / 'boundaries'), checkpoint_dir=checkpoint, resume=resume,
-        **({'retained_operator_windows': execution} if retained else {}))
+    load = io_engine.load_file
+    def recorded(path, limit, **kwargs):
+        # Every render read goes through the IO engine (PQ #1294), on
+        # whichever thread reads it.
+        paths.append(str(path))
+        return load(path, limit, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(io_engine, 'load_file', recorded)
+        result = aura.compute_aura_cost_streamed(runner, draw(),
+            ['FP8_DYNAMIC', 'NVFP4A16', 'BF16'], n_probes=4, probe_microbatch=1,
+            min_free_gib=0, production_cache=cache, joint_activation=True,
+            prepared_render_identities=proofs,
+            model_identity=_model_identity('joint-source'), operator_windows=operator_policy(),
+            boundary_storage=boundary_policy(tmp_path / 'boundaries'), checkpoint_dir=checkpoint, resume=resume,
+            **({'retained_operator_windows': execution} if retained else {}))
     return result, paths, context
 
 
@@ -149,7 +153,9 @@ def test_partial_streamed_resume_reads_only_pending_renders(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize('mutation,match', [('shape', 'tensor proof'), ('hash', 'actual render'),
-                                         ('file', 'prepared PWC render checksum changed')])
+                                         # The IO engine holds each read to its bound digest
+                                         # before decoding it (PQ #1294).
+                                         ('file', 'checksum changed')])
 def test_prepared_identity_reuse_refuses_changed_proof_or_file(tmp_path, monkeypatch, mutation, match):
     def change(proofs, files):
         key = next(iter(proofs))

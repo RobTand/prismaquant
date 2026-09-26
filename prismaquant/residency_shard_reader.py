@@ -32,7 +32,7 @@ to be a regular file of exactly the entry's length, and its stat signature has
 to be unchanged across every read this reader makes from it. They are the
 pre-open fences ``ResidencyResolver.staged_read`` applies, asked of a range.
 They are **not** a digest. The two whole-file consumers
-(``production_weight_cache._read_file_tensor``,
+(``io_engine.read_file``,
 ``tessera_joint_aura._read_wire_bytes``) hash what they read and hold it to the
 map's ``sha256``; a shard read cannot, because it reads one tensor's span out
 of a multi-gigabyte range and the map's digest covers the whole range. Hashing

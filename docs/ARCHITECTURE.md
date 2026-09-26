@@ -1,5 +1,125 @@
 # PrismaQuant Architecture
 
+Stage B reads each retained window's renders while the window before it
+computes (2026-09-25, `claude/stageb-window-readahead-1291`, PQ #1291), through
+one IO engine, `prismaquant/io_engine.py` (the first version of PQ #1294).
+Before, every window loaded its ~5.94 GB of renders after the window before it
+had finished: on GLM-5.3 layer 7 the GPU sat at 16-17 W for about 8 s at the
+start of each render window, the main thread spent 22.9% of its render-window
+py-spy samples in `retained_window`'s loads, and the loader threads read over
+four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
+
+- **One engine.** `io_engine.read_stream` (`:1174`) takes an ordered stream of
+  `ReadEntry` (`:568`) and a budget, and reads the entries ahead of the
+  consumer on the module's one thread pool, sized by the CPU affinity less the
+  consumer's thread. The caller never states a depth or a worker count.
+  `tests/test_io_site_freeze.py` (PQ #1297) freezes every other thread or
+  executor site; this change removes `ProductionWeightCache.retained_window`'s
+  pool from that list. The per-file read moved from `production_weight_cache`
+  into the engine unchanged: `read_file` (`:220`) reads one file once under its
+  tier's fences and hashes it once, `load_file` (`:409`) resolves the tier
+  through PrismaBuild's residency map and decodes with the caller's decoder,
+  and `pin_group` (`:496`) pins a group's staged files under one reader lease
+  (PQ #1210). A stream holds each read to the entry's expected digest before
+  its decoder runs (`_verified_decode`, `:1119`), so bytes that are not the
+  expected ones are never deserialized, and delivers a group whole and in
+  order. The first failed entry raises `EntryError` at the consumer, naming
+  the entry.
+- **Depth is the row's live headroom.** Stage B's budget is
+  `joint_statistics_replay.GuardReadBudget` (`:230`) over the capture guard.
+  `CaptureMemoryGuard.headroom_bytes` (`memory_management.py:596`) is the
+  largest host allocation that keeps every term of the current phase's check
+  passing: cgroup committed bytes plus the CUDA reservation, against the
+  row's cgroup cap, aggregate envelope and host floor, less the phase's own
+  reservations, with the host reservation also held against the cgroup cap on
+  its own. The engine reads the next entry only while its serialized buffer
+  plus its decoded bytes fit that headroom (`ReadStream._fits`, `:933`), and
+  keeps the serialized buffers in flight within the sealed load buffer. The
+  checks that bracket the replay now name the side each reservation lands on,
+  so a device reservation no longer takes host headroom: the render load
+  charges the incoming renders, their buffers, the read pages and the
+  boundaries to the host and the statistics, workspace and candidate delta to
+  the device, and the spill replay charges its pinned read buffers to the host
+  (`StageBReplaySpill.replay_reserve_host_bytes`) and the rest to the device.
+  The sums are unchanged; a guard with no device envelope still charges the
+  sum to its cgroup cap.
+- **Owned bytes, sealed and mapped.** A stream reads each file into a memfd
+  the engine owns (`SealedBuffer`, `:107`): `preadv` into a populated shared
+  mapping, one SHA-256 over those pages, then `F_SEAL_WRITE`, `GROW`,
+  `SHRINK` and `SEAL`, so nothing can change the bytes the digest names.
+  The PWC decoder (`_decode_file_tensor`, `production_weight_cache.py:1448`)
+  parses the archive through the memfd and loads the tensor with
+  `torch.load(..., mmap=True)` from `/proc/self/fd/N`, a private mapping of
+  the verified pages with no copy; the engine closes the descriptor after
+  the decoder returns, and the tensor's mapping keeps the pages until the
+  tensor is dropped. A decoded render therefore holds exactly its file's
+  pages, so the stream charges it its file length (it no longer measures
+  storage bytes), and freeing it returns them to the cgroup at once. The
+  mapping is private: a write copies pages into anonymous memory and never
+  reaches the sealed bytes. No Stage B consumer writes a render; the
+  identity read on every probe (`resident_render_identity`) compares the
+  tensor's version counter with the one recorded at load, so a `torch`
+  write in place fails the next probe. The PWC's other loads (`prefetch`,
+  a lazy `get`) and `tools/qualify_t4_overlay.py` keep the bytes path; they
+  are PQ #1295 consolidation items.
+- **Release, not take.** A taken window's renders stay charged to the
+  stream's budget until the consumer releases them (`ReadStream.release`,
+  `:825`): on unified memory a stream that counted them free at the take
+  would read a further window into memory the consumer still holds.
+  `retained_window` drops its tensors before it releases the stream.
+- **Negative result: a `torch` CPU tensor does not return its pages here.**
+  The first read-ahead row (GLM-5.3 layer 7, PB `7290d2373365`) decoded
+  each read into a `torch.load(io.BytesIO(raw))` copy. The aggregate check in
+  `observe_and_project_retained_windows` refused it (29.85 GB committed,
+  18.07 GB reserved on CUDA, 16.11 GB requested) after the guard had
+  evicted 116 read-ahead renders (1.95 GB) and its reading had not moved. The GB10 torch build (2.11+cu130, aarch64)
+  bundles mimalloc in `libc10` as its CPU allocator, and mimalloc keeps the
+  pages it frees: a PrismaBuild probe freed 3.84 GB of `torch.empty`
+  tensors and 3.85 GB stayed in RssAnon, where the same bytes in a
+  `bytearray` were returned. Decoding into a persistent anonymous pool
+  instead grew the mimalloc footprint by about one window per window. The
+  sealed memfd returned exactly what it held on every drop (0.938 GiB per
+  probe window, no growth over 4 windows).
+  `tests/test_io_engine_sealed_memory.py` holds the row to it: freeing
+  read-ahead renders, by reclaim or by a consumer's release, must drop the
+  guard's committed reading by their files' pages, to within the kernel's
+  per-CPU accounting batch. *A reclaim frees only what the allocator gives
+  back; measure the drop, not the `del`.*
+- **Reclaim.** Renders read ahead belong to the stream, not to the PWC, until
+  their window takes them. `ReadStream.reclaim` (`:854`) drops the
+  farthest-ahead ones first, and the guard calls it
+  (`CaptureMemoryGuard.add_reclaimer`, `:614`) before any check would refuse
+  on the cgroup, aggregate or host term, then reads the process again. A
+  dropped render is read again later. The layer quantum's source baseline is
+  taken with the stream paused and its measured bytes left out
+  (`ReadStream.paused`, `:744`).
+- **Order and staging.** The quantum builds one stream over every pending
+  window's renders, in window order, after the own-source phase starts
+  (`joint_cost_quantum.py:2353`); window 0 loads while the own source
+  settles. A window is read ahead only once its renders are staged:
+  `_retained_window_ready` (`:1365`) asks `await_retained_window_read`
+  (`:1376`), the wait half of `prepare_retained_window_read`, and a window
+  PrismaBuild has not landed yet waits for its consumer, which reads it
+  after its own wait. `retained_window(..., stream=, stream_group=)` takes
+  the window's group, charges `before_load_quantum` once with what is still
+  unread, and admits the renders through the PWC's own checks. Without a
+  stream it builds one for its own keys with no read-ahead headroom.
+- **Workers follow the measured rates** (`ReadStream._workers`, `:916`): all
+  of the pool while the consumer waits or before anything is measured, then
+  as many reads as land the next window within the consumer's shortest
+  measured window at the measured per-stream rate.
+- **Counters.** `counters.json` gains `io_engine`
+  (`prismaquant.io_engine_stream.v1`): entries and bytes read, read seconds,
+  the per-stream rate, rereads, evictions, deferrals, peak held bytes, peak
+  workers, and every wait the consumer spent on a window's renders
+  (`groups_taken`). Each window block gains `load_wait_s`.
+
+`retained_window`'s receipt is unchanged, `load_quanta` included, so the cost
+payload's `joint_operator_windows` bytes do not change. The PQ #1210 entry
+below says a next window's renders would be unpriced; they are now charged
+live against the row's measured headroom and dropped before a refusal. No
+format, pipeline default, stage, lane or ship gate changes.
+
 A band-serial spill consumer reads each probe's incoming plane during that
 probe's final pass (2026-09-25, `perf/1143-stream-handoff-load`, PQ #1143).
 A consumer used to read its whole incoming plane at its head, in
@@ -336,12 +456,16 @@ retained_window` now does each of these once per window:
   the remaining files' lengths.
 - **One loader pool.** A single pool of `max_workers` threads
   (`pwc-window-load`) serves every quantum. Each quantum is still a barrier
-  and is still charged to its own serialized-buffer cap.
+  and is still charged to its own serialized-buffer cap. (Superseded by
+  PQ #1291, the entry at the top: the IO engine's one pool reads a window
+  without quantum barriers, within the same buffer cap.)
 - **One cover lookup.** `prepare_retained_window_read` passes
   `published_batch=stage_covers_are_published` to `await_staged_spans`.
 
 Loading the next window's renders while this window computes does not fit the
-sealed budget. `retained_render_cap_bytes` (6,023,929,799 bytes on the
+sealed budget. (Superseded by PQ #1291, the entry at the top: the next
+window's renders are read into the row's measured headroom, outside the PWC
+LRU, and reclaimed before a refusal.) `retained_render_cap_bytes` (6,023,929,799 bytes on the
 row-041 plan) is the largest window's renders, and the quantum sizes the PWC
 LRU to it, so a second window's renders would be unpriced. The one charged
 buffer that is idle while a window computes is the load buffer (402,662,764
@@ -2998,6 +3122,16 @@ layer-config metadata. It moves no body byte and no body bpp (principle 12). A
 unit that the body also assigned is refused. There is no λ. Without the flag,
 the output is byte-identical. Gates: `tests/test_glm_mtp_selection.py` and
 `tests/test_allocator_output_pin_1304.py`.
+
+Re-stamped (2026-09-25, `claude/stageb-window-readahead-1291`) for **Stage B
+render read-ahead through the IO engine** (PQ #1291, #1294): the retained
+window's loads move to `io_engine`, the capture guard gains
+`headroom_bytes` and reclaimers, and the replay's checks charge each
+reservation to its side. A stream's reads land in sealed memfds that the
+decoder maps, because a freed `torch` CPU tensor does not leave the cgroup
+reading on the GB10 torch build, and a taken window stays charged until its
+release. See the entry at the top. No format, pipeline default or ship gate
+changes.
 
 Re-stamped (2026-09-25, `claude/dedup-gridbook-1304`) for **archiving the
 retired codebook lane's format, cost and render code** (PQ #1304, P2, sub-issue
