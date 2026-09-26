@@ -81,7 +81,7 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   inputs are digested on the device at capture, and each later probe's are
   compared with probe 0's (`_check_inputs`, `joint_replay_spill.py:1429`).
   Nothing compares the bytes read back from the file with the bytes written;
-  PQ #CKSUM tracks a per-range checksum verified in the engine at read.
+  PQ #1369 tracks a per-range checksum verified in the engine at read.
 
 Gate: `tests/test_io_engine.py`, `tests/test_stageb_one_pass_spill.py`
 (bitwise replay; chunks dropped ahead and read again; the render cache on the
