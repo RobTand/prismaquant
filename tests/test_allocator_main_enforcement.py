@@ -88,9 +88,11 @@ def test_main_invokes_candidate_membership_validator(tmp_path, monkeypatch):
         "validator must see the assignment that is emitted")
 
 
-def test_main_refuses_reader_only_fp8_cb_rung_before_allocation(
+def test_main_refuses_a_retired_codebook_rung_before_allocation(
     tmp_path, monkeypatch
 ):
+    # FP8_CB_K29 was a reader-only rung of the retired codebook lane, archived
+    # 2026-09-25 (#1304). A menu naming it now refuses at format resolution.
     probe_p, cost_p = _write_fixture(tmp_path)
     monkeypatch.setattr(sys, "argv", [
         "allocator",
@@ -103,5 +105,6 @@ def test_main_refuses_reader_only_fp8_cb_rung_before_allocation(
         "--allow-default-profile",
     ])
 
-    with pytest.raises(SystemExit, match="reader-only.*FP8_CB_K29"):
+    with pytest.raises(SystemExit, match="FP8_CB_K29.*gridbook_lane_2026-09-02"):
         alloc.main()
+    assert not (tmp_path / "layer_config.json").exists()
