@@ -344,6 +344,7 @@ class _RecordingGuard:
         self.physical_cap_bytes = 1 << 62
         self.margin_bytes = 0
         self.admissions = []
+        self.reclaim_counters = {}
 
     def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
         self.admissions.append((label, reserve_bytes))
@@ -360,7 +361,7 @@ class _RecordingGuard:
         # Nor any device headroom: the render cache keeps nothing (PQ #1348).
         return 0
 
-    def add_reclaimer(self, reclaim, *, device=False):
+    def add_reclaimer(self, reclaim, *, lowers, name=None):
         return lambda: None
 
 
