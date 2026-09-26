@@ -1818,6 +1818,57 @@ def test_spill_scratch_is_unnamed_and_bounded(tmp_path):
     assert not _open_under(root) and os.listdir(root) == []
 
 
+def test_a_spill_buffer_is_charged_what_the_host_allocator_holds():
+    """PQ #1348: a buffer asks one grid block over its size to align; a pinned
+    request rounds up to a power of two, and a pageable one does not.
+
+    Before, a 64 MiB read buffer asked 64 MiB plus a block, the pinned
+    allocator held 128 MiB, and the guard was charged the request. The
+    geometry's buffers are now one block under the power of two.
+    """
+    block = 4096
+    assert spill_mod._host_buffer_bytes((64 << 20) - block, block, True) == 64 << 20
+    assert spill_mod._host_buffer_bytes(64 << 20, block, True) == 128 << 20
+    assert spill_mod._host_buffer_bytes(150 << 20, block, True) == 256 << 20
+    assert spill_mod._host_buffer_bytes(64 << 20, block, False) == (64 << 20) + block
+    for pinned in (False, True):
+        read = spill_mod._host_buffer_bytes(
+            spill_mod.READ_BYTES - block, block, pinned)
+        arena = spill_mod._host_buffer_bytes(
+            spill_mod.ARENA_BYTES - block, block, pinned)
+        assert (read, arena) == (spill_mod.READ_BYTES, spill_mod.ARENA_BYTES)
+    buffer = spill_mod._aligned_buffer(3 * block, block, False)
+    assert buffer.numel() == 3 * block and buffer.data_ptr() % block == 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(),
+                    reason="needs CUDA (the pinned host allocator)")
+def test_a_pinned_spill_buffer_holds_its_charge_and_empties_back():
+    """PQ #1348: a pinned buffer sits on the grid and holds its charge.
+
+    Small ones too: the GB10 pinned allocator returns small blocks off the
+    4 KiB grid. ``_empty_host_cache`` hands a freed block back, which a spill
+    reclaim relies on for the guard's reading to drop.
+    """
+    stats = torch.cuda.memory.host_memory_stats
+    torch.zeros(1, device="cuda")
+    torch._C._host_emptyCache()
+    before = stats().get("allocated_bytes.current", 0)
+    block = 4096
+    for nbytes, held in (((64 << 20) - block, 64 << 20),
+                         ((64 << 20) - 3 * block, 64 << 20),
+                         (3 * block, 4 * block), (5 * block, 8 * block)):
+        buffer = spill_mod._aligned_buffer(nbytes, block, True)
+        assert buffer.is_pinned() and buffer.numel() == nbytes
+        assert buffer.data_ptr() % block == 0
+        charge = spill_mod._host_buffer_bytes(nbytes, block, True)
+        assert charge == held
+        assert stats()["allocated_bytes.current"] - before == charge
+        del buffer
+        assert spill_mod._empty_host_cache() == charge
+        assert stats().get("allocated_bytes.current", 0) == before
+
+
 def test_spill_slot_keeps_the_replay_residue_on_the_grid():
     block = spill_mod.ADDRESS_ALIGNMENT
     assert spill_mod._slot(0, 0, 0, block) == (0, 0, 0)

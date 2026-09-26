@@ -12,12 +12,12 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   (`io_engine.py:619`) makes an entry that is not a file: the stream calls it
   on the engine's pool and delivers what it returns. It has no path to pin
   and no serialized buffer, so it is charged its held bytes only.
-  `StageBReplaySpill._open_replay_stream` (`joint_replay_spill.py:1041`)
+  `StageBReplaySpill._open_replay_stream` (`joint_replay_spill.py:1064`)
   opens one stream at the first replay, over every chunk of every pending
   window and probe in replay order, one group per chunk. A chunk is read only
-  once its probe's capture has ended (`_chunk_ready`, `:1067`). Each chunk's
+  once its probe's capture has ended (`_chunk_ready`, `:1090`). Each chunk's
   reader allocates its own pinned buffer and issues its 1 MiB direct reads in
-  order (`_read_chunk`, `:1072`); the engine reads as many chunks at once as
+  order (`_read_chunk`, `:1095`); the engine reads as many chunks at once as
   its measured rates ask for. `READ_WORKERS`, the reader thread and its
   buffer queue are gone, and `tests/test_io_site_freeze.py` drops `_chunks`
   and `_start_read_buffers`.
@@ -31,13 +31,22 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   A host shortfall (the cgroup budget or the `MemAvailable` floor) asks
   `memory_management.ordered_reclaimer` (`:787`, registered at
   `joint_cost_quantum.py:2386`) for its bytes in order of refill cost: spill
-  chunks read ahead (`reclaim_replay`, `joint_replay_spill.py:1001`, which
+  chunks read ahead (`reclaim_replay`, `joint_replay_spill.py:1024`, which
   also hands the pinned allocator's idle blocks back; a 64 MiB re-read from
   local NVMe), then the render cache (a device copy of a render already
   resident on the host), then renders read ahead (GBs re-read from the
   stage). Each reclaimer is asked only for what the ones before it left. A
   device-envelope shortfall asks the render cache alone
   (`joint_cost_quantum.py:2390`), since nothing else frees device bytes.
+- **Pinned buffers charged what they hold.** torch's pinned allocator rounds
+  a request up to a power of two. A buffer asks one grid block over its size,
+  to align its start (`_aligned_buffer`, `joint_replay_spill.py:642`), so the
+  old 64 MiB read buffer held 128 MiB and each 256 MiB arena 512 MiB, while
+  the guard was charged the request: half of what was held. The read buffers
+  and arenas are now one grid block under `READ_BYTES` and `ARENA_BYTES`, so
+  their requests are those powers of two exactly, and the charge is the
+  rounded request (`_host_buffer_bytes`, `:630`). The block over stays: the
+  GB10 pinned allocator returns small blocks off the 4 KiB grid.
 - **Renders kept on the device.** `RetainedRenderDeviceCache`
   (`joint_statistics_replay.py:273`) keeps each render a window's first probe
   copies to the device, in the render's own dtype, while
@@ -70,7 +79,7 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   the direct-I/O grid (`_aligned`, `:1575`) and a short read, and `_fill`
   refuses a tensor off its replay residue and overlapping envelopes. Probe
   inputs are digested on the device at capture, and each later probe's are
-  compared with probe 0's (`_check_inputs`, `joint_replay_spill.py:1406`).
+  compared with probe 0's (`_check_inputs`, `joint_replay_spill.py:1429`).
   Nothing compares the bytes read back from the file with the bytes written;
   PQ #CKSUM tracks a per-range checksum verified in the engine at read.
 
@@ -3193,8 +3202,9 @@ Stamps follow, newest first, each recording its own branch and date.
 Re-stamped (2026-09-26, `claude/stageb-render-window-profile-1348`) for
 **Stage B spill replay through the IO engine and the device render cache**
 (PQ #1348): spill chunks become IO engine range entries that yield to the
-next window's renders, each window keeps its renders on the device across its
-probes, operator records run once per
+next window's renders, pinned spill buffers are charged what the pinned
+allocator holds (the guard had been charged half), each window keeps its
+renders on the device across its probes, operator records run once per
 window and once at its close, and the capture guard gains
 `device_headroom_bytes` (read from its own envelope and `MemAvailable`, never
 `torch.cuda.mem_get_info`) and device-side reclaimers. A host shortfall

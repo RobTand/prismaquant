@@ -88,8 +88,11 @@ SPILL_DTYPES = (torch.bfloat16, torch.float16)
 #: bytes: the CUDA caching allocator's block alignment, so no kernel variant
 #: chosen on pointer alignment can differ between the two paths.
 ADDRESS_ALIGNMENT = 512
-#: Write arenas and read buffers are at least this large (or one largest
-#: tensor pair), and never larger than the layer needs.
+#: The host request of one write arena and one read buffer: each holds one
+#: grid block less (``_aligned_buffer`` asks a block over its size to align
+#: its start), so a pinned request is exactly this power of two, which the
+#: pinned allocator rounds to (PQ #1348). A buffer is at least one largest
+#: tensor pair, and never larger than the layer needs.
 ARENA_BYTES = 256 << 20
 READ_BYTES = 64 << 20
 ARENA_COUNT = 3
@@ -624,8 +627,26 @@ def _empty_host_cache():
     return max(0, before - stats().get("allocated_bytes.current", 0))
 
 
+def _host_buffer_bytes(nbytes, block, pinned):
+    """Host bytes one ``_aligned_buffer(nbytes, block, pinned)`` holds: its charge.
+
+    The buffer asks for ``nbytes`` plus one grid block, to align its start,
+    and torch's pinned allocator rounds every request up to a power of two
+    (``torch.cuda.host_memory_stats``), so a pinned buffer holds its request
+    rounded up (PQ #1348).
+    """
+    request = nbytes + block
+    return 1 << (request - 1).bit_length() if pinned else request
+
+
 def _aligned_buffer(nbytes, block, pinned):
-    """A uint8 tensor of ``nbytes`` whose address is a multiple of ``block``."""
+    """A uint8 tensor of ``nbytes`` whose address is a multiple of ``block``.
+
+    It asks one ``block`` over ``nbytes`` and starts on the first grid
+    address in it, whatever alignment the allocator returned: on a GB10 the
+    pinned allocator returns small blocks off the 4 KiB grid (at a 0xa00
+    offset, PQ #1348).
+    """
     raw = torch.empty(nbytes + block, dtype=torch.uint8, pin_memory=pinned)
     return raw.narrow(0, (-raw.data_ptr()) % block, nbytes)
 
@@ -885,8 +906,8 @@ class StageBReplaySpill:
         pair = 2 * (geometry.largest_tensor_bytes + ADDRESS_ALIGNMENT + block)
         pair += -pair % block
         per_probe = geometry.x_bytes + geometry.g_bytes_per_probe
-        self.arena_bytes = _ceil(max(pair, min(ARENA_BYTES, per_probe + pair)), block)
-        self.read_bytes = _ceil(max(pair, min(READ_BYTES, per_probe + pair)), block)
+        self.arena_bytes = _ceil(max(pair, min(ARENA_BYTES - block, per_probe + pair)), block)
+        self.read_bytes = _ceil(max(pair, min(READ_BYTES - block, per_probe + pair)), block)
         self._replay_stream = None
         self._replay_budget = None
         # Reader threads add to the telemetry; the lock keeps the sums whole.
@@ -927,7 +948,8 @@ class StageBReplaySpill:
     def capture_reserve_bytes(self):
         """Pinned arenas plus every target input held until its backward.
 
-        Each arena is allocated one grid block over, to align its start.
+        Each arena is charged what the host allocator holds for it
+        (``_host_buffer_bytes``).
         """
         return self.capture_reserve_host_bytes + self.capture_reserve_device_bytes
 
@@ -935,7 +957,8 @@ class StageBReplaySpill:
     def capture_reserve_host_bytes(self):
         """The pinned host arenas, until ``capture`` allocates them on entry."""
         return 0 if self._arenas else (
-            (self.arena_bytes + self._block) * self.telemetry["arenas"])
+            _host_buffer_bytes(self.arena_bytes, self._block, self._cuda)
+            * self.telemetry["arenas"])
 
     @property
     def capture_reserve_device_bytes(self):
@@ -996,7 +1019,7 @@ class StageBReplaySpill:
     @property
     def replay_chunk_bytes(self):
         """Host bytes one read chunk's buffer holds: its IO engine charge."""
-        return self.read_bytes + self._block
+        return _host_buffer_bytes(self.read_bytes, self._block, self._cuda)
 
     def reclaim_replay(self, shortfall_bytes):
         """Drop chunks read ahead, farthest first; a capture guard's reclaimer.
