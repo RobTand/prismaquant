@@ -193,6 +193,19 @@ def test_a_group_rung_missing_for_one_unit_is_recorded_and_not_offered():
     assert result["incomplete_rungs"] == {"routed": {R832: [ROUTED[3]]}}
 
 
+def test_an_unattested_rung_is_left_off_the_menu_and_recorded():
+    from prismaquant.glm_mtp_selection import select_mtp_rungs
+
+    def eligible(unit, rung):
+        return not (rung == R1024 and unit in ROUTED)
+
+    result = select_mtp_rungs(_payload(), byte_budget=10**12, constants=CONSTANTS,
+                              eligible=eligible)
+    assert result["rung"] == f"routed={R832}|shared=BF16"
+    assert result["unattested_rungs"] == {R1024: len(ROUTED)}
+    assert all(f"routed={R1024}" not in row["name"] for row in result["selection"]["menu"])
+
+
 def _write_payload(tmp_path, payload):
     path = tmp_path / "mtp-cost.pkl"
     path.write_bytes(pickle.dumps(payload))
@@ -206,6 +219,10 @@ def test_allocator_stamps_the_mtp_selection_outside_body_bpp(tmp_path, monkeypat
 
     from prismaquant import allocator
 
+    from prismaquant import format_registry
+
+    monkeypatch.setattr(format_registry, "format_is_producer_eligible",
+                        lambda name, **_: name != R832)
     argv = _stock_inputs(tmp_path)
     monkeypatch.setattr(sys, "argv", ["allocator", *argv])
     allocator.main()
@@ -228,6 +245,7 @@ def test_allocator_stamps_the_mtp_selection_outside_body_bpp(tmp_path, monkeypat
     assert record["byte_budget"] == budget
     assert record["resident_bytes"] == budget
     assert record["objective"] == "mtp_head_self_kl"
+    assert record["unattested_rungs"] == {R832: len(ROUTED)}
     for name in ROUTED:
         assert got[name] == fr.get_format(R1024).autoround_config()
     for name in SHARED:

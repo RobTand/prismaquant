@@ -67,34 +67,45 @@ def _mtp_probe(payload) -> tuple[str, dict]:
     return digests.pop(), probe
 
 
-def _unit_rows(payload) -> dict:
-    """``{unit: {rung: (E, bytes)}}``, with BF16 passthrough where the source is BF16."""
+def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
+    """``{unit: {rung: (E, bytes)}}`` and the priced rungs the runtime does not attest.
+
+    BF16 passthrough is added where the source is BF16. A priced rung that
+    ``eligible(unit, rung)`` refuses is not offered; it is returned as
+    ``{rung: [units]}`` so the narrowing is recorded, not inferred.
+    """
     groups = payload["groups"]
     units = [unit for members in groups.values() for unit in members]
     if set(units) != set(payload["costs"]) or len(units) != len(set(units)):
         raise ValueError("MTP groups must partition the priced units")
-    rows = {}
+    rows, unattested = {}, {}
     for unit in units:
         wire = payload["wire_bytes"].get(unit, {})
         if set(wire) != set(payload["costs"][unit]):
             raise ValueError(f"MTP unit {unit}: wire bytes and costs name different rungs")
         if _BF16 in payload["costs"][unit]:
             raise ValueError(f"MTP unit {unit}: BF16 is passthrough, not a priced row")
-        rows[unit] = {rung: (float(row["predicted_dloss"]), int(wire[rung]))
-                      for rung, row in payload["costs"][unit].items()}
+        rows[unit] = {}
+        for rung, row in payload["costs"][unit].items():
+            if eligible is not None and not eligible(unit, rung):
+                unattested.setdefault(rung, []).append(unit)
+                continue
+            rows[unit][rung] = (float(row["predicted_dloss"]), int(wire[rung]))
         if payload["source_dtype"][unit] == "bfloat16":
             rows[unit][_BF16] = (0.0, 2 * int(payload["params"][unit]))
-    return rows
+    return rows, {rung: sorted(units) for rung, units in sorted(unattested.items())}
 
 
 def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
-                     acceptance_points=(), k: int = 1) -> dict:
+                     acceptance_points=(), k: int = 1, eligible=None) -> dict:
     """The MTP assignment and its selection record under ``byte_budget``.
 
     ``constants`` are the caller's declared serve constants
     (``t_ms``, ``d0_ms``, ``c_ms_per_bit`` and a ``source``); they are
     recorded, and with no ``acceptance_points`` they cannot move the choice:
     the selector is degenerate and returns the lowest-E rung within the budget.
+    ``eligible(unit, rung)``, when given, is the pinned runtime's attestation
+    (principle 14); a priced rung it refuses is left off the menu and recorded.
     """
     from . import mtp_rung_selection as canon
 
@@ -102,7 +113,7 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     if payload.get("schema") != SCHEMA:
         raise ValueError(f"MTP cost payload must be {SCHEMA}")
     probe_sha256, probe = _mtp_probe(payload)
-    rows = _unit_rows(payload)
+    rows, unattested = _unit_rows(payload, eligible)
     groups = {name: tuple(members) for name, members in payload["groups"].items()}
     menu, incomplete = canon.group_product_menu(groups, rows, params=payload["params"])
     serve = canon.ServeConstants(t_ms=float(constants["t_ms"]), d0_ms=float(constants["d0_ms"]),
@@ -125,6 +136,7 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         "E": float(result.rung.E),
         "constants_source": str(constants.get("source", "undeclared")),
         "incomplete_rungs": incomplete,
+        "unattested_rungs": {rung: len(units) for rung, units in unattested.items()},
         "selection": result.provenance,
         "assignment": assignment,
     }

@@ -709,7 +709,27 @@ def apply_mtp_format_override(
     return out
 
 
-def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping) -> None:
+def _mtp_rung_attestation(serving_target, profile):
+    """``eligible(unit, rung)`` from the pinned runtime's contract (principle 14).
+
+    The same reader the body menu uses (``format_is_producer_eligible``), asked
+    about one unit's serving context when a Tessera scope is declared. BF16
+    passthrough is not a Tessera route and is always offered.
+    """
+    from .tessera_serving_scope import unit_structure_from_profile
+
+    def eligible(unit, rung):
+        if not fr.is_tessera_format_name(fr.canonical_format_name(rung)):
+            return True
+        if serving_target is None:
+            return fr.format_is_producer_eligible(rung)
+        context = serving_target.context(unit_structure_from_profile(unit, profile))
+        return fr.format_is_producer_eligible(rung, context_by_unit={context.key(): context})
+    return eligible
+
+
+def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping, *,
+                         serving_target=None, profile=None) -> None:
     """Add the MTP layer's selected rungs to ``layer_cfg`` (PQ #1346).
 
     The selection runs after the body is final, on its own payload and its own
@@ -727,7 +747,8 @@ def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping) -> Non
         points = (json.loads(Path(args.mtp_acceptance_points).read_text())
                   if args.mtp_acceptance_points else [])
         record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
-                                  constants=constants, acceptance_points=points)
+                                  constants=constants, acceptance_points=points,
+                                  eligible=_mtp_rung_attestation(serving_target, profile))
     except ValueError as exc:
         raise SystemExit(f"[alloc] ERROR: MTP selection: {exc}") from exc
     assignment = record.pop("assignment")
@@ -5606,7 +5627,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # no keys, and a table carrying a population but no projection carries
     # only the population.
     if args.mtp_joint_cost:
-        _stamp_mtp_selection(args, layer_cfg, assignment_expanded)
+        _stamp_mtp_selection(args, layer_cfg, assignment_expanded,
+                             serving_target=tessera_serving_target, profile=model_profile)
     if args.tessera_materialization_plan:
         from .tessera_materialization import write_selection_request
         write_selection_request(args.tessera_materialization_plan,
