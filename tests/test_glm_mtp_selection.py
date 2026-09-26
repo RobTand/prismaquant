@@ -33,7 +33,7 @@ R1024, R832, E4M3_SHARED = "TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R832", "TES
 PARAMS = 64 * 128
 
 
-def _probe(*, objective=True, n=4):
+def _probe(*, objective=True, seed_base=7000):
     source_content = {
         "config": {"fixture": "mtp selection"},
         "weight_map": {"fixture.weight": "fixture.safetensors"},
@@ -45,8 +45,8 @@ def _probe(*, objective=True, n=4):
         "content_sha256": joint.identity_sha256(source_content),
     }
     probe = {
-        "schema": "prismaquant.joint_aura.probes.v2", "seed_base": 7000,
-        "n_probes": n, "calibration_sha256": "c" * 64,
+        "schema": "prismaquant.joint_aura.probes.v2", "seed_base": seed_base,
+        "n_probes": 4, "calibration_sha256": "c" * 64,
         "producer_source_sha256": "d" * 64, "source_model": source_model,
         "distribution": "rademacher", "normalization": "global_kl_fisher",
         "temperature": 1.0, "arithmetic": joint.arithmetic_identity(torch.float32),
@@ -108,7 +108,9 @@ def _bytes(fmt_routed, fmt_shared):
     return routed + shared
 
 
-CONSTANTS = {"t_ms": 40.0, "d0_ms": 6.0, "c_ms_per_bit": 0.02, "source": "fixture"}
+# A cost side that varies (about 5% of the cycle across the menu), so the
+# degenerate branch is reached only for want of acceptance data.
+CONSTANTS = {"t_ms": 40.0, "d0_ms": 6.0, "c_ms_per_bit": 0.2, "source": "fixture"}
 
 
 def test_group_product_menu_sums_rows_per_uniform_group():
@@ -176,7 +178,7 @@ def test_mixed_probe_identities_are_refused():
     from prismaquant.glm_mtp_selection import select_mtp_rungs
 
     payload = _payload()
-    other = _payload(probe=_probe(n=3))
+    other = _payload(probe=_probe(seed_base=7100))
     payload["costs"][ROUTED[0]][R1024] = other["costs"][ROUTED[0]][R1024]
     with pytest.raises(ValueError, match="one probe identity"):
         select_mtp_rungs(payload, byte_budget=10**12, constants=CONSTANTS)
