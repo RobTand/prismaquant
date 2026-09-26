@@ -160,7 +160,7 @@ def test_profiles_without_a_declared_lane_return_none():
 #
 # All three drove ``target_profile="nvfp4_cb"``.  With no profile declaring a
 # lane, every candidate's ``serving_lane`` is ``None`` and every bucket but
-# ``units_without_declared_lane`` is empty by construction, so the split these
+# ``no_declared_lane`` is empty by construction, so the split these
 # tests exist to check has no subject.  The laneless case is still covered
 # end to end by test_selection_json_carries_the_p5a_and_p5b_provenance below.
 #
@@ -183,7 +183,7 @@ def test_a_unit_with_no_candidate_is_stamped_unrecorded_not_omitted():
     honest answer is the ``unrecorded`` bucket: a census that silently dropped
     those rows would make the branch histogram sum to fewer units than the
     assignment, and "no row" would read as "no activation cost" -- the same
-    absence-as-evidence error ``units_without_declared_lane`` exists to stop.
+    absence-as-evidence error the ``no_declared_lane`` count exists to stop.
 
     This is the assertion that rode the deleted CB test above; it is profile
     independent, so it is pinned here against ``research``.
@@ -205,9 +205,7 @@ def test_a_unit_with_no_candidate_is_stamped_unrecorded_not_omitted():
     assert sum(branches.values()) == report["units_total"] == len(assignment)
     # `research` declares no lane, so the route census says so rather than
     # reporting a clean bill.
-    assert report["units_without_declared_lane"] == len(assignment)
     assert report["route_status_counts"] == {"no_declared_lane": 3}
-    assert report["route_status_attested"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -348,8 +346,7 @@ def test_selection_json_carries_the_p5a_and_p5b_provenance(
     assert lanes["units_total"] == len(_NAMES)
     # `research` (the default profile here) declares no CB lane, so every
     # selected unit reports laneless rather than claiming a fast path.
-    assert lanes["units_without_declared_lane"] == len(_NAMES)
-    assert lanes["selected_rungs_fused_mid_m_backed"] == []
+    assert lanes["route_status_counts"] == {"no_declared_lane": len(_NAMES)}
     assert set(lanes["activation_pricing_branches"]) == {
         "measured_output_mse"}
 

@@ -3251,8 +3251,20 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/dedup-digests-files-1361`.
+As of: 2026-09-26 · `claude/route-histogram-card-1377`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `claude/route-histogram-card-1377`) for **one route
+answer, carried on the card** (PQ #1377, P2, part of epic #1295).
+`selection_serving_lane_provenance` drops `units_on_backed_fused_mid_m_lane`,
+`units_on_fallback_route`, `units_without_declared_lane`,
+`route_status_attested`, `selected_rungs_fused_mid_m_backed` and
+`selected_rungs_on_fallback_route`; no live reader consumed them, and
+`route_status_counts` already counted every unit. `ResolvedServingLane` keeps
+`fused_mid_m_backed`. Both exporters stamp `build.route_histogram` through
+`shipcard.route_histogram_claim`, and `verify` requires and replays it on
+Tessera cards (§7, `build.route_histogram`). No default, stage, format or byte
+changes; the ship gate gains one refusal.
 
 Re-stamped (2026-09-25, `claude/dedup-digests-files-1361`) for **one owner per
 file, bytes and text digest** (PQ #1361, #1301 part 2, P1, part of epic #1295).
@@ -21507,6 +21519,22 @@ claim travels with its quality caveat). Known limit: `uniform_control_summary`
 prints producer-declared fields (`candidate_bpp`, `control_bpp`,
 `relative_slack_ppm`) beside the bpp rather than the replayed values; `verify`
 still refuses on the replay.
+
+**`build.route_histogram` (Tessera cards; PrismaQuant #1377).** Principle 12's
+route histogram on the card. The allocator's `serving_lane_provenance`
+(`allocator_candidates.selection_serving_lane_provenance`) answers the route
+question once, through `route_status_counts` and `activation_contracts`; the
+fused-mid-M and fallback counters beside it are retired. Both exporters copy
+those counts, never the per-unit rows, through `shipcard.route_histogram_claim`
+into the build block: `tessera_export_lane.preflight` into the build anchor that
+`lane_shipcard open --build-json` stamps, and `export_native_compressed.
+_write_shipcard` directly. `verify` requires the histogram on a card whose lane
+is `tessera` or whose build or `config.json` names the Tessera container, and
+replays it: the schema, a positive `units_total`, positive integer counts, the
+route statuses summing to `units_total`, and the contract counts summing to no
+more. `no_declared_lane` units (the plain-BF16 picks no lane declares) are
+carried as counted. A native card owes no histogram yet, because a native
+allocation writes no `serving_lane_provenance` (#1387).
 
 **`route.sweep` (compressed-tensors-lane cards; PrismaQuant #631).** The
 serve-side leg of principle 14 on the default lane. The record carries every

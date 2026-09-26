@@ -25,6 +25,7 @@ from prismaquant.shipcard import (
     GOLD_SLOTS,
     REQUIRED_SLOTS,
     ROUTE_CENSUS_SLOT,
+    ROUTE_HISTOGRAM_SCHEMA,
     UNIFORM_CONTROL_SLOT,
     build_shipcard,
     compute_model_sha,
@@ -199,7 +200,13 @@ def _artifact(tmp_path, *, name="exported", rate_axis=True):
     # rate-axis special case) is what opens and requires its route.census
     # slot, so the card under test carries the lane a real tessera export
     # opens with (`lane_shipcard open --lane tessera`).
-    card = build_shipcard(model_dir, build={"achieved_bpp": {"value": 4.0}},
+    build = {"achieved_bpp": {"value": 4.0}}
+    if rate_axis:
+        # A Tessera card carries its recipe's route histogram (#1377).
+        build["route_histogram"] = {
+            "schema": ROUTE_HISTOGRAM_SCHEMA, "units_total": 1,
+            "route_status_counts": {"unattested": 1}, "activation_contracts": {}}
+    card = build_shipcard(model_dir, build=build,
                           lane=("tessera" if rate_axis else None))
     write_shipcard(model_dir / "shipcard.json", card)
     return model_dir

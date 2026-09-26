@@ -23,7 +23,9 @@ the producer knew: no serving-profile lane declared a structured
 ``route_status``, so eligibility was not a gate input and a user discovered it
 at serve time. Its twin on the vanilla-vLLM lane is
 ``units_on_fallback_route=0`` -- vacuous, because no spec declares route status
-at all, so the counter is reachable only by never having looked.
+at all, so the counter is reachable only by never having looked. (That counter
+is retired (#1377): ``route_status_counts`` is the provenance's one route
+answer, and it counts ``no_declared_lane`` rather than reading it as clean.)
 
 The shape of the fix is therefore as important as the values:
 

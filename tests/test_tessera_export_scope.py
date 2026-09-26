@@ -379,6 +379,33 @@ def test_export_cli_writes_existing_build_anchor_from_exact_raw_assignment(case,
     assert build["tessera_serving_scope"] == _scope(case)
     assert build["layer_config"] == str(case.assignment)
     assert build["source_model"] == str(case.model)
+    # A recipe that carries no serving_lane_provenance stamps no histogram.
+    assert "route_histogram" not in build
+
+
+def test_export_build_anchor_carries_the_recipes_route_histogram(case, tmp_path, monkeypatch):
+    # #1377: the card's route histogram is the recipe's, counted once.
+    from prismaquant.shipcard import route_histogram_claim
+
+    _isolate_other_gates(monkeypatch)
+    provenance = {
+        "units_total": 3,
+        "route_status_counts": {"backed_with_serve_flag": 2, "no_declared_lane": 1},
+        "activation_contracts": {"fp8_per_token_dynamic": 2},
+        "by_unit": {DENSE: {"format": FORMAT}},
+    }
+    case.payload["__prismaquant__"]["serving_lane_provenance"] = provenance
+    _save(case)
+    output = tmp_path / "tessera_build.json"
+    assert export.main([
+        "--model", str(case.model), "--assignment", str(case.assignment),
+        "--tessera-platform", "sm_121", "--tessera-runtime-image", IMAGE,
+        "--tessera-execution-mode", "eager", "--tessera-residency", "resident",
+        "--write-build-json", str(output),
+    ]) == 0
+    build = json.loads(output.read_text())
+    assert build["route_histogram"] == route_histogram_claim(provenance)
+    assert "by_unit" not in build["route_histogram"]
 
 
 def test_export_build_anchor_requires_an_assignment(case, tmp_path):
