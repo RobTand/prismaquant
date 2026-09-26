@@ -24,7 +24,6 @@ packed render does.
 from __future__ import annotations
 
 import os
-import time
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -44,15 +43,10 @@ from prismaquant.measure_quant_cost import (
     resolve_cost_target_name,
 )
 from prismaquant.production_weight_cache import (
-    CB_CACHE_PAIR_IDENTITY_SCHEMA,
-    CB_RENDER_IDENTITY_METADATA_KEY,
     ProductionWeightCache,
     _FisherRowWeightCache,
-    _build_cb_transient_consumer_receipt,
-    _cache_pair_identity_filename,
     _canonical_json_sha256,
     _canonical_rendered_weight_tensor,
-    _cb_cache_tensor_identity,
     _fused_sibling_leaf_mapping_from_profile,
     _formats_need_static_activation_max,
     _render_base_format,
@@ -61,21 +55,10 @@ from prismaquant.production_weight_cache import (
     _resolve_production_render_levers,
     _resolve_render_mechanism_plan,
     _store_rendered_weight_entry,
-    _cache_weight_filename,
-    _extend_production_cache_cb_render_identity,
-    _is_cb_format_name,
     _production_cache_git_commit,
     _production_cache_source_sha256,
-    _combined_source_weights_sha256,
-    _validate_cb_cache_pair_resume,
-    _write_cb_cache_pair_sidecar,
-    bind_production_cache_cb_source_weights,
-    build_cb_cache_pair_identity,
     fill_packed_expert_cache_entries,
-    first_identity_difference,
-    identity_value_for_error,
     render_production_weight,
-    validate_cb_render_identity_metadata,
 )
 from prismaquant.streaming_model import _build_streaming_context
 
@@ -141,18 +124,9 @@ def _render_dense_layer(
     fisher_rows: _FisherRowWeightCache | None,
     render_score_records: dict[str, dict[str, object]],
     col_weights: Mapping[str, torch.Tensor] | None,
-    cb_serialization_context,
     retain_rendered: bool,
     consume_render: Callable[..., Mapping[str, object]] | None,
-    consumer_identity: Mapping[str, object] | None,
-    calibration_hash: str | None,
-    resume: bool,
     max_act_rows: int,
-    cb_pair_identities: dict[tuple[str, str], dict[str, object]],
-    cb_pair_artifacts: dict[str, dict[str, object]],
-    transient_results: dict[str, dict[str, object]],
-    cb_git_commit: str | None,
-    cb_producer_source_sha256: str | None,
     joint_scale_modules: Mapping[str, nn.Module] | None = None,
     declared_cold_qnames: frozenset[str] = frozenset(),
     progress: bool,
@@ -168,7 +142,6 @@ def _render_dense_layer(
     from prismaquant.decision_units import fused_group_key
     from prismaquant.export_native_compressed import _compute_nvfp4_joint_global
     from prismaquant.production_weight_cache import (
-        _check_resumed_render_score_policies,
         _render_levers_input_global_scale_policy,
     )
 
@@ -177,6 +150,10 @@ def _render_dense_layer(
     # renders must price identically, so neither may re-read the environment
     # per layer.
     stream_score_policy = _render_levers_input_global_scale_policy(levers)
+    if not retain_rendered and consume_render is None:
+        raise ValueError(
+            "a transient streamed render requires a consume_render callback"
+        )
     layer_formats: dict[str, tuple[str, ...]] = {}
     for qname in layer_dense_modules:
         fmts = tuple(render_formats_by_qname.get(qname, ()))
@@ -187,147 +164,6 @@ def _render_dense_layer(
     }
     if not qname_to_module:
         return 0
-
-    _extend_production_cache_cb_render_identity(
-        cache,
-        layer_formats,
-        cb_serialization_context=cb_serialization_context,
-        col_weights=col_weights,
-    )
-    dense_cb_source_weights = {
-        qname: qname_to_module[qname].weight.detach()
-        for qname, fmts in layer_formats.items()
-        if any(_is_cb_format_name(fmt) for fmt in fmts)
-    }
-    if dense_cb_source_weights:
-        bind_production_cache_cb_source_weights(
-            cache,
-            dense_cb_source_weights,
-            require_complete=False,
-            where="streaming ProductionWeightCache dense source binding",
-        )
-
-    expected_rerenders: dict[tuple[str, str], dict[str, object]] = {}
-    completed: set[tuple[str, str]] = set()
-    if dense_cb_source_weights:
-        if not calibration_hash:
-            raise ValueError(
-                "streaming CB render requires an exact calibration_hash for "
-                "per-pair identity"
-            )
-        cb_identity = cache.metadata.get(CB_RENDER_IDENTITY_METADATA_KEY)
-        cb_layer_scope = {
-            qname: tuple(
-                fmt for fmt in fmts if _is_cb_format_name(fmt)
-            )
-            for qname, fmts in layer_formats.items()
-            if any(_is_cb_format_name(fmt) for fmt in fmts)
-        }
-        validated_context = validate_cb_render_identity_metadata(
-            cb_identity,
-            expected_context=cb_serialization_context,
-            expected_formats_by_qname=cb_layer_scope,
-            require_source_complete=False,
-            where="streaming ProductionWeightCache dense pair identity",
-        )
-        if cb_git_commit is None or cb_producer_source_sha256 is None:
-            raise RuntimeError("streaming CB producer identity was not resolved")
-        for qname, fmts in cb_layer_scope.items():
-            weight_dtype = qname_to_module[qname].weight.dtype
-            for fmt in fmts:
-                key = (qname, fmt)
-                pair_identity = build_cb_cache_pair_identity(
-                    cb_identity,
-                    qname=qname,
-                    fmt=fmt,
-                    calibration_hash=calibration_hash,
-                    git_commit=cb_git_commit,
-                    source_weight_dtype=weight_dtype,
-                    cb_serialization_context=cb_serialization_context,
-                    render_input_contract={
-                        "path": "dense",
-                        "max_act_rows": int(max_act_rows),
-                    },
-                    validated_context=validated_context,
-                    producer_source_sha256=cb_producer_source_sha256,
-                )
-                cb_pair_identities[key] = pair_identity
-                if cache_dir_path is None:
-                    continue
-                shard_path = cache_dir_path / _cache_weight_filename(qname, fmt)
-                sidecar_path = (
-                    cache_dir_path / _cache_pair_identity_filename(qname, fmt)
-                )
-                if not resume and (shard_path.exists() or sidecar_path.exists()):
-                    raise RuntimeError(
-                        "streaming production cache destination is not fresh "
-                        f"for {qname}@{fmt}; pass resume=True only when the "
-                        "identity-bound sidecar should be admitted"
-                    )
-                if not resume:
-                    continue
-                admitted = _validate_cb_cache_pair_resume(
-                    cache_dir_path=cache_dir_path,
-                    qname=qname,
-                    fmt=fmt,
-                    expected_identity=pair_identity,
-                    require_render_score=True,
-                    allow_missing_shard=True,
-                    require_consumer_receipt=not retain_rendered,
-                    expected_consumer_identity=(
-                        consumer_identity if not retain_rendered else None
-                    ),
-                )
-                if admitted is None:
-                    continue
-                score = admitted.get("render_score")
-                if not isinstance(score, Mapping):
-                    raise RuntimeError(
-                        f"admitted CB pair {qname}@{fmt} has no render score"
-                    )
-                score_key = _render_score_record_key(qname, fmt)
-                if shard_path.is_file():
-                    if not retain_rendered:
-                        raise RuntimeError(
-                            f"transient CB resume found an unexpected retained "
-                            f"shard for {qname}@{fmt}: {shard_path}"
-                        )
-                    cache.weights[key] = _cache_weight_filename(qname, fmt)
-                    completed.add(key)
-                elif retain_rendered:
-                    expected_rerenders[key] = admitted
-                else:
-                    receipt = admitted.get("consumer_receipt")
-                    result = (
-                        receipt.get("result")
-                        if isinstance(receipt, Mapping) else None
-                    )
-                    if not isinstance(result, Mapping):
-                        raise RuntimeError(
-                            f"admitted transient CB pair {qname}@{fmt} has no "
-                            "consumer result"
-                        )
-                    transient_results[score_key] = dict(result)
-                    completed.add(key)
-                render_score_records[score_key] = dict(score)
-                # An admitted pair's cost is being reused: it answers the
-                # activation-scale policy question like any other retained
-                # score (#227).
-                _check_resumed_render_score_policies(
-                    {score_key: dict(score)},
-                    policy=stream_score_policy,
-                    where=f"streamed CB pair resume for {qname}@{fmt}",
-                )
-                cb_pair_artifacts[score_key] = {
-                    "identity": pair_identity,
-                    "tensor": admitted.get("tensor"),
-                    "render_score": dict(score),
-                    "render_score_sha256": admitted.get(
-                        "render_score_sha256"
-                    ),
-                    "consumer_receipt": admitted.get("consumer_receipt"),
-                    "retained_weight": bool(shard_path.is_file()),
-                }
 
     render_base_fmts = {
         _render_base_format(f)
@@ -382,12 +218,7 @@ def _render_dense_layer(
 
     rendered = 0
     for qname, mod in qname_to_module.items():
-        pending_formats = [
-            fmt for fmt in layer_formats[qname]
-            if (qname, fmt) not in completed
-        ]
-        if not pending_formats:
-            continue
+        pending_formats = layer_formats[qname]
         weight = mod.weight.data
         canonical = resolve_cost_target_name(qname, act_index, profile)
         cold_declared = qname in declared_cold_qnames
@@ -416,8 +247,8 @@ def _render_dense_layer(
         # on CPU (and diverges from the resident render dtype).
         X = X_cpu.to(device=device, dtype=torch.float32)
         # A provenance-authorized never-routed expert has no activation rows
-        # by definition.  Keep the mapping empty so LDLQ takes its explicit
-        # raw-render fallback; an empty matrix would look like a successfully
+        # by definition.  Keep the mapping empty so the render sees no
+        # activations at all; an empty matrix would look like a successfully
         # loaded (but degenerate) calibration input to downstream code.
         activations = {} if cold_declared else {qname: X}
         joint = joint_globals.get(qname)
@@ -440,12 +271,6 @@ def _render_dense_layer(
         for fmt in pending_formats:
             render_fmt = _render_base_format(fmt)
             gate_trace: list[dict[str, object]] = []
-            timed_cb_pair = (
-                cache_dir_path is not None and _is_cb_format_name(fmt)
-            )
-            if timed_cb_pair and weight.device.type == "cuda":
-                torch.cuda.synchronize(weight.device)
-            encode_started = time.perf_counter()
             w_dq = render_production_weight(
                 weight, render_fmt,
                 qname=qname,
@@ -457,15 +282,7 @@ def _render_dense_layer(
                 col_weights=(
                     None if col_weights is None else col_weights.get(qname)
                 ),
-                cb_serialization_context=cb_serialization_context,
                 gate_trace=gate_trace,
-                ldlq_missing_activation_ok=cold_declared,
-            )
-            if timed_cb_pair and weight.device.type == "cuda":
-                torch.cuda.synchronize(weight.device)
-            encode_seconds = (
-                time.perf_counter() - encode_started
-                if timed_cb_pair else 0.0
             )
             score_key = _render_score_record_key(qname, fmt)
             render_score = _render_score_record(
@@ -479,94 +296,25 @@ def _render_dense_layer(
                 input_global_scale_policy=stream_score_policy,
             )
             render_score_records[score_key] = render_score
-            canonical_render = _canonical_rendered_weight_tensor(
-                w_dq,
-                weight_dtype=weight.dtype,
-            )
-            expected_sidecar = expected_rerenders.get((qname, fmt))
-            if expected_sidecar is not None:
-                observed_tensor = _cb_cache_tensor_identity(canonical_render)
-                tensor_difference = first_identity_difference(
-                    expected_sidecar.get("tensor"),
-                    observed_tensor,
-                    path="tensor",
-                )
-                if tensor_difference is not None:
-                    field, stored, rerendered = tensor_difference
-                    raise RuntimeError(
-                        "selected CB assignment re-render differs from the "
-                        f"streamed scalar for {qname}@{fmt} at '{field}': "
-                        f"stored={identity_value_for_error(stored)} "
-                        f"rerendered={identity_value_for_error(rerendered)}; "
-                        "refusing publication"
-                    )
-
-            receipt = None
             if not retain_rendered:
-                if consume_render is None:
-                    result = dict(render_score)
-                else:
-                    result = consume_render(
-                        qname=qname,
-                        fmt=fmt,
-                        reference_weight=weight,
-                        rendered_weight=canonical_render,
-                        render_score=render_score,
-                    )
+                canonical_render = _canonical_rendered_weight_tensor(
+                    w_dq,
+                    weight_dtype=weight.dtype,
+                )
+                result = consume_render(
+                    qname=qname,
+                    fmt=fmt,
+                    reference_weight=weight,
+                    rendered_weight=canonical_render,
+                    render_score=render_score,
+                )
+                del canonical_render
                 if not isinstance(result, Mapping):
                     raise TypeError(
                         "streamed render consumer must return a Mapping for "
                         f"{qname}@{fmt}, got {type(result).__name__}"
                     )
-                # A receipt hashes the full canonical tensor and exists to
-                # authenticate a durable transient sidecar. Production-anchor
-                # AURA has no pair sidecar/cache directory; its exact consumer
-                # contract is already nested in the checkpoint identity, so a
-                # throwaway per-anchor tensor hash only burns CPU and UMA
-                # bandwidth on the hot path.
-                if cache_dir_path is not None:
-                    if consumer_identity is None:
-                        raise ValueError(
-                            "durable transient streamed render requires "
-                            "consumer_identity"
-                        )
-                    receipt = _build_cb_transient_consumer_receipt(
-                        qname=qname,
-                        fmt=fmt,
-                        tensor=canonical_render,
-                        render_score=render_score,
-                        consumer_identity=consumer_identity,
-                        result=result,
-                    )
-                transient_results[score_key] = dict(result)
-
-            if cache_dir_path is not None and _is_cb_format_name(fmt):
-                pair_identity = cb_pair_identities.get((qname, fmt))
-                if pair_identity is None:
-                    raise RuntimeError(
-                        f"streaming CB pair identity missing for {qname}@{fmt}"
-                    )
-                _write_cb_cache_pair_sidecar(
-                    cache_dir_path=cache_dir_path,
-                    qname=qname,
-                    fmt=fmt,
-                    identity=pair_identity,
-                    tensor=canonical_render,
-                    encode_seconds=encode_seconds,
-                    render_score=render_score,
-                    consumer_receipt=receipt,
-                    retained_weight=retain_rendered,
-                )
-                cb_pair_artifacts[score_key] = {
-                    "identity": pair_identity,
-                    "tensor": _cb_cache_tensor_identity(canonical_render),
-                    "render_score": render_score,
-                    "render_score_sha256": receipt.get("render_score_sha256")
-                    if isinstance(receipt, Mapping) else None,
-                    "consumer_receipt": receipt,
-                    "retained_weight": bool(retain_rendered),
-                }
-            if retain_rendered:
+            else:
                 _store_rendered_weight_entry(
                     weights=cache.weights,
                     cache_dir_path=cache_dir_path,
@@ -574,10 +322,9 @@ def _render_dense_layer(
                     fmt=fmt,
                     tensor=w_dq,
                     weight_dtype=weight.dtype,
-                    durable=_is_cb_format_name(fmt),
                 )
             rendered += 1
-            del canonical_render, w_dq
+            del w_dq
         del X
         activations.clear()
     if progress and rendered:
@@ -627,7 +374,6 @@ class StreamedProductionAnchorRenderer:
         profile,
         device: torch.device | str,
         col_weights: Mapping[str, torch.Tensor] | None,
-        cb_serialization_context,
         calibration_hash: str,
         arm_identity: Mapping[str, object],
         model_identity: Mapping[str, object],
@@ -756,7 +502,6 @@ class StreamedProductionAnchorRenderer:
         self.profile = profile
         self.device = torch.device(device)
         self.col_weights = col_weights
-        self.cb_serialization_context = cb_serialization_context
         self.calibration_hash = calibration_hash
         self.max_act_rows = int(max_act_rows)
         self.cold_qnames = cold_qnames
@@ -776,14 +521,6 @@ class StreamedProductionAnchorRenderer:
             failed={},
             cache_dir=None,
             metadata={},
-        )
-        _extend_production_cache_cb_render_identity(
-            self.cache,
-            self.formats_by_qname,
-            cb_serialization_context=self.cb_serialization_context,
-            col_weights=self.col_weights,
-            render_levers=self.levers,
-            render_mechanism_plan=self.mechanism_plan,
         )
         self.producer_git_commit = (
             str(producer_git_commit)
@@ -816,18 +553,18 @@ class StreamedProductionAnchorRenderer:
             "max_act_rows": self.max_act_rows,
             "arm_identity": dict(arm_identity),
             # This complete checkpoint-shard/value-map identity is the source
-            # binding authority on partial resume.  Per-layer CB source hashes
-            # cannot become complete when an already-checkpointed unit is
-            # intentionally not rematerialized; the immutable streamed-model
-            # content identity is the equivalent stronger binding.
+            # binding authority on partial resume: the immutable
+            # streamed-model content identity binds every unit, including one
+            # an already-written checkpoint lets a resume skip.
             "source_model": exact_model_identity,
             "source_weight_binding": (
                 "complete_streamed_model_content_identity"
             ),
             "cold_expert_provenance": raw_cold,
-            "cb_render_identity": self.cache.metadata.get(
-                CB_RENDER_IDENTITY_METADATA_KEY
-            ),
+            # Always None since the retired codebook lane was archived
+            # (2026-09-25, #1304). The key stays so the identity digest of an
+            # existing checkpoint still matches on resume.
+            "cb_render_identity": None,
             "producer_git_commit": self.producer_git_commit,
             "producer_source_sha256": self.producer_source_sha256,
             "retention": "one_render_or_explicit_layer_mapping",
@@ -842,9 +579,7 @@ class StreamedProductionAnchorRenderer:
         )
         self.render_count = 0
         self.max_live_rendered = 0
-        # Lazily bound source identities for units outside any CB scope
-        # (stock plans run no CB source binding); see
-        # source_weight_identity_for.
+        # Lazily bound source identities; see source_weight_identity_for.
         self._stock_source_identities: dict[str, dict[str, object]] = {}
 
     def render_layer(
@@ -904,18 +639,9 @@ class StreamedProductionAnchorRenderer:
             fisher_rows=self.fisher_rows,
             render_score_records=render_scores,
             col_weights=self.col_weights,
-            cb_serialization_context=self.cb_serialization_context,
             retain_rendered=True,
             consume_render=None,
-            consumer_identity=None,
-            calibration_hash=self.calibration_hash,
-            resume=False,
             max_act_rows=self.max_act_rows,
-            cb_pair_identities={},
-            cb_pair_artifacts={},
-            transient_results={},
-            cb_git_commit=self.producer_git_commit,
-            cb_producer_source_sha256=self.producer_source_sha256,
             joint_scale_modules=layer_scope,
             declared_cold_qnames=self.cold_qnames,
             progress=False,
@@ -1062,18 +788,9 @@ class StreamedProductionAnchorRenderer:
             fisher_rows=self.fisher_rows,
             render_score_records=render_scores,
             col_weights=self.col_weights,
-            cb_serialization_context=self.cb_serialization_context,
             retain_rendered=False,
             consume_render=_consume_once,
-            consumer_identity=consumer_identity,
-            calibration_hash=self.calibration_hash,
-            resume=False,
             max_act_rows=self.max_act_rows,
-            cb_pair_identities={},
-            cb_pair_artifacts={},
-            transient_results={},
-            cb_git_commit=self.producer_git_commit,
-            cb_producer_source_sha256=self.producer_source_sha256,
             joint_scale_modules=layer_scope,
             declared_cold_qnames=self.cold_qnames,
             progress=False,
@@ -1097,43 +814,11 @@ class StreamedProductionAnchorRenderer:
     ) -> dict[str, object]:
         """Return the unit's source-weight value identity.
 
-        A CB render binds it during source binding and this method reads it
-        back rather than hashing twice.  A stock (non-CB) unit runs no CB
-        source binding at all, so its identity is bound here lazily from the
-        live source weight -- the render is transient and the live module
-        weight is never mutated, so the tensor hashed is exactly the source.
-        A unit *inside* a CB scope with no binding stays a hard refusal: that
-        is a lost identity, not a stock plan.
+        The identity is bound lazily from the live source weight. The render
+        is transient and the live module weight is never mutated, so the
+        tensor hashed is exactly the source.
         """
-        identity = self.cache.metadata.get(CB_RENDER_IDENTITY_METADATA_KEY)
-        shapes = (
-            identity.get("source_weights_shapes")
-            if isinstance(identity, Mapping) else None
-        )
-        content = (
-            identity.get("source_weights_content_sha256")
-            if isinstance(identity, Mapping) else None
-        )
         name = str(qname)
-        if (
-            isinstance(shapes, Mapping)
-            and isinstance(content, Mapping)
-            and name in shapes
-            and name in content
-        ):
-            return {
-                "shape": [int(dim) for dim in shapes[name]],
-                "sha256": str(content[name]).lower(),
-            }
-        cb_scope = (
-            identity.get("cb_formats_by_qname")
-            if isinstance(identity, Mapping) else None
-        )
-        if isinstance(cb_scope, Mapping) and name in cb_scope:
-            raise RuntimeError(
-                f"production anchor renderer has no bound source identity "
-                f"for {name}"
-            )
         if name not in self.formats_by_qname:
             raise RuntimeError(
                 f"production anchor renderer was asked for the source "
@@ -1163,8 +848,8 @@ class StreamedProductionAnchorRenderer:
 
         The AURA journal restores records for units skipped on resume.  This
         method combines them with freshly bound rows and publishes a
-        source-complete *sparse anchor* CB identity; it never claims that the
-        unrendered ladder cells were materialized.
+        source-complete *sparse anchor* identity; it never claims that
+        unrendered cells were materialized.
         """
         from prismaquant.cost_stage_checkpoint import canonical_json
 
@@ -1203,33 +888,6 @@ class StreamedProductionAnchorRenderer:
                 where="production anchor source-weight identity",
             ),
         }
-        cb_identity = completed.get("cb_render_identity")
-        if isinstance(cb_identity, Mapping):
-            cb_identity = dict(cb_identity)
-            cb_qnames = list(cb_identity["cb_formats_by_qname"])
-            cb_shapes = {
-                name: normalized[name]["shape"] for name in cb_qnames
-            }
-            cb_content = {
-                name: normalized[name]["sha256"] for name in cb_qnames
-            }
-            cb_identity.update({
-                "source_weights_complete": True,
-                "source_weights_shapes": cb_shapes,
-                "source_weights_content_sha256": cb_content,
-                "source_weights_sha256": _combined_source_weights_sha256(
-                    cb_shapes, cb_content
-                ),
-                "render_scope": "sparse_production_anchors",
-            })
-            validate_cb_render_identity_metadata(
-                cb_identity,
-                expected_context=self.cb_serialization_context,
-                expected_formats_by_qname=self.formats_by_qname,
-                require_source_complete=True,
-                where="completed production anchor renderer",
-            )
-            completed["cb_render_identity"] = cb_identity
         self.identity = canonical_json(
             completed,
             where="completed production anchor renderer identity",
@@ -1251,7 +909,6 @@ def _render_packed_layer(
     max_rows_per_expert: int,
     render_mode: str,
     col_weights: Mapping[str, torch.Tensor] | None,
-    cb_serialization_context,
     progress: bool,
 ) -> dict:
     """Render this layer's packed experts via the shared packed-expert path,
@@ -1274,7 +931,6 @@ def _render_packed_layer(
         render_mode=render_mode,
         module_acts_override=module_acts,
         col_weights=col_weights,
-        cb_serialization_context=cb_serialization_context,
         progress=progress,
     )
 
@@ -1292,66 +948,6 @@ def _experts_qnames_by_layer(
             continue
         out[_layer_index_of(name, layers_prefix)].append(name)
     return out
-
-
-def _streaming_cb_render_scope(
-    model: nn.Module,
-    *,
-    dense_modules: Mapping[str, nn.Module],
-    experts_by_layer: Mapping[int | None, Sequence[str]],
-    render_assignment: Mapping[str, str],
-    assignment_nonbf16: Mapping[str, str],
-    requested_formats: Sequence[str],
-    render_formats_by_qname: Mapping[str, Sequence[str]],
-    render_scope: str,
-    profile,
-) -> dict[str, tuple[str, ...]]:
-    """Resolve the exact live-qname CB scope before the first shard write."""
-    from prismaquant.sensitivity_probe import _packed_experts_param_names
-
-    scope: dict[str, tuple[str, ...]] = {}
-    if render_scope == "format-menu":
-        del requested_formats
-        scope.update({
-            qname: tuple(
-                fmt for fmt in render_formats_by_qname.get(qname, ())
-                if _is_cb_format_name(fmt)
-            )
-            for qname in dense_modules
-            if any(
-                _is_cb_format_name(fmt)
-                for fmt in render_formats_by_qname.get(qname, ())
-            )
-        })
-    else:
-        for qname in dense_modules:
-            fmt = assignment_nonbf16.get(qname)
-            if fmt is not None and _is_cb_format_name(fmt):
-                scope[qname] = (fmt,)
-
-    if render_scope != "assignment":
-        return dict(sorted(scope.items()))
-
-    modules = dict(model.named_modules())
-    for experts_qname in sorted({
-        name for names in experts_by_layer.values() for name in names
-    }):
-        mod = modules[experts_qname]
-        for pn in _packed_experts_param_names(mod, profile):
-            full = f"{experts_qname}.{pn}" if experts_qname else pn
-            try:
-                recipe_key = profile.live_to_recipe_name(full)
-            except Exception:
-                recipe_key = full
-            fmt = render_assignment.get(recipe_key)
-            if fmt is None and recipe_key != full:
-                fmt = render_assignment.get(full)
-            if fmt is None:
-                continue
-            canonical = _canon_fmt(fmt)
-            if _is_cb_format_name(canonical):
-                scope[full] = (canonical,)
-    return dict(sorted(scope.items()))
 
 
 def run_streaming_render(
@@ -1372,13 +968,8 @@ def run_streaming_render(
     max_rows_per_expert: int = 2048,
     h_detail_dir: str | Path | None = None,
     col_weights: Mapping[str, torch.Tensor] | None = None,
-    cb_serialization_context=None,
     render_scope: str = "assignment",
-    retain_rendered: bool | None = None,
-    consume_render: Callable[..., Mapping[str, object]] | None = None,
-    consumer_identity: Mapping[str, object] | None = None,
     calibration_hash: str | None = None,
-    resume: bool = False,
     max_act_rows: int = 512,
     include_qnames: Sequence[str] | None = None,
     format_plan: Mapping[str, Sequence[str]] | None = None,
@@ -1393,18 +984,15 @@ def run_streaming_render(
     ``install``/``unload``/``set_priority`` are the ``StreamingContext`` hooks
     for a real streamed checkpoint. When ``None`` (an already-resident model,
     used by the tests) the loop just renders each layer in place — the render
-    math is identical, only weight residency differs.
+    math is identical, only weight residency differs. Every render is
+    materialized into the returned cache. (A transient, score-only
+    format-menu render existed only for the retired codebook lane, archived
+    2026-09-25, #1304.)
     """
     if render_scope not in {"assignment", "format-menu"}:
         raise ValueError(f"unsupported streaming render_scope={render_scope!r}")
     if render_scope == "assignment" and render_assignment is None:
         raise ValueError("assignment streaming render requires render_assignment")
-    if retain_rendered is None:
-        retain_rendered = render_scope == "assignment"
-    if render_scope == "assignment" and not retain_rendered:
-        raise ValueError(
-            "assignment streaming render must retain the selected weights"
-        )
     if max_act_rows < 1:
         raise ValueError("max_act_rows must be positive")
 
@@ -1415,30 +1003,6 @@ def run_streaming_render(
     requested_formats = tuple(
         dict.fromkeys(_canon_fmt(f) for f in formats if str(f).strip())
     )
-    if render_scope == "format-menu" and not retain_rendered:
-        unsupported = [
-            fmt for fmt in requested_formats
-            if fmt != "BF16" and not _is_cb_format_name(fmt)
-        ]
-        if unsupported:
-            raise ValueError(
-                "transient streamed format-menu is proven deterministic only "
-                f"for CB formats; unsupported={unsupported}"
-            )
-        if consume_render is not None and consumer_identity is None:
-            raise ValueError(
-                "a custom streamed render consumer requires an exact "
-                "consumer_identity"
-            )
-        if consumer_identity is None:
-            consumer_identity = {
-                "schema": (
-                    "prismaquant.production_weight_cache."
-                    "production_render_score_consumer.v1"
-                ),
-                "consumer": "production_render_score",
-            }
-
     cache = ProductionWeightCache(
         weights={},
         levers=dict(levers),
@@ -1528,33 +1092,7 @@ def run_streaming_render(
         model, profile, layers_prefix, num_layers,
     )
 
-    cb_scope = _streaming_cb_render_scope(
-        model,
-        dense_modules=dense_modules,
-        experts_by_layer=per_layer_experts,
-        render_assignment=render_assignment,
-        assignment_nonbf16=assignment_nonbf16,
-        requested_formats=requested_formats,
-        render_formats_by_qname=render_formats_by_qname,
-        render_scope=render_scope,
-        profile=profile,
-    )
-    _extend_production_cache_cb_render_identity(
-        cache,
-        cb_scope,
-        cb_serialization_context=cb_serialization_context,
-        col_weights=col_weights,
-        render_levers=levers,
-        render_mechanism_plan=mechanism_plan,
-    )
-    cb_git_commit = _production_cache_git_commit() if cb_scope else None
-    cb_producer_source_sha256 = (
-        _production_cache_source_sha256() if cb_scope else None
-    )
     render_score_records: dict[str, dict[str, object]] = {}
-    transient_results: dict[str, dict[str, object]] = {}
-    cb_pair_identities: dict[tuple[str, str], dict[str, object]] = {}
-    cb_pair_artifacts: dict[str, dict[str, object]] = {}
     coverage: dict[str, dict[str, object]] = {}
 
     def _process_layer(L: int | None) -> None:
@@ -1581,18 +1119,9 @@ def run_streaming_render(
                 fisher_rows=fisher_rows,
                 render_score_records=render_score_records,
                 col_weights=col_weights,
-                cb_serialization_context=cb_serialization_context,
-                retain_rendered=bool(retain_rendered),
-                consume_render=consume_render,
-                consumer_identity=consumer_identity,
-                calibration_hash=calibration_hash,
-                resume=resume,
+                retain_rendered=True,
+                consume_render=None,
                 max_act_rows=max_act_rows,
-                cb_pair_identities=cb_pair_identities,
-                cb_pair_artifacts=cb_pair_artifacts,
-                transient_results=transient_results,
-                cb_git_commit=cb_git_commit,
-                cb_producer_source_sha256=cb_producer_source_sha256,
                 progress=progress,
             )
             if experts and render_scope == "assignment":
@@ -1608,7 +1137,6 @@ def run_streaming_render(
                     max_rows_per_expert=max_rows_per_expert,
                     render_mode=expert_render_mode,
                     col_weights=col_weights,
-                    cb_serialization_context=cb_serialization_context,
                     progress=progress,
                 )
                 coverage.update(cov)
@@ -1625,14 +1153,6 @@ def run_streaming_render(
     # Head / root-level Linears (rare — lm_head is normally pinned-skipped) are
     # resident throughout; render them last with no install.
     _process_layer(None)
-
-    if cb_scope:
-        bind_production_cache_cb_source_weights(
-            cache,
-            {},
-            require_complete=True,
-            where="streaming ProductionWeightCache final source binding",
-        )
 
     # The packed-expert append writes its own render-score records, coverage
     # and counters onto the cache as each layer is rendered
@@ -1658,9 +1178,7 @@ def run_streaming_render(
     ) + len(packed_score_records)
     cache.metadata.update({
         "render_scope": render_scope,
-        "render_retention": (
-            "materialized" if retain_rendered else "transient-consumed"
-        ),
+        "render_retention": "materialized",
         "requested_formats": list(requested_formats),
         "requested_entries": int(requested_entries),
         "streaming": True,
@@ -1681,48 +1199,6 @@ def run_streaming_render(
             "records": dict(sorted(merged_score_records.items())),
         },
     })
-    if not retain_rendered:
-        cache.metadata["transient_render_artifacts"] = {
-            "schema": (
-                "prismaquant.production_weight_cache."
-                "transient_render_artifacts.v1"
-            ),
-            "entries": int(len(cb_pair_artifacts)),
-            "records": dict(sorted(cb_pair_artifacts.items())),
-            "consumer_identity": dict(consumer_identity or {}),
-            "consumer_results": dict(sorted(transient_results.items())),
-        }
-    if cb_pair_identities:
-        canonical_pairs = {
-            f"{qname}|{fmt}": pair
-            for (qname, fmt), pair in sorted(cb_pair_identities.items())
-        }
-        cache.metadata["cb_cache_pair_identity"] = {
-            "schema": "prismaquant.production_weight_cache.cb_pair_set.v1",
-            "pair_schema": CB_CACHE_PAIR_IDENTITY_SCHEMA,
-            "entries": len(canonical_pairs),
-            "identity_sha256": _canonical_json_sha256(
-                canonical_pairs,
-                where="streaming CB cache pair identity set",
-            ),
-            "published_entries": len(cb_pair_artifacts),
-            "artifact_sha256": _canonical_json_sha256(
-                cb_pair_artifacts,
-                where="streaming CB cache pair artifact set",
-            ),
-            "calibration_hashes": sorted({
-                str(pair["calibration_hash"])
-                for pair in canonical_pairs.values()
-            }),
-            "git_commits": sorted({
-                str(pair["git_commit"])
-                for pair in canonical_pairs.values()
-            }),
-            "producer_source_sha256": sorted({
-                str(pair["producer_source_sha256"])
-                for pair in canonical_pairs.values()
-            }),
-        }
     if cache.failed:
         cache.metadata["render_failures"] = {
             f"{q}|{fmt}": str(err)
@@ -1757,13 +1233,8 @@ def fill_production_weight_cache_streaming(
     max_rows_per_expert: int = 2048,
     h_detail_dir: str | Path | None = None,
     col_weights: Mapping[str, torch.Tensor] | None = None,
-    cb_serialization_context=None,
     render_scope: str = "assignment",
-    retain_rendered: bool | None = None,
-    consume_render: Callable[..., Mapping[str, object]] | None = None,
-    consumer_identity: Mapping[str, object] | None = None,
     calibration_hash: str | None = None,
-    resume: bool = False,
     max_act_rows: int = 512,
     include_qnames: Sequence[str] | None = None,
     format_plan: Mapping[str, Sequence[str]] | None = None,
@@ -1833,13 +1304,8 @@ def fill_production_weight_cache_streaming(
             max_rows_per_expert=max_rows_per_expert,
             h_detail_dir=h_detail_dir,
             col_weights=col_weights,
-            cb_serialization_context=cb_serialization_context,
             render_scope=render_scope,
-            retain_rendered=retain_rendered,
-            consume_render=consume_render,
-            consumer_identity=consumer_identity,
             calibration_hash=calibration_hash,
-            resume=resume,
             max_act_rows=max_act_rows,
             include_qnames=include_qnames,
             format_plan=format_plan,

@@ -14,8 +14,8 @@ Six things are pinned here, in the order they matter:
      and one whose unmeasured A side must leave the menu rather than be priced
      at the DP's global minimum;
   5. the wire contract: the reserved, globally unique wire id;
-  6. cost-measurement wiring — no codebook machinery, and the batched render
-     agreeing with the unbatched one.
+  6. cost-measurement wiring — the batched render agreeing with the
+     unbatched one.
 
 Updated 2026-09-02, when the Gridbook codebook lane was retired to
 ``archive/gridbook_lane_2026-09-02/``.  This rung was MX-FP8 FOR THAT LANE:
@@ -642,26 +642,13 @@ def test_the_wire_id_is_pinned_and_globally_unique():
 # 6. cost measurement wiring
 # ---------------------------------------------------------------------------
 
-def test_cost_measurement_needs_no_codebook_machinery():
-    """A non-CB rung takes the simple render path: no CB env stamps, no context."""
-    from prismaquant import measure_quant_cost as mqc
-
-    spec = fr.get_format(FMT)
-    assert spec.family not in mqc._CB_COST_FAMILIES
-    # cost_payload_provenance binds a CBSerializationContext only for CB menus;
-    # a menu of this rung alone must not demand one (it would raise without the
-    # CB_* env stamps set).
-    provenance = mqc.cost_payload_provenance([spec])
-    assert provenance.get("cb_serialization") in (None, {})
-
-
 def test_the_batched_render_is_the_same_codec_as_the_unbatched_one():
     """The batched path keys on element dtype, which this rung SHARES.
 
-    ``weight_element_dtype`` is "fp8_e4m3" here and on MXFP8_E4M3/FP8_CB, so a
-    fall-through would render this rung with the local codebook replica's E8M0
-    snap instead of its own saturating-ceil rule — pricing the batched path
-    with a different codec than the exporter writes.
+    ``weight_element_dtype`` is "fp8_e4m3" here and on MXFP8_E4M3, so a
+    fall-through would render this rung with MXFP8's E8M0 snap instead of its
+    own saturating-ceil rule — pricing the batched path with a different codec
+    than the exporter writes.
     """
     from prismaquant import measure_quant_cost as mqc
 

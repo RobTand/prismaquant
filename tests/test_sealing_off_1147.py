@@ -445,9 +445,9 @@ def test_an_aura_lineage_of_another_producer_is_reused_by_default(tmp_path, monk
     _, first = _aura_run(tmp_path, monkeypatch, source_sha="a" * 64, resume=False)
     monkeypatch.delenv(ENV, raising=False)
     capsys.readouterr()
-    model, payload = _aura_run(tmp_path, monkeypatch, source_sha="b" * 64, resume=True)
+    context, payload = _aura_run(tmp_path, monkeypatch, source_sha="b" * 64, resume=True)
     assert "[DEV-MODE] seal AURA checkpoint identity differs" in capsys.readouterr().out
-    assert model.forward_calls == 0
+    assert context.install_calls == 0
     assert repr(payload["costs"]) == repr(first["costs"])
     assert not sorted(tmp_path.glob("checkpoints.dev-archived-*"))
 
@@ -469,13 +469,13 @@ def test_aura_units_without_a_manifest_are_archived_and_recomputed_by_default(
     assert not sorted(tmp_path.glob("checkpoints.dev-archived-*"))
     monkeypatch.delenv(ENV, raising=False)
     capsys.readouterr()
-    model, payload = _aura_run(tmp_path, monkeypatch, source_sha="a" * 64, resume=True)
+    context, payload = _aura_run(tmp_path, monkeypatch, source_sha="a" * 64, resume=True)
     assert "[DEV-MODE] archived AURA checkpoint lineage" in capsys.readouterr().out
     archived = sorted(tmp_path.glob("checkpoints.dev-archived-*"))
     assert len(archived) == 1
     assert sorted(path.name for path in (archived[0] / "units").glob("*.pkl")) == units
     assert (root / "manifest.json").is_file()
-    assert model.forward_calls > 0
+    assert context.install_calls > 0
     assert repr(payload["costs"]) == repr(first["costs"])
 
 

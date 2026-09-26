@@ -21,12 +21,6 @@ from prismaquant.allocator_candidates import (
     source_format_for_kind,
     summarize_applicability_masks,
 )
-from prismaquant.nvfp4_cb_footprint import CBSerializationContext
-
-
-_LATTICE_CONTEXT = CBSerializationContext.production(
-    codebook_source="lattice",
-)
 
 
 def _stats(shape: tuple[int, ...]) -> dict[str, object]:
@@ -49,14 +43,18 @@ def _measured_cost() -> dict[str, object]:
     }
 
 
-def test_dsv4_mxfp4_packed_expert_boundary_and_audit_are_byte_exact():
+def test_mxfp4_packed_expert_boundary_and_audit_are_byte_exact():
+    # MXFP4 re-encodes an MXFP4 source at exactly its payload (4.25 bpp) and
+    # stays legal: equality is the boundary. NVFP4 (4.5 bpp) exceeds it by
+    # params/32 bytes and is eliminated. (Until 2026-09-25 this pinned the
+    # same boundary on two retired codebook rungs, #1304.)
     qname = "model.layers.0.mlp.experts.gate_up_proj"
     shape = (256, 4096, 2048)
     stats = {qname: _stats(shape)}
     costs = {
         qname: {
-            "FP8_CB_K33": _measured_cost(),
-            "FP8_CB_K34": _measured_cost(),
+            "MXFP4": _measured_cost(),
+            "NVFP4": _measured_cost(),
         },
     }
     records: list[dict] = []
@@ -64,29 +62,26 @@ def test_dsv4_mxfp4_packed_expert_boundary_and_audit_are_byte_exact():
     candidates = build_candidates(
         stats,
         costs,
-        [fr.get_format("FP8_CB_K33"), fr.get_format("FP8_CB_K34")],
+        [fr.get_format("MXFP4"), fr.get_format("NVFP4")],
         source_manifest={qname: "mxfp4"},
         mask_records=records,
-        cb_serialization_context=_LATTICE_CONTEXT,
     )
 
     assert source_format_for_kind("mxfp4").name == "MXFP4_SOURCE"
-    assert [candidate.fmt for candidate in candidates[qname]] == [
-        "FP8_CB_K33"
-    ]
-    k33 = candidates[qname][0]
-    assert k33.bits_per_param == 4.140625
-    # 4.140625 == 265/64 bits/parameter, pinned without float arithmetic.
+    assert [candidate.fmt for candidate in candidates[qname]] == ["MXFP4"]
+    mxfp4 = candidates[qname][0]
+    assert mxfp4.bits_per_param == 4.25
+    # 4.25 == 17/4 bits/parameter, pinned without float arithmetic.
     params = math.prod(shape)
-    assert 8 * k33.memory_bytes * 64 == 265 * params
+    assert 8 * mxfp4.memory_bytes * 4 == 17 * params
 
     assert len(records) == 1
     eliminated = records[0]
-    assert eliminated["format"] == "FP8_CB_K34"
+    assert eliminated["format"] == "NVFP4"
     assert eliminated["reason"] == SOURCE_BPP_EXCEEDED_REASON
     assert eliminated["shape"] == [256, 4096, 2048]
     assert eliminated["source_bpp"] == 4.25
-    assert eliminated["candidate_bpp"] == 4.265625
+    assert eliminated["candidate_bpp"] == 4.5
     assert eliminated["comparison"] == (
         "candidate_payload_bytes <= source_payload_bytes"
     )
@@ -95,14 +90,14 @@ def test_dsv4_mxfp4_packed_expert_boundary_and_audit_are_byte_exact():
     source_bits = eliminated["source_bpp_numerator_bits"]
     candidate_bits = eliminated["candidate_bpp_numerator_bits"]
     assert source_bits * 4 == 17 * params  # 4.25 == 17/4.
-    assert candidate_bits * 64 == 273 * params  # 4.265625 == 273/64.
+    assert candidate_bits * 2 == 9 * params  # 4.5 == 9/2.
     assert eliminated["candidate_payload_bytes"] > eliminated[
         "source_payload_bytes"
     ]
     assert (
         eliminated["candidate_payload_bytes"]
         - eliminated["source_payload_bytes"]
-        == params // 512
+        == params // 32
     )
 
     audit = summarize_applicability_masks(
@@ -118,16 +113,16 @@ def test_dsv4_mxfp4_packed_expert_boundary_and_audit_are_byte_exact():
     assert audit["source_census_units"] == 1
     assert audit["eliminated_candidates"] == [eliminated]
     assert audit["eliminated_candidates"][0]["source_bpp"] == 4.25
-    assert audit["eliminated_candidates"][0]["candidate_bpp"] == 4.265625
+    assert audit["eliminated_candidates"][0]["candidate_bpp"] == 4.5
 
 
-def test_dense_fp8_source_allows_k48_and_its_measured_equal_source_format():
+def test_dense_fp8_source_allows_a_lower_rung_and_its_measured_equal_source_format():
     source_kind = "fp8"
     source_format = "FP8_SOURCE"
     qname = "model.layers.0.self_attn.o_proj.fp8"
     shape = (8192, 4096)
     costs = {
-        "FP8_CB_K48": _measured_cost(),
+        "NVFP4": _measured_cost(),
         source_format: {
             "weight_mse": 0.0,
             "output_mse": 0.0,
@@ -139,22 +134,21 @@ def test_dense_fp8_source_allows_k48_and_its_measured_equal_source_format():
     candidates = build_candidates(
         {qname: _stats(shape)},
         {qname: costs},
-        [fr.get_format("FP8_CB_K48"), fr.get_format(source_format)],
+        [fr.get_format("NVFP4"), fr.get_format(source_format)],
         source_manifest={qname: source_kind},
         mask_records=records,
-        cb_serialization_context=_LATTICE_CONTEXT,
     )
 
     resolved_source = source_format_for_kind(source_kind)
     assert resolved_source is not None
     assert resolved_source.name == source_format
     by_format = {candidate.fmt: candidate for candidate in candidates[qname]}
-    assert set(by_format) == {"FP8_CB_K48", source_format}
+    assert set(by_format) == {"NVFP4", source_format}
     assert records == []
     assert by_format[source_format].memory_bytes == (
         resolved_source.memory_bytes_for_shape(shape)
     )
-    assert by_format["FP8_CB_K48"].memory_bytes < (
+    assert by_format["NVFP4"].memory_bytes < (
         by_format[source_format].memory_bytes
     )
 
@@ -168,11 +162,10 @@ def test_dense_ue8m0_w8a16_source_is_an_exact_identity_terminal():
 
     candidates = build_candidates(
         {qname: _stats(shape)},
-        {qname: {"FP8_CB_K48": _measured_cost()}},
-        [fr.get_format("FP8_CB_K48"), fr.get_format(source_format)],
+        {qname: {"NVFP4": _measured_cost()}},
+        [fr.get_format("NVFP4"), fr.get_format(source_format)],
         source_manifest={qname: "fp8_ue8m0"},
         mask_records=records,
-        cb_serialization_context=_LATTICE_CONTEXT,
     )
 
     resolved_source = source_format_for_kind("fp8_ue8m0")
@@ -180,12 +173,12 @@ def test_dense_ue8m0_w8a16_source_is_an_exact_identity_terminal():
     assert resolved_source.name == source_format
     assert not resolved_source.act_quant_changes_input
     by_format = {candidate.fmt: candidate for candidate in candidates[qname]}
-    assert set(by_format) == {"FP8_CB_K48", source_format}
+    assert set(by_format) == {"NVFP4", source_format}
     terminal = by_format[source_format]
     assert terminal.memory_bytes == resolved_source.memory_bytes_for_shape(shape)
     assert terminal.predicted_dloss == 0.0
     assert terminal.activation_pricing == BRANCH_SOURCE_PASSTHROUGH
-    assert by_format["FP8_CB_K48"].memory_bytes < terminal.memory_bytes
+    assert by_format["NVFP4"].memory_bytes < terminal.memory_bytes
     assert records == []
 
 
@@ -195,10 +188,9 @@ def test_unknown_source_kind_fails_closed_before_candidate_construction():
     assert source_format_for_kind("future_fp6") is None
     verdict = check_format_applicability(
         shape,
-        "FP8_CB_K33",
+        "NVFP4",
         qname=qname,
         source_kind="future_fp6",
-        cb_serialization_context=_LATTICE_CONTEXT,
     )
     assert not verdict.legal
     assert verdict.reason == SOURCE_BPP_UNKNOWN_REASON
@@ -206,11 +198,10 @@ def test_unknown_source_kind_fails_closed_before_candidate_construction():
     with pytest.raises(ValueError, match="source-bpp legality cannot be established"):
         build_candidates(
             {qname: _stats(shape)},
-            {qname: {"FP8_CB_K33": _measured_cost()}},
-            [fr.get_format("FP8_CB_K33")],
+            {qname: {"NVFP4": _measured_cost()}},
+            [fr.get_format("NVFP4")],
             source_manifest={qname: "future_fp6"},
-            cb_serialization_context=_LATTICE_CONTEXT,
-        )
+            )
 
 
 @pytest.mark.parametrize(("source_kind", "source_bpp"), [

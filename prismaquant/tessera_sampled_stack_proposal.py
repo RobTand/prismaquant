@@ -218,13 +218,13 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
             _require(len({expanded[name] for name in members}) == 1,
                      f'{stack}: stack assignment is not one exact rung')
         # The selected menu contains BF16 and Tessera only.  Ask the existing
-        # serialization owner for every expanded tensor; no CB sidecars exist
-        # in this menu, and no float bpp can grant a byte of budget tolerance.
+        # serialization owner for every expanded tensor; no float bpp can
+        # grant a byte of budget tolerance.
         _require(all(fmt == 'BF16' or parse_tessera_format_name(fmt) is not None
                      for fmt in expanded.values()), 'sampled proposal has an unsupported sidecar')
         exact = sum(serialized_candidate_payload(formats[fmt],
                     (stats[name]['out_features'], stats[name]['in_features']),
-                    qname=name, cb_serialization_context=None)[0]
+                    qname=name)[0]
                     for name, fmt in expanded.items())
         trace.append({'attempt': attempt, 'solver_bpp': solver_bpp,
                       'exact_mutable_bytes': exact, 'feasible': exact <= mutable_budget_bytes})

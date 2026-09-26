@@ -21,9 +21,6 @@ import pytest
 from prismaquant import (
     artifact_collection,
     artifact_collection_legacy,
-    cb_banked_books,
-    cb_learned_bundle,
-    cb_learned_promotion,
     cluster_campaign_contract,
     joint_catalog_extension,
     joint_cost_read_schedule,
@@ -32,7 +29,6 @@ from prismaquant import (
     joint_stageb_resources,
     measured_runtime_prices,
     native_runtime_cohort,
-    nvfp4_cb_footprint,
     prismasnap_checkpoint,
     prismasnap_moe_checkpoint,
     prismasnap_validation,
@@ -78,10 +74,7 @@ BYTE_DOCUMENTS = tuple(text.encode("utf-8") for text in DOCUMENTS) + (b"\xff\xfe
 
 
 TEXT_LOADERS = {
-    "cb_banked_books": lambda text: cb_banked_books._strict_json_loads(text, where="book"),
-    "cb_learned_bundle": lambda text: cb_learned_bundle._strict_json_loads(text, where="bundle"),
     "cluster_campaign_contract": cluster_campaign_contract.parse_campaign_manifest,
-    "nvfp4_cb_footprint": lambda text: nvfp4_cb_footprint._strict_json_loads(text, where="footprint"),
     "quality_prefill_contract": lambda text: quality_prefill_contract.decode_strict_json(text, where="manifest"),
     "quality_prefill_pb_adapter": lambda text: quality_prefill_pb_adapter.load_strict_json(text, where="adapter"),
     "runtime_provenance": lambda text: runtime_provenance._strict_json(text, "/p/m.json", "manifest"),
@@ -99,7 +92,6 @@ BYTE_LOADERS = {
 FILE_LOADERS = {
     "artifact_collection": artifact_collection.load_record,
     "artifact_collection_legacy": lambda path: artifact_collection_legacy._load_json_source(path, logical_schema="s.v1"),
-    "cb_learned_promotion": cb_learned_promotion.read_promotion_receipt_payload,
     "measured_runtime_prices": measured_runtime_prices._json,
     "prismasnap_checkpoint": lambda path: prismasnap_checkpoint._load_json(path, where="checkpoint"),
 }
@@ -282,11 +274,6 @@ def test_fail_refuses_as_before(site):
     row = GOLDEN.call(lambda: module._fail("a refusal"))
     assert row["raised"] == f"{error.__module__}.{error.__qualname__}"
     assert row["text"] == prefix + "a refusal"
-
-
-@pytest.mark.parametrize("value", ({}, {"a": 1}, MappingProxyType({}), [], None, "text"))
-def test_promotion_receipt_mapping_refuses_as_before(value):
-    GOLDEN.call(lambda: cb_learned_promotion._mapping(value, where="receipt"))
 
 
 @pytest.mark.parametrize("value", ({"a": 1, "b": 2}, {"a": 1}, {"a": 1, "c": 3}, {}, [], None))

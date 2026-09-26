@@ -112,7 +112,7 @@ def _aura_payload():
         seed_base=0, temperature=1.0, dw_dtype="float32",
         measurement_dtype=torch.float32, n_linear_chunks=1,
         calib_ids=torch.zeros(1, 4, dtype=torch.long),
-        omitted_packed_experts=[], cb_provenance={"cb": "none"},
+        omitted_packed_experts=[],
         checkpoint_git_commit="test", collect_col_energy=False,
         s2={}, s4={}, x2_probe={}, dw_src={},
         g_trace={name: 1.0 for name in linears}, col_energy={},

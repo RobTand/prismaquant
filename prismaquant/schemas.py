@@ -38,13 +38,39 @@ class CostEntry(TypedDict, total=False):
     cost_source: NotRequired[str]
     weight_mse_per_expert: NotRequired[list[float]]
     cost_source_per_expert: NotRequired[list[str]]
-    cb_minchain_identity_per_expert: NotRequired[list[dict]]
-    cb_minchain_interpolation: NotRequired[dict]
     error: str
 
 
 class SchemaValidationError(ValueError):
     """Raised when a PrismaQuant handoff artifact is structurally invalid."""
+
+
+#: Shape of a retired codebook rung name (the Gridbook lane, archived
+#: 2026-09-25, #1304). A shape test only, kept here so the torch-free readers
+#: (this module, ``layer_config``) can spot one; the authority is
+#: ``format_registry.RETIRED_CODEBOOK_FORMAT_RE``, reached through
+#: ``get_format`` by :func:`refuse_retired_codebook_format`.
+RETIRED_CODEBOOK_NAME_RE = re.compile(r"^(?:NVFP4_CB_K|FP8_CB_K)\d+$")
+RETIRED_CODEBOOK_ARCHIVE = "archive/gridbook_lane_2026-09-02"
+#: Cost-row fields only the retired codebook lane's min-chain encoder wrote.
+_RETIRED_CODEBOOK_COST_FIELDS = (
+    "cb_minchain_identity_per_expert",
+    "cb_minchain_interpolation",
+)
+
+
+def refuse_retired_codebook_format(name: str) -> None:
+    """Raise ``RetiredFormatError`` when ``name`` is a retired codebook rung.
+
+    Returns for every other name. ``format_registry`` imports torch, so it is
+    imported only on this refusal path and the caller stays torch-free.
+    """
+    if not RETIRED_CODEBOOK_NAME_RE.fullmatch(str(name).upper()):
+        return
+    from prismaquant.format_registry import get_format
+
+    get_format(str(name))
+    raise AssertionError(f"{name!r} is a retired codebook rung but resolved")
 
 
 def _label(path: str | None) -> str:
@@ -184,6 +210,7 @@ def validate_cost_payload(payload, path: str | None = None):
         for idx, fmt in enumerate(formats):
             if not isinstance(fmt, str):
                 _fail(path, f".formats[{idx}]", "format name must be a string")
+            refuse_retired_codebook_format(fmt)
     for name, layer_costs in costs.items():
         if not isinstance(name, str):
             _fail(path, ".costs", "layer keys must be strings")
@@ -192,6 +219,7 @@ def validate_cost_payload(payload, path: str | None = None):
         for fmt, entry in layer_costs.items():
             if not isinstance(fmt, str):
                 _fail(path, f".costs[{name!r}]", "format keys must be strings")
+            refuse_retired_codebook_format(fmt)
             if not _is_mapping(entry):
                 _fail(path, f".costs[{name!r}][{fmt!r}]", "entry is not a mapping")
             if "error" in entry:
@@ -249,63 +277,15 @@ def validate_cost_payload(payload, path: str | None = None):
                         f".costs[{name!r}][{fmt!r}].cost_source_per_expert",
                         "must match weight_mse_per_expert length",
                     )
-            if "cb_minchain_identity_per_expert" in entry:
-                identities = entry["cb_minchain_identity_per_expert"]
-                if (not isinstance(identities, Sequence)
-                        or isinstance(identities, (str, bytes))):
+            for field in _RETIRED_CODEBOOK_COST_FIELDS:
+                if field in entry:
                     _fail(
                         path,
-                        f".costs[{name!r}][{fmt!r}]"
-                        ".cb_minchain_identity_per_expert",
-                        "must be a sequence when present",
-                    )
-                from .cb_minchain import validate_chain_identity
-
-                for idx, identity in enumerate(identities):
-                    try:
-                        validate_chain_identity(
-                            identity,
-                            where=(
-                                f".costs[{name!r}][{fmt!r}]"
-                                f".cb_minchain_identity_per_expert[{idx}]"
-                            ),
-                        )
-                    except ValueError as exc:
-                        _fail(path, "", str(exc))
-                mse_values = entry.get("weight_mse_per_expert")
-                if (isinstance(mse_values, Sequence)
-                        and not isinstance(mse_values, (str, bytes))
-                        and len(identities) != len(mse_values)):
-                    _fail(
-                        path,
-                        f".costs[{name!r}][{fmt!r}]"
-                        ".cb_minchain_identity_per_expert",
-                        "must match weight_mse_per_expert length",
-                    )
-            if "cb_minchain_interpolation" in entry:
-                interpolation = entry["cb_minchain_interpolation"]
-                if not _is_mapping(interpolation):
-                    _fail(
-                        path,
-                        f".costs[{name!r}][{fmt!r}]"
-                        ".cb_minchain_interpolation",
-                        "must be an object when present",
-                    )
-                if interpolation.get("semantic") != (
-                    "v2_accept_all_plus_per_layer_audit"
-                ):
-                    _fail(
-                        path,
-                        f".costs[{name!r}][{fmt!r}]"
-                        ".cb_minchain_interpolation.semantic",
-                        "has an unsupported interpolation semantic",
-                    )
-                if interpolation.get("layer_audit_pass") is not True:
-                    _fail(
-                        path,
-                        f".costs[{name!r}][{fmt!r}]"
-                        ".cb_minchain_interpolation.layer_audit_pass",
-                        "must be true for an interpolated row",
+                        f".costs[{name!r}][{fmt!r}].{field}",
+                        "belongs to the retired Gridbook codebook lane's "
+                        "min-chain encoder (archived 2026-09-25, #1304); a "
+                        "row carrying it cannot be priced. See "
+                        f"{RETIRED_CODEBOOK_ARCHIVE}/README.md.",
                     )
             if ("output_mse_measured" in entry
                     and not isinstance(entry["output_mse_measured"], bool)):

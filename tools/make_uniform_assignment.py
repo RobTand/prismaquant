@@ -3,7 +3,7 @@
 
 **Why this exists.** The ENDPOINTS of the format-choice substitution ladder
 (``docs/design/format_choice_4p5.md`` §5 Stage 2) are *pure* single-format
-builds — pure ``NVFP4`` and pure ``FP8_CB_K36`` at the same 4.5 rung — so that
+builds — for example pure ``NVFP4`` against one other pure format — so that
 the total format effect on quality and serving time is measured with **zero
 allocation confound**. Neither endpoint is shippable: a single-rung menu is the
 sanctioned cost-model-isolation pattern only (``FP8 in every recipe``). This
@@ -41,8 +41,8 @@ Usage::
 
     python3 -m tools.make_uniform_assignment \\
         --model /home/rob/models/Qwen3-0.6B \\
-        --format FP8_CB_K36 \\
-        --target-profile nvfp4_cb \\
+        --format NVFP4 \\
+        --target-profile vllm_packed_moe \\
         --out $WORK_DIR/artifacts/layer_config.json \\
         --report $WORK_DIR/artifacts/uniform_assignment_report.json
 """
@@ -367,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="source HF model directory")
     ap.add_argument("--format", required=True,
                     help="the ONE format every quantizable unit gets "
-                         "(e.g. NVFP4, FP8_CB_K36)")
+                         "(e.g. NVFP4, FP8_DYNAMIC)")
     ap.add_argument("--out", required=True, help="output layer_config.json")
     ap.add_argument("--target-profile", default=None,
                     help="serving profile override; unset lets the "

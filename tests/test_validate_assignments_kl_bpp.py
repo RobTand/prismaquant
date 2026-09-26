@@ -4,7 +4,6 @@ from prismaquant import format_registry as fr
 from prismaquant.validate_assignments_kl import (
     _assignment_bpp_details,
     _kl_repeat_summary,
-    _merge_cb_identities_for_assignment,
     _profile_excludes_bpp_name,
 )
 
@@ -104,60 +103,6 @@ def test_bpp_exclusion_is_profile_driven_not_bf16_default():
     assert _profile_excludes_bpp_name(
         "model.visual.blocks.0.mlp.fc1", "NVFP4", profile,
     )
-
-
-def test_candidate_promotion_drops_only_inherited_stale_cb_identity():
-    from prismaquant.nvfp4_cb_footprint import (
-        CBSerializationContext,
-        cb_assignment_serialization_stamps,
-        validate_cb_assignment_serialization_stamps,
-    )
-
-    promoted = "model.layers.0.mlp.gate_proj"
-    retained = "model.layers.0.mlp.down_proj"
-    base_assignment = {
-        promoted: "NVFP4_CB_K16",
-        retained: "NVFP4_CB_K16",
-    }
-    shapes = {promoted: (4, 256), retained: (4, 256)}
-    context = CBSerializationContext.production()
-    base_identities = cb_assignment_serialization_stamps(
-        base_assignment,
-        shapes,
-        context=context,
-    )
-    candidate_assignment = {
-        promoted: "NVFP4",
-        retained: "NVFP4_CB_K16",
-    }
-
-    merged = _merge_cb_identities_for_assignment(
-        candidate_assignment,
-        base_identities,
-        {},
-    )
-
-    assert set(merged) == {retained}
-    validate_cb_assignment_serialization_stamps(
-        candidate_assignment,
-        shapes,
-        context=context,
-        stamps=merged,
-        where="Pareto candidate regression",
-    )
-
-
-def test_candidate_owned_stale_cb_identity_is_not_hidden():
-    promoted = "model.layers.0.mlp.gate_proj"
-    candidate_assignment = {promoted: "NVFP4"}
-
-    merged = _merge_cb_identities_for_assignment(
-        candidate_assignment,
-        {promoted: "inherited-stale"},
-        {promoted: "candidate-stale"},
-    )
-
-    assert merged == {promoted: "candidate-stale"}
 
 
 def test_kl_repeat_summary_reports_stderr_and_ucb():

@@ -349,7 +349,6 @@ def run_harvest(args: argparse.Namespace) -> dict[str, object]:
             activation_index=activation_index,
             render_levers=dict(RENDER_LEVERS),
             col_weights={},
-            cb_serialization_context=None,
             calibration_hash=probe_calib_hash,
             arm_identity=arm_identity,
             model_identity=model_identity,

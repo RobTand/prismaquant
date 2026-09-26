@@ -344,7 +344,7 @@ esac
 # objective: the render that produces the allocator's cost must be the render
 # the exporter ships. The right key already existed —
 # `measure_quant_cost._cost_render_uses_imatrix` decides it per FORMAT FAMILY
-# (the CB families always weighted, gguf tracking PRISMAQUANT_GGUF_IMATRIX) —
+# (gguf tracking PRISMAQUANT_GGUF_IMATRIX) —
 # the gates just did not use it, which is why `COST_MODE=local` had to stand
 # in for "weighted render" and blocked two objectives for no reason of their
 # own.
@@ -352,16 +352,11 @@ esac
 #   COST_RENDER=inline      -> the cost stage calls the family's own qdq:
 #                              faithful by construction.
 #   COST_RENDER=cached-menu -> faithful iff the ProductionWeightCache render
-#                              applies the same imatrix. Since CB Milestone C
-#                              (R3: `col_weights` on render_production_weight)
-#                              it can, given the harvested vector — so the
+#                              applies the same imatrix. Since R3
+#                              (`col_weights` on render_production_weight) it
+#                              can, given the harvested vector — so the
 #                              pipeline harvests it and passes --col-weights,
 #                              and this block records that requirement.
-#
-# NOT a promotion: AURA-on-CB is now REACHABLE, not recommended. Its −38% /
-# −17.9% wins are native-lane results and CB's error surface (VQ + the expert
-# route-flip floor) is a different animal; it stays opt-in pending its own
-# served A/B.
 # -----------------------------------------------------------------------
 COST_CACHE_COL_WEIGHTS_REQUIRED=0
 if [[ "$EXPORT_CONTAINER" == "gguf" ]]; then
@@ -393,7 +388,7 @@ PY
   fi
   if [[ "$COST_RENDER" == "cached-menu" && "$LANE_RENDER_WEIGHTED" == "1" ]]; then
     COST_CACHE_COL_WEIGHTS_REQUIRED=1
-    echo "[pipeline] lane ${EXPORT_CONTAINER}: COST_RENDER=cached-menu on an imatrix-weighted family -> the cost cache will be built with --col-weights (CB Milestone C). COST_OBJECTIVE=${COST_OBJECTIVE} on this lane is OPT-IN and NOT the default: its accuracy case is a native-lane result and has no served CB A/B yet."
+    echo "[pipeline] lane ${EXPORT_CONTAINER}: COST_RENDER=cached-menu on an imatrix-weighted family -> the cost cache will be built with --col-weights (R3). COST_OBJECTIVE=${COST_OBJECTIVE} on this lane is OPT-IN and NOT the default: its accuracy case is a native-lane result."
   fi
 fi
 
@@ -454,11 +449,6 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
       ;;
   esac
 fi
-
-# NVFP4-CB / FP8-CB codebook lane consistency gates (docs/lanes/nvfp4-cb/
-# format-pipeline.md §6, LAYOUT.md). The rendering-confound half is now the
-# shared render-faithfulness assertion above (R3); what remains here is the
-# serving-profile and production-cache consistency the CB container needs.
 
 if [[ "$DEVICE" != cuda* || "$EXPORT_DEVICE" != cuda* ]]; then
   echo "[pipeline] ERROR: PrismaQuant production pipeline is GPU-or-bust; DEVICE and EXPORT_DEVICE must be cuda*" >&2
@@ -832,13 +822,16 @@ fi
 # measured end-to-end, FP8 kept in the menu (real-KL rejects it, no bans).
 : "${AURA_EXPERT_NSAMPLES:=16}"
 : "${AURA_EXPERT_SEQLEN:=512}"
-# Imatrix (column-weight) harvest + ladder interpolation. These are named CB_*
-# for the lane that first needed them; the harvest is what the GGUF lane and
-# every imatrix-weighted cost cache / production cache read, so it stays.
-# `CB_EXPERT_EMPIRICAL` went with the Gridbook codebook lane on 2026-09-02: it
-# only ever selected the [2d-CB] empirical packed-expert stage on an
-# `EXPORT_CONTAINER=nvfp4_cb` run, and that container now fails closed above.
-# See archive/gridbook_lane_2026-09-02/README.md.
+# Imatrix (column-weight) harvest. CB_COL_WEIGHTS is named for the lane that
+# first needed it; the harvest is what the GGUF lane and every imatrix-weighted
+# cost cache read, so it stays. `CB_EXPERT_EMPIRICAL` went with the Gridbook
+# codebook lane on 2026-09-02, and the lane's cost/render code, including the
+# K-rung ladder that CB_LADDER_INTERP drove, was archived on 2026-09-25 (#1304;
+# archive/gridbook_lane_2026-09-02/README.md). CB_EXPERT_NSAMPLES /
+# CB_EXPERT_SEQLEN / CB_EXPERT_SAMPLE / CB_LADDER_INTERP now drive nothing.
+# Their defaults stay only because the stage-settings hash below records them:
+# dropping a hashed entry changes the hash of every existing WORK_DIR and would
+# force a loud rebuild that no computation actually requires.
 : "${CB_EXPERT_NSAMPLES:=16}"
 : "${CB_EXPERT_SEQLEN:=512}"
 : "${CB_EXPERT_SAMPLE:=0}"
@@ -922,36 +915,12 @@ case "$COST_MODE" in
     COST_PATH="${BASE_COST_PATH}"
     PRODUCTION_RENDER_COST_CACHE_PATH=""
     PRODUCTION_RENDER_COST_CACHE_DIR=""
-    # One user knob drives BOTH ladder wirings (dense local cost + the
-    # empirical expert stage): CB_LADDER_INTERP=1.
-    if [[ "$CB_LADDER_INTERP" == "1" ]]; then
-      export PRISMAQUANT_CB_LADDER_INTERP=1
-    fi
     ;;
   grouped-kl)
     echo "[pipeline] ERROR: COST_MODE=grouped-kl — the grouped-KL (fusion-matched) cost surrogate is archived under archive/grouped_kl_2026-05-28. It fixed a local allocator non-monotonicity but LOST the shipped vLLM A/B on Qwen3.6-27B (worse exact vLLM KL and direct WikiText PPL than the shipped 5.5 artifact); see archive/grouped_kl_2026-05-28/README.md. Use production-render-score (default), aura, or local." >&2
     exit 2
     ;;
   production-render-score|production-render)
-    # FAIL-CLOSED: this mode is UNLICENSED on any CB/CBL-containing menu.
-    # Its score field is `weight_mse` (since audit M6), and the per-unit
-    # factorization mse(e,K) ~= s_e * g(K) — the assumption the whole
-    # adaptive-render/allocation story rests on — FAILS in weight currency
-    # across a codebook-basis change: CV over experts of
-    # weight_mse_CBL/weight_mse_lattice is monotone in rung, 0.088 (K28) ->
-    # 0.224 (K48), with 8 of 10 rung-pairs breaching the 0.10 bar. The same
-    # six planes pass lattice->lattice at CV 0.067/0.056, so it is not a
-    # cohort artifact. Mechanism: a learned book is fit to the POOLED weight
-    # distribution (redistributing error across experts rather than scaling
-    # it), and CBL is itself selected under an imatrix-weighted weight metric
-    # (`err = err * wq` in the CB qdq) — shaped in one currency,
-    # measured in another. It was also already shown to mis-rank LDLQ.
-    # Allocating a CB menu on this estimator means allocating in the currency
-    # that demonstrably does not transfer. Use aura (the default) or local.
-    if [[ "${FORMATS:-}" == *_CB_* ]]; then
-      echo "[pipeline] ERROR: COST_MODE=$COST_MODE is unlicensed on a CB/CBL menu (FORMATS=${FORMATS:-unset}). Its score field is weight_mse, the currency in which the per-unit factorization FAILS across a codebook-basis change (CV 0.088 at K28 -> 0.224 at K48; 8/10 rung-pairs breach the 0.10 bar, while lattice->lattice passes at 0.067/0.056). Activation currency holds where weight currency does not. This spelling remains valid only for reproducing pre-CB artifacts on non-CB menus. Use COST_MODE=aura (default) or local." >&2
-      exit 2
-    fi
     BASE_COST_PATH="${WORK_DIR}/artifacts/cost_baseline.pkl"
     COST_PATH="${WORK_DIR}/artifacts/cost.pkl"
     PRODUCTION_RENDER_COST_CACHE_PATH="${WORK_DIR}/artifacts/production_render_score_cache.pkl"
@@ -1192,11 +1161,12 @@ STAGE_SETTINGS_ENV=(
   "SERVE_DEVICE_BUDGET_BYTES=${SERVE_DEVICE_BUDGET_BYTES:-}"
   "SERVE_KV_BYTES=${SERVE_KV_BYTES:-0}"
   "SERVE_PEAK_SCRATCH_BYTES=${SERVE_PEAK_SCRATCH_BYTES:-0}"
-  # CB_SCALE_CODING lost its shell DEFAULT on 2026-09-02 with the Gridbook
-  # lane (archive/gridbook_lane_2026-09-02/), but it keeps its settings-hash
-  # entry, exactly like the CB keys around it: the CB render plumbing still
-  # reads it (nvfp4_cb_footprint.py, debt D34), so a persisted cost/render
-  # artifact must still invalidate when an operator sets it.
+  # The CB_* and PRISMAQUANT_CB_* entries below configured the retired
+  # Gridbook codebook lane, whose cost/render code was archived on 2026-09-25
+  # (#1304, archive/gridbook_lane_2026-09-02/). Nothing reads them now. They
+  # stay in the hash on purpose: removing an entry changes the settings hash
+  # of every existing WORK_DIR and forces a loud rebuild with no computational
+  # cause. Drop them only together with a deliberate hash-version bump.
   "CB_SCALE_CODING=${CB_SCALE_CODING:-}"
   "CB_CODEBOOK_SOURCE=${CB_CODEBOOK_SOURCE:-}"
   "CB_CODEBOOK_SOURCE_SCOPE=${CB_CODEBOOK_SOURCE_SCOPE:-}"
@@ -1384,81 +1354,6 @@ print(
     f"[pipeline] {stage} wrote {out}: {len(cw)} entries "
     f"value_sha256={provenance['final_value_sha256']}"
 )
-PY
-}
-
-ensure_cb_learned_bundle() {
-  if [[ "${CB_CODEBOOK_SOURCE_SCOPE:-none}" == "none" ]]; then
-    return 0
-  fi
-  harvest_cb_col_weights "$1"
-  local col_sha
-  col_sha="$(sha256sum "$CB_COL_WEIGHTS" | cut -d' ' -f1)"
-  local trainer_version="${CB_LEARNED_TRAINER_VERSION:-v1}"
-  local promotion_sha=""
-  if [[ -n "${CB_LEARNED_PROMOTION_RECEIPT:-}" ]]; then
-    promotion_sha="$(sha256sum "$CB_LEARNED_PROMOTION_RECEIPT" | cut -d' ' -f1)"
-  fi
-  local source_identity_sha=""
-  if [[ -n "${CB_LEARNED_SOURCE_MODEL_IDENTITY_CACHE:-}" ]]; then
-    source_identity_sha="$(sha256sum "$CB_LEARNED_SOURCE_MODEL_IDENTITY_CACHE" | cut -d' ' -f1)"
-  fi
-  # The keying is part of a book's identity, so a bundle built under the other
-  # rule must rebuild loudly rather than be reused.
-  require_stage_settings "$CB_CODEBOOK_BUNDLE" cb-learned-bundle \
-    "CB_COL_WEIGHTS_SHA256=$col_sha" \
-    "CB_ROUTED_BOOK_KEYING=${CB_ROUTED_BOOK_KEYING:-stack}" \
-    "CB_LEARNED_TRAINER_VERSION=$trainer_version" \
-    "CB_LEARNED_PROMOTION_RECEIPT_SHA256=$promotion_sha" \
-    "CB_LEARNED_SOURCE_MODEL_IDENTITY_SHA256=$source_identity_sha"
-  if [[ -f "$CB_CODEBOOK_BUNDLE" ]]; then
-    # Full name/shape/digest/cell validation; a same-path replacement never
-    # counts as an immutable bundle merely because the file exists.
-    python3 - "$CB_CODEBOOK_BUNDLE" <<'PY'
-import sys
-from prismaquant.cb_learned_bundle import load_bundle
-bundle = load_bundle(sys.argv[1])
-print(f"[pipeline] learned CB bundle verified: {bundle.path} "
-      f"sha256={bundle.bundle_content_sha256}")
-PY
-    return 0
-  fi
-  echo "[pipeline] $1 training immutable learned CB cells before any cost/cache/KL render ..."
-  local routed_book_args=()
-  if [[ -n "${CB_ROUTED_MOE_BOOK_SELECTION:-}" ]]; then
-    routed_book_args+=(
-      --routed-moe-book-selection "$CB_ROUTED_MOE_BOOK_SELECTION"
-    )
-  fi
-  local imatrix_args=(--col-weights "$CB_COL_WEIGHTS")
-  local learned_v2_args=()
-  if [[ "$trainer_version" == "v2" ]]; then
-    imatrix_args=(--imatrix-probe "$PROBE_PATH")
-    learned_v2_args=(
-      --promotion-receipt "$CB_LEARNED_PROMOTION_RECEIPT"
-      --source-model-identity-cache "$CB_LEARNED_SOURCE_MODEL_IDENTITY_CACHE"
-    )
-  fi
-  python3 -m prismaquant.build_cb_learned_bundle \
-    --model-dir "$MODEL_PATH" \
-    "${imatrix_args[@]}" \
-    --formats "$FORMATS" \
-    --output "$CB_CODEBOOK_BUNDLE" \
-    --device "$DEVICE" \
-    --trainer-version "$trainer_version" \
-    --routed-book-keying "${CB_ROUTED_BOOK_KEYING:-stack}" \
-    "${learned_v2_args[@]+"${learned_v2_args[@]}"}" \
-    "${routed_book_args[@]}"
-}
-
-formats_contain_cb() {
-  python3 - "$1" <<'PY'
-import sys
-from prismaquant import format_registry as fr
-from prismaquant.nvfp4_cb_footprint import is_cb_format
-
-formats = [item.strip() for item in sys.argv[1].split(",") if item.strip()]
-raise SystemExit(0 if any(is_cb_format(fr.get_format(item).name) for item in formats) else 1)
 PY
 }
 
@@ -1887,7 +1782,6 @@ if [[ -n "$SERVE_DISPATCH_TABLE" ]]; then
   fi
   echo "[pipeline] serving constraints ACTIVE: table=$SERVE_DISPATCH_TABLE mix='${SERVE_WORKLOAD_MIX}' (PROPOSAL DATA; the served NATIVE-PARITY protocol is the release gate)"
 fi
-ALLOCATOR_CB_ARGS=()
 # Recheck the exact original input (including symlink target) after probe work
 # and immediately before the allocator consumes it. Never rewrite that input.
 if [[ -n "$PREPRICED_COST_REPORT" ]]; then
@@ -1903,7 +1797,6 @@ python3 -m prismaquant.allocator \
   "${ALLOCATOR_PROFILE_ARGS[@]}" \
   "${ALLOCATOR_BUDGET_ARGS[@]+"${ALLOCATOR_BUDGET_ARGS[@]}"}" \
   "${ALLOCATOR_SERVE_ARGS[@]+"${ALLOCATOR_SERVE_ARGS[@]}"}" \
-  "${ALLOCATOR_CB_ARGS[@]+"${ALLOCATOR_CB_ARGS[@]}"}" \
   --pareto-targets "$PARETO_TARGETS" \
   --visual-format "$VISUAL_FORMAT" \
   --visual-sensitivity "$VISUAL_SENSITIVITY" \
@@ -1927,8 +1820,6 @@ if [[ "$PRODUCTION_CACHE" != "0" && "$PRODUCTION_CACHE" != "false" && "$PRODUCTI
   PROD_CACHE_RAW="${WORK_DIR}/artifacts/production_weight_cache_raw.pkl"
   PROD_CACHE_RECACHED="${WORK_DIR}/artifacts/production_weight_cache_recached.pkl"
   CACHE_FORMATS="$PRODUCTION_CACHE_FORMATS"
-  PRODUCTION_CACHE_CB_ARGS=()
-  PRODUCTION_CACHE_CB_SETTINGS=()
   if [[ "$SELECTION_MODE" == "validated-surrogate" ]]; then
     if [[ -z "$ALLOCATOR_PARETO_DIR" || ! -f "$ALLOCATOR_PARETO_DIR/manifest.json" ]]; then
       echo "[pipeline] ERROR: validated-surrogate selection requires allocator pareto assignments at $ALLOCATOR_PARETO_DIR" >&2
@@ -1956,19 +1847,10 @@ PY
       echo "[pipeline] ERROR: validated-surrogate selection has no non-BF16 cache formats" >&2
       exit 2
     fi
-    if formats_contain_cb "$CACHE_FORMATS"; then
-      harvest_cb_col_weights "[4/4] validated-frontier cache"
-      CB_COL_WEIGHTS_SHA256=$(sha256sum "$CB_COL_WEIGHTS" | cut -d' ' -f1)
-      PRODUCTION_CACHE_CB_ARGS=(--col-weights "$CB_COL_WEIGHTS")
-      PRODUCTION_CACHE_CB_SETTINGS=(
-        "CB_COL_WEIGHTS_SHA256=$CB_COL_WEIGHTS_SHA256"
-      )
-    fi
     PROD_CACHE_DIR="${PROD_CACHE_DIR}_frontier"
     PROD_CACHE_RAW="${WORK_DIR}/artifacts/production_weight_cache_frontier_raw.pkl"
     require_stage_settings "$PROD_CACHE_RAW" frontier-cache \
-      "CACHE_FORMATS=$CACHE_FORMATS" \
-      "${PRODUCTION_CACHE_CB_SETTINGS[@]+"${PRODUCTION_CACHE_CB_SETTINGS[@]}"}"
+      "CACHE_FORMATS=$CACHE_FORMATS"
     if [[ ! -f "$PROD_CACHE_RAW" ]]; then
       echo "[pipeline] [4/4] building format-menu production cache for validated frontier ..."
       python3 -m prismaquant.build_production_cache \
@@ -1987,7 +1869,6 @@ PY
         --cache-dir "$PROD_CACHE_DIR" \
         --render-scope format-menu \
         --render-packed-experts \
-        "${PRODUCTION_CACHE_CB_ARGS[@]+"${PRODUCTION_CACHE_CB_ARGS[@]}"}" \
         2>&1 | tee "${WORK_DIR}/logs/production_cache_frontier.log"
     else
       echo "[pipeline] [4/4] frontier production cache exists, skipping"
@@ -2038,9 +1919,6 @@ PY
       --production-cache-lru-gb "$PRODUCTION_CACHE_LRU_GB"
       --production-cache-prefetch "$PRODUCTION_CACHE_PREFETCH"
       --production-cache-prefetch-workers "$PRODUCTION_CACHE_PREFETCH_WORKERS"
-    )
-    VAK_COMMON_ARGS+=(
-      "${PRODUCTION_CACHE_CB_ARGS[@]+"${PRODUCTION_CACHE_CB_ARGS[@]}"}"
     )
     if [[ "$VALIDATED_DISABLE_FROZEN_WEIGHT_CACHE" != "0" && "$VALIDATED_DISABLE_FROZEN_WEIGHT_CACHE" != "false" && "$VALIDATED_DISABLE_FROZEN_WEIGHT_CACHE" != "False" ]]; then
       VAK_COMMON_ARGS+=(--disable-frozen-weight-cache)
@@ -2165,16 +2043,6 @@ PY
 )"
     echo "[pipeline] production cache formats selected from assignment: ${CACHE_FORMATS:-none}"
   fi
-  if [[ "$SELECTION_MODE" != "validated-surrogate" \
-     && -n "$CACHE_FORMATS" ]] \
-     && formats_contain_cb "$CACHE_FORMATS"; then
-    harvest_cb_col_weights "[4/4] production cache"
-    CB_COL_WEIGHTS_SHA256=$(sha256sum "$CB_COL_WEIGHTS" | cut -d' ' -f1)
-    PRODUCTION_CACHE_CB_ARGS=(--col-weights "$CB_COL_WEIGHTS")
-    PRODUCTION_CACHE_CB_SETTINGS=(
-      "CB_COL_WEIGHTS_SHA256=$CB_COL_WEIGHTS_SHA256"
-    )
-  fi
   if [[ "$SELECTION_MODE" == "validated-surrogate" ]]; then
     :
   elif [[ -z "$CACHE_FORMATS" ]]; then
@@ -2182,8 +2050,7 @@ PY
   elif [[ "$PRODUCTION_RECACHE" != "0" && "$PRODUCTION_RECACHE" != "false" && "$PRODUCTION_RECACHE" != "False" ]]; then
     LC_DIGEST=$(sha256sum "${WORK_DIR}/artifacts/layer_config.json" | cut -c1-16)
     require_stage_settings "$PROD_CACHE_RECACHED" production-cache-recached \
-      "ASSIGNMENT_DIGEST=$LC_DIGEST" \
-      "${PRODUCTION_CACHE_CB_SETTINGS[@]+"${PRODUCTION_CACHE_CB_SETTINGS[@]}"}"
+      "ASSIGNMENT_DIGEST=$LC_DIGEST"
     if [[ ! -f "$PROD_CACHE_RECACHED" ]]; then
       if [[ ! -f "$PROD_CACHE_RAW" ]]; then
         echo "[pipeline] [4/4] building production cache + re-fitting activation scales ..."
@@ -2205,7 +2072,6 @@ PY
           --render-layer-config "${WORK_DIR}/artifacts/layer_config.json" \
           --recache-layer-config "${WORK_DIR}/artifacts/layer_config.json" \
           --recache-microbatch-size "$PRODUCTION_RECACHE_MICROBATCH" \
-          "${PRODUCTION_CACHE_CB_ARGS[@]+"${PRODUCTION_CACHE_CB_ARGS[@]}"}" \
           ${EXPERT_GATE_DATASET:+--expert-gate-dataset "$EXPERT_GATE_DATASET"} \
           2>&1 | tee "${WORK_DIR}/logs/production_cache.log"
       else
@@ -2234,8 +2100,7 @@ PY
   else
     RAW_LC_DIGEST=$(sha256sum "${WORK_DIR}/artifacts/layer_config.json" | cut -c1-16)
     require_stage_settings "$PROD_CACHE_RAW" production-cache-raw \
-      "CACHE_FORMATS=$CACHE_FORMATS" "ASSIGNMENT_DIGEST=$RAW_LC_DIGEST" \
-      "${PRODUCTION_CACHE_CB_SETTINGS[@]+"${PRODUCTION_CACHE_CB_SETTINGS[@]}"}"
+      "CACHE_FORMATS=$CACHE_FORMATS" "ASSIGNMENT_DIGEST=$RAW_LC_DIGEST"
     if [[ ! -f "$PROD_CACHE_RAW" ]]; then
       echo "[pipeline] [4/4] building production cache ..."
       python3 -m prismaquant.build_production_cache \
@@ -2254,7 +2119,6 @@ PY
         --cache-dir "$PROD_CACHE_DIR" \
         --render-scope "$PRODUCTION_CACHE_RENDER_SCOPE" \
         --render-layer-config "${WORK_DIR}/artifacts/layer_config.json" \
-        "${PRODUCTION_CACHE_CB_ARGS[@]+"${PRODUCTION_CACHE_CB_ARGS[@]}"}" \
         ${EXPERT_GATE_DATASET:+--expert-gate-dataset "$EXPERT_GATE_DATASET"} \
         2>&1 | tee "${WORK_DIR}/logs/production_cache.log"
     else

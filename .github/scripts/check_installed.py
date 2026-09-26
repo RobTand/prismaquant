@@ -57,11 +57,10 @@ if not os.path.isfile(pipeline):
     sys.exit(f"run-pipeline.sh missing from the install ({pipeline})")
 print("  run-pipeline.sh OK")
 
-# Canonical IQ and CB tables must ship. Without IQ tables the first real GGUF
-# encode raises FileNotFoundError; without CB lattices the package silently
-# regenerates them, which is expensive and can be nondeterministic on CUDA.
+# Canonical IQ tables must ship. Without them the first real GGUF encode
+# raises FileNotFoundError. (The CB lattice table checked here went with the
+# retired codebook lane, archived 2026-09-25, #1304.)
 from prismaquant.gguf_iq_formats import _tables as iq_tables  # noqa: E402
-from prismaquant.nvfp4_cb_formats import _lattice_file  # noqa: E402
 
 iq = iq_tables("cpu")
 required_iq = {
@@ -71,11 +70,6 @@ required_iq = {
 if set(iq) != required_iq:
     sys.exit(f"installed IQ tables differ from canonical keys: {sorted(iq)}")
 print(f"  IQ tables OK: {len(iq)}")
-
-lattices = _lattice_file()
-if len(lattices) != 20:
-    sys.exit(f"installed CB lattice table count is {len(lattices)}, expected 20")
-print(f"  CB lattices OK: {len(lattices)}")
 
 # The Gridbook codebook lane's packaged runtime helper and immutable pin were
 # checked here until 2026-09-02, when that lane was retired

@@ -182,14 +182,17 @@ def test_measure_unit_costs_on_dsv4_unpacked_expert_linears():
             assert torch.equal(module.weight.detach(), before[name])
 
 
-def test_dsv4_unpacked_cb_cost_refuses_missing_member_col_weights():
+def test_dsv4_unpacked_expert_cost_refuses_a_retired_codebook_rung():
+    # A stale menu naming a retired codebook rung (archived 2026-09-25,
+    # #1304) refuses before any unit is measured.
+    from prismaquant import format_registry as fr
     from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
 
     torch.manual_seed(23)
     model = _Dsv4PerExpertCausal().eval()
     calib = torch.randint(0, 32, (1, 8))
 
-    with pytest.raises(ValueError, match="CB stack member.*col_weights"):
+    with pytest.raises(fr.RetiredFormatError, match="gridbook_lane"):
         measure_expert_unit_costs(
             model,
             DeepseekV4Profile(),
@@ -397,144 +400,3 @@ def test_max_units_and_filter():
         model, None, calib, ["NVFP4", "BF16"], expert_chunk=1,
         progress=False, max_units=1)
     assert len(unit_kls) == 1
-
-
-def test_ladder_split_pays_at_four_fp8_rungs():
-    from prismaquant.expert_empirical_cost import (
-        _cb_ladder_fit,
-        _cb_ladder_rate_factor,
-        _cb_ladder_split,
-    )
-    fmts = ["FP8_CB_K36", "FP8_CB_K40", "FP8_CB_K44", "FP8_CB_K48"]
-    split = _cb_ladder_split(fmts)
-    assert split is not None and len(split) == 1
-    kmap, anchors, holdout, predicted = split[0]
-    assert set(anchors) == {"FP8_CB_K36", "FP8_CB_K48"}
-    assert len(predicted) == 1 and holdout not in predicted
-    # R20 (2026-07-30): the expert chain runs the SAME law as the dense
-    # chain, whose leading branch is the split-aware floored linear law
-    # D = F + C*R(k) in the exact ceil-first rate factor. Exact on its own
-    # model -> holdout accepts, prediction exact.
-    kls = {f: 0.002 + 1.5 * _cb_ladder_rate_factor(f, kmap[f]) for f in fmts}
-    pred, rel, tol = _cb_ladder_fit(
-        kls, kmap, anchors, holdout, predicted, 0.10)
-    assert pred is not None and rel < 1e-9
-    assert tol == 0.10          # no window datum supplied -> the floor
-    (pf,) = predicted
-    assert pred[pf] == pytest.approx(kls[pf], rel=1e-9)
-    # A FREE-rate exponential (decay != R's) is NOT the law's model. Before
-    # R20 the expert chain was log-linear with no R(k) term and fitted this
-    # exactly, shipping an interpolated cost; now the holdout gate rejects
-    # and the caller measures — the same guarantee the dense chain has had
-    # since 5184892.
-    expo = {f: 2.0 ** (3.0 - 0.4 * kmap[f]) for f in fmts}
-    pred_e, rel_e, _ = _cb_ladder_fit(
-        expo, kmap, anchors, holdout, predicted, 0.10)
-    assert pred_e is None and rel_e > 0.10
-    # Broken law -> holdout rejects.
-    kls_bad = dict(kls)
-    kls_bad[holdout] *= 3.0
-    pred_bad, rel_bad, _ = _cb_ladder_fit(
-        kls_bad, kmap, anchors, holdout, predicted, 0.10)
-    assert pred_bad is None and rel_bad > 0.10
-
-
-def test_ladder_split_too_short():
-    from prismaquant.expert_empirical_cost import _cb_ladder_split
-    assert _cb_ladder_split(["FP8_CB_K36", "FP8_CB_K44", "NVFP4"]) is None
-
-
-def test_ladder_split_explicit_campaign_plan(monkeypatch):
-    from prismaquant.expert_empirical_cost import _cb_ladder_split
-
-    fmts = [f"FP8_CB_K{k}" for k in range(28, 49)]
-    monkeypatch.setenv(
-        "PRISMAQUANT_CB_LADDER_ANCHORS",
-        "FP8_CB_K28,FP8_CB_K38,FP8_CB_K48",
-    )
-    monkeypatch.setenv("PRISMAQUANT_CB_LADDER_HOLDOUT", "FP8_CB_K33")
-    (kmap, anchors, holdout, predicted), = _cb_ladder_split(fmts)
-    assert set(kmap) == set(fmts)
-    assert anchors == ["FP8_CB_K28", "FP8_CB_K38", "FP8_CB_K48"]
-    assert holdout == "FP8_CB_K33"
-    assert set(predicted) == set(fmts) - set(anchors) - {holdout}
-
-
-def test_ladder_split_rejects_incomplete_explicit_plan(monkeypatch):
-    from prismaquant.expert_empirical_cost import _cb_ladder_split
-
-    monkeypatch.setenv("PRISMAQUANT_CB_LADDER_ANCHORS", "FP8_CB_K28,FP8_CB_K48")
-    monkeypatch.delenv("PRISMAQUANT_CB_LADDER_HOLDOUT", raising=False)
-    with pytest.raises(ValueError, match="requires both"):
-        _cb_ladder_split([f"FP8_CB_K{k}" for k in range(28, 49)])
-
-
-def test_imatrix_synthesis_for_cb_units():
-    """CB menus self-synthesize missing packed-expert imatrix entries:
-    gate_up = pooled module-input second moment; down_proj = the routed
-    per-expert intermediate REPLAY (its input is never activation-cached —
-    the latent 35B blocker found 2026-07-19). Shapes and coverage pinned."""
-    from prismaquant.expert_empirical_cost import (
-        _baseline_logprobs,
-        ensure_unit_col_weights,
-    )
-    model = _wide_moe(seed=17)
-    calib = torch.randint(0, 32, (2, 24))
-    units = [("inner.mlp.experts", model.inner.mlp.experts)]
-    _, unit_x = _baseline_logprobs(model, calib, capture_units=units)
-    assert "inner.mlp.experts" in unit_x
-    cw: dict = {}
-    added = ensure_unit_col_weights(model, units, cw, unit_x)
-    assert set(added) == {"inner.mlp.experts.gate_up_proj",
-                          "inner.mlp.experts.down_proj"}
-    gu = cw["inner.mlp.experts.gate_up_proj"]
-    dn = cw["inner.mlp.experts.down_proj"]
-    E = model.inner.mlp.experts.num_experts
-    inter = model.inner.mlp.experts.down_proj.shape[-1]
-    hidden = model.inner.mlp.experts.gate_up_proj.shape[-1]
-    assert gu.shape == (1, 1, hidden) and bool((gu > 0).all())
-    assert dn.shape == (E, 1, inter)
-    # Every expert row is positive (routed rows measured; unrouted rows get
-    # the routed mean — never zero, which would zero the VQ objective).
-    assert bool((dn > 0).all())
-    # Existing entries are respected, not recomputed.
-    before = dn.clone()
-    added2 = ensure_unit_col_weights(model, units, cw, unit_x)
-    assert added2 == [] and torch.equal(cw["inner.mlp.experts.down_proj"],
-                                        before)
-
-
-def test_floor_law_fit_exact_and_degenerate():
-    """The 3-anchor floor law D = F + C*2^(-b*k): exact recovery on
-    floor-law data (where pure log-linear would miss), None on non-monotone
-    anchors (caller falls back to log-linear, holdout still gates)."""
-    from prismaquant.expert_empirical_cost import (
-        _cb_ladder_fit,
-        _fit_floor_law,
-    )
-    F0, C0, b0 = 0.004, 3.0, 0.35
-    ks = [28.0, 40.0, 48.0]
-    ds = [F0 + C0 * 2.0 ** (-b0 * k) for k in ks]
-    fl = _fit_floor_law(ks, ds)
-    assert fl is not None
-    F, C, b = fl
-    assert F == pytest.approx(F0, rel=1e-6)
-    assert C == pytest.approx(C0, rel=1e-6)
-    assert b == pytest.approx(b0, rel=1e-6)
-    # Non-monotone -> None.
-    assert _fit_floor_law(ks, [1.0, 2.0, 0.5]) is None
-    # End-to-end through _cb_ladder_fit. Since R20 the shared chain LEADS
-    # with the floored-linear-in-R(k) branch, so this floor law is reached
-    # only when that branch declines (C <= 0 / degenerate anchors). On
-    # floor-law data the R branch is a good but not exact fit: it misses the
-    # holdout by 5.2%, inside the 10% gate, and lands the predictions within
-    # ~7%. The gate — not the branch order — is what makes either safe.
-    fmts = {f"FP8_CB_K{k}": k for k in (28, 32, 36, 40, 44, 48)}
-    kls = {f: F0 + C0 * 2.0 ** (-b0 * kk) for f, kk in fmts.items()}
-    anchors = ["FP8_CB_K28", "FP8_CB_K40", "FP8_CB_K48"]
-    pred, rel, tol = _cb_ladder_fit(kls, fmts, anchors, "FP8_CB_K36",
-                                    ["FP8_CB_K32", "FP8_CB_K44"], 0.10)
-    assert pred is not None and rel == pytest.approx(0.0516, abs=5e-4)
-    assert tol == 0.10
-    for f, v in pred.items():
-        assert v == pytest.approx(kls[f], rel=0.07)

@@ -207,12 +207,17 @@ def test_layer_state_cache_strict_miss_escape_allows_rtn(monkeypatch):
     assert len(cache.layer_inputs) == 2
 
 
-def test_layer_state_cache_never_uses_unweighted_cb_rtn_fallback(monkeypatch):
+def test_layer_state_cache_refuses_a_retired_codebook_rung(monkeypatch):
+    # The codebook RTN fallback this guarded was archived with the retired
+    # codebook lane (2026-09-25, #1304); a stale rung now refuses outright,
+    # even with the strict-cache guard relaxed.
+    from prismaquant.format_registry import RetiredFormatError
+
     monkeypatch.setenv("PRISMAQUANT_STRICT_PRODUCTION_CACHE", "0")
     model = _TinyCausalLM(layers=2, use_lm_head=False).eval()
     cache = LayerHiddenStateCache(model)
 
-    with pytest.raises(RuntimeError, match="required for CB fallback"):
+    with pytest.raises(RetiredFormatError, match="gridbook_lane_2026-09-02"):
         cache.populate(
             {"model.layers.0.proj": "NVFP4_CB_K16"},
             _calib_ids(batch=1, seq=3),

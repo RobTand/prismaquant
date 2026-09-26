@@ -6,7 +6,6 @@ import pytest
 
 import torch
 
-from prismaquant import cb_layout
 from prismaquant.allocator_solver import (
     Candidate,
     _charged_bins,
@@ -15,9 +14,7 @@ from prismaquant.allocator_solver import (
     solve_allocation,
     solve_with_promotion,
 )
-from prismaquant.expert_empirical_cost import _cb_ladder_rate_factor
 from prismaquant.kl_fisher import fisher_probe_scalar, fisher_quadratic_form
-from prismaquant.nvfp4_cb_formats import TWO_TIER_SUB_TABLE, TWO_TIER_SUPER_BIAS
 
 
 def test_charged_bins_conservative_table():
@@ -116,47 +113,6 @@ def test_fisher_quadratic_form_exact():
         assert abs(lhs.item() - exact.item()) <= tolerance, (
             f"T={temperature}: |{lhs.item():.10g} - {exact.item():.10g}| "
             f"exceeds {tolerance:.4g} (16 float32 ulps at this scale)")
-
-
-def test_bit_split_ceil_first_pinned():
-    assert cb_layout.bit_split(13, 2) == (7, 6)
-    assert cb_layout.bit_split(29, 4) == (8, 7, 7, 7)
-    assert cb_layout.bit_split(33, 4) == (9, 8, 8, 8)
-    assert cb_layout.bit_split(12, 2) == (6, 6)
-    for k in range(12, 49):
-        for n_sub in (1, 2, 4):
-            parts = cb_layout.bit_split(k, n_sub)
-            assert sum(parts) == k
-            assert all(parts[i] >= parts[i + 1] for i in range(len(parts) - 1))
-
-
-def test_two_tier_constants_pinned_by_value():
-    assert TWO_TIER_SUPER_BIAS == 127
-    assert TWO_TIER_SUB_TABLE == (
-        1.0, 1.125, 1.25, 1.375, 1.5, 1.625, 1.75, 1.875,
-        2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75,
-    )
-
-
-def test_scale_plane_and_type_size_pinned():
-    assert cb_layout.SCALE_PLANE_BYTES[("fp4", "v1")] == 16
-    assert cb_layout.SCALE_PLANE_BYTES[("fp4", "two_tier")] == 9
-    assert cb_layout.SCALE_PLANE_BYTES[("fp8", "v1")] == 0
-    assert cb_layout.INDEX_BYTES_PER_K == 4
-    assert cb_layout.CODEWORDS_PER_SUPERBLOCK == 32
-    assert cb_layout.type_size(28, "fp8") == 112
-    assert cb_layout.type_size(16, "fp4", "two_tier") == 73
-    assert cb_layout.type_size(16, "fp4", "v1") == 80
-    assert cb_layout.type_size(24, "fp4", "two_tier") == 105
-
-
-def test_cb_ladder_rate_factor_pinned():
-    assert _cb_ladder_rate_factor("FP8_CB_K33", 33) == pytest.approx(
-        0.013671875, rel=1e-12
-    )
-    assert _cb_ladder_rate_factor("FP8_CB_K28", 28) == pytest.approx(
-        0.03125, rel=1e-12
-    )
 
 
 def test_dual_interval_empty_on_equal_byte_cheaper():

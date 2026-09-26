@@ -262,9 +262,12 @@ _RENDER_SETTINGS: tuple[str, ...] = (
     "PRODUCTION_CACHE_DISABLE_LEVERS",
 )
 
-# Every CB producer choice below changes either the fitted/assigned values or
-# their byte layout. Persisted cost/render artifacts must invalidate on any
-# change, including assignment-only LDLQ even though serving stays unchanged.
+# These CB_* / PRISMAQUANT_CB_* names are the retired codebook lane's producer
+# choices (archived 2026-09-25, #1304). No live code reads them any more, but
+# they stay in the stage settings hashes on purpose: removing a key changes the
+# hash of every persisted WORK_DIR artifact and would force a full rebuild of
+# caches whose bytes are unchanged. With the lane gone they only ever hash
+# their shell defaults.
 _CB_SERIALIZATION_SETTINGS: tuple[str, ...] = (
     "CB_SCALE_CODING",
     "CB_CODEBOOK_SOURCE",
@@ -399,23 +402,6 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
     "cb-col-weights": _key_pairs(
         "MODEL_PATH", "DATASET", "NSAMPLES", "SEQLEN", "ACTIVATION_ROWS_LIMIT",
         "CB_IMATRIX_SOURCE",
-    ),
-    "cb-learned-bundle": _key_pairs(
-        "MODEL_PATH", "FORMATS", "CB_CODEBOOK_SOURCE_SCOPE",
-        "CB_CODEBOOK_BUNDLE", "CB_COL_WEIGHTS_SHA256",
-        "CB_ROUTED_MOE_BOOK_SELECTION_SHA256",
-        "CB_ROUTED_BOOK_KEYING",
-        "CB_LEARNED_TRAINER_VERSION",
-        "CB_LEARNED_PROMOTION_RECEIPT_SHA256",
-        "CB_LEARNED_SOURCE_MODEL_IDENTITY_SHA256",
-    ),
-    "cb-hybrid-cost": _key_pairs(
-        "MODEL_PATH", "FORMATS", "COST_MODE",
-        "EXPERT_NS<-CB_EXPERT_NSAMPLES",
-        "EXPERT_SL<-CB_EXPERT_SEQLEN",
-        "EXPERT_SAMPLE<-CB_EXPERT_SAMPLE",
-        "LADDER_INTERP<-CB_LADDER_INTERP",
-        *_CB_SERIALIZATION_SETTINGS,
     ),
     # --- production caches -------------------------------------------------
     "frontier-cache": _key_pairs(

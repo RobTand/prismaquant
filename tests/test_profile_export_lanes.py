@@ -18,7 +18,6 @@ lane will be admitted through.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -472,45 +471,8 @@ def test_no_declared_lane_run_becomes_illegal():
         assert require_lane_supported(profile, lane) == lane
 
 
-def test_every_in_tree_launch_scripts_container_is_live_or_refused_by_name():
-    """The other half of the promise the old docstring made and did not keep.
-
-    The only in-tree launch script that sets `EXPORT_CONTAINER` names
-    `nvfp4_cb`, retired with the Gridbook lane on 2026-09-02 -- so "every
-    launch script's pair passes the preflight" was not true and could not be
-    made true by adding rows. The honest rule: a script's container is either
-    a live lane some architecture declares, or it is a name the vocabulary
-    refuses *and* records as retired, so an operator running that script is
-    told where the code went rather than handed a bare unknown-lane error.
-    `RETIRED_EXPORT_LANES` is that record, and it is read here rather than
-    grepped for in the driver: a lane name mentioned in a shell comment is not
-    a refusal a machine can act on.
-    """
-    scripts = sorted((ROOT / "scripts").rglob("*.sh"))
-    assert scripts, "no launch scripts found; the sweep below is vacuous"
-
-    containers: dict[str, list[str]] = {}
-    for script in scripts:
-        for match in re.finditer(
-            r"^\s*(?:export\s+)?EXPORT_CONTAINER=([\w.-]+)",
-            script.read_text(encoding="utf-8"), re.MULTILINE,
-        ):
-            containers.setdefault(match.group(1), []).append(script.name)
-    assert containers, "no script sets EXPORT_CONTAINER; nothing checked"
-
-    declared = {
-        lane for cls in PROFILE_CLASSES
-        for lane in _profile(cls).supported_export_lanes()
-    }
-    for container, where in sorted(containers.items()):
-        if container in EXPORT_LANES:
-            assert container in declared, (container, where)
-            continue
-        assert container in RETIRED_EXPORT_LANES, (
-            f"{container} ({', '.join(where)}) is neither a live lane nor a "
-            f"retired one; the vocabulary cannot tell an operator what "
-            f"happened to it")
-        wall = RETIRED_EXPORT_LANES[container]
-        assert (ROOT / wall).exists(), (container, wall)
-        with pytest.raises(ValueError, match=re.escape(wall)):
-            canonical_export_lane(container)
+# RETIRED 2026-09-25 (#1304): `test_every_in_tree_launch_scripts_container_is_live_or_refused_by_name`
+# swept scripts/ for `EXPORT_CONTAINER=`. The only script that set one named
+# `nvfp4_cb` and moved to archive/gridbook_lane_2026-09-02/ with the rest of
+# the lane, so the sweep had nothing left to check. The retired-lane refusal
+# it exercised is pinned above by the `RETIRED_EXPORT_LANES` test.

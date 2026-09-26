@@ -1,4 +1,4 @@
-"""`LaneSpec` — one lane-uniform ship gate across native / CB / GGUF.
+"""`LaneSpec` — one lane-uniform ship gate across native / Tessera / GGUF.
 
 Re-vet **R16** (`docs/audits/architecture_re-vet_2026-07-30.md`), which closes
 the measurement half of debt **D26**.
@@ -204,12 +204,12 @@ class LaneActivationContract:
     """Which formats' activation quantization this lane's runtime EXECUTES.
 
     The format registry declares NVFP4 a W4A4 format. That is a fact about the
-    FORMAT, not about the LANE. Gridbook's CB runtime decodes to BF16 and runs
-    a BF16 GEMM -- what its own docstring calls "the exact native BF16 bridge"
-    -- unless a fused activation mode is explicitly selected by a
-    process-global env selector. Every gate and gold serve on the nvfp4_cb lane
-    leaves those selectors unset, so an NVFP4_CB unit's activations are never
-    quantized there and its A-side cost is exactly zero.
+    FORMAT, not about the LANE. The retired codebook lane (Gridbook, archived
+    2026-09-25, #1304) showed why: its runtime decoded NVFP4-CB to BF16 and ran
+    a BF16 GEMM unless a process-global env selector chose a fused activation
+    mode, and every gate and gold serve left those selectors unset, so an
+    NVFP4-CB unit's activations were never quantized and its A-side cost was
+    exactly zero.
 
     Pricing an A-side the runtime does not execute is a CURRENCY error, not a
     conservative overestimate. It makes a format look more expensive than it
@@ -222,13 +222,10 @@ class LaneActivationContract:
 
     ``executes`` is the authority the A-side pricing must intersect with. It is
     a set of **glob patterns** over format names, because the answer is per
-    FAMILY and the rungs within a family are open-ended: the CB lane bridges
-    every ``NVFP4_CB_K*`` but genuinely serves every ``FP8_CB_K*`` as W8A8
-    (`gridbook/linear.py` feeds quantized ``xq`` with per-token dynamic scales
-    into ``native_cutlass_scaled_mm``; `moe.py` declares
-    ``_FP8_GROUPED_CONTRACT = "fp8_per_token_dynamic"``). Listing rungs
-    explicitly would silently under-declare the day a new one is added, which
-    is the same silent-default failure this class exists to remove.
+    FAMILY and the rungs within a family are open-ended (the Tessera families
+    carry thousands of rungs each). Listing rungs explicitly would silently
+    under-declare the day a new one is added, which is the same
+    silent-default failure this class exists to remove.
 
     An empty set is a meaningful answer -- not a missing declaration.
     """

@@ -13,6 +13,7 @@ from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
 from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant import union_production_cache as union
+from prismaquant.format_registry import RetiredFormatError
 
 
 CODE_IDENTITY = {
@@ -397,9 +398,11 @@ def test_union_rejects_unknown_differing_metadata(tmp_path):
         )
 
 
-def test_union_refuses_cb_identity_merging_instead_of_dropping_it(tmp_path):
+def test_union_refuses_a_retired_codebook_rung(tmp_path):
+    # The retired codebook lane, archived 2026-09-25, #1304: a stale shard
+    # that names a codebook rung refuses instead of being merged or dropped.
     assignment = {"model.a": "NVFP4_CB_K16"}
-    with pytest.raises(ValueError, match="does not yet merge CB pair identities"):
+    with pytest.raises(RetiredFormatError, match="gridbook_lane"):
         _make_shard(
             tmp_path,
             shard_id="cb",

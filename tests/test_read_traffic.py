@@ -162,7 +162,6 @@ def test_synthetic_ledger_matches_hand_computation(model_dir: Path, profile):
         source_manifest=fp.source_tensor_bytes_manifest(
             str(model_dir), profile.checkpoint_to_live_name,
             profile.packed_expert_parent_for_projection),
-        cb_serialization_context=None,
     )
     assert priced["artifact_payload_bytes"] == 960
     assert report["reconciliation"]["ledger_stored_bytes"] == 960

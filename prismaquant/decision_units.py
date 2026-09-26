@@ -155,25 +155,7 @@ def discover_units(
     *,
     target_profile: str | None = None,
 ) -> tuple[dict[str, list[DecisionUnit]], list[DecisionUnit], dict[str, int]]:
-    """Build fused-sibling decision units directly from the model.
-
-    This generic API has no artifact-wide CB serialization context, so it
-    cannot deduplicate codebooks or choose FP4 layout v1/v2.  Reject CB menus
-    rather than silently falling back to ``FormatSpec.memory_bytes_for_shape``
-    (the stale legacy-v1 approximation).  CB allocation must use the main
-    allocator's context-bound candidate path.
-    """
-    cb_formats = [
-        spec.name
-        for spec in formats
-        if spec.family in {"nvfp4_cb", "fp8_cb"}
-    ]
-    if cb_formats:
-        raise ValueError(
-            "decision_units.discover_units cannot price CB formats without "
-            "an artifact-wide CBSerializationContext and shared-sidecar "
-            f"accounting: {sorted(set(cb_formats))}. Use prismaquant.allocator."
-        )
+    """Build fused-sibling decision units directly from the model."""
     graph_units = _discover_units_from_model_graph(
         model,
         profile,

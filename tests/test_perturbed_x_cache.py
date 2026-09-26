@@ -221,26 +221,29 @@ def test_perturbed_cache_strict_miss_escape_allows_rtn(tmp_path, monkeypatch):
     assert out.shape == (1, 64)
 
 
-def test_perturbed_cache_never_uses_unweighted_cb_rtn_fallback(
+def test_perturbed_cache_refuses_a_retired_codebook_rung(
     tmp_path, monkeypatch,
 ):
+    # The retired codebook lane, archived 2026-09-25, #1304: the refusal is
+    # raised wherever the cache first resolves the name, never skipped.
     monkeypatch.setenv("PRISMAQUANT_STRICT_PRODUCTION_CACHE", "0")
     model = nn.Sequential(nn.Linear(256, 256, bias=False)).eval()
-    cache = PerturbedActivationCache(
-        model,
-        {"0": "NVFP4_CB_K16"},
-        tmp_path,
-        input_rows=0,
-        cal_hash="test",
-        production_weight_cache=ProductionWeightCache({}, levers={}),
-    )
-
-    cache.install()
+    cache = None
     try:
-        with pytest.raises(RuntimeError, match="required for CB fallback"):
+        with pytest.raises(fr.RetiredFormatError, match="gridbook_lane"):
+            cache = PerturbedActivationCache(
+                model,
+                {"0": "NVFP4_CB_K16"},
+                tmp_path,
+                input_rows=0,
+                cal_hash="test",
+                production_weight_cache=ProductionWeightCache({}, levers={}),
+            )
+            cache.install()
             model(torch.randn(1, 256))
     finally:
-        cache.remove()
+        if cache is not None:
+            cache.remove()
 
 
 def test_perturbed_cache_can_disable_capture_for_inplace_replay(tmp_path):

@@ -271,6 +271,9 @@ def _fixture(tmp_path):
             for n in _NAMES
         },
         "meta": {"formats": ["NVFP4", "FP8_E4M3"]},
+        # A stale cost run's codebook-ladder verdict (the retired codebook
+        # lane, archived 2026-09-25, #1304). The allocator no longer
+        # republishes it; the payload must still load.
         "provenance": {
             "cb_ladder_cross_family_verdict": {
                 "schema": "prismaquant.cb_ladder.cross_family_verdict.v1",
@@ -307,8 +310,9 @@ def _stub_solver(fmt):
 
 def test_selection_json_carries_the_p5a_and_p5b_provenance(
         monkeypatch, tmp_path):
-    """The two P5 verdicts and the serving-lane split must be recoverable
-    from the shipped artifact, not from the producer commit that made it."""
+    """The P5a pricing record and the P5b serving-lane split must be
+    recoverable from the shipped artifact, not from the producer commit that
+    made it."""
     model_dir, probe_p, cost_p, stats = _fixture(tmp_path)
     monkeypatch.setattr(alloc, "solve_with_promotion", _stub_solver("NVFP4"))
     lc = tmp_path / "layer_config.json"
@@ -339,12 +343,6 @@ def test_selection_json_carries_the_p5a_and_p5b_provenance(
     assert pricing["families"]["fp"]["penalty"] == pytest.approx(2.0)
     assert pricing["uncalibrated_families"] == []
 
-    # The cost run's cross-family verdict is republished verbatim, failure
-    # and all — a consumer reading only allocator artifacts can still see it.
-    verdict = selection["cb_ladder_cross_family_verdict"]
-    assert verdict["verdict"] == "fail"
-    assert verdict["cross_family_comparison_publishable"] is False
-
     lanes = selection["serving_lane_provenance"]
     assert lanes["schema"] == sp.SERVING_LANE_SCHEMA
     assert lanes["units_total"] == len(_NAMES)
@@ -356,10 +354,10 @@ def test_selection_json_carries_the_p5a_and_p5b_provenance(
         "measured_output_mse"}
 
 
-def test_the_applicability_report_carries_the_same_three_blocks(
+def test_the_applicability_report_carries_the_same_blocks(
         monkeypatch, tmp_path):
     """The byte-budget selection is optional; the applicability report is
-    written on every run, so the P5 verdicts must live there too."""
+    written on every run, so the P5 records must live there too."""
     _model_dir, probe_p, cost_p, _stats = _fixture(tmp_path)
     monkeypatch.setattr(alloc, "solve_with_promotion", _stub_solver("NVFP4"))
     lc = tmp_path / "layer_config.json"
@@ -379,7 +377,6 @@ def test_the_applicability_report_carries_the_same_three_blocks(
     report = json.loads(
         (tmp_path / "format_applicability.json").read_text())
     assert report["activation_fair_pricing"]["enabled"] is True
-    assert (report["cb_ladder_cross_family_verdict"]["verdict"] == "fail")
     assert report["serving_lanes"]["target_profile"] == "research"
 
 

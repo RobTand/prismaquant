@@ -136,19 +136,6 @@ def test_checkpoint_probe_gib_is_bit_identical(status):
         probe._gib("VmSwap:")
 
 
-def test_afast_rss_bytes_is_unchanged(status, tmp_path, monkeypatch):
-    from tools import dsv4_afast_campaign as afast
-
-    real = io_spans._read_kb_table
-    monkeypatch.setattr(afast, "read_proc_status", lambda: real(status))
-    assert afast._rss_bytes() == 987654 * 1024
-    bare = tmp_path / "bare"
-    bare.write_text("Name:\tpython3\n")
-    monkeypatch.setattr(afast, "read_proc_status", lambda: real(bare))
-    with pytest.raises(RuntimeError, match="^/proc/self/status has no VmRSS$"):
-        afast._rss_bytes()
-
-
 def test_chain_roll_memory_watch_block_is_unchanged(status, monkeypatch):
     from tools import chain_roll_bench as bench
 
@@ -269,8 +256,7 @@ def test_power_windows_are_unchanged(monkeypatch):
 
 
 @pytest.mark.parametrize("name", [
-    "chain_roll_bench", "checkpoint_parse_probe", "dsv4_afast_burn", "dsv4_afast_campaign",
-    "nvfp4_served_qdq_bench", "profile_stage_b_head", "pwc_window_load_bench",
+    "chain_roll_bench", "checkpoint_parse_probe", "nvfp4_served_qdq_bench", "profile_stage_b_head", "pwc_window_load_bench",
     "render_window_bench", "stage_fed_demonstration", "staged_exact_read_bench",
     "staged_read_stream_ab", "unit_journal_bench"])
 def test_migrated_tool_imports(name):

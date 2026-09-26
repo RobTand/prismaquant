@@ -97,26 +97,6 @@
    "prismaquant/tessera_serving_runtime_pin.py::TesseraServingNativeExtension.as_contract_row"
   ],
   [
-   "tools/dsv4_afast_allocation_grid.py::_tee",
-   "tools/dsv4_allocation_grid.py::_tee_command"
-  ],
-  [
-   "tools/dsv4_afast_allocation_grid.py::_unique_fp8_sidecar_bytes",
-   "tools/dsv4_allocation_grid.py::_unique_fp8_sidecar_bytes"
-  ],
-  [
-   "tools/dsv4_afast_burn.py::_burn_delta_summary",
-   "tools/dsv4_afast_campaign.py::_delta_summary"
-  ],
-  [
-   "tools/dsv4_afast_burn.py::_configure",
-   "tools/dsv4_afast_campaign.py::_configure"
-  ],
-  [
-   "tools/dsv4_ldlq_burn.py::_compact",
-   "tools/dsv4_minchain_pilot.py::_compact"
-  ],
-  [
    "tools/measure_vllm_full_kl.py::_provenance",
    "tools/measure_vllm_wikitext_ppl.py::_provenance"
   ],
@@ -134,26 +114,14 @@
   ]
  ],
  "same_name_helpers": {
-  "_acceptance": [
-   "prismaquant/mtp_rung_selection.py",
-   "tools/dsv4_afast_burn.py"
-  ],
   "_actual_execution": [
    "prismaquant/joint_aura_retained_budget_transition.py",
    "prismaquant/joint_aura_run_transition.py",
    "prismaquant/joint_aura_source_transition.py"
   ],
-  "_allocator_command": [
-   "tools/dsv4_afast_allocation_grid.py",
-   "tools/dsv4_allocation_grid.py"
-  ],
   "_argv_flag": [
    "prismaquant/joint_layer_quanta.py",
    "prismaquant/prismasnap_validation.py"
-  ],
-  "_audit_rung": [
-   "tools/dsv4_acceptance_amendment.py",
-   "tools/dsv4_afast_burn.py"
   ],
   "_bound": [
    "prismaquant/joint_aura_retained_budget_transition.py",
@@ -192,11 +160,6 @@
    "prismaquant/dsv4_campaign_completion.py",
    "tools/build_prismasnap_27b_campaign.py"
   ],
-  "_canonical_json": [
-   "prismaquant/cb_banked_books.py",
-   "prismaquant/cb_learned_promotion.py",
-   "prismaquant/shipcard.py"
-  ],
   "_canonical_json_sha256": [
    "prismaquant/aura_cost.py",
    "prismaquant/production_weight_cache.py"
@@ -206,10 +169,6 @@
    "tools/measure_served_gold.py",
    "tools/measure_vllm_wikitext_ppl.py",
    "tools/serve_fingerprint.py"
-  ],
-  "_cell_identity": [
-   "tools/dsv4_afast_allocation_grid.py",
-   "tools/dsv4_afast_campaign.py"
   ],
   "_classify": [
    "prismaquant/full_engine_resource_report.py",
@@ -225,20 +184,11 @@
    "prismaquant/joint_aura_retained_budget_transition.py",
    "prismaquant/joint_aura_run_transition.py"
   ],
-  "_compact": [
-   "tools/dsv4_ldlq_burn.py",
-   "tools/dsv4_minchain_pilot.py"
-  ],
-  "_configure": [
-   "tools/dsv4_afast_burn.py",
-   "tools/dsv4_afast_campaign.py"
-  ],
   "_cost_entry": [
    "prismaquant/kl_measurement.py",
    "tools/build_sensitivity_ablation_assignments.py"
   ],
   "_digest": [
-   "prismaquant/cb_banked_books.py",
    "prismaquant/tessera_anchored_surface.py",
    "tools/stagea_produced_live_cycle.py",
    "tools/union_tessera_census_tables.py"
@@ -246,10 +196,6 @@
   "_domain": [
    "prismaquant/adaptive_anchored_shape.py",
    "prismaquant/tessera_sampled_stack_proposal.py"
-  ],
-  "_encode_free": [
-   "tools/dsv4_afast_campaign.py",
-   "tools/dsv4_ldlq_burn.py"
   ],
   "_enum": [
    "prismaquant/full_engine_resource_report.py",
@@ -271,12 +217,7 @@
    "tools/dspark_memavailable_sampler.py",
    "tools/regenerate_joint_quanta.py"
   ],
-  "_file_identity": [
-   "prismaquant/cb_banked_books.py",
-   "tools/serve_fingerprint.py"
-  ],
   "_file_sha256": [
-   "prismaquant/cb_banked_books.py",
    "prismaquant/cluster_campaign.py",
    "prismaquant/cost_streaming.py",
    "prismaquant/stage_a_chain_split.py",
@@ -304,10 +245,6 @@
    "prismaquant/layer_state_cache.py",
    "prismaquant/perturbed_x_cache.py"
   ],
-  "_fmt": [
-   "tools/dsv4_afast_campaign_report.py",
-   "tools/dsv4_campaign_report.py"
-  ],
   "_fp16_bytes": [
    "prismaquant/gguf_formats.py",
    "prismaquant/gguf_iq_formats.py"
@@ -327,10 +264,6 @@
    "prismaquant/export_gguf.py",
    "prismaquant/fisher_col_weights.py",
    "prismaquant/sensitivity_card_build.py"
-  ],
-  "_git_head": [
-   "tools/rerender_bf16_fp8_cb_balanced.py",
-   "tools/staged_exact_read_bench.py"
   ],
   "_git_sha": [
    "tools/tp2_budget_plan.py",
@@ -378,13 +311,7 @@
    "prismaquant/native_receipt_table.py",
    "prismaquant/tessera_calibration_cache.py",
    "prismaquant/tessera_joint_aura.py",
-   "prismaquant/tessera_materialization.py",
-   "tools/dsv4_afast_campaign_report.py",
-   "tools/dsv4_campaign_report.py"
-  ],
-  "_knee_budget": [
-   "tools/dsv4_afast_allocation_grid.py",
-   "tools/dsv4_allocation_grid.py"
+   "prismaquant/tessera_materialization.py"
   ],
   "_kneedle_convex_decreasing": [
    "prismaquant/allocator.py",
@@ -396,10 +323,6 @@
   ],
   "_load": [
    "tools/band_serial_handoff_live_pair.py",
-   "tools/dsv4_acceptance_amendment.py",
-   "tools/dsv4_afast_burn.py",
-   "tools/dsv4_ldlq_burn.py",
-   "tools/dsv4_verify_phase_a.py",
    "tools/kl_ab.py",
    "tools/stage_b_preparation_submission.py",
    "tools/validate_probe_marginals.py"
@@ -428,11 +351,6 @@
   "_load_llm": [
    "tools/measure_vllm_full_kl.py",
    "tools/measure_vllm_wikitext_ppl.py"
-  ],
-  "_load_pickle": [
-   "prismaquant/production_render_cost.py",
-   "prismaquant/research_cost_acceptance.py",
-   "prismaquant/tier2_per_expert_counterfactual.py"
   ],
   "_load_plan": [
    "prismaquant/tessera_joint_aura.py",
@@ -463,13 +381,7 @@
   ],
   "_mapping": [
    "prismaquant/artifact_collection.py",
-   "prismaquant/cb_banked_books.py",
    "prismaquant/runtime_provenance.py"
-  ],
-  "_measure_projection": [
-   "tools/dsv4_afast_burn.py",
-   "tools/dsv4_afast_campaign.py",
-   "tools/dsv4_ldlq_burn.py"
   ],
   "_mount_options": [
    "prismaquant/residency_shard_reader.py",
@@ -500,10 +412,6 @@
    "prismaquant/measured_runtime_prices.py",
    "prismaquant/tessera_route_receipt.py"
   ],
-  "_old": [
-   "tools/dsv4_afast_campaign_report.py",
-   "tools/dsv4_campaign_report.py"
-  ],
   "_optional_int": [
    "prismaquant/serving_profiles.py",
    "prismaquant/validation_harness.py"
@@ -529,7 +437,6 @@
    "prismaquant/tessera_runtime_contract.py"
   ],
   "_parser": [
-   "prismaquant/tier2_per_expert_counterfactual.py",
    "tools/build_prismasnap_27b_campaign.py",
    "tools/container_runtime_identity.py",
    "tools/prismaquant_runtime_snapshot.py",
@@ -570,10 +477,6 @@
    "prismaquant/prismasnap_checkpoint.py",
    "tools/measure_served_gold.py"
   ],
-  "_projection_abort": [
-   "tools/dsv4_afast_burn.py",
-   "tools/dsv4_ldlq_burn.py"
-  ],
   "_provenance": [
    "tools/measure_vllm_full_kl.py",
    "tools/measure_vllm_wikitext_ppl.py"
@@ -591,18 +494,13 @@
    "prismaquant/proposal_validation.py",
    "prismaquant/stage_a_chain_seed.py"
   ],
-  "_rank": [
-   "prismaquant/select_validated_frontier.py",
-   "tools/cost_v1_v2_rank_stability.py"
-  ],
   "_read_bound": [
    "prismaquant/tessera_joint_allocation.py",
    "prismaquant/tessera_sampled_stack_proposal.py"
   ],
   "_read_json": [
    "prismaquant/stage_a_chain_resume.py",
-   "prismaquant/stage_a_retirement.py",
-   "tools/rerender_bf16_fp8_cb_balanced.py"
+   "prismaquant/stage_a_retirement.py"
   ],
   "_read_receipt": [
    "prismaquant/joint_aura_retained_budget_transition.py",
@@ -611,14 +509,6 @@
   "_read_safetensors_header": [
    "prismaquant/artifact_completeness.py",
    "prismaquant/footprint.py"
-  ],
-  "_record": [
-   "prismaquant/cb_compile_contract.py",
-   "prismaquant/stage_a_head.py"
-  ],
-  "_record_key": [
-   "prismaquant/cb_warm_state.py",
-   "prismaquant/production_render_cost.py"
   ],
   "_refuse": [
    "prismaquant/joint_stage_b_head.py",
@@ -642,8 +532,7 @@
    "prismaquant/joint_aura_transitions.py",
    "prismaquant/serving_runtime_patch_set.py",
    "prismaquant/tessera_route_receipt.py",
-   "prismaquant/tessera_runtime_contract.py",
-   "tools/extract_raw_cost_table.py"
+   "prismaquant/tessera_runtime_contract.py"
   ],
   "_require_sha256": [
    "prismaquant/prepriced_cost.py",
@@ -697,10 +586,6 @@
    "prismaquant/tessera_route_trace_gate.py",
    "tools/dspark_memavailable_sampler.py"
   ],
-  "_scale_plane_bytes": [
-   "prismaquant/nvfp4_cb_formats.py",
-   "prismaquant/tessera_legal_domain.py"
-  ],
   "_sdk": [
    "prismaquant/joint_forward_resume.py",
    "prismaquant/stage_a_retirement.py",
@@ -728,20 +613,16 @@
    "prismaquant/tessera_joint_aura.py",
    "prismaquant/tessera_materialization.py",
    "tools/band_serial_handoff_live_pair.py",
-   "tools/cb_encode_bitcheck.py",
    "tools/dispatch_stage_a_split.py"
   ],
   "_sha256": [
    "prismaquant/artifact_collection.py",
-   "prismaquant/cb_ldlq_gate_telemetry.py",
-   "prismaquant/cb_learned_promotion.py",
    "prismaquant/cluster_campaign.py",
    "prismaquant/emu_forward_kl.py",
    "prismaquant/lane_eligibility.py",
    "prismaquant/prepriced_cost.py",
    "prismaquant/production_cache_stripes.py",
    "prismaquant/quality_prefill_pb_adapter.py",
-   "prismaquant/research_cost_acceptance.py",
    "tools/derive_retained_window_budget.py",
    "tools/kl_ab.py"
   ],
@@ -754,7 +635,6 @@
    "tools/build_prismasnap_27b_campaign.py",
    "tools/chain_roll_bench.py",
    "tools/measure_served_gold.py",
-   "tools/rerender_bf16_fp8_cb_balanced.py",
    "tools/union_tessera_census_tables.py"
   ],
   "_shape_of": [
@@ -777,15 +657,8 @@
    "prismaquant/runtime_provenance.py",
    "tools/measure_vllm_wikitext_ppl.py"
   ],
-  "_strict_json_loads": [
-   "prismaquant/cb_banked_books.py",
-   "prismaquant/cb_learned_bundle.py",
-   "prismaquant/nvfp4_cb_footprint.py",
-   "prismaquant/sample_parallel_probe.py"
-  ],
   "_summary": [
    "prismaquant/boundary_control.py",
-   "prismaquant/cb_ldlq_gate_telemetry.py",
    "prismaquant/stage_b_workspace_profile.py",
    "prismaquant/union_production_cache.py",
    "tools/unit_journal_bench.py"
@@ -794,22 +667,10 @@
    "prismaquant/artifact_collection_legacy.py",
    "tools/exl3_grouped_down_replay.py"
   ],
-  "_tensor_identity": [
-   "prismaquant/cb_learned_bundle.py",
-   "prismaquant/sample_parallel_probe_merge.py"
-  ],
   "_text": [
    "prismaquant/artifact_collection.py",
    "prismaquant/cluster_campaign.py",
    "prismaquant/quality_prefill_pb_adapter.py"
-  ],
-  "_unique_fp8_sidecar_bytes": [
-   "tools/dsv4_afast_allocation_grid.py",
-   "tools/dsv4_allocation_grid.py"
-  ],
-  "_validate_runtime": [
-   "prismaquant/quality_prefill_contract.py",
-   "tools/rerender_bf16_fp8_cb_balanced.py"
   ],
   "_verify_source": [
    "prismaquant/tessera_materialization.py",
@@ -822,10 +683,6 @@
   "_write_json": [
    "tools/dispatch_stage_a_split.py",
    "tools/tp_decode_feasibility.py"
-  ],
-  "_write_projection_costs": [
-   "tools/dsv4_afast_burn.py",
-   "tools/dsv4_ldlq_burn.py"
   ],
   "bind_execution_receipt": [
    "prismaquant/native_execution_binding.py",
@@ -888,10 +745,6 @@
    "tools/render_window_bench.py",
    "tools/unit_journal_bench.py"
   ],
-  "codebook_subtable_shapes": [
-   "prismaquant/cb_layout.py",
-   "prismaquant/nvfp4_cb_footprint.py"
-  ],
   "compare": [
    "prismaquant/boundary_control.py",
    "tools/cost_layer0_identity_gate.py",
@@ -945,14 +798,6 @@
    "tools/reseal_campaign_identity.py",
    "tools/union_tessera_census_tables.py"
   ],
-  "learn_pool": [
-   "prismaquant/cb_learned_bundle.py",
-   "tools/dsv4_cbl_kernels.py"
-  ],
-  "load_bundle": [
-   "prismaquant/cb_learned_bundle.py",
-   "tools/reseal_campaign_identity.py"
-  ],
   "load_manifest": [
    "prismaquant/readset_coverage.py",
    "tools/serve_fingerprint.py"
@@ -982,10 +827,6 @@
   "nvfp4_activation_qdq_served": [
    "prismaquant/format_registry.py",
    "prismaquant/nvfp4_activation_contract.py"
-  ],
-  "percentile": [
-   "tools/dsv4_ldlq_cost_campaign.py",
-   "tools/tp_decode_feasibility.py"
   ],
   "prepare": [
    "tools/band_serial_handoff_live_pair.py",
@@ -1017,18 +858,6 @@
    "prismaquant/joint_replay_frontier.py",
    "prismaquant/joint_stage_b_head.py"
   ],
-  "run": [
-   "prismaquant/tessera_materialization.py",
-   "tools/dsv4_afast_allocation_grid.py",
-   "tools/dsv4_afast_campaign_report.py",
-   "tools/dsv4_campaign_report.py",
-   "tools/dsv4_minchain_pilot.py",
-   "tools/dsv4_verify_phase_a.py"
-  ],
-  "run_burn": [
-   "tools/dsv4_afast_burn.py",
-   "tools/dsv4_ldlq_burn.py"
-  ],
   "sha": [
    "tools/assemble_t4_overlay.py",
    "tools/benchmarks/joint_validation_pair.py",
@@ -1043,11 +872,6 @@
    "prismaquant/glm_source_derivative.py",
    "prismaquant/tessera_calibration_cache.py",
    "tools/derive_tessera_progress_grace.py"
-  ],
-  "sha256_file": [
-   "tools/dsv4_ldlq_cost_campaign.py",
-   "tools/dsv4_minchain_pilot.py",
-   "tools/reseal_campaign_identity.py"
   ],
   "source_proof": [
    "prismaquant/joint_aura_retained_budget_transition.py",
@@ -1073,12 +897,6 @@
   "unit_path": [
    "prismaquant/cost_stage_checkpoint.py",
    "tools/reseal_campaign_identity.py"
-  ],
-  "utc_now": [
-   "tools/dsv4_afast_campaign.py",
-   "tools/dsv4_ldlq_burn.py",
-   "tools/dsv4_ldlq_cost_campaign.py",
-   "tools/dsv4_minchain_pilot.py"
   ],
   "verify_policy": [
    "prismaquant/joint_served_activation.py",

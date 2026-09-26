@@ -51,8 +51,8 @@ order they bind:
   arithmetic mean of ratios is set by a handful of high-``h_trace`` rows,
   while the correction is applied to all of them. The geometric mean is the
   MLE of a multiplicative factor under log-normal residuals, and it is the
-  same log-space least squares the CB ladder law already uses
-  (``expert_empirical_cost._cb_ladder_law``).
+  same log-space least squares the retired codebook lane's ladder law used
+  (archived 2026-09-25, #1304).
 * **It cannot corrupt what is already validated** — *provided every rung of
   the family takes the same pricing branch* (see the correction below). A
   per-family constant applied uniformly cannot reorder rungs *inside* a
@@ -447,7 +447,7 @@ def calibrate(
       handed a MIXED scale — at least one family calibrated while another
       activation-quantizing family still has weight-only-priced rows and no
       fit of its own. That is the audit's asymmetry made worse, not better:
-      correcting NVFP4-CB while leaving FP8-CB uncorrected tilts exactly the
+      correcting a W4A4 family while leaving a W8A8 one uncorrected tilts the
       comparison this work exists to make fair.
     * **Pass through, loudly**, when NO activation-quantizing family has a
       measured sample. Nothing can be corrected, no asymmetry is introduced,
@@ -509,7 +509,7 @@ def calibrate(
                 for family in uncalibrated
             )
             + "\nCorrecting one activation contract and not the other tilts "
-            "exactly the NVFP4-vs-FP8-CB comparison this calibration exists "
+            "exactly the W4A4-vs-W8A8 comparison this calibration exists "
             "to make fair (gridbook docs/audits/ultraplan_perf_2026-08-01.md "
             "§6, asymmetries 1 and 2), so the run refuses rather than ship a "
             "silently biased allocation.\n"

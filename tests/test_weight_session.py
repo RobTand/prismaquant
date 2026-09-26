@@ -2,6 +2,7 @@ import pytest
 import torch
 import torch.nn as nn
 
+from prismaquant import format_registry as fr
 from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant.weight_session import WeightSession
 
@@ -64,11 +65,13 @@ def test_weight_session_allows_mxfp8_rtn_fallback_when_not_strict():
     assert diag["n_cache_misses"] == 1
 
 
-def test_weight_session_never_uses_unweighted_cb_rtn_fallback():
+def test_weight_session_refuses_a_retired_codebook_rung():
+    # The retired codebook lane, archived 2026-09-25, #1304: the RTN
+    # fallback re-raises the refusal instead of returning None.
     model = _ModelWithBody().eval()
     session = WeightSession(model, strict_production_cache=False)
 
-    with pytest.raises(RuntimeError, match="required for CB fallback"):
+    with pytest.raises(fr.RetiredFormatError, match="gridbook_lane"):
         session.initialize({"model.proj": "NVFP4_CB_K16"}, units=[])
 
 

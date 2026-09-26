@@ -191,7 +191,7 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
     for unit in units:
         for fmt, (_loss, milliseconds) in menu.items():
             serialized, _, _ = serialized_candidate_payload(
-                allocator.fr.get_format(fmt), shape, qname=unit, cb_serialization_context=None)
+                allocator.fr.get_format(fmt), shape, qname=unit)
             table_rows.append({"unit": unit, "format": fmt,
                 "binding": {"member_formats": {unit: fmt},
                     "member_operator_identity_sha256": {unit: rows_by_unit[unit][fmt]["joint_operator_identity_sha256"]},

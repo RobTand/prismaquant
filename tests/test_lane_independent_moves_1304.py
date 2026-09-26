@@ -147,14 +147,6 @@ def test_enforce_whole_artifact_budget_measures_every_regular_file(tmp_path):
 
 
 def test_the_helpers_have_one_owner():
-    assert importlib.util.find_spec("prismaquant.cb_imatrix") is None
-    from prismaquant import nvfp4_cb_footprint
-
-    for name in (
-        "assignment_serialization_sha256",
-        "whole_artifact_budget_stamp",
-        "whole_artifact_budget_from_assignment_payload",
-        "enforce_whole_artifact_budget",
-        "recursive_regular_file_bytes",
-    ):
-        assert not hasattr(nvfp4_cb_footprint, name), name
+    # The retired codebook lane's modules were archived in step 2 of #1304.
+    for name in ("cb_imatrix", "nvfp4_cb_footprint"):
+        assert importlib.util.find_spec(f"prismaquant.{name}") is None, name

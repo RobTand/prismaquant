@@ -62,16 +62,18 @@ from prismaquant.allocator_candidates import (
     drop_interpolated_candidates_dominated_by_measured,
 )
 from prismaquant.allocator_solver import Candidate
-from prismaquant.nvfp4_cb_footprint import CBSerializationContext
 
-_CB_CONTEXT = CBSerializationContext.production()
-
-# One family, four consecutive rungs: the two ends measured, the two middle
-# ones band-interpolated — the K12/K15 vs K13/K14 structure of the banked
-# DSv4-Flash menu, minus the rungs that add nothing to the argument.
-_RUNGS = ["NVFP4_CB_K12", "NVFP4_CB_K13", "NVFP4_CB_K14", "NVFP4_CB_K15"]
-_MEASURED_RUNGS = ("NVFP4_CB_K12", "NVFP4_CB_K15")
-_INTERPOLATED_RUNGS = ("NVFP4_CB_K13", "NVFP4_CB_K14")
+# One family, four rungs: the two ends measured, the two middle ones
+# band-interpolated. Until 2026-09-25 these were four consecutive rungs of the
+# retired NVFP4 codebook ladder (K12..K15; archived, #1304). A stale table can
+# still carry the ``band_interpolated`` stamp, and the Tessera campaign's
+# fitted rows take the same branch, so the rule is pinned here on the four
+# activation-quantizing rungs of the live ``mx`` family. The pricing never
+# reads a rung's bytes, so their order is only a label order.
+_RUNGS = ["MXFP4", "MXFP8_E5M2", "MXFP8_UE8M0_G32", "MXFP8_E4M3"]
+_MEASURED_RUNGS = ("MXFP4", "MXFP8_E4M3")
+_INTERPOLATED_RUNGS = ("MXFP8_E5M2", "MXFP8_UE8M0_G32")
+_FAMILY = "mx"
 
 # h_trace = 2 makes predicted_dloss = 0.5*h_trace*mse exactly the mse, so every
 # expected number below is readable as an MSE.
@@ -97,12 +99,12 @@ _STEP = 1.2
 
 
 def _weight_mse(rung: str) -> float:
-    return _W12 / (_STEP ** (int(rung.split("_K")[1]) - 12))
+    return _W12 / (_STEP ** _RUNGS.index(rung))
 
 
 def _stats_entry() -> dict:
-    # in_features % 256 == 0 and out_features % 16 == 0 keeps every CB rung
-    # legal, so nothing drops out of build_candidates for shape reasons.
+    # in_features % 32 == 0 and both dims >= 128 keep every MX rung legal,
+    # so nothing drops out of build_candidates for shape reasons.
     return {
         "h_trace": _H_TRACE,
         "n_params": 1024 * 512,
@@ -112,7 +114,7 @@ def _stats_entry() -> dict:
 
 
 def _ladder_rows(ratio: float) -> dict:
-    """One tensor's NVFP4-CB ladder at a given output/weight ratio.
+    """One tensor's four-rung ladder at a given output/weight ratio.
 
     Both metrics are geometric in K, so the interpolated rungs carry exactly
     what a log-space ladder fit through the measured K12/K15 anchors produces
@@ -202,7 +204,7 @@ def test_interpolated_rungs_are_priced_between_their_measured_neighbours():
     stats, costs = _tables()
     pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
     assert pricing.enabled
-    assert pricing.families["nvfp4_cb"].penalty == pytest.approx(
+    assert pricing.families[_FAMILY].penalty == pytest.approx(
         _EXPECTED_PENALTY)
 
     for qname, ratio in ((_DOWN_PROJ, _RATIO_DOWN_PROJ),
@@ -239,7 +241,7 @@ def test_the_old_rule_breaks_rung_order_in_both_directions():
     # The calibration is not what changed: the interpolated rows never entered
     # it, so stripping their output_mse leaves the same fit.
     assert calibrate_activation_fair_pricing(
-        stats, pre_fix, _specs()).families["nvfp4_cb"].penalty == pytest.approx(
+        stats, pre_fix, _specs()).families[_FAMILY].penalty == pytest.approx(
             _EXPECTED_PENALTY)
 
     down = _priced_ladder(stats, pre_fix, _DOWN_PROJ, pricing)
@@ -250,10 +252,10 @@ def test_the_old_rule_breaks_rung_order_in_both_directions():
     assert _violations(gate) == [3], f"gate_proj prices={gate}"
     # And the misprice is the family constant standing in for the ratio.
     assert down[1] == pytest.approx(
-        _EXPECTED_PENALTY * _weight_mse("NVFP4_CB_K13"))
-    assert down[1] / (_RATIO_DOWN_PROJ * _weight_mse("NVFP4_CB_K13")) == (
+        _EXPECTED_PENALTY * _weight_mse("MXFP8_E5M2"))
+    assert down[1] / (_RATIO_DOWN_PROJ * _weight_mse("MXFP8_E5M2")) == (
         pytest.approx(_EXPECTED_PENALTY / _RATIO_DOWN_PROJ))   # 5x over
-    assert gate[1] / (_RATIO_GATE_PROJ * _weight_mse("NVFP4_CB_K13")) == (
+    assert gate[1] / (_RATIO_GATE_PROJ * _weight_mse("MXFP8_E5M2")) == (
         pytest.approx(_EXPECTED_PENALTY / _RATIO_GATE_PROJ))   # 0.2x under
     # The measured rungs are untouched by the fix, on both tables.
     fixed_down = _priced_ladder(stats, costs, _DOWN_PROJ, pricing)
@@ -265,18 +267,9 @@ def test_build_candidates_prices_and_labels_the_interpolated_rung():
     """End to end through candidate construction, not just the scalar path."""
     stats, costs = _tables()
     pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
-    # Re-pointed from `target_profile="nvfp4_cb"` on 2026-09-02: that serving
-    # profile retired with the Gridbook lane
-    # (archive/gridbook_lane_2026-09-02/) and was the only one that admitted a
-    # CB rung, so the call returned an empty candidate map and this test failed
-    # on a KeyError rather than on its subject. `research` is the honest
-    # replacement -- it declares no export lane and no menu restriction, which
-    # is exactly the status the CB pricing plumbing now has (debt D34):
-    # priceable and renderable, servable nowhere. The arithmetic under test is
-    # unchanged.
     cands = build_candidates(
         stats, costs, _specs(), target_profile="research",
-        cb_serialization_context=_CB_CONTEXT, activation_pricing=pricing)
+        activation_pricing=pricing)
 
     for qname, ratio in ((_DOWN_PROJ, _RATIO_DOWN_PROJ),
                          (_GATE_PROJ, _RATIO_GATE_PROJ)):
@@ -318,15 +311,15 @@ def test_interpolated_rows_never_enter_the_calibration_sample():
         collect_activation_calibration_rows(stats, measured_only, _specs()))
 
     assert rows_all == rows_ref
-    assert measured_all == measured_ref == {"nvfp4_cb": 4}
+    assert measured_all == measured_ref == {_FAMILY: 4}
     assert len(rows_all) == 4
     # Not one of the four came from an interpolated rung.
     assert {row.fmt for row in rows_all} == set(_MEASURED_RUNGS)
 
     fit_all = calibrate_activation_fair_pricing(
-        stats, costs, _specs()).families["nvfp4_cb"]
+        stats, costs, _specs()).families[_FAMILY]
     fit_ref = calibrate_activation_fair_pricing(
-        stats, measured_only, _specs()).families["nvfp4_cb"]
+        stats, measured_only, _specs()).families[_FAMILY]
     assert fit_all.n_rows == fit_ref.n_rows == 4
     assert fit_all.rows_digest == fit_ref.rows_digest
     assert fit_all.penalty == fit_ref.penalty == pytest.approx(
@@ -336,8 +329,8 @@ def test_interpolated_rows_never_enter_the_calibration_sample():
     # The one census that DOES see them, recorded rather than silently
     # divergent: the weight-only population feeds calibrate()'s fail-closed
     # refusal, where over-counting can only make a run refuse more eagerly.
-    assert weight_only_all == {"nvfp4_cb": 4}
-    assert weight_only_ref == {"nvfp4_cb": 0}
+    assert weight_only_all == {_FAMILY: 4}
+    assert weight_only_ref == {_FAMILY: 0}
 
 
 # ---------------------------------------------------------------------------
@@ -347,19 +340,19 @@ def test_interpolated_rows_never_enter_the_calibration_sample():
 def test_the_row_still_says_exactly_what_it_said_about_itself():
     """Only the number's USE changed, never its claims."""
     stats, costs = _tables()
-    entry = costs[_DOWN_PROJ]["NVFP4_CB_K13"]
+    entry = costs[_DOWN_PROJ]["MXFP8_E5M2"]
     assert entry["cost_source"] == "band_interpolated"
     assert entry["output_mse_measured"] is False
     # The provenance guard (constraint: not weakened) still classifies it.
     assert cost_entry_is_band_interpolated(entry)
     # The cost-FIELD source keeps reporting the explicit provenance string...
-    assert cost_entry_source(stats[_DOWN_PROJ], entry, "NVFP4_CB_K13") == (
+    assert cost_entry_source(stats[_DOWN_PROJ], entry, "MXFP8_E5M2") == (
         "band_interpolated")
     # ...and "is a real measurement behind this row" is still answered no.
     assert not cost_entry_uses_measured_output_mse(
-        stats[_DOWN_PROJ], entry, "NVFP4_CB_K13")
+        stats[_DOWN_PROJ], entry, "MXFP8_E5M2")
     assert cost_entry_activation_pricing_branch(
-        stats[_DOWN_PROJ], entry, "NVFP4_CB_K13",
+        stats[_DOWN_PROJ], entry, "MXFP8_E5M2",
         calibrate_activation_fair_pricing(stats, costs, _specs()),
     ) == BRANCH_INTERPOLATED_OUTPUT
 
@@ -370,16 +363,16 @@ def test_the_noise_band_guard_still_drops_a_dominated_interpolated_rung():
     _stats, costs = _tables()
     cands = {
         _DOWN_PROJ: [
-            Candidate(fmt="NVFP4_CB_K12", bits_per_param=4.5,
+            Candidate(fmt="MXFP4", bits_per_param=4.5,
                       memory_bytes=1000, predicted_dloss=1.0e-3),
-            Candidate(fmt="NVFP4_CB_K13", bits_per_param=4.6,
+            Candidate(fmt="MXFP8_E5M2", bits_per_param=4.6,
                       memory_bytes=1000, predicted_dloss=1.001e-3),
         ]
     }
     kept, dropped = drop_interpolated_candidates_dominated_by_measured(
         cands, costs, band=0.05)
     assert dropped == 1
-    assert [c.fmt for c in kept[_DOWN_PROJ]] == ["NVFP4_CB_K12"]
+    assert [c.fmt for c in kept[_DOWN_PROJ]] == ["MXFP4"]
 
 
 @pytest.mark.parametrize("packed", [False, True])
@@ -400,19 +393,19 @@ def test_a_zero_output_mse_placeholder_still_takes_the_weight_only_branch(
     if packed:
         stats_entry["num_experts"] = 256
     entry = {
-        "weight_mse": _weight_mse("NVFP4_CB_K13"),
+        "weight_mse": _weight_mse("MXFP8_E5M2"),
         "output_mse": 0.0,
         "rel_output_mse": 0.0,
         "output_mse_measured": False,
         "cost_source": "band_interpolated",
     }
     priced = cost_entry_predicted_dloss(
-        stats_entry, entry, format_name="NVFP4_CB_K13",
+        stats_entry, entry, format_name="MXFP8_E5M2",
         activation_pricing=pricing)
     assert priced == pytest.approx(
-        _EXPECTED_PENALTY * _weight_mse("NVFP4_CB_K13"))
+        _EXPECTED_PENALTY * _weight_mse("MXFP8_E5M2"))
     assert cost_entry_activation_pricing_branch(
-        stats_entry, entry, "NVFP4_CB_K13", pricing) == BRANCH_CALIBRATED
+        stats_entry, entry, "MXFP8_E5M2", pricing) == BRANCH_CALIBRATED
 
 
 def test_a_mixed_row_with_no_output_number_stays_weight_only():
@@ -427,9 +420,9 @@ def test_a_mixed_row_with_no_output_number_stays_weight_only():
         "cost_source": "mixed",
     }
     assert cost_entry_activation_pricing_branch(
-        _stats_entry(), entry, "NVFP4_CB_K13", pricing) == BRANCH_CALIBRATED
+        _stats_entry(), entry, "MXFP8_E5M2", pricing) == BRANCH_CALIBRATED
     assert cost_entry_predicted_dloss(
-        _stats_entry(), entry, format_name="NVFP4_CB_K13",
+        _stats_entry(), entry, format_name="MXFP8_E5M2",
         activation_pricing=pricing,
     ) == pytest.approx(_EXPECTED_PENALTY * 1.0e-4)
 
@@ -437,13 +430,13 @@ def test_a_mixed_row_with_no_output_number_stays_weight_only():
 def test_a_genuinely_measured_row_is_priced_exactly_as_before():
     stats, costs = _tables()
     pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
-    entry = costs[_GATE_PROJ]["NVFP4_CB_K12"]
+    entry = costs[_GATE_PROJ]["MXFP4"]
     assert cost_entry_predicted_dloss(
-        stats[_GATE_PROJ], entry, format_name="NVFP4_CB_K12",
+        stats[_GATE_PROJ], entry, format_name="MXFP4",
         activation_pricing=pricing,
     ) == pytest.approx(_RATIO_GATE_PROJ * _W12)
     assert cost_entry_activation_pricing_branch(
-        stats[_GATE_PROJ], entry, "NVFP4_CB_K12", pricing) == BRANCH_MEASURED
+        stats[_GATE_PROJ], entry, "MXFP4", pricing) == BRANCH_MEASURED
 
 
 def test_the_ucb_hedge_conversion_follows_the_pricing_branch():

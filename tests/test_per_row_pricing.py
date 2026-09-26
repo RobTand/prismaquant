@@ -18,13 +18,13 @@ from prismaquant.per_row_pricing import reconcile_selection, reprice_assignment
 _P5A = {
     "enabled": True,
     "reason": "calibrated",
-    "families": {"nvfp4_cb": {"penalty": 10.0}},
+    "families": {"nv": {"penalty": 10.0}},
 }
 
 
 def test_p5a_gain_is_applied_once_even_to_an_already_priced_row():
     """The applied marker prevents the historical 10x -> 100x inflation."""
-    assignment = {"model.layers.0.experts.0.w2": "NVFP4_CB_K14"}
+    assignment = {"model.layers.0.experts.0.w2": "NVFP4"}
     stats = {
         "model.layers.0.experts.0.w2": {
             "h_trace": 1.0,
@@ -35,7 +35,7 @@ def test_p5a_gain_is_applied_once_even_to_an_already_priced_row():
     }
     raw_costs = {
         "model.layers.0.experts.0.w2": {
-            "NVFP4_CB_K14": {
+            "NVFP4": {
                 "predicted_dloss": 2.0,
                 "output_mse_measured": False,
             },
@@ -47,7 +47,7 @@ def test_p5a_gain_is_applied_once_even_to_an_already_priced_row():
 
     already_priced = {
         "model.layers.0.experts.0.w2": {
-            "NVFP4_CB_K14": {
+            "NVFP4": {
                 "predicted_dloss": 20.0,
                 "output_mse_measured": False,
                 APPLIED_MARKER_KEY: True,

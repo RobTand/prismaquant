@@ -54,7 +54,7 @@ def _n_params(shape):
 def _payload(format_name, shape, qname):
     payload, _, _ = serialized_candidate_payload(
         fr.get_format(format_name), shape,
-        qname=qname, cb_serialization_context=None,
+        qname=qname,
     )
     return int(payload)
 

@@ -78,6 +78,7 @@ import numpy as np
 from .allocator_candidates import (
     ACT_DLOSS_KEY, JointCellCoordinateError, cost_entry_is_joint_aura,
     joint_row_binds_cell)
+from .schemas import refuse_retired_codebook_format
 
 #: Return the CUDA pool to the OS once it has reserved this much. On GB10's
 #: UNIFIED memory a reserved CUDA block IS host RAM, so it competes with the
@@ -350,6 +351,10 @@ def required_activation_formats(formats, *, shape, device, executes_all,
     unbuildable: list[tuple[str, str]] = []
     required: list[tuple[str, object]] = []
     for fmt in formats:
+        # A stale cost.pkl can still name a retired codebook rung (archived
+        # 2026-09-25, #1304). It refuses here: the handler below would record
+        # it as an unbuildable hole and let the run finish.
+        refuse_retired_codebook_format(fmt)
         try:
             plugin = RegistryFormatPlugin.build(fmt, shape=shape, device=device)
         except Exception as exc:

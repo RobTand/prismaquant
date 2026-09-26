@@ -283,14 +283,14 @@ levers or cost modes are requested.
 > now `exit 2`s, the exporter and the pin are archived at
 > `archive/gridbook_lane_2026-09-02/`, and **no shell knob below has a
 > `run-pipeline.sh` default any more** — every `CB_*` shell variable was read
-> only inside an `EXPORT_CONTAINER=nvfp4_cb` block. What survives is the
-> *render and cost plumbing* (`nvfp4_cb_formats.py`, `nvfp4_cb_footprint.py`,
-> `cb_ldlq*.py`, `cb_minchain.py`, `cb_warm_state.py`, …), recorded as debt
-> **D34** in `docs/ARCHITECTURE.md` §12. So the `PRISMAQUANT_CB_*` rows below
-> are still **accurate about the code** and are kept for that reason — but
-> nothing sets them, nothing reaches them from the pipeline, and a rung they
-> price cannot be exported or served. Read this section as documentation of
-> live-but-orphaned machinery, never as a lane you can run.
+> only inside an `EXPORT_CONTAINER=nvfp4_cb` block. The *render and cost
+> plumbing* (`nvfp4_cb_formats.py`, `nvfp4_cb_footprint.py`, `cb_ldlq*.py`,
+> `cb_minchain.py`, `cb_warm_state.py`, …) survived as debt **D34** until
+> **2026-09-25, when it was archived too** (#1304). Nothing reads the
+> `PRISMAQUANT_CB_*` flags below any more; the file:line citations point into
+> `archive/gridbook_lane_2026-09-02/prismaquant/`. The `CB_*` names stay only as
+> unread stage-settings hash entries in `run-pipeline.sh`. Read this section as
+> the record of a retired lane, never as a lane you can run.
 
 Historically: the lane was enabled by `EXPORT_CONTAINER=nvfp4_cb`, which the
 pipeline gated to `TARGET_PROFILE=nvfp4_cb`, `PRODUCTION_CACHE=0` and
