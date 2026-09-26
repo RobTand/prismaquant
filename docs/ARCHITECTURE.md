@@ -3334,9 +3334,14 @@ after `torch.as_tensor`) and `tensor_hash_update` (the calibration content
 hash). `sample_parallel_probe_merge`, `measure_quant_cost`'s verified loader,
 `expert_empirical_cost`, `perturbed_x_cache`, `prismasnap_checkpoint` and,
 through a lazy import, `tessera_export_lane` hash through it; every site keeps
-its name and key order, and a GoldenTable of the pre-change outcomes on CPU
-and CUDA holds them byte-identical (`tests/test_tensor_digests_1384.py`). No
-default, stage, format, lane, gate or byte changes.
+its name and key order. `tests/test_tensor_digests_1384.py` now uses explicit
+half-step inputs in place of a version-dependent `torch.randn` stream. Its
+portable GoldenTable was recorded against the pre-change CPU sites at main
+`2cd57b53dc4` through PB action `733e778ebc78`; all 94 CUDA rows were
+checked against the pre-change functions on a GB10 through PB action
+`e2b14fa8a90c` and matched the CPU rows. The original random-input table
+remains as historical evidence. No default, stage, format, lane, gate or byte
+changes.
 
 Re-stamped (2026-09-26, `claude/stream-head-adoptable-1403`) for **stream-head
 anchors that survive a kill** (PQ #1403, P2).

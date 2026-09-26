@@ -4,8 +4,12 @@ Each site below hashed a tensor's raw host bytes with its own copy of one
 recipe. Each now binds or calls ``prismaquant.tensor_digests``. The outcomes
 of the pre-move code on every input here (the returned digest or identity,
 key order included, or the exception type, ``str()`` and chained cause) are
-frozen in ``fixtures/tensor_digests_1384.json`` (``tests/golden_table.py``),
-and every call goes through the old site's name.
+frozen in ``fixtures/tensor_digests_1384_portable.json`` (``tests/golden_table.py``),
+and every call goes through the old site's name. The CPU rows were recorded
+from main at 2cd57b53dc4 through PB action 733e778ebc78; the 94 CUDA rows
+were then checked against the pre-change functions on a GB10 in action
+e2b14fa8a90c. Every CUDA outcome matched its corresponding CPU row. The
+original seeded-RNG fixture remains as historical evidence from the first run.
 
 Inputs cover every dtype the sites stamp (float32, bf16, fp16, fp8, int64,
 int32, uint8, bool), empty, zero-dimensional and non-contiguous tensors, a
@@ -21,7 +25,7 @@ import torch
 
 from tests.golden_table import GoldenTable
 
-GOLDEN = GoldenTable("tensor_digests_1384")
+GOLDEN = GoldenTable("tensor_digests_1384_portable")
 
 _CUDA = pytest.param("cuda", marks=pytest.mark.skipif(
     not torch.cuda.is_available(), reason="needs CUDA"))
@@ -43,8 +47,10 @@ def _site(ref):
 
 
 def _tensors(device):
-    generator = torch.Generator().manual_seed(1384)
-    base = torch.randn(6, 10, generator=generator)
+    # Explicit dyadic values survive every supported CPU torch RNG and GPU
+    # transfer unchanged. A seeded randn stream is not a portable byte input.
+    base = torch.tensor([((index * 37) % 13 - 6) / 2
+                         for index in range(60)], dtype=torch.float32).reshape(6, 10)
     values = [
         base,
         base.to(torch.bfloat16),
