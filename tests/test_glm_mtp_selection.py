@@ -199,7 +199,7 @@ def test_an_unattested_rung_is_left_off_the_menu_and_recorded():
     def eligible(unit, rung):
         return not (rung == R1024 and unit in ROUTED)
 
-    result = select_mtp_rungs(_payload(), byte_budget=10**12, constants=CONSTANTS,
+    result = select_mtp_rungs(_payload(), byte_budget=_bytes(R1024, "BF16"), constants=CONSTANTS,
                               eligible=eligible)
     assert result["rung"] == f"routed={R832}|shared=BF16"
     assert result["unattested_rungs"] == {R1024: len(ROUTED)}
