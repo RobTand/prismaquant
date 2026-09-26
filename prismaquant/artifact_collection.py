@@ -8,6 +8,10 @@ Every authoritative object is a strict JSON envelope.  ``payload_sha256`` is
 the semantic object ID; optional locators live outside the hashed payload so a
 mount point, Hugging Face URL, or local staging path cannot change identity.
 References bind both the semantic identity and the exact portable content.
+
+:mod:`prismaquant.artifact_collection_legacy` is a layer on this module, not a
+copy of it: it imports its envelope, reference and validation primitives from
+here and adds only the reading of pre-collection export metadata (PQ #1302).
 """
 from __future__ import annotations
 
