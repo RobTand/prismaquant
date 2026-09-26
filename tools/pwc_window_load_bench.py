@@ -160,12 +160,9 @@ def run_setup(args):
 # ---------------------------------------------------------------------------
 
 def _drop_client_pages(paths):
-    for path in paths:
-        fd = os.open(path, os.O_RDONLY)
-        try:
-            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-        finally:
-            os.close(fd)
+    # Keeps its own frame: the py-spy attribution below keys on this name.
+    from prismaquant.io_spans import drop_page_cache
+    drop_page_cache(paths)
 
 
 def _render_key(path: str):

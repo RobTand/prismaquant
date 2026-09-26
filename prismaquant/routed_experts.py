@@ -29,11 +29,17 @@ def resolve_routed_expert_profile(model: nn.Module, profile=None):
     return profile
 
 
-def _profile_call(profile, accessor: str, *args):
+def _profile_call(profile, accessor: str, *args,
+                  purpose: str = "classify", subject: str = "membership"):
+    """Call one routed-expert profile accessor, refusing by name.
+
+    The one owner (PQ #1302); ``expert_empirical_cost`` names its own purpose
+    ("render") and subject ("layout") in the refusal text.
+    """
     method = getattr(profile, accessor, None)
     if not callable(method):
         raise RuntimeError(
-            f"profile {type(profile).__name__} cannot classify routed experts: "
+            f"profile {type(profile).__name__} cannot {purpose} routed experts: "
             f"missing callable {accessor}()"
         )
     try:
@@ -41,7 +47,7 @@ def _profile_call(profile, accessor: str, *args):
     except Exception as exc:
         raise RuntimeError(
             f"profile {type(profile).__name__} could not determine routed-"
-            f"expert membership via {accessor}()"
+            f"expert {subject} via {accessor}()"
         ) from exc
 
 

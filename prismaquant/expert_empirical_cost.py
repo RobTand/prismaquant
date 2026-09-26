@@ -37,6 +37,7 @@ import re
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
+from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
@@ -48,6 +49,7 @@ from . import io_spans
 from prismaquant import format_registry as fr
 from prismaquant.routed_experts import (
     UnpackedExpertLinear,
+    _profile_call,
     profile_declared_routed_expert_targets,
     profile_declared_unpacked_expert_linears,
     resolve_routed_expert_profile,
@@ -238,20 +240,7 @@ class _UnpackedExpertUnit(NamedTuple):
     members_by_target: dict[str, dict[tuple[str, int], str]]
 
 
-def _expert_profile_call(profile, accessor: str, *args):
-    method = getattr(profile, accessor, None)
-    if not callable(method):
-        raise RuntimeError(
-            f"profile {type(profile).__name__} cannot render routed experts: "
-            f"missing callable {accessor}()"
-        )
-    try:
-        return method(*args)
-    except Exception as exc:
-        raise RuntimeError(
-            f"profile {type(profile).__name__} could not determine routed-"
-            f"expert layout via {accessor}()"
-        ) from exc
+_expert_profile_call = partial(_profile_call, purpose="render", subject="layout")
 
 
 def _unpacked_expert_units(model, profile) -> list[_UnpackedExpertUnit]:

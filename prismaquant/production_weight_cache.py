@@ -87,6 +87,7 @@ import torch.nn as nn
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
+from prismaquant.digests import canonical_json
 from prismaquant.render_score import (
     gate_render_candidate,
     normalize_row_weights,
@@ -2953,18 +2954,8 @@ def _is_cb_format_name(fmt: str) -> bool:
     return False
 
 
-def _canonical_json_value(value, *, where: str):
-    try:
-        encoded = json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{where} is not canonical JSON data") from exc
-    return json.loads(encoded)
+#: One canonical-JSON value normalizer (PQ #1302): ``digests`` owns it.
+_canonical_json_value = canonical_json
 
 
 def _source_weight_value_identity(

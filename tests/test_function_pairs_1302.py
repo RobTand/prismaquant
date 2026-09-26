@@ -159,6 +159,7 @@ def test_packed_expert_param_names_and_module_test(module_name, profile_index):
     GOLDEN.call(lambda: sorted(module._packed_expert_param_name_set(profile)))
     for candidate in _MODULES:
         GOLDEN.call(lambda: module._is_packed_experts_module(candidate, profile))
+        GOLDEN.call(lambda: module._packed_experts_param_names(candidate, profile))
 
 
 @pytest.mark.parametrize("module_name", [

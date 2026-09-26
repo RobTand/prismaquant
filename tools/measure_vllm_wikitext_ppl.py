@@ -24,8 +24,7 @@ try:  # package mode (`python -m tools.measure_vllm_wikitext_ppl`)
     from .gold_engine_options import (
         add_gold_engine_arguments,
         gold_engine_kwargs,
-        gold_fabric_request,
-        headless_peer_argv,
+        gold_provenance,
         validate_gold_engine_arguments,
     )
     from .gold_measurement_fidelity import wikitext_ppl_fidelity
@@ -36,8 +35,7 @@ except ImportError:  # script mode (`python /repo/tools/measure_vllm_wikitext_pp
     from gold_engine_options import (  # type: ignore
         add_gold_engine_arguments,
         gold_engine_kwargs,
-        gold_fabric_request,
-        headless_peer_argv,
+        gold_provenance,
         validate_gold_engine_arguments,
     )
     from gold_measurement_fidelity import wikitext_ppl_fidelity  # type: ignore
@@ -126,30 +124,11 @@ def _provenance(args) -> dict:
     authoritative extension-residency read for the numbers below; a PPL from a
     different `serve_fingerprint` is not a comparable delta (tools/kl_ab.py).
     """
-    producer = gold_producer_identity("measure_vllm_wikitext_ppl")
-    topology = gold_engine_kwargs(args)
-    # See the twin comment in `measure_vllm_full_kl._provenance`: the fabric is
-    # an environment request, not an engine argument, and a PPL crossing two
-    # boxes is not readable without it.
-    extra = {
-        "measurement_tool": "measure_vllm_wikitext_ppl",
-        "producer_identity": producer,
-        "gold_engine_configuration": topology,
-        "gold_fabric_request": gold_fabric_request(),
-    }
-    if int(topology.get("nnodes", 1)) > 1 and _ENGINE_KWARGS is not None:
-        extra["headless_peer_argv"] = headless_peer_argv(
-            _ENGINE_KWARGS, node_rank=1)
-    manifest = self_manifest(
-        extra=extra,
-        image=_resolve_serve_image(args),
-    )
-    return {
-        "git_commit": producer["git_commit"],
-        "serve_fingerprint": manifest["serve_fingerprint"],
-        "serve_manifest": manifest,
-        "spec_decode_detected": _SPEC_DECODE_DETECTED,
-    }
+    return gold_provenance(
+        "measure_vllm_wikitext_ppl", args, engine_kwargs=_ENGINE_KWARGS,
+        spec_decode_detected=_SPEC_DECODE_DETECTED,
+        producer_identity=gold_producer_identity, self_manifest=self_manifest,
+        serve_image=_resolve_serve_image)
 
 
 def _load_ids(

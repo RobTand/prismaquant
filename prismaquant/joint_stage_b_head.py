@@ -89,13 +89,9 @@ def head_slice_sha256(head_slice) -> str:
 
 def head_slice_directory(output_root: str, *, metadata_root: str | None = None) -> str:
     """Where head slices land: the control-metadata namespace (PQ #884)."""
-    from .joint_layer_quanta import _canonical_control_root
+    from .joint_layer_quanta import control_directory
 
-    if metadata_root is not None:
-        return _canonical_control_root(metadata_root) + "/head-slices"
-    if type(output_root) is not str or not output_root.startswith("/"):
-        raise ValueError("an output root must be absolute: refusing")
-    return output_root.rstrip("/") + "/layer-quanta/head-slices"
+    return control_directory(output_root, "head-slices", metadata_root=metadata_root)
 
 
 def head_slice_path(output_root: str, layer: int, *,

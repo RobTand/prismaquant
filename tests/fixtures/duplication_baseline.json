@@ -1,4 +1,41 @@
 {
+ "must_differ": [
+  {
+   "pair": [
+    "prismaquant/aura_cost.py::_atomic_write_bytes",
+    "tools/reseal_campaign_identity.py::atomic_write"
+   ],
+   "reason": "tools/reseal_campaign_identity.py keeps its row rewrites stdlib-only: import prismaquant pulls in torch, it imports the package lazily only for consumer_merge, and aura_cost cannot import a tool."
+  },
+  {
+   "pair": [
+    "prismaquant/joint_aura_retained_budget_transition.py::_actual_execution",
+    "prismaquant/joint_aura_run_transition.py::_actual_execution"
+   ],
+   "reason": "The joint_aura_*_transition modules are sealed: every transition receipt binds transition_module_sha256 over the module's own bytes, so each stays self-contained and byte-stable, and sharing a helper would change a sealed identity."
+  },
+  {
+   "pair": [
+    "prismaquant/joint_aura_retained_budget_transition.py::_committed_package",
+    "prismaquant/joint_aura_run_transition.py::_committed_package"
+   ],
+   "reason": "The joint_aura_*_transition modules are sealed: every transition receipt binds transition_module_sha256 over the module's own bytes, so each stays self-contained and byte-stable, and sharing a helper would change a sealed identity."
+  },
+  {
+   "pair": [
+    "prismaquant/joint_aura_retained_budget_transition.py::checkout_head_commit",
+    "prismaquant/joint_aura_run_transition.py::checkout_head_commit"
+   ],
+   "reason": "The joint_aura_*_transition modules are sealed: every transition receipt binds transition_module_sha256 over the module's own bytes, so each stays self-contained and byte-stable, and sharing a helper would change a sealed identity."
+  },
+  {
+   "pair": [
+    "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
+    "prismaquant/sample_parallel_probe_merge.py::_reference_mullo32_scalar"
+   ],
+   "reason": "_reference_mullo32_scalar is the merge's independent reference for the contract's uint32 low product; an oracle that shares code with the implementation it checks proves nothing (PQ #1302)."
+  }
+ ],
  "near_duplicates": [
   [
    "prismaquant/allocator.py::_log_error_values",
@@ -25,36 +62,12 @@
    "prismaquant/union_production_cache.py::_file_sha256"
   ],
   [
-   "prismaquant/digests.py::canonical_json",
-   "prismaquant/production_weight_cache.py::_canonical_json_value"
-  ],
-  [
-   "prismaquant/emu_forward_kl.py::_git_commit",
-   "prismaquant/fisher_col_weights.py::_git_commit"
-  ],
-  [
-   "prismaquant/expert_empirical_cost.py::_expert_profile_call",
-   "prismaquant/routed_experts.py::_profile_call"
-  ],
-  [
    "prismaquant/export_gguf.py::build_imatrix_from_act_cache",
    "prismaquant/export_gguf_direct.py::build_direct_imatrix"
   ],
   [
-   "prismaquant/export_native_compressed.py::_is_packed_experts_module",
-   "prismaquant/sensitivity_probe.py::_is_packed_experts_module"
-  ],
-  [
    "prismaquant/export_native_compressed.py::_mx_rounded_amax_power2",
    "prismaquant/format_registry.py::_mx_rounded_amax_power2"
-  ],
-  [
-   "prismaquant/export_native_compressed.py::_packed_expert_param_name_set",
-   "prismaquant/sensitivity_probe.py::_packed_expert_param_name_set"
-  ],
-  [
-   "prismaquant/export_native_compressed.py::_packed_expert_parent_for_projection",
-   "prismaquant/measure_quant_cost.py::_packed_expert_parent_for_projection"
   ],
   [
    "prismaquant/incremental_probe.py::_marginal_chunk",
@@ -77,18 +90,6 @@
    "prismaquant/joint_aura_run_transition.py::checkout_head_commit"
   ],
   [
-   "prismaquant/joint_layer_quanta.py::bound_readset_directory",
-   "prismaquant/joint_stage_b_head.py::head_slice_directory"
-  ],
-  [
-   "prismaquant/layer_state_cache.py::_first_tensor_location",
-   "prismaquant/perturbed_x_cache.py::_first_tensor_location"
-  ],
-  [
-   "prismaquant/model_profiles/gemma4.py::Gemma4Profile.matches",
-   "prismaquant/model_profiles/lfm2_moe.py::Lfm2MoeProfile.matches"
-  ],
-  [
    "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
    "prismaquant/sample_parallel_probe_merge.py::_reference_mullo32_scalar"
   ],
@@ -97,20 +98,8 @@
    "prismaquant/tessera_serving_runtime_pin.py::TesseraServingNativeExtension.as_contract_row"
   ],
   [
-   "tools/measure_vllm_full_kl.py::_provenance",
-   "tools/measure_vllm_wikitext_ppl.py::_provenance"
-  ],
-  [
-   "tools/pwc_window_load_bench.py::_drop_client_pages",
-   "tools/render_window_bench.py::_drop_pages"
-  ],
-  [
    "tools/resolve_prismabuild_dev_pin.py::resolve_prismabuild_dev_pin",
    "tools/resolve_tessera_dev_pin.py::resolve_tessera_dev_pin"
-  ],
-  [
-   "tools/tp2_budget_plan.py::_git_sha",
-   "tools/tp_decode_feasibility.py::_git_sha"
   ]
  ],
  "same_name_helpers": {
@@ -241,10 +230,6 @@
    "prismaquant/prismasnap_checkpoint.py",
    "prismaquant/quality_prefill_contract.py"
   ],
-  "_first_tensor_location": [
-   "prismaquant/layer_state_cache.py",
-   "prismaquant/perturbed_x_cache.py"
-  ],
   "_fp16_bytes": [
    "prismaquant/gguf_formats.py",
    "prismaquant/gguf_iq_formats.py"
@@ -264,10 +249,6 @@
    "prismaquant/export_gguf.py",
    "prismaquant/fisher_col_weights.py",
    "prismaquant/sensitivity_card_build.py"
-  ],
-  "_git_sha": [
-   "tools/tp2_budget_plan.py",
-   "tools/tp_decode_feasibility.py"
   ],
   "_group_key": [
    "prismaquant/production_cache_stripes.py",
@@ -300,10 +281,6 @@
   "_is_number": [
    "prismaquant/prismasnap_validation.py",
    "prismaquant/schemas.py"
-  ],
-  "_is_packed_experts_module": [
-   "prismaquant/export_native_compressed.py",
-   "prismaquant/sensitivity_probe.py"
   ],
   "_json": [
    "prismaquant/joint_catalog_extension.py",
@@ -419,18 +396,6 @@
   "_optional_str": [
    "prismaquant/model_profiles/structure.py",
    "prismaquant/serving_profiles.py"
-  ],
-  "_packed_expert_param_name_set": [
-   "prismaquant/export_native_compressed.py",
-   "prismaquant/sensitivity_probe.py"
-  ],
-  "_packed_expert_parent_for_projection": [
-   "prismaquant/export_native_compressed.py",
-   "prismaquant/measure_quant_cost.py"
-  ],
-  "_packed_experts_param_names": [
-   "prismaquant/export_native_compressed.py",
-   "prismaquant/sensitivity_probe.py"
   ],
   "_parse": [
    "prismaquant/joint_replay_regime.py",

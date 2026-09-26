@@ -29,12 +29,9 @@ class Gemma4Profile(ModelProfile):
 
     @classmethod
     def matches(cls, model_type: str, architectures: list[str]) -> bool:
-        if model_type in {"gemma4", "gemma4_text"}:
-            return True
-        for arch in architectures:
-            if arch.startswith("Gemma4"):
-                return True
-        return False
+        return cls.claims_by_name(
+            model_type, architectures,
+            frozenset({"gemma4", "gemma4_text"}), ("Gemma4",))
 
     @property
     def name(self) -> str:

@@ -72,3 +72,17 @@ def test_same_name_helpers_only_shrink():
     assert not shrunk, (
         f"baseline entries gone {shrunk}: shrink the baseline with "
         "tools/duplication_inventory.py --write-baseline")
+
+
+def test_must_differ_pairs_are_live_and_give_a_reason():
+    """A pair kept as two implementations says why, and still exists (#1302)."""
+    base = _baseline()
+    pairs = {tuple(p) for p in base["near_duplicates"]}
+    seen = set()
+    for row in base.get("must_differ", []):
+        assert set(row) == {"pair", "reason"}, row
+        pair = tuple(row["pair"])
+        assert pair in pairs, f"must_differ names a pair the baseline lacks: {pair}"
+        assert pair not in seen, f"must_differ repeats {pair}"
+        seen.add(pair)
+        assert len(row["reason"].split()) >= 8, f"{pair} needs a real reason"

@@ -1096,6 +1096,21 @@ def _packed_expert_param_name_set(profile=None) -> set[str]:
     return set()
 
 
+def _packed_expert_parent_for_projection(profile, projection_name: str) -> str | None:
+    if profile is None:
+        try:
+            from .model_profiles import DefaultProfile
+            profile = DefaultProfile()
+        except Exception:
+            profile = None
+    if profile is not None:
+        try:
+            return profile.packed_expert_parent_for_projection(projection_name)
+        except Exception:
+            pass
+    return None
+
+
 def _is_packed_experts_module(module: nn.Module, profile=None) -> bool:
     """A module qualifies as a packed-experts container iff (a) its
     class name contains "Experts" (case-insensitive), and (b) it owns

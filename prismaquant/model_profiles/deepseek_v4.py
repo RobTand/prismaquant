@@ -59,12 +59,10 @@ class DeepseekV4Profile(ModelProfile):
 
     @classmethod
     def matches(cls, model_type: str, architectures: list[str]) -> bool:
-        if model_type in {"deepseek_v4", "deepseek-v4"}:
-            return True
-        for arch in architectures:
-            if arch.startswith("DeepseekV4") or arch.startswith("DeepSeek-V4"):
-                return True
-        return False
+        return cls.claims_by_name(
+            model_type, architectures,
+            frozenset({"deepseek_v4", "deepseek-v4"}),
+            ("DeepseekV4", "DeepSeek-V4"))
 
     @property
     def name(self) -> str:
