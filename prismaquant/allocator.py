@@ -709,6 +709,41 @@ def apply_mtp_format_override(
     return out
 
 
+def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping) -> None:
+    """Add the MTP layer's selected rungs to ``layer_cfg`` (PQ #1346).
+
+    The selection runs after the body is final, on its own payload and its own
+    declared sub-budget, so it moves no body byte and no body bpp. A unit the
+    body also assigned is refused: one unit cannot be priced in two currencies.
+    """
+    from .glm_mtp_selection import load_mtp_cost, select_mtp_rungs
+
+    if args.mtp_byte_budget is None or not args.mtp_serve_constants:
+        raise SystemExit("[alloc] --mtp-joint-cost requires --mtp-byte-budget "
+                         "and --mtp-serve-constants")
+    try:
+        payload = load_mtp_cost(args.mtp_joint_cost)
+        constants = json.loads(Path(args.mtp_serve_constants).read_text())
+        points = (json.loads(Path(args.mtp_acceptance_points).read_text())
+                  if args.mtp_acceptance_points else [])
+        record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
+                                  constants=constants, acceptance_points=points)
+    except ValueError as exc:
+        raise SystemExit(f"[alloc] ERROR: MTP selection: {exc}") from exc
+    assignment = record.pop("assignment")
+    clash = sorted(set(assignment) & (set(body_assignment) | set(layer_cfg)))
+    if clash:
+        raise SystemExit(f"[alloc] ERROR: MTP selection names {len(clash)} unit(s) the "
+                         f"body allocation also assigned: {clash[:4]}")
+    for name, fmt in sorted(assignment.items()):
+        layer_cfg[name] = fr.get_format(fmt).autoround_config()
+    layer_cfg[LAYER_CONFIG_META_KEY]["mtp_selection"] = {
+        **record, "cost_path": str(args.mtp_joint_cost), "units": len(assignment)}
+    print(f"[alloc] MTP selection: {record['rung']} "
+          f"{record['resident_bytes']:,} B of {record['byte_budget']:,} B "
+          f"({record['selection']['regime']})", flush=True)
+
+
 def _is_mtp_linear(name: str) -> bool:
     """True when `name` refers to an MTP Linear-like quantization target."""
     return str(name).startswith("mtp.")
@@ -1907,6 +1942,23 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     help="Uniform format for MTP Linears. BF16 is the "
                          "production default until MTP speculative-decode "
                          "acceptance is validated for quantized MTP weights.")
+    ap.add_argument("--mtp-joint-cost", default=None,
+                    help="GLM MTP layer cost payload (prismaquant.glm_mtp_cost.v1), "
+                         "priced on the MTP head's self-KL. Its rungs are chosen "
+                         "by glm_mtp_selection under --mtp-byte-budget, outside the "
+                         "body DP and outside body bpp (PQ #1346).")
+    ap.add_argument("--mtp-byte-budget", type=int, default=None,
+                    help="Declared resident-byte sub-budget for the MTP layer "
+                         "(required with --mtp-joint-cost).")
+    ap.add_argument("--mtp-serve-constants", default=None,
+                    help="JSON file: the declared serve constants t_ms, d0_ms, "
+                         "c_ms_per_bit and their source (required with "
+                         "--mtp-joint-cost; recorded, and inert without "
+                         "acceptance points).")
+    ap.add_argument("--mtp-acceptance-points", default=None,
+                    help="Optional JSON list of served acceptance points "
+                         "({measured_acceptance, rung_name|bits}) for the MTP "
+                         "selector's acceptance fit.")
     ap.add_argument(
         "--lm-head-format",
         choices=_format_cli_choices(),
@@ -5553,6 +5605,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # before the layer config is written.  Additive: a stock cost table adds
     # no keys, and a table carrying a population but no projection carries
     # only the population.
+    if args.mtp_joint_cost:
+        _stamp_mtp_selection(args, layer_cfg, assignment_expanded)
     if args.tessera_materialization_plan:
         from .tessera_materialization import write_selection_request
         write_selection_request(args.tessera_materialization_plan,
