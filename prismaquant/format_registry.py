@@ -32,25 +32,11 @@ from typing import Callable, Iterable
 import torch
 from compressed_tensors.quantization.utils.mxfp_utils import generate_mx_scales
 
-from prismaquant.cb_layout import (
-    CODEWORDS_PER_SUPERBLOCK,
-    FP4_GROUP,
-    FP8_ACCEPTED_RUNGS,
-    FP8_PRODUCT_RUNGS,
-    NVFP4_ACCEPTED_RUNGS,
-    NVFP4_PRODUCT_RUNGS,
-    SCALE_CODING_V1,
-    SCALE_PLANE_BYTES,
-    SUPERBLOCK,
-    is_producer_format_name,
-    parse_format_name,
-)
 from prismaquant.fp8_dynamic import (
     fp8_dynamic_activation_qdq_vllm,
     fp8_dynamic_weight_qdq,
 )
 from prismaquant.gguf_formats import make_gguf_qdq
-from prismaquant.nvfp4_cb_formats import make_nvfp4_cb_qdq
 from prismaquant.mx_formats import (
     e8m0_to_scale,
     mxfp8_e4m3_activation_qdq_vllm,
@@ -104,11 +90,10 @@ class FormatSpec:
     activation_quantize_dequantize: Callable[[torch.Tensor], torch.Tensor] = field(
         default=lambda x: x
     )
-    # Reader compatibility is deliberately wider than the producer surface
-    # for FP8-CB: old K28..K48 artifacts remain loadable even though new
-    # artifacts may only use K%4.  Kept last to preserve FormatSpec's existing
-    # positional constructor ABI. Menus/assignments must use the explicit
-    # producer APIs instead of treating registry membership as authority.
+    # Whether a newly produced menu or assignment may name this format.
+    # Kept last to preserve FormatSpec's existing positional constructor ABI.
+    # Menus/assignments must use the explicit producer APIs instead of
+    # treating registry membership as authority.
     producer_eligible: bool = True
     # An exact bits-per-parameter rate, for formats whose serialized size is
     # not the integer-weight-plus-group-scale model the fields above encode.
@@ -1258,102 +1243,6 @@ register_format(_make_gguf_spec("IQ4_XS", 4, 256, 64))    # 136 B / 256 = 4.25
 register_format(_make_gguf_spec("IQ4_NL", 4, 32, 16))     # 18 B / 32 = 4.5
 
 
-# NVFP4-CB / FP8-CB vector-quantization codebook family (NOT stock
-# compressed-tensors).  The out-of-tree plugin lane these once fed — Gridbook
-# — was retired 2026-09-02 and archived whole under
-# archive/gridbook_lane_2026-09-02/ (its docs/ holds the lane documents the
-# older `docs/lanes/nvfp4-cb` pointers cite); no sanctioned lane serves these
-# bytes.  The specs stay registered as reader/reporting rows only.
-# The k-bit VQ index stream lives in scale_bits (fp4 family, weight_bits=0,
-# group_size=256).  FormatSpec retains the legacy-v1 4k+16 nominal field for
-# old generic consumers; exact producer paths use CBSerializationContext and
-# price/render production layout-v2 as 4k+9.  FP8's FormatSpec likewise omits
-# its shape-dependent FP32 row-scale plane.  Consequently neither
-# ``effective_bits`` nor ``effective_bits_for_shape`` is authoritative for CB.
-# The FP8 index body is represented by the same group_size=256 superblock
-# stream as FP4-CB. Its per-output-channel FP32 scale cannot be represented by
-# that single-plane FormatSpec, so only the context-bound accountant adds the
-# shape-dependent 32/in_features term. quantize_dequantize
-# is the weighted-VQ closure that also feeds the (Milestone B) byte packer;
-# activations are byte-identical to NVFP4 (fp4) / FP8 dynamic (fp8).
-def _make_nvfp4_cb_spec(k: int, *, producer_eligible: bool) -> FormatSpec:
-    return FormatSpec(
-        name=f"NVFP4_CB_K{k}",
-        weight_bits=0, group_size=SUPERBLOCK,
-        scale_bits=(CODEWORDS_PER_SUPERBLOCK * k
-                    + 8 * SCALE_PLANE_BYTES[("fp4", SCALE_CODING_V1)]),
-        scale_dtype_name="nvfp4_cb_vq",
-        weight_element_dtype=f"nvfp4_cb_k{k}",
-        act_bits=4, act_dtype_name="fp4_e2m1", act_group_size=FP4_GROUP,
-        family="nvfp4_cb", min_capability_sm=100,
-        producer_eligible=producer_eligible,
-        autoround_config=(
-            lambda k=k: dict(bits=0, group_size=SUPERBLOCK, data_type="nvfp4_cb",
-                             cb_k=k, sym=True, act_bits=4,
-                             act_data_type="nv_fp4_with_static_gs",
-                             act_group_size=FP4_GROUP, act_dynamic=True)
-        ),
-        # Kept at v1 for direct legacy/research callers. Producer-cost paths
-        # bind CBSerializationContext explicitly; a FormatSpec alone cannot
-        # establish the artifact layout/codebook identity.
-        quantize_dequantize=make_nvfp4_cb_qdq(k, "fp4", "product"),
-        activation_quantize_dequantize=_make_rtn("fp4_e2m1", FP4_GROUP),
-    )
-
-
-def _make_fp8_cb_spec(k: int, *, producer_eligible: bool) -> FormatSpec:
-    # Index stream in scale_bits (32k bits / 256-superblock, weight_bits=0,
-    # group_size=256) so effective_bits = k/8 exactly, mirroring the GGUF /
-    # NVFP4_CB accounting. FP8_CB has NO group-16 scale plane; its
-    # per-output-channel fp32 scales are accounted by nvfp4_cb_footprint
-    # (the authoritative byte accountant, format-pipeline §1.5), which a
-    # single-scale FormatSpec cannot model on top of the superblock stream.
-    return FormatSpec(
-        name=f"FP8_CB_K{k}",
-        weight_bits=0, group_size=SUPERBLOCK,
-        scale_bits=CODEWORDS_PER_SUPERBLOCK * k,
-        scale_dtype_name="fp8_cb_vq",
-        weight_element_dtype=f"fp8_cb_k{k}",
-        act_bits=8, act_dtype_name="fp8_e4m3", act_group_size=0,
-        # Ada has native FP8 tensor-core execution, which the retired
-        # Gridbook lane's SM89 decode and expand+CUTLASS routes used (lane
-        # retired 2026-09-02).  This floor is capability metadata about the
-        # silicon, never a serving claim: no sanctioned lane serves FP8-CB.
-        family="fp8_cb", min_capability_sm=89,
-        producer_eligible=producer_eligible,
-        autoround_config=(
-            lambda k=k: dict(bits=0, group_size=0, data_type="fp8_cb",
-                             cb_k=k, sym=True, act_bits=8,
-                             act_data_type="fp8_e4m3", act_dynamic=True)
-        ),
-        quantize_dequantize=make_nvfp4_cb_qdq(k, "fp8", "product"),
-        activation_quantize_dequantize=_make_plain_fp8_activation_vllm_rtn(
-            torch.float8_e4m3fn, 448.0,
-        ),
-    )
-
-
-for _k in NVFP4_ACCEPTED_RUNGS:
-    # The public reader and producer domain is K1..K25 (v2 body
-    # 0.40625..3.40625 bpw). Wider direct-codec research has no registry id.
-    register_format(
-        _make_nvfp4_cb_spec(
-            _k,
-            producer_eligible=_k in NVFP4_PRODUCT_RUNGS,
-        )
-    )
-for _k in FP8_ACCEPTED_RUNGS:
-    # Registry membership is a reader/reporting guarantee, not a producer
-    # menu. Historical off-law K28..K48 rungs remain resolvable while only the
-    # exact K4,K8,...,K48 ladder is eligible for a new artifact.
-    register_format(
-        _make_fp8_cb_spec(
-            _k,
-            producer_eligible=_k in FP8_PRODUCT_RUNGS,
-        )
-    )
-
-
 def list_formats(family: str | None = None) -> list[FormatSpec]:
     if family is None:
         return sorted(REGISTRY.values(), key=lambda s: s.effective_bits)
@@ -1412,10 +1301,6 @@ def format_is_producer_eligible(name: str, *, context_by_unit=None) -> bool:
         return False
     if spec is None or not spec.producer_eligible:
         return False
-    # Pin CB eligibility to the torch-free wire source as a second invariant;
-    # a registry construction bug cannot widen the producer ladder by itself.
-    if parse_format_name(canonical) is not None:
-        return is_producer_format_name(canonical)
     return True
 
 
@@ -1473,6 +1358,19 @@ def is_tessera_format_name(name: object) -> bool:
     return name.strip().upper().startswith("TESSERA_")
 
 
+# The retired Gridbook lane's codebook rungs (NVFP4_CB_K<k>, FP8_CB_K<k>).
+# They are no longer registered. A stale artifact that names one gets this
+# refusal, never a silent skip: RetiredFormatError is deliberately NOT a
+# KeyError, so a reader that tolerates unknown names with ``except KeyError``
+# still refuses a retired one.
+RETIRED_CODEBOOK_FORMAT_RE = re.compile(r"(?:NVFP4_CB_K|FP8_CB_K)\d+")
+RETIRED_CODEBOOK_ARCHIVE = "archive/gridbook_lane_2026-09-02"
+
+
+class RetiredFormatError(ValueError):
+    """A format name that belongs to a retired lane and is no longer served."""
+
+
 def get_format(name: str) -> FormatSpec:
     canonical = canonical_format_name(name)
     if canonical not in REGISTRY:
@@ -1495,6 +1393,16 @@ def get_format(name: str) -> FormatSpec:
             spec = synthesize_tessera_spec(canonical)
             if spec is not None:
                 return spec
+        if RETIRED_CODEBOOK_FORMAT_RE.fullmatch(canonical.upper()):
+            raise RetiredFormatError(
+                f"format {name!r} belongs to the retired Gridbook codebook "
+                f"lane (NVFP4-CB / FP8-CB), removed on 2026-09-02; its "
+                f"format, cost and render code was archived on 2026-09-25 "
+                f"(#1304). A cost table, layer config or selection that "
+                f"names it can no longer be priced, rendered or exported "
+                f"from this repository. See {RETIRED_CODEBOOK_ARCHIVE}/"
+                f"README.md."
+            )
         raise KeyError(f"Unknown format '{name}'. Available: "
                        f"{sorted((*REGISTRY.keys(), *FORMAT_ALIASES.keys()))}")
     return REGISTRY[canonical]
