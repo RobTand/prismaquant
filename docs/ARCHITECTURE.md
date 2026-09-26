@@ -2998,6 +2998,29 @@ run that asks for one refuses, as it did before for every stock menu. The
 `CB_*` stage-settings hash entries in `run-pipeline.sh` stay, so no existing
 `WORK_DIR` rebuilds. No default, stage, served format or gate changed.
 
+Re-stamped (2026-09-25, `claude/glm-derivative-kda-scope`) for the **reach of
+the GLM KDA derivative guard** (PQ #1341, P1). On the corrected runtime, an
+unbound model used to be refused whenever it held any module from the corrected
+modeling file. The guard now refuses only a model that holds an instance of a
+class the correction reaches.
+`glm_source_derivative.correction_reach` derives that set from the loaded file:
+- it inverts the reviewed expression, and must reproduce the pinned original;
+- it diffs every definition;
+- it follows names that call, subclass or decorate with a changed definition, to
+  a fixed point.
+
+A file that does not invert, or module-level code that names a changed
+definition, is refused for every model.
+
+On the pinned source, only `chunk_kimi_delta_attention` changes. The reach is
+`Glm5NextTextLinearAttention` and the classes that name it; the body still
+refuses unbound. The GLM MTP layer (attention, MoE, norms) reaches none of it.
+It computes the same bytes on either source and runs with no derivative
+identity, which lets the MTP-scoped campaign run in the corrected image. Binding
+is unchanged and still needs an observed KDA module. Gate:
+`tests/test_glm_derivative_reach.py`, which includes two mutations of the real
+source that refuse again.
+
 Re-stamped (2026-09-25, `claude/glm-mtp-prepare-1338`) for **joint
 preparation over a source scope** (PQ #1338, M4 of #1271, P1). A source scope
 is no longer snapshot-only. A scoped context installs its own layers, so
