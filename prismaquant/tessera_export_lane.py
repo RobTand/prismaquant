@@ -651,9 +651,11 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     projected unit whose source tensor the producer hashed in the shard it
     actually lives in, each executed stack must be selected whole at one rung
     (the stamp the allocator wrote must agree), and every selected rung's
-    priced bytes must sit in the campaign's wire directory under their
-    receipt.  The bundle that comes back is what the exporter's
-    ``--cached-expert-units`` intake consumes.
+    priced blob must sit in the campaign's wire directory at its receipt's
+    size.  The bytes are not read here: the bundle that comes back is what the
+    exporter's ``--cached-expert-units`` intake consumes, and that intake
+    hashes every blob against its receipt before framing it
+    (``locate_expert_wire``'s contract, PrismaQuant #1378).
 
     Returned WITH the bundle, and not derived from it by the caller, is which
     of the two paths this run took (PrismaQuant #222).  The unlock is one
@@ -665,8 +667,8 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     """
     from .tessera_expert_projection import (
         EXPERT_WIRES_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, WIRE_DIR_KEY,
-        ExpertProjectionError, carried_units, require_stack_uniform_assignment,
-        verify_expert_wire_record,
+        ExpertProjectionError, carried_units, check_expert_wire_receipt,
+        locate_expert_wire, require_stack_uniform_assignment,
     )
     from .tessera_formats import parse_tessera_format_name
 
@@ -722,9 +724,16 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
             if record is None:
                 raise ExpertProjectionError(
                     f"{name}: selected {fmt} has no priced wire receipt in the allocation")
-            records[name] = verify_expert_wire_record(
+            # Name, rung, directory and size only: the exporter's
+            # ``--cached-expert-units`` intake reads and hashes every blob
+            # against ``blob_sha256`` (``verify_cached_unit``) before it frames
+            # it, so reading the bytes here too hashed each wire twice -- 153 GB
+            # of serial NFS reads before a GLM-5.3 export (PrismaQuant #1378).
+            record = check_expert_wire_receipt(
                 record, name=name, unit=units[name], q256=int(q256),
-                grid=family.payload_grid().name, wire_dir=Path(wire_dir))
+                grid=family.payload_grid().name)
+            locate_expert_wire(record, name=name, wire_dir=Path(wire_dir))
+            records[name] = record
     except ExpertProjectionError as exc:
         raise TesseraExportLaneError(f"expert projection: {exc}") from exc
     # A carried projection that no selected unit rides is still not priced

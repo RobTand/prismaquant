@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+The Tessera export preflight no longer reads the priced expert wires
+(2026-09-26, `ws-serve/1378-preflight-no-rehash`, PQ #1378).
+`_carried_expert_projection` (`tessera_export_lane.py`) used to check every
+selected routed unit's blob against its receipt's size and sha256
+(`verify_expert_wire_record`), reading each file whole. It now checks the
+receipt against the unit and rung (`check_expert_wire_receipt`), and the blob's
+directory and size (`locate_expert_wire`), without reading a byte. Byte
+integrity is not dropped. The exporter's `--cached-expert-units` intake, the
+consumer of the bundle this preflight writes, reads and hashes every blob
+against `blob_sha256` (`tessera.cached_unit.verify_cached_unit`) before it
+frames it. The preflight hash only duplicated that check. On GLM-5.3 the
+duplicate was 36,288 wires and 153 GB, read serially over NFS at 20 MB/s
+(py-spy: `verify_expert_wire_record`, `/proc/PID/io`), about 2 h 10 min before
+every export. A same-size blob with wrong bytes now passes the preflight, and
+the intake refuses it. A missing blob, a wrong size, or a receipt for another
+unit or rung is still refused here. Gate: `tests/test_tessera_export_projection.py`
+(`test_scope_reads_no_priced_wire_bytes`; before the fix, the scope read the
+wire and refused it). No format, default, stage or ship-gate verdict changes.
+
 Tessera pin (2026-09-26, `ws-serve/1274-tessera-pin-v38`, PQ #1274): the
 serving-runtime pin and the reader dev pin move from `07bfcc0e9b…` to
 `af7a86d43d…`, Tessera master after #621. The packaged contract moves from v34
@@ -3232,8 +3251,13 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-26 · `ws-serve/1274-tessera-pin-v38`.
+As of: 2026-09-26 · `ws-serve/1378-preflight-no-rehash`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `ws-serve/1378-preflight-no-rehash`) for **the
+Tessera export preflight reading no priced wire bytes** (PQ #1378): the
+scope gate checks receipt, location and size, and the exporter's cached intake
+remains the byte check. See the entry at the top.
 
 Re-stamped (2026-09-26, `ws-serve/1274-tessera-pin-v38`) for the **Tessera pin
 move to `af7a86d43d…`** (contract v34 -> v38, PQ #1274): the GLM serving
