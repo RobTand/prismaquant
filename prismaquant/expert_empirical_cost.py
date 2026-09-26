@@ -921,7 +921,6 @@ def measure_expert_unit_costs_streamed(
     resume: bool = False,
     model_identity: Mapping[str, object] | None = None,
     checkpoint_identity_extra: Mapping[str, object] | None = None,
-    formats_by_qname: Mapping[str, Sequence[str]] | None = None,
 ) -> tuple[dict, dict, dict]:
     """Measure routed serving units with one decoder layer resident at once.
 
@@ -956,49 +955,6 @@ def measure_expert_unit_costs_streamed(
         runner.layer_index_for_qname(qname)
 
     menu_by_unit = {qname: menu for qname in qnames}
-    canonical_format_plan = None
-    if formats_by_qname is not None:
-        canonical_format_plan = {
-            str(name): tuple(_canon_formats(values))
-            for name, values in formats_by_qname.items()
-        }
-        planned_universe = {
-            fmt
-            for values in canonical_format_plan.values()
-            for fmt in values
-        }
-        menu_by_unit = {}
-        for identity in unit_identities:
-            unit_qname = str(identity["qname"])
-            members = [str(row["qname"]) for row in identity["members"]]
-            missing = sorted(
-                member for member in members
-                if member not in canonical_format_plan
-            )
-            if missing:
-                raise ValueError(
-                    f"streamed expert format plan does not cover serving "
-                    f"unit {unit_qname}; sample={missing[:8]}"
-                )
-            projected = {
-                tuple(
-                    fmt for fmt in menu
-                    if fmt not in planned_universe
-                    or fmt in canonical_format_plan[member]
-                )
-                for member in members
-            }
-            if len(projected) != 1:
-                raise ValueError(
-                    "streamed expert format plan straddles one serving unit "
-                    f"{unit_qname}: {sorted(projected)}"
-                )
-            unit_menu = next(iter(projected))
-            if not unit_menu:
-                raise ValueError(
-                    f"streamed expert format plan leaves {unit_qname} empty"
-                )
-            menu_by_unit[unit_qname] = unit_menu
 
     completed: dict[str, dict[str, object]] = {}
     journal_root: Path | None = None
@@ -1010,16 +966,6 @@ def measure_expert_unit_costs_streamed(
                 "refusing model-name-gated resume"
             )
         extra = dict(checkpoint_identity_extra or {})
-        if canonical_format_plan is not None:
-            if "formats_by_qname" in extra:
-                raise ValueError(
-                    "checkpoint_identity_extra cannot override "
-                    "formats_by_qname"
-                )
-            extra["formats_by_qname"] = {
-                name: list(values)
-                for name, values in canonical_format_plan.items()
-            }
         identity = _expert_checkpoint_identity(
             runner=runner,
             profile=profile,
@@ -1646,13 +1592,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--formats", default="NVFP4,FP8_DYNAMIC,BF16",
         help="Expert format menu. Non-passthrough formats are measured; "
         "BF16/FP8_SOURCE rows are passthrough-zero.")
-    p.add_argument(
-        "--format-plan",
-        default=None,
-        help="Identity-bound source-class format plan. Streaming measurement "
-        "intersects the global menu for every serving unit and refuses a "
-        "group whose members straddle planned menus.",
-    )
     p.add_argument("--n-calib-samples", type=int, default=16)
     p.add_argument("--calib-seqlen", type=int, default=512)
     p.add_argument("--calib-split", default="train")
@@ -1740,8 +1679,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.resume and not args.checkpoint_dir:
         raise SystemExit("--resume requires --checkpoint-dir")
-    if args.format_plan and not args.streaming:
-        raise SystemExit("--format-plan requires --streaming")
 
     from prismaquant.gpu_guard import require_cuda_hot_path
     require_cuda_hot_path("expert_empirical_cost", args.device)
@@ -1826,11 +1763,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     formats = _canon_formats(
         [f for f in args.formats.split(",") if f.strip()])
-    source_format_plan = None
-    if args.format_plan:
-        from prismaquant.source_class_format_plan import load_format_plan
-
-        source_format_plan = load_format_plan(args.format_plan)
     col_weights = None
     if args.col_weights:
         with open(args.col_weights, "rb") as fh:
@@ -1865,7 +1797,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 # it does not take are refused here, loudly.
                 refused = {
                     "--expert-sample": args.expert_sample,
-                    "--format-plan": source_format_plan is not None,
                 }
                 on = sorted(k for k, v in refused.items() if v)
                 if on:
@@ -1900,18 +1831,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     checkpoint_dir=args.checkpoint_dir,
                     resume=args.resume,
                     model_identity=streamed_model_identity,
-                    checkpoint_identity_extra=(
-                        {
-                            "source_format_plan_identity_sha256": (
-                                source_format_plan.identity_sha256
-                            )
-                        }
-                        if source_format_plan is not None else None
-                    ),
-                    formats_by_qname=(
-                        source_format_plan.formats_by_qname()
-                        if source_format_plan is not None else None
-                    ),
                 )
         finally:
             streamed_runner.shutdown()

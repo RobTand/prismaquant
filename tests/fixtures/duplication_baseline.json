@@ -405,10 +405,6 @@
    "prismaquant/joint_layer_quanta.py",
    "tools/dispatch_joint_quanta.py"
   ],
-  "_plan_digest": [
-   "prismaquant/prismasnap_checkpoint.py",
-   "prismaquant/source_class_format_plan.py"
-  ],
   "_positive": [
    "prismaquant/boundary_control.py",
    "prismaquant/quality_prefill_pb_adapter.py",

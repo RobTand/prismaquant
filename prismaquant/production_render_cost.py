@@ -20,13 +20,10 @@ import math
 import pickle
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from prismaquant import format_registry as fr
 from prismaquant.name_projection import strip_weight_leaf
-
-if TYPE_CHECKING:
-    from prismaquant.source_class_format_plan import SourceClassFormatPlan
+from prismaquant.schemas import refuse_retired_format_plan_identity
 
 
 SCHEMA = "prismaquant.production_render_score_cost.v1"
@@ -221,97 +218,6 @@ def _production_cost_entry(
     }
 
 
-def _validated_format_plan_scope(
-    production_cache: object,
-    baseline_costs: Mapping[str, object],
-    output_formats: Sequence[str],
-    format_plan: "SourceClassFormatPlan",
-) -> tuple[dict[str, frozenset[str]], frozenset[str]]:
-    """Bind pricing to the exact source-class plan used by the renderer.
-
-    The format plan partitions only its declared family. Formats outside that
-    family (for example BF16/source terminals or a separately declared family)
-    remain global. Within the planned family, every baseline unit receives
-    exactly its declared menu: no illegal higher-rate cell and no
-    demand-truncated legal rung.
-    """
-    metadata = getattr(production_cache, "metadata", None)
-    if not isinstance(metadata, Mapping):
-        raise ValueError(
-            "--format-plan requires cache metadata with a bound plan identity"
-        )
-    expected_identity = str(format_plan.identity_sha256)
-    observed_identity = metadata.get("format_plan_identity_sha256")
-    if observed_identity != expected_identity:
-        raise ValueError(
-            "production cache format-plan identity mismatch: "
-            f"expected={expected_identity!r} observed={observed_identity!r}"
-        )
-
-    scope: dict[str, frozenset[str]] = {}
-    for raw_qname, raw_formats in format_plan.formats_by_qname().items():
-        qname = canonical_cost_name(raw_qname)
-        formats = frozenset(
-            fr.canonical_format_name(str(fmt)) for fmt in raw_formats
-        )
-        previous = scope.setdefault(qname, formats)
-        if previous != formats:
-            raise ValueError(
-                "format plan contains colliding canonical qnames with "
-                f"different menus: {qname}"
-            )
-    planned_universe = frozenset(
-        fmt for formats in scope.values() for fmt in formats
-    )
-    if not planned_universe:
-        raise ValueError("format plan has an empty planned format universe")
-
-    requested_planned = frozenset(
-        fmt for fmt in output_formats if fmt in planned_universe
-    )
-    if requested_planned != planned_universe:
-        raise ValueError(
-            "requested formats truncate the source-class format plan: "
-            f"missing={sorted(planned_universe - requested_planned)}"
-        )
-
-    baseline_names: dict[str, str] = {}
-    for raw_qname in baseline_costs:
-        qname = canonical_cost_name(str(raw_qname))
-        previous = baseline_names.setdefault(qname, str(raw_qname))
-        if previous != str(raw_qname):
-            raise ValueError(
-                "baseline costs contain colliding canonical qnames: "
-                f"{previous!r} and {raw_qname!r}"
-            )
-    missing_baseline = sorted(set(scope) - set(baseline_names))
-    if missing_baseline:
-        raise ValueError(
-            "baseline costs do not cover every format-plan unit; sample="
-            f"{missing_baseline[:8]}"
-        )
-    unplanned_baseline = sorted(set(baseline_names) - set(scope))
-    if unplanned_baseline:
-        raise ValueError(
-            "baseline costs contain units absent from the format plan; "
-            f"sample={unplanned_baseline[:8]}"
-        )
-
-    # Refuse a cache that claims this plan identity but nevertheless recorded
-    # an illegal planned-family render. Ignoring such a row would hide illegal
-    # work and let a future consumer accidentally revive it.
-    for (qname, fmt) in _cache_render_score_records(production_cache):
-        if fmt not in planned_universe:
-            continue
-        allowed = scope.get(qname)
-        if allowed is None or fmt not in allowed:
-            raise ValueError(
-                "production cache contains a render outside its source-class "
-                f"format plan: {qname}@{fmt}"
-            )
-    return scope, planned_universe
-
-
 def synthesize_production_render_cost_payload(
     production_cache: object,
     baseline_cost_payload: Mapping,
@@ -321,7 +227,6 @@ def synthesize_production_render_cost_payload(
     source_label: str | None = None,
     require_render_scores: bool = False,
     require_output_metric: bool = False,
-    format_plan: "SourceClassFormatPlan | None" = None,
 ) -> dict:
     baseline_costs = dict(baseline_cost_payload["costs"])
     output_formats = [
@@ -334,15 +239,13 @@ def synthesize_production_render_cost_payload(
     ]
     output_formats = list(dict.fromkeys(output_formats))
 
-    planned_scope: dict[str, frozenset[str]] | None = None
-    planned_universe: frozenset[str] = frozenset()
-    if format_plan is not None:
-        planned_scope, planned_universe = _validated_format_plan_scope(
-            production_cache,
-            baseline_costs,
-            output_formats,
-            format_plan,
-        )
+    # A cache or baseline built under the archived source-class format plan
+    # priced a per-qname menu this reader can no longer reproduce (#1345).
+    refuse_retired_format_plan_identity(
+        getattr(production_cache, "metadata", None), "production cache metadata")
+    for part in ("provenance", "meta"):
+        refuse_retired_format_plan_identity(
+            baseline_cost_payload.get(part), f"baseline cost {part}")
 
     # Resolving every rung refuses a retired codebook name from a stale
     # cost.pkl (the retired codebook lane, archived 2026-09-25, #1304).
@@ -358,17 +261,9 @@ def synthesize_production_render_cost_payload(
     non_output_metric: list[dict[str, str]] = []
 
     for qname, per_name_raw in baseline_costs.items():
-        cname = canonical_cost_name(str(qname))
         per_name = dict(per_name_raw)
         synthesized: dict[str, dict] = {}
-        per_qname_formats = output_formats
-        if planned_scope is not None:
-            allowed = planned_scope[cname]
-            per_qname_formats = [
-                fmt for fmt in output_formats
-                if fmt not in planned_universe or fmt in allowed
-            ]
-        for fmt in per_qname_formats:
+        for fmt in output_formats:
             fmt_c = fr.canonical_format_name(fmt)
             if fmt_c == "BF16":
                 synthesized[fmt_c] = {
@@ -450,10 +345,6 @@ def synthesize_production_render_cost_payload(
         if isinstance(baseline_provenance, Mapping)
         else {}
     )
-    if format_plan is not None:
-        inherited_provenance["source_format_plan_identity_sha256"] = (
-            format_plan.identity_sha256
-        )
     # Cost/export pair (#147, consumer 2): on the shipping default the AURA
     # dW cache is built format-menu and the export cache assignment-scoped,
     # and #135's whole point is that these must be the same rendering. The
@@ -501,10 +392,9 @@ def synthesize_production_render_cost_payload(
             "production_cache_source": source_label,
             "baseline_schema": baseline_cost_payload.get("schema"),
             "baseline_meta": baseline_cost_payload.get("meta"),
-            "source_format_plan_identity_sha256": (
-                format_plan.identity_sha256
-                if format_plan is not None else None
-            ),
+            # Always null since the format plan was archived (#1345); kept so
+            # the payload's bytes do not move.
+            "source_format_plan_identity_sha256": None,
             "score_field": score_field,
             "render_score_entries": int(render_entries),
             "fallback_entries": int(fallback_entries),
@@ -533,13 +423,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--formats",
         default=None,
         help="Comma-separated formats. Defaults to baseline cost formats.",
-    )
-    parser.add_argument(
-        "--format-plan",
-        default=None,
-        help="Identity-bound source-class format plan used to build the "
-        "production cache. Planned-family rows are priced only within each "
-        "qname's exact legal menu; identity drift and truncation are fatal.",
     )
     parser.add_argument(
         "--score-field",
@@ -584,11 +467,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         [fmt.strip() for fmt in args.formats.split(",") if fmt.strip()]
         if args.formats else None
     )
-    format_plan = None
-    if args.format_plan:
-        from prismaquant.source_class_format_plan import load_format_plan
-
-        format_plan = load_format_plan(args.format_plan)
     payload = synthesize_production_render_cost_payload(
         cache,
         baseline,
@@ -597,7 +475,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         source_label=str(args.production_cache),
         require_render_scores=bool(args.require_render_scores),
         require_output_metric=bool(args.require_output_metric),
-        format_plan=format_plan,
     )
     # Stamp the pipeline COST_MODE (re-vet R2 precondition (i)): cost.pkl is
     # the same path under every mode, so reuse must be conditional on it.

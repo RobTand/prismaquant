@@ -972,8 +972,6 @@ def run_streaming_render(
     calibration_hash: str | None = None,
     max_act_rows: int = 512,
     include_qnames: Sequence[str] | None = None,
-    format_plan: Mapping[str, Sequence[str]] | None = None,
-    format_plan_identity: str | None = None,
     install=None,
     unload=None,
     set_priority=None,
@@ -1043,48 +1041,6 @@ def run_streaming_render(
         render_formats_by_qname = {
             qname: menu for qname in dense_modules if menu
         }
-    if format_plan is not None:
-        canonical_plan = {
-            str(qname): tuple(dict.fromkeys(
-                _canon_fmt(fmt) for fmt in formats
-            ))
-            for qname, formats in format_plan.items()
-        }
-        missing = sorted(set(dense_modules) - set(canonical_plan))
-        if missing:
-            raise ValueError(
-                "streaming format plan does not cover every selected live "
-                f"Linear; sample={missing[:8]}"
-            )
-        planned_universe = {
-            fmt for formats in canonical_plan.values() for fmt in formats
-        }
-        if render_scope == "assignment":
-            illegal = sorted(
-                (qname, formats[0])
-                for qname, formats in render_formats_by_qname.items()
-                if formats[0] in planned_universe
-                and formats[0] not in canonical_plan[qname]
-            )
-            if illegal:
-                raise ValueError(
-                    "streaming assignment contains source-rate-illegal "
-                    f"format-plan cells; sample={illegal[:8]}"
-                )
-        else:
-            render_formats_by_qname = {
-                qname: tuple(
-                    fmt for fmt in formats
-                    if fmt not in planned_universe
-                    or fmt in canonical_plan[qname]
-                )
-                for qname, formats in render_formats_by_qname.items()
-            }
-            render_formats_by_qname = {
-                qname: formats
-                for qname, formats in render_formats_by_qname.items()
-                if formats
-            }
     per_layer_dense: dict[int | None, dict[str, nn.Module]] = defaultdict(dict)
     for qname, mod in dense_modules.items():
         per_layer_dense[_layer_index_of(qname, layers_prefix)][qname] = mod
@@ -1183,7 +1139,10 @@ def run_streaming_render(
         "requested_entries": int(requested_entries),
         "streaming": True,
         "calib_hash": calibration_hash,
-        "format_plan_identity_sha256": format_plan_identity,
+        # The source-class format plan was archived with the codebook lane
+        # (#1345); the key stays, always null, so cache metadata bytes do not
+        # move. production_render_cost refuses a cache that carries one.
+        "format_plan_identity_sha256": None,
         "render_mechanism_order": [
             {
                 "name": spec.name,
@@ -1237,8 +1196,6 @@ def fill_production_weight_cache_streaming(
     calibration_hash: str | None = None,
     max_act_rows: int = 512,
     include_qnames: Sequence[str] | None = None,
-    format_plan: Mapping[str, Sequence[str]] | None = None,
-    format_plan_identity: str | None = None,
     offload_folder: str | Path | None = None,
     progress: bool = True,
 ) -> ProductionWeightCache:
@@ -1308,8 +1265,6 @@ def fill_production_weight_cache_streaming(
             calibration_hash=calibration_hash,
             max_act_rows=max_act_rows,
             include_qnames=include_qnames,
-            format_plan=format_plan,
-            format_plan_identity=format_plan_identity,
             install=ctx.install,
             unload=ctx.unload,
             set_priority=_priority_setter(ctx),
