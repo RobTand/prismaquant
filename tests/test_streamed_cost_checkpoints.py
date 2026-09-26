@@ -1118,8 +1118,9 @@ def test_production_anchor_resolves_raw_named_expert_activation_cache(
     )
     assert set(rendered) == {(qname, "NVFP4")}
     # Loaded under the raw name, and the render saw the REAL activations
-    # rather than the empty cold-prior mapping.
-    assert act_index.loaded == [qname]
+    # rather than the empty cold-prior mapping. NVFP4 reads the unit twice:
+    # once for its static activation max and once for the render.
+    assert act_index.loaded == [qname, qname]
     assert calls == [("NVFP4", [qname])]
 
 

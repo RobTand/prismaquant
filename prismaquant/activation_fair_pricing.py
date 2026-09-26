@@ -51,8 +51,8 @@ order they bind:
   arithmetic mean of ratios is set by a handful of high-``h_trace`` rows,
   while the correction is applied to all of them. The geometric mean is the
   MLE of a multiplicative factor under log-normal residuals, and it is the
-  same log-space least squares the CB ladder law already uses
-  (``expert_empirical_cost._cb_ladder_law``).
+  same log-space least squares the retired codebook lane's ladder law used
+  (archived 2026-09-25, #1304).
 * **It cannot corrupt what is already validated** — *provided every rung of
   the family takes the same pricing branch* (see the correction below). A
   per-family constant applied uniformly cannot reorder rungs *inside* a
