@@ -9,6 +9,17 @@ trial used `f790bcc1a…`; its result is historical and does not itself prove
 MTP generation or quality. The MTP original-wire preflight is refreshed under
 this exact pin before a combined export.
 
+At `09d6559d7…`, `grammar.py` and the contract are byte-identical to the
+previous pin, and `export.py` moved only inside `ActivationSource` (it also
+accepts a `*.collection.references.json` Hessian owner). The legal-domain
+inventory records that as the new source state `reader-pin-09d6559d` in its
+wire-equivalence set, and its frozen pins move to `09d6559d7…`; no count
+moves (`tests/test_tessera_legal_domain.py`). The PrismaBuild test
+interpreters for this pin are `/home/rob/venvs/pq-pb461728e4-tessera-09d6559d`
+on sparky, sparklina and dl380g10, and `…-09d6559d-tf516` on both Sparks
+(`prismaquant/tessera_runtime/README.md`). No format, default, stage or ship
+gate changes.
+
 Tessera pin retake (2026-09-26, PQ #1413): the exact reader and serving pin
 moved from `af7a86d43d…` to `d2a6455025…` after Tessera #625, #626 and
 #630. Hessian-reference collections and composed original cached cohorts are
@@ -141,7 +152,7 @@ tagged `a5424378-mtpmap1`) carries every v38 cell. Under one serving scope an
 allocation can admit one set or the other, not both. `export.py` and
 `grammar.py` are byte-identical to the previous pin, so the legal domain is a
 re-transcription. The PrismaBuild test interpreters are
-`/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4` on sparky, sparklina and
+`/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4` (now `…-09d6559d`) on sparky, sparklina and
 dl380g10, and `…-af7a86d4-tf516` on both Sparks. No format, default, stage or
 ship gate changes. Gate: `tests/test_tessera_pin_v38_scope.py`.
 
@@ -2240,7 +2251,7 @@ run in a PrismaBuild test run. PrismaBuild #941's reconciliation named them:
 they were the six outcomes by which a full-suite summary exceeded its
 collection.
 
-The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4-tf516`
+The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-09d6559d-tf516`
 carries transformers 5.16.1 and is otherwise the same interpreter. It exists
 on both Sparks. `prismaquant/tessera_runtime/README.md` has the recipe and the
 `pbtest` command for a PR that touches these modules. The full suite also

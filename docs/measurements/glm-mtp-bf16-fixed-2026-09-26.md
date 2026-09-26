@@ -67,6 +67,70 @@ Tessera's plan translator wrote the 584-entry plan at
 (PB `d1898b42...`, CAS `5d10f8f9...`). The optional PrismaQuant charged-bpp
 annotations in its provenance sidecar are null because the host-local PQ
 worktree was unavailable on the dl380 worker; the plan itself and PQ
-preflight have exact source names, rates and coverage. No checkpoint export
-has been launched. The later exact pin retake to Tessera's MTP mapper commit
-requires its own refreshed preflight build anchor before export.
+preflight have exact source names, rates and coverage.
+
+The pin then moved to Tessera's MTP mapper commit `09d6559d7…`. The refreshed
+full preflight at that pin passed PB
+`0f2de41f0994757f80f820c56d93acdb4ba7bbb74d3b5c04b2367140a5f3ea93`
+(CAS receipt SHA-256 `7532f773e9cd…`) with 37,173 scoped selected units and
+the same build SHA, `f90ac64a…`. The pin tests passed in PB `9e1233ec…`.
+
+## Combined export
+
+PB `0e39638c2fc0ca4bc655b1d1f07e6100793373a263a9ede0cd44d5b06e351717` ran
+Tessera `09d6559d7…`'s `experiments/export_tessera_serving.py` on CPU. Its
+inputs were the plan, the `f90ac64a…` build, the Hessian collection and the
+v3 cached-unit bundle above, and it wrote
+`/mnt/shared/tessera-runs/moe/glm53-body-mtp-bf16-r1024-20260926/exported`.
+The exporter finished: the last line of its `export.log` is the `elapsed` line
+naming that output. **The action itself failed** (exit 1, no CAS receipt).
+The inline gate that the sealed request runs after the exporter read
+`cached_units.hessian_identity.established`. The manifest carries the
+by-producer identity schema
+(`tessera.cached_unit_hessian_identity.by_producer.v1`), which records
+`established` per producer, so the gate raised `KeyError`. That gate was
+campaign-local code in the request, not PrismaQuant code.
+
+PB `014fb213d82f2413204aea96fc48fe6f13a82b5e60bdfae90c1ba511d5b1100e`
+re-applied the same checks read-only, reading the per-producer schema. It
+also **exited 1 with no CAS receipt**. Every check before the last one
+passed:
+
+- The exporter log ends with the finished line for this output.
+- 37,173 planned units, with a 37,152-unit routed-expert intake.
+- Two producers, both `established: committed`, including `0833671b…` and
+  `da5805bc…`. Two cached cohorts and two producer packages.
+- 120 `model-*-of-00120.safetensors` shards. The index shard roster is
+  those 120.
+- For each shard, the header extent equals the file size, and every header
+  tensor is indexed to the shard that holds it. The header and index tensor
+  name sets are equal.
+- The index `total_size` equals the measured shard bytes,
+  175,576,305,954 B.
+
+The last check, the strict all-file ceiling, refused:
+175,643,087,583 B > 175,642,157,752 B, over by **929,831 B**.
+`tessera_serving_manifest.json` is written with `indent=2` (42,445,119 B).
+The same object in compact JSON is 29,341,610 B, so the whitespace alone is
+13,103,509 B (Tessera #635). By Rob's decision the artifact is **not
+re-exported** over this miss. It stands as exported, and the ceiling
+acceptance criterion in PR #1416 is waived by that decision, not met.
+
+A separate read-only metadata check of the same directory (PB
+`30cdff440a69…`, launcher `tools/check-mtp-artifact.py`) found 120 shards,
+38,764 indexed tensors and 58 config groups. It also found
+`model.language_model.layers.45.mlp.experts` declaring `TESSERA_BF16` at rung
+1024, with no refusals.
+
+### Size against the EXL3 reference
+
+The reference is `brandonmusic/GLM-5.3-Flash-tr3-4bpw` at revision
+`a5fee929cf4888b1824323e33e8a19b60129e025`. Both sides count every regular
+file.
+
+| Accounting | This export | Reference | Difference |
+| --- | ---: | ---: | ---: |
+| Safetensors shards (120 each) | 175,576,305,954 B | 175,642,157,752 B | 65,851,798 B smaller |
+| All files | 175,643,087,583 B | 175,790,111,275 B | 147,023,692 B smaller |
+
+This is a size comparison only. It makes no quality, speed or serving claim.

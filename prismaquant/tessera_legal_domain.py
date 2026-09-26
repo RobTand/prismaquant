@@ -484,7 +484,9 @@ def live_pins() -> DomainPins:
 #: ``_window_bits_for``, ``wire_recipe``, the WINDOW raw-cap expression and
 #: the ``*_WINDOW_BITS`` constants are byte-identical, so the new
 #: ``reader-pin-09d6559d`` state joins
-#: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves.
+#: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves:
+#: ``test_legal_rate_count_is_the_audited_count`` re-derived the frozen
+#: counts through the installed 09d bytes (PrismaBuild ``f12448eff0e5``).
 FROZEN_PINS = DomainPins(
     reader_dev_pin_commit="09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
     reader_dev_pin_contract_sha256=(
