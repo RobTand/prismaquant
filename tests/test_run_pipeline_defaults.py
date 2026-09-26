@@ -125,24 +125,11 @@ def test_production_cache_union_is_archived_and_blocked():
     assert "tools.build_union_cache" not in script
 
 
-def test_production_render_score_is_unlicensed_on_a_cb_menu():
-    """COST_MODE=production-render-score fails fast on any CB/CBL menu.
-
-    Its score field is `weight_mse` (audit M6), and the per-unit factorization
-    mse(e,K) ~= s_e * g(K) FAILS in weight currency across a codebook-basis
-    change: CV over experts of weight_mse_CBL/weight_mse_lattice is monotone in
-    rung, 0.088 (K28) -> 0.224 (K48), 8 of 10 rung-pairs breaching the 0.10
-    bar, while lattice->lattice on the same planes passes at 0.067/0.056.
-    Allocating a CB menu on that estimator allocates in the currency that does
-    not transfer.
-    """
-    script = _run_pipeline_script()
-
-    assert "unlicensed on a CB/CBL menu" in script
-    # The evidence travels with the guard, so the refusal is auditable.
-    assert "0.088" in script and "0.224" in script
-    # The escape hatch stays honest: it is still valid off CB menus.
-    assert "reproducing pre-CB artifacts on non-CB menus" in script
+# RETIRED 2026-09-25 (#1304): `test_production_render_score_is_unlicensed_on_a_cb_menu`
+# pinned run-pipeline.sh's refusal of COST_MODE=production-render-score on a
+# codebook menu. A codebook rung no longer resolves at all (RetiredFormatError,
+# tests/test_retired_codebook_refusals_1304.py), so the guard and its test went
+# to archive/gridbook_lane_2026-09-02/ with the lane.
 
 
 # RETIRED 2026-09-02 with the Gridbook codebook lane

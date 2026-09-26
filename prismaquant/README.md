@@ -29,12 +29,9 @@ declarative contract layer, not the executor.
 - `saturation_select` — saturation-point bit-rate selection.
 - `gguf_formats`, `gguf_iq_formats`, `gguf_gptq` — GGUF k-quant / IQ quantizers
   and the GPTQ-under-frozen-scales lever.
-- `nvfp4_cb_formats`, `nvfp4_cb_footprint` — product-codebook codecs plus the
-  versioned serialized-payload contract (production FP4 layout-v2, FP8 row
-  scales, and shared FP16 codebook sidecars). **Orphaned since 2026-09-02**:
-  their serving lane was retired (`archive/gridbook_lane_2026-09-02/`) and the
-  exporter went with it, so these rungs can be priced and rendered but not
-  shipped. Recorded as debt D34 in `docs/ARCHITECTURE.md` §12.
+- `moe_imatrix` — packed-expert and probe-derived imatrix synthesis for
+  `run-pipeline.sh`'s col-weights harvest, which the GGUF lane's weighted
+  render reads.
 
 ## Archive
 

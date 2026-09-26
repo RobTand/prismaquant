@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-import pytest
 
 from prismaquant import format_registry as fr
 from prismaquant.decision_units import discover_units
@@ -79,15 +78,6 @@ def test_discover_units_uses_model_graph_fused_groups():
 
     down = units["model.layers.0.mlp.down_proj"]
     assert down.member_qnames == ("model.layers.0.mlp.down_proj",)
-
-
-def test_discover_units_rejects_cb_without_artifact_wide_accountant():
-    with pytest.raises(ValueError, match="cannot price CB formats"):
-        discover_units(
-            _QwenToy(),
-            Qwen3Profile(),
-            [fr.get_format("NVFP4_CB_K16"), fr.get_format("BF16")],
-        )
 
 
 def test_discover_units_uses_configured_serving_profile_by_default():

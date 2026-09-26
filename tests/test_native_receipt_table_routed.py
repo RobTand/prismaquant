@@ -1074,8 +1074,7 @@ def _glm_cli_fixture(tmp_path, *, budgets=GLM_CLI_BUDGETS):
     format_spec = allocator.fr.get_format(FORMAT)
     for member in inputs["members"]:
         serialized, _, _ = serialized_candidate_payload(
-            format_spec, tuple(member["shape"]), qname=member["unit"],
-            cb_serialization_context=None)
+            format_spec, tuple(member["shape"]), qname=member["unit"])
         member["wire"]["blob_bytes"] = serialized
     spec, panel, cost_payload, _receipts = _write(
         (inputs, preflight, rows), tmp_path, world_size=GLM_TP, samples=[FAST, SLOW],

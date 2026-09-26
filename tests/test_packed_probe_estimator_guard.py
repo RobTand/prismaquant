@@ -60,10 +60,11 @@ def test_dense_probe_unaffected(tmp_path):
     prepare_cost_context(p, act, "NVFP4", True)
 
 
-def test_reader_only_fp8_cb_rung_is_refused_by_explicit_cost_menu(tmp_path):
+def test_retired_codebook_rung_is_refused_by_explicit_cost_menu(tmp_path):
+    # The retired codebook lane, archived 2026-09-25, #1304.
     p = _write_probe(tmp_path, {}, DENSE)
     act = _write_act_cache(tmp_path, DENSE)
-    with pytest.raises(SystemExit, match="reader-only"):
+    with pytest.raises(SystemExit, match="gridbook_lane"):
         prepare_cost_context(p, act, "FP8_CB_K29", True)
 
 

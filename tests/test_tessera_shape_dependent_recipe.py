@@ -440,7 +440,7 @@ def test_the_allocator_reaches_a_rate_for_a_packed_expert_format():
             "n_params": GLM_EXPERTS * GLM_EXPERT_SHAPE[0] * GLM_EXPERT_SHAPE[1],
         }
     }
-    _ordered, rates = _sort_specs_by_serialized_rate([spec], stats, None)
+    _ordered, rates = _sort_specs_by_serialized_rate([spec], stats)
     want = _reference_bits(
         1024, *GLM_EXPERT_SHAPE, window_bits=LIVE_WINDOW_BITS
     ) / (GLM_EXPERT_SHAPE[0] * GLM_EXPERT_SHAPE[1])
