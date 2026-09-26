@@ -3606,7 +3606,13 @@ The selection writes the layer-45 entries and a `mtp_selection` record into the
 layer-config metadata. It moves no body byte and no body bpp (principle 12). A
 unit that the body also assigned is refused. There is no λ. Without the flag,
 the output is byte-identical. Gates: `tests/test_glm_mtp_selection.py` and
-`tests/test_allocator_output_pin_1304.py`.
+`tests/test_allocator_output_pin_1304.py`. A quantum prices only one Tessera
+rate, so when a layer's attested rungs sit at more than one rate, the payload is a
+merge. For GLM-5.3, routed E4M3 is attested at R896 and routed BF16 at R1024.
+`glm_mtp_selection.merge_mtp_costs` (PQ #1409) joins parts that were priced on
+one probe identity. It carries their rows unchanged, records each part's source,
+and refuses a part that describes another layer, unit set or probe, or that
+prices a rung twice.
 
 Re-stamped (2026-09-25, `claude/stageb-window-readahead-1291`) for **Stage B
 render read-ahead through the IO engine** (PQ #1291, #1294): the retained
