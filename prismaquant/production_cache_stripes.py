@@ -13,7 +13,7 @@ fail-closed reconciliation of those manifests and their backing tensors.
 from __future__ import annotations
 
 import argparse
-import hashlib
+from functools import partial
 import json
 import pickle
 import re
@@ -23,6 +23,7 @@ from pathlib import Path
 
 from prismaquant.decision_units import block_id_from_qname
 from prismaquant.model_profiles import detect_profile
+from .digests import file_sha256hex
 
 
 SCHEMA = "prismaquant.production_cache_stripe_plan.v1"
@@ -38,12 +39,7 @@ class Stripe:
     parameters: int
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+_sha256 = partial(file_sha256hex, block_size=1024 * 1024)
 
 
 def _group_key(qname: str) -> str:

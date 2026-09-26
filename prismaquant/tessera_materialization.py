@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import os
 import pickle
@@ -19,15 +18,14 @@ from types import SimpleNamespace
 from . import tessera_expert_projection as tep
 from .cost_stage_checkpoint import atomic_write_bytes
 from .nvfp4_activation_contract import resolve_input_global_scale_policy
+from .digests import file_sha256hex
 
 REQUEST_SCHEMA = "prismaquant.tessera_selected_wire_request.v1"
 PLAN_SCHEMA = "prismaquant.tessera_selected_wire_plan.v1"
 STAGE = "tessera_selected_wire"
 
 
-def _sha(path):
-    with Path(path).open('rb') as handle:
-        return hashlib.file_digest(handle, 'sha256').hexdigest()
+_sha = file_sha256hex
 
 
 def _json(path, value):

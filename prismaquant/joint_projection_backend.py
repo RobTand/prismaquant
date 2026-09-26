@@ -23,6 +23,7 @@ import torch
 
 from .dev_mode import dev_mode_enabled, seal_check
 from .kernels import joint_projection_reduce as kernel
+from .digests import file_sha256hex
 
 SCHEMA = 'prismaquant.joint_projection_backend.v1'
 FUSED_NAME = 'fused_fp32_v1'
@@ -40,9 +41,7 @@ _LOADED_MODULES = {}
 _WARMED_DEVICES = set()
 
 
-def _sha(path):
-    with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+_sha = file_sha256hex
 
 
 @lru_cache(maxsize=1)

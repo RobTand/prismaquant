@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager, nullcontext
 import dataclasses
 from dataclasses import dataclass
+from functools import partial
 import hashlib
 import json
 import os
@@ -28,7 +29,7 @@ from prismaquant.layer_streaming import (
     _compute_position_embeddings,
     _get_final_norm,
 )
-from .digests import DIRECT_ASCII_LAX
+from .digests import DIRECT_ASCII_LAX, file_sha256hex
 
 
 STREAMED_MODEL_IDENTITY_SCHEMA = "prismaquant.streamed_model.identity.v1"
@@ -5883,15 +5884,7 @@ def build_streamed_causal_lm(
     return runner
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(16 * 1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
+_file_sha256 = partial(file_sha256hex, block_size=16 * 1024 * 1024)
 
 
 def stat_fingerprint(path: str | Path, observed: os.stat_result) -> dict[str, object]:

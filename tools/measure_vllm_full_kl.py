@@ -31,6 +31,7 @@ try:  # package mode (`python -m tools.measure_vllm_full_kl`)
     from .gold_measurement_fidelity import full_kl_fidelity
     from .full_kl_teacher_payload import (
         TEACHER_PAYLOAD_V2_SCHEMA,
+        file_sha256 as _file_sha256,
         load_teacher_evidence,
         safe_load_torch_payload,
         tokenizer_identity,
@@ -47,6 +48,7 @@ except ImportError:  # script mode (`python /repo/tools/measure_vllm_full_kl.py`
     from gold_measurement_fidelity import full_kl_fidelity  # type: ignore
     from full_kl_teacher_payload import (  # type: ignore
         TEACHER_PAYLOAD_V2_SCHEMA,
+        file_sha256 as _file_sha256,
         load_teacher_evidence,
         safe_load_torch_payload,
         tokenizer_identity,
@@ -69,14 +71,6 @@ _SPEC_DECODE_DETECTED: bool | None = None
 #: The exact kwargs this process built its `LLM` with, captured so a multi-node
 #: receipt can state the peer argv they imply. `None` until an engine is built.
 _ENGINE_KWARGS: dict | None = None
-
-
-def _file_sha256(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        while block := handle.read(16 << 20):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _strict_json_text(value: object) -> str:

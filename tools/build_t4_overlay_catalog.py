@@ -12,7 +12,6 @@ field pairs, so a catalog the loader would refuse is never written.
 import argparse
 import concurrent.futures
 import copy
-import hashlib
 import json
 import math
 import os
@@ -26,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prismaquant.cost_stage_checkpoint import _load_unit, canonical_json_sha256, unit_path
 from prismaquant.joint_aura import activation_identity
 from prismaquant import format_registry as fr
+from prismaquant.digests import bytes_sha256hex
 
 BASE = Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911')
 PREP = Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/allocation/joint-panel/complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02/prepare/prepared.json')
@@ -42,8 +42,7 @@ ANCHOR_FIELDS = (("output_mse", "dloss"), ("tessera_family", "family"),
 MEASURED_CURRENCY = "output_mse_under_route_activation_contract"
 
 
-def sha(raw):
-    return hashlib.sha256(raw).hexdigest()
+sha = bytes_sha256hex
 
 
 def stamp(path):

@@ -22,7 +22,18 @@ JSON profiles, all with sorted keys and compact ``(",", ":")`` separators:
   ``allow_nan=True``, so ``NaN`` and ``Infinity`` are written, not refused.
 - ``DIRECT_ASCII_LAX_DEFAULT_STR``: ``DIRECT_ASCII_LAX`` with ``default=str``.
 
-The families are not interchangeable. The round trip and a direct encoding
+Byte profiles, all lowercase-hex SHA-256:
+
+- ``bytes_sha256hex``: the bytes as given (``bytes``, ``bytearray`` or
+  ``memoryview``).
+- ``text_sha256hex``: the text encoded as strict UTF-8, so a lone surrogate
+  raises ``UnicodeEncodeError``.
+- ``file_sha256hex``: a file's bytes, read in ``block_size`` pieces
+  (``FILE_BLOCK_BYTES`` unless the site keeps its own). The block size changes
+  only how the file is read, never the digest. The path may be a ``str`` or a
+  ``PathLike``; a missing path or a directory raises what ``open`` raises.
+
+The JSON families are not interchangeable. The round trip and a direct encoding
 differ on a mapping with integer keys (``{10: .., 9: ..}``); ASCII and UTF-8
 differ on any non-ASCII character; strict and lax differ on ``NaN``. A direct
 profile raises ``json``'s own ``TypeError`` or ``ValueError`` unchanged.
@@ -37,6 +48,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import os
 
 
 def canonical_json(value: object, *, where: str) -> object:
@@ -196,3 +208,23 @@ DIRECT_ASCII_STRICT = JsonProfile("direct-ascii-strict", ensure_ascii=True, allo
 DIRECT_ASCII_LAX = JsonProfile("direct-ascii-lax", ensure_ascii=True, allow_nan=True)
 DIRECT_ASCII_LAX_DEFAULT_STR = JsonProfile(
     "direct-ascii-lax-default-str", ensure_ascii=True, allow_nan=True, default=str)
+
+
+#: The read size ``file_sha256hex`` uses when a site does not keep its own.
+FILE_BLOCK_BYTES = 8 << 20
+
+
+def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def text_sha256hex(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def file_sha256hex(path: str | os.PathLike, *, block_size: int = FILE_BLOCK_BYTES) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while block := handle.read(block_size):
+            digest.update(block)
+    return digest.hexdigest()

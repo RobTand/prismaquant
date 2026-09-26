@@ -133,6 +133,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from .digests import file_sha256hex
+
 
 #: Schema of the eligibility table PrismaQuant consumes, published by Tessera's
 #: own vLLM plugin
@@ -3151,10 +3153,7 @@ def _require_keys(payload: Mapping[str, Any], where: str, *,
         raise LaneEligibilityError(f"{where}: unknown field(s) {extra}")
 
 
-def _sha256(path: Path) -> str:
-    import hashlib
-
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+_sha256 = file_sha256hex
 
 
 __all__ = [

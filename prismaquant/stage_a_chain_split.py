@@ -35,6 +35,7 @@ were written, and that the plane it publishes is whole.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import hashlib
 import json
 import os
@@ -43,6 +44,7 @@ import re
 import sys
 
 from .cost_stage_checkpoint import atomic_write_bytes
+from .digests import file_sha256hex
 
 SPLIT_SCHEMA = "prismaquant.stage_a.chain_split.v1"
 PREP_RECEIPT_SCHEMA = "prismaquant.stage_a.chain_split_prep.v1"
@@ -287,12 +289,7 @@ def apply_split_prep(prep: dict, *, index: int) -> dict:
 
 # -- partial checkpoints --------------------------------------------------------
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 22), b""):
-            digest.update(block)
-    return digest.hexdigest()
+_file_sha256 = partial(file_sha256hex, block_size=1 << 22)
 
 
 def read_partial(directory, *, boundary: int) -> dict:

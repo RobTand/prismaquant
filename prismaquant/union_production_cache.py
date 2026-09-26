@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import os
 import pickle
@@ -55,6 +54,7 @@ from prismaquant.production_weight_cache import (
     packed_activation_hook_scope_of,
     validate_activation_hook_scope,
 )
+from .digests import file_sha256hex
 
 
 CAMPAIGN_IDENTITY_SCHEMA = (
@@ -118,15 +118,7 @@ _MERGED_METADATA_KEYS = frozenset({
 })
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(8 * 1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
+_file_sha256 = file_sha256hex
 
 
 def _require_sha256(value: object, *, where: str) -> str:

@@ -37,6 +37,7 @@ from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
 from .schemas import Contract
+from .digests import file_sha256hex
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -147,9 +148,7 @@ _HEAD_WALK_SYNTHESIS_LOCK = threading.Lock()
 _require = Contract(ValueError).require
 
 
-def _sha(path):
-    with Path(path).open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
+_sha = file_sha256hex
 
 
 def _stat_signature(value):
