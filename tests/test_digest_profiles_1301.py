@@ -104,11 +104,6 @@ SITE_INPUTS = {
         {"a": 1, "pre_render_recipe_identity_sha256": "x", "p": PurePosixPath("/x")},
         {"n": float("nan"), "s": {3}},
     ),
-    ("prismaquant.source_class_format_plan", "_plan_digest"): (
-        {"identity_sha256": "x", "b": [1], 3: "int key", "café": 1},
-        {"identity_sha256": "x"},
-        {"s": "\ud800"},
-    ),
     ("prismaquant.sample_parallel_probe", "_runtime_snapshot_closure_sha256"): (
         [{"path": "a", "sha256": "0" * 64}, {"path": "b", "sha256": "1" * 64}],
         ({"b": 1},),
@@ -132,7 +127,6 @@ _WHERE = {"where": "digest fixture"}
 SITES = (
     ("prismaquant.aura_cost", "_canonical_json", _WHERE),
     ("prismaquant.aura_cost", "_canonical_json_sha256", _WHERE),
-    ("prismaquant.source_class_format_plan", "_plan_digest", {}),
     ("prismaquant.artifact_collection", "_canonical_bytes", _WHERE),
     ("prismaquant.glm_capture_compatibility", "_digest", {}),
     ("prismaquant.boundary_control", "digest", {}),

@@ -318,3 +318,17 @@ def test_a_cost_row_stamped_by_the_retired_ladder_refuses(source):
     payload["costs"]["model.layers.0.mlp.down_proj"]["NVFP4"]["cost_source"] = (
         "tessera_campaign_interpolated")
     schemas.validate_cost_payload(payload, "cost.pkl")
+
+
+@pytest.mark.parametrize("part", ["provenance", "meta"])
+@pytest.mark.parametrize(
+    "key", ["format_plan_identity_sha256", "source_format_plan_identity_sha256"])
+def test_a_cost_table_bound_to_a_format_plan_refuses(part, key):
+    # The source-class format plan left with the codebook lane (#1345).
+    payload = {"costs": {"model.layers.0.mlp.down_proj": {"NVFP4": {
+        "weight_mse": 1.0}}}, "formats": ["NVFP4"], part: {key: "f" * 64}}
+    with pytest.raises(fr.RetiredFormatError) as info:
+        schemas.validate_cost_payload(payload, "cost.pkl")
+    assert fr.RETIRED_CODEBOOK_ARCHIVE in str(info.value)
+    payload[part][key] = None
+    schemas.validate_cost_payload(payload, "cost.pkl")

@@ -3766,13 +3766,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--model", required=True)
     p.add_argument("--output", required=True)
     p.add_argument("--formats", default="NVFP4,FP8_DYNAMIC,BF16")
-    p.add_argument(
-        "--format-plan",
-        default=None,
-        help="Identity-bound source-class format plan. In streaming mode the "
-        "requested family is intersected per qname, so source-rate-illegal "
-        "cells are neither rendered nor priced.",
-    )
     p.add_argument("--production-cache", default=None,
                    help="ProductionWeightCache pickle for production-faithful dW")
     p.add_argument("--checkpoint-dir", default=None,
@@ -3940,8 +3933,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.streaming and args.gradient_checkpointing:
         p.error("--gradient-checkpointing is resident-only; --streaming uses "
                 "an explicit one-layer reverse recomputation")
-    if args.format_plan and not args.streaming:
-        p.error("--format-plan requires --streaming")
     from prismaquant.gpu_guard import require_cuda_hot_path
     require_cuda_hot_path("aura_cost", args.device)
 
@@ -4049,26 +4040,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     requested_formats = [
         f.strip() for f in args.formats.split(",") if f.strip()
     ]
-    source_format_plan = None
-    planned_formats_by_qname = None
-    if args.format_plan:
-        from prismaquant.source_class_format_plan import load_format_plan
-
-        source_format_plan = load_format_plan(args.format_plan)
-        allowed_by_qname = source_format_plan.formats_by_qname()
-        planned_universe = {
-            fmt for values in allowed_by_qname.values() for fmt in values
-        }
-        canonical_requested = [
-            fr.canonical_format_name(fmt) for fmt in requested_formats
-        ]
-        planned_formats_by_qname = {
-            qname: tuple(
-                fmt for fmt in canonical_requested
-                if fmt not in planned_universe or fmt in allowed
-            )
-            for qname, allowed in allowed_by_qname.items()
-        }
     if streamed_runner is not None:
         try:
             streamed_model_identity = None
@@ -4108,16 +4079,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 resume=args.resume,
                 unit_filter=(args.unit_filter or None),
                 model_identity=streamed_model_identity,
-                checkpoint_identity_extra={
-                    "streaming": True,
-                    **(
-                        {"source_format_plan_identity_sha256": (
-                            source_format_plan.identity_sha256
-                        )}
-                        if source_format_plan is not None else {}
-                    ),
-                },
-                formats_by_qname=planned_formats_by_qname,
+                checkpoint_identity_extra={"streaming": True},
                 include_routed_experts=args.include_routed_experts,
                 profile=profile,
             )

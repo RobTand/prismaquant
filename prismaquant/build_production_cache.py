@@ -250,12 +250,6 @@ def _run_streaming(args, formats, levers, dtype) -> int:
     from prismaquant.streaming_production_cache import (
         fill_production_weight_cache_streaming,
     )
-    format_plan = None
-    if args.format_plan:
-        from prismaquant.source_class_format_plan import load_format_plan
-
-        format_plan = load_format_plan(args.format_plan)
-
     layer_config = args.render_layer_config or args.recache_layer_config
     if args.render_scope != "assignment":
         # The transient, score-only streamed format menu served only the
@@ -359,14 +353,6 @@ def _run_streaming(args, formats, levers, dtype) -> int:
         calibration_hash=calib_hash,
         max_act_rows=args.max_act_rows,
         include_qnames=include_qnames,
-        format_plan=(
-            format_plan.formats_by_qname()
-            if format_plan is not None else None
-        ),
-        format_plan_identity=(
-            format_plan.identity_sha256
-            if format_plan is not None else None
-        ),
     )
     profile = detect_profile_with_warning(
         args.model,
@@ -439,13 +425,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Comma-separated formats to render. FP8_DYNAMIC is accepted "
         "as an alias for FP8_E4M3 and uses GPTQ damp-sweep. MXFP8/E5M2 "
         "are explicit opt-in research/legacy formats.",
-    )
-    p.add_argument(
-        "--format-plan",
-        default=None,
-        help="Identity-bound source-class format plan. Format-menu renders "
-        "intersect the requested family with each qname's exact legal menu; "
-        "assignment scope refuses an illegal planned cell.",
     )
     p.add_argument(
         "--render-scope",
@@ -654,8 +633,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "NVFP4/FP8/MX/BF16 renders are bit-identical with or without it.",
     )
     args = p.parse_args(argv)
-    if args.format_plan and not args.streaming:
-        p.error("--format-plan requires --streaming")
 
     # Opt-in deterministic CUDA path. The default lever ablations on small
     # models show ~2-4% per-Linear weight variance across re-runs of the
