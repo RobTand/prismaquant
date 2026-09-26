@@ -334,6 +334,24 @@ def _no_staged_tier_policy_carried_between_tests():
 
 
 @pytest.fixture(autouse=True)
+def _no_prismabuild_import_carried_between_tests():
+    """No test inherits another test's ``prismabuild`` imports (PQ #1281).
+
+    Where ``import prismabuild`` resolves is process-global: ``sys.path``
+    and ``sys.modules``. A test that imports PrismaBuild from a sealed
+    generation tree left both pointing at it, and every later test on that
+    worker then ran against the generation instead of the installed SDK
+    (``tests/test_stageb_one_pass_spill.py`` then
+    ``tests/test_strict_reader_tier_enforcement.py`` refused
+    ``no-claim-context``). ``fleet_sdk.prismabuild_imports_restored`` says
+    what is put back and why.
+    """
+    from fleet_sdk import prismabuild_imports_restored
+    with prismabuild_imports_restored():
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _no_staged_range_wait_unless_asked(monkeypatch):
     """Tests do not wait on a PrismaBuild fleet that is not running.
 
