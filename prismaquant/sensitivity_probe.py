@@ -2191,6 +2191,37 @@ _DENSE_FISHER_MARGINAL_KEYS = (
 )
 
 
+def dense_marginal_chunk(gy2_sq: torch.Tensor, x2_sq: torch.Tensor,
+                         x2: torch.Tensor,
+                         chunk_h: torch.Tensor) -> list[torch.Tensor]:
+    """Five per-channel reductions of one (gy², x², H) chunk, in
+    ``_DENSE_FISHER_MARGINAL_KEYS`` order, device-resident fp32.
+
+    Reductions force fp32 accumulation: the inputs are bf16 and a
+    T-long running sum in bf16 loses real precision for free.
+    act_absmax comes off ``x2`` directly via amax/amin rather than
+    sqrt(x2_sq.amax) -- same value, but exact in the input dtype and
+    without materializing a [T, in] abs() copy on the hot path. Both probe
+    paths (``FisherAccumulator`` here and the streaming
+    ``incremental_probe``) reduce through this one copy (#1394).
+    """
+    if x2.size(0) == 0:
+        # A routed expert can be handed zero tokens; the sums are all
+        # zero anyway but amax/amin raise on an empty reduction dim.
+        absmax = torch.zeros(x2.size(1), dtype=torch.float32,
+                             device=x2.device)
+    else:
+        absmax = torch.maximum(x2.amax(dim=0).abs(),
+                               x2.amin(dim=0).abs()).to(torch.float32)
+    return [
+        chunk_h.sum(dim=1, dtype=torch.float32),
+        chunk_h.sum(dim=0, dtype=torch.float32),
+        gy2_sq.sum(dim=0, dtype=torch.float32),
+        x2_sq.sum(dim=0, dtype=torch.float32),
+        absmax,
+    ]
+
+
 class FisherAccumulator:
     def __init__(self, model: nn.Module, tracked: list[str],
                  expert_info: dict[str, tuple[str, str]],
@@ -2536,29 +2567,7 @@ class FisherAccumulator:
                     self._fwd_handles.append(
                         experts_mod.register_forward_hook(_exp_fwd))
 
-    @staticmethod
-    def _dense_marginal_chunk(
-        gy2_sq: torch.Tensor,
-        x2_sq: torch.Tensor,
-        x2: torch.Tensor,
-        chunk_h: torch.Tensor,
-    ) -> list[torch.Tensor]:
-        """Return the closed dense-schema marginals for one hook call."""
-        if x2.size(0) == 0:
-            act_absmax = torch.zeros(
-                x2.size(1), dtype=torch.float32, device=x2.device,
-            )
-        else:
-            act_absmax = torch.maximum(
-                x2.amax(dim=0).abs(), x2.amin(dim=0).abs(),
-            ).to(torch.float32)
-        return [
-            chunk_h.sum(dim=1, dtype=torch.float32),
-            chunk_h.sum(dim=0, dtype=torch.float32),
-            gy2_sq.sum(dim=0, dtype=torch.float32),
-            x2_sq.sum(dim=0, dtype=torch.float32),
-            act_absmax,
-        ]
+    _dense_marginal_chunk = staticmethod(dense_marginal_chunk)
 
     def _accumulate_dense_marginals(
         self,
