@@ -25,7 +25,8 @@ from prismaquant.joint_adjoint_slices import stage_a_slice, write_adjoint_slice
 from prismaquant.joint_layer_quanta import adjoint_binding_fields
 
 from test_stage_b_band_binding import band_from_receipt, synthetic_receipt
-from stage_a_spool_spec import (SPOOL_ENV, SPOOL_MOUNT, SPOOL_ROOT, SPOOL_WINDOW_BYTES,
+from stage_a_spool_spec import (QUANTUM_SPOOL_ENV, SPOOL_ENV, SPOOL_MOUNT, SPOOL_ROOT,
+                                SPOOL_WINDOW_BYTES,
                                  STAGE_A_SPOOL_ENV, stage_a_plan, with_spool)
 
 from dispatch_joint_quanta import (  # noqa: E402
@@ -221,8 +222,9 @@ def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     envs = [envelope[i + 1] for i, word in enumerate(envelope) if word == "--env"]
     assert envs[-1] == "PRISMAQUANT_DEV_MODE=1"
     # The fixture spec declares the produced spool, so the quantum row seals
-    # it too; the container refuses a declared spool the action lacks (#1012).
-    assert envs[:-1] == [f"{name}={value}" for name, value in SPOOL_ENV.items()]
+    # it too; the container refuses a declared spool the action lacks (#1012),
+    # and the host window opt-in has placement charge it (PQ #1364).
+    assert envs[:-1] == [f"{name}={value}" for name, value in QUANTUM_SPOOL_ENV.items()]
     assert "--detach" in argv
     assert "--" in argv
     tail = argv[argv.index("--") + 1:]
@@ -902,7 +904,8 @@ def test_stage_a_refuses_a_malformed_spool(tmp_path, campaign, case):
 
 def test_a_quantum_row_seals_the_spool_its_spec_declares(tmp_path, campaign):
     """The quantum row shares the spec. When the spec declares the spool the
-    row seals it (the container refuses a declared spool the action lacks);
+    row seals it (the container refuses a declared spool the action lacks),
+    with the host window opt-in that has placement charge it (PQ #1364);
     when it declares none the row carries nothing new, and a quantum never
     refuses for it."""
     slices = tmp_path / "slices"
@@ -913,8 +916,11 @@ def test_a_quantum_row_seals_the_spool_its_spec_declares(tmp_path, campaign):
     record_path.write_text(json.dumps(record))
     argv = quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
     assert _envelope_envs(argv) == [
-        *(f"{name}={value}" for name, value in SPOOL_ENV.items()),
+        *(f"{name}={value}" for name, value in QUANTUM_SPOOL_ENV.items()),
         "PRISMAQUANT_DEV_MODE=1"]
+    tail = argv[argv.index("--") + 1:]
+    sealed = json.loads(tail[tail.index("--spec") + 1])
+    assert {name: sealed["env"][name] for name in QUANTUM_SPOOL_ENV} == QUANTUM_SPOOL_ENV
     _write_fixture_spec({"container": {"image": "sha256:" + "0" * 64}, "env": {}})
     argv = quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
     assert _envelope_envs(argv) == ["PRISMAQUANT_DEV_MODE=1"]
@@ -926,8 +932,8 @@ def test_a_quantum_row_seals_the_spool_its_spec_declares(tmp_path, campaign):
 def test_the_default_spec_declares_the_paced_spool():
     """The campaign's default spec (PQ #1012) carries the spool root on the
     executing box's disk, a 32 GiB bound and the paced export, and no host
-    window: the Stage A row seals that opt-in itself (PQ #1120), and a
-    quantum row seals the spec's spool as it is. It lives on the shared
+    window: each row seals that opt-in itself, the Stage A row since
+    PQ #1120 and a quantum row since PQ #1364. It lives on the shared
     mount."""
     import dispatch_joint_quanta
     path = dispatch_joint_quanta.DEFAULT_SPEC_PATH
@@ -1369,6 +1375,56 @@ def test_every_declared_scratch_pair_is_listed_for_pb(tmp_path, campaign):
     # The list is a request option, never forwarded into the container.
     wrapped = argv[argv.index('--') + 1:]
     assert not any('PRISMABUILD_LOCAL_SCRATCH_PAIRS' in part for part in wrapped)
+
+
+def test_a_quantum_row_refuses_a_spec_that_opts_out_of_the_host_window(
+        tmp_path, campaign):
+    """PQ #1364: a spec that declares the host window off would leave a
+    quantum row's spool uncharged at placement; the row refuses it rather
+    than overriding what the spec says, as the Stage A row does."""
+    import dispatch_joint_quanta as dispatch
+    root = '/home/rob/pb-spool/fixture'
+    env = {'PRISMABUILD_PRODUCED_SPOOL_ROOT': root,
+           'PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES': str(32 << 30),
+           'PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW': '0'}
+    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
+    with pytest.raises(dispatch.DispatchRefused, match='HOST_WINDOW=0'):
+        build()
+
+
+def test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box(tmp_path, campaign):
+    """PQ #1364 acceptance, on PrismaBuild's own published pbrun: the sealed
+    environment of a Stage B quantum row that declares a spill, a cotangent
+    scratch and a produced spool derives one ``spool_gb`` demand that covers
+    all three, each rounded up to whole GiB. Before the fix the spool went
+    uncharged: prof-1 (PQ #1348) held ``spool_gb=218`` for a 185.38 GiB
+    spill and a 32 GiB cotangent, beside an uncharged 32 GiB spool."""
+    import subprocess
+    published = Path("/mnt/shared/prismabuild-fleet/repo")
+    if not (published / "tools" / "pbrun.py").is_file():
+        pytest.skip(f"published PrismaBuild not visible at {published}")
+    cotangent, spill = '/home/rob/pb-scratch/cot', '/home/rob/pb-scratch/spill'
+    spool = '/home/rob/pb-spool/fixture'
+    ceilings = {_COTANGENT[1]: 32 << 30, _SPILL[1]: 199_051_640_832,
+                'PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES': 32 << 30}
+    env = {_COTANGENT[0]: cotangent, _SPILL[0]: spill,
+           'PRISMABUILD_PRODUCED_SPOOL_ROOT': spool,
+           **{name: str(value) for name, value in ceilings.items()}}
+    argv = _scratch_quantum_argv(tmp_path, campaign, env, (cotangent, spill, spool))()
+    variables = dict(item.split('=', 1) for item in _outer_env(argv))
+    run = subprocess.run(
+        [sys.executable, "-c", _PLACEMENT_PROBE, str(published),
+         json.dumps(variables), str(tmp_path / "pb-queue")],
+        capture_output=True, text=True, timeout=300,
+        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(published / "src"),
+             "HOME": str(tmp_path)})
+    assert run.returncode == 0, run.stderr
+    result = json.loads(run.stdout.strip().splitlines()[-1])
+    assert Path(result["pbrun"]).resolve().is_relative_to(published.resolve()), result
+    need = sum(-(-value // (1 << 30)) for value in ceilings.values())
+    assert need == 186 + 32 + 32
+    assert result["terms"] == {"spool_gb": need}
+    assert result["first"]["spool_gb"] == need
 
 
 def test_a_row_without_scratch_seals_todays_request(tmp_path, campaign, monkeypatch):
