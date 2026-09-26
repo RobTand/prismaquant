@@ -116,7 +116,8 @@ def _synthetic_producer_admitted(monkeypatch):
 
 
 def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_proj",),
-                  menu=DEFAULT_MENU, target_bits="9"):
+                  menu=DEFAULT_MENU, target_bits="9", shape=(64, 64),
+                  stats_extra=None, activation_max_abs=None):
     """Synthetic probe/cost/table/context files plus the allocator argv.
 
     ``units`` are the Linears priced (each with the same ``menu``); ``menu``
@@ -137,7 +138,7 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
     units = list(units)
     name = units[0]
     formats = list(menu)
-    shape = (64, 64)
+    n_params = shape[0] * shape[1]
     source_content = {"config": {"fixture": True}, "weight_map": {"fixture.weight": "fixture.weight"},
         "shards": [{"path": "/fixture/synthetic.safetensors", "size": 1, "sha256": "a" * 64}]}
     source_model = {"schema": STREAMED_MODEL_IDENTITY_SCHEMA, "source": "synthetic",
@@ -157,10 +158,11 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
             operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": unit,
                         "format": fmt, "probe_identity_sha256": identity_sha256(probe),
                         "source_weight": {"content_sha256": "a" * 64, "shape": list(shape),
-                                          "dtype": "torch.float32", "logical_bytes": 16384},
+                                          "dtype": "torch.float32", "logical_bytes": n_params * 4},
                         "rendered_weight": {"content_sha256": "b" * 64, "shape": list(shape),
-                                            "dtype": "torch.float32", "logical_bytes": 16384},
-                        "activation": activation_identity(allocator.fr.get_format(fmt), {}, unit),
+                                            "dtype": "torch.float32", "logical_bytes": n_params * 4},
+                        "activation": activation_identity(allocator.fr.get_format(fmt),
+                                                          activation_max_abs or {}, unit),
                         "arithmetic": arithmetic}
             rows[fmt] = make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
                 signed_components=[dict(weight=math.sqrt(2 * loss), activation=0.0,
@@ -169,7 +171,8 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
     rows = rows_by_unit[name]
     probe_path, cost_path = tmp_path / "probe.pkl", tmp_path / "costs.pkl"
     probe_path.write_bytes(pickle.dumps({"stats": {unit: {
-        "h_trace": 1.0, "n_params": 4096, "in_features": 64, "out_features": 64}
+        "h_trace": 1.0, "n_params": n_params, "in_features": shape[1], "out_features": shape[0],
+        **(stats_extra or {})}
         for unit in units}, "meta": {"model": None}}))
     cost_path.write_bytes(pickle.dumps({"costs": rows_by_unit,
         "meta": {"formats": formats}, "provenance": {"cost_mode": "aura",
@@ -197,7 +200,7 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
                     "member_operator_identity_sha256": {unit: rows_by_unit[unit][fmt]["joint_operator_identity_sha256"]},
                     "member_shapes": {unit: list(shape)}, "operator_route": context["operator_routes"][unit][fmt]},
                 "resources": vars(_resources(prefill_ms=milliseconds, decode_ms=None,
-                    serialized_bytes=serialized, resident_bytes=16384)),
+                    serialized_bytes=serialized, resident_bytes=n_params * 4)),
                 "prefill": {"method": "cuda_events", "samples_ms": [milliseconds] * 3,
                     "warmup_iterations": 3, "receipt_path": receipt.name, "receipt_sha256": receipt_sha},
                 "decode": None})
