@@ -3115,6 +3115,33 @@ receipt has been read back off the landed file, so the count is durable work
 unchanged. Gate: `tests/test_tessera_row_stream.py`
 (`test_the_stream_head_reports_durable_progress_before_its_journal_exists`).
 
+Re-stamped (2026-09-25, `claude/glm-mtp-quantum-m5`) for **pricing the GLM MTP
+layer** (PQ #1353, M5 of #1271, P1). `tessera_joint_aura run` on a plan whose
+`source_scope` is `mtp` calls `glm_mtp_quantum.run_mtp_scope` instead of
+`compute_aura_cost_streamed`, after the same prepared-cache checks as a body
+run. It installs the MTP layer on the scoped runner, reads the embedding and
+the target `lm_head` through the capture's source owner, and streams M1's
+final-hidden entries named by the MTP census (`mtp_extension.final_hidden`).
+`compute_mtp_cost` then uses the body's arithmetic with the MTP seed:
+- `JointOperatorStatisticsLease` observes the 867 priced Linears (the packed
+  routed experts and the shared expert);
+- the seed is `glm_mtp.mtp_probe_scalar` on `lm_head(mtp_layer(...))`, one
+  global row per sequence, and `h` is a graph root, so the backward stops at
+  the MTP layer;
+- `observe_and_project_windows` projects every qualified render's `dW`, and
+  `make_joint_aura_entry` builds the rows on a probe identity that carries the
+  MTP objective and an MTP `noise_layout` (`T - 1` rows per sequence).
+
+Each render, source weight and activation contract must equal the prepared
+`verified_cells` entry, or the run refuses. A served activation policy
+(A4 machinery) refuses too. The output `joint-cost.pkl` is a
+`prismaquant.glm_mtp_cost.v1` payload: rows for every priced rung but
+zero-cost passthrough, wire bytes from the merged campaign table, and the
+MTP census's anchor groups. That is the input of the allocator's MTP path.
+The `[3c]` additivity gate is not run on the MTP block. Gate:
+`tests/test_glm_mtp_quantum.py` (rows equal the autograd projection of the
+MTP seed, and the refusals).
+
 Re-stamped (2026-09-25, `claude/format-plan-archive-1345`) for **archiving the
 source-class format plan** (PQ #1345 part 2, P3, part of epic #1295).
 `source_class_format_plan.py` moved to `archive/gridbook_lane_2026-09-02/`
@@ -22877,7 +22904,9 @@ scope's selected tensors; joint preparation (`tessera_joint_aura.prepare_cache`)
 installs them to check renders against live source weights, walking
 `runner.source_layers` with its prefetch and settlement windows over that walk.
 A joint plan names its scope as a top-level `source_scope`, which `execute`
-passes to `build_streamed_causal_lm`.
+passes to `build_streamed_causal_lm`. A `run` over the `mtp` scope prices the
+layer on the MTP head's self-KL (`glm_mtp_quantum`, PQ #1353) and publishes a
+`glm_mtp_cost.v1` payload rather than a body cost table.
 
 Routed-expert classification for the AURA hybrid is also a profile boundary, not a shape
 heuristic. `routed_experts.py` treats `packed_expert_format_group(qname)` as the membership
