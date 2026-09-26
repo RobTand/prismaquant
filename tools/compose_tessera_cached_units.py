@@ -16,28 +16,25 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
+from prismaquant.digests import file_sha256hex
 from tessera.cached_unit import (CACHE_SCHEMA, COMPOSED_CACHE_SCHEMA,
                                  CachedUnitBundle, read_manifest)
-
-
-def _bound(path: str, sha256: str) -> dict:
-    source = Path(path)
-    if not source.is_absolute() or source.is_symlink() or source.resolve() != source:
-        raise ValueError('cached child needs a canonical absolute manifest path')
-    raw = source.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != sha256:
-        raise ValueError(f'cached child manifest checksum differs: {source}')
-    document = read_manifest(source)
-    if not isinstance(document, dict) or not isinstance(document.get('units'), dict):
-        raise ValueError(f'cached child has no unit document: {source}')
-    return document
 
 
 def compose(children: list[dict], *, output: Path) -> tuple[dict, CachedUnitBundle]:
     if len(children) < 2 or output.exists() or output.is_symlink():
         raise ValueError('cached composition needs at least two children and a new output')
-    documents = [_bound(child['manifest']['path'], child['manifest']['sha256'])
-                 for child in children]
+    documents = []
+    for child in children:
+        path = Path(child['manifest']['path'])
+        if not path.is_absolute() or path.is_symlink() or path.resolve() != path:
+            raise ValueError('cached child needs a canonical absolute manifest path')
+        if file_sha256hex(path) != child['manifest']['sha256']:
+            raise ValueError(f'cached child manifest checksum differs: {path}')
+        document = read_manifest(path)
+        if not isinstance(document, dict) or not isinstance(document.get('units'), dict):
+            raise ValueError(f'cached child has no unit document: {path}')
+        documents.append(document)
     source = documents[0]['source']
     units = set()
     for child, document in zip(children, documents):

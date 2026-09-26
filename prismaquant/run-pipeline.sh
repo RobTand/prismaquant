@@ -2391,7 +2391,7 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
     TESSERA_PRICED_INPUT_ARGS+=(--input-scales "$TESSERA_INPUT_SCALES")
   fi
   TESSERA_PREFLIGHT_CACHE_ARGS=(--write-cached-expert-units)
-  if [[ -n "$TESSERA_CACHED_UNITS" ]]; then
+  if [[ -n "${TESSERA_CACHED_UNITS:-}" ]]; then
     TESSERA_PREFLIGHT_CACHE_ARGS=(--cached-units "$TESSERA_CACHED_UNITS")
   fi
   if ! TESSERA_BUILD_SHA256=$(python3 -m prismaquant.tessera_export_lane --model "$MODEL_PATH" \
@@ -2473,7 +2473,7 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   elif [[ -n "$TESSERA_CACHED_EXPERT_UNITS" ]]; then
     TESSERA_CACHED_UNIT_ARGS+=(--cached-expert-units "$TESSERA_CACHED_EXPERT_UNITS")
   fi
-  if [[ -n "$TESSERA_SOURCE_DIGEST_CACHE" ]]; then
+  if [[ -n "${TESSERA_SOURCE_DIGEST_CACHE:-}" ]]; then
     TESSERA_CACHED_UNIT_ARGS+=(--source-digest-cache "$TESSERA_SOURCE_DIGEST_CACHE")
   fi
 
