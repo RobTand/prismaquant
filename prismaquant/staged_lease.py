@@ -313,6 +313,21 @@ def inject_installed_sdk_for_tests():
         if _INJECTED_MODULES_BEFORE is None:
             _INJECTED_MODULES_BEFORE = frozenset(_prismabuild_modules())
     import prismabuild.reader_lease as module  # noqa: PLC0415
+    # The checks above prove what is installed, not what the import
+    # served. A ``prismabuild`` preimported from another tree (a sealed
+    # generation's ``src`` put on ``sys.path`` by an earlier test) answers
+    # this import instead, and the coherence check below cannot see it: it
+    # is relative to the module it was handed. That module then binds as
+    # the "installed" SDK, with another generation's behaviour
+    # (PQ #1281). The raise leaves the snapshot on record, as the
+    # coherence raise below does; the teardown's clear drops both.
+    installed = Path(dist.locate_file("prismabuild/reader_lease.py")).resolve()
+    served = Path(getattr(module, "__file__", None) or "").resolve()
+    if served != installed:
+        raise RuntimeError(
+            f"test SDK injection: prismabuild.reader_lease serves {served}, "
+            f"not the installed distribution's {installed}; a prismabuild "
+            "imported from another tree shadows it (PQ #1281)")
     try:
         expected = _package_dir_of(module)
     except LeaseRefused as exc:
