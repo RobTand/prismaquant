@@ -6359,10 +6359,28 @@ def _main(argv, *, source_scope) -> int:
             anchor, wire_dir, identity),
         journal_anchor=journal_anchor)
 
+    def committed_anchors() -> int:
+        """Every anchor the run holds, each with a receipt read off its landed file.
+
+        This is the count to report, not the anchors one flush touched. A
+        resumed row continues from the shards its journal already has, and a
+        counter that restarted at zero would look like a regression to the
+        watchdog, which refuses it.
+        """
+        return sum(len(anchors) for by_format in measured.values()
+                   for anchors in by_format.values())
+
     def flush_checkpoint() -> None:
         if journal is None:
             # The stream head before finalize: the shards cite a run identity
-            # that does not exist yet. The dirty units stay dirty until then.
+            # that does not exist yet, so the dirty units stay dirty until
+            # then. Progress is still owed, and it is still durable work
+            # (PB #480). An anchor reaches ``measured`` only through the
+            # ledger, after its wire receipt was read back off the landed
+            # file. Staying silent until finalize held a 1728-anchor row in
+            # ``startup`` for its whole encode, and PB killed it with 1608
+            # anchors on disk (PQ #1362).
+            report_progress("pricing", committed_anchors())
             return
         # The rows are snapshotted here, on the thread that owns them, and
         # only the write itself is ordered behind the receipts it cites.
@@ -6382,13 +6400,7 @@ def _main(argv, *, source_scope) -> int:
         if not states:
             return
 
-        # The count this reports is every anchor the run holds, not the ones
-        # this flush touched: a resumed row continues from the shards its
-        # journal already carries, and a counter that restarted at zero would
-        # read as a regression to the watchdog and be refused.
-        committed = sum(len(anchors)
-                        for by_format in measured.values()
-                        for anchors in by_format.values())
+        committed = committed_anchors()
 
         def write():
             for name, state in states:
@@ -6762,9 +6774,7 @@ def _main(argv, *, source_scope) -> int:
         # allowance follows the furthest phase entered and never an earlier
         # name.  What such a record does change is the phase the observation
         # displays, so a late drain can read "pricing" while finalize governs.
-        report_progress("finalize", sum(
-            len(anchors) for by_format in measured.values()
-            for anchors in by_format.values()))
+        report_progress("finalize", committed_anchors())
         publication_stats = None
         if publisher is not None:
             # The last barrier, and where a writer failure nothing else looked at
