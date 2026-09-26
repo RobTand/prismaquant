@@ -302,27 +302,3 @@ def test_packed_router_topk_accepts_indices_weights_tuple_order():
     assert torch.equal(indices, torch.zeros(3, 1, dtype=torch.long))
     assert torch.equal(weights, torch.ones(3, 1))
 
-
-def test_skip_packed_expert_cost_env(monkeypatch):
-    """PRISMAQUANT_SKIP_PACKED_EXPERT_COST=1 (set when the empirical expert
-    stage will REPLACE every expert row) must skip all packed-expert
-    measurement — the local measurements are discarded work."""
-    torch.manual_seed(7)
-    model = TinyModel().eval()
-    target_names = {"mlp.experts.gate_up_proj", "mlp.experts.down_proj"}
-    spec = fr.get_format("NVFP4")
-
-    monkeypatch.setenv("PRISMAQUANT_SKIP_PACKED_EXPERT_COST", "1")
-    accum: dict = {}
-    _measure_packed_experts(
-        model, target_names, [spec], "cpu", torch.float32, accum,
-        act_cache=None, h_detail=None,
-    )
-    assert accum == {}
-
-    monkeypatch.delenv("PRISMAQUANT_SKIP_PACKED_EXPERT_COST")
-    _measure_packed_experts(
-        model, target_names, [spec], "cpu", torch.float32, accum,
-        act_cache=None, h_detail=None,
-    )
-    assert set(accum) == target_names

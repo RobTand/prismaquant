@@ -1319,17 +1319,6 @@ def _measure_packed_experts(
     entries = _enumerate_packed_experts(model, target_names, profile)
     if not entries:
         return
-    if os.environ.get("PRISMAQUANT_SKIP_PACKED_EXPERT_COST", "0") == "1":
-        # When the expert_empirical_cost stage REPLACES every packed-expert
-        # row wholesale (merge_cost_payloads replace_experts=True pops
-        # them), measuring them here is discarded work. Set this env only
-        # when that replacement is guaranteed to run; if the empirical stage
-        # then fails, the run must die there, before the allocator ever sees
-        # the row-less payload.
-        print(f"[cost] SKIPPING {len(entries)} packed-expert tensors "
-              f"(PRISMAQUANT_SKIP_PACKED_EXPERT_COST=1: the empirical "
-              f"expert stage replaces these rows)", flush=True)
-        return
     measured = 0
     fallback = 0
     for full_name, packed_param, experts_qname, experts_mod in entries:

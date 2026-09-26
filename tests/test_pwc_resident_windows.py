@@ -315,31 +315,30 @@ def test_page_advice_uses_verified_load_stat_and_cleanup(tmp_path, monkeypatch):
 def test_window_load_failure_cleans_partial_prefetch_and_allows_fresh_context(tmp_path, monkeypatch, workers):
     cache, paths, _ = make_cache(tmp_path, 2)
     a, b = paths
-    original = cache._validate_loaded_cb_pair_tensor
-    def refused(key, tensor):
+    original = cache._check_expected_file_sha256
+    def refused(key, receipt):
         if key == b:
             raise RuntimeError('synthetic integrity refusal')
-        return original(key, tensor)
-    monkeypatch.setattr(cache, '_validate_loaded_cb_pair_tensor', refused)
+        return original(key, receipt)
+    monkeypatch.setattr(cache, '_check_expected_file_sha256', refused)
     with pytest.raises(RuntimeError, match='integrity'):
         with cache.resident_window(tuple(paths), max_resident_bytes=10000, max_workers=workers):
             pytest.fail('partial load exposed')
     assert all(isinstance(value, str) for value in cache.weights.values())
     assert not cache._file_load_receipts
-    monkeypatch.setattr(cache, '_validate_loaded_cb_pair_tensor', original)
+    monkeypatch.setattr(cache, '_check_expected_file_sha256', original)
     with cache.resident_window([a], max_resident_bytes=10000, max_workers=1):
         assert isinstance(cache.get_resident(*a), torch.Tensor)
 
 
-def test_resident_cb_lookup_preserves_both_existing_validators(monkeypatch):
+def test_resident_lookup_of_a_retired_codebook_key_refuses():
+    """A resident tensor keyed by a retired codebook rung (#1304) is never served."""
+    from prismaquant.format_registry import RetiredFormatError
+
     key = ('a', 'FP8_CB_K28')
     cache = ProductionWeightCache({key: torch.zeros(2, 2)}, {})
-    calls = []
-    monkeypatch.setattr('prismaquant.production_weight_cache._is_cb_format_name', lambda fmt: True)
-    monkeypatch.setattr(cache, 'validate_cb_render_identity', lambda **kwargs: calls.append('identity'))
-    monkeypatch.setattr(cache, '_validate_loaded_cb_pair_tensor', lambda *args: calls.append('tensor'))
-    assert cache.get_resident(*key) is cache.weights[key]
-    assert calls == ['identity', 'tensor']
+    with pytest.raises(RetiredFormatError, match='gridbook_lane'):
+        cache.get_resident(*key)
 
 
 def test_existing_disk_loaded_tensor_can_enter_without_enabling_receipts(tmp_path):

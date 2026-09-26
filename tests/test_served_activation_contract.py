@@ -293,15 +293,11 @@ def test_the_fill_gate_is_total_over_names_the_registry_does_not_own():
     from prismaquant.production_weight_cache import (
         _format_uses_static_activation_clip,
         _formats_need_static_activation_max,
-        _is_cb_format_name,
     )
 
     junk = "NOT_A_REGISTERED_FORMAT_pq218"
     assert _format_uses_static_activation_clip(junk) is False
     assert _formats_need_static_activation_max({junk, "BF16"}) is False
-    # The sibling predicate over the same values already answered False here;
-    # they now share one resolver, so they cannot drift apart again.
-    assert _is_cb_format_name(junk) is False
 
 
 # ------------------- the policy a cached cost was priced under (#227)

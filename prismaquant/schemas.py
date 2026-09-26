@@ -59,6 +59,33 @@ _RETIRED_CODEBOOK_COST_FIELDS = (
 )
 
 
+#: ``cost_source`` spellings only the retired codebook lane's RD-ladder
+#: interpolation stamped (archived 2026-09-25, #1304). No live producer writes
+#: them; the Tessera campaign's fitted rows use their own spelling.
+RETIRED_LADDER_COST_SOURCES = frozenset({"band_interpolated", "mixed"})
+
+
+def refuse_retired_ladder_cost_source(entry, where: str = "cost row") -> None:
+    """Raise ``RetiredFormatError`` when ``entry`` was priced by the retired
+    codebook lane's RD ladder; return for every other row.
+
+    ``validate_cost_payload`` calls it on every row it admits, and
+    ``allocator_candidates.cost_entry_is_band_interpolated`` calls it on the
+    rows it prices, so a table that skipped validation still refuses.
+    """
+    source = entry.get("cost_source") if _is_mapping(entry) else None
+    if source not in RETIRED_LADDER_COST_SOURCES:
+        return
+    from prismaquant.format_registry import RetiredFormatError
+
+    raise RetiredFormatError(
+        f"{where}: cost_source {source!r} was stamped by the retired Gridbook "
+        f"codebook lane's RD-ladder interpolation (archived 2026-09-25, "
+        f"#1304); a row carrying it cannot be priced. See "
+        f"{RETIRED_CODEBOOK_ARCHIVE}/README.md."
+    )
+
+
 def refuse_retired_codebook_format(name: str) -> None:
     """Raise ``RetiredFormatError`` when ``name`` is a retired codebook rung.
 
@@ -242,6 +269,8 @@ def validate_cost_payload(payload, path: str | None = None):
                     f".costs[{name!r}][{fmt!r}].cost_source",
                     "must be a string when present",
                 )
+            refuse_retired_ladder_cost_source(
+                entry, f"{_label(path)}.costs[{name!r}][{fmt!r}]")
             if "weight_mse_per_expert" in entry:
                 values = entry["weight_mse_per_expert"]
                 if (not isinstance(values, Sequence)
