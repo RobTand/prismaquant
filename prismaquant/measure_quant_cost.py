@@ -45,22 +45,7 @@ from .render_score import (
     normalize_clipped_fisher_row_weights,
     resolve_fisher_row_weight_clip,
 )
-from .sensitivity_probe import grouped_linear_groups
-
-
-def _packed_expert_parent_for_projection(profile, projection_name: str) -> str | None:
-    if profile is None:
-        try:
-            from .model_profiles import DefaultProfile
-            profile = DefaultProfile()
-        except Exception:
-            profile = None
-    if profile is not None:
-        try:
-            return profile.packed_expert_parent_for_projection(projection_name)
-        except Exception:
-            pass
-    return None
+from .sensitivity_probe import _packed_expert_parent_for_projection, grouped_linear_groups
 
 
 def canonical_linear_name(name: str, profile=None) -> str:
@@ -1333,17 +1318,6 @@ def _measure_packed_experts(
     dev = torch.device(device)
     entries = _enumerate_packed_experts(model, target_names, profile)
     if not entries:
-        return
-    if os.environ.get("PRISMAQUANT_SKIP_PACKED_EXPERT_COST", "0") == "1":
-        # When the expert_empirical_cost stage REPLACES every packed-expert
-        # row wholesale (merge_cost_payloads replace_experts=True pops
-        # them), measuring them here is discarded work. Set this env only
-        # when that replacement is guaranteed to run; if the empirical stage
-        # then fails, the run must die there, before the allocator ever sees
-        # the row-less payload.
-        print(f"[cost] SKIPPING {len(entries)} packed-expert tensors "
-              f"(PRISMAQUANT_SKIP_PACKED_EXPERT_COST=1: the empirical "
-              f"expert stage replaces these rows)", flush=True)
         return
     measured = 0
     fallback = 0

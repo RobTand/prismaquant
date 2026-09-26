@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import threading
 import time
 from contextlib import contextmanager
@@ -734,12 +735,36 @@ class GpuPowerSampler:
         return block
 
 
+def drop_page_cache(paths, *, missing_ok: bool = False) -> int:
+    """Advise the kernel to drop each whole file's cached pages; return how
+    many files were advised.
+
+    The one owner (PQ #1302) of the measurement step benches run before a
+    cold read, so the next read is a read. A path that cannot be opened
+    raises, or with ``missing_ok`` is skipped.
+    """
+    done = 0
+    for path in paths:
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+        except OSError:
+            if not missing_ok:
+                raise
+            continue
+        try:
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+            done += 1
+        finally:
+            os.close(fd)
+    return done
+
+
 __all__ = [
     "GB10_POWER_ENVELOPE_W", "GpuPowerSampler", "GpuPowerSpanSource",
     "IO_SPAN_MARKER", "IO_SPAN_SCHEMA", "IoSpan", "IoSpanLog",
     "MemAvailableFloor", "PROC_IO_FIELDS", "PeriodicSampler",
     "READ_RATE_MARKER", "READ_RATE_SCHEMA", "RESIDENCY_TIER_KEYS",
-    "ReadRateReporter", "counter_delta", "failure_outcome",
+    "ReadRateReporter", "counter_delta", "drop_page_cache", "failure_outcome",
     "mem_available_bytes", "nfs_read_bytes", "read_meminfo", "read_mountstats",
     "read_proc_io", "read_proc_status", "residency_tier_bytes", "stage_span_log",
 ]

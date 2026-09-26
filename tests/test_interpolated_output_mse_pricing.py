@@ -55,6 +55,7 @@ from prismaquant.allocator_candidates import (
     calibrate_activation_fair_pricing,
     collect_activation_calibration_rows,
     cost_entry_activation_pricing_branch,
+    TESSERA_INTERPOLATED_COST_SOURCE,
     cost_entry_is_band_interpolated,
     cost_entry_predicted_dloss,
     cost_entry_source,
@@ -64,10 +65,11 @@ from prismaquant.allocator_candidates import (
 from prismaquant.allocator_solver import Candidate
 
 # One family, four rungs: the two ends measured, the two middle ones
-# band-interpolated. Until 2026-09-25 these were four consecutive rungs of the
-# retired NVFP4 codebook ladder (K12..K15; archived, #1304). A stale table can
-# still carry the ``band_interpolated`` stamp, and the Tessera campaign's
-# fitted rows take the same branch, so the rule is pinned here on the four
+# interpolated. Until 2026-09-25 these were four consecutive rungs of the
+# retired NVFP4 codebook ladder (K12..K15; archived, #1304), stamped
+# ``band_interpolated``, which now refuses (``test_a_retired_ladder_row_refuses``).
+# The Tessera campaign's fitted rows take the same branch under their own
+# stamp, so the rule is pinned here with that stamp on the four
 # activation-quantizing rungs of the live ``mx`` family. The pricing never
 # reads a rung's bytes, so their order is only a label order.
 _RUNGS = ["MXFP4", "MXFP8_E5M2", "MXFP8_UE8M0_G32", "MXFP8_E4M3"]
@@ -120,8 +122,8 @@ def _ladder_rows(ratio: float) -> dict:
     what a log-space ladder fit through the measured K12/K15 anchors produces
     — which is what ``_ladder_metric_fit`` writes, and what the banked shards
     contain (``weight_mse``, ``output_mse``, ``rel_output_mse``,
-    ``output_mse_measured: false``, ``cost_source: band_interpolated``; no
-    ``predicted_dloss``).
+    ``output_mse_measured: false``, and an interpolated ``cost_source``, now
+    the Tessera campaign's; no ``predicted_dloss``).
     """
     rows: dict[str, dict] = {}
     for rung in _RUNGS:
@@ -130,7 +132,8 @@ def _ladder_rows(ratio: float) -> dict:
         if rung in _INTERPOLATED_RUNGS:
             row["rel_output_mse"] = 0.1 * ratio * weight_mse
             row["output_mse_measured"] = False
-            row["cost_source"] = "band_interpolated"
+            row["cost_source"] = TESSERA_INTERPOLATED_COST_SOURCE
+            row["tessera_family"] = _FAMILY
         else:
             row["n_activation_rows"] = 64
         rows[rung] = row
@@ -267,9 +270,14 @@ def test_build_candidates_prices_and_labels_the_interpolated_rung():
     """End to end through candidate construction, not just the scalar path."""
     stats, costs = _tables()
     pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
+    # The campaign's interpolated rows need its leave-one-anchor-out table; a
+    # zero band drops nothing that is not an exact tie, so pricing is what
+    # this test sees.
+    loo = {qname: {_FAMILY: {"max_abs_log2_error": 0.0}}
+           for qname in (_DOWN_PROJ, _GATE_PROJ)}
     cands = build_candidates(
         stats, costs, _specs(), target_profile="research",
-        activation_pricing=pricing)
+        activation_pricing=pricing, census_loo=loo)
 
     for qname, ratio in ((_DOWN_PROJ, _RATIO_DOWN_PROJ),
                          (_GATE_PROJ, _RATIO_GATE_PROJ)):
@@ -341,13 +349,13 @@ def test_the_row_still_says_exactly_what_it_said_about_itself():
     """Only the number's USE changed, never its claims."""
     stats, costs = _tables()
     entry = costs[_DOWN_PROJ]["MXFP8_E5M2"]
-    assert entry["cost_source"] == "band_interpolated"
+    assert entry["cost_source"] == TESSERA_INTERPOLATED_COST_SOURCE
     assert entry["output_mse_measured"] is False
     # The provenance guard (constraint: not weakened) still classifies it.
     assert cost_entry_is_band_interpolated(entry)
     # The cost-FIELD source keeps reporting the explicit provenance string...
     assert cost_entry_source(stats[_DOWN_PROJ], entry, "MXFP8_E5M2") == (
-        "band_interpolated")
+        TESSERA_INTERPOLATED_COST_SOURCE)
     # ...and "is a real measurement behind this row" is still answered no.
     assert not cost_entry_uses_measured_output_mse(
         stats[_DOWN_PROJ], entry, "MXFP8_E5M2")
@@ -380,12 +388,10 @@ def test_a_zero_output_mse_placeholder_still_takes_the_weight_only_branch(
         packed):
     """``output_mse == 0.0`` is not a usable price, whatever stamped it.
 
-    Two real producers of that row: the packed-expert ladder path, which fits
-    in WEIGHT space only and accumulates ``output_mse=0.0`` next to
-    ``cost_source=band_interpolated``/``mixed``; and the dense path's
-    ``float(fills["output_mse"] or 0.0)`` when the output fit could not be
-    made. Neither carries output-space information, and 0.0 is the DP's global
-    optimum — so both must keep falling through to weight-only pricing.
+    The retired ladder wrote such rows (a weight-space-only packed fit, and a
+    dense fit that could not be made); an interpolated row of any stamp at 0.0
+    carries no output-space information, and 0.0 is the DP's global optimum —
+    so it must keep falling through to weight-only pricing.
     """
     stats, costs = _tables()
     pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
@@ -397,7 +403,7 @@ def test_a_zero_output_mse_placeholder_still_takes_the_weight_only_branch(
         "output_mse": 0.0,
         "rel_output_mse": 0.0,
         "output_mse_measured": False,
-        "cost_source": "band_interpolated",
+        "cost_source": TESSERA_INTERPOLATED_COST_SOURCE,
     }
     priced = cost_entry_predicted_dloss(
         stats_entry, entry, format_name="MXFP8_E5M2",
@@ -408,23 +414,31 @@ def test_a_zero_output_mse_placeholder_still_takes_the_weight_only_branch(
         stats_entry, entry, "MXFP8_E5M2", pricing) == BRANCH_CALIBRATED
 
 
-def test_a_mixed_row_with_no_output_number_stays_weight_only():
-    """``cost_source: mixed`` is the packed path's accepted+rejected slice
-    row; it too carries ``output_mse=0.0``."""
+@pytest.mark.parametrize("source", ["band_interpolated", "mixed"])
+@pytest.mark.parametrize("output_mse", [0.0, 1.0e-3])
+def test_a_retired_ladder_row_refuses(source, output_mse):
+    """The retired RD ladder's stamps (codebook lane, archived 2026-09-25,
+    #1304) have no producer left. A stale row carrying one refuses, naming
+    the archive, instead of being priced on either branch."""
+    from prismaquant.format_registry import RetiredFormatError
+
     stats, costs = _tables()
     pricing = calibrate_activation_fair_pricing(stats, costs, _specs())
     entry = {
         "weight_mse": 1.0e-4,
-        "output_mse": 0.0,
+        "output_mse": output_mse,
         "output_mse_measured": False,
-        "cost_source": "mixed",
+        "cost_source": source,
     }
-    assert cost_entry_activation_pricing_branch(
-        _stats_entry(), entry, "MXFP8_E5M2", pricing) == BRANCH_CALIBRATED
-    assert cost_entry_predicted_dloss(
-        _stats_entry(), entry, format_name="MXFP8_E5M2",
-        activation_pricing=pricing,
-    ) == pytest.approx(_EXPECTED_PENALTY * 1.0e-4)
+    with pytest.raises(RetiredFormatError, match="gridbook_lane"):
+        cost_entry_activation_pricing_branch(
+            _stats_entry(), entry, "MXFP8_E5M2", pricing)
+    with pytest.raises(RetiredFormatError, match="gridbook_lane"):
+        cost_entry_predicted_dloss(
+            _stats_entry(), entry, format_name="MXFP8_E5M2",
+            activation_pricing=pricing)
+    with pytest.raises(RetiredFormatError, match="gridbook_lane"):
+        cost_entry_is_band_interpolated(entry)
 
 
 def test_a_genuinely_measured_row_is_priced_exactly_as_before():
@@ -455,7 +469,7 @@ def test_the_ucb_hedge_conversion_follows_the_pricing_branch():
         "predicted_dloss": 1.0e-4,
         "predicted_dloss_stderr": 2.0e-5,
         "output_mse_measured": False,
-        "cost_source": "band_interpolated",
+        "cost_source": TESSERA_INTERPOLATED_COST_SOURCE,
     }
     hedge, stderr_agg = _super_item_ucb_hedge(
         [(stats_entry, interpolated, 1.0e-3, 1.0)], ucb_z=2.0)

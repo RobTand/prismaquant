@@ -139,10 +139,33 @@ def _selection_layer_config(name, _tmp_path):
     _layer_config_from_assignment({"model.layers.0.mlp.down_proj": name})
 
 
-def _cache_key(name, _tmp_path):
-    from prismaquant.production_weight_cache import _is_cb_format_name
+def _cache_lookup(name, _tmp_path):
+    import torch
 
-    _is_cb_format_name(name)
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    qname = "model.layers.0.mlp.down_proj"
+    cache = ProductionWeightCache({(qname, name): torch.zeros(2, 2)}, {})
+    cache.get(qname, name)
+
+
+def _cache_prefetch(name, tmp_path):
+    import torch
+
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    qname = "model.layers.0.mlp.down_proj"
+    shard = tmp_path / "stale.pt"
+    torch.save(torch.zeros(2, 2), shard)
+    cache = ProductionWeightCache({(qname, name): str(shard)}, {})
+    cache.prefetch([(qname, name)], max_workers=1)
+
+
+def _cache_assignment_keys(name, _tmp_path):
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    ProductionWeightCache({}, {}).assignment_keys(
+        {"model.layers.0.mlp.down_proj": name})
 
 
 def _reprice(name, _tmp_path):
@@ -183,7 +206,10 @@ READERS = [
         _selection_layer_config,
         id="select_validated_frontier._layer_config_from_assignment",
     ),
-    pytest.param(_cache_key, id="production_weight_cache._is_cb_format_name"),
+    pytest.param(_cache_lookup, id="ProductionWeightCache.get"),
+    pytest.param(
+        _cache_assignment_keys, id="ProductionWeightCache.assignment_keys"),
+    pytest.param(_cache_prefetch, id="ProductionWeightCache.prefetch"),
     pytest.param(_reprice, id="per_row_pricing.reprice_assignment"),
     pytest.param(
         _serve_dispatch_family,
@@ -276,3 +302,19 @@ def test_the_codebook_only_paths_are_gone():
     for module in ("cb_minchain", "nvfp4_cb_formats", "nvfp4_cb_footprint",
                    "cb_ladder_cross_family", "routed_moe_codebooks"):
         assert importlib.util.find_spec(f"prismaquant.{module}") is None, module
+
+
+@pytest.mark.parametrize("source", ["band_interpolated", "mixed"])
+def test_a_cost_row_stamped_by_the_retired_ladder_refuses(source):
+    # The RD-ladder interpolation that stamped these was part of the codebook
+    # lane (#1345). The Tessera campaign's fitted rows keep their own stamp.
+    payload = {"costs": {"model.layers.0.mlp.down_proj": {"NVFP4": {
+        "weight_mse": 1.0, "output_mse_measured": False,
+        "cost_source": source}}}, "formats": ["NVFP4"]}
+    with pytest.raises(fr.RetiredFormatError) as info:
+        schemas.validate_cost_payload(payload, "cost.pkl")
+    assert fr.RETIRED_CODEBOOK_ARCHIVE in str(info.value)
+    assert "cost.pkl" in str(info.value)
+    payload["costs"]["model.layers.0.mlp.down_proj"]["NVFP4"]["cost_source"] = (
+        "tessera_campaign_interpolated")
+    schemas.validate_cost_payload(payload, "cost.pkl")

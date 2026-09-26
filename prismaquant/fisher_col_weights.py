@@ -39,7 +39,6 @@ import argparse
 import hashlib
 import os
 import pickle
-import subprocess
 import time
 from pathlib import Path
 from typing import Sequence
@@ -52,14 +51,9 @@ def _log(msg: str) -> None:
 
 
 def _git_commit() -> str | None:
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=Path(__file__).resolve().parent,
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip() or None
-    except Exception:
-        return None
+    from prismaquant.aura_cost import _git_head_commit
+
+    return _git_head_commit()
 
 
 def _dataset_sha256(dataset: str | None) -> str | None:

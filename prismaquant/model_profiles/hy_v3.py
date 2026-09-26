@@ -54,9 +54,9 @@ class HyV3Profile(ModelProfile):
     @classmethod
     def matches(cls, model_type: str | None,
                 architectures: list[str] | None) -> bool:
-        if model_type == "hy_v3":
-            return True
-        return any(a.startswith("HYV3") for a in architectures or ())
+        return cls.claims_by_name(
+            model_type, architectures,
+            frozenset({"hy_v3"}), ("HYV3",))
 
     @property
     def name(self) -> str:

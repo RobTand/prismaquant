@@ -25,8 +25,7 @@ try:  # package mode (`python -m tools.measure_vllm_full_kl`)
     from .gold_engine_options import (
         add_gold_engine_arguments,
         gold_engine_kwargs,
-        gold_fabric_request,
-        headless_peer_argv,
+        gold_provenance,
         validate_gold_engine_arguments,
     )
     from .gold_measurement_fidelity import full_kl_fidelity
@@ -42,8 +41,7 @@ except ImportError:  # script mode (`python /repo/tools/measure_vllm_full_kl.py`
     from gold_engine_options import (  # type: ignore
         add_gold_engine_arguments,
         gold_engine_kwargs,
-        gold_fabric_request,
-        headless_peer_argv,
+        gold_provenance,
         validate_gold_engine_arguments,
     )
     from gold_measurement_fidelity import full_kl_fidelity  # type: ignore
@@ -119,36 +117,11 @@ def _provenance(args) -> dict:
     result JSONs whose `serve_fingerprint` differs are not comparable as a
     delta (`tools/kl_ab.py` refuses them).
     """
-    producer = gold_producer_identity("measure_vllm_full_kl")
-    topology = gold_engine_kwargs(args)
-    # A TP>1 number is not readable without the fabric it crossed, and the
-    # fabric is an environment request rather than an engine argument, so it
-    # rides beside the topology instead of inside it. On a single node there is
-    # no collective to label, but the block is still recorded: "this ran on one
-    # box" is the honest reading of an absent fabric, and omitting the key
-    # would make a TP1 receipt and an unlabelled TP2 receipt look alike.
-    extra = {
-        "measurement_tool": "measure_vllm_full_kl",
-        "producer_identity": producer,
-        "gold_engine_configuration": topology,
-        "gold_fabric_request": gold_fabric_request(),
-    }
-    if int(topology.get("nnodes", 1)) > 1 and _ENGINE_KWARGS is not None:
-        # The peer argv this coordinator's own kwargs imply. Recorded so the
-        # launcher that started rank 1 can be checked against the engine rank 0
-        # actually built, rather than trusted because both were typed by hand.
-        extra["headless_peer_argv"] = headless_peer_argv(
-            _ENGINE_KWARGS, node_rank=1)
-    manifest = self_manifest(
-        extra=extra,
-        image=_resolve_serve_image(args),
-    )
-    return {
-        "git_commit": producer["git_commit"],
-        "serve_fingerprint": manifest["serve_fingerprint"],
-        "serve_manifest": manifest,
-        "spec_decode_detected": _SPEC_DECODE_DETECTED,
-    }
+    return gold_provenance(
+        "measure_vllm_full_kl", args, engine_kwargs=_ENGINE_KWARGS,
+        spec_decode_detected=_SPEC_DECODE_DETECTED,
+        producer_identity=gold_producer_identity, self_manifest=self_manifest,
+        serve_image=_resolve_serve_image)
 
 
 def _load_wikitext_calibration(

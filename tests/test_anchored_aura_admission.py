@@ -84,7 +84,8 @@ def test_anchored_zero_is_retained_but_the_guard_keeps_full_strength():
     # cell the guard exists for.
     for entry in (
         {"predicted_dloss": 0.0},
-        {"predicted_dloss": 0.0, "cost_source": "band_interpolated"},
+        {"predicted_dloss": 0.0,
+         "cost_source": candidates.TESSERA_INTERPOLATED_COST_SOURCE},
         _anchored_entry(predicted_dloss=0.0, fisher_application_count=2),
         {k: v for k, v in _anchored_entry(predicted_dloss=0.0).items()
          if k != "cost_currency"},

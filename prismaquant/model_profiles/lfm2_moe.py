@@ -89,12 +89,9 @@ class Lfm2MoeProfile(ModelProfile):
 
     @classmethod
     def matches(cls, model_type: str, architectures: list[str]) -> bool:
-        if model_type in {"lfm2_moe", "lfm2-moe"}:
-            return True
-        for arch in architectures:
-            if arch.startswith("Lfm2Moe"):
-                return True
-        return False
+        return cls.claims_by_name(
+            model_type, architectures,
+            frozenset({"lfm2_moe", "lfm2-moe"}), ("Lfm2Moe",))
 
     @property
     def name(self) -> str:

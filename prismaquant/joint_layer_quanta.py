@@ -1764,11 +1764,24 @@ def bound_readset_directory(output_root: str, *,
     while ``adjoint.boundary_artifacts`` (the stage-A DATA directory) keeps
     deriving from the data output root alone and never points here.
     """
+    return control_directory(output_root, "adjoint/bound-readsets",
+                             metadata_root=metadata_root)
+
+
+def control_directory(output_root: str, relative: str, *,
+                      metadata_root: str | None = None) -> str:
+    """``relative`` inside the control-metadata namespace (PQ #884, #1302).
+
+    The one derivation behind every control directory: under
+    ``metadata_root`` when one is given, else under
+    ``{output_root}/layer-quanta``, so ``metadata_root ==
+    {output_root}/layer-quanta`` reproduces the default paths exactly.
+    """
     if metadata_root is not None:
-        return _canonical_control_root(metadata_root) + "/adjoint/bound-readsets"
+        return _canonical_control_root(metadata_root) + "/" + relative
     if type(output_root) is not str or not output_root.startswith("/"):
         raise ValueError("an output root must be absolute: refusing")
-    return output_root.rstrip("/") + "/layer-quanta/adjoint/bound-readsets"
+    return output_root.rstrip("/") + "/layer-quanta/" + relative
 
 
 def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,

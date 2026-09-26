@@ -50,6 +50,11 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Sequence, Set
 
+try:  # package mode; one owner of the short HEAD sha (PQ #1302)
+    from .tp2_budget_plan import _git_sha
+except ImportError:  # script mode (`python tools/tp_decode_feasibility.py`)
+    from tp2_budget_plan import _git_sha  # type: ignore
+
 BF16_BYTES = 2
 LINK_BPS_DEFAULT = 10e9  # 10 GbE TCP, no RDMA (verified: enP7s7 at 10000 Mb/s)
 
@@ -204,15 +209,6 @@ def check_scratch_path(path: Path) -> Path:
     if resolved.is_relative_to(Path("/tmp")):
         raise ValueError(f"refusing /tmp path ({resolved}); scratch belongs under {SCRATCH_ROOT}")
     return resolved
-
-
-def _git_sha() -> Optional[str]:
-    try:
-        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                             capture_output=True, text=True, timeout=10, check=True)
-        return out.stdout.strip()
-    except Exception:
-        return None
 
 
 def _primary_ip(peer: Optional[str]) -> str:

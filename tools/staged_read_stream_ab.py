@@ -31,15 +31,8 @@ import time
 
 def drop_client_cache(paths):
     """Forget what this client cached, so the next read is a read."""
-    for path in paths:
-        try:
-            fd = os.open(path, os.O_RDONLY)
-        except OSError:
-            continue
-        try:
-            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-        finally:
-            os.close(fd)
+    from prismaquant.io_spans import drop_page_cache
+    drop_page_cache(paths, missing_ok=True)
 
 
 def digest_tensor(tensor, torch):

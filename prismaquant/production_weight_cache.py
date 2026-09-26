@@ -87,6 +87,8 @@ import torch.nn as nn
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
+from prismaquant.digests import canonical_json
+from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
     gate_render_candidate,
     normalize_row_weights,
@@ -173,10 +175,6 @@ def _render_base_format(fmt: str) -> str:
 def _cache_weight_filename(qname: str, fmt: str) -> str:
     safe = qname.replace("/", "__").replace(".", "_")
     return f"{safe}__{fmt}.pt"
-
-
-def _cache_pair_identity_filename(qname: str, fmt: str) -> str:
-    return _cache_weight_filename(qname, fmt) + ".identity.json"
 
 
 _UNCACHED_PACKED_EXPERT_RE = re.compile(
@@ -337,7 +335,6 @@ class ProductionWeightCache:
     _lru_paths: dict[tuple[str, str], str] | None = None
     _lru_bytes: int = 0
     _lru_max_bytes: int = 0
-    _cb_verified_keys: set[tuple[str, str]] | None = None
     _file_load_max_bytes: int = 0
     _file_load_receipts: dict | None = None
     _expected_file_sha256: dict[tuple[str, str], str] | None = None
@@ -349,31 +346,6 @@ class ProductionWeightCache:
             self.activation_max_abs = self.activation_scales
         elif self.activation_scales is None and self.activation_max_abs is not None:
             self.activation_scales = self.activation_max_abs
-
-    def validate_cb_render_identity(
-        self,
-        *,
-        expected_context=None,
-        expected_qnames: Sequence[str] | None = None,
-        col_weights: Mapping[str, torch.Tensor] | None = None,
-        require_for_formats: Sequence[str] = (),
-        require_source_complete: bool = True,
-        where: str = "ProductionWeightCache",
-    ):
-        """Validate and return this cache's persisted CB producer context.
-
-        The context is read from the cache metadata, never reconstructed from
-        the current process environment.  Non-CB caches return ``None``.
-        """
-        return validate_production_cache_cb_render_identity(
-            self,
-            expected_context=expected_context,
-            expected_qnames=expected_qnames,
-            col_weights=col_weights,
-            require_for_formats=require_for_formats,
-            require_source_complete=require_source_complete,
-            where=where,
-        )
 
     def enable_lru(self, max_bytes: int) -> None:
         """Bound the in-memory tensor footprint to ``max_bytes`` via LRU
@@ -397,8 +369,6 @@ class ProductionWeightCache:
                 # Restore the filename so subsequent lookups still resolve.
                 if self._lru_paths is not None and evict_key in self._lru_paths:
                     self.weights[evict_key] = self._lru_paths[evict_key]
-                if self._cb_verified_keys is not None:
-                    self._cb_verified_keys.discard(evict_key)
                 if self._file_load_receipts is not None:
                     self._file_load_receipts.pop(evict_key, None)
 
@@ -427,7 +397,6 @@ class ProductionWeightCache:
                     compacted += 1
         self._lru_order = [] if self._lru_order is not None else None
         self._lru_bytes = 0
-        self._cb_verified_keys = None
         self._file_load_receipts = None
         self._forget_window_archive_bytes()
         return compacted
@@ -464,8 +433,6 @@ class ProductionWeightCache:
             if self._lru_order is not None and key in self._lru_order:
                 self._lru_order.remove(key)
                 self._lru_bytes -= value.numel() * value.element_size()
-            if self._cb_verified_keys is not None:
-                self._cb_verified_keys.discard(key)
             if self._file_load_receipts is not None:
                 self._file_load_receipts.pop(key, None)
             released += 1
@@ -1046,22 +1013,9 @@ class ProductionWeightCache:
         """
         from prismaquant import format_registry as fr
 
-        cb_formats = [
-            (str(qname), fr.canonical_format_name(str(fmt)))
-            for qname, fmt in assignment.items()
-            if _is_cb_format_name(fr.canonical_format_name(str(fmt)))
-        ]
-        if cb_formats:
-            cb_expected = []
-            for qname, fmt in cb_formats:
-                resolved = self.resolve_key(qname, fmt)
-                if resolved is not None:
-                    cb_expected.append(resolved[0])
-            self.validate_cb_render_identity(
-                expected_qnames=cb_expected,
-                require_for_formats=[fmt for _qname, fmt in cb_formats],
-                where="ProductionWeightCache assignment",
-            )
+        for fmt in assignment.values():
+            refuse_retired_codebook_format(
+                fr.canonical_format_name(str(fmt)).strip())
 
         keys: list[tuple[str, str]] = []
         missing: list[tuple[str, str]] = []
@@ -1265,57 +1219,6 @@ class ProductionWeightCache:
         self._lru_bytes += tensor.element_size() * tensor.numel()
         self._lru_order.append(key)
         self._evict_to_budget()
-
-    def _validate_loaded_cb_pair_tensor(
-        self,
-        key: tuple[str, str],
-        tensor: torch.Tensor,
-    ) -> None:
-        """Verify an admitted CB shard on its necessary consumer load.
-
-        Resume admission validates the small identity sidecar without an eager
-        full-cache scan. The first real consumer load verifies the logical
-        tensor digest from the cache manifest, combining integrity checking
-        with I/O AURA/export already has to perform.
-        """
-        if not _is_cb_format_name(key[1]):
-            return
-        if self._cb_verified_keys is not None and key in self._cb_verified_keys:
-            return
-        metadata = self.metadata if isinstance(self.metadata, Mapping) else {}
-        artifact_set = metadata.get("cb_cache_pair_artifacts")
-        if artifact_set is None:
-            return
-        if not isinstance(artifact_set, Mapping):
-            raise RuntimeError(
-                "ProductionWeightCache CB pair artifact metadata is malformed"
-            )
-        records = artifact_set.get("records")
-        record_key = f"{key[0]}|{key[1]}"
-        record = records.get(record_key) if isinstance(records, Mapping) else None
-        expected = record.get("tensor") if isinstance(record, Mapping) else None
-        if not isinstance(expected, Mapping):
-            raise RuntimeError(
-                f"ProductionWeightCache CB pair artifact identity is missing "
-                f"for {key[0]}@{key[1]}"
-            )
-        observed = _cb_cache_tensor_identity(tensor)
-        difference = first_identity_difference(
-            expected,
-            observed,
-            path="tensor",
-        )
-        if difference is not None:
-            field, stored, current = difference
-            raise RuntimeError(
-                f"ProductionWeightCache CB shard integrity refused for "
-                f"{key[0]}@{key[1]}: identity field '{field}' differs: "
-                f"stored={identity_value_for_error(stored)} "
-                f"current={identity_value_for_error(current)}"
-            )
-        if self._cb_verified_keys is None:
-            self._cb_verified_keys = set()
-        self._cb_verified_keys.add(key)
 
     def enable_file_load_receipts(self, *, max_file_bytes: int) -> None:
         """Capture content provenance on the necessary, bounded PWC file read.
@@ -1613,8 +1516,8 @@ class ProductionWeightCache:
             key, original_value, tensor, receipt, derived = item
             if isinstance(self.weights.get(key), torch.Tensor):
                 continue
+            refuse_retired_codebook_format(key[1])
             self._check_expected_file_sha256(key, receipt)
-            self._validate_loaded_cb_pair_tensor(key, tensor)
             self.weights[key] = tensor
             self._record_lru_load(key, original_value, tensor)
             self._record_file_load(key, tensor, receipt)
@@ -1636,8 +1539,10 @@ class ProductionWeightCache:
             raise RuntimeError(f'PWC cache entry is not resident: {key}')
         if v is None:
             return None
+        # A stale cache keyed by a retired codebook rung (archived 2026-09-25,
+        # #1304) refuses on every lookup and load, never serves the bytes.
+        refuse_retired_codebook_format(key[1])
         if isinstance(v, torch.Tensor):
-            self._validate_loaded_cb_pair_tensor(key, v)
             if getattr(self, "_expected_file_sha256", None) is not None:
                 self._check_expected_file_sha256(key, (self.file_load_receipt(key, v),))
             if resident_only and (getattr(self, '_file_load_max_bytes', 0)
@@ -1653,7 +1558,6 @@ class ProductionWeightCache:
         # Treat anything non-tensor as a filename / path.
         loaded, receipt = self._load_file_tensor(v, key)
         self._check_expected_file_sha256(key, receipt)
-        self._validate_loaded_cb_pair_tensor(key, loaded)
         self.weights[key] = loaded
         self._record_lru_load(key, v, loaded)
         self._record_file_load(key, loaded, receipt)
@@ -1664,12 +1568,6 @@ class ProductionWeightCache:
     def get(self, name: str, fmt: str, *, resident_only=False) -> torch.Tensor | None:
         key = self.resolve_key(name, fmt)
         if key is not None:
-            if _is_cb_format_name(key[1]):
-                self.validate_cb_render_identity(
-                    expected_qnames=[key[0]],
-                    require_for_formats=[key[1]],
-                    where=f"ProductionWeightCache get({key[0]}@{key[1]})",
-                )
             return self._resolve_to_tensor(key, resident_only=resident_only)
         if resident_only:
             raise RuntimeError(f'PWC missing cache entry: {name}@{fmt}')
@@ -2934,37 +2832,8 @@ def _weighted_render_family(fmt: str) -> str | None:
     return family if family in WEIGHTED_RENDER_FAMILIES else None
 
 
-def _is_cb_format_name(fmt: str) -> bool:
-    """Refuse a retired codebook rung name; every live format answers False.
-
-    The codebook families were archived on 2026-09-25 (#1304), so no
-    resolvable format is one. ``_resolve_format_spec`` swallows the
-    registry's refusal, which would let a stale ``NVFP4_CB_K*``/``FP8_CB_K*``
-    cache key read as "not a codebook format" and be reused; this raises
-    ``fr.RetiredFormatError`` for it instead.
-
-    Kept only because ``ProductionWeightCache`` still asks it (its
-    ``assignment_keys``, ``_validate_loaded_cb_pair_tensor`` and ``get``);
-    delete it with those call sites once #1318 lands (#1328).
-    """
-    from prismaquant.schemas import refuse_retired_codebook_format
-
-    refuse_retired_codebook_format(str(fmt).strip())
-    return False
-
-
-def _canonical_json_value(value, *, where: str):
-    try:
-        encoded = json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{where} is not canonical JSON data") from exc
-    return json.loads(encoded)
+#: One canonical-JSON value normalizer (PQ #1302): ``digests`` owns it.
+_canonical_json_value = canonical_json
 
 
 def _source_weight_value_identity(
@@ -3184,35 +3053,6 @@ def _cb_cache_tensor_identity(tensor: torch.Tensor) -> dict[str, object]:
         "logical_bytes": nbytes,
         "content_sha256": digest.hexdigest(),
     }
-
-
-def validate_production_cache_cb_render_identity(
-    cache: ProductionWeightCache,
-    *,
-    expected_context=None,
-    expected_qnames: Sequence[str] | None = None,
-    col_weights: Mapping[str, torch.Tensor] | None = None,
-    require_for_formats: Sequence[str] = (),
-    require_source_complete: bool = True,
-    where: str = "ProductionWeightCache",
-):
-    """Refuse a cache that stores, or is asked for, a retired codebook rung.
-
-    The codebook lane and its render identity were archived on 2026-09-25
-    (#1304). A stale manifest that still keys a weight by an
-    ``NVFP4_CB_K*``/``FP8_CB_K*`` name raises ``fr.RetiredFormatError`` here
-    instead of being reused. A lone ``cb_render_identity`` metadata key with
-    no codebook weight is inert provenance and is ignored. Returns ``None``.
-
-    Kept only because ``ProductionWeightCache.validate_cb_render_identity``
-    still calls it; delete both once #1318 lands (#1328). The keyword
-    parameters are that method's call shape and are not read.
-    """
-    for fmt in require_for_formats:
-        _is_cb_format_name(fmt)
-    for _qname, fmt in (getattr(cache, "weights", {}) or {}):
-        _is_cb_format_name(fmt)
-    return None
 
 
 def _render_nvfp4_progressive_candidate(
@@ -5794,7 +5634,6 @@ def fill_production_weight_cache(
         )
 
     from prismaquant import format_registry as fr
-    from prismaquant.schemas import refuse_retired_codebook_format
 
     def _canon(fmt: str) -> str:
         canonical = fr.canonical_format_name(str(fmt).strip().upper())
@@ -7316,7 +7155,6 @@ def fill_packed_expert_cache_entries(
     cache_dir_path = Path(cache_dir) if cache_dir is not None else None
     if cache_dir_path is not None:
         cache_dir_path.mkdir(parents=True, exist_ok=True)
-    from prismaquant.schemas import refuse_retired_codebook_format
 
     def _canon(fmt: str) -> str:
         canonical = fr.canonical_format_name(str(fmt).strip().upper())

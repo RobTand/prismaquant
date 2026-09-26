@@ -91,6 +91,12 @@ from .allocator_candidates import (
 from .fp8_dynamic import fp8_dynamic_weight_qdq
 from .mx_formats import e8m0_to_scale, mxfp8_e4m3_qdq
 from .serving_profiles import resolve_target_profile
+from .sensitivity_probe import (
+    _is_packed_experts_module,
+    _packed_expert_param_name_set,
+    _packed_expert_parent_for_projection,
+    _packed_experts_param_names,
+)
 from .layer_config import (
     canonicalize_assignment as _canonicalize_assignment,
     canonicalize_format,
@@ -4864,47 +4870,9 @@ def _build_target_list(vllm_names: list[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Module / parameter discovery — mirrors what install_packed_expert_hooks
-# detects, so the export sees the same units as the probe.
+# Module / parameter discovery — the probe's own helpers
+# (``sensitivity_probe``), so the export sees the same units as the probe.
 # ---------------------------------------------------------------------------
-def _packed_expert_param_name_set(profile=None) -> set[str]:
-    if profile is None:
-        try:
-            from .model_profiles import DefaultProfile
-            profile = DefaultProfile()
-        except Exception:
-            profile = None
-    if profile is not None:
-        try:
-            return set(profile.packed_expert_param_names())
-        except Exception:
-            pass
-    return set()
-
-
-def _is_packed_experts_module(module: nn.Module, profile=None) -> bool:
-    names = _packed_expert_param_name_set(profile)
-    cls_name = type(module).__name__.lower()
-    if "expert" not in cls_name:
-        return False
-    for n, p in module.named_parameters(recurse=False):
-        if (isinstance(p, nn.Parameter)
-                and p.dim() == 3
-                and n in names):
-            return True
-    return False
-
-
-def _packed_experts_param_names(module: nn.Module, profile=None) -> list[str]:
-    names = _packed_expert_param_name_set(profile)
-    return sorted(
-        n for n, p in module.named_parameters(recurse=False)
-        if (isinstance(p, nn.Parameter)
-            and p.dim() == 3
-            and n in names)
-    )
-
-
 def _packed_expert_projection_names(profile, param_name: str) -> tuple[str, ...]:
     if profile is None:
         try:
@@ -4920,21 +4888,6 @@ def _packed_expert_projection_names(profile, param_name: str) -> tuple[str, ...]
         except Exception:
             pass
     return (str(param_name),)
-
-
-def _packed_expert_parent_for_projection(profile, projection_name: str) -> str | None:
-    if profile is None:
-        try:
-            from .model_profiles import DefaultProfile
-            profile = DefaultProfile()
-        except Exception:
-            profile = None
-    if profile is not None:
-        try:
-            return profile.packed_expert_parent_for_projection(projection_name)
-        except Exception:
-            pass
-    return None
 
 
 def _vllm_moe_scheme_projection_names(profile, param_name: str) -> tuple[str, ...]:

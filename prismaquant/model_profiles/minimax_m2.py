@@ -52,12 +52,10 @@ class MiniMaxM2Profile(ModelProfile):
 
     @classmethod
     def matches(cls, model_type: str, architectures: list[str]) -> bool:
-        if model_type in {"minimax_m2", "minimax-m2", "minimax_m2.7"}:
-            return True
-        for arch in architectures:
-            if arch.startswith("MiniMaxM2") or arch.startswith("MiniMax-M2"):
-                return True
-        return False
+        return cls.claims_by_name(
+            model_type, architectures,
+            frozenset({"minimax_m2", "minimax-m2", "minimax_m2.7"}),
+            ("MiniMaxM2", "MiniMax-M2"))
 
     @property
     def name(self) -> str:
