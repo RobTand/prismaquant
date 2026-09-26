@@ -62,6 +62,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 import bisect
 import os
 import queue
@@ -92,21 +93,23 @@ ADDRESS_ALIGNMENT = 512
 ARENA_BYTES = 256 << 20
 READ_BYTES = 64 << 20
 ARENA_COUNT = 3
+#: Read buffers a replay phase reserves: the chunk it consumes and the one it
+#: asks for next. The IO engine reads further ahead within its budget's live
+#: headroom (PQ #1348), not within this count.
 READ_BUFFER_COUNT = 2
 #: Direct I/O (PQ #1060): the most bytes one write call and one read call
-#: put in flight, and the threads that issue a read chunk's calls. The
-#: NVMe takes at most 128 KiB per request, so throughput is queue depth
-#: times 128 KiB over the latency, and Netdata's disk backlog integrates
-#: that queue. These are the smallest bounds that keep the spill's I/O well
-#: ahead of its compute, measured on lina from pinned memory (PB
+#: put in flight. The NVMe takes at most 128 KiB per request, so throughput
+#: is queue depth times 128 KiB over the latency, and Netdata's disk backlog
+#: integrates that queue. Measured on lina from pinned memory (PB
 #: f6733604db33, b55e4305076c): one 1 MiB write in flight ran 4.8 GB/s at
 #: an average queue of 4 and 0.11 ms await, against 5.9 GB/s at a queue of
-#: 811 and 18 ms for a whole 256 MiB arena at once; four 1 MiB reads ran
-#: 6.9 GB/s. See docs/ARCHITECTURE.md.
+#: 811 and 18 ms for a whole 256 MiB arena at once. Replay reads go through
+#: the IO engine (PQ #1348): each read chunk is one entry of one stream, and
+#: the engine's pool sets how many chunks are read at once from the measured
+#: rates. See docs/ARCHITECTURE.md.
 WRITE_CALL_BYTES = 1 << 20
 READ_CALL_BYTES = 1 << 20
-READ_WORKERS = 4
-#: Writer and read-ahead threads by default; tests run the same I/O inline.
+#: A writer thread by default; tests run the same writes inline.
 DEFAULT_THREADS = True
 #: The sealed spill bound's schema (``executable_readset.spill_bound``).
 SPILL_BOUND_SCHEMA = "prismaquant.stage_b_spill_bound.v1"
@@ -613,6 +616,14 @@ def _slot(cursor, residue, nbytes, block):
     return start, offset, _ceil(offset + nbytes, block)
 
 
+def _empty_host_cache():
+    """Hand the caching host allocator's idle pinned blocks back; the bytes freed."""
+    stats = torch.cuda.memory.host_memory_stats
+    before = stats().get("allocated_bytes.current", 0)
+    torch._C._host_emptyCache()
+    return max(0, before - stats().get("allocated_bytes.current", 0))
+
+
 def _aligned_buffer(nbytes, block, pinned):
     """A uint8 tensor of ``nbytes`` whose address is a multiple of ``block``."""
     raw = torch.empty(nbytes + block, dtype=torch.uint8, pin_memory=pinned)
@@ -818,10 +829,13 @@ class StageBReplaySpill:
     """One layer quantum's spill: capture per probe, then replay per window.
 
     ``window_names`` are the sealed retained windows in index order, already
-    reduced to their pending targets. ``threads`` runs the NVMe writer and
-    the window read-ahead on their own threads; ``False`` does the same I/O
-    inline. ``None`` takes ``DEFAULT_THREADS``. ``max_block`` is the grid a
-    sealed ceiling was sized on (:func:`require_sealed_spill_bound`).
+    reduced to their pending targets. ``threads`` runs the NVMe writer on
+    its own thread; ``False`` does the same writes inline. ``None`` takes
+    ``DEFAULT_THREADS``. The replay reads through the IO engine either way
+    (PQ #1348): one stream over every chunk of every pending window and
+    probe, in replay order, read ahead within :meth:`bind_replay_budget`'s
+    budget. ``max_block`` is the grid a sealed ceiling was sized on
+    (:func:`require_sealed_spill_bound`).
     """
 
     def __init__(self, *, root, max_bytes, geometry, window_names, n_probes,
@@ -873,7 +887,10 @@ class StageBReplaySpill:
         per_probe = geometry.x_bytes + geometry.g_bytes_per_probe
         self.arena_bytes = _ceil(max(pair, min(ARENA_BYTES, per_probe + pair)), block)
         self.read_bytes = _ceil(max(pair, min(READ_BYTES, per_probe + pair)), block)
-        self._read_pool = None
+        self._replay_stream = None
+        self._replay_budget = None
+        # Reader threads add to the telemetry; the lock keeps the sums whole.
+        self._telemetry_lock = threading.Lock()
         self._arenas: list[_Arena] = []
         self._free: queue.Queue | None = None
         self._pending: queue.Queue | None = None
@@ -883,7 +900,6 @@ class StageBReplaySpill:
         self._probe = None
         self._captured = 0
         self._failed = False
-        self._read_buffers: list = []
         self.telemetry = {
             "bound_bytes": geometry.total_bytes, "ceiling_bytes": int(max_bytes),
             "x_bytes_written": 0, "g_bytes_written": 0, "bytes_read": 0,
@@ -894,13 +910,13 @@ class StageBReplaySpill:
             "arena_bytes": self.arena_bytes,
             "arenas": ARENA_COUNT if self._threads else 1,
             "read_buffer_bytes": self.read_bytes,
-            "read_buffers": READ_BUFFER_COUNT if self._threads else 1,
+            "read_buffers": READ_BUFFER_COUNT,
             "threads": self._threads,
             "direct_io_block": block, "reserved_bytes": self._scratch.capacity,
             "write_call_bytes": WRITE_CALL_BYTES, "read_call_bytes": READ_CALL_BYTES,
-            "read_workers": READ_WORKERS if self._threads else 1,
             "write_calls": 0, "file_bytes_written": 0, "read_calls": 0,
-            "file_bytes_read": 0,
+            "file_bytes_read": 0, "replay_stream": None,
+            "replay_reclaims": 0, "replay_reclaimed_bytes": 0,
         }
         if self.accumulation == OPERATOR_GEMM:
             self.telemetry.update(accumulation=self.accumulation,
@@ -937,9 +953,8 @@ class StageBReplaySpill:
 
     @property
     def replay_reserve_host_bytes(self):
-        """The pinned host read buffers, until ``replay`` allocates them."""
-        return 0 if self._read_buffers else (
-            (self.read_bytes + self._block) * self.telemetry["read_buffers"])
+        """The pinned read buffers a replay phase allocates (``READ_BUFFER_COUNT``)."""
+        return self.replay_chunk_bytes * READ_BUFFER_COUNT
 
     @property
     def replay_reserve_device_bytes(self):
@@ -960,13 +975,105 @@ class StageBReplaySpill:
             writer.join()
         self._arenas.clear()
         self._arena = None
-        pool, self._read_pool = self._read_pool, None
-        if pool is not None:
-            pool.shutdown(wait=True)
-        self._read_buffers.clear()
-        for window in self._windows:
-            window.dedupe.clear()
-        self._scratch.close()
+        try:
+            self.close_replay_stream()
+        finally:
+            for window in self._windows:
+                window.dedupe.clear()
+            self._scratch.close()
+
+    # -- the replay's read stream (PQ #1348) ----------------------------------
+    def bind_replay_budget(self, budget):
+        """The IO engine budget the replay's stream reads ahead within.
+
+        Unbound, the stream holds the phase's own ``READ_BUFFER_COUNT``
+        buffers: the chunk it consumes and one chunk ahead.
+        """
+        if self._replay_stream is not None:
+            raise RuntimeError("Stage B spill replay stream is already open")
+        self._replay_budget = budget
+
+    @property
+    def replay_chunk_bytes(self):
+        """Host bytes one read chunk's buffer holds: its IO engine charge."""
+        return self.read_bytes + self._block
+
+    def reclaim_replay(self, shortfall_bytes):
+        """Drop chunks read ahead, farthest first; a capture guard's reclaimer.
+
+        Returns the bytes freed: the dropped chunks' charge, or on CUDA what
+        the caching host allocator hands back. A dropped buffer is pinned,
+        and the allocator keeps a freed pinned block for reuse, so the guard's
+        reading drops only once its idle blocks are emptied.
+        """
+        stream = self._replay_stream
+        freed = 0 if stream is None else stream.reclaim(shortfall_bytes)
+        if self._cuda:
+            freed = max(freed, _empty_host_cache())
+        if freed:
+            self.telemetry["replay_reclaims"] += 1
+            self.telemetry["replay_reclaimed_bytes"] += freed
+        return freed
+
+    def close_replay_stream(self):
+        """Close the replay's stream and keep its counters in the telemetry.
+
+        The per-group waits become a summary: the stream takes one group per
+        read chunk, thousands in a quantum.
+        """
+        stream, self._replay_stream = self._replay_stream, None
+        if stream is None:
+            return
+        try:
+            stream.close()
+        finally:
+            counters = dict(stream.counters)
+            taken = counters.pop("groups_taken", [])
+            waits = [group["wait_s"] for group in taken]
+            counters.update(groups_taken=len(taken),
+                            max_group_wait_s=max(waits, default=0.0),
+                            reread_chunks=sum(1 for group in taken
+                                              if group["reread_entries"]))
+            self.telemetry["replay_stream"] = counters
+            if self._cuda:
+                _empty_host_cache()
+
+    def _open_replay_stream(self):
+        """One stream over every chunk the replay reads, in replay order.
+
+        A group is one chunk, keyed ``(window, probe, position)``: windows
+        with pending targets in index order, each probe's chunks in plan order,
+        which is the order ``replay`` takes them. A chunk is read only once
+        its probe's capture has ended (``_chunk_ready``).
+        """
+        from .io_engine import FixedBudget, ReadEntry, read_stream
+
+        held = self.replay_chunk_bytes
+        entries = [
+            ReadEntry(key=(index, probe, position), path=None, size=item[1][3],
+                      limit=item[1][3], held_bytes=held, expected_sha256=None,
+                      decoder=None, group=(index, probe, position),
+                      reader=partial(self._read_chunk, window, probe, item))
+            for index, window in enumerate(self._windows) if window.names
+            for probe in range(self.n_probes)
+            for position, item in enumerate(window.plan)]
+        if not entries:
+            return None
+        budget = self._replay_budget or FixedBudget(
+            buffer_bytes=held, headroom=self.replay_reserve_host_bytes)
+        self._replay_stream = read_stream(entries, budget=budget, ready=self._chunk_ready)
+        return self._replay_stream
+
+    def _chunk_ready(self, group, cancel):
+        """A chunk is on the file once its probe's capture has ended."""
+        del cancel
+        return group[1] < self._captured
+
+    def _read_chunk(self, window, probe, item):
+        """The engine's reader for one chunk: a new buffer, filled in plan order."""
+        buffer = _aligned_buffer(self.read_bytes, self._block, self._cuda)
+        self._fill(window, probe, item, memoryview(buffer.numpy()))
+        return buffer, (item[1][3],)
 
     def _require_healthy(self):
         if self._failed:
@@ -1417,14 +1524,15 @@ class StageBReplaySpill:
             raise RuntimeError("Stage B spill stream index is incomplete")
         return file_offset + (logical - start)
 
-    def _fill(self, window, probe, item, buffer):
-        """Read one chunk's tensors into ``buffer`` at their planned offsets.
+    def _fill(self, window, probe, item, view):
+        """Read one chunk's tensors into ``view`` at their planned offsets.
 
         Each tensor's slot envelope is read from the file straight into the
         buffer (the plan and the file share the slot rule, so the envelopes
         line up); envelopes that abut in both the file and the buffer are one
-        read. The reads, cut at ``READ_CALL_BYTES``, go to the read workers
-        together, so the device sees them queued at once.
+        read, cut at ``READ_CALL_BYTES``. The calls run in order on the IO
+        engine's thread that reads this chunk; the engine reads chunks in
+        parallel.
         """
         owner, (_records, new, gradients, _used) = item
         block = self._block
@@ -1460,82 +1568,13 @@ class StageBReplaySpill:
             for cut in range(low, high, READ_CALL_BYTES):
                 size = min(READ_CALL_BYTES, high - cut)
                 calls.append((cut, at + (cut - low), size))
-        view = buffer[1]
         read = self._scratch.read_into
-        if self._read_pool is None:
-            done = [read(cut, [view[at:at + size]]) for cut, at, size in calls]
-        else:
-            futures = [self._read_pool.submit(read, cut, [view[at:at + size]])
-                       for cut, at, size in calls]
-            done, failure = [], None
-            for future in futures:
-                try:
-                    done.append(future.result())
-                except BaseException as exc:  # noqa: BLE001 - raised after the join
-                    failure = failure or exc
-            if failure is not None:
-                raise failure
-        self.telemetry["bytes_read"] += sum(nbytes for _, _, nbytes in pieces)
-        self.telemetry["file_bytes_read"] += sum(done)
-        self.telemetry["reads"] += len(spans)
-        self.telemetry["read_calls"] += len(calls)
-
-    def _start_read_buffers(self):
-        if self._read_buffers:
-            return
-        count = READ_BUFFER_COUNT if self._threads else 1
-        for _ in range(count):
-            tensor = _aligned_buffer(self.read_bytes, self._block, self._cuda)
-            # [tensor, memoryview, event of the H2D copy that last read it]
-            self._read_buffers.append([tensor, memoryview(tensor.numpy()), None])
-        if self._threads and self._read_pool is None:
-            from concurrent.futures import ThreadPoolExecutor
-            self._read_pool = ThreadPoolExecutor(max_workers=READ_WORKERS,
-                                                 thread_name_prefix="stage-b-spill-read")
-
-    def _chunks(self, window, probe, plan):
-        """Yield ``(chunk, buffer)`` with bounded read-ahead on another thread."""
-        self._start_read_buffers()
-        if not self._threads:
-            buffer = self._read_buffers[0]
-            for item in plan:
-                if buffer[2] is not None:
-                    buffer[2].synchronize()
-                self._fill(window, probe, item, buffer)
-                yield item, buffer
-            return
-        free, ready, stop = queue.Queue(), queue.Queue(), threading.Event()
-        for buffer in self._read_buffers:
-            free.put(buffer)
-
-        def read():
-            try:
-                for item in plan:
-                    buffer = free.get()
-                    if stop.is_set() or buffer is None:
-                        return
-                    if buffer[2] is not None:
-                        buffer[2].synchronize()
-                    self._fill(window, probe, item, buffer)
-                    ready.put((item, buffer))
-            except BaseException as exc:
-                ready.put(exc)
-
-        reader = threading.Thread(target=read, name="stage-b-spill-reader", daemon=True)
-        reader.start()
-        try:
-            for _ in plan:
-                started = time.time()
-                item = ready.get()
-                self.telemetry["reader_wait_s"] += time.time() - started
-                if isinstance(item, BaseException):
-                    raise RuntimeError("Stage B spill read failed") from item
-                yield item
-                free.put(item[1])
-        finally:
-            stop.set()
-            free.put(None)
-            reader.join()
+        done = [read(cut, [view[at:at + size]]) for cut, at, size in calls]
+        with self._telemetry_lock:
+            self.telemetry["bytes_read"] += sum(nbytes for _, _, nbytes in pieces)
+            self.telemetry["file_bytes_read"] += sum(done)
+            self.telemetry["reads"] += len(spans)
+            self.telemetry["read_calls"] += len(calls)
 
     def replay(self, window_index, probe_index, lease):
         """Feed ``lease`` this window's spilled invocations for one probe."""
@@ -1551,8 +1590,16 @@ class StageBReplaySpill:
         gemm = self.accumulation == OPERATOR_GEMM
         blocks: dict[str, _RowBlock] = {}
         stream = None
+        reads = self._replay_stream
+        if reads is None and window.plan:
+            reads = self._open_replay_stream()
         try:
-            for item, buffer in self._chunks(window, probe_index, window.plan):
+            for chunk, item in enumerate(window.plan):
+                waited = time.time()
+                delivered = reads.take((window_index, probe_index, chunk))
+                self.telemetry["reader_wait_s"] += time.time() - waited
+                host = delivered[0].value
+                del delivered
                 owner, (records, new, gradients, used) = item
                 if gemm and owner != stream:
                     # The plan replays one input stream to its end first.
@@ -1561,11 +1608,13 @@ class StageBReplaySpill:
                 staging = torch.empty(used + 2 * ADDRESS_ALIGNMENT, dtype=torch.uint8,
                                       device=self.device)
                 shift = (-staging.data_ptr()) % ADDRESS_ALIGNMENT
-                staging.narrow(0, shift, used).copy_(buffer[0].narrow(0, 0, used),
+                # A pinned buffer's copy is recorded on its block, so the
+                # caching host allocator reuses it only after the copy: the
+                # stream may count it released once the copy is queued.
+                staging.narrow(0, shift, used).copy_(host.narrow(0, 0, used),
                                                      non_blocking=self._cuda)
-                if self._cuda:
-                    buffer[2] = torch.cuda.Event()
-                    buffer[2].record(torch.cuda.current_stream(self.device))
+                del host
+                reads.release()
                 typed = staging.narrow(0, 0, (staging.numel() // es) * es).view(self.dtype)
                 entries = window.entries[owner]
                 for entry, offset in new:

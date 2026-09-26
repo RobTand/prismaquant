@@ -651,7 +651,7 @@ class QuantumCounters:
         })
 
     def close_window(self, window_index: int, *, kernel_active_s, wall_s,
-                     load_wait_s=None) -> None:
+                     load_wait_s=None, reads=None) -> None:
         now = self._snapshot()
         block = self.windows[window_index]
         ram, stage, pool, _refused = self._delta(now, self._window_cursor)
@@ -663,6 +663,11 @@ class QuantumCounters:
         # The seconds the window waited for its renders' loads after its
         # staged wait (PQ #1291); None when no read stream served it.
         block["load_wait_s"] = load_wait_s
+        # The window's own reads and caches (PQ #1348): the spill replay's
+        # bytes and consumer wait, and the device render cache's hits,
+        # misses, bytes held and reclaims.
+        if reads is not None:
+            block["reads"] = dict(reads)
         self._window_cursor = now
 
     def chain_step(self, *, layers: int, backwards: int, wall_s: float,
@@ -1572,8 +1577,10 @@ def run_layer_quantum_core(
     )
     from .joint_retained_window_plan import OBSERVED_BASELINE_KEY
     from .io_engine import FixedBudget, read_stream
+    from .memory_management import ordered_reclaimer
     from .joint_statistics_replay import (
         GuardReadBudget,
+        RetainedRenderDeviceCache,
         check_operator_allocation,
         observe_and_project_retained_windows,
         operator_window_guard,
@@ -2354,8 +2361,33 @@ def run_layer_quantum_core(
                        if executable else None),
                 lease_counters=PWC_WINDOW_LEASE_COUNTERS)
             handoff_exit.callback(render_stream.close)
-            if guard is not None:
-                handoff_exit.callback(guard.add_reclaimer(render_stream.reclaim))
+        if spill is not None and guard is not None:
+            # PQ #1348: the spill replay reads its chunks through the IO
+            # engine too, ahead as far as the row's memory allows less what
+            # the render stream's next window still needs, and never below
+            # the two buffers its phase reserves.
+            spill.bind_replay_budget(GuardReadBudget(
+                guard, buffer_bytes=spill.replay_chunk_bytes, yield_to=render_stream,
+                floor_bytes=spill.replay_reserve_host_bytes))
+        # PQ #1348: each window's renders stay on the device across its
+        # probes while the row's device headroom admits them; a guard
+        # shortfall drops them first, and a dropped render is copied again.
+        from . import joint_statistics_replay as _retained_replay
+        render_cache = RetainedRenderDeviceCache(
+            guard.device_headroom_bytes if guard is not None else
+            lambda: _retained_replay.UNGUARDED_RENDER_CACHE_BYTES - render_cache.bytes_held)
+        handoff_exit.callback(render_cache.clear)
+        if guard is not None:
+            # One pool on GB10, so one order for a host shortfall, cheapest to
+            # restore first: spill chunks read ahead (a 64 MiB local read
+            # each), then renders kept on the device (a copy from the
+            # resident host render), then renders read ahead (gigabytes of
+            # stage). A device-envelope shortfall asks the render cache alone.
+            handoff_exit.callback(guard.add_reclaimer(ordered_reclaimer(
+                None if spill is None else spill.reclaim_replay,
+                render_cache.reclaim,
+                None if render_stream is None else render_stream.reclaim)))
+            handoff_exit.callback(guard.add_reclaimer(render_cache.reclaim, device=True))
         with counters.io.span("own-source", layer=int(layer)):
             # The chain step left this layer's read in flight during the
             # roll. The consumer waits for it here, under the phase that
@@ -2776,6 +2808,7 @@ def run_layer_quantum_core(
         window_kernel: KernelTimeProfiler | None = None
         window_started = time.time()
         replay_window: int | None = None
+        window_reads_at_open: dict = {}
         # PQ #1348: a render pass profile's session, open for its one window.
         render_session = None
 
@@ -2791,6 +2824,19 @@ def run_layer_quantum_core(
             if render_stream is not None:
                 values["io_engine_consumer_wait_s"] = render_stream.counters.get(
                     "consumer_wait_s", 0.0)
+            return values
+
+        def window_read_counters():
+            # Per window (PQ #1348): the spill's reads and waits, and the
+            # device render cache's hits, misses and reclaims, cumulative;
+            # ``after_window`` records each window's deltas.
+            values = render_counters()
+            if spill is not None:
+                values.update({key: spill.telemetry[key] for key in (
+                    "replay_reclaims", "replay_reclaimed_bytes")})
+            values.update({f"render_cache_{key}": value
+                           for key, value in render_cache.counters.items()
+                           if key != "peak_bytes_held"})
             return values
 
         def close_render_session(exc=None):
@@ -2821,6 +2867,7 @@ def run_layer_quantum_core(
 
         def before_window(window_index, window_names):
             nonlocal window_kernel, window_started, replay_window, window_span
+            nonlocal window_reads_at_open
             del window_names
             close_skipped_window()
             window_span = counters.io.open("window", window=int(window_index))
@@ -2851,6 +2898,7 @@ def run_layer_quantum_core(
             counters.enter_phase()
             counters.open_window(window_index,
                                  resolved_windows[window_index])
+            window_reads_at_open = window_read_counters()
             if profiled:
                 open_render_session(window_index)
 
@@ -2907,13 +2955,18 @@ def run_layer_quantum_core(
                                        if not window_kernel.error else None)
             finally:
                 window_kernel = None
+            reads = window_read_counters()
+            reads = {key: value - window_reads_at_open.get(key, 0)
+                     for key, value in reads.items()}
+            reads["render_cache_peak_bytes_held"] = render_cache.last_window_peak_bytes
             counters.close_window(window_index,
                                   kernel_active_s=kernel_active_s,
                                   wall_s=time.time() - window_started,
                                   load_wait_s=(
                                       render_stream.counters["groups_taken"][-1]["wait_s"]
                                       if render_stream is not None
-                                      and render_stream.counters["groups_taken"] else None))
+                                      and render_stream.counters["groups_taken"] else None),
+                                  reads=reads)
             with counters.io.span("commit", window=int(window_index)) as commit_span:
                 commit_span.attrs["units"] = commit_streamed_units(window_names)
             progress.window_done(resolved_windows[window_index])
@@ -3147,6 +3200,7 @@ def run_layer_quantum_core(
                 # _record_joint_operator reads a hash (PQ #1192).
                 render_identities=True,
                 render_stream=render_stream,
+                render_cache=render_cache,
             )
             close_skipped_window()
         except BaseException as exc:
@@ -3157,7 +3211,10 @@ def run_layer_quantum_core(
                 render_stream.close()
                 counters.io_engine = dict(render_stream.counters)
             if spill is not None:
-                counters.replay["spill"] = dict(spill.telemetry)
+                try:
+                    spill.close_replay_stream()
+                finally:
+                    counters.replay["spill"] = dict(spill.telemetry)
             if window_kernel is not None:
                 window_kernel.__exit__(None, None, None)
                 window_kernel = None

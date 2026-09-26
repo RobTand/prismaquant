@@ -1,5 +1,85 @@
 # PrismaQuant Architecture
 
+Stage B's spill replay reads through the IO engine, and each retained window
+keeps its renders on the device across its probes (2026-09-26,
+`claude/stageb-render-window-profile-1348`, PQ #1348). On GLM-5.3 layer 7
+(the #1291 after arm) a render window averaged 20.8 s, 47% of it spill replay
+and 42% projections. The replay read 272 GB in 804,674 calls on its own four
+reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
+143.5 s replay wall.
+
+- **Spill chunks are range entries.** `io_engine.ReadEntry.reader`
+  (`io_engine.py:619`) makes an entry that is not a file: the stream calls it
+  on the engine's pool and delivers what it returns. It has no path to pin
+  and no serialized buffer, so it is charged its held bytes only.
+  `StageBReplaySpill._open_replay_stream` (`joint_replay_spill.py:1041`)
+  opens one stream at the first replay, over every chunk of every pending
+  window and probe in replay order, one group per chunk. A chunk is read only
+  once its probe's capture has ended (`_chunk_ready`, `:1067`). Each chunk's
+  reader allocates its own pinned buffer and issues its 1 MiB direct reads in
+  order (`_read_chunk`, `:1072`); the engine reads as many chunks at once as
+  its measured rates ask for. `READ_WORKERS`, the reader thread and its
+  buffer queue are gone, and `tests/test_io_site_freeze.py` drops `_chunks`
+  and `_start_read_buffers`.
+- **The spill yields to the next window's renders.** Its budget is
+  `GuardReadBudget` (`joint_statistics_replay.py:231`) with `yield_to` and
+  `floor_bytes`: the guard's live headroom less what the render stream's next
+  group will still hold (`ReadStream.unread_bytes`, `io_engine.py:760`), and
+  never less than the two chunk buffers the replay phase reserves.
+- **One pool, one reclaim order.** On a GB10 the host and the device share
+  one pool, so a shortfall on it picks the reclaimer by the term that binds.
+  A host shortfall (the cgroup budget or the `MemAvailable` floor) asks
+  `memory_management.ordered_reclaimer` (`:787`, registered at
+  `joint_cost_quantum.py:2386`) for its bytes in order of refill cost: spill
+  chunks read ahead (`reclaim_replay`, `joint_replay_spill.py:1001`, which
+  also hands the pinned allocator's idle blocks back; a 64 MiB re-read from
+  local NVMe), then the render cache (a device copy of a render already
+  resident on the host), then renders read ahead (GBs re-read from the
+  stage). Each reclaimer is asked only for what the ones before it left. A
+  device-envelope shortfall asks the render cache alone
+  (`joint_cost_quantum.py:2390`), since nothing else frees device bytes.
+- **Renders kept on the device.** `RetainedRenderDeviceCache`
+  (`joint_statistics_replay.py:273`) keeps each render a window's first probe
+  copies to the device, in the render's own dtype, while
+  `CaptureMemoryGuard.device_headroom_bytes` (`memory_management.py:626`)
+  admits it. That reading is the guard's own envelope, never
+  `torch.cuda.mem_get_info`: the device envelope less the CUDA caching
+  allocator's reservation, the host floor against `MemAvailable` (a CUDA
+  allocation on unified memory takes host pages and bypasses the memcg), and
+  the aggregate envelope of cgroup bytes plus the reservation, each less the
+  phase's reservations; the smallest wins. Later probes widen the kept copy to FP32 instead of copying the
+  host render again. The copy and the widening are exact, so every delta has
+  the same bytes. A render the headroom does not admit takes the old path.
+  The cache is a device-side reclaimer: the guard now also calls reclaimers
+  registered with `device=True` (`:652`) on a device-envelope shortfall
+  (`:443`), and the cache empties the CUDA caching allocator after it drops
+  renders. Unguarded, it keeps nothing (`UNGUARDED_RENDER_CACHE_BYTES`).
+- **Operator records once per window.** `record_operator` runs on a window's
+  first probe and once more after its last probe, before `after_window`
+  commits; the probes between read the resident render the first probe
+  recorded. An in-place write to a render fails the window's close instead of
+  the next probe, still before the commit.
+- **Counters.** Each window block in `counters.json` gains `reads`: the
+  spill's bytes, read calls, consumer wait (`reader_wait_s`) and reclaims,
+  the render stream's consumer wait, and the render cache's hits, misses,
+  admitted, refused, reclaims and peak bytes held.
+  `replay.spill.replay_stream` carries the spill stream's engine counters.
+- **What checks the spill's bytes.** The spill file is unlinked, job-local
+  and `O_DIRECT`. `StageBSpillScratch.read_into`
+  (`perturbed_x_cache.py:1608`) refuses a read outside the allocation or off
+  the direct-I/O grid (`_aligned`, `:1575`) and a short read, and `_fill`
+  refuses a tensor off its replay residue and overlapping envelopes. Probe
+  inputs are digested on the device at capture, and each later probe's are
+  compared with probe 0's (`_check_inputs`, `joint_replay_spill.py:1406`).
+  Nothing compares the bytes read back from the file with the bytes written;
+  PQ #CKSUM tracks a per-range checksum verified in the engine at read.
+
+Gate: `tests/test_io_engine.py`, `tests/test_stageb_one_pass_spill.py`
+(bitwise replay; chunks dropped ahead and read again; the render cache on the
+quantum), `tests/test_joint_retained_statistics_replay.py`,
+`tests/test_io_site_freeze.py`. No format, pipeline default, stage or ship
+gate changes.
+
 Stage B reads each retained window's renders while the window before it
 computes (2026-09-25, `claude/stageb-window-readahead-1291`, PQ #1291), through
 one IO engine, `prismaquant/io_engine.py` (the first version of PQ #1294).
@@ -57,9 +137,10 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   storage bytes), and freeing it returns them to the cgroup at once. The
   mapping is private: a write copies pages into anonymous memory and never
   reaches the sealed bytes. No Stage B consumer writes a render; the
-  identity read on every probe (`resident_render_identity`) compares the
-  tensor's version counter with the one recorded at load, so a `torch`
-  write in place fails the next probe. The PWC's other loads (`prefetch`,
+  identity read at a window's first probe and at its close
+  (`resident_render_identity`, PQ #1348) compares the tensor's version
+  counter with the one recorded at load, so a `torch` write in place fails
+  the window before it commits. The PWC's other loads (`prefetch`,
   a lazy `get`) and `tools/qualify_t4_overlay.py` keep the bytes path; they
   are PQ #1295 consolidation items.
 - **Release, not take.** A taken window's renders stay charged to the
@@ -2206,11 +2287,12 @@ and no page cache. A read chunk holds its inputs first and then each Linear's
 gradients together, in file order, so tensors that abut in the file land as
 one read. A buffer position never changes the arithmetic, only the residue
 does, and the residue is kept. Writes go out `WRITE_CALL_BYTES` (1 MiB) per
-call from the writer thread. Reads go out `READ_CALL_BYTES` (1 MiB) per call
-over `READ_WORKERS` (4) threads. On lina, from pinned memory, one 1 MiB write
-in flight ran 4.8 GB/s at an average queue of 4 and 0.11 ms await, against
-5.9 GB/s at a queue of 811 and 18 ms for a whole arena at once; four 1 MiB
-reads ran 6.9 GB/s (PB `f6733604db33`, `b55e4305076c`). An empty tensor takes
+call from the writer thread. Reads go out `READ_CALL_BYTES` (1 MiB) per call,
+one read chunk per IO engine read (PQ #1348; see the entry at the top). On
+lina, from pinned memory, one 1 MiB write in flight ran 4.8 GB/s at an
+average queue of 4 and 0.11 ms await, against 5.9 GB/s at a queue of 811 and
+18 ms for a whole arena at once; four 1 MiB reads ran 6.9 GB/s (PB
+`f6733604db33`, `b55e4305076c`). An empty tensor takes
 no slot and no run. The file reserves slot padding for at most
 `SpillGeometry.max_parts` tensors, (probes + 1) x targets x samples, each at
 most 512 bytes plus one grid block; the ceiling covers the reservation, and a
@@ -3107,6 +3189,17 @@ allowance. This is progress-write coalescing, not relaxed authentication.
 
 As of: 2026-09-26 · `claude/stageb-render-window-profile-1348`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `claude/stageb-render-window-profile-1348`) for
+**Stage B spill replay through the IO engine and the device render cache**
+(PQ #1348): spill chunks become IO engine range entries that yield to the
+next window's renders, each window keeps its renders on the device across its
+probes, operator records run once per
+window and once at its close, and the capture guard gains
+`device_headroom_bytes` (read from its own envelope and `MemAvailable`, never
+`torch.cuda.mem_get_info`) and device-side reclaimers. A host shortfall
+reclaims spill read-ahead, then the render cache, then render read-ahead; a
+device shortfall reclaims the render cache alone. See the entry at the top. No format, pipeline default or ship gate changes.
 
 Re-stamped (2026-09-26, `claude/stageb-render-window-profile-1348`) for
 **the Stage B render window profile** (PQ #1348), an opt-in development

@@ -10,7 +10,8 @@ from prismaquant import io_engine
 from prismaquant.joint_retained_window_plan import RetainedWindowBudget
 from prismaquant.joint_statistics_plan import plan_joint_statistics_target_windows
 from prismaquant.joint_statistics_replay import (
-    SCHEMA, observe_and_project_retained_windows, observe_and_project_windows,
+    SCHEMA, RetainedRenderDeviceCache, observe_and_project_retained_windows,
+    observe_and_project_windows,
 )
 from prismaquant.production_weight_cache import ProductionWeightCache
 
@@ -135,7 +136,9 @@ def test_retained_replay_matches_probe_major_signed_components_and_loads_once(
     assert [(index, receipt['window_index']) for index, _, _, receipt in consumed] == (
         [(probe, window) for window in range(2) for probe in range(4)])
     assert Counter(loaded) == Counter(str(path) for path in paths.values())
-    assert Counter(records) == Counter({key: 4 for key in paths})
+    # Recorded at each window's first probe and once more at its close
+    # (PQ #1348), not on every probe.
+    assert Counter(records) == Counter({key: 2 for key in paths})
     assert all(isinstance(value, str) for value in cache.weights.values())
     assert cache._lru_bytes == 0 and not cache._file_load_receipts
 
@@ -269,3 +272,125 @@ def test_resume_keeps_original_windows_and_only_final_active_updates_cotangents(
     assert [w['names'] for w in result['plan']['windows']] == [('first',), ('second',)]
     assert all(set(diagnostics) == {'second'} for _, _, diagnostics, _ in consumed)
     assert not cache._window_resident_storages()
+
+
+# -- the device render cache (PQ #1348) ------------------------------------
+
+
+def _by_probe(consumed):
+    return [(probe, receipt['window_index'], terms,
+             {name: (d['g_trace'], d['col_energy']) for name, d in diagnostics.items()})
+            for probe, terms, diagnostics, receipt in consumed]
+
+
+def _assert_same_bytes(actual, expected):
+    assert len(actual) == len(expected)
+    for (probe, window, terms, diagnostics), (probe0, window0, terms0, diagnostics0) in zip(
+            actual, expected):
+        assert (probe, window) == (probe0, window0)
+        assert terms.keys() == terms0.keys()
+        for key in terms0:
+            assert terms[key] == terms0[key]
+        for name, (g_trace, col_energy) in diagnostics0.items():
+            assert diagnostics[name][0] == g_trace
+            assert torch.equal(diagnostics[name][1], col_energy)
+
+
+def _run_with(tmp_path, render_cache=None, consume_hook=None):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    modules, specs, cache, paths, policy, budget = _fixture(tmp_path)
+    consumed, records, reads = [], [], []
+
+    def backward(*, probe_index, final, lease):
+        _backward(modules, probe_index=probe_index, final=final, lease=lease)
+
+    def record(name, fmt, source, rendered):
+        records.append((name, fmt))
+
+    def consume(probe_index, terms, diagnostics, receipt):
+        consumed.append((probe_index, terms, diagnostics, receipt))
+        if consume_hook is not None:
+            consume_hook(probe_index, receipt['window_index'])
+
+    observe_and_project_retained_windows(
+        modules, specs, cache, policy, retained_budget=budget,
+        n_probes=4, source_bytes=1 << 12, backward=backward,
+        record_operator=record, consume_probe=consume,
+        collect_col_energy=True, backend=None, render_cache=render_cache)
+    return _by_probe(consumed), records, paths
+
+
+def test_a_device_render_cache_changes_no_signed_component(tmp_path, monkeypatch):
+    """Renders kept across a window's probes give the uncached run's bytes.
+
+    Each window's first probe copies its two renders and keeps them; the
+    other three probes widen the kept copies. Every signed component and
+    diagnostic equals the uncached run's exactly, each render file is read
+    once, and nothing is kept once the pass ends.
+    """
+    loaded = []
+    _spy_reads(monkeypatch, loaded)
+    plain, plain_records, _paths = _run_with(tmp_path / 'plain')
+    loaded.clear()
+    render_cache = RetainedRenderDeviceCache(lambda: 1 << 30)
+    cached, records, paths = _run_with(tmp_path / 'cached', render_cache)
+    _assert_same_bytes(cached, plain)
+    assert Counter(records) == Counter(plain_records) == Counter({key: 2 for key in paths})
+    assert Counter(loaded) == Counter(str(path) for path in paths.values())
+    render_bytes = 16 * 16 * 4
+    assert render_cache.counters == {
+        'hits': 2 * 2 * 3, 'misses': 2 * 2, 'admitted': 2 * 2, 'refused': 0,
+        'reclaims': 0, 'reclaimed_bytes': 0, 'peak_bytes_held': 2 * render_bytes}
+    assert render_cache.bytes_held == 0
+    assert render_cache.last_window_peak_bytes == 2 * render_bytes
+
+
+def test_a_render_cache_without_headroom_is_the_uncached_path(tmp_path):
+    plain, _records, _paths = _run_with(tmp_path / 'plain')
+    render_cache = RetainedRenderDeviceCache(lambda: 0)
+    cached, _records, _paths = _run_with(tmp_path / 'refused', render_cache)
+    _assert_same_bytes(cached, plain)
+    # Every probe but each window's last asked to keep, and was refused.
+    assert render_cache.counters['hits'] == render_cache.counters['admitted'] == 0
+    assert render_cache.counters['misses'] == 2 * 2 * 4
+    assert render_cache.counters['refused'] == 2 * 2 * 3
+
+
+def test_a_reclaimed_render_is_copied_again_with_the_same_bytes(tmp_path):
+    plain, _records, _paths = _run_with(tmp_path / 'plain')
+    render_cache = RetainedRenderDeviceCache(lambda: 1 << 30)
+
+    def reclaim_after_probe_one(probe_index, window_index):
+        if probe_index == 1:
+            assert render_cache.reclaim(1) == 16 * 16 * 4
+
+    cached, _records, _paths = _run_with(tmp_path / 'reclaimed', render_cache,
+                                         reclaim_after_probe_one)
+    _assert_same_bytes(cached, plain)
+    counters = render_cache.counters
+    # One render of each window dropped after probe 1, copied and kept
+    # again at probe 2.
+    assert counters['reclaims'] == 2 and counters['reclaimed_bytes'] == 2 * 16 * 16 * 4
+    assert counters['misses'] == 2 * (2 + 1) and counters['admitted'] == 2 * (2 + 1)
+    assert counters['hits'] == 2 * (2 * 3 - 1)
+
+
+@pytest.mark.parametrize('dtype', [torch.bfloat16, torch.float16, torch.float32])
+def test_a_kept_render_widens_to_the_uncached_delta_bytes(dtype):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    torch.manual_seed(3)
+    rendered = (torch.randn(64, 96) * 3).to(dtype)
+    rendered[0, :4] = torch.tensor([0.0, -0.0, 1e-8, -65504.0]).to(dtype)
+    source = torch.randn(64, 96, device=device)
+    expected = rendered.to(device=device, dtype=torch.float32, copy=True)
+    expected.sub_(source)
+    render_cache = RetainedRenderDeviceCache(lambda: 1 << 30)
+    first = render_cache.delta('k', rendered, source, keep=True)
+    again = render_cache.delta('k', lambda: pytest.fail('a hit reads no render'), source,
+                               keep=False)
+    for delta in (first, again):
+        assert delta.dtype == torch.float32 and delta.device == source.device
+        assert torch.equal(delta.view(torch.int32), expected.view(torch.int32))
+    assert render_cache.counters['hits'] == render_cache.counters['misses'] == 1
+    assert render_cache.reclaim(1) == rendered.numel() * rendered.element_size()
+    assert render_cache.bytes_held == 0

@@ -356,7 +356,11 @@ class _RecordingGuard:
         # stream reads each window when the window asks for it.
         return 0
 
-    def add_reclaimer(self, reclaim):
+    def device_headroom_bytes(self):
+        # Nor any device headroom: the render cache keeps nothing (PQ #1348).
+        return 0
+
+    def add_reclaimer(self, reclaim, *, device=False):
         return lambda: None
 
 
@@ -853,6 +857,11 @@ def test_spill_replay_is_bitwise_the_windowed_replay(campaign, monkeypatch, tmp_
         assert replay["noncontiguous_cotangent_seeds"] == 0
         telemetry = replay["spill"]
         assert telemetry["threads"] is threads
+        # PQ #1348: every chunk came through the IO engine, one group each,
+        # and what it read is what the replay counted.
+        stream = telemetry["replay_stream"]
+        assert stream["groups_taken"] > 0 and stream["entries_read"] >= stream["groups_taken"]
+        assert telemetry["read_calls"] > 0 and stream["bytes_read"] >= telemetry["bytes_read"]
         assert telemetry["x_digest_checks"] > 0
         assert len(set(telemetry["records_per_probe"])) == 1
         assert telemetry["records_per_probe"][0] > 0
@@ -933,6 +942,94 @@ def test_render_pass_profile_times_each_probe_of_its_window_and_changes_no_byte(
     replay = state.counters_block["replay"]["spill"]
     assert sum(unit["counter_deltas"]["read_calls"] for unit in timing["units"]) < (
         replay["read_calls"])
+
+
+def test_spill_chunks_dropped_ahead_are_read_again_and_change_no_byte(
+        campaign, monkeypatch, tmp_path):
+    """PQ #1348: the replay's chunks read ahead are reclaimable.
+
+    The replay reads its chunks through the IO engine, ahead of its
+    consumer. Before every replay the spill drops all it holds ahead, as a
+    guard shortfall asks it to; those chunks are read again when their turn
+    comes, and the checkpoint, the journal and every cost row are the plain
+    run's bytes.
+    """
+    layer = 0
+    # One tensor pair per chunk: many chunks, so some are always ahead.
+    monkeypatch.setattr(spill_mod, "READ_BYTES", 1)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "plain"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    plain = _evidence(campaign, layer, payload)
+    assert state.counters_block["replay"]["spill"]["replay_stream"]["rereads"] == 0
+
+    original = spill_mod.StageBReplaySpill.replay
+    dropped = []
+
+    def replay(self, window_index, probe_index, lease):
+        stream = self._replay_stream
+        if stream is not None:
+            # No read in flight: what is ahead is whole, and all of it goes.
+            with stream.paused():
+                dropped.append(stream.held_bytes())
+                self.reclaim_replay(1 << 62)
+        return original(self, window_index, probe_index, lease)
+
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "replay", replay)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "dropped"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    assert _evidence(campaign, layer, payload) == plain
+    telemetry = state.counters_block["replay"]["spill"]
+    stream = telemetry["replay_stream"]
+    assert sum(dropped) > 0 and stream["evicted_bytes"] == sum(dropped)
+    assert stream["rereads"] == stream["evictions"] > 0
+    assert telemetry["replay_reclaims"] > 0
+
+
+def test_a_device_render_cache_changes_no_byte_of_the_quantum(
+        campaign, monkeypatch, tmp_path):
+    """PQ #1348: each window's renders kept on the device across its probes.
+
+    Unguarded, the cache keeps nothing, and every keep is refused. Given
+    room, each window's first probe keeps its renders and the other probes
+    read the kept copies. The checkpoint, the journal and every cost row are
+    the same bytes either way, and each window's counters say what hit.
+    """
+    import prismaquant.joint_statistics_replay as retained
+
+    layer = 0
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "plain"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    plain = _evidence(campaign, layer, payload)
+    blocks = [block for block in state.counters_block["windows"] if "reads" in block]
+    assert len(blocks) >= 2
+    for block in blocks:
+        reads = block["reads"]
+        assert reads["render_cache_hits"] == reads["render_cache_admitted"] == 0
+        assert reads["render_cache_refused"] == reads["render_cache_misses"] * (
+            N_PROBES - 1) // N_PROBES > 0
+        # The spill's consumer wait sits beside the render stream's.
+        assert reads["reader_wait_s"] >= 0 and reads["replay_wall_s"] > 0
+        assert block["load_wait_s"] is not None
+
+    monkeypatch.setattr(retained, "UNGUARDED_RENDER_CACHE_BYTES", 1 << 40)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "cached"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    assert _evidence(campaign, layer, payload) == plain
+    blocks = [block for block in state.counters_block["windows"] if "reads" in block]
+    for block in blocks:
+        reads = block["reads"]
+        assert reads["render_cache_misses"] == reads["render_cache_admitted"] > 0
+        assert reads["render_cache_hits"] == reads["render_cache_misses"] * (N_PROBES - 1)
+        assert reads["render_cache_refused"] == reads["render_cache_reclaims"] == 0
+        assert reads["render_cache_peak_bytes_held"] > 0
 
 
 def test_spill_resume_after_partial_completion_is_bitwise(campaign, monkeypatch,
