@@ -325,10 +325,12 @@ def test_admission_is_true_under_a_released_pin_on_the_real_packaged_contract(
     e4m3_routed = _routed_context("TESSERA_E4M3_K1")
     assert tr.tessera_lane_attested(
         "TESSERA_E2M1_K2_R896", serving_context=context) is True
-    # E4M3's cells are routed-only since the v31 withdrawals, so the family
-    # is asked at the routed scope.
+    # E4M3 is asked at the routed scope, whose cells (contract v38) attest
+    # q896 on the GLM image; q1024 there is the routed rung v38 withdrew.
     assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R1024", serving_context=e4m3_routed) is True
+        "TESSERA_E4M3_K1_R896", serving_context=e4m3_routed) is True
+    assert tr.tessera_lane_attested(
+        "TESSERA_E4M3_K1_R1024", serving_context=e4m3_routed) is False
     # a serialisable rate no DENSE cell names, on a published family
     assert tr.tessera_lane_attested(
         "TESSERA_E2M1_K2_R512", serving_context=context) is False
@@ -356,7 +358,7 @@ def test_the_synthesized_spec_reads_the_same_lookup(released_pin):
     assert tr.synthesize_tessera_spec(
         "TESSERA_E2M1_K2_R896", serving_context=context).producer_eligible is True
     assert tr.synthesize_tessera_spec(
-        "TESSERA_E4M3_K1_R1024",
+        "TESSERA_E4M3_K1_R896",
         serving_context=_routed_context("TESSERA_E4M3_K1"),
     ).producer_eligible is True
     assert tr.synthesize_tessera_spec(

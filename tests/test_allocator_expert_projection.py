@@ -134,7 +134,8 @@ def _v5_contract(monkeypatch):
     from prismaquant import tessera_menu as menu
     from prismaquant import tessera_runtime_contract as contract
     from conftest import (
-        down_convert_lane_table, project_lane_cells_onto_structures)
+        down_convert_lane_table, lane_cells_on_one_image,
+        project_lane_cells_onto_structures)
     from prismaquant.lane_eligibility import LANE_ELIGIBILITY_SCHEMAS
     payload = json.loads(contract.contract_path().read_text())
     block = payload["lane_eligibility"]
@@ -160,7 +161,11 @@ def _v5_contract(monkeypatch):
     # that scope's cell so the rung/activation facts are the family's, and
     # only the structure key -- a lookup discriminator, never an admission
     # input -- is synthesized.
-    payload = project_lane_cells_onto_structures(payload, ("dense", "routed_moe"))
+    # One real image's roster first: every cell is flattened onto IMAGE
+    # below, and since contract v38 two images publish the same dense E4M3
+    # scopes (``lane_cells_on_one_image``).
+    payload = project_lane_cells_onto_structures(
+        lane_cells_on_one_image(payload), ("dense", "routed_moe"))
     # Down-convert through the one helper that owns this, rather than by
     # rewriting the schema string in place: the packaged table is v10 now, and
     # setting the string to v5 while leaving v6+'s `evidence` block behind

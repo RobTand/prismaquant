@@ -639,9 +639,9 @@ def test_readability_does_not_depend_on_the_serving_scope(installed_contract):
         bare = tm.route_admission(name)
         assert scoped.readable == bare.readable, name
     # ...and the attestation is, which is what makes the above non-trivial.
-    # E4M3's cells are routed-only since the v31 withdrawals, so the scoped
-    # ask rides a cell-derived routed context.
+    # The scoped ask rides a cell-derived routed context, whose E4M3 pair
+    # attests q896 since contract v38.
     routed = _routed_context("TESSERA_E4M3_K1")
     assert tm.route_admission(
-        "TESSERA_E4M3_K1_R1024", serving_context=routed).attested
-    assert not tm.route_admission("TESSERA_E4M3_K1_R1024").attested
+        "TESSERA_E4M3_K1_R896", serving_context=routed).attested
+    assert not tm.route_admission("TESSERA_E4M3_K1_R896").attested

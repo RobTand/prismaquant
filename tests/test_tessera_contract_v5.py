@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 import pytest
-from conftest import down_convert_lane_table
+from conftest import down_convert_lane_table, lane_cells_on_one_image
 
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_runtime_contract as contract
@@ -25,8 +25,12 @@ def _payload():
     not change (families, rungs, route statuses) honest and real, and drops
     exactly the newer fields, so the test exercises v5 and nothing else.
     """
+    # One real image's roster (``lane_cells_on_one_image``): the cells are
+    # flattened onto DENSE_IMAGE below, and since contract v38 the stock and
+    # GLM images publish the same dense E4M3 scopes.
     payload = down_convert_lane_table(
-        json.loads(contract.contract_path().read_text(encoding="utf-8")),
+        lane_cells_on_one_image(
+            json.loads(contract.contract_path().read_text(encoding="utf-8"))),
         "tessera.lane-eligibility.v5")
     # Dense-only, decided here rather than inherited: v6 publishes routed_moe
     # cells too, and this file's scope tests ask what a routed_moe CONTEXT gets

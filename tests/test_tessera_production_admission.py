@@ -17,14 +17,15 @@ def test_production_pin_preserves_attested_conditions(monkeypatch):
     (Tessera #538 and the A4 retirement), and with them every STREAMED cell
     in the roster -- the streamed half of the premise is now pinned by
     :func:`test_a_streamed_context_has_no_cell_to_attest_it` below.  What
-    survives is the resident routed pair at the same rung the dense cells
-    carried, so the production-pin equivalence this test exists for is
-    still exercised end to end.
+    survives is the resident routed pair (q896 on the GLM image since
+    contract v38, which re-used the ids of the q1024 pair it withdrew), so
+    the production-pin equivalence this test exists for is still exercised
+    end to end.
     """
     monkeypatch.delenv(contract.TESSERA_DEV_PIN_ENV, raising=False)
     require_pinned_tessera_runtime()  # Exercise the real production pin, no substitute.
     table, formats = render._pinned_serving_table()
-    name = "TESSERA_E4M3_K1_R1024"
+    name = "TESSERA_E4M3_K1_R896"
     reference = next(cell for cell in table.cells
                      if cell.family == "TESSERA_E4M3_K1"
                      and cell.structure == "routed_moe"
@@ -77,7 +78,7 @@ def test_a_streamed_context_has_no_cell_to_attest_it(monkeypatch):
     context = ServingContext(
         platform=resident.platform, structure="routed_moe", residency="streamed",
         runtime_image=resident.runtime_image, execution_mode=resident.execution_modes[0])
-    admission = menu.route_admission("TESSERA_E4M3_K1_R1024", serving_context=context)
+    admission = menu.route_admission("TESSERA_E4M3_K1_R896", serving_context=context)
     assert not admission.attested
     assert admission.route_status == "unattested"
     assert admission.requires_serve_flags == ()
@@ -108,7 +109,7 @@ def test_conflicting_cell_statuses_refuse_with_named_cells(monkeypatch, dev_pin)
             for cell in table.cells))
         monkeypatch.setattr(render, "_pinned_serving_table", lambda: (altered, formats))
     with pytest.raises(menu.TesseraMenuError, match="native cells disagree about route status") as err:
-        menu.route_admission("TESSERA_E4M3_K1_R1024", serving_context=context)
+        menu.route_admission("TESSERA_E4M3_K1_R896", serving_context=context)
     assert reference.id in str(err.value)
     assert "backed_with_serve_flag" in str(err.value)
 
@@ -123,7 +124,7 @@ def test_production_conditions_do_not_override_pin_refusal(monkeypatch):
     context = ServingContext(platform=reference.platform, structure="routed_moe", residency="resident",
                              runtime_image=reference.runtime_image,
                              execution_mode=reference.execution_modes[0])
-    admission = menu.route_admission("TESSERA_E4M3_K1_R1024", serving_context=context)
+    admission = menu.route_admission("TESSERA_E4M3_K1_R896", serving_context=context)
     assert not admission.attested
     assert admission.route_status == "unattested"
     assert admission.requires_serve_flags == ()
