@@ -203,7 +203,8 @@ def test_a_composed_cached_bundle_reaches_preflight_and_export(tmp_path):
                      if line.startswith("TEST_PREFLIGHT_ARGS:"))
     assert f"--cached-units {bundle}" in preflight
     assert "--write-cached-expert-units" not in preflight
-    export = next(line for line in result.stderr.splitlines()
+    # The export's stderr is folded into its tee'd log, so read stdout.
+    export = next(line for line in result.stdout.splitlines()
                   if line.startswith("TEST_EXPORT_ARGS:"))
     assert f"--cached-units {bundle}" in export
     assert "--cached-expert-units" not in export
