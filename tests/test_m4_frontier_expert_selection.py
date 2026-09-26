@@ -96,32 +96,20 @@ def test_force_format_renders_all_packed_experts_without_assignment():
         assert cache.activation_max_abs.get(full, 0.0) > 0.0
 
 
-def test_packed_cb_resume_rejects_preexisting_shard(tmp_path):
-    import prismaquant.production_weight_cache as pwc
-    from prismaquant.nvfp4_cb_footprint import CBSerializationContext
-
+def test_packed_render_refuses_a_retired_codebook_rung(tmp_path):
+    # A stale assignment naming a retired codebook rung (archived 2026-09-25,
+    # #1304) must refuse; it must not skip the expert or render it as BF16.
     model = _model()
     full = EXPERT_NAMES[0]
-    packed = dict(model.named_parameters())[full]
-    fmt = "NVFP4_CB_K16"
-    cache_dir = tmp_path / "shards"
-    cache_dir.mkdir()
-    torch.save(
-        packed.detach(),
-        cache_dir / pwc._cache_weight_filename(full, fmt),
-    )
-
-    with pytest.raises(RuntimeError, match="packed-CB cache resume is disabled"):
+    with pytest.raises(fr.RetiredFormatError, match="gridbook_lane"):
         fill_packed_expert_cache_entries(
             _empty_cache(),
             model,
             _calib(),
-            render_assignment={full: fmt},
+            render_assignment={full: "NVFP4_CB_K16"},
             levers={},
             profile=None,
-            cache_dir=cache_dir,
-            col_weights={full: torch.ones(packed.shape[-1])},
-            cb_serialization_context=CBSerializationContext.production(),
+            cache_dir=tmp_path,
             progress=False,
         )
 

@@ -1,16 +1,18 @@
-"""CB Milestone C / re-vet R3: `col_weights` on the production render path.
+"""Re-vet R3: `col_weights` on the production render path.
 
 Two contracts, both load-bearing:
 
 1. **Strictly additive.** Passing `col_weights` must leave every non-weighted
    family's rendered bytes BIT-IDENTICAL. That is the whole risk of touching a
    shared render path, so it is pinned here rather than argued in a docstring.
-2. **One render.** For the weighted families (CB codebook rungs, GGUF
-   k-quants) the cache render must equal the exporter's / inline cost render's
-   weighted render exactly — `emu_forward_kl.weighted_quantize_dequantize` is
-   the single definition all three consume. Without that identity the CB lane
-   still has the rendering confound its `COST_MODE=local` gate existed to
-   avoid.
+2. **One render.** For the weighted families (GGUF k-quants) the cache
+   render must equal the exporter's / inline cost render's weighted render
+   exactly — `emu_forward_kl.weighted_quantize_dequantize` is the single
+   definition all three consume.
+
+The codebook rungs that were the other weighted family, and the cases that
+pinned their serialization context, were archived with the retired codebook
+lane on 2026-09-25 (#1304).
 """
 import pytest
 import torch
@@ -19,13 +21,7 @@ pytest.importorskip("torch")
 
 
 NON_WEIGHTED_FORMATS = ["NVFP4", "FP8_E4M3", "MXFP4", "MXFP8_E4M3", "BF16"]
-WEIGHTED_FORMATS = ["NVFP4_CB_K16", "FP8_CB_K32", "Q4_K"]
-
-
-def _cb_context():
-    from prismaquant.nvfp4_cb_footprint import CBSerializationContext
-
-    return CBSerializationContext.production()
+WEIGHTED_FORMATS = ["Q4_K"]
 
 
 def _render(fmt, weight, acts, col_weights, levers=None):
@@ -38,9 +34,6 @@ def _render(fmt, weight, acts, col_weights, levers=None):
         activations={"lin": acts},
         levers={"gptq": True} if levers is None else levers,
         col_weights=col_weights,
-        cb_serialization_context=(
-            _cb_context() if "_CB_" in str(fmt).upper() else None
-        ),
     )
 
 
@@ -99,54 +92,6 @@ def test_weighted_families_actually_use_the_vector(fmt):
     assert not torch.equal(uniform, weighted)
 
 
-def test_fp8_cb_k43_production_rerender_is_bit_deterministic():
-    """A discarded menu rung can be reproduced at its stored cache dtype."""
-    from prismaquant.nvfp4_cb_footprint import CBSerializationContext
-    from prismaquant.production_weight_cache import render_production_weight
-
-    context = CBSerializationContext.production(
-        codebook_source="lattice",
-        codebook_source_scope="none",
-        scale_sweep=True,
-        scale_sweep_scope="all",
-        ldlq=False,
-        ldlq_scope="none",
-        minchain=False,
-        encode_tier="balanced",
-    )
-    assert context.scale_coding == "two_tier"
-    assert context.codebook_source == "lattice"
-    assert context.scale_sweep is True
-    assert context.ldlq is False
-    assert context.minchain is False
-    assert context.encode_tier == "balanced"
-
-    generator = torch.Generator(device="cpu").manual_seed(731)
-    weight = torch.randn(8, 256, generator=generator)
-    acts = torch.randn(32, 256, generator=generator)
-    col_weights = torch.rand(256, generator=generator) + 0.05
-    render_kwargs = {
-        "qname": "lin",
-        "activations": {"lin": acts},
-        "levers": {"gptq": False, "weighted_vq": True},
-        "col_weights": col_weights,
-        "cb_serialization_context": context,
-    }
-
-    first = render_production_weight(
-        weight, "FP8_CB_K43", **render_kwargs,
-    )
-    second = render_production_weight(
-        weight, "FP8_CB_K43", **render_kwargs,
-    )
-
-    # ProductionWeightCache stores FP32 renders as BF16 shards. Compare the
-    # canonical value-bearing bytes that scoring later has to reproduce.
-    first_stored = first.to(dtype=torch.bfloat16).contiguous()
-    second_stored = second.to(dtype=torch.bfloat16).contiguous()
-    assert torch.equal(first_stored, second_stored)
-
-
 def test_only_weighted_vq_is_offered_to_the_weighted_families():
     import prismaquant.production_weight_cache as pwc
 
@@ -175,38 +120,6 @@ def test_weighted_vq_is_a_declared_render_mechanism():
     assert plan.names() == ("weighted_vq",)
 
 
-def test_weighted_vq_lever_cannot_disable_required_cb_imatrix():
-    torch.manual_seed(3)
-    weight = torch.randn(8, 256) * 0.2
-    acts = torch.randn(32, 256) * 0.3
-    cw = torch.rand(256) * 10.0 + 0.01
-
-    with pytest.raises(RuntimeError, match="weighted_vq cannot be disabled"):
-        _render("NVFP4_CB_K16", weight, acts, cw,
-                levers={"gptq": True, "weighted_vq": False})
-
-
-@pytest.mark.parametrize("fmt", ["NVFP4_CB_K16", "FP8_CB_K32"])
-def test_production_cb_render_requires_col_weights(fmt):
-    with pytest.raises(RuntimeError, match="no col_weights"):
-        _render(fmt, torch.randn(8, 256), torch.randn(32, 256), None)
-
-
-@pytest.mark.parametrize("fmt", ["NVFP4_CB_K16", "FP8_CB_K32"])
-def test_production_cb_render_requires_explicit_serialization_context(fmt):
-    import prismaquant.production_weight_cache as pwc
-
-    with pytest.raises(ValueError, match="explicit CBSerializationContext"):
-        pwc.render_production_weight(
-            torch.randn(8, 256),
-            fmt,
-            qname="lin",
-            activations={"lin": torch.randn(32, 256)},
-            levers={"gptq": True},
-            col_weights=torch.ones(256),
-        )
-
-
 def test_packed_expert_col_weight_slicing_matches_the_cost_convention():
     """`_expert_col_weights` and `measure_quant_cost._item_col_weights` are the
     same convention; a divergence would weight cost and cache differently."""
@@ -229,48 +142,6 @@ def test_build_cache_col_weights_refuses_the_confounding_combinations():
 
     assert _load_col_weights(None, ["NVFP4", "FP8_DYNAMIC", "BF16"]) is None
     with pytest.raises(SystemExit, match="no --col-weights"):
-        _load_col_weights(None, ["NVFP4_CB_K16", "BF16"])
+        _load_col_weights(None, ["Q4_K", "BF16"])
     with pytest.raises(SystemExit, match="no weighted-render family"):
         _load_col_weights("unused.pkl", ["NVFP4", "BF16"])
-
-
-def test_build_cache_cb_context_requires_explicit_producer_settings(monkeypatch):
-    from prismaquant.build_production_cache import _explicit_cb_render_context
-
-    monkeypatch.delenv("CB_SCALE_CODING", raising=False)
-    monkeypatch.delenv("CB_CODEBOOK_SOURCE", raising=False)
-    monkeypatch.delenv("CB_SCALE_SWEEP", raising=False)
-    monkeypatch.delenv("PRISMAQUANT_CB_LDLQ", raising=False)
-    monkeypatch.delenv("PRISMAQUANT_CB_MINCHAIN", raising=False)
-    monkeypatch.delenv("PRISMAQUANT_CB_ENCODE_TIER", raising=False)
-    with pytest.raises(SystemExit, match="missing explicit CB producer"):
-        _explicit_cb_render_context(["NVFP4_CB_K16"])
-
-    monkeypatch.setenv("CB_SCALE_CODING", "v1")
-    monkeypatch.setenv("CB_CODEBOOK_SOURCE", "lattice")
-    monkeypatch.setenv("CB_SCALE_SWEEP", "1")
-    monkeypatch.setenv("PRISMAQUANT_CB_LDLQ", "0")
-    monkeypatch.setenv("PRISMAQUANT_CB_MINCHAIN", "0")
-    monkeypatch.setenv("PRISMAQUANT_CB_ENCODE_TIER", "balanced")
-    context = _explicit_cb_render_context(["NVFP4_CB_K16"])
-    assert context.scale_coding == "v1"
-    assert context.layout_version == 1
-
-
-def test_direct_cb_kl_swapper_requires_production_col_weights():
-    import torch.nn as nn
-
-    from prismaquant import format_registry as fr
-    from prismaquant.emu_forward_kl import _WeightSwapper
-
-    module = nn.Linear(256, 2, bias=False)
-    targets = [(
-        "layer.q_proj",
-        module,
-        fr.get_format("NVFP4_CB_K16"),
-        None,
-        None,
-    )]
-    with pytest.raises(RuntimeError, match="no production col_weights"):
-        with _WeightSwapper(module, targets, act_emulation=False):
-            pass

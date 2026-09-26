@@ -96,140 +96,25 @@ def _calib_batch() -> int:
 @torch.no_grad()
 def _baseline_logprobs(
     model, calib_ids: torch.Tensor,
-    capture_units: Sequence[tuple[str, object]] | None = None,
-    capture_rows: int = 4096,
     *,
     forward_model=None,
-) -> list[torch.Tensor] | tuple[list[torch.Tensor], dict]:
-    """Baseline log-probs; optionally capture each expert module's INPUT rows
-    during the same forwards (bounded to ``capture_rows`` per unit) for the
-    imatrix replay — no separate pass, no activation-cache dependency."""
-    captured: dict[str, list[torch.Tensor]] = {}
-    handles = []
-    if capture_units:
-        def _mk_hook(qn):
-            def _hook(_mod, args, _kwargs, _out):
-                xs = captured.setdefault(qn, [])
-                have = sum(t.shape[0] for t in xs)
-                if have >= capture_rows:
-                    return
-                x = args[0].detach()
-                x = x.reshape(-1, x.shape[-1])
-                xs.append(x[: capture_rows - have].cpu())
-            return _hook
-        for qn, mod in capture_units:
-            handles.append(mod.register_forward_hook(
-                _mk_hook(qn), with_kwargs=True))
-    try:
-        out = []
-        bs = _calib_batch()
-        n_total = calib_ids.shape[0]
-        t0 = time.time()
-        for i in range(0, n_total, bs):
-            logits = (forward_model or model)(
-                calib_ids[i:i + bs]
-            ).logits.float()
-            out.append(F.log_softmax(logits, dim=-1).cpu())
-            done = min(i + bs, n_total)
-            dt = time.time() - t0
-            tps = done * calib_ids.shape[1] / max(dt, 1e-9)
-            _log(f"baseline forward {done}/{n_total} windows "
-                 f"(batch={bs}, {dt:.0f}s elapsed, {tps:.0f} tok/s)")
-    finally:
-        for h in handles:
-            h.remove()
-    if capture_units is None:
-        return out
-    unit_x = {qn: torch.cat(xs, dim=0) for qn, xs in captured.items() if xs}
-    return out, unit_x
-
-
-@torch.no_grad()
-def _replay_down_proj_col_weights(
-    mod, parent_mod, router, X: torch.Tensor,
-) -> torch.Tensor:
-    """Per-expert down_proj imatrix ``(E, 1, inter)`` by replaying the routed
-    forward on captured module inputs X: route -> per-expert gate_up ->
-    activation -> intermediate; pool mean-square over that expert's routed
-    tokens. down_proj's input (the per-expert intermediate) is never
-    activation-cached — the packed-expert hook sees only the MODULE input —
-    so this replay is the only faithful source (the same reason
-    measure_quant_cost leaves down_proj unweighted in its pooled path).
-    Experts with no routed tokens in the capture get the mean of the routed
-    experts' vectors (a neutral prior, recorded by the caller)."""
-    from prismaquant.measure_quant_cost import _packed_router_topk
-
-    gate_up = mod.gate_up_proj
-    E = int(gate_up.shape[0])
-    inter = int(gate_up.shape[1]) // 2
-    dev = gate_up.device
-    Xd = X.to(device=dev, dtype=gate_up.dtype)
-    act_fn = getattr(mod, "act_fn", F.silu)
-    route_fn = getattr(parent_mod, "route_tokens_to_experts", None)
-    if callable(route_fn):
-        top_k_index, _tw = route_fn(router(Xd))
-    else:
-        top_k_index, _tw = _packed_router_topk(
-            router, Xd, e_score_correction_bias=getattr(
-                parent_mod, "e_score_correction_bias", None),
-            expert_bias=getattr(parent_mod, "expert_bias", None))
-    out = torch.zeros(E, inter, dtype=torch.float32, device=dev)
-    hit = torch.zeros(E, dtype=torch.bool)
-    for e in range(E):
-        tok = (top_k_index == e).any(dim=-1).nonzero(as_tuple=True)[0]
-        if tok.numel() == 0:
-            continue
-        g, u = F.linear(Xd[tok], gate_up[e]).chunk(2, dim=-1)
-        inter_act = (act_fn(g) * u).float()
-        out[e] = inter_act.pow(2).mean(dim=0)
-        hit[e] = True
-    if bool(hit.any()) and not bool(hit.all()):
-        out[~hit] = out[hit].mean(dim=0)
-    elif not bool(hit.any()):
-        out[:] = 1.0
-    return out.reshape(E, 1, inter).cpu()
-
-
-@torch.no_grad()
-def ensure_unit_col_weights(
-    model, units, col_weights: dict, unit_x: Mapping[str, torch.Tensor],
-) -> list[str]:
-    """Fill missing packed-expert col_weights entries in place.
-
-    gate_up_proj: pooled module-input second moment (identical op to the
-    exporter's builder — full rows, fp32, mean over dim 0).
-    down_proj: the per-expert intermediate replay above.
-    Returns the names added (caller persists them back to the shared
-    col-weights pickle so the EXPORTER ships the same weighting — the
-    lockstep contract)."""
-    from prismaquant.measure_quant_cost import (
-        _packed_experts_parent_module,
-        _packed_experts_router,
-    )
-    added: list[str] = []
-    for qn, mod in units:
-        X = unit_x.get(qn)
-        gu_name, dn_name = f"{qn}.gate_up_proj", f"{qn}.down_proj"
-        if gu_name not in col_weights:
-            if X is None:
-                raise ValueError(f"{qn}: no captured input rows for the "
-                                 f"gate_up imatrix (unit never routed?)")
-            col_weights[gu_name] = (
-                X.float().pow(2).mean(dim=0).reshape(1, 1, -1))
-            added.append(gu_name)
-        if dn_name not in col_weights and hasattr(mod, "down_proj"):
-            if X is None:
-                raise ValueError(f"{qn}: no captured input rows for the "
-                                 f"down_proj imatrix replay")
-            parent = _packed_experts_parent_module(model, qn)
-            router = _packed_experts_router(parent)
-            if router is None:
-                raise ValueError(f"{qn}: no router found for the down_proj "
-                                 f"imatrix replay")
-            col_weights[dn_name] = _replay_down_proj_col_weights(
-                mod, parent, router, X)
-            added.append(dn_name)
-    return added
+) -> list[torch.Tensor]:
+    """Baseline log-probs over the calibration windows."""
+    out = []
+    bs = _calib_batch()
+    n_total = calib_ids.shape[0]
+    t0 = time.time()
+    for i in range(0, n_total, bs):
+        logits = (forward_model or model)(
+            calib_ids[i:i + bs]
+        ).logits.float()
+        out.append(F.log_softmax(logits, dim=-1).cpu())
+        done = min(i + bs, n_total)
+        dt = time.time() - t0
+        tps = done * calib_ids.shape[1] / max(dt, 1e-9)
+        _log(f"baseline forward {done}/{n_total} windows "
+             f"(batch={bs}, {dt:.0f}s elapsed, {tps:.0f} tok/s)")
+    return out
 
 
 @torch.no_grad()

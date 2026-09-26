@@ -10,7 +10,6 @@ import torch.nn as nn
 
 import prismaquant.aura_cost as aura
 import prismaquant.expert_empirical_cost as expert_cost
-import prismaquant.production_weight_cache as pwc
 from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
@@ -96,19 +95,7 @@ class _DenseTinyLM(nn.Module):
 
 class _RenderedCache:
     def __init__(self, model, fmt):
-        self.metadata = {
-            "calib_hash": "fixture-calibration",
-            "cb_cache_pair_identity": {
-                "schema": "prismaquant.production_weight_cache.cb_pair_set.v1",
-                "identity_sha256": "e" * 64,
-                "artifact_sha256": "d" * 64,
-                "entries": 2,
-                "published_entries": 2,
-                "calibration_hashes": ["fixture-calibration"],
-                "git_commits": ["9" * 40],
-                "producer_source_sha256": ["8" * 64],
-            },
-        }
+        self.metadata = {"calib_hash": "fixture-calibration"}
         self.weights = {
             (name, fmt): mod.weight.detach().clone() + 0.03125
             for name, mod in model.named_modules()
@@ -123,20 +110,6 @@ class _RenderedCache:
 
     def compact_for_pickle(self):
         return 0
-
-
-def _cb_provenance():
-    return {
-        "cb_cost_provenance_schema": "test.cb.provenance.v1",
-        "cb_render_identity": {
-            "schema": "test.cb.render_identity.v1",
-            "col_weights_sha256": "f" * 64,
-            "scale_coding": "two_tier",
-            "scale_sweep_scope": "all",
-            "ldlq_scope": "none",
-            "layout_version": 2,
-        },
-    }
 
 
 def _model_identity(label: str):
@@ -305,29 +278,39 @@ def test_streamed_aura_cost_rows_are_exactly_resident_rows():
     )
 
 
-def _run_streamed_aura(
-    state, calib, checkpoint_dir, *, resume, monkeypatch
-):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
-    monkeypatch.setattr(
-        pwc,
-        "production_cache_cb_render_provenance",
-        lambda *_args, **_kwargs: _cb_provenance(),
-    )
-    model, context, runner = _dense_runner(state)
-    result = aura.compute_aura_cost_streamed(
+_DENSE_ANCHOR_PLAN = {
+    "model.layers.0.proj": ("NVFP4",),
+    "model.layers.1.proj": ("NVFP4",),
+}
+
+
+def _anchored_streamed_aura(runner, calib, checkpoint_dir, *, resume):
+    # Durable streamed checkpoints bind the production-anchor renderer's
+    # exact identity. (Until 2026-09-25 this fixture bound a codebook
+    # production cache's identity instead; that lane was archived, #1304.)
+    return aura.compute_aura_cost_streamed(
         runner,
         calib,
-        ["FP8_CB_K28"],
+        ["NVFP4"],
         n_probes=2,
         min_free_gib=0.0,
-        production_cache=_RenderedCache(model, "FP8_CB_K28"),
-        require_production_cache=True,
         dw_dtype="float32",
+        formats_by_qname=_DENSE_ANCHOR_PLAN,
+        anchor_renderer=_ExactAnchorRenderer(_DENSE_ANCHOR_PLAN),
         checkpoint_dir=checkpoint_dir,
         resume=resume,
         model_identity=_model_identity("dense-v1"),
         profile=DefaultProfile(),
+    )
+
+
+def _run_streamed_aura(
+    state, calib, checkpoint_dir, *, resume, monkeypatch
+):
+    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    _model, context, runner = _dense_runner(state)
+    result = _anchored_streamed_aura(
+        runner, calib, checkpoint_dir, resume=resume
     )
     return result, context
 
@@ -375,41 +358,20 @@ def test_streamed_aura_interrupt_resume_and_identity_refusal(
     assert actual["stats"] == expected["stats"]
     assert actual["costs"] == expected["costs"]
 
-    complete_model, complete_context, complete_runner = _dense_runner(state)
-    complete = aura.compute_aura_cost_streamed(
-        complete_runner,
-        calib,
-        ["FP8_CB_K28"],
-        n_probes=2,
-        min_free_gib=0.0,
-        production_cache=_RenderedCache(complete_model, "FP8_CB_K28"),
-        require_production_cache=True,
-        dw_dtype="float32",
-        checkpoint_dir=tmp_path / "resumed",
-        resume=True,
-        model_identity=_model_identity("dense-v1"),
-        profile=DefaultProfile(),
+    _complete_model, complete_context, complete_runner = _dense_runner(state)
+    complete = _anchored_streamed_aura(
+        complete_runner, calib, tmp_path / "resumed", resume=True
     )
     assert complete["costs"] == expected["costs"]
     assert complete_context.install_calls == 0
 
-    mismatch_model, mismatch_context, mismatch_runner = _dense_runner(state)
+    _mismatch_model, mismatch_context, mismatch_runner = _dense_runner(state)
     with pytest.raises(RuntimeError, match="calibration.*refusing"):
-        aura.compute_aura_cost_streamed(
+        _anchored_streamed_aura(
             mismatch_runner,
             torch.tensor([[1, 2, 3, 9]]),
-            ["FP8_CB_K28"],
-            n_probes=2,
-            min_free_gib=0.0,
-            production_cache=_RenderedCache(
-                mismatch_model, "FP8_CB_K28"
-            ),
-            require_production_cache=True,
-            dw_dtype="float32",
-            checkpoint_dir=tmp_path / "resumed",
+            tmp_path / "resumed",
             resume=True,
-            model_identity=_model_identity("dense-v1"),
-            profile=DefaultProfile(),
         )
     # The mismatch is validated before capture_boundaries installs layer 0.
     assert mismatch_context.install_calls == 0
@@ -436,7 +398,6 @@ class _ExactAnchorRenderer:
     def render_layer(self, *, layer, modules, formats_by_qname):
         del layer
         offsets = {"NVFP4": 0.03125, "FP8_E4M3": 0.015625}
-        offsets["FP8_CB_K28"] = 0.0078125
         rendered = {
             (name, fmt): modules[name].weight.detach().clone() + offsets[fmt]
             for name, formats in formats_by_qname.items()
@@ -781,20 +742,14 @@ def _run_checkpointed_anchor_diagnostic(
     monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
     _model, context, runner = _dense_runner(state)
     plan = {
-        "model.layers.0.proj": ("FP8_CB_K28",),
-        "model.layers.1.proj": ("FP8_CB_K28",),
+        "model.layers.0.proj": ("FP8_E4M3",),
+        "model.layers.1.proj": ("FP8_E4M3",),
     }
     renderer = _ExactAnchorRenderer(plan)
-    renderer.identity["cb_render_identity"] = {
-        "schema": "test.sparse.anchor.cb.v1",
-        "formats_by_qname": {
-            name: list(formats) for name, formats in plan.items()
-        },
-    }
     payload = aura.compute_aura_cost_streamed(
         runner,
         calib,
-        ["FP8_CB_K28"],
+        ["FP8_E4M3"],
         n_probes=2,
         min_free_gib=0.0,
         dw_dtype="float32",
@@ -804,7 +759,7 @@ def _run_checkpointed_anchor_diagnostic(
         formats_by_qname=plan,
         anchor_renderer=renderer,
         diagnostic_weight_mse_pairs=list(
-            (name, "FP8_CB_K28") for name in plan
+            (name, "FP8_E4M3") for name in plan
         ),
         profile=DefaultProfile(),
     )
@@ -862,9 +817,9 @@ def test_production_anchor_weight_mse_diagnostic_resumes_exactly(
     assert actual["costs"] == expected["costs"]
     assert renderer.render_count == 1
     for rows in actual["costs"].values():
-        row = rows["FP8_CB_K28"]
+        row = rows["FP8_E4M3"]
         assert row["weight_mse_diagnostic"] == pytest.approx(
-            0.0078125 ** 2
+            0.015625 ** 2
         )
         assert row["weight_mse_is_cost_input"] is False
     assert actual["provenance"]["production_anchor_cost_currency"] == (
@@ -1001,7 +956,6 @@ def test_production_anchor_cold_render_requires_exact_declared_profile_scope(
     monkeypatch,
 ):
     import prismaquant.streaming_production_cache as streaming
-    from prismaquant.nvfp4_cb_footprint import CBSerializationContext
 
     torch.manual_seed(110)
     model = _ExpertTinyLM().eval()
@@ -1017,16 +971,11 @@ def test_production_anchor_cold_render_requires_exact_declared_profile_scope(
 
     kwargs = dict(
         act_index=_NoActivations(),
-        formats_by_qname={qname: ("NVFP4_CB_K12",)},
+        formats_by_qname={qname: ("NVFP4",)},
         levers={"gptq": True, "weighted_vq": True},
         profile=profile,
         device="cpu",
-        col_weights={qname: torch.ones(16)},
-        cb_serialization_context=CBSerializationContext.production(
-            scale_sweep=True,
-            ldlq=True,
-            codebook_source="lattice",
-        ),
+        col_weights={},
         calibration_hash="a" * 64,
         arm_identity={"arm": "fixture-production-ldlq"},
         model_identity=_model_identity("cold-render-source"),
@@ -1042,8 +991,8 @@ def test_production_anchor_cold_render_requires_exact_declared_profile_scope(
 
     calls = []
 
-    def render(weight, fmt, *, activations, ldlq_missing_activation_ok, **_kw):
-        calls.append((fmt, dict(activations), ldlq_missing_activation_ok))
+    def render(weight, fmt, *, activations, **_kw):
+        calls.append((fmt, dict(activations)))
         return weight.detach().clone() + 0.03125
 
     monkeypatch.setattr(streaming, "render_production_weight", render)
@@ -1058,9 +1007,9 @@ def test_production_anchor_cold_render_requires_exact_declared_profile_scope(
     rendered = renderer.render_layer(
         layer=0,
         modules={qname: model.get_submodule(qname)},
-        formats_by_qname={qname: ("NVFP4_CB_K12",)},
+        formats_by_qname={qname: ("NVFP4",)},
     )
-    assert set(rendered) == {(qname, "NVFP4_CB_K12")}
+    assert set(rendered) == {(qname, "NVFP4")}
     consumed = []
 
     def consume_render(**kwargs):
@@ -1071,36 +1020,22 @@ def test_production_anchor_cold_render_requires_exact_declared_profile_scope(
         })
         return {"consumed": True}
 
-    def refuse_throwaway_tensor_receipt(**_kwargs):
-        raise AssertionError(
-            "non-durable production anchor render hashed a tensor receipt"
-        )
-
-    monkeypatch.setattr(
-        streaming,
-        "_build_cb_transient_consumer_receipt",
-        refuse_throwaway_tensor_receipt,
-    )
-
     observed = renderer.render_layer_transient(
         layer=0,
         modules={qname: model.get_submodule(qname)},
-        formats_by_qname={qname: ("NVFP4_CB_K12",)},
+        formats_by_qname={qname: ("NVFP4",)},
         consume_render=consume_render,
         consumer_identity=(
             aura.AURA_PRODUCTION_ANCHOR_DELTA_CONSUMER_IDENTITY
         ),
     )
-    assert observed == ((qname, "NVFP4_CB_K12"),)
-    assert calls == [
-        ("NVFP4_CB_K12", {}, True),
-        ("NVFP4_CB_K12", {}, True),
-    ]
+    assert observed == ((qname, "NVFP4"),)
+    assert calls == [("NVFP4", {}), ("NVFP4", {})]
     assert renderer.render_count == 2
     assert renderer.max_live_rendered == 1
     torch.testing.assert_close(
         consumed[0]["rendered"],
-        rendered[(qname, "NVFP4_CB_K12")],
+        rendered[(qname, "NVFP4")],
         rtol=0,
         atol=0,
     )
@@ -1109,10 +1044,9 @@ def test_production_anchor_cold_render_requires_exact_declared_profile_scope(
         qname: renderer.source_weight_identity_for(qname)
     })
     assert completed["source_weights"]["complete"] is True
-    assert completed["cb_render_identity"]["source_weights_complete"] is True
-    assert completed["cb_render_identity"]["render_scope"] == (
-        "sparse_production_anchors"
-    )
+    assert completed["source_weights"]["scope"] == "sparse_anchor_plan"
+    # Kept as None so an existing checkpoint's identity digest still matches.
+    assert completed["cb_render_identity"] is None
 
 
 def test_production_anchor_resolves_raw_named_expert_activation_cache(
@@ -1129,7 +1063,6 @@ def test_production_anchor_resolves_raw_named_expert_activation_cache(
     """
     import prismaquant.streaming_production_cache as streaming
     from prismaquant.measure_quant_cost import canonical_linear_name
-    from prismaquant.nvfp4_cb_footprint import CBSerializationContext
 
     torch.manual_seed(111)
     model = _ExpertTinyLM().eval()
@@ -1166,16 +1099,11 @@ def test_production_anchor_resolves_raw_named_expert_activation_cache(
     renderer = streaming.StreamedProductionAnchorRenderer(
         model,
         act_index=act_index,
-        formats_by_qname={qname: ("NVFP4_CB_K12",)},
+        formats_by_qname={qname: ("NVFP4",)},
         levers={"gptq": True, "weighted_vq": True},
         profile=profile,
         device="cpu",
-        col_weights={qname: torch.ones(16)},
-        cb_serialization_context=CBSerializationContext.production(
-            scale_sweep=True,
-            ldlq=True,
-            codebook_source="lattice",
-        ),
+        col_weights={},
         calibration_hash="b" * 64,
         arm_identity={"arm": "fixture-raw-named-acts"},
         model_identity=_model_identity("raw-named-act-source"),
@@ -1186,23 +1114,22 @@ def test_production_anchor_resolves_raw_named_expert_activation_cache(
     rendered = renderer.render_layer(
         layer=0,
         modules={qname: model.get_submodule(qname)},
-        formats_by_qname={qname: ("NVFP4_CB_K12",)},
+        formats_by_qname={qname: ("NVFP4",)},
     )
-    assert set(rendered) == {(qname, "NVFP4_CB_K12")}
+    assert set(rendered) == {(qname, "NVFP4")}
     # Loaded under the raw name, and the render saw the REAL activations
     # rather than the empty cold-prior mapping.
     assert act_index.loaded == [qname]
-    assert calls == [("NVFP4_CB_K12", [qname])]
+    assert calls == [("NVFP4", [qname])]
 
 
 def test_production_anchor_stock_plan_binds_source_identity_lazily(
     monkeypatch,
 ):
-    """A CB-free (stock) plan runs no CB source binding at all.
-
-    ``source_weight_identity_for`` must then bind the identity from the live
+    """``source_weight_identity_for`` binds the identity from the live
     source weight -- the GLM-5.3 harvest crashed on exactly this at its first
-    reverse layer (2026-08-27) because the method only read the CB binding.
+    reverse layer (2026-08-27) because the method only read a codebook
+    binding (that lane was archived 2026-09-25, #1304).
     A unit outside the plan stays refused.
     """
     import prismaquant.streaming_production_cache as streaming
@@ -1236,7 +1163,6 @@ def test_production_anchor_stock_plan_binds_source_identity_lazily(
         profile=profile,
         device="cpu",
         col_weights={},
-        cb_serialization_context=None,
         calibration_hash="c" * 64,
         arm_identity={"arm": "fixture-stock-plan"},
         model_identity=_model_identity("stock-plan-source"),
@@ -1376,11 +1302,11 @@ def test_streamed_expert_interrupt_resume_and_identity_refusal(
     assert mismatch_context.install_calls == 0
 
 
-def test_streamed_aura_non_cb_checkpointing_needs_anchor_identity(
+def test_streamed_aura_checkpointing_needs_anchor_identity(
     tmp_path, monkeypatch
 ):
-    """Non-CB menus have no CB identity to bear: checkpointing refuses
-    without an anchor renderer, and runs on the anchor's exact identity."""
+    """Checkpointing refuses without an anchor renderer, and runs on the
+    anchor's exact identity."""
     torch.manual_seed(116)
     monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
     seed_model = _DenseTinyLM().eval()

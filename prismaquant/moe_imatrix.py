@@ -14,10 +14,9 @@ ships weighted bytes — the rendering-confound class) need these entries, from
 ONE shared source. This module synthesizes them by replaying the routed
 forward directly from the CHECKPOINT tensors (router weight + per-expert
 gate/up) on the cached module inputs: route -> per-expert gate/up ->
-activation -> intermediate, mean-square pooled per expert. The
-model-loaded twin of this replay lives in
-``expert_empirical_cost.ensure_unit_col_weights``; keep semantics in
-lockstep.
+activation -> intermediate, mean-square pooled per expert. (Its
+model-loaded twin in ``expert_empirical_cost`` served only the retired
+codebook lane and was archived with it on 2026-09-25, #1304.)
 """
 from __future__ import annotations
 
