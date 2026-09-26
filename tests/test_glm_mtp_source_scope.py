@@ -278,3 +278,48 @@ def test_campaign_row_prices_mtp_units_from_the_mtp_capture(mtp_source, monkeypa
     assert receipt["source_forward_count"] == 0
     assert [row["layer"] for row in receipt["layers"]] == [BACKBONE]
     assert all(key.startswith(PREFIX) for key in receipt["source_tensor_keys"])
+
+
+@pytest.mark.parametrize("mtp_source", [torch.bfloat16], indirect=True)
+def test_scoped_source_installs_the_mtp_layer_without_a_body_forward(mtp_source, monkeypatch):
+    """Preparation (PQ #1338) installs the scope's layer to verify renders
+    against their live source weights; the scope still runs no body forward
+    and reads no layer outside itself."""
+    from prismaquant import tessera_calibration_cache as cc
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+
+    env = mtp_source
+    published = _published_mtp_capture(env, monkeypatch)
+    last = int(env.text_config.n_routed_experts) - 1
+    units = [SHARED_DOWN, f"{STACK}.1.gate_proj", f"{STACK}.{last}.down_proj"]
+    owner = cc.authenticate_selected_capture_source(
+        published.census_path, published.capture["path"],
+        expected_sha256=published.capture["sha256"], model=str(env.source),
+        max_act_rows=MAX_ROWS, attention_implementation="eager")
+    try:
+        runner = build_streamed_causal_lm(
+            str(env.source), device=torch.device("cpu"), dtype=torch.bfloat16,
+            offload_folder=str(env.root / "installed-offload"), profile=PROFILE, max_cache_slots=2,
+            prefetch_workers=1, prefetch_min_available_gb=0, cache_headroom_gb=0,
+            prefetch_lookahead=1, require_prefetched_residency=False,
+            attn_implementation="eager", source_authentication=owner, source_scope="mtp")
+        try:
+            assert runner.source_layers == (BACKBONE,)
+            with pytest.raises(RuntimeError, match="cannot execute a forward"):
+                runner(env.ids)
+            assert runner.context.schedule_prefetch(0) is None
+            with pytest.raises(RuntimeError, match="outside the source scope"):
+                runner.context.install(0)
+            runner.context.install(BACKBONE)
+            targets = bridge._live_targets(runner, units)
+            installed = {name: target.weight.detach().clone() for name, target in targets.items()}
+            runner.context.unload(BACKBONE)
+        finally:
+            runner.shutdown()
+    finally:
+        owner.close()
+
+    expected = _loaded_mtp_weights(env, torch.bfloat16)
+    for name in units:
+        assert torch.equal(installed[name], expected[name]), name

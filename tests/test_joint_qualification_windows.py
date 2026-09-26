@@ -92,6 +92,7 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False, fail_unit=None,
         settle_prefetched_layers=lambda indices, *, retry_availability=False: events.append(('settled', tuple(indices))))
     runner = SimpleNamespace(model=torch.nn.Module(), context=context,
         num_layers=max(layer_of) + 1, prefetch_lookahead=1,
+        source_layers=tuple(range(max(layer_of) + 1)),
         require_prefetched_residency=True, profile=object(), device='cpu',
         layer_index_for_qname=lambda name: layer_of[names.index(name)])
     monkeypatch.setattr(bridge, '_bound', lambda record, label: tmp_path / 'capture.json')
@@ -751,3 +752,26 @@ def test_a_replay_binds_the_journalled_reuse_to_this_run(tmp_path, monkeypatch, 
     with pytest.raises(ValueError, match='incomplete qualification receipt|half a reuse receipt|'
                                          'journalled encoder reuse'):
         bridge.prepare_cache(runner, data, **options, qualification_resume=True)
+
+
+def test_a_scoped_source_walks_only_its_own_layers(tmp_path, monkeypatch):
+    """A source scope (PQ #1338) reads only ``runner.source_layers``.
+
+    GLM's MTP layer is layer 45 of a 46-slot index whose layers 0..44 the
+    scope cannot read: installing, prefetching or settling any of them would
+    read a layer the scope does not hold.
+    """
+    runner, data, capture, events, _live, observed = fixture(
+        tmp_path, monkeypatch, layer_of=(2, 2))
+    runner.source_layers = (2,)
+    scheduled = []
+    runner.context.schedule_prefetch = lambda layer: scheduled.append(layer)
+    cache = bridge.prepare_cache(runner, data, capture=capture, max_render_bytes=10000,
+        file_load_workers=1, qualification_window=policy())
+    assert set(cache.metadata['verified_cells']) == set(data.cells)
+    assert [event for event in events if event[0] == 'install'] == [('install', 2)]
+    assert [event for event in events if event[0] == 'unload'] == [('unload', 2)]
+    # Past the last index a schedule is the no-op the body walk has always
+    # issued; no in-range layer outside the scope is ever scheduled.
+    assert [layer for layer in scheduled if layer < runner.num_layers] == [2]
+    assert all(set(event[1]) <= {2} for event in events if event[0] == 'settled')
