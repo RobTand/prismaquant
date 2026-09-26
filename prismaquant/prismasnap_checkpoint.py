@@ -53,7 +53,7 @@ from .prismasnap import (
 )
 from .schemas import strict_json_loads
 from .digests import file_sha256hex
-from .tensor_digests import tensor_bytes
+from .tensor_digests import tensor_host_bytes
 
 
 PLAN_SCHEMA = "prismaquant.prismasnap.plan.v1"
@@ -457,7 +457,7 @@ def _derivation_digest(payload: Mapping[str, object]) -> str:
 
 def _tensor_payload_sha256(value: torch.Tensor, *, where: str) -> str:
     contiguous = value.detach().to(device="cpu").contiguous()
-    raw = tensor_bytes(contiguous)
+    raw = tensor_host_bytes(contiguous)
     return canonical_json_sha256(
         {
             "shape": list(contiguous.shape),

@@ -13,7 +13,7 @@ Profiles:
   after ``torch.as_tensor``, so a list or a scalar is stamped too.
 - ``tensor_hash_update``: feeds ``str(tuple(shape))``, ``str(dtype)`` and the
   bytes into a running hash object (the calibration content hash).
-- ``tensor_bytes``: the bytes alone, for a site that frames them itself.
+- ``tensor_host_bytes``: the bytes alone, for a site that frames them itself.
 
 This module imports only torch and ``digests``, so any module can own a call
 to it without widening its import surface. ``digests`` stays stdlib-only.
@@ -35,7 +35,7 @@ def _raw(host: torch.Tensor) -> bytes:
     return host.view(torch.uint8).numpy().tobytes()
 
 
-def tensor_bytes(tensor: torch.Tensor) -> bytes:
+def tensor_host_bytes(tensor: torch.Tensor) -> bytes:
     """The tensor's host bytes, C-contiguous."""
     return _raw(_host(tensor))
 
