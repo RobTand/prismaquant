@@ -1,0 +1,10 @@
+{
+"test_native_extension_contract_row_is_unchanged[0-contract]#0": {"returned": "{'module_name_prefix': 'tessera_nvfp4_', 'filename_glob': 'tessera_nvfp4_*.so', 'match': 'basename_fnmatch', 'when_unavailable': {}}"},
+"test_native_extension_contract_row_is_unchanged[0-pin]#0": {"returned": "{'module_name_prefix': 'tessera_nvfp4_', 'filename_glob': 'tessera_nvfp4_*.so', 'match': 'basename_fnmatch', 'when_unavailable': {}}"},
+"test_native_extension_contract_row_is_unchanged[1-contract]#0": {"returned": "{'module_name_prefix': 'tessera_nvfp4_', 'filename_glob': 'tessera_nvfp4_*.so', 'match': 'basename_fnmatch', 'when_unavailable': {'resident': {'status': 'substituted', 'decoder': 'torch_materialize_stock'}, 'streamed': {'status': 'refused', 'decoder': None}}}"},
+"test_native_extension_contract_row_is_unchanged[1-pin]#0": {"returned": "{'module_name_prefix': 'tessera_nvfp4_', 'filename_glob': 'tessera_nvfp4_*.so', 'match': 'basename_fnmatch', 'when_unavailable': {'resident': {'status': 'substituted', 'decoder': 'torch_materialize_stock'}, 'streamed': {'status': 'refused', 'decoder': None}}}"},
+"test_native_extension_contract_row_is_unchanged[2-contract]#0": {"returned": "{'module_name_prefix': 'tessera_nvfp4_', 'filename_glob': 'tessera_nvfp4_*.so', 'match': 'basename_fnmatch', 'when_unavailable': {'resident': {'status': 'substituted', 'decoder': 'd'}, 'streamed': {'status': 'refused', 'decoder': None}}}"},
+"test_native_extension_contract_row_is_unchanged[2-pin]#0": {"returned": "{'module_name_prefix': 'tessera_nvfp4_', 'filename_glob': 'tessera_nvfp4_*.so', 'match': 'basename_fnmatch', 'when_unavailable': {'resident': {'status': 'substituted', 'decoder': 'd'}, 'streamed': {'status': 'refused', 'decoder': None}}}"},
+"test_native_extension_contract_row_is_unchanged[3-contract]#0": {"cause": null, "raised": "builtins.KeyError", "text": "'decoder'"},
+"test_native_extension_contract_row_is_unchanged[3-pin]#0": {"cause": null, "raised": "builtins.KeyError", "text": "'decoder'"}
+}

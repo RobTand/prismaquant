@@ -64,8 +64,10 @@ from .staged_tier_policy import TierPolicyRefused
 
 #: Accepted PB730/PB741 source pin for the PB reader lease.
 #: Deployment qualification is separate; this pin advertises no capability.
-#: The owning literal the test resolver reads — see
-#: tools/resolve_prismabuild_dev_pin.py. No capability assertion rides it.
+#: No capability assertion rides it. Its stdlib resolver,
+#: tools/resolve_prismabuild_dev_pin.py, had no caller and was retired in
+#: PQ #1302; recover it with
+#: ``git show ffb40f417b2:tools/resolve_prismabuild_dev_pin.py``.
 PB_READER_LEASE_PIN_COMMIT = "461728e4dcc08123d5fdb410eb2f18772fdb3fe0"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
