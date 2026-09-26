@@ -71,6 +71,10 @@ def _forget_state(monkeypatch):
     monkeypatch.delenv("PRISMABUILD_ACTION_NONCE", raising=False)
     monkeypatch.delenv("PRISMABUILD_ACTION_SCOPE", raising=False)
     monkeypatch.delenv("PRISMABUILD_READER_HELPER_ROOT", raising=False)
+    # PB's launch names the live fleet queue here. These fixtures claim in
+    # their own queue, and an SDK that reads this variable (PrismaBuild #961)
+    # would look for the claim in the live one (PQ #1281).
+    monkeypatch.delenv("PRISMABUILD_QUEUE_ROOT", raising=False)
     reset_residency_resolver_for_tests()
     deactivate_staged_tier_policy_for_tests()
     set_lease_helper_root(None)
