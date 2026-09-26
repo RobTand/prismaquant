@@ -1,5 +1,31 @@
 # PrismaQuant Architecture
 
+The GLM MTP selected-wire export preflight accepts a Tessera Hessian reference
+collection (2026-09-26, `astra/mtp-wire-compat-proof-1413`, PQ #1413). The body
+allocation retains its original Hessian stamp; the collection names the
+body and MTP canonical v1 references as disjoint children. The existing
+`open_hessian_reference` owner checks every child capture contract, while
+`require_priced_export_inputs` binds every selected body unit to the body's
+original child and each selected MTP receipt to the exact M6→M4→M3 cost and
+M3 Hessian child (`tessera_calibration_cache.py`, `tessera_export_lane.py`).
+The combined seal identifies the collection; original per-unit H commitments
+and wire identities stay unchanged. Metadata checks read no H payload; Tessera
+checks each H when consumed and each cached blob at intake. The selection's
+MTP source scope supplies layer-45 shapes without changing the body projection.
+The MTP plan view keeps the profile-declared layer-45 source keys, including
+its BF16 shared units; visual BF16 entries outside the text graph remain
+omitted. A selected MTP Tessera export requires `--cached-units` naming
+Tessera's composed v3 bundle. Its children are original complete v1/v2
+manifests with disjoint rosters; the preflight compares each selected MTP
+receipt and carried body expert receipt exactly to the corresponding child,
+and the exporter checks whole-plan coverage, original producer packages,
+source/H/recipe identities and actual blob bytes. `run-pipeline.sh` passes the
+bundle via `TESSERA_CACHED_UNITS`; `TESSERA_SOURCE_DIGEST_CACHE` can supply the
+existing stat-bound source-digest cache for a standard cached export. The
+export scope still requires device-qualified cells: routed E4M3 R1024
+currently refuses under the v38 runtime contract. This preflight does not
+authorize re-encoding or a serving qualification.
+
 The Tessera export preflight joins a GLM allocation in the source namespace
 (2026-09-26, `ws-serve/glm-source-unit-shapes`, PQ #1388). The allocation,
 Tessera's `plan_from_layer_config.py` and its exporter all name units by
@@ -3321,8 +3347,13 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-26 · `claude/tensor-digests-1384`.
+As of: 2026-09-26 · `astra/mtp-wire-compat-proof-1413`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `astra/mtp-wire-compat-proof-1413`) for the
+selected MTP Hessian collection, source-scope plan, and composed cached-unit
+preflight above (PQ #1413).
+It changes no format, default, numerical choice or serving gate.
 
 Re-stamped (2026-09-26, `claude/tensor-digests-1384`) for **one owner for
 tensor digests** (PQ #1384, P2, part of epic #1295). The new
