@@ -523,6 +523,42 @@ def test_existing_out_needs_resume_and_resume_verifies_every_file(tmp_path, caps
 # ---------------------------------------------------------------------------
 # The streamed manifest is the JSON the campaign writes
 # ---------------------------------------------------------------------------
+@pytest.mark.parametrize("level", ["identity", "units", "unit", "nested", "menu"])
+@pytest.mark.parametrize("key", [9, None, False, 1.5, ("tuple",)])
+def test_identity_digest_refuses_non_string_keys(level, key):
+    unit = {"weight": {"dtype": "torch.bfloat16"}, "menu": ["R896"]}
+    identity = {"units": {"linear": unit}, "settings": {}}
+    target = {"identity": identity, "units": identity["units"], "unit": unit,
+              "nested": unit["weight"], "menu": {}}[level]
+    if level == "menu":
+        unit["menu"].append(target)
+    target[key] = "invalid"
+    with pytest.raises(tool.UnionRefused, match="mapping key.*string"):
+        tool.identity_sha256(identity)
+
+
+@pytest.mark.parametrize("identity", [
+    {9: "nine", 10: "ten"},
+    {"units": {9: {}, 10: {}}},
+    {"units": {"linear": {9: "nine", 10: "ten"}}},
+])
+def test_identity_digest_refuses_homogeneous_integer_keys(identity):
+    # These used to hash non-JSON bytes without even a mixed-key sort error.
+    with pytest.raises(tool.UnionRefused, match="mapping key.*string"):
+        tool.identity_sha256(identity)
+
+
+def test_identity_digest_keeps_normalized_json_bytes_and_shared_menus():
+    menu = ["R896", "λ", {"10": None, "9": [False, -0.0, 1.25]}]
+    identity = {"units": {"β": {"menu": menu, "weight": {"dtype": "bf16"}},
+                           "a": {"weight": {"dtype": "bf16"}, "menu": menu}},
+                "settings": {"9": 9, "10": 10, "escaped": "\"\\\\\n"}}
+    expected = canonical_json_sha256(identity, where="normalized identity")
+    memo = tool._Memo()
+    assert tool.identity_sha256(identity, memo) == expected
+    assert tool.identity_sha256(json.loads(json.dumps(identity)), memo) == expected
+
+
 @pytest.mark.parametrize("block", [7, 64 << 20])
 def test_streamed_manifest_read_digest_and_write_are_the_json_spellings(tmp_path, monkeypatch, block):
     a, _b, _experts, _all_units = _census(tmp_path)
