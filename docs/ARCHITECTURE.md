@@ -10,6 +10,20 @@ admission answer and lane schema v10 do not move. Tessera's serving source at
 GLM text-only TP2 result. This retake alone does not qualify routed E4M3
 R1024, publish an MTP artifact, or alter the selected body assignment.
 
+`glm_mtp_selection.select_mtp_rungs` accepts an optional explicit
+`fixed_formats` map from whole MTP group to exact format. It intersects each
+fixed format with the existing priced and device-eligible per-unit menu before
+the group-product selector runs; a missing, ineligible, or over-budget choice
+refuses. The selection record carries the map, and the bound-wire backfill
+checks it against the selected groups. With no map, the selector and record
+retain their old behavior. `tools/reselect_mtp_fixed.py` uses this owner to
+join a fresh MTP choice to an unchanged body-only allocation. It rebinds the
+whole-assignment digest and recomputes the final artifact budget from the
+source-MTP-to-selected-wire byte difference. Its reserve is the completed
+body export's observed all-file overhead above its selected payload estimate
+plus a declared allowance for new metadata; the actual recursive file
+inventory remains the final budget gate.
+
 The GLM MTP selected-wire export preflight accepts a Tessera Hessian reference
 collection (2026-09-26, `astra/mtp-wire-compat-proof-1413`, PQ #1413). The body
 allocation retains its original Hessian stamp; the collection names the

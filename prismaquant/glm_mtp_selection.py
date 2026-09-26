@@ -286,7 +286,8 @@ def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
 
 
 def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
-                     acceptance_points=(), k: int = 1, eligible=None) -> dict:
+                     acceptance_points=(), k: int = 1, eligible=None,
+                     fixed_formats: Mapping[str, str] | None = None) -> dict:
     """The MTP assignment and its selection record under ``byte_budget``.
 
     ``constants`` are the caller's declared serve constants
@@ -295,6 +296,8 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     the selector is degenerate and returns the lowest-E rung within the budget.
     ``eligible(unit, rung)``, when given, is the pinned runtime's attestation
     (principle 14); a priced rung it refuses is left off the menu and recorded.
+    ``fixed_formats`` restricts named whole groups to one format, intersected
+    with that same eligible menu. A missing or unpriced group format refuses.
     """
     from . import mtp_rung_selection as canon
 
@@ -304,6 +307,22 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     probe_sha256, probe = _mtp_probe(payload)
     rows, unattested = _unit_rows(payload, eligible)
     groups = {name: tuple(members) for name, members in payload["groups"].items()}
+    if fixed_formats is not None:
+        if not isinstance(fixed_formats, Mapping) or any(
+                not isinstance(name, str) or not isinstance(fmt, str) or not fmt
+                for name, fmt in fixed_formats.items()):
+            raise ValueError("MTP fixed_formats must map group names to format names")
+        unknown = set(fixed_formats) - set(groups)
+        if unknown:
+            raise ValueError(f"MTP fixed_formats name unknown groups: {sorted(unknown)}")
+        for group, fmt in fixed_formats.items():
+            absent = [unit for unit in groups[group] if fmt not in rows[unit]]
+            if absent:
+                raise ValueError(
+                    f"MTP fixed {group}={fmt} is missing or ineligible for "
+                    f"{len(absent)} member(s): {absent[:3]}")
+            for unit in groups[group]:
+                rows[unit] = {fmt: rows[unit][fmt]}
     menu, incomplete = canon.group_product_menu(groups, rows, params=payload["params"])
     serve = canon.ServeConstants(t_ms=float(constants["t_ms"]), d0_ms=float(constants["d0_ms"]),
                                  c_ms_per_bit=float(constants["c_ms_per_bit"]))
@@ -347,6 +366,8 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         "incomplete_rungs": incomplete,
         "unattested_rungs": {rung: len(units) for rung, units in unattested.items()},
         "selection": result.provenance,
+        **({"fixed_formats": dict(sorted(fixed_formats.items()))}
+           if fixed_formats is not None else {}),
         "assignment": assignment,
         **selected_wires,
     }
@@ -381,6 +402,11 @@ def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
             record.get("rung") != "|".join(f"{group}={chosen[group]}"
                                             for group in sorted(chosen))):
         raise ValueError("MTP selection rung differs from the bound groups")
+    fixed = record.get("fixed_formats")
+    if fixed is not None:
+        if (not isinstance(fixed, Mapping) or not set(fixed) <= set(chosen)
+                or any(chosen[group] != fmt for group, fmt in fixed.items())):
+            raise ValueError("MTP selected rung differs from fixed group formats")
     assignment = {unit: chosen[group] for group, members in payload["groups"].items()
                   for unit in members}
     if len(assignment) != len(payload["costs"]) or set(assignment) != set(payload["costs"]):

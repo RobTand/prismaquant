@@ -157,6 +157,41 @@ def test_lowest_E_within_the_sub_budget_without_acceptance_points():
         select_mtp_rungs(_payload(), byte_budget=tighter - 1, constants=CONSTANTS)
 
 
+def test_fixed_group_formats_intersect_the_priced_eligible_menu():
+    from prismaquant.glm_mtp_selection import select_mtp_rungs
+
+    payload = _payload()
+    bf16_wire = "TESSERA_BF16_K1_R1024"
+    for name in ROUTED:
+        payload["costs"][name][bf16_wire] = _row(
+            name, bf16_wire, [0.040, 0.041, 0.039, 0.040],
+            payload["costs"][name][R1024]["probe_identity"])
+        payload["wire_bytes"][name][bf16_wire] = payload["wire_bytes"][name][R1024]
+    budget = _bytes(R1024, "BF16")
+    default = select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS)
+    assert default["rung_by_group"]["routed"] == R1024
+
+    fixed = {"routed": bf16_wire, "shared": "BF16"}
+    selected = select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS,
+                                fixed_formats=fixed)
+    assert selected["rung_by_group"] == fixed
+    assert selected["fixed_formats"] == fixed
+    assert selected["E"] > default["E"]
+    assert all(selected["assignment"][name] == "BF16" for name in SHARED)
+    with pytest.raises(ValueError, match="unknown groups"):
+        select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS,
+                         fixed_formats={"other": bf16_wire})
+    with pytest.raises(ValueError, match="missing or ineligible"):
+        select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS,
+                         fixed_formats={"routed": "TESSERA_E2M1_K2_R896"})
+    with pytest.raises(ValueError, match="missing or ineligible"):
+        select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS,
+                         fixed_formats=fixed, eligible=lambda _unit, rung: rung != bf16_wire)
+    with pytest.raises(ValueError, match="no rung fits"):
+        select_mtp_rungs(payload, byte_budget=budget - 1, constants=CONSTANTS,
+                         fixed_formats=fixed)
+
+
 def test_bf16_is_offered_only_for_a_bf16_source():
     from prismaquant.glm_mtp_selection import select_mtp_rungs
 
