@@ -45,6 +45,7 @@ from safetensors.torch import save_file  # noqa: E402
 
 from prismaquant import genuine_weight_initialization  # noqa: E402
 from prismaquant import glm_mtp, glm_mtp_capture  # noqa: E402
+from prismaquant import tessera_hessian as th  # noqa: E402
 from prismaquant.export_native_compressed import _split_packed_expert_tensor  # noqa: E402
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile  # noqa: E402
 from prismaquant.routed_experts import profile_declared_packed_expert_projections  # noqa: E402
@@ -399,6 +400,13 @@ def test_boundary_records_are_checked_before_any_read():
 # --------------------------------------------------------------------------
 
 N_SEQUENCES, SEQ_LEN, MAX_ROWS = 4, 13, 4
+#: The corpus a campaign row's draw names (see the ``mtp_source`` fixture).
+CALIBRATION_TEXT = "the tiny MTP checkpoint's calibration corpus"
+
+
+def _calibration_rows(ids):
+    """The draw as ``tessera_campaign._calibration_tokens`` returns it."""
+    return [ids[index:index + 1] for index in range(ids.shape[0])]
 LAST = BACKBONE - 1
 DENSE_UNIT = "model.language_model.layers.0.mlp.down_proj"
 
@@ -498,10 +506,15 @@ def mtp_source(request, tmp_path, monkeypatch):
         dtype="torch.float32", layers_prefix="model.language_model.layers.",
         num_layers=BACKBONE, persistent_tensors=2, derived_buffers=0,
         state_sha256="a" * 64, source_map_sha256="b" * 64)
-    calibration = {"fit_ids_sha256": "d" * 64, "fit_tokens": N_SEQUENCES * SEQ_LEN,
-                   "nsamples": N_SEQUENCES, "seqlen": SEQ_LEN, "seed": 0,
-                   "source": "synthetic", "split_role": "calibration",
-                   "text_sha256": "e" * 64}
+    # The draw a campaign row recomputes from its own tokens
+    # (``tessera_campaign._calibration_tokens``, which a campaign test replaces
+    # with CALIBRATION_TEXT and these ids): the body census's rows give the
+    # (max, min) pair, as the real body census's do.
+    ids = torch.randint(2, 128, (N_SEQUENCES, SEQ_LEN), generator=torch.Generator().manual_seed(31))
+    calibration = th.calibration_identity(
+        CALIBRATION_TEXT, _calibration_rows(ids), fit_tokens=4,
+        source="wikitext-2-raw-v1/train", split_role="calibration", model=str(source),
+        seed=0, nsamples=N_SEQUENCES, seqlen=SEQ_LEN, fit_tokens_min=4)
     # The body census's producer block: the producer's own seal of this
     # checkpoint, and the nominal question the body asked for each stack.
     producer = {"schema": "tessera.expert_projection.v1",
@@ -512,7 +525,7 @@ def mtp_source(request, tmp_path, monkeypatch):
                              seed=0, layer_stride=1),
         groups={"u:" + DENSE_UNIT: [DENSE_UNIT]}, dense_targets=[DENSE_UNIT],
         expert_targets=[], shapes={DENSE_UNIT: [64, 128]},
-        identity={"text_sha256": "e" * 64, "fit_ids_sha256": "d" * 64},
+        identity={key: calibration[key] for key in ("text_sha256", "fit_ids_sha256")},
         expert_projection={"producer": producer, "request": {
             "model.language_model.layers.1.mlp.experts": dict(BODY_REQUEST)}},
         model_load_contract=contract,
@@ -525,7 +538,6 @@ def mtp_source(request, tmp_path, monkeypatch):
     capture = cc.publish_capture(tmp_path / "canonical", census_path=census_path,
         identity=canonical, acts={DENSE_UNIT: rows}, hessians={DENSE_UNIT: rows.T @ rows},
         counts=census["counts"], maxima=census["max_abs"])
-    ids = torch.randint(2, 128, (N_SEQUENCES, SEQ_LEN), generator=torch.Generator().manual_seed(31))
     return SimpleNamespace(source=source, text_config=text_config, mtp=mtp, census=census,
                            census_path=census_path, canonical=canonical, capture=capture,
                            ids=ids, root=tmp_path)
