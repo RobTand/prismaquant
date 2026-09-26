@@ -40,8 +40,9 @@ class SourceScope:
     streamed source context builds ``build_skeleton``'s meta model in place of
     the body skeleton and maps checkpoint keys through ``live_name``, so the
     one loader (weight map, packer, authentication, layer cache and prefetch
-    pool) reads these layers. A scope is snapshot-only: it has no forward and
-    no initialization audit.
+    pool) reads these layers: selected snapshots read them, and preparation
+    installs them (PQ #1338). A scope has no body forward and no
+    initialization audit.
 
     * ``layers``: the checkpoint layer indices the scope covers.
     * ``num_layers``: the index bound the loader checks layers against.

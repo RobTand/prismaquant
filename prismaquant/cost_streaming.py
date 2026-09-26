@@ -5190,7 +5190,7 @@ class SelectedSource(Protocol):
 
     The body's ``StreamedCausalLM`` satisfies it, and so does one built over a
     profile-declared source scope (``build_streamed_causal_lm(source_scope=)``),
-    which has no forward. ``SELECTED_SOURCE_MEMBERS`` lists these members; a
+    which has no body forward. ``SELECTED_SOURCE_MEMBERS`` lists these members; a
     test pins it and keeps the campaign's ``runner.`` uses inside it.
     """
 
@@ -5432,6 +5432,8 @@ class StreamedCausalLM:
     def _prepare(self, input_ids: torch.Tensor):
         if getattr(self.context, 'source_snapshot_only', False):
             raise RuntimeError('snapshot-only source cannot execute a forward')
+        if getattr(self.context, 'source_scope', None) is not None:
+            raise RuntimeError(f'source scope {self.context.source_scope!r} cannot execute a forward')
         ids = input_ids.to(self.device)
         position_ids = torch.arange(
             ids.size(-1), device=self.device
@@ -5834,8 +5836,9 @@ def build_streamed_causal_lm(
     ``planned_source_window_bytes`` bounds the prefetch note by the sealed
     plan's source window (PQ #1134); None leaves the note as before.
 
-    ``source_scope`` names a profile-declared out-of-body source (PQ #1316);
-    it requires ``source_snapshot_only``. None builds the body, as before.
+    ``source_scope`` names a profile-declared out-of-body source (PQ #1316).
+    The runner reads and installs only the scope's layers and never runs the
+    body forward (PQ #1338). None builds the body, as before.
     """
     from prismaquant.streaming_model import _build_streaming_context
 

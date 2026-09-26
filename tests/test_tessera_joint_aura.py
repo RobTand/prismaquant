@@ -417,8 +417,9 @@ def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypat
         assert result["sampling_session"]["sha256"] == sha(session)
 
 
+@pytest.mark.parametrize("scope", [None, "mtp"])
 @pytest.mark.parametrize("command", ["prepare", "run"])
-def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch, command):
+def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch, command, scope):
     import torch
     from types import SimpleNamespace
     from prismaquant import tessera_joint_aura as bridge, calibration_data, cost_streaming, gpu_guard
@@ -463,13 +464,17 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
     def inspect(*_args, **kwargs):
         assert {key: kwargs.get(key) for key in prefetch} == prefetch
         assert kwargs.get("source_authentication") is (source_owner if command == "prepare" else None)
+        # A plan's source scope (PQ #1338) reaches the one streamed builder;
+        # a body plan passes none, so the body call is unchanged.
+        assert kwargs.get("source_scope", "absent") == (scope or "absent")
         raise Reached
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", inspect)
     _stub_device_envelope(monkeypatch, bridge)
     config = {"model": "fixture", "inputs": {}, "output_root": str(tmp_path),
         "source_prefetch": prefetch, "max_gpu_bytes": 2048,
         "calibration_input": {"path": "fixture", "sha256": "a" * 64},
-        "execution": {"production_act_scales": "0", "n_calib_samples": 512, "calib_seqlen": 512}}
+        "execution": {"production_act_scales": "0", "n_calib_samples": 512, "calib_seqlen": 512},
+        **({"source_scope": scope} if scope is not None else {})}
     with pytest.raises(Reached):
         bridge.execute(command, config, plan_sha256="b" * 64)
 

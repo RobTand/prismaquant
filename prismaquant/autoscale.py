@@ -152,7 +152,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
 
     ``source_scope`` prices a profile-declared out-of-body source (PQ #1316)
     the way the loader reads it: the scope's own key mapping, layer prefix and
-    layers. A scope is snapshot-only, so it requires ``selected_source_units``.
+    layers. A scope has no forward, so it requires ``selected_source_units``.
     """
     # Ahead of every return in this function, including the legacy one
     # below: a caller that declares a malformed reservation must be
@@ -175,7 +175,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     profile = detect_profile(str(model_path))
     scope = None if source_scope is None else profile.source_scope(source_scope, model_path)
     if scope is not None and selected_source_units is None:
-        raise ValueError(f'source scope {source_scope!r} is snapshot-only: '
+        raise ValueError(f'source scope {source_scope!r} has no forward: '
                          'it prices selected source units only')
     cfg = json.loads((Path(model_path)/'config.json').read_text())
     text = cfg.get('text_config') or cfg
@@ -434,7 +434,7 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     """Bound selected-source preparation separately from resident encoding.
 
     ``source_scope`` plans a profile-declared out-of-body source (PQ #1316);
-    it is snapshot-only, so it requires ``selected-tensors-v1``.
+    it has no forward, so it requires ``selected-tensors-v1``.
 
     This extends the source loader's header/dtype accounting. No source
     forward or calibration accumulation occurs. The existing plane-keyed

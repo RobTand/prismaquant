@@ -1858,6 +1858,12 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     layers = defaultdict(list)
     for name in targets:
         layers[runner.layer_index_for_qname(name)].append(name)
+    # The layers this source can read, in walk order: every body layer, or a
+    # source scope's own (``SelectedSource.source_layers``, PQ #1338). The
+    # prefetch window and its settlement run over this walk, so a scope never
+    # installs, prefetches or settles a layer it does not hold.
+    walk = tuple(runner.source_layers)
+    _require(walk and set(layers) <= set(walk), "census units lie outside the source's layers")
     projected = {name: unit for units in (data.census.get("expert_projection") or {}).get("stacks", {}).values()
                  for name, unit in units.items()}
     renders = {name: tuple(fmt for fmt in fmts if fmt != "BF16")
@@ -1891,14 +1897,14 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
         # first here because the prefetch window this walk opens before any
         # install reads exactly the source extents that phase declares -- even
         # when every one of the layer's own units is already qualified.
-        first = [name for name in sorted(layers.get(0, ())) if name not in completed]
-        phase = layer_phase(0, first)
+        first = [name for name in sorted(layers.get(walk[0], ())) if name not in completed]
+        phase = layer_phase(walk[0], first)
         if phase is not None:
             current_prewarm_phase = phase
             _pb_commit(committed_units, phase, unit=first[0] if first else None)
-    for depth in range(min(runner.num_layers, runner.prefetch_lookahead + 1)):
+    for depth in walk[:runner.prefetch_lookahead + 1]:
         runner.context.schedule_prefetch(depth)
-    for layer in range(runner.num_layers):
+    for position, layer in enumerate(walk):
         names = sorted(layers.get(layer, ()))
         walk_names = [name for name in names if name not in completed]
         if prewarm_phase_starts is not None:
@@ -1909,15 +1915,19 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                 _pb_commit(committed_units, phase, unit=walk_names[0] if walk_names else None)
                 current_prewarm_phase = phase
         runner.context.install(layer, require_prefetched=runner.require_prefetched_residency)
-        runner.context.schedule_prefetch(layer + runner.prefetch_lookahead)
+        ahead = position + runner.prefetch_lookahead
+        # Past the walk's end this is ``layer + lookahead``, which the context
+        # ignores as it always has, so the body's call sequence is unchanged.
+        runner.context.schedule_prefetch(walk[ahead] if ahead < len(walk)
+                                         else layer + runner.prefetch_lookahead)
         members = [targets[name] for name in names if isinstance(targets[name], PackedExpertProjection)]
         try:
             targets.update({member.qname: member for member in refresh_packed_expert_projections(members, runner.profile)})
             if not names:
                 continue
             if policy is not None:
-                runner.context.settle_prefetched_layers(range(layer + 1,
-                    min(runner.num_layers, layer + 1 + runner.prefetch_lookahead)))
+                runner.context.settle_prefetched_layers(
+                    walk[position + 1:position + 1 + runner.prefetch_lookahead])
             capture_windows = [names] if policy is None else [(name,) for name in names]
             layer_stats = []
             for unit_names in capture_windows:
@@ -2246,6 +2256,9 @@ def _load_plan(path, digest, *, projection_runtime=True, defer_pool_reads=False)
     from .glm_source_derivative import normalize_source_derivative
     normalize_source_derivative(execution.get('source_derivative'))
     normalize_qualification_window(config.get("qualification_window"))
+    _require(config.get("source_scope") is None or
+             (type(config["source_scope"]) is str and config["source_scope"]),
+             "a plan's source_scope names a profile-declared scope")
     from .perturbed_x_cache import normalize_verified_activation_load
     if normalize_verified_activation_load(config.get('capture_load_policy')) is not None:
         _require(config.get('qualification_window') is not None,
@@ -2767,6 +2780,10 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             **({'source_derivative': execution['source_derivative']} if execution.get('source_derivative') is not None else {}),
             **({'source_authentication': source_authentication}
                if source_authentication is not None else {}),
+            # A plan over a profile-declared source scope (GLM's MTP layer,
+            # PQ #1338) builds the same runner over that scope's layers only.
+            **({'source_scope': config['source_scope']}
+               if config.get('source_scope') is not None else {}),
             **_planned_source_window(config),
             **source_prefetch)
         from .glm_capture_compatibility import require_capture_compatibility
