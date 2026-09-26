@@ -21,13 +21,20 @@ from fleet_sdk import (
 
 
 def _foreign_tree(tmp_path: Path) -> Path:
-    """A ``src`` holding a ``prismabuild`` package, as a generation has."""
+    """A ``src`` holding a ``prismabuild`` package, as a generation has.
+
+    Its ``reader_lease`` carries every name the injection checks for, so
+    only the check on where the module came from can refuse it.
+    """
+
+    from prismaquant.staged_lease import _REQUIRED_NAMES
 
     src = tmp_path / "generation" / "src"
     package = src / "prismabuild"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("FOREIGN = True\n")
-    (package / "reader_lease.py").write_text("FOREIGN = True\n")
+    (package / "reader_lease.py").write_text("FOREIGN = True\n" + "".join(
+        f"{name} = None\n" for name in _REQUIRED_NAMES))
     (package / "pool.py").write_text("FOREIGN = True\n")
     return src
 
