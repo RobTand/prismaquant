@@ -52,6 +52,7 @@ from prismaquant.joint_layer_quanta import (
     quantum_id,
     roster_digest,
 )
+from .digests import file_sha256hex
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
@@ -140,7 +141,7 @@ def _load_json(path: Path, *, where: str) -> object:
 
 def _sha_file(path: Path, *, where: str) -> str:
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        return file_sha256hex(path)
     except OSError as exc:
         raise JoinRefused(f"{where}: unreadable file at {path}: {exc}") from exc
 

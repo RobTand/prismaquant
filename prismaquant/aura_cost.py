@@ -64,6 +64,7 @@ from prismaquant.routed_experts import (
     refresh_packed_expert_projections,
     resolve_routed_expert_profile,
 )
+from .cost_stage_checkpoint import unit_path
 from .digests import DIRECT_UTF8_STRICT, canonical_json
 
 SCHEMA = "prismaquant.aura_cost.v1"
@@ -169,9 +170,7 @@ def _atomic_write_bytes(path: Path, payload: bytes) -> None:
         os.close(directory_fd)
 
 
-def _aura_unit_checkpoint_path(checkpoint_dir: Path, qname: str) -> Path:
-    digest = hashlib.sha256(str(qname).encode("utf-8")).hexdigest()
-    return checkpoint_dir / "units" / f"{digest}.pkl"
+_aura_unit_checkpoint_path = unit_path
 
 
 def _checkpoint_identity_mismatch(

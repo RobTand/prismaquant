@@ -24,6 +24,7 @@ from .digests import (  # noqa: F401 -- re-exported: one spelling
     canonical_json_sha256,
     canonical_json_sha256_normalized,
 )
+from .digests import text_sha256hex
 
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
@@ -167,8 +168,7 @@ def merge_identity_migrations(per_source: Mapping[str, object], *,
 
 
 def unit_path(root: Path, qname: str) -> Path:
-    digest = hashlib.sha256(str(qname).encode("utf-8")).hexdigest()
-    return root / "units" / f"{digest}.pkl"
+    return root / "units" / f"{text_sha256hex(str(qname))}.pkl"
 
 
 def _mismatch(

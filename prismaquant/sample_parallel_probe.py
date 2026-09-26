@@ -13,6 +13,7 @@ import argparse
 import copy
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from functools import partial
 import hashlib
 import json
 import os
@@ -38,7 +39,7 @@ from prismaquant.sample_parallel_probe_contract import (
 )
 from prismaquant.sensitivity_probe import load_calibration
 from .schemas import strict_json_loads
-from .digests import DIRECT_ASCII_STRICT, DIRECT_UTF8_STRICT
+from .digests import DIRECT_ASCII_STRICT, DIRECT_UTF8_STRICT, file_sha256hex
 
 
 CALIBRATION_SCHEMA = "prismaquant.sample_parallel_probe.calibration.v1"
@@ -369,12 +370,7 @@ def _normalize_partition_contract(
     return row
 
 
-def _sha256_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+_sha256_file = partial(file_sha256hex, block_size=1024 * 1024)
 
 
 def _opened_stat_identity(value: os.stat_result) -> tuple[int, ...]:

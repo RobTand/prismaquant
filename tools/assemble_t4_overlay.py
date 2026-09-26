@@ -17,7 +17,6 @@ published.
 """
 import argparse
 import copy
-import hashlib
 import json
 import os
 import pickle
@@ -30,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prismaquant.joint_catalog_extension import extended_roster
 from prismaquant.tessera_joint_aura import render_origin_census
 from rebind_t4_qualified_results import SCHEMA as REBINDING_SCHEMA, cell_sha256, require_rebound
+from prismaquant.digests import bytes_sha256hex
 
 PANEL = Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/allocation/joint-panel')
 OLDPLAN = PANEL / 'complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.plan.json'
@@ -38,8 +38,7 @@ OLDPREP = PANEL / 'complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-0
 EXTENDED_CELLS = 234278
 
 
-def sha(raw):
-    return hashlib.sha256(raw).hexdigest()
+sha = bytes_sha256hex
 
 
 def doc(value):

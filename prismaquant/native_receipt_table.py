@@ -62,7 +62,6 @@ then refuses it by name, which is the truthful state of the axis (PQ #237,
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import pickle
 import statistics
@@ -77,6 +76,7 @@ from .measured_runtime_prices import (
     identity_sha256, load_measured_runtime_table, parse_runtime_context,
 )
 from .runtime_provenance import SCHEMA as RELATION_SCHEMA, recompute_fixed_resources
+from .digests import file_sha256hex
 
 EMISSION_SCHEMA = "prismaquant.native_receipt_table_emission.v1"
 #: The CLI's three answers; see the module docstring for what each one means.
@@ -139,9 +139,7 @@ PANEL_STRUCTURE = {DENSE_PANEL_SCHEMA: "dense", MOE_PANEL_SCHEMA: "routed_moe"}
 #: emitter was the stricter of the two, and it was the one that refused.
 PER_ROUTE_RUNTIME_FIELD = "native_libraries"
 
-def file_sha256(path: Path) -> str:
-    with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+file_sha256 = file_sha256hex
 
 
 def _resolve(path: str | Path, base: Path) -> Path:

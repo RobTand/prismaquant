@@ -50,6 +50,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Mapping, Sequence
 
+from .digests import text_sha256hex
+
 __all__ = [
     "HESSIAN_IDENTITY_FIELDS",
     "activation_source",
@@ -96,7 +98,7 @@ def hessian_from_rows(rows) -> "Any":
 
 def text_sha256(text: str) -> str:
     """The calibration corpus's identity."""
-    return hashlib.sha256(str(text).encode("utf-8")).hexdigest()
+    return text_sha256hex(str(text))
 
 
 def token_ids_sha256(batches: Sequence) -> str:

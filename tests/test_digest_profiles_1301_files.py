@@ -135,3 +135,61 @@ def test_text_digest_site(name):
 def test_unit_path_site(ref, name):
     site = _site(ref)
     GOLDEN.call(lambda: site(Path("/root"), _TEXT_INPUTS[name]))
+
+
+# --- the owners ---------------------------------------------------------------
+
+_EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+_ABC = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+def test_each_profile_pins_its_digest(tmp_path):
+    assert digests.bytes_sha256hex(b"") == _EMPTY
+    assert digests.bytes_sha256hex(memoryview(b"abc")) == _ABC
+    assert digests.text_sha256hex("abc") == _ABC
+    path = tmp_path / "abc"
+    path.write_bytes(b"abc")
+    for block_size in (1, 2, 3, digests.FILE_BLOCK_BYTES):
+        assert digests.file_sha256hex(path, block_size=block_size) == _ABC
+        assert digests.file_sha256hex(str(path), block_size=block_size) == _ABC
+    assert digests.FILE_BLOCK_BYTES == 8 << 20
+
+
+#: ``(site, owner, block size the site keeps or None)``.
+BINDINGS = [
+    ("prismaquant.anchored_cost._sha256_file", digests.file_sha256hex, None),
+    ("prismaquant.cost_streaming._file_sha256", digests.file_sha256hex, 16 * _MIB),
+    ("prismaquant.joint_adjoint_band._sha256_file", digests.file_sha256hex, _MIB),
+    ("prismaquant.joint_projection_backend._sha", digests.file_sha256hex, None),
+    ("prismaquant.lane_eligibility._sha256", digests.file_sha256hex, None),
+    ("prismaquant.native_receipt_table.file_sha256", digests.file_sha256hex, None),
+    ("prismaquant.production_cache_stripes._sha256", digests.file_sha256hex, _MIB),
+    ("prismaquant.sample_parallel_probe._sha256_file", digests.file_sha256hex, _MIB),
+    ("prismaquant.stage_a_chain_split._file_sha256", digests.file_sha256hex, 4 * _MIB),
+    ("prismaquant.tessera_anchored_surface._sha", digests.file_sha256hex, _MIB),
+    ("prismaquant.tessera_joint_aura._sha", digests.file_sha256hex, None),
+    ("prismaquant.tessera_legal_domain._file_digest", digests.file_sha256hex, None),
+    ("prismaquant.tessera_materialization._sha", digests.file_sha256hex, None),
+    ("prismaquant.union_production_cache._file_sha256", digests.file_sha256hex, None),
+    ("prismaquant.emu_forward_kl._sha256", digests.bytes_sha256hex, None),
+    ("tools.assemble_t4_overlay.sha", digests.bytes_sha256hex, None),
+    ("tools.build_t4_overlay_catalog.sha", digests.bytes_sha256hex, None),
+    ("tools.extract_layer8_native_metadata.sha", digests.bytes_sha256hex, None),
+]
+
+
+@pytest.mark.parametrize("ref,owner,block_size", BINDINGS, ids=[row[0] for row in BINDINGS])
+def test_each_site_binds_its_owner(ref, owner, block_size):
+    site = _site(ref)
+    if block_size is None:
+        assert site is owner
+    else:
+        assert site.func is owner and site.args == () and site.keywords == {"block_size": block_size}
+
+
+def test_the_unit_path_and_the_full_kl_digest_have_one_owner():
+    from prismaquant import aura_cost, cost_stage_checkpoint
+    from tools import full_kl_teacher_payload, measure_vllm_full_kl
+
+    assert aura_cost._aura_unit_checkpoint_path is cost_stage_checkpoint.unit_path
+    assert measure_vllm_full_kl._file_sha256 is full_kl_teacher_payload.file_sha256

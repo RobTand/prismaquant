@@ -56,6 +56,7 @@ from .tessera_formats import (
     scale_plane_name,
     tessera_wire_recipe,
 )
+from .digests import file_sha256hex
 
 
 SCHEMA = "prismaquant.tessera_legal_domain.v1"
@@ -279,12 +280,7 @@ TESSERA_EQUIVALENT_SOURCE_STATES = (
 )
 
 
-def _file_digest(path: str) -> str:
-    """sha256 of a file's bytes."""
-    import hashlib
-
-    with open(path, "rb") as handle:
-        return hashlib.sha256(handle.read()).hexdigest()
+_file_digest = file_sha256hex
 
 
 def tessera_source_state() -> dict[str, object]:

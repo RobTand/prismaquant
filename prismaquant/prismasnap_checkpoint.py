@@ -52,6 +52,7 @@ from .prismasnap import (
     search_diagonal_scale,
 )
 from .schemas import strict_json_loads
+from .digests import file_sha256hex
 
 
 PLAN_SCHEMA = "prismaquant.prismasnap.plan.v1"
@@ -313,14 +314,7 @@ _BF16_REALIZED_UPDOWN_KEYS = frozenset(
 
 
 def _sha256_file(path: Path, chunk_bytes: int = 16 << 20) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(chunk_bytes)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
+    return file_sha256hex(path, block_size=chunk_bytes)
 
 
 def _atomic_json(path: Path, payload: object) -> None:

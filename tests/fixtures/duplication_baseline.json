@@ -46,18 +46,6 @@
    "tools/reseal_campaign_identity.py::atomic_write"
   ],
   [
-   "prismaquant/cluster_campaign.py::_file_sha256",
-   "prismaquant/cost_streaming.py::_file_sha256"
-  ],
-  [
-   "prismaquant/cluster_campaign.py::_file_sha256",
-   "prismaquant/union_production_cache.py::_file_sha256"
-  ],
-  [
-   "prismaquant/cost_streaming.py::_file_sha256",
-   "prismaquant/union_production_cache.py::_file_sha256"
-  ],
-  [
    "prismaquant/export_gguf.py::build_imatrix_from_act_cache",
    "prismaquant/export_gguf_direct.py::build_direct_imatrix"
   ],
@@ -196,10 +184,6 @@
   ],
   "_file_sha256": [
    "prismaquant/cluster_campaign.py",
-   "prismaquant/cost_streaming.py",
-   "prismaquant/stage_a_chain_split.py",
-   "prismaquant/union_production_cache.py",
-   "tools/measure_vllm_full_kl.py",
    "tools/prismaquant_runtime_snapshot.py"
   ],
   "_finite": [
@@ -543,32 +527,22 @@
    "prismaquant/joint_aura_run_transition.py",
    "prismaquant/joint_aura_source_transition.py",
    "prismaquant/joint_cost_read_schedule.py",
-   "prismaquant/joint_projection_backend.py",
    "prismaquant/measured_runtime_prices.py",
    "prismaquant/native_operator_panel.py",
-   "prismaquant/tessera_anchored_surface.py",
-   "prismaquant/tessera_joint_aura.py",
-   "prismaquant/tessera_materialization.py",
    "tools/band_serial_handoff_live_pair.py",
    "tools/dispatch_stage_a_split.py"
   ],
   "_sha256": [
    "prismaquant/artifact_collection.py",
    "prismaquant/cluster_campaign.py",
-   "prismaquant/emu_forward_kl.py",
-   "prismaquant/lane_eligibility.py",
    "prismaquant/prepriced_cost.py",
-   "prismaquant/production_cache_stripes.py",
    "prismaquant/quality_prefill_pb_adapter.py",
    "tools/derive_retained_window_budget.py",
    "tools/kl_ab.py"
   ],
   "_sha256_file": [
-   "prismaquant/anchored_cost.py",
-   "prismaquant/joint_adjoint_band.py",
    "prismaquant/prismasnap_checkpoint.py",
    "prismaquant/prismasnap_validation.py",
-   "prismaquant/sample_parallel_probe.py",
    "tools/build_prismasnap_27b_campaign.py",
    "tools/chain_roll_bench.py",
    "tools/measure_served_gold.py",
@@ -713,7 +687,6 @@
    "prismaquant/native_moe_execution_binding.py"
   ],
   "file_sha256": [
-   "prismaquant/native_receipt_table.py",
    "prismaquant/shipcard.py",
    "tools/full_kl_teacher_payload.py"
   ],
@@ -791,13 +764,10 @@
    "prismaquant/joint_stage_b_head.py"
   ],
   "sha": [
-   "tools/assemble_t4_overlay.py",
    "tools/benchmarks/joint_validation_pair.py",
    "tools/build_t4_logical_request.py",
-   "tools/build_t4_overlay_catalog.py",
    "tools/build_t4_recovery_request.py",
    "tools/check_t4_overlay_prepare.py",
-   "tools/extract_layer8_native_metadata.py",
    "tools/rebind_t4_qualified_results.py"
   ],
   "sha256": [

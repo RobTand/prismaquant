@@ -49,6 +49,7 @@ from .prismasnap_checkpoint import (
     _derivation_digest,
 )
 from .schemas import strict_json_loads
+from .digests import file_sha256hex
 
 
 PROVENANCE_SCHEMA = "prismaquant.prismasnap.provenance.v1"
@@ -360,11 +361,7 @@ def _load_json(path: Path, *, where: str) -> dict[str, Any]:
 def _sha256_file(path: Path, chunk_bytes: int = 16 << 20) -> str:
     if path.is_symlink() or not path.is_file():
         raise RuntimeError(f"PrismaSnap evidence is not a regular file: {path}")
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while block := handle.read(chunk_bytes):
-            digest.update(block)
-    return digest.hexdigest()
+    return file_sha256hex(path, block_size=chunk_bytes)
 
 
 def _provenance_digest(payload: Mapping[str, object]) -> str:
