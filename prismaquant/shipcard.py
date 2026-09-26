@@ -1472,6 +1472,19 @@ def build_shipcard(
     from prismaquant.export_output_safety import directory_publication_target
 
     build_payload = dict(build or {})
+    from .layer_config import prefill_frontier_replay_claim, read_layer_config_metadata
+
+    # Validate a supplied marker before adding claims; do not silently repair
+    # a build anchor whose research stamps were stripped.
+    prefill_frontier_replay_claim(build_payload)
+    recipe = build_payload.get("layer_config")
+    if recipe and Path(recipe).is_file():
+        claim = prefill_frontier_replay_claim(read_layer_config_metadata(recipe))
+        if claim:
+            for key, value in claim.items():
+                if key in build_payload and build_payload[key] != value:
+                    raise ValueError(f"prefill frontier replay build.{key} differs from recipe")
+            build_payload.update(claim)
     slots = list(REQUIRED_SLOTS) + [
         slot for slot in lane_gate_slots(lane) if slot not in REQUIRED_SLOTS
     ]
@@ -3591,6 +3604,12 @@ def _verify_build_block(card: Mapping[str, Any]) -> list[str]:
     build = card.get("build")
     if not isinstance(build, Mapping):
         return problems
+    from .layer_config import prefill_frontier_replay_claim
+
+    try:
+        prefill_frontier_replay_claim(build)
+    except ValueError as exc:
+        problems.append(str(exc))
     fisher = build.get("kv_shared_fisher")
     if isinstance(fisher, Mapping):
         flag = fisher.get("unvalidated_kv_fisher_correction")

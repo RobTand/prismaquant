@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Research frontier replay provenance (2026-09-26, branch
+`astra/prefill-frontier-replay-1428`, PQ #1428): the replay/shipcard contract
+below is derived from `prefill_frontier.py`, the allocator's shared writer,
+`layer_config.py`, `tessera_export_lane.py`, and `shipcard.py`. No pipeline
+or serving default changes; no new runtime or placement qualification.
+
 Re-stamped 2026-09-26 (`astra/routed-capture-all-layers-1427`, PQ #1427):
 research native routed-input acquisition now covers GLM source layers 3..44.
 The source initialization schemas and the PACT runtime/placement gates are
@@ -17770,8 +17776,8 @@ and its twin, `device_memory_bytes`, `assignment_sha256` and
 `assignment_file_provenance` naming the run that published it), `refusal_reason`,
 `nondominated` -- plus `saturation` (measured at the
 table's upper bound and verified), `slo_axis` (table-derived bounds), `monotone_loss`, and
-provenance (table identity, context, cost digest, git commit, allocator argv, bootstrap
-draws/seed). The intervals resample each priced row's own samples
+provenance (table identity, context, cost and probe digests, allocator cwd, git commit,
+allocator argv, bootstrap draws/seed). The intervals resample each priced row's own samples
 (`measured_runtime_prices.bootstrap_sum`, shared with
 `experiments/pq_prefill_accuracy_curve.py`) and are published, never thresholded: every
 envelope, saturation and monotonicity decision is taken on the point estimates. The grid is
@@ -17780,6 +17786,30 @@ there is no default and no knee. An exact-search bound refusal inside a sweep is
 `refusal_reason`; a single solve still exits. Loader refusals (stale cost digest, bad rows,
 context drift) surface unchanged. Synthetic CPU coverage only until a real v2 table exists
 (`docs/design/joint_aura_runtime_allocation.md` §Frontier sweep names what Tessera owes).
+
+**Research replay (2026-09-26, #1428).**
+`python -m prismaquant.prefill_frontier replay --frontier frontier.json
+--assignment-sha256 DIGEST --layer-config research-layer.json` replays the
+recorded allocator arguments, checks their cost/table/context/scope identities,
+and re-solves the tightest recorded feasible SLO for that digest. Both the
+re-solved and final expanded assignment must equal the selected assignment.
+The allocator's single layer-config writer emits full metadata (including
+Tessera scopes, Hessian/priced-scale bindings and routed projections); there
+is no replay-specific format writer or hardcoded three-rung menu. The output
+is create-only. New sweeps bind probe bytes and record cwd for audit, not as
+an admission condition (PB may use a different checkout per action). Recorded
+paths must still resolve to the bound inputs. Legacy v1 sweeps without a probe
+digest explicitly carry `probe_bound_by_sweep: false`.
+
+The config metadata and shipcard build carry `research_only: true`,
+`certifies_placement: false`, and `prefill_frontier_replay` provenance. Tessera
+preflight refuses the sweep's shorthand stub, shape-only configs without the
+replay marker, and replay configs missing either stamp; shipcard construction
+and offline verification refuse missing/contradictory stamps as well. These
+labels grant no serving qualification: native-row/world equality, scope and
+wire admission, fixed-resource refusals, and every shipcard slot including
+`route.trace` still apply. Plain shape-only single-solve and device-budget
+refusals stay unchanged. CPU gates: `tests/test_prefill_frontier_replay.py`.
 
 ### 4.6 Selection
 
