@@ -34,6 +34,7 @@ __all__ = [
     "add_gold_engine_arguments",
     "gold_engine_kwargs",
     "gold_fabric_request",
+    "gold_provenance",
     "headless_peer_argv",
     "validate_gold_engine_arguments",
 ]
@@ -254,3 +255,45 @@ def headless_peer_argv(
             )
         argv.extend([flag, str(value)])
     return argv
+
+
+def gold_provenance(tool: str, args: argparse.Namespace, *, engine_kwargs,
+                    spec_decode_detected, producer_identity, self_manifest,
+                    serve_image) -> dict:
+    """Serving-stack + code provenance for one gold result dict (R15).
+
+    The one owner for both in-process gold tools (PQ #1302). Each tool passes
+    its own module globals and helpers, so a test that replaces one of them
+    on the tool still reaches this body.
+
+    A TP>1 number is not readable without the fabric it crossed, and the
+    fabric is an environment request rather than an engine argument, so it
+    rides beside the topology instead of inside it. On a single node there is
+    no collective to label, but the block is still recorded: "this ran on one
+    box" is the honest reading of an absent fabric, and omitting the key would
+    make a TP1 receipt and an unlabelled TP2 receipt look alike.
+    """
+    producer = producer_identity(tool)
+    topology = gold_engine_kwargs(args)
+    extra = {
+        "measurement_tool": tool,
+        "producer_identity": producer,
+        "gold_engine_configuration": topology,
+        "gold_fabric_request": gold_fabric_request(),
+    }
+    if int(topology.get("nnodes", 1)) > 1 and engine_kwargs is not None:
+        # The peer argv this coordinator's own kwargs imply. Recorded so the
+        # launcher that started rank 1 can be checked against the engine rank 0
+        # actually built, rather than trusted because both were typed by hand.
+        extra["headless_peer_argv"] = headless_peer_argv(
+            engine_kwargs, node_rank=1)
+    manifest = self_manifest(
+        extra=extra,
+        image=serve_image(args),
+    )
+    return {
+        "git_commit": producer["git_commit"],
+        "serve_fingerprint": manifest["serve_fingerprint"],
+        "serve_manifest": manifest,
+        "spec_decode_detected": spec_decode_detected,
+    }

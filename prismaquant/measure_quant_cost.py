@@ -45,22 +45,7 @@ from .render_score import (
     normalize_clipped_fisher_row_weights,
     resolve_fisher_row_weight_clip,
 )
-from .sensitivity_probe import grouped_linear_groups
-
-
-def _packed_expert_parent_for_projection(profile, projection_name: str) -> str | None:
-    if profile is None:
-        try:
-            from .model_profiles import DefaultProfile
-            profile = DefaultProfile()
-        except Exception:
-            profile = None
-    if profile is not None:
-        try:
-            return profile.packed_expert_parent_for_projection(projection_name)
-        except Exception:
-            pass
-    return None
+from .sensitivity_probe import _packed_expert_parent_for_projection, grouped_linear_groups
 
 
 def canonical_linear_name(name: str, profile=None) -> str:

@@ -33,7 +33,6 @@ import argparse
 import hashlib
 import inspect
 import json
-import subprocess
 from pathlib import Path
 from typing import Mapping
 
@@ -61,14 +60,9 @@ _CONFIDENT_PROB = 0.5
 
 
 def _git_commit() -> str | None:
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=Path(__file__).resolve().parent,
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip() or None
-    except Exception:
-        return None
+    from prismaquant.aura_cost import _git_head_commit
+
+    return _git_head_commit()
 
 
 def _sha256(data: bytes) -> str:

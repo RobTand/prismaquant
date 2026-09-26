@@ -181,6 +181,18 @@ class ModelProfile(ABC):
         """Return True if this profile claims responsibility for the
         given HF `model_type` / `architectures`."""
 
+    @staticmethod
+    def claims_by_name(model_type: str | None, architectures: list[str] | None,
+                       model_types: frozenset[str],
+                       architecture_prefixes: tuple[str, ...]) -> bool:
+        """The name claim most profiles make, in one place (PQ #1302):
+        one of ``model_types``, or any architecture starting with one of
+        ``architecture_prefixes``."""
+        if model_type in model_types:
+            return True
+        return any(arch.startswith(architecture_prefixes)
+                   for arch in architectures or ())
+
     @property
     @abstractmethod
     def name(self) -> str:

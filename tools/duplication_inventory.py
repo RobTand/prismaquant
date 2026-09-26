@@ -19,6 +19,11 @@ line. This scanner compares structure and names instead:
 ``tests/fixtures/duplication_baseline.json``, which only shrinks.
 ``--write-baseline`` rewrites the baseline after a consolidation removes
 entries.
+
+A pair that must stay two implementations is recorded in the baseline's
+``must_differ`` list with its reason (PQ #1302): for example, an independent
+reference oracle, or a sealed module whose bytes are bound into receipts.
+``--write-baseline`` keeps those records for pairs that still exist.
 """
 from __future__ import annotations
 
@@ -127,13 +132,18 @@ def main() -> int:
     parser.add_argument("--write-baseline", action="store_true")
     args = parser.parse_args()
     live = scan()
+    old = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.exists() else {}
+    pairs = {tuple(p) for p in live["near_duplicates"]}
+    live["must_differ"] = [row for row in old.get("must_differ", [])
+                           if tuple(row["pair"]) in pairs]
     if args.write_baseline:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
         BASELINE.write_text(json.dumps(live, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     groups = live["same_name_helpers"]
     print(f"near-duplicate pairs >= {THRESHOLD}: {len(live['near_duplicates'])}; "
           f"same-name helper groups: {len(groups)} "
-          f"({sum(len(v) for v in groups.values())} definitions)")
+          f"({sum(len(v) for v in groups.values())} definitions); "
+          f"must-differ pairs: {len(live['must_differ'])}")
     return 0
 
 

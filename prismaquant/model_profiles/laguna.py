@@ -38,9 +38,9 @@ class LagunaProfile(ModelProfile):
     @classmethod
     def matches(cls, model_type: str | None,
                 architectures: list[str] | None) -> bool:
-        if model_type == "laguna":
-            return True
-        return any(a.startswith("Laguna") for a in architectures or ())
+        return cls.claims_by_name(
+            model_type, architectures,
+            frozenset({"laguna"}), ("Laguna",))
 
     @property
     def name(self) -> str:

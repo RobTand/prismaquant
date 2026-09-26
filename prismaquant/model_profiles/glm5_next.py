@@ -207,9 +207,9 @@ class Glm5NextProfile(ModelProfile):
     @classmethod
     def matches(cls, model_type: str | None,
                 architectures: list[str] | None) -> bool:
-        if model_type in ("glm5_next", "glm5_next_text"):
-            return True
-        return any(a.startswith("Glm5Next") for a in architectures or ())
+        return cls.claims_by_name(
+            model_type, architectures,
+            frozenset({"glm5_next", "glm5_next_text"}), ("Glm5Next",))
 
     @property
     def name(self) -> str:

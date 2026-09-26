@@ -41,7 +41,7 @@ import torch.nn as nn
 
 from prismaquant import format_registry as fr
 from prismaquant.memory_management import env_truthy as _env_truthy
-from prismaquant.perturbed_x_cache import _maybe_clip_activations
+from prismaquant.perturbed_x_cache import _first_tensor_location, _maybe_clip_activations
 
 
 _HIDDEN_SENTINEL = object()
@@ -158,21 +158,6 @@ def _build_linear_weight_targets(model: nn.Module) -> tuple[dict[str, _WeightTar
         for name in names:
             by_name[name] = target
     return by_name, by_key
-
-
-def _first_tensor_location(args: tuple[Any, ...], kwargs: Mapping[str, Any] | None):
-    for idx, value in enumerate(args):
-        if isinstance(value, torch.Tensor):
-            return "args", idx, value
-    if kwargs:
-        for key in ("hidden_states", "inputs_embeds", "input"):
-            value = kwargs.get(key)
-            if isinstance(value, torch.Tensor):
-                return "kwargs", key, value
-        for key, value in kwargs.items():
-            if isinstance(value, torch.Tensor):
-                return "kwargs", key, value
-    return None, None, None
 
 
 def _replace_tensor_input(

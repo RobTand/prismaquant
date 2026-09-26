@@ -202,12 +202,8 @@ def _power_summary(values):
 
 
 def _drop_pages(paths):
-    for path in paths:
-        descriptor = os.open(path, os.O_RDONLY)
-        try:
-            os.posix_fadvise(descriptor, 0, 0, os.POSIX_FADV_DONTNEED)
-        finally:
-            os.close(descriptor)
+    from prismaquant.io_spans import drop_page_cache
+    drop_page_cache(paths)
 
 
 def cmd_child(args) -> int:

@@ -92,6 +92,15 @@ def _git_commit() -> str | None:
                 "64-character hexadecimal commit id"
             )
         return override
+    return _git_head_commit()
+
+
+def _git_head_commit() -> str | None:
+    """Best-effort ``git rev-parse HEAD`` of the package's checkout.
+
+    The one owner of this recipe (PQ #1302): 5 s timeout, run from the package
+    directory, ``None`` when git is absent, fails or prints nothing.
+    """
     try:
         return subprocess.run(
             ["git", "rev-parse", "HEAD"],

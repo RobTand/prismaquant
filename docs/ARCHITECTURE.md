@@ -47,7 +47,7 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   the engine owns (`SealedBuffer`, `:107`): `preadv` into a populated shared
   mapping, one SHA-256 over those pages, then `F_SEAL_WRITE`, `GROW`,
   `SHRINK` and `SEAL`, so nothing can change the bytes the digest names.
-  The PWC decoder (`_decode_file_tensor`, `production_weight_cache.py:1448`)
+  The PWC decoder (`_decode_file_tensor`, `production_weight_cache.py:1449`)
   parses the archive through the memfd and loads the tensor with
   `torch.load(..., mmap=True)` from `/proc/self/fd/N`, a private mapping of
   the verified pages with no copy; the engine closes the descriptor after
@@ -1544,6 +1544,8 @@ said nothing about its own reads between the head and the records.
   device or a mount. Pair spans with the host's diskstats and mountstats by
   epoch. The three copies of the `/proc/self/io` reader (Stage A, Stage B,
   the joint run) now call `io_spans.read_proc_io`.
+  The read benches' page-cache drop (`posix_fadvise(DONTNEED)` on each
+  file) is `io_spans.drop_page_cache` (PQ #1302).
 - **Rate lines.** `load_adjoint_checkpoint` and `load_handoff_inputs` print
   `[read-rate] {json}` every 64 entries or 30 s, with entries, bytes, the
   interval and mean MB/s, the ETA and the process's IO since the start.
@@ -3097,8 +3099,23 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/glm-mtp-allocate-m6`.
+As of: 2026-09-25 · `claude/dedup-fnpairs-1302`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/dedup-fnpairs-1302`) for **one owner per
+near-identical function pair** (PQ #1302, P1, part of epic #1295). Twelve pairs
+the duplication scanner flagged now call one owner: the page-cache drop of four
+read benches is `io_spans.drop_page_cache`; the gold measure tools' provenance
+row is `gold_engine_options.gold_provenance`; the control-metadata directories
+are `joint_layer_quanta.control_directory`; seven model profiles claim a config
+through `ModelProfile.claims_by_name`; the packed-expert helpers live in
+`sensitivity_probe`; the git-HEAD recipe is `aura_cost._git_head_commit`; the
+PWC JSON canonicaliser is `digests.canonical_json`. Every call site's outputs are
+pinned byte for byte by `tests/test_function_pairs_1302.py`, recorded on the
+code before the change. The duplication baseline gains a `must_differ` list,
+each entry with its reason (sealed transition modules, a stdlib-only tool, and
+an independent test oracle); `tests/test_duplication_baseline.py` checks it.
+No format, pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/glm-mtp-allocate-m6`) for the **allocator's
 GLM MTP path** (PQ #1346, M6 of #1271, P1). The GLM-5.3 MTP layer
@@ -3364,7 +3381,7 @@ per-unit router_path/expert_id topology". Two changes:
   (`None`/`None` when no router places it) and a packed expert's per-expert
   view `_packed_experts_module` + `num_experts`, the count of the full profile
   split, as `tessera_campaign` records for the same members. Both assemblers
-  merge it into every row (`aura_cost.py:1738`, `:1877`); the Stage B layer
+  merge it into every row (`aura_cost.py:1747`, `:1877`); the Stage B layer
   quantum computes it with its roster, off the skeleton, before any window
   loads (`joint_cost_quantum.py:1042`). A Linear the profile declares routed
   that the walk cannot place gets no keys, so the scope reports it missing
@@ -4731,7 +4748,8 @@ metadata-generation root (`--metadata-root`) that names where slice
 manifests (`{root}/manifests/`), the record set
 (`{root}/records/`, the `--records-out` default) and newly bound
 boundary/executable readset manifests (`{root}/adjoint/bound-readsets/`,
-one shared `bound_readset_directory` derivation) live -- while
+one shared `control_directory` derivation, which
+`joint_stage_b_head.head_slice_directory` also uses) live -- while
 `output_space` and `adjoint.boundary_artifacts` keep deriving from the
 plan's data `output_root` alone (the consumer identity pin and stage A's
 receipt location unchanged). Absent the flag every sealed byte is
@@ -12254,7 +12272,7 @@ answer on one branch and re-raises on the fall-through, passed
 `_handler_always_reraises`, which tested only the last statement. The census's
 whole justification is the four call sites with no behavioural test
 (`aqua_activation_cost.py:661`, `build_rtn_cache.py:500`,
-`sensitivity_probe.py:3592`, `streaming_production_cache.py:1776`). Now
+`sensitivity_probe.py:3607`, `streaming_production_cache.py:1776`). Now
 `CATCHES_DEAD_OVERRIDE` is derived from `DeadVendoredOverrideError.__mro__`
 rather than a second typed list, so the census follows the class if it is
 re-parented; `_handler_catches_dead_override` matches bare, dotted and
@@ -16430,7 +16448,7 @@ dW_{i,f} = Q_f(W_i) − W_i                               # production-rendered
 ```
 
 The probe is `kl_fisher.fisher_probe_scalar` (`kl_fisher.py:77-131`). `dW` provenance is
-recorded per row as `rendered` vs `rtn` (`aura_cost.py:181-220`) — immaterial at fp4, decisive
+recorded per row as `rendered` vs `rtn` (`aura_cost.py:190-229`) — immaterial at fp4, decisive
 at fp8 (+36% served KL under RTN dW); `--require-production-cache` makes a missing rendered row
 fatal and the pipeline always passes it (`run-pipeline.sh:886`). Passthroughs are zero-cost by
 construction (`aura_cost.py:_ZERO_COST_FORMATS`). Every routed expert declared by the resolved
@@ -19679,7 +19697,7 @@ the field is typed as a spec-level property, not an NVFP4 flag.
 ### 5.2 Scale rules and JSO
 
 NVFP4 scale rules live in the *exporter*, not the registry
-(`export_native_compressed.py:111-132`): `static_6` (default), `four_over_six_mse`,
+(`export_native_compressed.py:117-138`): `static_6` (default), `four_over_six_mse`,
 `joint_mse`. `joint_scale_opt` / `joint_scale_optimization` / `codebook_mse` are all aliases of
 `joint_mse` — three names, one rule.
 
@@ -19695,7 +19713,7 @@ NVFP4 scale rules live in the *exporter*, not the registry
 
 ### 5.3 GPTQ damp
 
-Sweep **OFF** since 2026-06-12 (`gptq_damp_sweep_enabled` `export_native_compressed.py:2543`,
+Sweep **OFF** since 2026-06-12 (`gptq_damp_sweep_enabled` `export_native_compressed.py:2549`,
 env default `"0"` at `:2555`), fixed damp **1.0** (`_resolve_gptq_fixed_damp :2558-2577`). The
 sweep's evaluator was in-sample; the V1 served A/B had fixed damp winning every gold-lane
 readout across calibration draws at ~4.4× less render time.
@@ -19707,7 +19725,7 @@ defaulting; it now delegates to `production_weight_cache._resolve_production_ren
 
 ### 5.4 The single rendered-weight store
 
-`ProductionWeightCache` (`production_weight_cache.py:137`) is the only store for rendered
+`ProductionWeightCache` (`production_weight_cache.py:138`) is the only store for rendered
 weights and `render_production_weight` (`:1785`) the only producer. Not tidiness: the
 surrogate, the KL validation, and the exported bytes must be the *same* rendering, or every A/B
 carries a rendering confound. Levers are recorded on the cache (`:165`, `:835-858`), which is
@@ -19844,7 +19862,7 @@ binds coverage, source, calibration, producer code, settings, levers, render sco
 formats and mechanism order (`union_production_cache.py:486-553`). It does **not** bind the
 qname enumeration the activation collector hooked, and that enumeration is what the rendered
 bytes are a function of. One `torch.Generator` feeds every hooked Linear's priority reservoir
-(`production_weight_cache.py:921-922`), so the slice of the stream a Linear receives depends
+(`production_weight_cache.py:922-923`), so the slice of the stream a Linear receives depends
 on how many rows every earlier hook consumed; rows feed the GPTQ Hessian and the Hessian feeds
 the bytes. `56c765d` draws for every *hooked* Linear, which makes `--resume` reproduce a fresh
 build because resume narrows only the *store* set. Two narrowings reached the **hook** set and
@@ -19945,7 +19963,7 @@ rather than buying a reservation no read redeems.
 The NVFP4 activation global scale can be patched in place after export and re-measured — no
 re-render. `PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE` selects the compressed-tensors
 `generate_gparam` convention `FP8_MAX·FP4_MAX/amax` over the legacy `FP4_MAX/amax`
-(`export_native_compressed.py:874-910`); it rescues blocks far below calibration amax from FP8
+(`export_native_compressed.py:880-916`); it rescues blocks far below calibration amax from FP8
 subnormals at the cost of clipping any serve block above it. Served A/Bs 2026-07-02, weights
 byte-identical: 35B-A3B MoE frontier −14.1% KL (win), LFM2.5 +5.8% (loss), 27B regen dense
 +37.5% (loss). Strongly artifact-dependent, so the default stays legacy (`0`) and any change
@@ -20940,7 +20958,7 @@ re-render, it is the render the gate declined to keep.
 * **Row fields.** An LDLQ-covered CB row additionally carries
   `weight_mse_raw_render`, `predicted_dloss_raw_render` and — exactly where the primary
   has its per-expert vector — `weight_mse_per_expert_raw_render`
-  (`measure_quant_cost.py:141-143`, emitted `:205-224`). The raw `predicted_dloss` runs
+  (`measure_quant_cost.py:126-128`, emitted `:205-224`). The raw `predicted_dloss` runs
   the **same** Fisher math as the primary, including the sampled-expert `E/S` scaling, and
   `_extrapolate_expert_costs` carries the raw scalars so `PRISMAQUANT_EXPERT_COST_SAMPLE`
   groups stay extractable. Raw metrics **reconstruct**, never re-encode, and packed stacks
@@ -20953,7 +20971,7 @@ re-render, it is the render the gate declined to keep.
   `output_mse=0.0`/`output_mse_measured=false` on every swapped row rather than inventing
   a number.
 * **Provenance.** `prismaquant.cb_ldlq_raw_render_sidecar.v1`
-  (`measure_quant_cost.py:139`, stamped into the payload at `:245-249`) states the
+  (`measure_quant_cost.py:124`, stamped into the payload at `:245-249`) states the
   identical-env no-LDLQ derivation.
 * **Strict no-op when LDLQ is off.** `raw_fields_out` stays untouched, no sidecar keys are
   emitted, and cost pickles are byte-identical to the pre-`96bbf09` schema
@@ -21100,7 +21118,7 @@ by registry, #162 closed). The fourth link is `publish_artifact`, above.
 One lane holds all four links, and it is Tessera. Native
 compressed-tensors holds the first, third and fourth but not the second:
 `export_native_compressed._write_shipcard` calls `build_shipcard(out_dir,
-build=build)` (`export_native_compressed.py:8487`) with no `lane=`, so a native
+build=build)` (`export_native_compressed.py:8440`) with no `lane=`, so a native
 card carries no `lane` key and `required_slots` derives nothing from the lane.
 That omission is deliberate -- `build_shipcard`'s own docstring says omitting
 the argument reproduces the historical card exactly -- and a native artifact is
@@ -22445,7 +22463,7 @@ evidence either way and should be quoted as a range.
 | In-sample "validation" | selection KL measured on text the surrogates saw | `--calib-skip-first $NSAMPLES` (`run-pipeline.sh:1194-1219`); an audit found this had regressed once already |
 | Metric-era mixing | old harness records measured on wikitext **train** | check `eval_split`/`metric_era` (`validation_harness.py:147-152`) before comparing |
 | Tied embeddings (`tie_word_embeddings`) | the cost stage died on the `lm_head` shard with `NotImplementedError: Cannot copy out of meta tensor` — the checkpoint ships no `lm_head` tensor at all, so the head is a meta alias of `embed_tokens` | `prismaquant/tied_embeddings.py` (landed `d058267`). The head is **materialized** — phase-2's CE backward runs through it, so meta is never acceptable — via transformers' own `get_output_embeddings()`/`get_input_embeddings()`, and **excluded from probe/cost/DP**: a tie means one Parameter, so quantizing the head quantizes the embedding, and probe/cost measure only the head's *output* MSE while the identical perturbation enters every token embedding and thus layer 0 for the whole forward — a cost no surrogate, not even L2 perturbed-X, can observe. There is also nothing to re-encode (no `lm_head.weight` bytes), so `footprint` would either fail to resolve the name or subtract the embedding from the floor while it still ships verbatim. Detection = config declaration AND a source index with no head tensor, never a name guess; a meta head with no declared tie raises immediately. The allocator exclusion (`allocator.py:1010-1043`, called `:1465`) also covers probes built before the fix. It ignores `--allow-pinned lm_head` by design — the tie is a property of the checkpoint, not of the serving profile. Gemma4-31B completed probe → cost → allocate → export for the first time on this fix (**enablement, not a quality claim** — unserved, no KL/PPL) |
-| KV-sharing layers (`num_kv_shared_layers > 0`) | phase-3 forwards each layer in isolation and handed the consumer a **detached** K/V, so the storing layer's `k_proj`/`v_proj` Fisher never saw any consumer's contribution — and phase-3 chains each layer's input gradient downward, so the truncation was inherited by every layer *below* the producer too | The KV-cotangent path (`b6ec9cb`): consumers get grad-enabled leaf clones whose `.grad` is the cotangent they contribute, accumulated per storing layer and used to seed that layer's backward alongside its own output cotangent, in one reverse pass (`sensitivity_probe.py:1269-1299`, `:3185-3222`; `incremental_probe.py:1943-2409`). Verified by **exact equivalence** on an fp64 synthetic model — h_trace bit-identical to one end-to-end autograd backward (rel err 0.00e+00) — where the pre-fix protocol under-counts `k_proj` 85.1% and `v_proj` 38.5%. Guard semantics were **inverted, not deleted**: `PRISMAQUANT_ALLOW_KV_SHARED_FISHER` no longer gates KV-sharing models generally; the probe hard-errors only when the path is turned *off* (`PRISMAQUANT_KV_COTANGENT=0`) on a model that needs it, and `PRISMAQUANT_ALLOW_KV_SHARED_FISHER=1` still reproduces a pre-fix probe (`incremental_probe.py:1035-1060`). Models without KV sharing are bit-for-bit unaffected either way. **Honest limit:** no real `num_kv_shared_layers > 0` checkpoint has been probed; those percentages are a toy correctness demonstration, not a quality claim |
+| KV-sharing layers (`num_kv_shared_layers > 0`) | phase-3 forwards each layer in isolation and handed the consumer a **detached** K/V, so the storing layer's `k_proj`/`v_proj` Fisher never saw any consumer's contribution — and phase-3 chains each layer's input gradient downward, so the truncation was inherited by every layer *below* the producer too | The KV-cotangent path (`b6ec9cb`): consumers get grad-enabled leaf clones whose `.grad` is the cotangent they contribute, accumulated per storing layer and used to seed that layer's backward alongside its own output cotangent, in one reverse pass (`sensitivity_probe.py:1284-1314`, `:3185-3222`; `incremental_probe.py:1943-2409`). Verified by **exact equivalence** on an fp64 synthetic model — h_trace bit-identical to one end-to-end autograd backward (rel err 0.00e+00) — where the pre-fix protocol under-counts `k_proj` 85.1% and `v_proj` 38.5%. Guard semantics were **inverted, not deleted**: `PRISMAQUANT_ALLOW_KV_SHARED_FISHER` no longer gates KV-sharing models generally; the probe hard-errors only when the path is turned *off* (`PRISMAQUANT_KV_COTANGENT=0`) on a model that needs it, and `PRISMAQUANT_ALLOW_KV_SHARED_FISHER=1` still reproduces a pre-fix probe (`incremental_probe.py:1035-1060`). Models without KV sharing are bit-for-bit unaffected either way. **Honest limit:** no real `num_kv_shared_layers > 0` checkpoint has been probed; those percentages are a toy correctness demonstration, not a quality claim |
 
 ## 8. Model support: the plugin architecture
 
@@ -22593,7 +22611,7 @@ is an idempotent no-op for every text-only-skeleton family), and
 `fill_packed_expert_cache_entries` probes its compute device from the first **non-meta**
 parameter — `next(model.parameters())` returned a meta visual weight on the wrapper and
 silently `.to(meta)`'d the activation snapshot (the same fragile probe still exists in
-`aura_cost.py:1144`, `kl_measurement.py:1078`, `validate_assignments_kl.py:987/:1579`,
+`aura_cost.py:1153`, `kl_measurement.py:1078`, `validate_assignments_kl.py:987/:1579`,
 `validation_harness.py:63`; audit before running those stages on a partially-meta skeleton).
 
 **glm5_next streamed-forward wiring (2026-08-26).** The concat bridge was necessary but not
@@ -22789,14 +22807,14 @@ not a quantization or serving default.
 The adapter is `model_profiles/vllm_registry.py`: `vllm_class_for_architecture` (`:25-102`)
 tries four registry APIs plus internal-table fallbacks and degrades to `None` when vLLM is
 absent. It consumes **prefix-substitution mappers only** (`:123-125`) — regex/substring mappers
-are skipped, which is why LFM2.5 (`lfm2_moe.py:115-141`), MiniMax (`minimax_m2.py:110-131`) and
+are skipped, which is why LFM2.5 (`lfm2_moe.py:112-138`), MiniMax (`minimax_m2.py:108-129`) and
 HyV3 (`hy_v3.py:75-89`) still hand-override `to_vllm_internal_name`. Spec `regex` rewrite rules
 can now express those; `lfm2_moe.json` already does.
 
 Roughly 25 further accessors are pure spec reads (packed-expert names/classes, pinned names,
 unpacked expert projection names, per-expert regexes, source/recipe/live name mapping, format groups, passthrough prefixes,
 staging, layer prefixes, lm_head, probe skips, export-lane eligibility,
-`bypass_hf_fp8_module_rewrite`), `base.py:208-859`. Deliberately Python-only,
+`bypass_hf_fp8_module_rewrite`), `base.py:220-871`. Deliberately Python-only,
 because they are forward-pass *behaviour* rather than naming: MTP (`:248-272`),
 streaming-probe adapters (`:823-947` — `checkpoint_to_live_name`, `fp8_scale_pairs`,
 `head_resident_extra_prefixes`, `init_rotaries`, `expand_hidden_for_layers`,
@@ -22832,12 +22850,12 @@ code contains no DSv4 architecture literal or rank-based expert predicate.
 
 **Two plugin-contract additions landed on this branch.**
 
-`ModelProfile.probe_linear_exclude_extra()` (`base.py:247`, default `""`) makes the probe's
+`ModelProfile.probe_linear_exclude_extra()` (`base.py:259`, default `""`) makes the probe's
 Linear-exclusion regex **profile-owned**. `incremental_probe.resolve_linear_exclude()`
 (`:423-437`) ORs the profile's fragment into the router baseline and replaced four literal
 regex sites, so hook installs and the shard-reuse meta stamp (`:830`) can no longer disagree —
 a mismatch there silently invalidates shard reuse. `DeepseekV4Profile` overrides it
-(`deepseek_v4.py:115`) to exclude `self_attn.{compressor,indexer}`. The Tessera campaign's dense-Linear census honours the same fragment (`tessera_campaign.py:3680`), so every campaign pins the set the probe pins. The reason is a contract
+(`deepseek_v4.py:113`) to exclude `self_attn.{compressor,indexer}`. The Tessera campaign's dense-Linear census honours the same fragment (`tessera_campaign.py:3680`), so every campaign pins the set the probe pins. The reason is a contract
 fact, not a preference: the faithful vendored forward (`87ca027`) instantiates and loads the
 compressor and indexer, so their `nn.Linear` leaves became visible to the probe's enumeration,
 but they sit **outside the gridbook D0.1 serving contract's quantizable set** — served
@@ -22847,16 +22865,16 @@ trips the allocator's coverage refusal *after* the cost run has already been pai
 override restores the 33,325-selectable-Linear inventory the DSv4 byte accounting assumes
 (`deepseek_v4.py:6`, `:127`; commit `d62bace`; `tests/test_probe_linear_exclude.py`).
 
-`ModelProfile.init_rotaries` gained an optional `base_model` kwarg (`base.py:1131`, commit
+`ModelProfile.init_rotaries` gained an optional `base_model` kwarg (`base.py:1143`, commit
 `9cee20d`) — a profile-plugin **signature** change, so the in-tree overrides moved in step
-(`gemma4.py:60`, `deepseek_v4.py:339`). It exists because the DSv4 faithful forward gives every
+(`gemma4.py:57`, `deepseek_v4.py:337`). It exists because the DSv4 faithful forward gives every
 compressor and indexer its **own** `rotary_emb`, and a meta-built skeleton leaves those nested
 `inv_freq` buffers on meta — "Cannot copy out of meta tensor" at the first CSA forward. The
 DSV4 override now walks the skeleton from `base_model` and materializes every nested rotary,
 not just the model-level one; the caller passes it at `streaming_model.py:216`.
 
 `structure.py`'s `build_model_graph` (five parallel name spaces per tensor) is a declared
-contract, not an executor — `base.py:1268-1278`, "intentionally not called from hot paths yet";
+contract, not an executor — `base.py:1280-1290`, "intentionally not called from hot paths yet";
 production reads the accessors.
 
 ### 8.3 Adding a model, end-to-end, as it stands today
@@ -23002,7 +23020,7 @@ checking shipped artifact metadata first.
 profile class or spec exists (the sole textual mention is a comment at
 `model_profiles/default.py:6`), so it ran under
 `DefaultProfile`; the `allocator.py:1550-1554` gate would refuse that menu today. Finally, the
-never-declared `unpacked_expert_projection_names` (`base.py:651-661`) **is now declared** — by
+never-declared `unpacked_expert_projection_names` (`base.py:663-673`) **is now declared** — by
 `specs/minimax_m2.json` (R27), which also required adding it as a real
 `ModelStructureSpec` field; `base.py` had been reading it off the spec with `getattr`, so no
 declaration could ever have taken effect. Other architectures still ride the `('w1','w2','w3')`
@@ -23015,12 +23033,12 @@ These four are the canonical statement; §12 references them rather than restati
 | # | Leak | Severity |
 |---|---|---|
 | L1 | **FIXED 2026-07-30 (R11).** Was: `run-pipeline.sh` hardcoded `TARGET_PROFILE:=vllm_packed_moe` and passed it unconditionally, and `resolve_target_profile` gives an explicit request precedence (`serving_profiles.py`), so `spec.default_serving_profile` was **never consulted through the production orchestrator** — `hy_v3.json` (`gguf`) and `laguna.json` (`nvfp4_cb`) silently overridden. **The leak had a measured cost:** because export re-resolved the profile it judges legality under, on 2026-07-11 **226 dense FP8 Linears were silently demoted to BF16** on the Hy3 compressed-tensors export. **Mechanism of the fix:** (i) the shell default is now empty and `--target-profile` is passed to the allocator **only when non-empty**, with a new `--target-profile-default vllm_packed_moe` supplying the fallback for architectures that declare nothing — never `research`, whose menu is unbounded. (ii) The allocator stamps its **resolved** profile into `layer_config.json`'s reserved `__prismaquant__` metadata block (`layer_config.LAYER_CONFIG_META_KEY`, skipped by every assignment parser and by the schema), and `export_native_compressed._allocator_target_profile_for_audit` reads it, with `PRISMAQUANT_TARGET_PROFILE` kept as the operator override for direct exporter invocations. `select_validated_frontier` carries the block forward when it overwrites the layer config, so the validated path keeps it too. Allocator and export can no longer disagree, and the channel travels **with** the artifact. **Non-regression:** re-solving the shipped 27B and 35B from their stored probe/cost artifacts changed **0 of 614** and **0 of 500** assignments vs the same code without the change (the 35B differs from its *shipped* config by 32/500 for an unrelated, pre-existing reason — the Fisher renormalization fix that landed after that artifact shipped). Every in-tree launch script sets `TARGET_PROFILE` explicitly, so all eight are bit-identical. | ~~high~~ FIXED |
-| L2 | **FIXED 2026-07-30 (R12).** MTP construction bypassed the profile: `prismaquant/mtp_module.py` was Qwen3.5-specific yet imported **directly** by `incremental_probe.py`, `incremental_measure_quant_cost.py` and `export_native_compressed.py`, gated only on the arch-agnostic `profile.has_mtp()`, so `deepseek_v4` (`has_mtp → True`, `build_mtp_module → None`) would have been handed a Qwen3.5 decoder layer. **Mechanism of the fix:** a fourth accessor `ModelProfile.mtp_source_prefix()` (`base.py:294-311`, spec-expressible as `shard_regexes.mtp_source_prefix`, default `"mtp."`) plus a generic `read_mtp_source_state_dict()` (`:348-365`) and a packed-expert-aware `load_mtp_state_dict()` (`:387-435`, absorbed from the deleted `_load_into_mtp`); `build_mtp_module`'s docstring now states the naming contract (names under an `mtp` parent must equal the recipe names). The Qwen body moved verbatim into `model_profiles/qwen3_5.py:124` (`MtpModule`) and the dead near-copies in `qwen3_5.py` and `qwen3_5_dense.py` were reconciled into it; all three call sites now go through the profile and hard-fail with a named error if `has_mtp()` and `build_mtp_module()` disagree. `prismaquant/mtp_module.py` is **deleted**. DSv4 takes the hy_v3 route (`has_mtp → False` + `"mtp."` in `passthrough_prefixes`) until its nextn block is actually quantized. Gates: `tests/test_mtp_module_arch.py` pins parameter-name-set equality against the pre-move layout for both the dense and MoE profile; `tests/test_model_profile_conformance.py::test_has_mtp_implies_a_buildable_mtp_module` is the standing ratchet. | ~~high~~ FIXED |
+| L2 | **FIXED 2026-07-30 (R12).** MTP construction bypassed the profile: `prismaquant/mtp_module.py` was Qwen3.5-specific yet imported **directly** by `incremental_probe.py`, `incremental_measure_quant_cost.py` and `export_native_compressed.py`, gated only on the arch-agnostic `profile.has_mtp()`, so `deepseek_v4` (`has_mtp → True`, `build_mtp_module → None`) would have been handed a Qwen3.5 decoder layer. **Mechanism of the fix:** a fourth accessor `ModelProfile.mtp_source_prefix()` (`base.py:306-323`, spec-expressible as `shard_regexes.mtp_source_prefix`, default `"mtp."`) plus a generic `read_mtp_source_state_dict()` (`:348-365`) and a packed-expert-aware `load_mtp_state_dict()` (`:387-435`, absorbed from the deleted `_load_into_mtp`); `build_mtp_module`'s docstring now states the naming contract (names under an `mtp` parent must equal the recipe names). The Qwen body moved verbatim into `model_profiles/qwen3_5.py:124` (`MtpModule`) and the dead near-copies in `qwen3_5.py` and `qwen3_5_dense.py` were reconciled into it; all three call sites now go through the profile and hard-fail with a named error if `has_mtp()` and `build_mtp_module()` disagree. `prismaquant/mtp_module.py` is **deleted**. DSv4 takes the hy_v3 route (`has_mtp → False` + `"mtp."` in `passthrough_prefixes`) until its nextn block is actually quantized. Gates: `tests/test_mtp_module_arch.py` pins parameter-name-set equality against the pre-move layout for both the dense and MoE profile; `tests/test_model_profile_conformance.py::test_has_mtp_implies_a_buildable_mtp_module` is the standing ratchet. | ~~high~~ FIXED |
 | L3 | **FIXED 2026-07-30 (R10), ownership boundary hardened 2026-08-01.** Was: a hand-maintained `try/except ImportError` opt-in chain whose missing-line failure mode was **coherent-looking garbage generation**. Gridbook now owns the module-path registry, fill guard, and tests in its sole canonical repository. PrismaQuant owns no loader or runtime copy; its required CI job installs the exact pinned Gridbook commit, validates PEP 610 provenance, and compares the producer profile set with Gridbook's packaged `runtime_contract.json`. The runtime stamps CB expert parameters unfilled, stamps them after either loader path, and fails closed before execution if any local registered expert remains unfilled. **No env bypass.** | ~~high~~ closed |
-| L4 | **FIXED 2026-07-30 (R27).** Both MiniMax hardcodes now go through profile accessors. `streaming_model.py`'s FP8-rewrite bypass was already half config-derived (`quant_method == "fp8"` and `weight_block_size`); the architecture half is a static property, so it became `staging.bypass_hf_fp8_module_rewrite` in the spec behind `profile.bypass_hf_fp8_module_rewrite()` (`base.py`), leaving the per-checkpoint half a config read where it belongs. `incremental_probe.py`'s `type(module).__name__ == "MiniMaxM2Experts"` became `profile.packed_expert_module_class_names()` (`base.py:221-231`) — the accessor that already existed for exactly this lookup — plus the structural shape test; the declared class stays **required**, because the replacement forward implements one specific expert-loop signature and applying it to a lookalike container would silently change a forward pass. `specs/minimax_m2.json` declares both, and `unpacked_expert_projection_names` with them. | closed |
+| L4 | **FIXED 2026-07-30 (R27).** Both MiniMax hardcodes now go through profile accessors. `streaming_model.py`'s FP8-rewrite bypass was already half config-derived (`quant_method == "fp8"` and `weight_block_size`); the architecture half is a static property, so it became `staging.bypass_hf_fp8_module_rewrite` in the spec behind `profile.bypass_hf_fp8_module_rewrite()` (`base.py`), leaving the per-checkpoint half a config read where it belongs. `incremental_probe.py`'s `type(module).__name__ == "MiniMaxM2Experts"` became `profile.packed_expert_module_class_names()` (`base.py:233-243`) — the accessor that already existed for exactly this lookup — plus the structural shape test; the declared class stays **required**, because the replacement forward implements one specific expert-loop signature and applying it to a lookalike container would silently change a forward pass. `specs/minimax_m2.json` declares both, and `unpacked_expert_projection_names` with them. | closed |
 
 Cosmetic, listed so they are not re-discovered as leaks:
-`export_native_compressed.py:94,151-152` imports `Qwen3_5Profile` for `_COMPAT_QWEN_PROFILE`
+`export_native_compressed.py:100,151-152` imports `Qwen3_5Profile` for `_COMPAT_QWEN_PROFILE`
 (verified test-only back-compat); `_fast_kernel_guard.py:86-90`'s Qwen substring list is a
 labelled fallback for remote HF IDs with no local `config.json`; `layer_streaming.py:1914-1920`
 imports an upstream transformers Gemma3 masking helper under config-driven selection;
@@ -24170,7 +24188,7 @@ unplumbed).
 | ~~D14~~ | **CLOSED 2026-08-01.** Runtime documentation now lives with the sole canonical Gridbook package. PrismaQuant documents only its producer/export contract and points to the pinned package's machine-readable runtime contract; the former in-tree README was deleted with the vendored runtime. | external Gridbook `README.md`; `prismaquant/gridbook_runtime/gridbook_runtime_pin.json` | ~~MED~~ | closed |
 | ~~D15~~ | **CLOSED 2026-07-30 (wave 4, R28/R3).** The approved option was taken — **flip the defaults to the shipped values**, not defend the conservative one: `CB_SCALE_CODING=two_tier` (layout-v2 shipped in the Hy3 295B and Laguna-S-2.1 artifacts, and `STANDARDS.md` calls it the production fp4 scale coding with v1 legacy read-compat only — the old "serve gates pending, do NOT ship" comment predated its own ship; the knob is inert on fp8-CB-only menus, which is why two 27B/35B drivers set `v1` without contradicting it) and `CB_EXPERT_EMPIRICAL=0` (every shipped MoE CB driver sets it). Both are pinned by `tests/test_architecture_doc.py::test_cb_defaults_match_the_shipped_drivers`, which asserts the shell default against the drivers themselves so the two cannot drift apart again. No shipped run changes: every driver sets both explicitly. | `run-pipeline.sh`; `tests/test_architecture_doc.py` | ~~MED~~ | closed |
 | D16 | **RESOLVED 2026-07-30 (R25) — as *unreachable*, not unmeasured, and the A/B was never needed.** The register asked for a gold-lane A/B on a 27B-class artifact; reading the emit-loop dispatch order answered it for free: the production-cache pack fires first and `continue`s, so with `PRODUCTION_CACHE=1` (the shipping default) **no dense NVFP4 Linear ever reached the branch** — confirmed by `grep -c "block-output-match"` → 0 on two real production export logs. Two further findings made keeping it indefensible: had it run, `_finalize_compute_only` would have re-derived per-group scales **outside** `_export_match_render_scale_rule`, discarding the render's `joint_mse` scales (the −6.6% KL defect M19 fixed everywhere else); and its `{0.95, 1.0, 1.05}` per-tensor gain re-search is subsumed by JSO, wrapped in `except Exception → WARN` so failure was invisible. Walled with `_finalize_compute_only` and the three export branches; `main()` now hard-`SystemExit`s if the flag is set truthy (§3.5). **Lesson: before funding a measurement, check the code under test executes on the recipe you ship.** | `archive/block_output_match_2026-07-30/README.md`; `export_native_compressed.py::_refuse_archived_block_output_match` | ~~MED~~ closed | — |
-| D17 | **Registry and export metadata are unreconciled sources of truth** for bits/group per format — `FormatSpec` vs the `*_SCHEME` constants, with no test comparing them (§6.4, last row). | `format_registry.py:44-168`; `export_native_compressed.py:7247-7336` | MED | Add a parametrized test asserting scheme ↔ spec agreement per production format. |
+| D17 | **Registry and export metadata are unreconciled sources of truth** for bits/group per format — `FormatSpec` vs the `*_SCHEME` constants, with no test comparing them (§6.4, last row). | `format_registry.py:44-168`; `export_native_compressed.py:7200-7289` | MED | Add a parametrized test asserting scheme ↔ spec agreement per production format. |
 | D18 | **PARTIALLY FIXED 2026-08-01.** The Gridbook-documentation half is closed: Gridbook owns and publishes its runtime flags, and PrismaQuant no longer mirrors that external catalog. The only remaining debt is producer-local cleanup: the dead `PRISMAQUANT_L2_CUDA_GRAPHS` and `PRISMAQUANT_DO_NO_HARM_MIN_GAIN` tokens remain in the historical/dead section even though the former's sole code occurrence is a comment at `perturbed_x_cache.py:1225` and the latter has no code occurrence. The live producer analogue remains `PRISMAQUANT_RENDER_GATE_MIN_GAIN`. | `docs/design/runtime_flags.md`; external pinned Gridbook runtime contract | LOW | Delete the two dead PrismaQuant entries once no reader is chasing them. |
 | D19 | **FIXED 2026-07-30.** The count was low: **14** launchers under `examples/launchers/`, not 8, invoke `python -m prismaquant.<module>` for a module that no longer exists (`iterate_block_clado`, `measure_block_clado`, `block_clado`, `validate_block_clado`, `measure_output_fisher`, `dense_cone`, `polish_from_assignment`, `coord_descent_polish`, `measure_adjoint_l3`, `adjoint_l3_frontier`). Walled at `archive/launchers_2026-07-30/` with a banner README enumerating each file and its dead invocation, per the dated-wall convention of §11. | `archive/launchers_2026-07-30/README.md`; `examples/launchers/README.md` | — | Done. |
 | D20 | **RESOLVED 2026-07-30.** Two archive walls had no banner README (`archive/prismaclip_2026-05-14/`, `archive/reap_2026-05-15/`) — the latter walls off live-adjacent code (`expert_prune.py`, `allocator_prune.py`, `observers/`, 5 tests) and encodes a policy the code still enforces. Two more walls violated the dated-directory convention. Banners written; `archive/entmoot/` → `archive/entmoot_2026-05-03/` (date from `193f313`) and `archive/minimax_m2p7/` → `archive/minimax_m2p7_2026-04-24/` (date from its own banner). Neither renamed wall is cited by a `run-pipeline.sh` `exit 2` message. | `ls archive/*/README.md` | — | Done. Follow-up: a test asserting every `archive/*/` carries a `README.md`. |

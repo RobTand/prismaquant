@@ -103,18 +103,8 @@ def mountstats_delta(before: dict, after: dict) -> dict:
 
 def drop_client_cache(paths) -> int:
     """Forget what this client cached for ``paths``; returns files advised."""
-    done = 0
-    for path in paths:
-        try:
-            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
-        except OSError:
-            continue
-        try:
-            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-            done += 1
-        finally:
-            os.close(fd)
-    return done
+    from prismaquant.io_spans import drop_page_cache
+    return drop_page_cache(paths, missing_ok=True)
 
 
 # -- inputs -------------------------------------------------------------------
