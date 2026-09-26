@@ -8,12 +8,6 @@ from prismaquant.allocator_candidates import build_candidates
 from prismaquant.production_render_cost import (
     synthesize_production_render_cost_payload,
 )
-from prismaquant.source_class_format_plan import (
-    EXPERT_MENU,
-    NONEXPERT_MENU,
-    SourceClassFormatPlan,
-    UnitFormatPlan,
-)
 from prismaquant.production_weight_cache import ProductionWeightCache
 
 
@@ -49,37 +43,7 @@ def _cache_with_scores() -> ProductionWeightCache:
     )
 
 
-def _split_format_plan() -> SourceClassFormatPlan:
-    low = UnitFormatPlan(
-        qname="layers.0.low",
-        menu_id=EXPERT_MENU,
-        source_kind="synthetic-low",
-        shape=(2, 2),
-        source_payload_bytes=2,
-        source_bpp_numerator_bits=16,
-        bpp_denominator_params=4,
-    )
-    high = UnitFormatPlan(
-        qname="layers.0.high",
-        menu_id=NONEXPERT_MENU,
-        source_kind="synthetic-high",
-        shape=(2, 2),
-        source_payload_bytes=4,
-        source_bpp_numerator_bits=32,
-        bpp_denominator_params=4,
-    )
-    return SourceClassFormatPlan(
-        menus={
-            EXPERT_MENU: ("NVFP4",),
-            NONEXPERT_MENU: ("NVFP4", "NVFP4A16"),
-        },
-        units={low.qname: low, high.qname: high},
-        serving_groups=(),
-        identity_sha256="f" * 64,
-    )
-
-
-def _split_cache(*, identity: str = "f" * 64) -> ProductionWeightCache:
+def _split_cache(*, identity: str | None = "f" * 64) -> ProductionWeightCache:
     records = {
         "layers.0.low|NVFP4": {
             "qname": "layers.0.low",
@@ -87,20 +51,6 @@ def _split_cache(*, identity: str = "f" * 64) -> ProductionWeightCache:
             "metric": "output_mse",
             "score": 1.0,
             "score_sum": 4.0,
-        },
-        "layers.0.high|NVFP4": {
-            "qname": "layers.0.high",
-            "format": "NVFP4",
-            "metric": "output_mse",
-            "score": 2.0,
-            "score_sum": 8.0,
-        },
-        "layers.0.high|NVFP4A16": {
-            "qname": "layers.0.high",
-            "format": "NVFP4A16",
-            "metric": "output_mse",
-            "score": 3.0,
-            "score_sum": 12.0,
         },
     }
     return ProductionWeightCache(
@@ -114,77 +64,41 @@ def _split_cache(*, identity: str = "f" * 64) -> ProductionWeightCache:
 
 
 def _split_baseline() -> dict:
-    formats = ["NVFP4", "NVFP4A16", "BF16"]
+    formats = ["NVFP4", "BF16"]
     return {
         "formats": formats,
         "costs": {
-            qname: {
-                fmt: {"predicted_dloss": 99.0}
-                for fmt in formats
-            }
-            for qname in ("layers.0.low", "layers.0.high")
+            "layers.0.low": {fmt: {"predicted_dloss": 99.0} for fmt in formats},
         },
     }
 
 
-def test_render_cost_enforces_identity_bound_per_qname_format_plan():
-    plan = _split_format_plan()
+def test_render_cost_refuses_a_cache_built_under_a_format_plan():
+    """The source-class format plan was archived with the codebook lane
+    (#1345). Pricing a plan-scoped cache without its plan would price rows
+    the plan withheld, so a non-null plan identity refuses."""
+    with pytest.raises(fr.RetiredFormatError, match="gridbook_lane") as info:
+        synthesize_production_render_cost_payload(
+            _split_cache(), _split_baseline())
+    assert "production cache metadata" in str(info.value)
+
+
+@pytest.mark.parametrize("part", ["provenance", "meta"])
+def test_render_cost_refuses_a_baseline_priced_under_a_format_plan(part):
+    baseline = _split_baseline()
+    baseline[part] = {"source_format_plan_identity_sha256": "e" * 64}
+    with pytest.raises(fr.RetiredFormatError, match="gridbook_lane") as info:
+        synthesize_production_render_cost_payload(
+            _split_cache(identity=None), baseline)
+    assert f"baseline cost {part}" in str(info.value)
+
+
+def test_render_cost_keeps_the_null_plan_identity_it_always_wrote():
     payload = synthesize_production_render_cost_payload(
-        _split_cache(),
-        _split_baseline(),
-        format_plan=plan,
-    )
-
+        _split_cache(identity=None), _split_baseline())
+    assert payload["meta"]["source_format_plan_identity_sha256"] is None
+    assert "source_format_plan_identity_sha256" not in payload["provenance"]
     assert set(payload["costs"]["layers.0.low"]) == {"NVFP4", "BF16"}
-    assert set(payload["costs"]["layers.0.high"]) == {
-        "NVFP4", "NVFP4A16", "BF16",
-    }
-    assert payload["costs"]["layers.0.high"]["NVFP4A16"][
-        "predicted_dloss"
-    ] == 12.0
-    assert payload["provenance"][
-        "source_format_plan_identity_sha256"
-    ] == plan.identity_sha256
-    assert payload["meta"][
-        "source_format_plan_identity_sha256"
-    ] == plan.identity_sha256
-
-
-def test_render_cost_refuses_plan_identity_drift_and_menu_truncation():
-    plan = _split_format_plan()
-    with pytest.raises(ValueError, match="format-plan identity mismatch"):
-        synthesize_production_render_cost_payload(
-            _split_cache(identity="e" * 64),
-            _split_baseline(),
-            format_plan=plan,
-        )
-
-    with pytest.raises(ValueError, match="truncate.*format plan"):
-        synthesize_production_render_cost_payload(
-            _split_cache(),
-            _split_baseline(),
-            formats=("NVFP4", "BF16"),
-            format_plan=plan,
-        )
-
-
-def test_render_cost_refuses_illegal_cached_cell_under_bound_plan():
-    cache = _split_cache()
-    cache.metadata["render_scores"]["records"][
-        "layers.0.low|NVFP4A16"
-    ] = {
-        "qname": "layers.0.low",
-        "format": "NVFP4A16",
-        "metric": "output_mse",
-        "score": 4.0,
-        "score_sum": 16.0,
-    }
-    with pytest.raises(ValueError, match="outside its source-class"):
-        synthesize_production_render_cost_payload(
-            cache,
-            _split_baseline(),
-            format_plan=_split_format_plan(),
-        )
 
 
 def test_production_render_cost_uses_render_score_directly():

@@ -451,11 +451,6 @@ def test_streaming_cli_requires_scope_specific_inputs_and_cache_dirs():
         activation_cache_dir=None, skip_qnames=None,
         expert_render_mode="batched", expert_token_budget=32768,
         h_detail_dir=None, allow_incomplete=False,
-        # Mirrors the real parser (build_production_cache.main, --format-plan).
-        # This fixture is hand-built, so every new CLI flag _run_streaming
-        # reads has to be added here or the test dies on AttributeError
-        # before it reaches the validation it exists to cover.
-        format_plan=None,
     )
     # A streamed format menu is refused: it served only the retired codebook
     # lane (archived 2026-09-25, #1304).

@@ -65,6 +65,37 @@ _RETIRED_CODEBOOK_COST_FIELDS = (
 RETIRED_LADDER_COST_SOURCES = frozenset({"band_interpolated", "mixed"})
 
 
+#: Metadata keys that bound a cache or cost table to a source-class format
+#: plan, a codebook-campaign feature archived with the lane (#1345).
+RETIRED_FORMAT_PLAN_IDENTITY_KEYS = (
+    "format_plan_identity_sha256",
+    "source_format_plan_identity_sha256",
+)
+
+
+def refuse_retired_format_plan_identity(record, where: str) -> None:
+    """Raise ``RetiredFormatError`` when ``record`` names a format-plan identity.
+
+    ``source_class_format_plan`` scoped each qname's menu to its source class.
+    It was archived with the codebook lane (#1345), so a cache or cost table
+    built under a plan can no longer be read back against that plan. Reading
+    it without the plan would price rows the plan withheld, so it refuses.
+    A null value, which every artifact since then carries, passes.
+    """
+    if not _is_mapping(record):
+        return
+    for key in RETIRED_FORMAT_PLAN_IDENTITY_KEYS:
+        if record.get(key) is None:
+            continue
+        from prismaquant.format_registry import RetiredFormatError
+
+        raise RetiredFormatError(
+            f"{where}: {key}={record[key]!r} binds it to a source-class format "
+            f"plan; that feature was archived with the Gridbook codebook lane "
+            f"(#1345). See {RETIRED_CODEBOOK_ARCHIVE}/README.md."
+        )
+
+
 def refuse_retired_ladder_cost_source(entry, where: str = "cost row") -> None:
     """Raise ``RetiredFormatError`` when ``entry`` was priced by the retired
     codebook lane's RD ladder; return for every other row.
@@ -230,6 +261,9 @@ def validate_cost_payload(payload, path: str | None = None):
     costs = payload.get("costs")
     if not _is_mapping(costs):
         _fail(path, ".costs", "missing or not a mapping")
+    for part in ("provenance", "meta"):
+        refuse_retired_format_plan_identity(
+            payload.get(part), f"{_label(path)}.{part}")
     formats = payload.get("formats", [])
     if formats is not None:
         if not isinstance(formats, Sequence) or isinstance(formats, (str, bytes)):

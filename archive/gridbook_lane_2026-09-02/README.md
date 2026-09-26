@@ -121,8 +121,11 @@ omission:
   lane's.
 - **The CB format / cost / render plumbing** stayed out of this archive on
   2026-09-02, as debt D34. It arrived on 2026-09-25; see the last section.
-  `mxfp4_widen.py` and `source_class_format_plan.py`, which that remainder list
-  named, stay in the tree because they serve non-codebook rungs.
+  `mxfp4_widen.py`, which that remainder list named, stays in the tree
+  because it serves non-codebook rungs. `source_class_format_plan.py` stayed
+  too until 2026-09-25 (#1345): its only producer was this lane's split-menu
+  campaign, so it joined `prismaquant/` here beside its archived test, and a
+  cache or cost table that carries a plan identity now refuses.
 
 ## Do not revive
 
