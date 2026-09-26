@@ -114,7 +114,8 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install prismaquant + test extras
-        run: python -m pip install -e '.[test]'
+        # The constraints pin what CI tests to what the campaign runs (#1419).
+        run: python -m pip install -c .github/ci-constraints.txt -e '.[test]'
 
       # CUDA_VISIBLE_DEVICES is belt-and-braces: hosted runners have no GPU, but
       # this makes a local reproduction of a CI failure one env var away, and
@@ -177,7 +178,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Install prismaquant
-        run: python -m pip install -e .
+        run: python -m pip install -c .github/ci-constraints.txt -e .
       - name: Import the package entry points
         env:
           CUDA_VISIBLE_DEVICES: ""
