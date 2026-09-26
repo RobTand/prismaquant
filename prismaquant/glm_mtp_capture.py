@@ -47,6 +47,25 @@ FINAL_HIDDEN_SCHEMA = "prismaquant.glm_mtp.final_hidden.v1"
 CENSUS_EXTENSION_SCHEMA = "prismaquant.glm_mtp.census_extension.v1"
 
 
+def sequence_progress(label, total):
+    """A reporter that prints about sixteen lines over ``total`` sequences.
+
+    The MTP passes (capture, final hidden, pricing) each walk the whole
+    calibration draw for minutes; this keeps them from running silent.
+    """
+    import time
+
+    started = time.monotonic()
+    step = max(1, int(total) // 16)
+
+    def report(done):
+        if done % step == 0 or done == total:
+            print(f"{label} {done}/{total} sequences, {time.monotonic() - started:.0f} s",
+                  flush=True)
+
+    return report
+
+
 def final_hidden(runner, input_ids, boundary, *, layer: int):
     """The target's post-final-norm hidden state from the last layer's input.
 
