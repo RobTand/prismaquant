@@ -1,7 +1,7 @@
 """Packed-expert imatrix synthesis — CHECKPOINT-based, no model load.
 
 The activation cache holds only each experts MODULE's input, so the harvested
-imatrix (``export_gguf.build_imatrix_from_act_cache``) can never contain:
+imatrix (``build_imatrix_from_act_cache`` below) can never contain:
 
 * ``<qn>.gate_up_proj`` — the harvest emits the MODULE name, while the CB
   cost/export look up the packed-param name;
@@ -210,6 +210,32 @@ def _load_act_entry(
             or int(row_indices.numel()) != int(inputs.shape[0]):
         row_indices = None
     return name, inputs.float(), row_indices
+
+
+def build_imatrix_from_act_cache(act_dir: str | Path) -> dict[str, torch.Tensor]:
+    """Per-input-column mean squared activation per cached module.
+
+    llama.cpp imatrix semantics, computed on the same calibration corpus the
+    probe and cost stages used. Dense Linears key by their recipe qname;
+    packed-experts module snapshots key by the experts module qname
+    (``...mlp.experts``), the exact input of the gate/up projections. The ops
+    (full rows, fp32, mean over dim 0) are the cost path's, so measured cost and
+    shipped bytes stay in lockstep. Both GGUF exporters read this one copy
+    (``export_gguf``, and ``export_gguf_direct`` as ``build_direct_imatrix``;
+    #1394). Files are read in sorted order, so a later file naming the same
+    module replaces an earlier one; entries whose inputs are not 2-D are skipped.
+    """
+    out: dict[str, torch.Tensor] = {}
+    for p in sorted(Path(act_dir).glob("*.pt")):
+        blob = torch.load(p, map_location="cpu", weights_only=False)
+        inputs = blob.get("inputs") if isinstance(blob, dict) else None
+        if inputs is None or inputs.ndim != 2:
+            continue
+        name = (blob.get("name") if isinstance(blob, dict) else None) or (
+            p.stem.replace("__", ".")
+        )
+        out[name] = inputs.float().pow(2).mean(dim=0)
+    return out
 
 
 @torch.no_grad()

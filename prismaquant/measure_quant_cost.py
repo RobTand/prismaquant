@@ -909,7 +909,7 @@ def measure_unbatched(model: nn.Module, act_cache: "ActivationIndex",
         gguf_qw = None
         if any(_cost_render_uses_imatrix(s) for s in specs):
             # Shared activation imatrix (per-input-column mean-sq act). Same
-            # op/data as export_gguf.build_imatrix_from_act_cache: full fp32
+            # op/data as moe_imatrix.build_imatrix_from_act_cache: full fp32
             # rows, mean over dim 0.
             gguf_qw = X_cpu.float().pow(2).mean(dim=0).to(W.device)
 
@@ -2035,7 +2035,7 @@ def measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
             gguf_qw = None
             if any(_cost_render_uses_imatrix(s) for s in specs):
                 # Per-item imatrix, computed with the IDENTICAL op on the
-                # IDENTICAL data as export_gguf.build_imatrix_from_act_cache
+                # IDENTICAL data as moe_imatrix.build_imatrix_from_act_cache
                 # (FULL fp32 CPU act rows, mean over dim 0) — NOT from the
                 # chunk-truncated compute-dtype X. The k-quant scale search
                 # is a discrete grid: a numerically different importance
