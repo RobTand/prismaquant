@@ -326,3 +326,18 @@ def test_the_run_refuses_an_evaluation_panel_and_missing_windows():
         _scoped_call({}, joint_eval={"panel": 1})
     with pytest.raises(RuntimeError, match="operator windows"):
         _scoped_call({}, windows=False)
+
+
+def test_only_the_mtp_scope_prices_operator_windows_without_exact_boundaries():
+    """The body replays Stage A's boundaries; the MTP scope reads M1's
+    final-hidden entries instead, so it alone needs no boundary storage."""
+    from prismaquant import tessera_joint_aura as bridge
+
+    windows = dict(schema=WINDOWS_SCHEMA, max_statistics_bytes=1 << 30,
+                   max_candidate_bytes=1 << 20, max_render_resident_bytes=1 << 20,
+                   max_load_buffer_bytes=1 << 20, workspace_reserve_bytes=1 << 20,
+                   max_replay_cotangent_bytes=1 << 20, prefetch_workers=1)
+    body = {"max_render_bytes": 1 << 20, "execution": {"operator_windows": windows}}
+    with pytest.raises(ValueError, match="exact boundary storage"):
+        bridge._operator_window_policy(body)
+    assert bridge._operator_window_policy({**body, "source_scope": "mtp"}) == windows

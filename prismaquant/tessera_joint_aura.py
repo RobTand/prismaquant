@@ -2203,7 +2203,10 @@ def _operator_window_policy(config):
     from .joint_statistics_replay import normalize_operator_windows
     policy = normalize_operator_windows(config['execution'].get('operator_windows'))
     if policy is not None:
-        _require(config['execution'].get('boundary_storage') is not None,
+        # The body replays Stage A's exact boundaries. The MTP scope has no
+        # chain: its inputs are M1's final-hidden entries (PQ #1353).
+        _require(config['execution'].get('boundary_storage') is not None
+                 or config.get('source_scope') == 'mtp',
                  'operator-window campaign requires explicit exact boundary storage')
         _require(policy['max_render_resident_bytes'] <= config['max_render_bytes'],
                  'operator-window PWC cap exceeds campaign render admission')
