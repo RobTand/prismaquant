@@ -35,6 +35,9 @@ SPOOL_WINDOW_BYTES = 2 * 2 * 8 * (16 * FIXTURE_HIDDEN * 2 + 65536)
 STAGE_A_SPOOL_ENV = {**SPOOL_ENV,
                      "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": str(SPOOL_WINDOW_BYTES),
                      "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW": "1"}
+#: The spool environment a quantum row seals: the spec's, with the host
+#: window opt-in, so placement charges its bound too (PQ #1364).
+QUANTUM_SPOOL_ENV = {**SPOOL_ENV, "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW": "1"}
 
 
 def stage_a_plan(root, **fields) -> dict:
