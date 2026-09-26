@@ -23395,6 +23395,23 @@ passes to `build_streamed_causal_lm`. A `run` over the `mtp` scope prices the
 layer on the MTP head's self-KL (`glm_mtp_quantum`, PQ #1353) and publishes a
 `glm_mtp_cost.v1` payload rather than a body cost table.
 
+**MTP selected-wire metadata (PQ #1413, 2026-09-26).** The MTP cost merge
+retains exact `{path, sha256}` references to its M4 parts; each part's
+`tessera_joint_anchors.inputs.merged_cost` binds the M3 table that priced its
+wire bytes. `glm_mtp_selection.enrich_mtp_cost_wires` follows those anchors
+through the existing bound-artifact reader, verifies merged M4 rows and bytes
+against the exact parts, and validates each projected expert M3 receipt's
+unit, rung, projection, directory and size. The selection record carries the
+chosen expert receipts, their M3 wire roots, the common producer projection,
+and exact M4/M3 source bindings under `mtp_expert_*`; BF16 passthrough carries
+no wire. An already completed M6 allocation can receive that metadata in a
+new `layer_config.json` through `glm_mtp_selection backfill`: it checks the
+recorded rung, measured menu, per-unit config and source anchors, leaves body
+and MTP choices unchanged, and refuses to overwrite the historical config.
+The join does not read each wire's bytes; export intake must hash the selected
+blobs against their original receipts. This step does not itself authorize or
+materialize an MTP export.
+
 Routed-expert classification for the AURA hybrid is also a profile boundary, not a shape
 heuristic. `routed_experts.py` treats `packed_expert_format_group(qname)` as the membership
 answer, validates it against the packed/unpacked/vLLM projection accessors, and maps live,
