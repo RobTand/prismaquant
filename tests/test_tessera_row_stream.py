@@ -269,24 +269,28 @@ def test_the_first_encode_starts_before_the_late_entries_are_read(monkeypatch, t
 
 def test_the_stream_head_reports_durable_progress_before_its_journal_exists(
         monkeypatch, tmp_path):
-    """PQ #1362: the stream head opens its journal only at finalize, and a row
-    that reported nothing until then was killed in ``startup`` while its
-    anchors were landing. Each flush before the journal exists now reports
-    the anchors whose wire receipts were read back, and never more than the
+    """PQ #1362 and #1403: the stream head opens its checkpoint journal only at
+    finalize, and a row that reported nothing until then was killed in
+    ``startup`` while its anchors were landing. Each flush before that journal
+    exists writes the flushed units to the stream journal and then reports,
+    so every report counts rows a relaunch can adopt, and never more than the
     wires on disk."""
     campaign, argv, state = stream_fixture(monkeypatch, tmp_path)
     from prismaquant import cost_stage_checkpoint, prismabuild_progress
     wire = state["root"] / "cache" / "wire"
-    events = []
+    events, streamed = [], set()
     original_write_unit = cost_stage_checkpoint.write_unit
 
     def write_unit(*args, **kwargs):
-        events.append(("journal",))
+        if kwargs["stage"] == campaign.STREAM_JOURNAL_STAGE:
+            streamed.add(kwargs["qname"])
+        else:
+            events.append(("journal",))
         return original_write_unit(*args, **kwargs)
 
     def report(phase, units_completed, **_kwargs):
         landed = len(list(wire.glob("*.tessera"))) if wire.is_dir() else 0
-        events.append(("report", phase, units_completed, landed))
+        events.append(("report", phase, units_completed, landed, len(streamed)))
         return True
 
     monkeypatch.setattr(cost_stage_checkpoint, "write_unit", write_unit)
@@ -294,15 +298,167 @@ def test_the_stream_head_reports_durable_progress_before_its_journal_exists(
     assert campaign.main(argv) == 0
     first_journal = events.index(("journal",))
     early = [event for event in events[:first_journal] if event[0] == "report"]
-    # Reports before the journal exists: all "pricing", each for work on
-    # disk. One arrives mid-encode (the scalar cadence flushes at the first
-    # anchor), and the round's drain reports every anchor (one per unit
-    # here), all before finalize.
+    # Reports before the checkpoint journal exists: all "pricing", each for
+    # rows already in the stream journal (one anchor per unit here), each for
+    # work on disk. One arrives mid-encode (the scalar cadence flushes at the
+    # first anchor), and the round's drain reports every anchor, all before
+    # finalize.
     assert {event[1] for event in early} == {"pricing"}
-    assert all(0 < count <= landed for _, _, count, landed in early)
+    assert all(0 < count <= min(landed, journalled)
+               for _, _, count, landed, journalled in early)
     assert early[0][2] < len(UNITS) and early[-1][2] == len(UNITS)
     counts = [event[2] for event in events if event[0] == "report"]
     assert counts == sorted(counts) and counts[-1] == len(UNITS)
+
+
+class _Killed(BaseException):
+    """A kill mid-encode: not an ``Exception``, so no batch retry absorbs it."""
+
+
+def _pin_clock(campaign, monkeypatch):
+    # Encode durations and the wall clock are the only run-varying values the
+    # outputs carry; pinned, a relaunch can be compared byte for byte.
+    monkeypatch.setattr(campaign, "time", SimpleNamespace(
+        time=lambda: 1789500000.0, monotonic=time.monotonic, perf_counter=time.perf_counter))
+
+
+def _kill_at(campaign, monkeypatch, call):
+    """Run the row until its ``call``-th encode, which dies; return the relaunch's encodes."""
+    original = campaign._measure_anchor
+    calls = []
+
+    def measure(**kwargs):
+        calls.append(kwargs["qname"])
+        if len(calls) == call:
+            raise _Killed()
+        return original(**kwargs)
+
+    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    return calls, original
+
+
+def _stream_shard(root, name):
+    from prismaquant.cost_stage_checkpoint import unit_path
+    return unit_path(root / ("campaign.anchors.json" + ".stream"), name)
+
+
+def test_a_killed_stream_row_adopts_its_journalled_anchors_on_relaunch(
+        monkeypatch, tmp_path, capsys):
+    """PQ #1403: a stream-head row killed mid-round left encoded anchors that no
+    relaunch could reuse. The relaunch now adopts every unit its stream journal
+    holds, through the resume gates, encodes only the rest, and writes the
+    bytes an uninterrupted run writes."""
+    campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
+    _pin_clock(campaign, monkeypatch)
+    assert campaign.main(argv) == 0
+    clean = produced(tmp_path)
+    for base in (*OUTPUTS, "campaign.anchors.json.stream"):
+        shutil.rmtree(tmp_path / base, ignore_errors=True)
+        (tmp_path / base).unlink(missing_ok=True)
+
+    # The scalar cadence flushes after the first anchor, so the kill at the
+    # third encode leaves one unit journalled and one encoded but unflushed.
+    calls, original = _kill_at(campaign, monkeypatch, 3)
+    with pytest.raises(_Killed):
+        campaign.main(argv)
+    assert calls == UNITS
+    assert _stream_shard(tmp_path, UNITS[0]).is_file()
+    assert not _stream_shard(tmp_path, UNITS[1]).exists()
+    assert not (tmp_path / "campaign.anchors.json").exists()
+    capsys.readouterr()
+
+    relaunch = []
+
+    def measure(**kwargs):
+        relaunch.append(kwargs["qname"])
+        return original(**kwargs)
+
+    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    assert campaign.main(argv) == 0
+    out = capsys.readouterr().out
+    assert "[campaign] row head: stream (" in out
+    assert "[campaign] adopted 1 verified anchors for 1 units from campaign.anchors.json.stream" in out
+    assert relaunch == UNITS[1:]
+    resumed = produced(tmp_path)
+    assert sorted(resumed) == sorted(clean)
+    # Every file is the same bytes, the cost payload included: an adopted row
+    # is an equal but distinct object from the one a fresh encode shares, and
+    # the payload is written through ``canonical_pickle_bytes`` so its digest
+    # does not depend on which path built it.
+    assert [name for name in sorted(clean) if clean[name] != resumed[name]] == [], \
+        _differences(clean["cost.pkl"], resumed["cost.pkl"])
+
+
+def _differences(left, right, limit=8):
+    """The first paths at which two pickled payloads differ in value, order or type."""
+    import pickle
+    found = []
+
+    def walk(a, b, path):
+        if len(found) >= limit:
+            return
+        if type(a) is not type(b):
+            found.append((path, "type", type(a).__name__, type(b).__name__))
+        elif isinstance(a, dict):
+            if list(a) != list(b):
+                found.append((path, "key order", [repr(k)[:60] for k in a][:6],
+                              [repr(k)[:60] for k in b][:6]))
+            for key in sorted(set(a) | set(b), key=repr):
+                if key not in a or key not in b:
+                    found.append((f"{path}/{key!r}", "missing on one side"))
+                else:
+                    walk(a[key], b[key], f"{path}/{key!r}")
+        elif isinstance(a, (list, tuple)) and len(a) == len(b):
+            for index, (x, y) in enumerate(zip(a, b)):
+                walk(x, y, f"{path}[{index}]")
+        elif a != b:
+            found.append((path, repr(a)[:120], repr(b)[:120]))
+
+    walk(pickle.loads(left), pickle.loads(right), "")
+    return found
+
+
+def _killed_run(monkeypatch, tmp_path):
+    campaign, argv, state = stream_fixture(monkeypatch, tmp_path)
+    _pin_clock(campaign, monkeypatch)
+    _calls, original = _kill_at(campaign, monkeypatch, 3)
+    with pytest.raises(_Killed):
+        campaign.main(argv)
+    monkeypatch.setattr(campaign, "_measure_anchor", original)
+    return campaign, argv, state
+
+
+def test_a_tampered_journalled_wire_is_refused_not_adopted(monkeypatch, tmp_path):
+    campaign, argv, _state = _killed_run(monkeypatch, tmp_path)
+    wire = campaign._wire_path(tmp_path / "cache" / "wire", UNITS[0], FORMAT)
+    data = bytearray(wire.read_bytes())
+    data[len(data) // 2] ^= 0xFF
+    wire.write_bytes(bytes(data))
+    with pytest.raises(RuntimeError, match="checkpoint cached wire identity refused"):
+        campaign.main(argv)
+    assert not (tmp_path / "campaign.anchors.json").exists()
+
+
+def test_a_unit_whose_inputs_changed_is_refused_not_adopted(monkeypatch, tmp_path):
+    """The shard's recorded receipts are this unit's W, X and H as its first
+    reader saw them. A relaunch whose read disagrees is pricing other inputs."""
+    import pickle
+    from prismaquant import cost_stage_checkpoint as journal
+    campaign, argv, _state = _killed_run(monkeypatch, tmp_path)
+    path = _stream_shard(tmp_path, UNITS[0])
+    envelope = pickle.loads(path.read_bytes())
+    unit = pickle.loads(envelope["payload"])
+    unit["stream_receipts"]["weight"] = {"changed": True}
+    journal.write_unit(path.parent.parent, stage=campaign.STREAM_JOURNAL_STAGE, qname=UNITS[0],
+                       identity_sha256=envelope["identity_sha256"], state=unit)
+    with pytest.raises(RuntimeError, match="recorded W/X/H receipts are not this run"):
+        campaign.main(argv)
+
+
+def test_a_stream_journal_under_other_settings_is_refused(monkeypatch, tmp_path):
+    campaign, argv, _state = _killed_run(monkeypatch, tmp_path)
+    with pytest.raises(RuntimeError, match="stream head checkpoint identity mismatch"):
+        campaign.main([*argv, "--anchor-budget", "11"])
 
 
 def test_a_corrupt_late_entry_refuses_before_any_identity_bound_write(monkeypatch, tmp_path):

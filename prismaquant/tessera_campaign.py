@@ -123,6 +123,16 @@ SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 #: allocator's cost-source precedence reads a field, not a convention.
 CURRENCY = "output_mse_under_route_activation_contract"
 
+#: The stream head's journal before finalize (PQ #1403), beside the checkpoint
+#: and never inside ``<checkpoint>.parts``: a present ``.parts`` means a
+#: finalized run identity exists and sends the row to the load-all head.
+STREAM_JOURNAL_SUFFIX = ".stream"
+STREAM_JOURNAL_STAGE = "Tessera campaign stream head"
+#: What the stream journal's identity holds in place of each unit's W, X and H
+#: receipts. The unit's own shard carries them, and adoption compares them
+#: with the relaunch's read of the same entry.
+STREAM_JOURNAL_RECEIPT = "bound per unit in its stream journal shard"
+
 #: Round 1's anchors: both endpoints plus the middle.  The endpoints are
 #: mandatory rather than chosen -- a surface that does not span its family's
 #: legal range would have to extrapolate to price the ends, and
@@ -6054,10 +6064,27 @@ def _main(argv, *, source_scope) -> int:
     # receipts, and the last of them is taken when the last entry is read.
     checkpoint_identity = journal = identity_sha256 = None
     resumed = {}
+    # Until then the stream head keeps its own journal beside the checkpoint
+    # (PQ #1403). Its identity is the run identity with every unit's W, X and H
+    # receipts left to the unit's shard, which carries the receipts its reader
+    # took; so a killed row's anchors can be adopted by the relaunch, one unit
+    # at a time, once that unit's entry is read again and its receipts match.
+    # It opens like the checkpoint journal: a stream journal under any other
+    # identity is refused by field, never silently discarded.
+    stream_journal = stream_identity_sha256 = None
+    stream_resumed = {}
+    dirty_stream_units = set()
     if not streaming_head:
         checkpoint_identity = run_identity(
             **({"bound_units": bound_checkpoint_units} if bound_checkpoint_units else {}))
         journal, identity_sha256, resumed = open_journal(checkpoint_identity)
+    else:
+        stream_journal, stream_identity_sha256, stream_resumed = prepare_journal(
+            checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX),
+            stage=STREAM_JOURNAL_STAGE, resume=True, qnames=targets,
+            identity=run_identity(unit_receipts={
+                name: dict.fromkeys(("weight", "scoring_rows", "hessian"),
+                                    STREAM_JOURNAL_RECEIPT) for name in weights}))
     measured: dict[str, dict[str, list[CampaignAnchor]]] = {}
     # Rows adopted from another campaign whose rungs THIS run's menu does not
     # admit.  They are measurements of the same rate/distortion law and cost
@@ -6077,7 +6104,7 @@ def _main(argv, *, source_scope) -> int:
                                   structure_by_unit=structure_by_unit,
                                   rate_band=restricted_rate_band)
 
-    def adopt_state(name: str, state, *, where: str, deferred=None) -> None:
+    def adopt_state(name: str, state, *, where: str, deferred=None, entry=None) -> None:
         """Verify one unit's stored anchors against this run and take them.
 
         The one path for both a resume of this run's own checkpoint and an
@@ -6108,6 +6135,12 @@ def _main(argv, *, source_scope) -> int:
         existing)`` instead of being verified inline; the caller verifies the
         whole list on worker threads and fills ``wire_records`` in this same
         order.  Without it, the receipt is verified where it always was.
+
+        ``entry`` is the stream head's resident entry for this unit
+        (``RowStream.entry``). Each row's input identity is then derived from
+        that entry's own source and holder, exactly as the encode loop derives
+        a fresh anchor's, rather than from a run-wide source the stream head
+        does not have.
         """
         if not isinstance(state, dict) \
                 or set(state) - {"unservable"} != {"anchors", "wire_records"} \
@@ -6136,11 +6169,16 @@ def _main(argv, *, source_scope) -> int:
             # Row level, the same rule: the row's inputs (Hessian
             # applicability, static scale) must be what this run's producer
             # stamps for its rung, then its wire receipt must verify.
+            if entry is not None:
+                source, bound = (entry.source if want_h else None), {"bound_unit": entry.holder}
+            else:
+                source = calibration_source
+                bound = ({"bound_unit": bound_checkpoint_units[name]}
+                         if bound_checkpoint_units else {})
             identity = _checkpoint_anchor_identity(
                 anchor, weights=weights, menus=menus,
-                calibration_source=calibration_source, static_scales=static_scales,
-                projected_units=projected_units,
-                **({"bound_unit": bound_checkpoint_units[name]} if bound_checkpoint_units else {}))
+                calibration_source=source, static_scales=static_scales,
+                projected_units=projected_units, **bound)
             existing = state["wire_records"][anchor.format_name]
             if deferred is not None:
                 deferred.append((name, anchor, identity, existing))
@@ -6175,6 +6213,34 @@ def _main(argv, *, source_scope) -> int:
         print(f"[campaign] resumed {sum(len(v) for f in measured.values() for v in f.values())} "
               f"verified anchors from {checkpoint} in {_time.monotonic() - resume_started:.1f} s "
               f"({identity_threads} threads)", flush=True)
+
+    if stream_resumed:
+        # A killed stream-head row's anchors (PQ #1403). Each unit's entry is
+        # read and verified through the window like any batch, its receipts
+        # must equal the ones its shard recorded, and then every row passes
+        # the same gates as a checkpoint resume: its input identity against
+        # this entry, its wire receipt against the file on disk. The adopted
+        # units stay dirty, so the finalized journal carries them.
+        adopt_started = _time.monotonic()
+        names = sorted(stream_resumed)
+        chunks = [names[start:start + args.anchor_batch_size]
+                  for start in range(0, len(names), args.anchor_batch_size)]
+        row_stream.plan(chunks)
+        for index, chunk in enumerate(chunks):
+            row_stream.admit(index)
+            for name in chunk:
+                state = dict(stream_resumed[name])
+                recorded = state.pop("stream_receipts", None)
+                entry = row_stream.entry(name)
+                if entry.holder is None or recorded != entry.identities:
+                    raise RuntimeError(
+                        f"stream checkpoint unit {name}: its recorded W/X/H receipts are not "
+                        "this run's read of the same entry; refusing to adopt its anchors")
+                adopt_state(name, state, where="stream checkpoint", entry=entry)
+                dirty_checkpoint_units.add(name)
+        print(f"[campaign] adopted {sum(len(state['anchors']) for state in stream_resumed.values())} verified anchors "
+              f"for {len(names)} units from {checkpoint.name}{STREAM_JOURNAL_SUFFIX} in "
+              f"{_time.monotonic() - adopt_started:.1f} s", flush=True)
 
     seed_provenance = None
     if args.seed_checkpoint:
@@ -6352,6 +6418,8 @@ def _main(argv, *, source_scope) -> int:
         measured.setdefault(name, {}).setdefault(
             anchor.family, []).append(anchor)
         dirty_checkpoint_units.add(name)
+        if journal is None and stream_journal is not None:
+            dirty_stream_units.add(name)
 
     ledger = _AnchorPublicationLedger(
         publisher=None,
@@ -6370,32 +6438,47 @@ def _main(argv, *, source_scope) -> int:
         return sum(len(anchors) for by_format in measured.values()
                    for anchors in by_format.values())
 
+    def unit_state(name) -> dict:
+        """One unit's journal state: its anchor rows and their wire receipts.
+
+        Snapshotted on the thread that owns the rows; only the write is
+        ordered behind the receipts it cites. ``vars`` returns the anchor's
+        live ``__dict__``, so it is copied rather than handed over.
+        """
+        state = {"anchors": [dict(vars(anchor))
+                             for anchors in measured.get(name, {}).values()
+                             for anchor in anchors],
+                 "wire_records": dict(wire_records[name])}
+        if unservable.get(name):
+            state["unservable"] = dict(unservable[name])
+        return state
+
     def flush_checkpoint() -> None:
         if journal is None:
-            # The stream head before finalize: the shards cite a run identity
-            # that does not exist yet, so the dirty units stay dirty until
-            # then. Progress is still owed, and it is still durable work
-            # (PB #480). An anchor reaches ``measured`` only through the
-            # ledger, after its wire receipt was read back off the landed
-            # file. Staying silent until finalize held a 1728-anchor row in
-            # ``startup`` for its whole encode, and PB killed it with 1608
-            # anchors on disk (PQ #1362).
-            report_progress("pricing", committed_anchors())
+            # The stream head before finalize: the checkpoint shards cite a
+            # run identity that does not exist yet, so the dirty units stay
+            # dirty until then. Their rows go to the stream journal now, each
+            # with the receipts its entry's reader took, so a relaunch can
+            # adopt them (PQ #1403). Progress is reported after that write and
+            # only for rows it holds: before it, PB was told of anchors no
+            # restart could reuse. Staying silent until finalize instead held
+            # a 1728-anchor row in ``startup`` for its whole encode, and PB
+            # killed it with 1608 anchors on disk (PQ #1362, PB #480).
+            states = [(name, {**unit_state(name),
+                              "stream_receipts": row_stream.unit_identity(name)})
+                      for name in sorted(dirty_stream_units)]
+            dirty_stream_units.clear()
+            committed = committed_anchors()
+
+            def write_stream():
+                for name, state in states:
+                    write_unit(stream_journal, stage=STREAM_JOURNAL_STAGE, qname=name,
+                               identity_sha256=stream_identity_sha256, state=state)
+                report_progress("pricing", committed)
+
+            ledger.submit_checkpoint(write_stream)
             return
-        # The rows are snapshotted here, on the thread that owns them, and
-        # only the write itself is ordered behind the receipts it cites.
-        # ``vars`` returns the anchor's live ``__dict__``, so it is copied
-        # rather than handed over.
-        states = []
-        for name in sorted(dirty_checkpoint_units):
-            rows = [dict(vars(anchor))
-                    for anchors in measured.get(name, {}).values()
-                    for anchor in anchors]
-            state = {"anchors": rows,
-                     "wire_records": dict(wire_records[name])}
-            if unservable.get(name):
-                state["unservable"] = dict(unservable[name])
-            states.append((name, state))
+        states = [(name, unit_state(name)) for name in sorted(dirty_checkpoint_units)]
         dirty_checkpoint_units.clear()
         if not states:
             return
@@ -7053,8 +7136,11 @@ def _main(argv, *, source_scope) -> int:
         n: {f: len(a) for f, a in by_f.items()} for n, by_f in measured.items()
     }
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    with open(args.out, "wb") as handle:
-        pickle.dump(payload, handle)
+    # Canonical bytes: a resumed or adopted row is an equal but distinct object
+    # from the one a fresh encode shares, and plain ``pickle.dump`` would make
+    # the file's digest depend on which path built it (PQ #1403).
+    from .digests import canonical_pickle_bytes
+    Path(args.out).write_bytes(canonical_pickle_bytes(payload))
     total = sum(len(rows) for rows in payload["costs"].values())
     print(f"[campaign] wrote {args.out}: {len(payload['costs'])} units, "
           f"{total} priced rungs, {len(payload['formats'])} distinct formats",
