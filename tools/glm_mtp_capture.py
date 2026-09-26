@@ -100,19 +100,6 @@ def _peak_memory():
             "max_reserved_bytes": int(torch.cuda.max_memory_reserved())}
 
 
-def _progress(label, total):
-    """A reporter that prints about sixteen lines over ``total`` sequences."""
-    started = time.monotonic()
-    step = max(1, int(total) // 16)
-
-    def report(done):
-        if done % step == 0 or done == total:
-            print(f"{label} {done}/{total} sequences, {time.monotonic() - started:.0f} s",
-                  flush=True)
-
-    return report
-
-
 def _plan_inputs(args):
     """The plan, the calibration draw and the canonical capture's source owner."""
     from prismaquant import glm_mtp_capture as cap
@@ -175,7 +162,7 @@ def final_hidden_phase(args):
                 boundary_session=boundaries["session"], layer=layer, out_dir=args.out,
                 session=session, read_ahead_bytes=int(args.read_ahead_mb) << 20,
                 head=runner._head(),
-                progress=_progress("[mtp-final-hidden]", int(ids.shape[0])))
+                progress=cap.sequence_progress("[mtp-final-hidden]", int(ids.shape[0])))
             witness = runner.context.source_selected_initialization_witness([layer])
         finally:
             runner.shutdown()
@@ -295,7 +282,7 @@ def capture_phase(args):
         print(f"[mtp-capture] projection checked on {len(checked)} routed units", flush=True)
         read, stream = cap.final_hidden_stream(final, int(ids.shape[0]),
                                                read_ahead_bytes=int(args.read_ahead_mb) << 20)
-        report = _progress("[mtp-capture] capture", int(ids.shape[0]))
+        report = cap.sequence_progress("[mtp-capture] capture", int(ids.shape[0]))
 
         def reporting_read(index):
             value = read(index)

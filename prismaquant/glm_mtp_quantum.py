@@ -142,19 +142,6 @@ def mtp_priced_modules(model, profile) -> dict:
     return dict(sorted(modules.items()))
 
 
-def _reporter(label, total):
-    """A line about sixteen times per pass: the passes run for minutes each."""
-    started = time.monotonic()
-    step = max(1, int(total) // 16)
-
-    def report(done):
-        if done % step == 0 or done == total:
-            print(f"{label}: {done}/{total} sequences, {time.monotonic() - started:.0f} s",
-                  flush=True)
-
-    return report
-
-
 def mtp_backward(model, embed_tokens, lm_head, calibration_ids, hidden_states, *,
                  seed: int, device, min_free_gib=None, free_gib=None, report=None):
     """One probe's forward and backward over every calibration sequence.
@@ -205,6 +192,7 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
     rungs' serialized bytes from the merged campaign table.
     """
     from . import format_registry as fr
+    from .glm_mtp_capture import sequence_progress
     from .joint_aura import (activation_identity, identity_sha256, make_joint_aura_entry,
                              source_execution_identity, validate_joint_aura_entry,
                              validated_probe_identity)
@@ -296,8 +284,8 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
             mtp_backward(model, embed_tokens, lm_head, calibration_ids, hidden_states,
                          seed=int(seed_base) + _probe, device=device,
                          min_free_gib=min_free_gib, free_gib=free_gib,
-                         report=_reporter(f"[mtp-quantum] probe {_probe + 1}/{n_probes} "
-                                          f"pass {passes[0]}", n_sequences))
+                         report=sequence_progress(f"[mtp-quantum] probe {_probe + 1}/{n_probes} "
+                                                  f"pass {passes[0]}:", n_sequences))
 
         terms, diagnostics, receipt = observe_and_project_windows(
             measured, specs, production_cache, operator_windows, backward=backward,
