@@ -40,7 +40,8 @@ This is a class, not an event. Instances already in the institutional record:
 - AQUA priced 5.5% of an MoE's mass because packed experts were outside the
   A-side's enumeration (fixed in `d61bddf`).
 - `units_on_fallback_route = 0` published as clean while no unit had a
-  declared lane — a zero over an empty denominator.
+  declared lane — a zero over an empty denominator. (The counter is retired,
+  #1377; `route_status_counts` counts `no_declared_lane` instead.)
 - The completeness gate read fused-group claims from a dense-only source, so
   routed claims were invisible to it.
 - The byte-budget audit caught overshoot but not undershoot — a one-sided
