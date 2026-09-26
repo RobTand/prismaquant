@@ -2986,6 +2986,10 @@ and `--mtp-serve-constants`, with optional `--mtp-acceptance-points`, run
 - `mtp_rung_selection.group_product_menu` builds one uniform rung per declared
   group (routed stack, shared expert), with `E` and bytes summed over the units;
 - a group whose source is BF16 is also offered BF16 passthrough at zero cost;
+- a priced Tessera rung is offered only if the pinned runtime attests it for
+  that unit (`format_is_producer_eligible`, asked about the unit's serving
+  context under a declared scope; principle 14); the record counts every
+  priced rung it left out (`unattested_rungs`);
 - the canon `select_rung` chooses under the sub-budget, and with no acceptance
   points it is degenerate: the lowest-E rung within the budget.
 
