@@ -1134,9 +1134,9 @@ def test_a_cell_with_no_reseal_proof_is_admitted_in_dev_mode_only(tmp_path, camp
 
 
 def test_a_proof_that_does_not_cover_the_candidate_stratum_is_a_seal(tmp_path, campaign, probe, monkeypatch):
-    """The fixture proof covers routed E2M1 only among routed strata: a routed
-    E4M3 candidate is uncovered. Certified mode refuses; dev mode admits it
-    unproven, with no producer package."""
+    """The fixture proof covers routed E4M3 and E2M1 but no routed BF16: a
+    routed BF16 candidate is uncovered. Certified mode refuses; dev mode admits
+    it unproven, with no producer package."""
     from prismaquant.joint_catalog_extension import validated_encoder_adoption
     inputs, _, _ = _pair(tmp_path, campaign, probe)
     prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
@@ -1146,12 +1146,12 @@ def test_a_proof_that_does_not_cover_the_candidate_stratum_is_a_seal(tmp_path, c
     assert validated_encoder_adoption(adoption, fmt=ADDED_FORMAT)['encoder_source_proof_covered'] is True
     adoption['candidate_encoding_identity']['unit'] = 'model.layers.0.mlp.experts.0.down_proj'
     with pytest.raises(ValueError, match='does not cover the added candidate stratum'):
-        validated_encoder_adoption(adoption, fmt='TESSERA_E4M3_K1_R1152')
+        validated_encoder_adoption(adoption, fmt='TESSERA_BF16_K1_R1152')
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
-    result = validated_encoder_adoption(adoption, fmt='TESSERA_E4M3_K1_R1152')
+    result = validated_encoder_adoption(adoption, fmt='TESSERA_BF16_K1_R1152')
     assert result['encoder_source_proof_covered'] is False
     assert result['proof'] is None and result['producer_package'] is None
     # The fixture wall is not a seal.
     adoption['candidate_encoding_identity']['encoder_fixture_id'] = 'e'*64
     with pytest.raises(ValueError, match='adopted encoder fixture'):
-        validated_encoder_adoption(adoption, fmt='TESSERA_E4M3_K1_R1152')
+        validated_encoder_adoption(adoption, fmt='TESSERA_BF16_K1_R1152')
