@@ -222,6 +222,48 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     assert json.loads((tmp_path / 'run/results.json').read_text())['passed'] is False
 
 
+def test_the_gpu_pass_binds_the_digest_quantum_and_refuses_to_hash_its_source(tmp_path, monkeypatch):
+    """PQ #1374: a prepare hashed the whole source under its GPU reservation.
+    The pass now hands the identity build the plan's bound digest cache and a
+    refusal naming the CPU-only quantum, so nothing is hashed under the GPU."""
+    from prismaquant import tessera_joint_aura as bridge, calibration_data, cost_streaming, gpu_guard
+    from prismaquant import model_profiles
+    monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_: None)
+    _stub_device_envelope(monkeypatch, bridge)
+    monkeypatch.setattr(model_profiles, 'detect_profile', lambda _: object())
+    draw = dict(fit_ids_sha256='a' * 64, text_sha256='b' * 64, nsamples=512, seqlen=512, seed=0)
+    data = SimpleNamespace(census={'model': 'fixture', 'attention_implementation': 'eager'},
+        payload={'provenance': {'hessian': {'calibration_identity': draw}}},
+        layer_render_bytes=lambda _: {0: 64}, formats_by_qname={'unit': ['BF16']},
+        cells={('unit', 'BF16'): {'render_origin': 'encoded'}},
+        unit_scope=None, render_mirror_root=None, synthesized_now=0,
+        head_walk_workers=None, head_walk_resumed_units=0, encoder_source_reuse=None)
+    monkeypatch.setattr(bridge, 'load_measured_anchor_input', lambda *_args, **_kwargs: data)
+    monkeypatch.setattr(calibration_data, 'load_calibration_input', lambda *_args, **_kwargs:
+        (torch.zeros((512, 512), dtype=torch.int64), {'provenance': draw}))
+    monkeypatch.setattr(bridge, '_prepare_source_owner', lambda *_args, **_kwargs: None)
+    runner = SimpleNamespace(model=torch.nn.Module(), layer_index_for_qname=lambda _: 0, shutdown=lambda: None)
+    monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *_args, **_kwargs: runner)
+    seen = {}
+
+    class Reached(Exception):
+        pass
+
+    def identity(*_args, **kwargs):
+        seen.update(kwargs)
+        raise Reached
+    monkeypatch.setattr(cost_streaming, 'build_streamed_model_identity', identity)
+    digests = tmp_path / 'digests.json'
+    digests.write_text('{}')
+    config = _plan(tmp_path)
+    config['source_digest_cache'] = {'path': str(digests), 'sha256': bridge._sha(digests)}
+    with pytest.raises(Reached):
+        bridge.execute('prepare', config, plan_sha256='d' * 64)
+    assert Path(seen['digest_cache_path']) == digests
+    assert 'identity --model fixture' in seen['refuse_uncovered']
+    assert 'source_digest_cache' in seen['refuse_uncovered']
+
+
 def test_repeated_row_admission_uses_prewarmed_metadata_without_file_io(monkeypatch):
     backend._qualification.cache_clear()
     qualification, digest = backend._qualification()

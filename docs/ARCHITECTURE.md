@@ -1,5 +1,36 @@
 # PrismaQuant Architecture
 
+The Tessera export preflight joins a GLM allocation in the source namespace
+(2026-09-26, `ws-serve/glm-source-unit-shapes`, PQ #1388). The allocation,
+Tessera's `plan_from_layer_config.py` and its exporter all name units by
+source checkpoint tensor. On glm5_next that is `model.language_model.layers.N…`,
+and the recipe namespace folds it to `model.layers.N…`. Three joins in
+`tessera_export_lane.py` failed on the real GLM allocation:
+
+- `_source_unit_shapes` keyed the scope gate's shape map by recipe unit, so
+  every selected unit found no shape. It is now keyed by source unit (the
+  tensor name without `.weight`). The name projection still decides which
+  tensors are body units.
+- The producer plan view (`_write_plan_assignment`) carried the allocator's
+  BF16 entry, `{"bits": 16, "data_type": "float"}`. The translator reads only
+  `"BF16"`, so it refused 238 units as quantised non-Tessera choices. The view
+  is now always written, and every BF16 choice in it is spelled `"BF16"`.
+- The view carried 124 BF16 `model.visual.*` units. The translator plans the
+  decoder body only, so it refused them as absent from its body projection.
+  The view now leaves out units the profile declares outside the text graph
+  (`DECLARED_OUT_OF_GRAPH`), and records them under
+  `source_precision_outside_graph`. The exporter already writes those tensors
+  at source precision and names them in `ignore`. A non-BF16 choice on such a
+  unit is refused, because the exporter would not write it as priced.
+
+The allocator's own `layer_config.json` is unchanged. Gate:
+`tests/test_tessera_glm_source_namespace.py` drives a layer-43 glm5_next
+checkpoint through the lane CLI and the pinned translator's `main`. Before the
+fix, the scope gate refused it with `found []`. On the real GLM-5.3 allocation,
+the preflight passes (36,309 scoped units) and the translator plans 36,309
+Tessera units and 1,384 BF16 units. No format, default, stage or ship-gate
+verdict changes.
+
 The Tessera export preflight no longer reads the priced expert wires
 (2026-09-26, `ws-serve/1378-preflight-no-rehash`, PQ #1378).
 `_carried_expert_projection` (`tessera_export_lane.py`) used to check every
@@ -3309,6 +3340,53 @@ reclaim pass that reads each step** (PQ #1383, P1, a regression from #1348).
 - **Headroom.** `headroom_bytes` and `device_headroom_bytes` read the same
   term table, `_room`. Their values do not change.
 - **Unchanged.** No pipeline default, stage, format or ship gate changes.
+
+Re-stamped (2026-09-26, `ws-serve/glm-source-unit-shapes`) for **the Tessera
+export preflight joining GLM allocations by source unit** (PQ #1388): the
+scope gate's shape map, the plan view's BF16 spelling, and the plan view's
+out-of-graph units. See the entry at the top.
+
+Re-stamped (2026-09-26, `claude/identity-quantum-1374`) for **the source
+identity built in a CPU-only quantum, not under a GPU** (PQ #1374, P2). A
+first-time joint prepare hashed the whole GLM-5.3 source, about 640 GB for
+about 70 minutes at 12.8 W of 140, inside its GPU reservation.
+
+- **The quantum.** `python -m prismaquant.tessera_joint_aura identity
+  --model M --out D` writes `build_source_checkpoint_identity`'s runner-free
+  digest cache. It takes no plan, lease, runner or device, and a rerun hashes
+  only shards whose stat fingerprint changed.
+- **The binding.** A joint plan may bind `source_digest_cache: {path,
+  sha256}`, admitted like `source_identity_cache`. `build_streamed_model_identity`
+  takes it as `digest_cache_path` and fills every shard the identity cache
+  misses from it, using the same lookup and fingerprint predicate as
+  `build_source_checkpoint_identity` (`_digest_cache_digests`, one owner).
+- **The refusal.** `prepare` and `run` pass `refuse_uncovered`: when neither
+  cache covers a shard, the pass refuses before hashing a byte, with the
+  uncovered bytes and the quantum's command in the message. This holds in
+  both modes; it is a performance gate, not a seal.
+- **Run seeding.** With nothing bound, `_seed_source_identity_cache` starts a
+  pass from `<output_root>/prepare/source-identity.json` when its own slot
+  is empty. The capture owner already adopted that file; the run's streamed
+  identity build did not, and rehashed the whole source under its GPU. The
+  copy is a starting point: each digest is still reused only where the live
+  fingerprint admits it.
+- **Measured (M4 R896, before the code change, the proof bound by hand).** The
+  prepare took 356 s with 100.7 GB `read_bytes` and 0 payload bytes hashed,
+  against 4,660 s, 1,346 GB and 642.65 GB for the R1024 prepare that hashed.
+
+No stored format, rendered byte, pipeline default or ship gate changes.
+
+Re-stamped (2026-09-26, `claude/route-histogram-card-1377`) for **one route
+answer, carried on the card** (PQ #1377, P2, part of epic #1295).
+`selection_serving_lane_provenance` drops `units_on_backed_fused_mid_m_lane`,
+`units_on_fallback_route`, `units_without_declared_lane`,
+`route_status_attested`, `selected_rungs_fused_mid_m_backed` and
+`selected_rungs_on_fallback_route`; no live reader consumed them, and
+`route_status_counts` already counted every unit. `ResolvedServingLane` keeps
+`fused_mid_m_backed`. Both exporters stamp `build.route_histogram` through
+`shipcard.route_histogram_claim`, and `verify` requires and replays it on
+Tessera cards (§7, `build.route_histogram`). No default, stage, format or byte
+changes; the ship gate gains one refusal.
 
 Re-stamped (2026-09-25, `claude/dedup-digests-files-1361`) for **one owner per
 file, bytes and text digest** (PQ #1361, #1301 part 2, P1, part of epic #1295).
@@ -8339,7 +8417,11 @@ because the loader reads tensors after authenticating their shard.
 An optional plan binding `source_identity_cache: {path, sha256}` seeds the
 existing per-pass `source-identity.json` slot in a new output root, with an
 exact checksum and conflict refusal; it does not create a weight or activation
-cache. A cache proven on another host's NFS mount is portable in dev mode
+cache. Since PQ #1374 a plan may also bind `source_digest_cache`, the output
+of the CPU-only `tessera_joint_aura identity` quantum. A prepare or run whose
+two caches leave a shard uncovered refuses rather than hashing under its GPU
+reservation, and a pass with nothing bound starts from the prepare's own
+`source-identity.json` in the same output root. A cache proven on another host's NFS mount is portable in dev mode
 only, and only when every mutation-sensitive field matches and the sole
 difference is the client-local `st_dev` (same export, two mounts): certified
 mode still refuses it, and dev records the `[DEV-MODE]` trust line on every
@@ -21563,6 +21645,22 @@ claim travels with its quality caveat). Known limit: `uniform_control_summary`
 prints producer-declared fields (`candidate_bpp`, `control_bpp`,
 `relative_slack_ppm`) beside the bpp rather than the replayed values; `verify`
 still refuses on the replay.
+
+**`build.route_histogram` (Tessera cards; PrismaQuant #1377).** Principle 12's
+route histogram on the card. The allocator's `serving_lane_provenance`
+(`allocator_candidates.selection_serving_lane_provenance`) answers the route
+question once, through `route_status_counts` and `activation_contracts`; the
+fused-mid-M and fallback counters beside it are retired. Both exporters copy
+those counts, never the per-unit rows, through `shipcard.route_histogram_claim`
+into the build block: `tessera_export_lane.preflight` into the build anchor that
+`lane_shipcard open --build-json` stamps, and `export_native_compressed.
+_write_shipcard` directly. `verify` requires the histogram on a card whose lane
+is `tessera` or whose build or `config.json` names the Tessera container, and
+replays it: the schema, a positive `units_total`, positive integer counts, the
+route statuses summing to `units_total`, and the contract counts summing to no
+more. `no_declared_lane` units (the plain-BF16 picks no lane declares) are
+carried as counted. A native card owes no histogram yet, because a native
+allocation writes no `serving_lane_provenance` (#1387).
 
 **`route.sweep` (compressed-tensors-lane cards; PrismaQuant #631).** The
 serve-side leg of principle 14 on the default lane. The record carries every
