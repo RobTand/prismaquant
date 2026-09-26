@@ -272,7 +272,8 @@ class CaptureSourceAuthentication:
         silently rehashed under a manifest that omitted the source read.
         """
         from .cost_streaming import (_local_checkpoint_shards,
-                                     _read_streamed_model_identity_cache)
+                                     _read_streamed_model_identity_cache,
+                                     stat_fingerprint, stat_fingerprint_reusable)
 
         path = Path(cache_path)
         before = path.stat()
@@ -309,11 +310,11 @@ class CaptureSourceAuthentication:
                 raise RuntimeError(f'{name}: streamed source SHA differs from canonical capture')
             fingerprint = fp_by_path[str(source_path)]
             _, state = self._file(self.root / name)
-            observed = state['before']
-            if any(fingerprint.get(key) != getattr(observed, attribute)
-                   for key, attribute in (('device', 'st_dev'), ('inode', 'st_ino'),
-                                          ('size', 'st_size'), ('mtime_ns', 'st_mtime_ns'),
-                                          ('ctime_ns', 'st_ctime_ns'))):
+            # The same predicate the identity cache is built and validated
+            # with: device may differ only where it is client-local (NFS) or
+            # in dev mode (PQ #1363); anything else names another object.
+            live = stat_fingerprint(str(source_path), state['before'])
+            if not stat_fingerprint_reusable(live, fingerprint):
                 raise RuntimeError(f'{name}: streamed source proof names another object')
             candidate.append((name, state, row['sha256']))
         if {name for name, _, _ in candidate} != expected_shards:

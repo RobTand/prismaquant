@@ -3099,8 +3099,44 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/glm-mtp-quantum-m5`.
+As of: 2026-09-25 · `claude/identity-cache-portable-1363`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/identity-cache-portable-1363`) for **source
+identity proofs that survive another NFS mount, checked by one predicate**
+(PQ #1363, P2). This amends the PQ #843 stamp below.
+
+- **The reuse rule.** `cost_streaming.stat_fingerprint_reuse` returns
+  `exact`, `mount`, `dev` or `None`.
+  - `mount` means only `st_dev` differs and the live file is on NFS (`nfs`
+    or `nfs4` in `/proc/self/mountinfo`). There, the device number is the
+    client's anonymous number for the mount, and the inode is the server's
+    file id. Certified mode now admits it.
+  - `dev` means only `st_dev` differs on any other filesystem. Only dev mode
+    admits it. Only `dev` reuse prints the uncertified `[DEV-MODE]` line.
+  - Any other field difference refuses in both modes: path, inode, size,
+    mtime or ctime.
+- **Measured.** The pool read `st_dev` 64 and 66 on two mounts, with
+  identical inode, size, mtime and ctime on all 120 GLM-5.3 shards. The
+  capture owner refused its proof with "names another object", and the M4
+  prepare re-hashed about 640 GB.
+- **One predicate and one constructor.** `stat_fingerprint(path, stat)`
+  builds the record, and the predicate checks it, for:
+  - the identity cache build and validation;
+  - the export digest memo, whose portable index is no longer dev-only;
+  - the capture owner's `adopt_streamed_identity_cache`, which had its own
+    exact-tuple comparison;
+  - Tessera digest adoption.
+- **Parallel hashing.** `build_streamed_model_identity` now hashes uncovered
+  shards through `_hash_source_shards`, over the admitted CPUs, instead of a
+  serial loop in the main thread.
+
+The record format and the identity bytes are unchanged. Gates:
+`tests/test_source_identity_portable_device.py` (two NFS mounts of one
+object reuse in certified mode; a same-inode object that differs in size,
+mtime or ctime refuses; mountinfo longest-prefix parsing) and
+`tests/test_selected_source_authentication.py` (owner adoption across
+mounts).
 
 Re-stamped (2026-09-25, `claude/glm-mtp-quantum-m5`) for **pricing the GLM MTP
 layer** (PQ #1353, M5 of #1271, P1). `tessera_joint_aura run` on a plan whose

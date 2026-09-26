@@ -38,9 +38,10 @@ def adopt_source_digests(source, binding, output, *, expected_content_sha256,
         live={'path':str(shard.resolve()),'device':fp['_dev'],'inode':fp['ino'],
               'size':fp['size'],'mtime_ns':fp['mtime_ns'],'ctime_ns':fp['ctime_ns']}
         prior=old[str(shard.resolve())]
-        if not owner.stat_fingerprint_reusable(live,prior):
+        reuse=owner.stat_fingerprint_reuse(live,prior)
+        if reuse is None:
             raise ValueError('retained source fence changed before adoption: '+str(shard))
-        observed.append((shard,row['sha256'],fp,prior,live!=prior))
+        observed.append((shard,row['sha256'],fp,prior,reuse!='exact'))
     out=Path(output);out.mkdir(parents=True,exist_ok=True,mode=0o700)
     cache=(SourceDigestCache(out,source=source) if quiescent_seconds is None
            else SourceDigestCache(out,source=source,quiescent_seconds=quiescent_seconds))

@@ -115,8 +115,6 @@ ALLOWLIST = {
         1, INTEGRITY, "a source shard changed while it was hashed"),
     ("prismaquant/cost_streaming.py", "build_source_checkpoint_identity"): (
         1, INTEGRITY, "source metadata changed while it was hashed"),
-    ("prismaquant/cost_streaming.py", "build_streamed_model_identity"): (
-        1, INTEGRITY, "a source shard changed while it was hashed"),
     ("prismaquant/cost_streaming.py", "_read_streamed_model_identity_cache"): (
         1, INTEGRITY, "an identity cache for another source is not this source's hashes"),
     ("prismaquant/cost_streaming.py", "validate_streamed_model_identity"): (

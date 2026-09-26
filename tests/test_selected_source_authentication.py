@@ -296,6 +296,50 @@ def test_adopted_full_source_sha_reuses_bytes_but_rejects_same_size_mutation(
         owner.close()
 
 
+@pytest.mark.parametrize('fstype,shift,accepted', [
+    ('nfs4', {'device': 2}, True),      # another mount of the same export
+    ('ext4', {'device': 2}, False),     # a local device number binds the object
+    ('nfs4', {'ctime_ns': 1}, False),   # same inode, another object
+    ('nfs4', {'size': 1}, False),
+])
+def test_adoption_admits_another_nfs_mount_and_refuses_another_object(
+    complete_source, monkeypatch, tmp_path, fstype, shift, accepted,
+):
+    """PQ #1363: a proof written on one host's mount of the pool is adoptable
+    on another, whose st_dev differs, in certified mode. Any other field
+    difference is refused. The owner uses the identity cache's own predicate."""
+    from prismaquant import cost_streaming
+    from prismaquant import tessera_calibration_cache as cc
+
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
+    monkeypatch.setattr(cost_streaming, '_mount_filesystem_type', lambda _path: fstype)
+    f = complete_source
+    shards, fingerprints = [], []
+    for name in sorted(f.tensors):
+        path = f.root / name
+        row = cost_streaming.stat_fingerprint(path, path.stat())
+        shards.append({'path': str(path), 'size': row['size'], 'sha256': cc.sha256(path)})
+        fingerprints.append({key: value + shift.get(key, 0) if key != 'path' else value
+                             for key, value in row.items()})
+    identity = {'shards': shards,
+                'checkpoint_weight_map': json.loads(
+                    (f.root/'model.safetensors.index.json').read_text())['weight_map']}
+    cache = tmp_path / 'source-identity.json'
+    cache_record = {'identity': identity, 'fingerprints': fingerprints}
+    cache.write_text(json.dumps(cache_record))
+    monkeypatch.setattr(cost_streaming, '_read_streamed_model_identity_cache',
+                        lambda *_a, **_k: (cache_record, identity))
+    monkeypatch.setattr(cost_streaming, '_local_checkpoint_shards',
+                        lambda *_a, **_k: (identity['checkpoint_weight_map'],
+                                           [Path(row['path']) for row in shards]))
+    with cc.authenticate_selected_capture_source(**f.kwargs) as owner:
+        if accepted:
+            assert owner.adopt_streamed_identity_cache(cache) == len(shards)
+        else:
+            with pytest.raises(RuntimeError, match='another object'):
+                owner.adopt_streamed_identity_cache(cache)
+
+
 @pytest.mark.parametrize('name', ['config.json', 'model.safetensors.index.json', 'chat_template.jinja'])
 def test_metadata_tampering_refused_before_source_construction(complete_source, name):
     from prismaquant import tessera_calibration_cache as cc
