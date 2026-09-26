@@ -292,3 +292,37 @@ def test_hidden_states_stream_once_then_replay():
     hidden.require_complete()
     assert float(hidden(0)[0, 0, 0]) == 0.0
     assert reads == [0, 1]
+
+
+def _scoped_call(census, *, source_layers=(BACKBONE,), joint_eval=None, windows=True):
+    from types import SimpleNamespace
+
+    runner = SimpleNamespace(source_layers=source_layers,
+                             context=SimpleNamespace(install=lambda *a, **k: pytest.fail(
+                                 "installed a layer before the inputs were admitted")))
+    config = {"joint_eval": joint_eval, "execution": {}, "min_free_gib": 0}
+    return quantum.run_mtp_scope(
+        runner, config=config, data=SimpleNamespace(census=census), production_cache=None,
+        calibration_ids=torch.zeros(1, 2, dtype=torch.int64),
+        calibration={"calibration_sha256": "c" * 64}, source_model=None,
+        projection_backend=None, operator_windows={"schema": WINDOWS_SCHEMA} if windows else None,
+        device_bytes=None)
+
+
+def test_the_run_refuses_a_census_that_is_not_the_mtp_capture_s():
+    with pytest.raises(RuntimeError, match="not an MTP census"):
+        _scoped_call({"anchor_groups": {}})
+
+
+def test_the_run_refuses_a_source_that_does_not_hold_the_mtp_layer():
+    census = {"mtp_extension": {"layer": BACKBONE,
+                                "final_hidden": {"path": "/nonexistent", "sha256": "0" * 64}}}
+    with pytest.raises(RuntimeError, match="not the MTP layer"):
+        _scoped_call(census, source_layers=(0, 1))
+
+
+def test_the_run_refuses_an_evaluation_panel_and_missing_windows():
+    with pytest.raises(RuntimeError, match="full draw"):
+        _scoped_call({}, joint_eval={"panel": 1})
+    with pytest.raises(RuntimeError, match="operator windows"):
+        _scoped_call({}, windows=False)
