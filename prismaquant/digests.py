@@ -33,6 +33,17 @@ Byte profiles, all lowercase-hex SHA-256:
   only how the file is read, never the digest. The path may be a ``str`` or a
   ``PathLike``; a missing path or a directory raises what ``open`` raises.
 
+Pickle profile:
+
+- ``canonical_pickle_bytes``: ``pickle.dumps`` at the default protocol of a
+  rebuilt copy. In the copy, every plain ``dict``, ``list`` and ``tuple`` is a
+  fresh object, and every equal ``str`` or ``bytes`` is one shared object. A
+  pickle writes a shared object once and refers back to it, so its bytes
+  depend on which objects the caller happened to share. This profile makes
+  that a function of the value: the same plain-typed value, in the same key
+  order, gives the same bytes whichever path built it (PQ #1403). Other types
+  are pickled as given, and a container that contains itself is refused.
+
 The JSON families are not interchangeable. The round trip and a direct encoding
 differ on a mapping with integer keys (``{10: .., 9: ..}``); ASCII and UTF-8
 differ on any non-ASCII character; strict and lax differ on ``NaN``. A direct
@@ -208,6 +219,32 @@ DIRECT_ASCII_STRICT = JsonProfile("direct-ascii-strict", ensure_ascii=True, allo
 DIRECT_ASCII_LAX = JsonProfile("direct-ascii-lax", ensure_ascii=True, allow_nan=True)
 DIRECT_ASCII_LAX_DEFAULT_STR = JsonProfile(
     "direct-ascii-lax-default-str", ensure_ascii=True, allow_nan=True, default=str)
+
+
+def canonical_pickle_bytes(value: object) -> bytes:
+    import pickle
+
+    shared: dict = {}
+    open_containers: set[int] = set()
+
+    def rebuild(item):
+        kind = type(item)
+        if kind is str or kind is bytes:
+            return shared.setdefault((kind, item), item)
+        if kind is dict or kind is list or kind is tuple:
+            if id(item) in open_containers:
+                raise ValueError("canonical_pickle_bytes refuses a container that contains itself")
+            open_containers.add(id(item))
+            try:
+                if kind is dict:
+                    return {rebuild(key): rebuild(entry) for key, entry in item.items()}
+                rebuilt = [rebuild(entry) for entry in item]
+                return rebuilt if kind is list else tuple(rebuilt)
+            finally:
+                open_containers.discard(id(item))
+        return item
+
+    return pickle.dumps(rebuild(value))
 
 
 #: The read size ``file_sha256hex`` uses when a site does not keep its own.

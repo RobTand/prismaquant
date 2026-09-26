@@ -3338,6 +3338,60 @@ its name and key order, and a GoldenTable of the pre-change outcomes on CPU
 and CUDA holds them byte-identical (`tests/test_tensor_digests_1384.py`). No
 default, stage, format, lane, gate or byte changes.
 
+Re-stamped (2026-09-26, `claude/stream-head-adoptable-1403`) for **stream-head
+anchors that survive a kill** (PQ #1403, P2).
+
+Before this change, a stream-head row wrote no journal until finalize. After
+PQ #1362 it still reported its encoded anchors as progress, so a row killed
+mid-round had told PrismaBuild about 1632 anchors, and its relaunch had to
+re-encode every one of them.
+
+Each flush before finalize now writes the flushed units' rows to a stream
+journal, `<checkpoint>.stream` (`STREAM_JOURNAL_SUFFIX`), through the same
+`prepare_journal`/`write_unit`. It reports `pricing` only after that write.
+- The journal's identity is the run identity with every unit's W, X and H
+  receipts deferred to the unit's own shard (`STREAM_JOURNAL_RECEIPT`). The
+  shard records the receipts that its reader took (`RowStream.unit_identity`).
+- A relaunch on the stream head opens this journal before the first batch. A
+  journal written under any other identity is refused by field, as a
+  checkpoint resume is.
+- For each unit the journal holds, the relaunch reads the unit's entry through
+  the window and requires the entry's receipts to equal the recorded ones. It
+  then passes every row through `adopt_state`, with the row's input identity
+  taken from the entry's source and holder and its wire receipt verified
+  against the file on disk.
+- Only the remainder is encoded. The adopted units are journalled again at
+  finalize, under the final run identity.
+
+The stream journal is not `<checkpoint>.parts`, so its presence does not send a
+row to the load-all head. The six identity-bound writes are unchanged, and so
+is a clean run's output: the relaunch writes the same bytes, the cost payload
+included.
+
+The cost payload is now written through a new digest profile,
+`digests.canonical_pickle_bytes`, instead of plain `pickle.dump`. Without it,
+the payload's bytes depended on the path that built it: pickle writes a shared
+object once and refers back to it, and an adopted row is an equal but distinct
+object from the one a fresh encode shares. The first relaunch differed from a
+clean run at one string, `'fp8_e4m3'`, which was a memo reference in one and a
+second copy in the other.
+
+In the rebuilt copy that the profile pickles, every plain container is fresh
+and every equal `str` or `bytes` is shared. Its bytes are therefore a function
+of the value, key order and types. A fresh run's `cost.pkl` bytes differ from
+those written before this change, while the value is unchanged.
+
+No format, pipeline default, stage or ship gate changes.
+
+Gates: `tests/test_tessera_row_stream.py`:
+- `test_a_killed_stream_row_adopts_its_journalled_anchors_on_relaunch`;
+- `test_a_tampered_journalled_wire_is_refused_not_adopted`;
+- `test_a_unit_whose_inputs_changed_is_refused_not_adopted`;
+- `test_a_stream_journal_under_other_settings_is_refused`;
+- the progress test, now requiring that each report count only journalled
+  rows;
+- `tests/test_digest_profiles_1301.py` for the pickle profile.
+
 Re-stamped (2026-09-26, `claude/numerics-pairs-1303`) for **one owner per
 numeric recipe the duplication baseline still paired** (PQ #1394, #1303 part 1,
 P1, part of epic #1295). The kneedle's log-distortion axis is
