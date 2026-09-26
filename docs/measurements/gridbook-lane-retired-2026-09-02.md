@@ -470,3 +470,11 @@ six files hold most of the residue.
 line 2249 to 6289, and §4.9 (the last §4 subsection on this branch) begins at
 3580. §4.10 does not exist here; it is the other branch's addition, so there is
 nothing to conflict with.
+
+## Addendum 2026-09-25: the remainder is archived (#1304)
+
+The D34 remainder this document lists was archived on 2026-09-25 (#1304; step 1
+#1332, step 2 #1328). The list of what moved is in
+`archive/gridbook_lane_2026-09-02/README.md` under "Late arrival, archived
+2026-09-25", and `docs/ARCHITECTURE.md` debt D34 is closed. The measurements
+above are unchanged; only the "still in the tree" statements are now history.

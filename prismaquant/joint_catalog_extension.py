@@ -17,6 +17,7 @@ from pathlib import Path
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
 from .dev_mode import dev_mode_enabled, dev_warning, seal_check
 from .tessera_joint_allocation import _read_bound, _bound_stat_fence
+from .schemas import Contract
 
 SCHEMA = "prismaquant.joint_catalog_extension.v2"
 #: v1 bound one whole completed receipt; v2 (PQ #993) binds the Stage A run
@@ -61,9 +62,7 @@ ADDED_RECIPE = {"body": "tcq", "channel_sigma": None, "grid": "E2M1x2",
                 "span": 2, "window_bits": 0}
 
 
-def _require(value, message):
-    if not value:
-        raise ValueError("joint catalog extension: " + message)
+_require = Contract(ValueError, "joint catalog extension: ").require
 
 
 def _same(a, b, message):

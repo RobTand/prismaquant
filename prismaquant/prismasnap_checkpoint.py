@@ -46,6 +46,7 @@ from .prismasnap import (
     measured_render_objective,
     search_diagonal_scale,
 )
+from .schemas import strict_json_loads
 
 
 PLAN_SCHEMA = "prismaquant.prismasnap.plan.v1"
@@ -375,24 +376,13 @@ def _copy_file_durable(source: Path, destination: Path) -> None:
 
 
 def _load_json(path: Path, *, where: str) -> dict[str, Any]:
-    def exact_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"duplicate JSON member {key!r}")
-            result[key] = value
-        return result
-
-    def reject_constant(value: str) -> object:
-        raise ValueError(f"non-JSON constant {value}")
-
     try:
         if path.is_symlink() or not path.is_file():
             raise ValueError("not one regular file")
-        value = json.loads(
+        value = strict_json_loads(
             path.read_text(encoding="utf-8"),
-            object_pairs_hook=exact_object,
-            parse_constant=reject_constant,
+            duplicate=lambda key: ValueError(f"duplicate JSON member {key!r}"),
+            constant=lambda value: ValueError(f"non-JSON constant {value}"),
         )
     except Exception as exc:
         raise RuntimeError(f"{where} {path} is unreadable/corrupt") from exc
@@ -530,6 +520,8 @@ def _producer_identity() -> dict[str, object]:
         repository / "prismaquant" / "prismasnap_contract.py",
         repository / "prismaquant" / "export_native_compressed.py",
         repository / "prismaquant" / "cost_stage_checkpoint.py",
+        # The canonical JSON encoding cost_stage_checkpoint re-exports (#1301).
+        repository / "prismaquant" / "digests.py",
         repository / "prismaquant" / "cost_streaming.py",
         repository / "tools" / "prismasnap.py",
     ]

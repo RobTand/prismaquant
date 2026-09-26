@@ -36,11 +36,10 @@ from prismaquant import joint_aura_run_transition as transition
 from prismaquant import joint_aura_transitions as transitions
 from prismaquant import tessera_joint_aura as bridge
 from prismaquant.production_weight_cache import _production_cache_source_sha256
-import prismaquant.production_weight_cache as pwc
 
 from test_joint_aura_streamed import _fixture, _run as _streamed_run
-from test_aura_checkpoint_resume_identity import (
-    _cb_provenance, _run as _aura_cost_run, _TinyCache, _TinyLM,
+from test_streamed_cost_checkpoints import (
+    _anchored_streamed_aura, _dense_runner, _DenseTinyLM,
 )
 from test_glm_joint_data_manifest_at_submit import (
     _prepared_fixture, _scope_args, _workspace,
@@ -285,15 +284,23 @@ def test_prepared_non_digest_fields_still_wall_under_dev_mode(tmp_path, monkeypa
 # checkpoint-lineage identity mismatch is reused under dev (PQ #1147)
 
 def _aura_run(tmp_path, monkeypatch, *, source_sha, resume):
+    """One durable streamed AURA run; returns ``(streaming context, payload)``.
+
+    The context's ``install_calls`` counts layer installs, so zero means every
+    unit came from the checkpoint lineage. (Until 2026-09-25 this ran the
+    resident path against a codebook cache identity; that lane was archived,
+    #1304, and durable AURA checkpoints are streamed-only.)
+    """
     monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "7" * 40)
     monkeypatch.setattr(aura, "_aura_source_sha256", lambda: source_sha)
-    monkeypatch.setattr(pwc, "production_cache_cb_render_provenance",
-                        lambda *_args, **_kwargs: _cb_provenance())
     torch.manual_seed(2026)
-    model = _TinyLM()
-    payload = _aura_cost_run(model, _TinyCache(model), tmp_path / "checkpoints",
-                             resume=resume)
-    return model, payload
+    state = {name: value.detach().clone()
+             for name, value in _DenseTinyLM().state_dict().items()}
+    _model, context, runner = _dense_runner(state)
+    payload = _anchored_streamed_aura(
+        runner, torch.tensor([[1, 2, 3, 4]]), tmp_path / "checkpoints",
+        resume=resume)
+    return context, payload
 
 
 def test_checkpoint_identity_mismatch_still_refuses_without_dev_mode(tmp_path, monkeypatch):
@@ -311,13 +318,13 @@ def test_checkpoint_identity_mismatch_reuses_the_lineage_under_dev_mode(
     root = tmp_path / "checkpoints"
     old_manifest = json.loads((root / "manifest.json").read_text())
     monkeypatch.setenv(DEV_ENV, "1")
-    model, payload = _aura_run(tmp_path, monkeypatch, source_sha="b" * 64, resume=True)
+    context, payload = _aura_run(tmp_path, monkeypatch, source_sha="b" * 64, resume=True)
     out = capsys.readouterr().out
     assert "[DEV-MODE]" in out and "AURA checkpoint identity" in out
     assert "a" * 64 in out and "b" * 64 in out  # both producer digests are named
     assert not sorted(root.parent.glob("checkpoints.dev-archived-*"))
     assert json.loads((root / "manifest.json").read_text()) == old_manifest
-    assert model.forward_calls == 0  # every unit was reused, none recomputed
+    assert context.install_calls == 0  # every unit was reused, none recomputed
     assert repr(payload["costs"]) == repr(first["costs"])
 
 

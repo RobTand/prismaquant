@@ -128,7 +128,6 @@ from .allocator_candidates import (
     aggregate_packed_serving_groups,
     build_candidates,
     calibrate_activation_fair_pricing,
-    check_stats_format_applicability,
     expand_fused_sibling_assignment,
     expand_packed_group_assignment,
     fused_sibling_group_members,
@@ -145,23 +144,7 @@ from .fixed_head import (
     is_lm_head_name,
     parse_allow_pinned,
 )
-from .nvfp4_cb_footprint import (
-    CB_ASSIGNMENT_IDENTITIES_FIELD,
-    CB_TENSOR_IDENTITY_FIELD,
-    CBSerializationContext,
-    cb_assignment_payload_breakdown,
-    cb_assignment_serialization_stamps,
-    cb_serialization_context_from_env,
-    cb_serialization_context_stamp,
-    cb_tensor_payload_breakdown,
-    is_cb_format,
-    validate_cb_cost_provenance,
-    whole_artifact_budget_stamp,
-)
-from .production_weight_cache import (
-    project_cb_render_identity,
-    validate_cb_render_provenance,
-)
+from .footprint import whole_artifact_budget_stamp
 from .footprint import (
     NVFP4_WEIGHT_ONLY_STATS_KEY,
     nvfp4_global_sidecar_bytes,
@@ -173,9 +156,6 @@ from .serving_profiles import (
     serving_lane_catalog,
     serving_lane_route,
     serving_profile_names,
-)
-from .cb_ladder_cross_family import (
-    cross_family_verdict_from_cost_payload,
 )
 from .serve_constraints import (
     ServeConstraintContext,
@@ -204,15 +184,13 @@ _KNEE_DIAGNOSTIC_TAIL_MIDPOINT_FRACTION = 0.5
 def _serialized_format_rates(
     specs: list[fr.FormatSpec],
     stats: Mapping[str, Mapping],
-    cb_serialization_context: CBSerializationContext | None,
 ) -> dict[str, float]:
     """Artifact-faithful menu ordering, independent of input menu order.
 
-    CB FormatSpec rates are deliberately incomplete.  Rank each format by the
-    exact payload it would use across the available Linear shapes; for CB this
-    includes FP8 row scales and once-only codebook sidecars. Shapes a format
-    cannot serialize are omitted (the applicability gate will remove them
-    later). A name tie-break makes the result deterministic.
+    Rank each format by the exact payload it would use across the available
+    Linear shapes. Shapes a format cannot serialize are omitted (the
+    applicability gate will remove them later). A name tie-break makes the
+    result deterministic.
     """
     rates: dict[str, float] = {}
     for spec in specs:
@@ -225,20 +203,7 @@ def _serialized_format_rates(
             if len(shape) < 2 or any(int(dim) <= 0 for dim in shape):
                 continue
             try:
-                if is_cb_format(spec.name):
-                    if cb_serialization_context is None:
-                        continue
-                    # The exact accountant owns the divisibility/shape gate.
-                    from .nvfp4_cb_footprint import cb_tensor_payload_breakdown
-
-                    cb_tensor_payload_breakdown(
-                        spec.name,
-                        shape,
-                        qname=str(name),
-                        context=cb_serialization_context,
-                    )
-                else:
-                    spec.memory_bytes_for_shape(shape)
+                spec.memory_bytes_for_shape(shape)
             except (ValueError, AssertionError):
                 continue
             shapes[str(name)] = shape
@@ -246,18 +211,10 @@ def _serialized_format_rates(
         if total_params <= 0:
             rates[spec.name] = float(spec.effective_bits)
             continue
-        if is_cb_format(spec.name):
-            payload = cb_assignment_payload_breakdown(
-                {name: spec.name for name in shapes},
-                shapes,
-                context=cb_serialization_context,
-            )
-            total_bytes = int(payload["total_bytes"])
-        else:
-            total_bytes = sum(
-                int(spec.memory_bytes_for_shape(shape))
-                for shape in shapes.values()
-            )
+        total_bytes = sum(
+            int(spec.memory_bytes_for_shape(shape))
+            for shape in shapes.values()
+        )
         rates[spec.name] = 8.0 * total_bytes / float(total_params)
     return rates
 
@@ -265,9 +222,8 @@ def _serialized_format_rates(
 def _sort_specs_by_serialized_rate(
     specs: list[fr.FormatSpec],
     stats: Mapping[str, Mapping],
-    cb_serialization_context: CBSerializationContext | None,
 ) -> tuple[list[fr.FormatSpec], dict[str, float]]:
-    rates = _serialized_format_rates(specs, stats, cb_serialization_context)
+    rates = _serialized_format_rates(specs, stats)
     return (
         sorted(specs, key=lambda spec: (rates[spec.name], spec.name)),
         rates,
@@ -878,7 +834,6 @@ def _build_bit_attribution(
     candidates: dict[str, list[Candidate]],
     stats_entry_for,
     format_specs: dict[str, "fr.FormatSpec"],
-    cb_serialization_context: CBSerializationContext | None = None,
 ) -> tuple[list[dict], list[dict], dict]:
     """Build (buckets, per_linear_rows, body_totals) for the bit-attribution
     report over the FINAL resolved body assignment.
@@ -895,8 +850,6 @@ def _build_bit_attribution(
     per_linear: list[dict] = []
     body_tensor_bits = 0.0
     body_params = 0
-    cb_assignment: dict[str, str] = {}
-    cb_shapes: dict[str, tuple[int, ...]] = {}
 
     for name, fmt in assignment_expanded.items():
         if _is_visual_linear(name) or _is_mtp_linear(name):
@@ -913,29 +866,7 @@ def _build_bit_attribution(
         cand = _find_candidate_for_format(candidates, name, fmt)
         bits = None
         pred_dloss = None
-        if is_cb_format(fmt):
-            if cb_serialization_context is None:
-                raise ValueError(
-                    f"bit attribution cannot price {name}={fmt} without "
-                    "CBSerializationContext"
-                )
-            if not isinstance(entry, dict):
-                raise ValueError(
-                    f"bit attribution cannot price {name}={fmt} without shape stats"
-                )
-            shape = _shape_from_stats(entry)
-            item = cb_tensor_payload_breakdown(
-                fmt,
-                shape,
-                qname=name,
-                context=cb_serialization_context,
-            )
-            bits = 8.0 * int(item["tensor_payload_bytes"])
-            cb_assignment[name] = fmt
-            cb_shapes[name] = shape
-            if cand is not None:
-                pred_dloss = float(getattr(cand, "predicted_dloss", 0.0))
-        elif cand is not None:
+        if cand is not None:
             bits = 8.0 * cand.memory_bytes
             pred_dloss = float(getattr(cand, "predicted_dloss", 0.0))
         elif isinstance(entry, dict):
@@ -1016,21 +947,10 @@ def _build_bit_attribution(
 
     bucket_list.sort(key=lambda r: (_bit_attr_block_sort_key(r["block_id"]), r["role"]))
     per_linear.sort(key=lambda r: (_bit_attr_block_sort_key(r["block_id"]), r["role"], r["qname"]))
-    cb_shared_sidecar_bits = 0.0
-    if cb_assignment:
-        cb_payload = cb_assignment_payload_breakdown(
-            cb_assignment,
-            cb_shapes,
-            context=cb_serialization_context,
-        )
-        cb_shared_sidecar_bits = 8.0 * int(
-            cb_payload["codebook_sidecar_bytes"]
-        )
-    body_bits = body_tensor_bits + cb_shared_sidecar_bits
+    body_bits = body_tensor_bits
     totals = {
         "body_bits": body_bits,
         "body_tensor_payload_bits": body_tensor_bits,
-        "body_shared_cb_sidecar_bits": cb_shared_sidecar_bits,
         "body_assignment_payload_bits": body_bits,
         "body_quantizable_params": body_params,
         "body_bits_per_param": (body_bits / body_params) if body_params else None,
@@ -1049,7 +969,6 @@ def _write_bit_attribution_reports(
     candidates: dict[str, list[Candidate]],
     stats_entry_for,
     format_specs: dict[str, "fr.FormatSpec"],
-    cb_serialization_context: CBSerializationContext | None = None,
 ) -> None:
     """Write the bit-attribution JSON / CSV and print a compact per-role rollup.
 
@@ -1061,7 +980,6 @@ def _write_bit_attribution_reports(
         candidates,
         stats_entry_for,
         format_specs,
-        cb_serialization_context,
     )
 
     if totals["body_quantizable_params"]:
@@ -1087,13 +1005,6 @@ def _write_bit_attribution_reports(
                 "body_assignment_payload_bits"
             ],
             "body_tensor_payload_bits": totals["body_tensor_payload_bits"],
-            "body_shared_cb_sidecar_bits": totals[
-                "body_shared_cb_sidecar_bits"
-            ],
-            "reconciliation": (
-                "body_assignment_payload_bits = body_tensor_payload_bits + "
-                "body_shared_cb_sidecar_bits"
-            ),
             "body_quantizable_params": totals["body_quantizable_params"],
             "n_body_linears": totals["n_body_linears"],
             "buckets": buckets,
@@ -1750,20 +1661,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         "--accept-research-cost-table",
         action="store_true",
         help="Explicitly accept a table stamped as the sanctioned study-grade "
-             "assembled-segments lane. This never weakens production CB "
-             "provenance checks for unstamped tables.",
-    )
-    ap.add_argument(
-        "--research-cost-base",
-        default=None,
-        help="With --accept-research-cost-table, production v2 base pickle "
-             "to assemble into --costs before allocation.",
-    )
-    ap.add_argument(
-        "--research-cost-segments-dir",
-        default=None,
-        help="With --accept-research-cost-table, complete layer_*.pkl store "
-             "to assemble over --research-cost-base before allocation.",
+             "assembled-segments lane. Unstamped tables are unaffected.",
     )
     ap.add_argument("--model-override", default=None,
                     help="Override the model path stored in probe.pkl's meta. "
@@ -1851,113 +1749,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "of MTP spans leave the floor. Exact (resolved against the "
             "per-tensor source manifest, each span charged at most once); a "
             "prefix matching nothing is a hard error."
-        ),
-    )
-    ap.add_argument(
-        "--cb-scale-coding",
-        choices=("v1", "two_tier"),
-        default=None,
-        help=(
-            "Exact CB producer scale layout used for candidate and artifact "
-            "bytes. Required when the body/auxiliary formats contain a CB "
-            "rung; production "
-            "passes two_tier. v1 is explicit legacy-write reproduction only."
-        ),
-    )
-    ap.add_argument(
-        "--cb-codebook-source",
-        choices=("lattice", "learned"),
-        default=None,
-        help=(
-            "Exact CB sidecar sharing policy. Required when any body/auxiliary "
-            "format is CB so codebook identity/bytes cannot be guessed. The "
-            "production CLI currently accepts lattice only; learned is "
-            "rejected until every stage consumes one immutable value-bearing "
-            "bundle."
-        ),
-    )
-    ap.add_argument(
-        "--cb-codebook-source-scope",
-        choices=("none", "fp8", "all"),
-        default=None,
-        help=(
-            "Family-scoped source contract. none is the byte-identical "
-            "all-lattice default; fp8 keeps NVFP4 lattice and binds FP8_CB "
-            "to immutable learned cells; all is research-only/NO-GO on NVFP4."
-        ),
-    )
-    ap.add_argument(
-        "--cb-codebook-bundle",
-        default=None,
-        help=(
-            "Immutable value-bearing .pqcb used by every learned render "
-            "stage. Required when the effective source scope is not none."
-        ),
-    )
-    ap.add_argument(
-        "--cb-codebook-digests",
-        default=None,
-        help=(
-            "Reserved learned-CB digest manifest. The production CLI rejects "
-            "this digest-only contract because it does not supply codebook "
-            "values; direct research accounting APIs still accept digests."
-        ),
-    )
-    ap.add_argument(
-        "--cb-scale-sweep",
-        choices=("0", "1"),
-        default=None,
-        help="Exact CB scale-search contract; required with CB formats.",
-    )
-    ap.add_argument(
-        "--cb-scale-sweep-scope",
-        choices=("none", "nvfp4", "fp8", "all"),
-        default=None,
-        help=(
-            "Optional per-family scale-search scope. Unset preserves the "
-            "legacy --cb-scale-sweep bool and its byte-identical stamp."
-        ),
-    )
-    ap.add_argument(
-        "--cb-ldlq",
-        choices=("0", "1"),
-        default=None,
-        help="Exact CB feedback-assignment contract; required with CB formats.",
-    )
-    ap.add_argument(
-        "--cb-ldlq-scope",
-        choices=("none", "nvfp4", "all"),
-        default=None,
-        help=(
-            "Which CB family the exporter will LDLQ. Authoritative over "
-            "--cb-ldlq when given. The stamp must match what the export "
-            "actually renders, or the per-tensor identity preflight fails: "
-            "'nvfp4' means NVFP4_CB is LDLQ and FP8_CB stays raw. LDLQ is "
-            "byte-neutral, so this changes the recorded contract, not bytes."
-        ),
-    )
-    ap.add_argument(
-        "--cb-minchain",
-        choices=("0", "1"),
-        default="0",
-        help=(
-            "Exact CB monotone min-chain encoder contract (default: 0). "
-            "The production pipeline passes this explicitly."
-        ),
-    )
-    ap.add_argument(
-        "--cb-encode-tier",
-        choices=("fast", "balanced", "max"),
-        default=None,
-        help="Resolved CB encoder tier; required with CB formats.",
-    )
-    ap.add_argument(
-        "--cb-col-weights",
-        default=None,
-        help=(
-            "Exact imatrix pickle used by CB cost/cache/export. Required "
-            "when any allocated or fixed auxiliary format is CB; allocator "
-            "validates its value-bearing render identity before solving."
         ),
     )
     ap.add_argument("--formats", default="",
@@ -2275,18 +2066,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     elif args.measured_runtime_fixed_scope != "admitted":
         ap.error("--measured-runtime-fixed-scope requires --measured-runtime-table")
 
-    effective_cb_source_scope = args.cb_codebook_source_scope
-    if effective_cb_source_scope is None:
-        effective_cb_source_scope = (
-            "all" if args.cb_codebook_source == "learned" else "none"
-        )
-    if effective_cb_source_scope != "none" and not args.cb_codebook_bundle:
-        raise SystemExit(
-            "[alloc] ERROR: learned CB requires an immutable value-bearing "
-            "codebook bundle before reading probe/cost inputs; pass "
-            "--cb-codebook-bundle. Digest-only identity cannot render values."
-        )
-
     if args.target_disk_gb is not None:
         if not math.isfinite(args.target_disk_gb) or args.target_disk_gb <= 0:
             raise SystemExit(
@@ -2566,35 +2345,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     tessera_serving_target = serving_target_from_args(
         args, target_platform=load_serving_profile(target_profile).target_platform)
 
-    if bool(args.research_cost_base) != bool(args.research_cost_segments_dir):
-        raise SystemExit(
-            "[alloc] ERROR: --research-cost-base and "
-            "--research-cost-segments-dir must be supplied together"
-        )
-    if args.research_cost_base:
-        if not args.accept_research_cost_table:
-            raise SystemExit(
-                "[alloc] ERROR: assembling segmented research costs requires "
-                "--accept-research-cost-table"
-            )
-        from .research_cost_acceptance import assemble_research_cost_table
-        try:
-            _assembled, _manifest = assemble_research_cost_table(
-                args.research_cost_base,
-                args.research_cost_segments_dir,
-                output_path=args.costs,
-            )
-        except ValueError as exc:
-            raise SystemExit(f"[alloc] ERROR: research cost assembly: {exc}") from None
-        print(
-            "[alloc] RESEARCH COST ACCEPTED: assembled "
-            f"{_manifest['assembled_row_count']} rows x "
-            f"{len(_manifest['formats'])} formats from "
-            f"{_manifest['layer_count']} x {_manifest['rows_per_layer']} "
-            f"layer rows -> {args.costs}",
-            flush=True,
-        )
-
     with open(args.probe, "rb") as f:
         probe = pickle.load(f)
     with open(args.costs, "rb") as f:
@@ -2651,9 +2401,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         )
     if research_cost_provenance is not None:
         print(
-            "[alloc] RESEARCH COST ACCEPTANCE ACTIVE: production CB reuse, "
-            "serialized-payload, lattice-coverage, and render-scope guards "
-            "remain unchanged outside this exact stamped table",
+            "[alloc] RESEARCH COST ACCEPTANCE ACTIVE: production provenance "
+            "guards remain unchanged outside this exact stamped table",
             flush=True,
         )
     stats = probe["stats"]
@@ -2908,117 +2657,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         raise SystemExit(
             f"[alloc] ERROR: {exc}" + tessera_refusal_cause(tessera_diagnosis)
         ) from None
-    cb_serialization_context = None
-    cb_col_weights = None
-    cb_cost_render_identity = None
-    cb_requested_names = [spec.name for spec in specs]
-    cb_requested_names.extend((
-        lm_head_format_canonical,
-        fr.get_format(args.mtp_format).name,
-        fr.get_format(args.visual_format).name,
-    ))
-    if any(is_cb_format(name) for name in cb_requested_names):
-        if (
-            args.cb_scale_coding is None
-            or args.cb_codebook_source is None
-            or args.cb_scale_sweep is None
-            or args.cb_ldlq is None
-            or args.cb_encode_tier is None
-        ):
-            raise SystemExit(
-                "[alloc] ERROR: a CB format is present in the body or fixed "
-                "auxiliary assignment but exact serialized "
-                "and renderer context is missing. Pass --cb-scale-coding, "
-                "--cb-codebook-source, --cb-scale-sweep, --cb-ldlq, "
-                "--cb-minchain, and "
-                "--cb-encode-tier; refusing implicit render defaults."
-            )
-        if args.cb_codebook_digests is not None:
-            raise SystemExit(
-                "[alloc] ERROR: --cb-codebook-digests is a digest-only legacy "
-                "contract and cannot supply learned values. Pass "
-                "--cb-codebook-bundle instead."
-            )
-        if args.cb_col_weights is None:
-            raise SystemExit(
-                "[alloc] ERROR: CB allocation requires --cb-col-weights so "
-                "the cost table can be checked against the exact imatrix "
-                "that cache/KL/export consume"
-            )
-        try:
-            with open(args.cb_col_weights, "rb") as fh:
-                cb_col_weights = pickle.load(fh)
-        except Exception as exc:
-            raise SystemExit(
-                f"[alloc] ERROR: cannot load CB col-weights "
-                f"{args.cb_col_weights}: {exc}"
-            ) from None
-        if not isinstance(cb_col_weights, Mapping):
-            raise SystemExit(
-                "[alloc] ERROR: --cb-col-weights must contain a qname -> "
-                "tensor mapping"
-            )
-        try:
-            cb_env = {
-                "CB_SCALE_CODING": args.cb_scale_coding,
-                "CB_CODEBOOK_SOURCE": args.cb_codebook_source,
-                "CB_SCALE_SWEEP": args.cb_scale_sweep,
-                "PRISMAQUANT_CB_LDLQ": args.cb_ldlq,
-                "PRISMAQUANT_CB_MINCHAIN": args.cb_minchain,
-                "PRISMAQUANT_CB_ENCODE_TIER": args.cb_encode_tier,
-            }
-            if args.cb_codebook_source_scope is not None:
-                cb_env["CB_CODEBOOK_SOURCE_SCOPE"] = (
-                    args.cb_codebook_source_scope
-                )
-            if args.cb_scale_sweep_scope is not None:
-                cb_env["CB_SCALE_SWEEP_SCOPE"] = args.cb_scale_sweep_scope
-            if args.cb_ldlq_scope is not None:
-                cb_env["PRISMAQUANT_CB_LDLQ_SCOPE"] = args.cb_ldlq_scope
-            if args.cb_codebook_bundle is not None:
-                cb_env["CB_CODEBOOK_BUNDLE"] = args.cb_codebook_bundle
-            cb_serialization_context = cb_serialization_context_from_env(
-                cb_env,
-                require_explicit=True,
-                where="allocator CB producer context",
-            )
-        except ValueError as exc:
-            raise SystemExit(f"[alloc] ERROR: {exc}") from None
-        print(
-            "[alloc] CB serialized payload: "
-            f"scale_coding={cb_serialization_context.scale_coding} "
-            f"layout_version={cb_serialization_context.layout_version} "
-            f"codebook_source={cb_serialization_context.codebook_source} "
-            f"codebook_source_scope={cb_serialization_context.codebook_source_scope} "
-            f"scale_sweep={cb_serialization_context.scale_sweep} "
-            f"scale_sweep_scope={cb_serialization_context.scale_sweep_scope} "
-            f"ldlq={cb_serialization_context.ldlq} "
-            f"encode_tier={cb_serialization_context.encode_tier} "
-            f"renderer_abi={cb_serialization_context.renderer_abi}",
-            flush=True,
-        )
-        if research_cost_provenance is None:
-            try:
-                validate_cb_cost_provenance(
-                    cost_data,
-                    cb_requested_names,
-                    context=cb_serialization_context,
-                    where=f"allocator cost cache {args.costs}",
-                )
-                _stored_context, cb_cost_render_identity = (
-                    validate_cb_render_provenance(
-                        cost_data,
-                        expected_context=cb_serialization_context,
-                        col_weights=cb_col_weights,
-                        where=f"allocator cost cache {args.costs}",
-                    )
-                )
-            except ValueError as exc:
-                raise SystemExit(f"[alloc] ERROR: {exc}") from None
     specs_sorted, serialized_rates = _sort_specs_by_serialized_rate(
         specs,
         accounting_stats,
-        cb_serialization_context,
     )
 
     # Fused-coherence guard: a multi-format menu under DefaultProfile cannot
@@ -3100,7 +2741,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     rank_specs_sorted, _rank_serialized_rates = _sort_specs_by_serialized_rate(
         list(rank_specs.values()),
         accounting_stats,
-        cb_serialization_context,
     )
     format_rank = {s.name: i for i, s in enumerate(rank_specs_sorted)}
     format_specs = {s.name: s for s in rank_specs_sorted}
@@ -3164,76 +2804,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             source_manifest = source_kinds_in_row_namespace(
                 source_manifest, stats, model_profile)
 
-    # A requested production CB rung needs a measured row everywhere it is
-    # otherwise legal. `build_candidates` historically skipped absent/error
-    # rows, which could silently prune the entire CB menu after an imatrix or
-    # learned-codebook render failure and let the run select stock/BF16.
-    body_cb_specs = [spec for spec in specs_sorted if is_cb_format(spec.name)]
-    mtp_cb_spec = (
-        fr.get_format(mtp_format_canonical)
-        if is_cb_format(mtp_format_canonical)
-        else None
-    )
-    visual_cb_spec = (
-        fr.get_format(visual_format_canonical)
-        if is_cb_format(visual_format_canonical)
-        else None
-    )
-    incomplete_cb_costs: list[tuple[str, str, str]] = []
-    for name, stats_entry in stats.items():
-        if _is_mtp_linear(name):
-            required_specs = [mtp_cb_spec] if mtp_cb_spec is not None else []
-        elif _is_visual_linear(name):
-            required_specs = (
-                [visual_cb_spec] if visual_cb_spec is not None else []
-            )
-        else:
-            required_specs = body_cb_specs
-        source_kind = (
-            source_manifest.get(name, "unknown")
-            if source_manifest is not None
-            else None
-        )
-        per_name_costs = costs.get(name)
-        for spec in required_specs:
-            verdict = check_stats_format_applicability(
-                stats_entry,
-                spec,
-                qname=name,
-                source_kind=source_kind,
-                target_profile=target_profile,
-                cb_serialization_context=cb_serialization_context,
-            )
-            if not verdict.legal:
-                continue
-            row = None
-            if isinstance(per_name_costs, Mapping):
-                for candidate_name in dict.fromkeys(
-                    (spec.name, *fr.aliases_for(spec.name))
-                ):
-                    if candidate_name in per_name_costs:
-                        row = per_name_costs[candidate_name]
-                        break
-            reason = None
-            if not isinstance(row, Mapping):
-                reason = "missing"
-            elif "error" in row:
-                reason = f"error={row.get('error')!r}"
-            if reason is not None:
-                incomplete_cb_costs.append((str(name), spec.name, reason))
-    if incomplete_cb_costs:
-        sample = "; ".join(
-            f"{name}={fmt} ({reason})"
-            for name, fmt, reason in incomplete_cb_costs[:8]
-        )
-        raise SystemExit(
-            "[alloc] ERROR: production CB cost coverage is incomplete for "
-            f"{len(incomplete_cb_costs)} legal (tensor, format) pair(s): "
-            f"{sample}. CB export is imatrix-weighted, so missing/error rows "
-            "cannot be silently pruned from the menu. Rebuild the cost/cache "
-            "with complete production col_weights or remove the CB rung."
-        )
-
     # ---- Activation-fair pricing (ultraplan P5a) ----
     # ONE per-family calibration for the whole run, fit before any candidate
     # is built so the body, MTP and visual menus cannot end up on three
@@ -3281,26 +2851,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             flush=True,
         )
 
-    # ---- Cross-family CB-ladder symmetry verdict (ultraplan P5a item 2) ----
-    # Computed by the cost stage on its own held-out units; the allocator
-    # republishes it so a consumer reading only the allocation artifacts can
-    # see whether this run's ladder fits support a cross-family (NVFP4-CB vs
-    # FP8-CB) claim at all. A failure is surfaced, never fatal: the
-    # allocation is still solvable, only the cross-family verdict is not
-    # publishable.
-    cross_family_verdict = cross_family_verdict_from_cost_payload(cost_data)
-    if cross_family_verdict is not None:
-        line = (
-            "[alloc] CB ladder cross-family symmetry: "
-            f"{str(cross_family_verdict.get('verdict', '?')).upper()} — "
-            f"{cross_family_verdict.get('detail', '')}"
-        )
-        if not cross_family_verdict.get(
-                "cross_family_comparison_publishable", False):
-            print(f"[alloc] WARNING: {line[8:]}", flush=True)
-        else:
-            print(line, flush=True)
-
     candidate_mask_records: list[dict] = []
     tessera_menu_report: dict = {}
     # Packed-group and fused-sibling members are intersected by format NAME
@@ -3331,7 +2881,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         source_manifest=source_manifest,
         target_profile=target_profile,
         mask_records=candidate_mask_records,
-        cb_serialization_context=cb_serialization_context,
         activation_pricing=activation_pricing,
         # The DP's own bin width, so a continuous Tessera menu is reduced to
         # what THIS solver can distinguish rather than to a taste constant.
@@ -3388,7 +2937,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             source_manifest=source_manifest,
             target_profile=target_profile,
             mask_records=candidate_mask_records,
-            cb_serialization_context=cb_serialization_context,
             # The fixed head is selected from direct terminal-head evidence.
             # The body family transfer fits a measured/output-space scale for
             # ordinary internal Linears and must not multiply that terminal
@@ -3482,7 +3030,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             source_manifest=source_manifest,
             target_profile=target_profile,
             mask_records=candidate_mask_records,
-            cb_serialization_context=cb_serialization_context,
             activation_pricing=activation_pricing,
             context_by_unit=tessera_context_by_unit,
         )
@@ -3556,7 +3103,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 source_manifest=source_manifest,
                 target_profile=target_profile,
                 mask_records=candidate_mask_records,
-                cb_serialization_context=cb_serialization_context,
                 activation_pricing=activation_pricing,
                 context_by_unit=tessera_context_by_unit,
             )
@@ -3601,7 +3147,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
 
     # Text-only probes can omit the complete visual tower. Discover those
     # source-only Linears *before* Pareto records are built so every candidate
-    # JSON, CB identity, payload price, and budget stamp covers the exact full
+    # JSON, payload price, and budget stamp covers the exact full
     # assignment later emitted by the selector/exporter. The historical late
     # insertion made Pareto files deltas over the final layer_config and could
     # stamp a different (occasionally smaller) artifact than the one shipped.
@@ -3625,14 +3171,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         for name, entry in source_visual_stats.items()
         if name not in fixed_format_assignment
     }
-    if source_only_visual_stats and is_cb_format(visual_format_canonical):
-        sample = sorted(source_only_visual_stats)[:8]
-        raise SystemExit(
-            "[alloc] ERROR: source-only visual Linears cannot be assigned a "
-            f"CB format without measured imatrix/cost rows (sample={sample}). "
-            "Run multimodal probing so these Linears have production "
-            "col_weights, or choose a non-CB --visual-format."
-        )
     try:
         validate_source_visual_passthrough_contract(
             source_visual_stats,
@@ -3670,7 +3208,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             fr.get_format(fmt),
             shape,
             qname=qname,
-            cb_serialization_context=cb_serialization_context,
         )
         global_bytes = (
             nvfp4_global_sidecar_bytes(
@@ -3690,28 +3227,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         for name, fmt in fixed_format_assignment.items()
         if name in fixed_stats
     )
-    fixed_cb_assignment = {
-        name: fmt
-        for name, fmt in fixed_format_assignment.items()
-        if name in fixed_stats and is_cb_format(fmt)
-    }
-    if fixed_cb_assignment:
-        if cb_serialization_context is None:
-            raise AssertionError(
-                "fixed CB assignment reached payload reporting without a "
-                "CBSerializationContext"
-            )
-        fixed_cb_payload = cb_assignment_payload_breakdown(
-            fixed_cb_assignment,
-            {
-                name: _shape_from_stats(fixed_stats[name])
-                for name in fixed_cb_assignment
-            },
-            context=cb_serialization_context,
-        )
-        fixed_total_bits += 8.0 * int(
-            fixed_cb_payload["codebook_sidecar_bytes"]
-        )
     fixed_total_dloss = sum(
         float(cand.predicted_dloss)
         for cand in fixed_chosen_candidates.values()
@@ -3885,10 +3400,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "budget_scope": "auxiliary_excluded_from_body_budget",
         },
         # Ultraplan P5a/P5b: how every candidate's activation contract was
-        # priced, whether this run's per-family ladder fits are
-        # cross-comparable, and the concrete serving route each format rides.
+        # priced and the concrete serving route each format rides.
         "activation_fair_pricing": activation_pricing.as_dict(),
-        "cb_ladder_cross_family_verdict": cross_family_verdict,
         "serving_lanes": serving_lane_catalog(target_profile),
         **summarize_applicability_masks(
             candidate_mask_records,
@@ -4091,16 +3604,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         *,
         require_all_stats: bool,
     ) -> dict[str, float | int | list[str]]:
-        """Exact assignment-scope tensor payload, including shared CB tables.
+        """Exact assignment-scope tensor payload.
 
         Candidate memory remains the additive DP proposal cost.  This function
-        is the non-additive exact filter/reporting path: CB tables are charged
-        once per physical identity and NVFP4 global scale tensors are included.
+        is the exact filter/reporting path: NVFP4 global scale tensors are
+        included.
         """
         total = 0.0
         params = 0
-        cb_assignment: dict[str, str] = {}
-        cb_shapes: dict[str, tuple[int, ...]] = {}
         missing: list[str] = []
         for name, fmt in assignment.items():
             entry = _stats_entry_for_assignment_name(name)
@@ -4108,10 +3619,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 missing.append(name)
                 continue
             params += int(entry.get("n_params", 0) or 0)
-            if is_cb_format(fmt):
-                cb_assignment[name] = fmt
-                cb_shapes[name] = _shape_from_stats(entry)
-                continue
             # Super-items (packed groups, fused siblings) carry exact
             # per-format byte sums; their stats entries have no single
             # (out, in) shape, so the shape fallback is only for plain rows.
@@ -4132,7 +3639,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 fr.get_format(fmt),
                 shape,
                 qname=name,
-                cb_serialization_context=cb_serialization_context,
             )
             total += 8.0 * payload_bytes
             if fmt == "NVFP4":
@@ -4148,28 +3654,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "exact assignment payload has no shape/stats for "
                 f"{len(missing)} tensor(s): {sorted(missing)[:12]}"
             )
-        cb_tensor_bits = 0.0
-        cb_sidecar_bits = 0.0
-        if cb_assignment:
-            if cb_serialization_context is None:
-                raise AssertionError(
-                    "CB assignment reached exact bit reporting without a "
-                    "CBSerializationContext"
-                )
-            payload = cb_assignment_payload_breakdown(
-                cb_assignment,
-                cb_shapes,
-                context=cb_serialization_context,
-            )
-            cb_tensor_bits = 8.0 * int(payload["tensor_payload_bytes"])
-            cb_sidecar_bits = 8.0 * int(payload["codebook_sidecar_bytes"])
-            total += cb_tensor_bits + cb_sidecar_bits
         return {
             "bits_total": float(total),
             "quantizable_params": int(params),
             "bits_per_param": float(total) / max(params, 1),
-            "cb_tensor_bits": float(cb_tensor_bits),
-            "cb_shared_sidecar_bits": float(cb_sidecar_bits),
             "missing_stats_names": sorted(missing),
         }
 
@@ -4185,13 +3673,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     _solve_diagnostics: dict[float, dict] = {}
 
     def _solve_for_target(target_bits: float):
-        """Solve additively, then exact-filter non-additive shared payloads.
+        """Solve additively, then exact-filter the expanded assignment.
 
-        Shared CB sidecars are assignment activation costs rather than legal
-        per-candidate additive costs.  The DP therefore proposes assignments;
-        every proposal is expanded and exact-priced, and an over-target result
+        The DP proposes assignments over additive candidate costs; every
+        proposal is expanded and exact-priced, and an over-target result
         tightens/re-solves.  This enforces feasibility but is deliberately not
-        advertised as a globally optimal mixed-sidecar solve.
+        advertised as a globally optimal solve.
         """
         cache_key = round(float(target_bits), 9)
         cached = _solve_cache.get(cache_key)
@@ -4349,9 +3836,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "proposal_target_bits": float(mutable_target_bits),
                 "solver_additive_candidate_bpp": float(solver_achieved),
                 "exact_assignment_payload_bpp": exact_achieved,
-                "cb_shared_sidecar_bits": float(
-                    exact["cb_shared_sidecar_bits"]
-                ),
                 "feasible": bool(
                     exact_achieved
                     <= requested_target + args.overshoot_tolerance
@@ -4379,80 +3863,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         outer_diag["feasible"] = False
         outer_diag["reason"] = "exact_assignment_payload_filter_exhausted"
         return None, float("nan"), float("inf"), float("inf")
-
-    def _cb_stamps_for_assignment(
-        assignment: Mapping[str, str],
-    ) -> dict[str, str]:
-        cb_names = {
-            name: fmt for name, fmt in assignment.items()
-            if is_cb_format(fmt)
-        }
-        if not cb_names:
-            return {}
-        if cb_serialization_context is None:
-            raise AssertionError(
-                "CB assignment reached stamp emission without a "
-                "CBSerializationContext"
-            )
-        shapes: dict[str, tuple[int, ...]] = {}
-        for name in cb_names:
-            entry = _stats_entry_for_assignment_name(name)
-            if not isinstance(entry, dict):
-                raise AssertionError(
-                    f"{name}: cannot stamp CB serialization identity without "
-                    "probe stats"
-                )
-            shapes[name] = _shape_from_stats(entry)
-        stamps = cb_assignment_serialization_stamps(
-            cb_names,
-            shapes,
-            context=cb_serialization_context,
-        )
-        # Candidate construction persisted the identity it priced. Assert the
-        # expanded assignment still agrees before a Pareto/KL/export consumer
-        # can mistake a promotion or stale aggregation record for exact bytes.
-        for name, fmt in cb_names.items():
-            entry = _stats_entry_for_assignment_name(name)
-            identities = (
-                entry.get("_serialized_identity_by_format")
-                if isinstance(entry, dict)
-                else None
-            )
-            if isinstance(identities, Mapping) and fmt in identities:
-                if str(identities[fmt]) != stamps[name]:
-                    raise AssertionError(
-                        f"{name}: selected {fmt} serialization identity "
-                        "differs from the candidate priced by the allocator"
-                    )
-        return stamps
-
-    def _cb_render_identity_for_assignment(
-        expanded_assignment: Mapping[str, str],
-    ) -> dict | None:
-        selected_scope = {
-            str(name): (str(fmt),)
-            for name, fmt in expanded_assignment.items()
-            if is_cb_format(fmt)
-        }
-        if not selected_scope:
-            return None
-        if cb_cost_render_identity is None or cb_col_weights is None:
-            if research_cost_provenance is not None:
-                # This absence is the exact production guard the explicit
-                # research-cost acceptance acknowledges. Do not fabricate a
-                # render identity; carry the research manifest instead so the
-                # exporter can demand its own independent acknowledgement.
-                return None
-            raise RuntimeError(
-                "CB assignment has no validated value-bearing cost render "
-                "identity"
-            )
-        return project_cb_render_identity(
-            cb_cost_render_identity,
-            selected_scope,
-            col_weights=cb_col_weights,
-            where="allocator selected CB assignment",
-        )
 
     pareto_seed_records: list[dict] = []
 
@@ -4565,9 +3975,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             expanded_counts = defaultdict(int)
             for fmt in expanded.values():
                 expanded_counts[fmt] += 1
-            pareto_cb_render_identity = _cb_render_identity_for_assignment(
-                expanded
-            )
             pareto_seed_records.append({
                 "target_bits": float(t),
                 "achieved_bits": float(achieved),
@@ -4580,12 +3987,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "format_counts": dict(sorted(expanded_counts.items())),
                 "bits_total": _assignment_bits_total(budget_expanded),
                 "bits_total_with_aux": _assignment_bits_total(expanded),
-                CB_ASSIGNMENT_IDENTITIES_FIELD: _cb_stamps_for_assignment(
-                    expanded
-                ),
-                **({
-                    "cb_render_identity": pareto_cb_render_identity,
-                } if pareto_cb_render_identity is not None else {}),
             })
 
     # Coarse Kneedle, then golden-section refinement inside the knee bracket so
@@ -4619,9 +4020,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     r_counts = defaultdict(int)
                     for fmt in r_exp.values():
                         r_counts[fmt] += 1
-                    refined_cb_render_identity = (
-                        _cb_render_identity_for_assignment(r_exp)
-                    )
                     pareto_seed_records.append({
                         "target_bits": float(refined["target_bits"]),
                         "achieved_bits": float(r_ach),
@@ -4634,12 +4032,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                         "format_counts": dict(sorted(r_counts.items())),
                         "bits_total": _assignment_bits_total(r_bud),
                         "bits_total_with_aux": _assignment_bits_total(r_exp),
-                        CB_ASSIGNMENT_IDENTITIES_FIELD: _cb_stamps_for_assignment(
-                            r_exp
-                        ),
-                        **({
-                            "cb_render_identity": refined_cb_render_identity,
-                        } if refined_cb_render_identity is not None else {}),
                         "knee_refined": True,
                     })
 
@@ -4741,7 +4133,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 source_manifest=ctx["source_manifest"],
                 regime=ctx["regime"],
                 context="pareto candidate footprint",
-                cb_serialization_context=cb_serialization_context,
             )
             if info["n_missing_stats"]:
                 sample = ", ".join(info["missing_stats_names"][:10])
@@ -4892,30 +4283,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 ),
                 "target_profile": target_profile,
                 "assignment": dict(sorted(assignment.items())),
-                # Two independent facts, so two independent guards. A CB
-                # assignment always carries per-tensor serialized identities,
-                # but it carries a render identity only when the cost table had
-                # a validated one to project from: under
-                # ``--accept-research-cost-table``
-                # ``_cb_render_identity_for_assignment`` deliberately returns
-                # None rather than fabricate one (see its comment), and
-                # ``cb_cost_render_identity`` is never assigned on that path at
-                # all. Gating the render-identity fields on the *identities*
-                # field therefore KeyErrors on every research-cost run that
-                # writes a Pareto point with any CB format. The final-assignment
-                # writer already guards on the render identity itself; this
-                # makes the Pareto writer agree with it.
-                **({
-                    CB_ASSIGNMENT_IDENTITIES_FIELD: dict(sorted(
-                        record.get(CB_ASSIGNMENT_IDENTITIES_FIELD, {}).items()
-                    )),
-                } if record.get(CB_ASSIGNMENT_IDENTITIES_FIELD) else {}),
-                **({
-                    "cb_serialized_payload": record[
-                        "cb_render_identity"
-                    ]["cb_serialized_payload"],
-                    "cb_render_identity": record["cb_render_identity"],
-                } if record.get("cb_render_identity") is not None else {}),
                 **({
                     "whole_artifact_budget": record_budget_stamp,
                 } if record_budget_stamp is not None else {}),
@@ -5094,7 +4461,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     source_manifest=src_manifest,
                     regime=regime,
                     context=ctx,
-                    cb_serialization_context=cb_serialization_context,
                 )
             except ValueError as exc:
                 # House idiom for an operator-facing fatal in main(): a
@@ -5155,9 +4521,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             expanded and priced through the same exact accountant
             ``_solve_for_target`` filters against, so the returned bpp is a
             target the solver can actually land on (an epsilon-below value
-            like the format's nominal rate is NOT: per-shape row scales and
-            the shared CB sidecar push the achievable mean a hair above it,
-            and the rung comes back INFEASIBLE).
+            like the format's nominal rate is NOT: per-shape scale and
+            sidecar bytes push the achievable mean a hair above it, and the
+            rung comes back INFEASIBLE).
 
             ``None`` when a unit has no candidate at all or the proposal
             cannot be priced — both are upstream legality/coverage bugs that
@@ -5189,7 +4555,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             allocation". That reading holds only while the grid actually
             reaches the bottom of the format menu, and ``--pareto-targets``
             defaults to 4.5..8.25 — a range written for a 4-bit/8-bit menu.
-            On the CB menu (NVFP4-CB is ~2.03 bpp) every sampled point is
+            On a sub-4-bit menu (the retired codebook lane, archived
+            2026-09-25, #1304, had NVFP4-CB at ~2.03 bpp) every sampled point is
             more than twice as dense as the operator's budget, so a budget
             the menu can meet with room to spare is rejected as "below the
             floor" and the remedy printed with it ("raise the budget, widen
@@ -5663,12 +5030,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 and max_bytes_pick["target_bits"] == grid_pick["target_bits"]),
             "whole_artifact_budget": selected_whole_artifact_budget_stamp,
             # Ultraplan P5a/P5b provenance for the SHIPPED assignment: how
-            # each selected unit's activation cost was priced, whether this
-            # run's per-family ladder fits are cross-comparable, and which
+            # each selected unit's activation cost was priced and which
             # selected rungs ride a backed fused mid-M lane vs the
             # expand+GEMM fallback.
             "activation_fair_pricing": activation_pricing.as_dict(),
-            "cb_ladder_cross_family_verdict": cross_family_verdict,
             "serving_lane_provenance": selection_serving_lane_provenance(
                 chosen_info["assignment"], candidates, target_profile,
                 context_by_unit=tessera_context_by_unit),
@@ -6029,19 +5394,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 f"target_bits={args.target_bits} misses a hard serving "
                 f"constraint — {violated}. Binding: "
                 f"{final_serve_feasibility.binding_constraint}. Policy §1 "
-                "(docs/lanes/nvfp4-cb/format-speed-policy.md) makes these "
+                "(archive/gridbook_lane_2026-09-02/docs/lanes/nvfp4-cb/"
+                "format-speed-policy.md) makes these "
                 "hard constraints, not penalties: there is no λ that trades "
                 "them against predicted Δloss. Raise the SLO, widen "
                 "--formats, adjust --serve-workload-mix, or supply a dispatch "
                 "table that prices this menu's format families."
             )
 
-    final_cb_serialization_stamps = _cb_stamps_for_assignment(
-        assignment_expanded
-    )
-    final_cb_render_identity = _cb_render_identity_for_assignment(
-        assignment_expanded
-    )
     layer_cfg = {}
     for name, fmt in assignment_expanded.items():
         if fmt in format_specs:
@@ -6051,10 +5411,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             # passed --formats NVFP4,BF16 plus --visual-format MXFP8_E4M3).
             # Resolve from the global registry.
             layer_cfg[name] = fr.get_format(fmt).autoround_config()
-        if name in final_cb_serialization_stamps:
-            layer_cfg[name][CB_TENSOR_IDENTITY_FIELD] = (
-                final_cb_serialization_stamps[name]
-            )
 
     # The resolved serving profile travels WITH the assignment (re-vet R11 /
     # debt D4). Before this, it landed only in the side report
@@ -6093,9 +5449,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         "body_assignment_quantizable_params": int(
             final_body_payload["quantizable_params"]
         ),
-        "body_shared_cb_sidecar_bits": float(
-            final_body_payload["cb_shared_sidecar_bits"]
-        ),
+        # Frozen at 0.0 for byte-identical layer-config metadata: the only
+        # shared sidecar it ever counted belonged to the retired codebook
+        # lane (archived 2026-09-25, #1304).
+        "body_shared_cb_sidecar_bits": 0.0,
         "solver_contract": (
             "additive_candidate_proposal_then_exact_assignment_filter"
         ),
@@ -6158,24 +5515,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             }} if any(
                 isinstance(v, dict) and "solver_seconds" in v
                 for v in _solve_diagnostics.values()) else {}),
-        # The artifact-wide CB context the per-tensor identities above were
-        # computed under. Without it the exporter cannot know which contract
-        # produced them: it reads this key
-        # (`cb_serialization_metadata_from_assignment_payload`) to decide
-        # whether to claim the W4A4 activation contract. Absent, it falls back
-        # to no-contract/payload-v2, drops the 4-byte input_global_scale, and
-        # EVERY per-tensor stamp mismatches -- measured 2026-08-08 on DSv4:
-        # 24851/24851 mismatched, which is the root cause of the four earlier
-        # "CB per-layer serialization identity mismatch" export failures.
-        **({"cb_serialized_payload": cb_serialization_context_stamp(
-                cb_serialization_context,
-                formats=sorted({
-                    str(fmt) for fmt in assignment_expanded.values()
-                    if is_cb_format(str(fmt))
-                }) or None,
-            )}
-           if cb_serialization_context is not None
-           and final_cb_serialization_stamps else {}),
         **propagated_cost_provenance(research_cost_provenance),
         "assignment_payload_bits_total": (
             float(final_assignment_payload["bits_total"])
@@ -6188,12 +5527,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         "assignment_payload_missing_stats_names": final_assignment_payload[
             "missing_stats_names"
         ],
-        **({
-            "cb_serialized_payload": final_cb_render_identity[
-                "cb_serialized_payload"
-            ],
-            "cb_render_identity": final_cb_render_identity,
-        } if final_cb_render_identity is not None else {}),
         **({
             "whole_artifact_budget": selected_whole_artifact_budget_stamp,
         } if selected_whole_artifact_budget_stamp is not None else {}),
@@ -6261,7 +5594,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         candidates=candidates,
         stats_entry_for=_stats_entry_for_assignment_name,
         format_specs=format_specs,
-        cb_serialization_context=cb_serialization_context,
     )
 
 

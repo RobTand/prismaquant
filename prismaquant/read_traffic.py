@@ -160,13 +160,13 @@ from .name_projection import (
     NameProjection,
     strip_weight_leaf,
 )
-from .nvfp4_cb_footprint import is_cb_format
 
 #: Tensor-name prefix the codebook subtables were written under. It came from
 #: ``cb_export_config`` until 2026-09-02, when the Gridbook codebook lane was
 #: retired (``archive/gridbook_lane_2026-09-02/``) and its exporter went with
-#: it. The read-traffic model still has to name those tensors to account for a
-#: CB assignment, so the literal moved here rather than the import staying.
+#: it. The exported-artifact reader still has to name those tensors to read a
+#: shipped codebook artifact, so the literal moved here rather than the import
+#: staying.
 CODEBOOK_TENSOR_PREFIX = "cb_codebook."
 
 SCHEMA = "prismaquant.read_traffic.v1"
@@ -940,8 +940,6 @@ def assignment_read_traffic(
     source_manifest: Mapping[str, int] | None = None,
     source_total_bytes: int | None = None,
     config: Mapping[str, Any] | None = None,
-    cb_serialization_context=None,
-    per_expert_assignment: Mapping[str, str] | None = None,
     context: str = "assignment_read_traffic",
 ) -> dict:
     """Expected per-token decode read bytes for ``assignment``, both lanes.
@@ -952,8 +950,8 @@ def assignment_read_traffic(
     :func:`footprint.assignment_artifact_bytes` takes them -- and that
     function is this one's byte authority.  Stored bytes for an assigned unit
     come from :func:`footprint.format_tensor_payload_breakdown` (the shared
-    per-unit primitive that already prices NVFP4 group scales, FP8 row
-    scales, and CB index/row-scale/layout bytes); stored bytes for every
+    per-unit primitive that already prices NVFP4 group scales and FP8 row
+    scales); stored bytes for every
     tensor the allocator never decided come from the checkpoint's own
     safetensors spans via :func:`footprint.source_tensor_span_bytes`.
 
@@ -966,9 +964,11 @@ def assignment_read_traffic(
     Returns a dict with ``read_bytes_per_token`` / ``read_gb_per_token``, the
     four-key ``breakdown`` (dense / routed / held_fixed / resident_codebooks),
     the itemized ``excluded`` bytes, the ``routing`` factor and its
-    provenance, per-class totals, and the ``reconciliation`` block.  CB
-    assignments require ``cb_serialization_context`` for the same reason
-    ``assignment_artifact_bytes`` does.
+    provenance, per-class totals, and the ``reconciliation`` block.
+    ``resident_codebooks`` is always zero on the selection side: no producer
+    format ships a codebook sidecar since the codebook lane was retired
+    (archived 2026-09-25, #1304). The exported-artifact reader below still
+    counts one, so a shipped codebook artifact reads correctly.
     """
     model_path = str(model_path)
     if profile is None:
@@ -995,23 +995,10 @@ def assignment_read_traffic(
         source_manifest=source_manifest,
         regime=regime,
         context=context,
-        cb_serialization_context=cb_serialization_context,
-        per_expert_assignment=per_expert_assignment,
     )
 
     merged = dict(assignment)
-    if per_expert_assignment:
-        merged.update(per_expert_assignment)
     unpriced = tuple(totals["missing_stats_names"])
-    grouped_payload = totals.get("per_expert_format_group_payload") or {}
-    grouped_qnames = {
-        qname
-        for group in (grouped_payload.get("groups") or {}).values()
-        if is_cb_format(group["format"])
-        for qname in group["member_qnames"]
-    }
-    cb_payload = totals.get("cb_serialized_payload") or {}
-    cb_per_tensor = cb_payload.get("per_tensor") or {}
 
     # Mirrors footprint's own passthrough resolution exactly: the same names,
     # resolved by the same helper, so a passthrough unit is charged the
@@ -1082,24 +1069,11 @@ def assignment_read_traffic(
         priced_names.append(qname)
         shape = _shape_from_stats(entry)
         name = fr.canonical_format_name(raw_format)
-        if qname in grouped_qnames:
-            continue  # priced once per physical CB sub-stack, below
         if qname in passthrough_spans:
             nbytes = int(passthrough_spans[qname])
-        elif is_cb_format(name):
-            item = cb_per_tensor.get(qname)
-            if item is None:
-                raise ReadTrafficError(
-                    f"[read_traffic] {context}: {qname!r} is assigned the CB "
-                    f"format {name} but the whole-assignment CB payload has "
-                    "no entry for it, so its stored bytes are unknown. "
-                    "Refusing to contribute a silent zero."
-                )
-            nbytes = int(item["tensor_payload_bytes"])
         else:
             nbytes = int(fp.format_tensor_payload_breakdown(
                 name, shape, qname=qname,
-                cb_serialization_context=cb_serialization_context,
             )["tensor_payload_bytes"])
         if name == "NVFP4":
             nbytes += int(fp.nvfp4_global_sidecar_bytes(
@@ -1115,26 +1089,6 @@ def assignment_read_traffic(
             if len(shape) == 3:
                 observed_expert_counts[qname] = int(shape[0])
         _charge(nbytes, klass)
-
-    # CB split sub-stacks are physical tensors of their own; charge each once
-    # to the class of its members (all members of a group share a role).
-    for key, group in sorted((grouped_payload.get("groups") or {}).items()):
-        members = group["member_qnames"]
-        if not members:
-            raise ReadTrafficError(
-                f"[read_traffic] {context}: per-expert group {key!r} declares "
-                "no member tensors, so it cannot be classified.")
-        klass = classify_read_class(
-            members[0], profile=profile, in_assignment=True,
-            embedding_streamed=embedding.streamed, context=context)
-        saw_routed |= klass == "routed_experts"
-        _charge(int(group["tensor_payload_bytes"]), klass)
-        if int(group["codebook_sidecar_bytes"]):
-            _charge(int(group["codebook_sidecar_bytes"]), "resident_codebooks")
-
-    cb_sidecar_bytes = int(cb_payload.get("codebook_sidecar_bytes") or 0)
-    if cb_sidecar_bytes:
-        _charge(cb_sidecar_bytes, "resident_codebooks")
 
     # --- half two: every tensor the allocator never decided ------------------
     covered_spans: set[str] = set()

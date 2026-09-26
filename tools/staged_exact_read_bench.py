@@ -64,30 +64,16 @@ OPS = ("READ", "LOOKUP", "GETATTR", "ACCESS", "OPEN", "CLOSE", "WRITE",
 
 def mountstats() -> dict:
     """``{mount: {"bytes": [...], "ops": {OP: [ops, trans, ..., execute_ms]}}}``."""
-    out, cur = {}, None
+    from prismaquant.io_spans import read_mountstats
+
     try:
-        lines = open("/proc/self/mountstats").read().splitlines()
+        rows = read_mountstats()
     except OSError:
-        return out
-    for line in lines:
-        if line.startswith("device "):
-            parts = line.split()
-            where = parts[parts.index("on") + 1] if "on" in parts else None
-            cur = where if where in MOUNTS else None
-            if cur is not None:
-                out.setdefault(cur, {"bytes": None, "ops": {}})
-            continue
-        if cur is None:
-            continue
-        text = line.strip()
-        if text.startswith("bytes:"):
-            out[cur]["bytes"] = [int(x) for x in text.split()[1:]]
-        name, sep, rest = text.partition(":")
-        if sep and name in OPS:
-            fields = rest.split()
-            if len(fields) >= 8 and all(f.isdigit() for f in fields[:8]):
-                out[cur]["ops"][name] = [int(f) for f in fields[:9]]
-    return out
+        return {}
+    return {mount: {"bytes": row["bytes"],
+                    "ops": {name: fields[:9] for name, fields in row["ops"].items()
+                            if name in OPS and len(fields) >= 8}}
+            for mount, row in rows.items() if mount in MOUNTS}
 
 
 def mountstats_delta(before: dict, after: dict) -> dict:
@@ -113,17 +99,6 @@ def mountstats_delta(before: dict, after: dict) -> dict:
         entry["ops"] = ops
         delta[mount] = entry
     return delta
-
-
-def proc_io() -> dict:
-    out = {}
-    try:
-        for line in open("/proc/self/io"):
-            key, _, value = line.partition(":")
-            out[key.strip()] = int(value)
-    except OSError:
-        pass
-    return out
 
 
 def drop_client_cache(paths) -> int:
@@ -433,40 +408,36 @@ class MemcgPeaks:
         self.peaks = {field: 0 for field in self.FIELDS}
         self.first = None
         self.samples = 0
-        self._stop = threading.Event()
-        self._thread = None
+        self._sampler = None
 
     def _read(self):
-        values = {}
-        for line in self.path.read_text().splitlines():
-            key, _, value = line.partition(" ")
-            if key in self.FIELDS:
-                values[key] = int(value)
-        return values
+        from prismaquant.memory_management import read_memory_stat
+
+        return {key: value for key, value in read_memory_stat(self.path).items()
+                if key in self.FIELDS}
+
+    def _tick(self):
+        try:
+            values = self._read()
+        except OSError:
+            return
+        self.samples += 1
+        for key, value in values.items():
+            self.peaks[key] = max(self.peaks[key], value)
 
     def __enter__(self):
+        from prismaquant.io_spans import PeriodicSampler
+
         if self.path is None or not self.path.exists():
             return self
         self.first = self._read()
-
-        def run():
-            while not self._stop.wait(self.period_s):
-                try:
-                    values = self._read()
-                except OSError:
-                    continue
-                self.samples += 1
-                for key, value in values.items():
-                    self.peaks[key] = max(self.peaks[key], value)
-
-        self._thread = threading.Thread(target=run, name="memcg-peaks", daemon=True)
-        self._thread.start()
+        self._sampler = PeriodicSampler(self._tick, interval_s=self.period_s,
+                                        name="memcg-peaks", tick_first=False).start()
         return self
 
     def __exit__(self, *exc):
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join()
+        if self._sampler is not None:
+            self._sampler.stop()
         return False
 
     def report(self):
@@ -691,6 +662,7 @@ def _sink_variant(base, variant, *, window_bytes):
 
 
 def child_stage_b(args, slice_doc) -> dict:
+    from prismaquant.io_spans import counter_delta, read_proc_io
     from prismaquant.joint_adjoint_checkpoints import load_adjoint_checkpoint
     resolver = _bind(args.manifest_sha256, args.allowed_tiers)
     record = slice_doc["checkpoint"]
@@ -727,7 +699,7 @@ def child_stage_b(args, slice_doc) -> dict:
         if resident["now"] > policy["max_resident_bytes"] or resident["now"] < 0:
             raise RuntimeError("bench residency budget exceeded")
 
-    io0 = proc_io()
+    io0 = read_proc_io()
     memcg = MemcgPeaks()
     started = time.monotonic()
     try:
@@ -763,7 +735,7 @@ def child_stage_b(args, slice_doc) -> dict:
     return {"entries": entries, "file_bytes": file_bytes, "tensor_bytes": tensor_bytes,
             "wall_s": round(wall, 4), "entries_per_s": round(entries / wall, 3),
             "mb_s": round(file_bytes / wall / 1e6, 1),
-            "resident_peak_bytes": resident["peak"], "io": _io_delta(io0, proc_io()),
+            "resident_peak_bytes": resident["peak"], "io": counter_delta(read_proc_io(), io0),
             "counters": _counters(), "residency": _residency(resolver),
             "sink": "discard" if discard else variant, "readback": readback,
             "memcg": memcg.report()}
@@ -854,6 +826,7 @@ def child_sink_feed(args, slice_doc) -> dict:
 
 
 def child_stage_a(args, slice_doc) -> dict:
+    from prismaquant.io_spans import counter_delta, read_proc_io
     from prismaquant.joint_adjoint_checkpoints import reference_from_record
     from prismaquant.perturbed_x_cache import (
         EntryReadScratch, prefetch_exact_activation_cache_entries)
@@ -863,7 +836,7 @@ def child_stage_a(args, slice_doc) -> dict:
                               batches=args.stage_a_batches, windows=args.stage_a_windows)
     session = windows[0][0]["metadata"]["identity"]["session"]
     scratch = EntryReadScratch()
-    io0 = proc_io()
+    io0 = read_proc_io()
     started = time.monotonic()
     entries = file_bytes = 0
     per_window = []
@@ -885,12 +858,8 @@ def child_stage_a(args, slice_doc) -> dict:
             "window_entries": len(windows[0]), "wall_s": round(wall, 4),
             "entries_per_s": round(entries / wall, 3),
             "mb_s": round(file_bytes / wall / 1e6, 1), "window_s": per_window,
-            "io": _io_delta(io0, proc_io()), "counters": _counters(),
+            "io": counter_delta(read_proc_io(), io0), "counters": _counters(),
             "residency": _residency(resolver)}
-
-
-def _io_delta(before, after):
-    return {key: after.get(key, 0) - before.get(key, 0) for key in after}
 
 
 def _counters():

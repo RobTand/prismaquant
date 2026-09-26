@@ -31,13 +31,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import math
 import os
 import pickle
 import re
 import subprocess
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
@@ -45,23 +44,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from . import io_spans
 from prismaquant import format_registry as fr
-from prismaquant.cb_layout import (
-    VEC_DIM,
-    parse_format_name,
-    subtable_bit_widths,
-)
-from prismaquant.cb_ladder_cross_family import (
-    PROVENANCE_KEY as CROSS_FAMILY_PROVENANCE_KEY,
-)
-from prismaquant.cb_ladder_cross_family import verdict_from_unit_kls
-from prismaquant.emu_forward_kl import _qdq_accepts_col_weights
-from prismaquant.nvfp4_cb_footprint import (
-    cb_cost_provenance,
-    cb_quantize_dequantize_for_context,
-    cb_serialization_context_from_env,
-    validate_cb_cost_provenance,
-)
 from prismaquant.routed_experts import (
     UnpackedExpertLinear,
     profile_declared_routed_expert_targets,
@@ -71,20 +55,6 @@ from prismaquant.routed_experts import (
 
 SCHEMA = "prismaquant.expert_empirical_cost.v1"
 PASSTHROUGH_FORMATS = {"BF16", "FP8_SOURCE"}
-# CB families render the WHOLE stack in one qdq call (the export convention:
-# fp4 derives one per-stack global; fp8 per-row scales) — measured render ==
-# shipped bytes, never chunked (moe_cb_design.md §3).
-_CB_FAMILIES = {"nvfp4_cb", "fp8_cb"}
-# Both CB families carry k-rung ladders (k index bits per 8-weight vector).
-# Ladders are PER (family, mode) — NVFP4_CB_K and FP8_CB_K are
-# different grids/codings and never share one log-linear fit. The RD-law fit
-# is holdout-gated per unit, so admitting a family costs nothing when the law
-# fails there (falls back to full measurement).
-# RD-law ladder interpolation (moe_cb_design.md §3.4): D(k) = C * 2^(-k/4),
-# validated +-3% on weighted-recon at 0.6B but UNPROVEN on unit-KL — so it is
-# opt-in and holdout-gated PER UNIT (a failed holdout falls back to full
-# measurement for that unit).
-_LADDER_SLOPE_BITS = 0.25
 
 
 def _log(msg: str) -> None:
@@ -127,140 +97,25 @@ def _calib_batch() -> int:
 @torch.no_grad()
 def _baseline_logprobs(
     model, calib_ids: torch.Tensor,
-    capture_units: Sequence[tuple[str, object]] | None = None,
-    capture_rows: int = 4096,
     *,
     forward_model=None,
-) -> list[torch.Tensor] | tuple[list[torch.Tensor], dict]:
-    """Baseline log-probs; optionally capture each expert module's INPUT rows
-    during the same forwards (bounded to ``capture_rows`` per unit) for the
-    imatrix replay — no separate pass, no activation-cache dependency."""
-    captured: dict[str, list[torch.Tensor]] = {}
-    handles = []
-    if capture_units:
-        def _mk_hook(qn):
-            def _hook(_mod, args, _kwargs, _out):
-                xs = captured.setdefault(qn, [])
-                have = sum(t.shape[0] for t in xs)
-                if have >= capture_rows:
-                    return
-                x = args[0].detach()
-                x = x.reshape(-1, x.shape[-1])
-                xs.append(x[: capture_rows - have].cpu())
-            return _hook
-        for qn, mod in capture_units:
-            handles.append(mod.register_forward_hook(
-                _mk_hook(qn), with_kwargs=True))
-    try:
-        out = []
-        bs = _calib_batch()
-        n_total = calib_ids.shape[0]
-        t0 = time.time()
-        for i in range(0, n_total, bs):
-            logits = (forward_model or model)(
-                calib_ids[i:i + bs]
-            ).logits.float()
-            out.append(F.log_softmax(logits, dim=-1).cpu())
-            done = min(i + bs, n_total)
-            dt = time.time() - t0
-            tps = done * calib_ids.shape[1] / max(dt, 1e-9)
-            _log(f"baseline forward {done}/{n_total} windows "
-                 f"(batch={bs}, {dt:.0f}s elapsed, {tps:.0f} tok/s)")
-    finally:
-        for h in handles:
-            h.remove()
-    if capture_units is None:
-        return out
-    unit_x = {qn: torch.cat(xs, dim=0) for qn, xs in captured.items() if xs}
-    return out, unit_x
-
-
-@torch.no_grad()
-def _replay_down_proj_col_weights(
-    mod, parent_mod, router, X: torch.Tensor,
-) -> torch.Tensor:
-    """Per-expert down_proj imatrix ``(E, 1, inter)`` by replaying the routed
-    forward on captured module inputs X: route -> per-expert gate_up ->
-    activation -> intermediate; pool mean-square over that expert's routed
-    tokens. down_proj's input (the per-expert intermediate) is never
-    activation-cached — the packed-expert hook sees only the MODULE input —
-    so this replay is the only faithful source (the same reason
-    measure_quant_cost leaves down_proj unweighted in its pooled path).
-    Experts with no routed tokens in the capture get the mean of the routed
-    experts' vectors (a neutral prior, recorded by the caller)."""
-    from prismaquant.measure_quant_cost import _packed_router_topk
-
-    gate_up = mod.gate_up_proj
-    E = int(gate_up.shape[0])
-    inter = int(gate_up.shape[1]) // 2
-    dev = gate_up.device
-    Xd = X.to(device=dev, dtype=gate_up.dtype)
-    act_fn = getattr(mod, "act_fn", F.silu)
-    route_fn = getattr(parent_mod, "route_tokens_to_experts", None)
-    if callable(route_fn):
-        top_k_index, _tw = route_fn(router(Xd))
-    else:
-        top_k_index, _tw = _packed_router_topk(
-            router, Xd, e_score_correction_bias=getattr(
-                parent_mod, "e_score_correction_bias", None),
-            expert_bias=getattr(parent_mod, "expert_bias", None))
-    out = torch.zeros(E, inter, dtype=torch.float32, device=dev)
-    hit = torch.zeros(E, dtype=torch.bool)
-    for e in range(E):
-        tok = (top_k_index == e).any(dim=-1).nonzero(as_tuple=True)[0]
-        if tok.numel() == 0:
-            continue
-        g, u = F.linear(Xd[tok], gate_up[e]).chunk(2, dim=-1)
-        inter_act = (act_fn(g) * u).float()
-        out[e] = inter_act.pow(2).mean(dim=0)
-        hit[e] = True
-    if bool(hit.any()) and not bool(hit.all()):
-        out[~hit] = out[hit].mean(dim=0)
-    elif not bool(hit.any()):
-        out[:] = 1.0
-    return out.reshape(E, 1, inter).cpu()
-
-
-@torch.no_grad()
-def ensure_unit_col_weights(
-    model, units, col_weights: dict, unit_x: Mapping[str, torch.Tensor],
-) -> list[str]:
-    """Fill missing packed-expert col_weights entries in place.
-
-    gate_up_proj: pooled module-input second moment (identical op to the
-    exporter's builder — full rows, fp32, mean over dim 0).
-    down_proj: the per-expert intermediate replay above.
-    Returns the names added (caller persists them back to the shared
-    col-weights pickle so the EXPORTER ships the same weighting — the
-    lockstep contract)."""
-    from prismaquant.measure_quant_cost import (
-        _packed_experts_parent_module,
-        _packed_experts_router,
-    )
-    added: list[str] = []
-    for qn, mod in units:
-        X = unit_x.get(qn)
-        gu_name, dn_name = f"{qn}.gate_up_proj", f"{qn}.down_proj"
-        if gu_name not in col_weights:
-            if X is None:
-                raise ValueError(f"{qn}: no captured input rows for the "
-                                 f"gate_up imatrix (unit never routed?)")
-            col_weights[gu_name] = (
-                X.float().pow(2).mean(dim=0).reshape(1, 1, -1))
-            added.append(gu_name)
-        if dn_name not in col_weights and hasattr(mod, "down_proj"):
-            if X is None:
-                raise ValueError(f"{qn}: no captured input rows for the "
-                                 f"down_proj imatrix replay")
-            parent = _packed_experts_parent_module(model, qn)
-            router = _packed_experts_router(parent)
-            if router is None:
-                raise ValueError(f"{qn}: no router found for the down_proj "
-                                 f"imatrix replay")
-            col_weights[dn_name] = _replay_down_proj_col_weights(
-                mod, parent, router, X)
-            added.append(dn_name)
-    return added
+) -> list[torch.Tensor]:
+    """Baseline log-probs over the calibration windows."""
+    out = []
+    bs = _calib_batch()
+    n_total = calib_ids.shape[0]
+    t0 = time.time()
+    for i in range(0, n_total, bs):
+        logits = (forward_model or model)(
+            calib_ids[i:i + bs]
+        ).logits.float()
+        out.append(F.log_softmax(logits, dim=-1).cpu())
+        done = min(i + bs, n_total)
+        dt = time.time() - t0
+        tps = done * calib_ids.shape[1] / max(dt, 1e-9)
+        _log(f"baseline forward {done}/{n_total} windows "
+             f"(batch={bs}, {dt:.0f}s elapsed, {tps:.0f} tok/s)")
+    return out
 
 
 @torch.no_grad()
@@ -284,57 +139,16 @@ def _quantize_unit_inplace(
 ) -> None:
     """Render every member of one expert serving unit in-place in ``fmt``.
 
-    CB families use the imatrix-WEIGHTED VQ render on the whole stack (the
-    exporter convention — measuring an unweighted render while the exporter
-    ships weighted bytes is the rendering-confound class, so a CB format
-    with no col_weights entry for a member hard-fails; the encode tier is
-    inherited from PRISMAQUANT_CB_ENCODE_TIER via the registry closure).
-
     ``sample_idx`` (expert subsampling): quantize ONLY those expert slices,
     leaving the rest BF16 — the caller extrapolates the partial unit KL.
-    Each sampled expert's render is identical to its full-stack render (the
-    CB encode is per-expert-row independent; per-expert col_weights slices
-    keep the weighted-render contract), so sampling changes COVERAGE, never
-    the bytes measured for a covered expert.
+    Each sampled expert's render is identical to its full-stack render, so
+    sampling changes COVERAGE, never the bytes measured for a covered expert.
     """
     spec = fr.get_format(fmt)
     qdq = spec.quantize_dequantize
-    if spec.family in _CB_FAMILIES:
-        context = cb_serialization_context_from_env()
-
-        def qdq(weight, col_weights=None, *, qname=None):
-            return cb_quantize_dequantize_for_context(
-                spec,
-                weight,
-                context=context,
-                qname=qname,
-                col_weights=col_weights,
-            )
-    weighted = _qdq_accepts_col_weights(spec)
     for pn in param_names:
         w = getattr(mod, pn).data
-        full = f"{unit_qname}.{pn}" if unit_qname else pn
-        if spec.family in _CB_FAMILIES:
-            cw = (col_weights or {}).get(full)
-            if weighted and cw is None:
-                raise ValueError(
-                    f"{full}: CB format {fmt} needs a col_weights entry — "
-                    f"the deliberate CB render is imatrix-weighted; an "
-                    f"unweighted unit-KL would measure bytes the exporter "
-                    f"never ships (pass --col-weights)")
-            cw_dev = cw.to(w.device)
-            if sample_idx is not None:
-                idx = sample_idx.to(w.device)
-                cw_s = (cw_dev[idx] if cw_dev.ndim >= 3
-                        and cw_dev.shape[0] == w.shape[0] else cw_dev)
-                w[idx] = qdq(
-                    w[idx].float(), col_weights=cw_s, qname=full
-                ).to(w.dtype)
-            else:
-                w.copy_(qdq(
-                    w.float(), col_weights=cw_dev, qname=full
-                ).to(w.dtype))
-        elif spec.family == "nv":
+        if spec.family == "nv":
             # NV formats derive one per-TENSOR global scale from
             # whatever slice they are given, while export ships one
             # global PER EXPERT. Chunk-batching would share a global
@@ -374,19 +188,12 @@ def _unit_kl(
     col_weights: Mapping[str, torch.Tensor] | None = None,
     unit_qname: str = "",
     sample_idx: torch.Tensor | None = None,
-    per_window: bool = False,
     forward_model=None,
-) -> float | tuple[float, list[float]]:
+) -> float:
     """Mean-token KL(BF16 || model-with-this-unit-quantized).
 
     With ``sample_idx``, only those expert slices are quantized (and cloned
-    for restore) — the caller owns the extrapolation to the full unit.
-
-    With ``per_window`` also returns the per-calibration-window mean KLs the
-    aggregate is built from — free (the loop already runs window by window)
-    and the only between-draw noise datum either cost chain has. The CB
-    ladder's holdout gate derives its tolerance from it rather than from a
-    bare constant (``_cb_ladder_holdout_tol``)."""
+    for restore) — the caller owns the extrapolation to the full unit."""
     if sample_idx is None:
         originals = {pn: getattr(mod, pn).data.clone() for pn in param_names}
     else:
@@ -400,7 +207,6 @@ def _unit_kl(
             sample_idx=sample_idx)
         total = 0.0
         n_tok = 0
-        windows: list[float] = []
         bs = _calib_batch()
         for bi, i in enumerate(range(0, calib_ids.shape[0], bs)):
             lp = F.log_softmax(
@@ -409,13 +215,9 @@ def _unit_kl(
                 ).logits.float(), -1)
             bl = baseline[bi].to(lp.device)
             kl = (bl.exp() * (bl - lp)).sum(-1)
-            wsum = float(kl.sum().item())
-            total += wsum
+            total += float(kl.sum().item())
             n_tok += kl.numel()
-            if per_window:
-                windows.append(wsum / max(kl.numel(), 1))
-        mean = total / max(n_tok, 1)
-        return (mean, windows) if per_window else mean
+        return total / max(n_tok, 1)
     finally:
         for pn in param_names:
             w = getattr(mod, pn).data
@@ -654,9 +456,8 @@ def _unpacked_unit_kl(
     expert_chunk: int = 16,
     col_weights: Mapping[str, torch.Tensor] | None = None,
     sample_idx: torch.Tensor | None = None,
-    per_window: bool = False,
     forward_model=None,
-) -> float | tuple[float, list[float]]:
+) -> float:
     """Unit KL for per-expert Linears via the shipped packed-stack render."""
     if sample_idx is None:
         expert_ids = list(range(unit.num_experts))
@@ -693,7 +494,6 @@ def _unpacked_unit_kl(
         torch.cuda.empty_cache()
         total = 0.0
         n_tok = 0
-        windows: list[float] = []
         bs = _calib_batch()
         for bi, i in enumerate(range(0, calib_ids.shape[0], bs)):
             lp = F.log_softmax(
@@ -703,13 +503,9 @@ def _unpacked_unit_kl(
             )
             bl = baseline[bi].to(lp.device)
             kl = (bl.exp() * (bl - lp)).sum(-1)
-            wsum = float(kl.sum().item())
-            total += wsum
+            total += float(kl.sum().item())
             n_tok += kl.numel()
-            if per_window:
-                windows.append(wsum / max(kl.numel(), 1))
-        mean = total / max(n_tok, 1)
-        return (mean, windows) if per_window else mean
+        return total / max(n_tok, 1)
     finally:
         for member in unit.members:
             original = originals.get(member.qname)
@@ -722,393 +518,6 @@ def _unpacked_unit_kl(
         torch.cuda.empty_cache()
 
 
-def _cb_ladder_split(measured_fmts: Sequence[str]):
-    """Split the menu's CB rungs into PER-(family, mode) ladders, each
-    (kmap, anchors, holdout, predicted) for RD-law interpolation. A family
-    with < 4 rungs is skipped (anchors+holdout would measure everything
-    anyway). At exactly 4 rungs the two extremes anchor the line and one
-    middle rung is the holdout, predicting the other (25% fewer encodes); at
-    >= 5 rungs three anchors give a least-squares fit. Returns a list of
-    ladders, or None when no family pays."""
-    fams: dict[str, dict[str, int]] = {}
-    for f in measured_fmts:
-        parsed = parse_format_name(f)
-        if parsed is not None:
-            family, k = parsed
-            fams.setdefault(family.prefix, {})[f] = k
-    raw_anchors = os.environ.get("PRISMAQUANT_CB_LADDER_ANCHORS", "").strip()
-    raw_holdout = os.environ.get("PRISMAQUANT_CB_LADDER_HOLDOUT", "").strip()
-    if bool(raw_anchors) != bool(raw_holdout):
-        raise ValueError(
-            "explicit CB ladder planning requires both "
-            "PRISMAQUANT_CB_LADDER_ANCHORS and "
-            "PRISMAQUANT_CB_LADDER_HOLDOUT"
-        )
-    explicit_anchors = [
-        item.strip().upper() for item in raw_anchors.split(",") if item.strip()
-    ]
-    explicit_holdout = raw_holdout.upper() if raw_holdout else ""
-    explicit_family = ""
-    if explicit_anchors:
-        parsed_explicit = [parse_format_name(name) for name in
-                           explicit_anchors + [explicit_holdout]]
-        if any(item is None for item in parsed_explicit):
-            raise ValueError("explicit CB ladder plan contains a non-CB format")
-        families = {item[0].prefix for item in parsed_explicit}
-        if len(families) != 1:
-            raise ValueError("explicit CB ladder plan crosses format families")
-        if len(set(explicit_anchors)) != len(explicit_anchors):
-            raise ValueError("explicit CB ladder anchors contain duplicates")
-        if len(explicit_anchors) < 2 or explicit_holdout in explicit_anchors:
-            raise ValueError(
-                "explicit CB ladder needs at least two distinct anchors and "
-                "a separate holdout"
-            )
-        explicit_family = next(iter(families))
-
-    ladders = []
-    explicit_applied = False
-    for fam, kmap in sorted(fams.items()):
-        if len(kmap) < 4:
-            continue
-        by_k = sorted(kmap, key=kmap.get)
-        if explicit_family and fam == explicit_family:
-            required = set(explicit_anchors + [explicit_holdout])
-            missing = sorted(required - set(kmap))
-            if missing:
-                raise ValueError(
-                    f"explicit CB ladder plan is absent from the measured "
-                    f"menu: {missing}"
-                )
-            anchors = list(explicit_anchors)
-            holdout = explicit_holdout
-            explicit_applied = True
-        else:
-            if len(by_k) == 4:
-                anchors = [by_k[0], by_k[-1]]
-            else:
-                anchors = [by_k[0], by_k[len(by_k) // 2], by_k[-1]]
-            rest = [f for f in by_k if f not in anchors]
-            holdout = rest[len(rest) // 2]
-        rest = [f for f in by_k if f not in anchors]
-        predicted = [f for f in rest if f != holdout]
-        if predicted:
-            ladders.append((kmap, anchors, holdout, predicted))
-    if explicit_family and not explicit_applied:
-        raise ValueError(
-            f"explicit CB ladder family {explicit_family!r} is absent from "
-            "the measured menu"
-        )
-    return ladders or None
-
-
-def _ladder_family_prefix(kmap: Mapping[str, int]) -> str:
-    """The CB family prefix a ladder's kmap belongs to.
-
-    ``_cb_ladder_split`` already buckets by ``family.prefix``, so every key of
-    one kmap shares a family; recovering it here keeps the splitter's 4-tuple
-    shape (both cost chains and their tests unpack it) while letting the
-    cross-family check know WHICH curve each residual came from.
-    """
-    for name in sorted(kmap):
-        parsed = parse_format_name(name)
-        if parsed is not None:
-            return str(parsed[0].prefix)
-    return ""
-
-
-def _cb_ladder_signed_residual(kmap: Mapping[str, int],
-                               anchors: Sequence[str],
-                               values: Mapping[str, float],
-                               holdout: str) -> float | None:
-    """Signed relative holdout residual ``(predicted - measured)/|measured|``.
-
-    ``_cb_ladder_gate`` keeps only the magnitude, which is the right input to
-    a per-unit accept/reject. The cross-family symmetry check needs the SIGN:
-    two families can miss by the same amount in opposite directions, and that
-    is precisely the biased-estimator state the audit's gate exists to catch
-    (``cb_ladder_cross_family``). Refits the same shared law, so the two
-    numbers cannot disagree about which law produced them.
-    """
-    law = _cb_ladder_law(kmap, anchors, values)
-    if law is None:
-        return None
-    try:
-        meas = float(values[holdout])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if not math.isfinite(meas) or meas == 0.0:
-        return None
-    resid = (law.predict(holdout) - meas) / abs(meas)
-    return resid if math.isfinite(resid) else None
-
-
-def _fit_floor_law(ks: Sequence[float], ds: Sequence[float]):
-    """Solve D(k) = F + C * 2^(-b*k) exactly through three (k, D) anchors
-    (unequal spacing; bisection on b). The floor term matters for the FP8_CB
-    family, whose error flattens toward the E4M3 grid's own floor at high k —
-    a pure log-linear law systematically misses there (0.6B smoke: 60-90%
-    holdout rejection). Returns (F, C, b) with F >= 0, or None when the
-    anchors are non-monotone/degenerate (caller falls back to log-linear;
-    the holdout gate rules either way)."""
-    pts = sorted(zip(ks, ds))
-    (k1, d1), (k2, d2), (k3, d3) = pts
-    if not (d1 > d2 > d3 > 0.0):
-        return None
-    target = (d1 - d2) / (d2 - d3)
-
-    def ratio(b):
-        r1, r2, r3 = (2.0 ** (-b * k) for k in (k1, k2, k3))
-        den = r2 - r3
-        if den <= 0.0:
-            return float("inf")
-        return (r1 - r2) / den
-
-    lo, hi = 1e-6, 4.0
-    if ratio(lo) > target:            # decays faster than pure exponential
-        return None
-    while ratio(hi) < target and hi < 64.0:
-        hi *= 2.0
-    if ratio(hi) < target:
-        return None
-    for _ in range(80):
-        mid = 0.5 * (lo + hi)
-        if ratio(mid) < target:
-            lo = mid
-        else:
-            hi = mid
-    b = 0.5 * (lo + hi)
-    r1 = 2.0 ** (-b * k1)
-    r2 = 2.0 ** (-b * k2)
-    if r1 - r2 <= 0.0:
-        return None
-    C = (d1 - d2) / (r1 - r2)
-    F = d1 - C * r1
-    if F < 0.0 or C <= 0.0:
-        return None
-    return F, C, b
-
-
-def _cb_ladder_rate_factor(fmt_name: str, k: int) -> float:
-    """Exact per-sub rate factor R(k) = sum_i 2^(-2*b_i/d_i) under the
-    ceil-first bit split — the theory-faithful rate variable for the CB
-    ladder. The smooth 2^(-alpha*k) law treats k as evenly divisible, but at
-    k % n_sub != 0 the ceil-first split gives some sub-tables one bit more:
-    the true error carries a +4-6% SAWTOOTH by split phase that a smooth law
-    cannot represent — and the (28, 38, 48) anchors + k=39 holdout sit on
-    DIFFERENT phases, which is exactly where the 8-12% holdout rejections
-    came from (2026-07-21 27B cost run). R is exact per phase and reduces to
-    the old law at even splits (R(4m) = 4*2^(-m) for fp8)."""
-    parsed = parse_format_name(fmt_name)
-    if parsed is None:
-        raise ValueError(f"not a producer CB format: {fmt_name!r}")
-    family, parsed_k = parsed
-    if int(k) != parsed_k:
-        raise ValueError(
-            f"CB rung mismatch: {fmt_name!r} encodes k={parsed_k}, got {k}"
-        )
-    widths = subtable_bit_widths(parsed_k, family.mode, family.n_sub)
-    sub_dim = VEC_DIM // family.n_sub
-    return sum(2.0 ** (-2.0 * width / sub_dim) for width in widths)
-
-
-class _LadderLaw(NamedTuple):
-    """A fitted CB-ladder law: the prediction closure plus the branch name
-    that produced it (for provenance in the gate's log)."""
-    predict: Callable[[str], float]
-    name: str
-
-
-def _cb_ladder_law(kmap: Mapping[str, int], anchors: Sequence[str],
-                   values: Mapping[str, float]) -> _LadderLaw | None:
-    """Fit ONE metric on the anchors. THE shared CB-ladder law.
-
-    Chain (the holdout gate arbitrates accept/reject of the whole chain, so
-    every branch is a proposal only):
-      1. Split-aware FLOORED LINEAR law D = F + C*R(k), with R the exact
-         ceil-first per-sub rate factor — plain linear least squares in
-         (1, R); kills both the high-k floor miss AND the k%n_sub sawtooth.
-         (F clamped to 0 -> C is refit through the origin.)
-      2. The smooth floor law D = F + C*2^(-b*k) (exact 3-anchor solve; the
-         fp8 family flattens toward the E4M3 grid floor at high k).
-      3. Log-linear LS (the original law).
-
-    Both cost chains call this: the dense per-tensor path
-    (``measure_quant_cost._ladder_metric_fit``) and the expert unit-KL path
-    (``_cb_ladder_fit``). They were separate implementations until R20
-    (2026-07-30) and the expert side carried NO R(k) term at all, so the
-    ceil-first sawtooth that motivated the dense change (commit 5184892 —
-    the (28,38,48)+k=39 phase mismatch behind 8-12% holdout rejections on
-    the 2026-07-21 27B run) was still costing the expert ladder its
-    holdouts.
-
-    Returns None if any anchor value is unusable."""
-    try:
-        xs = [float(kmap[f]) for f in anchors]
-        vs = [float(values[f]) for f in anchors]
-    except (KeyError, TypeError):
-        return None
-    if len(anchors) >= 2:
-        # -- 1. split-aware floored linear LS ------------------------------
-        rs = [_cb_ladder_rate_factor(f, kmap[f]) for f in anchors]
-        n = float(len(rs))
-        mr = sum(rs) / n
-        mv = sum(vs) / n
-        den = sum((r - mr) ** 2 for r in rs)
-        if den > 0.0:
-            C = sum((r - mr) * (v - mv) for r, v in zip(rs, vs)) / den
-            F = mv - C * mr
-            if C > 0.0 and F >= 0.0:
-                return _LadderLaw(
-                    lambda f, _F=F, _C=C, _km=kmap: float(
-                        _F + _C * _cb_ladder_rate_factor(f, _km[f])),
-                    "floored_linear_R")
-            if C > 0.0 and F < 0.0:
-                # floor clamped to 0: refit C through the origin
-                den0 = sum(r * r for r in rs)
-                if den0 > 0.0:
-                    C0 = sum(r * v for r, v in zip(rs, vs)) / den0
-                    if C0 > 0.0:
-                        return _LadderLaw(
-                            lambda f, _C=C0, _km=kmap: float(
-                                _C * _cb_ladder_rate_factor(f, _km[f])),
-                            "linear_R_origin")
-    if len(anchors) == 3:
-        # -- 2. smooth floor law (exact solve) -----------------------------
-        fl = _fit_floor_law(xs, vs)
-        if fl is not None:
-            F, C, b = fl
-            return _LadderLaw(
-                lambda f, _F=F, _C=C, _b=b, _km=kmap:
-                    float(_F + _C * 2.0 ** (-_b * _km[f])),
-                "floor_law")
-    # -- 3. log-linear LS --------------------------------------------------
-    ys = [math.log2(max(v, 1e-20)) for v in vs]
-    n = float(len(xs))
-    mx = sum(xs) / n
-    my = sum(ys) / n
-    denom = sum((x - mx) ** 2 for x in xs)
-    b = (-sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / denom
-         if denom > 0 else _LADDER_SLOPE_BITS)
-    a = my + b * mx
-    return _LadderLaw(
-        lambda f, _a=a, _b=b, _km=kmap: float(2.0 ** (_a - _b * _km[f])),
-        "log_linear")
-
-
-def _cb_ladder_holdout_tol(kmap: Mapping[str, int], anchors: Sequence[str],
-                           values: Mapping[str, float], holdout: str,
-                           floor: float,
-                           windows: Mapping[str, Sequence[float]] | None
-                           ) -> float:
-    """Derive the holdout-gate tolerance from the rungs' MEASUREMENT noise.
-
-    ``encode_tiers.md`` §B states the rule — *"trust the fit only where the
-    holdout error clears the between-seed cost noise"* — so the threshold is
-    that noise, not a taste constant (house rule 2). ``windows`` carries each
-    measured rung's per-calibration-window values; the expert stage gets them
-    for free because every unit KL is already a mean over independent
-    calibration windows (``_unit_kl(per_window=True)``).
-
-    The estimate is PAIRED: for each window w the law is refitted on that
-    window's anchors and the holdout residual ``r_w`` recomputed. Anchors and
-    holdout are measured on the SAME windows, so their errors are strongly
-    common-mode; the spread of ``r_w`` isolates exactly the noise that
-    survives the pairing, and its systematic part (the law's misfit) drops
-    out of a standard deviation. The tolerance is the standard error of that
-    mean residual, relative to the holdout::
-
-        tol = stdev(r_w) / sqrt(n_windows) / |v_holdout|
-
-    Returns ``floor`` when the datum is ABSENT or degenerate:
-
-    * the dense per-tensor path measures each ``(tensor, format)`` exactly
-      once — the accumulator's ``_count`` is 1 — so it has no between-draw
-      spread to offer. (A FIT RESIDUAL is not a substitute: it cannot
-      separate measurement noise from law misfit, so a systematically wrong
-      law would inflate its own tolerance and open the gate exactly where it
-      must close. Measured: on free-rate exponential anchors that estimator
-      returns tol 252% against a 127% miss.)
-    * fewer than 2 windows, ragged window counts, or an exactly-zero spread
-      (a synthetic/degenerate estimator with no resolution).
-
-    ``floor`` defaults to the historical bare 0.10 and is the value the
-    shipped runs used; where the datum IS present the derived tolerance
-    REPLACES it, which is the literal §B rule and can tighten as well as
-    loosen. The accept/reject rate is logged so a ladder that the derived
-    tolerance has closed is visible rather than silent."""
-    if not windows:
-        return floor
-    need = list(anchors) + [holdout]
-    if any(f not in windows for f in need):
-        return floor
-    n = len(windows[holdout])
-    if n < 2 or any(len(windows[f]) != n for f in need):
-        return floor
-    resid = []
-    for w in range(n):
-        vw = {f: float(windows[f][w]) for f in need}
-        law_w = _cb_ladder_law(kmap, anchors, vw)
-        if law_w is None:
-            return floor
-        resid.append(law_w.predict(holdout) - vw[holdout])
-    mr = sum(resid) / n
-    var = sum((r - mr) ** 2 for r in resid) / (n - 1)
-    se = math.sqrt(var / n)
-    try:
-        vh = abs(float(values[holdout]))
-    except (KeyError, TypeError):
-        return floor
-    if se <= 0.0 or vh <= 0.0:
-        return floor
-    return se / vh
-
-
-def _cb_ladder_gate(kmap: Mapping[str, int], anchors: Sequence[str],
-                    values: Mapping[str, float], holdout: str,
-                    tol_floor: float,
-                    windows: Mapping[str, Sequence[float]] | None = None):
-    """Fit + holdout-gate ONE metric. THE shared gate for both cost chains.
-
-    Returns ``(law | None, holdout_rel_err, tol)``. ``law`` is None when the
-    anchors are unusable (rel_err inf) or when the holdout misses by more
-    than the tolerance; the caller then MEASURES the predicted rungs
-    (encode_tiers.md §B/§C — a tensor/unit that defies the law never
-    receives an interpolated cost)."""
-    law = _cb_ladder_law(kmap, anchors, values)
-    tol = _cb_ladder_holdout_tol(kmap, anchors, values, holdout, tol_floor,
-                                 windows)
-    if law is None:
-        return None, float("inf"), tol
-    try:
-        meas = float(values[holdout])
-    except (KeyError, TypeError):
-        return None, float("inf"), tol
-    rel = abs(law.predict(holdout) - meas) / max(abs(meas), 1e-20)
-    if rel > tol:
-        return None, rel, tol
-    return law, rel, tol
-
-
-def _cb_ladder_fit(kls: Mapping[str, float], kmap: Mapping[str, int],
-                   anchors: Sequence[str], holdout: str,
-                   predicted: Sequence[str], tol: float,
-                   windows: Mapping[str, Sequence[float]] | None = None):
-    """Fit the anchors and predict, through the SHARED law + gate.
-
-    ``tol`` is the tolerance used when no measurement-noise datum is
-    available; when ``windows`` (per-rung per-calibration-window values) is
-    supplied the gate derives the tolerance from it instead
-    (``_cb_ladder_holdout_tol``).
-
-    Returns ``(predicted_kls | None, holdout_rel_err, tol_used)``."""
-    law, rel, tol_used = _cb_ladder_gate(kmap, anchors, kls, holdout, tol,
-                                         windows)
-    if law is None:
-        return None, rel, tol_used
-    return {f: law.predict(f) for f in predicted}, rel, tol_used
-
-
 def measure_expert_unit_costs(
     model,
     profile,
@@ -1118,14 +527,11 @@ def measure_expert_unit_costs(
     expert_chunk: int = 16,
     progress: bool = True,
     col_weights: Mapping[str, torch.Tensor] | None = None,
-    ladder_interp: bool = False,
-    ladder_tol: float = 0.10,
     expert_sample: int = 0,
     max_units: int = 0,
     unit_filter: str | None = None,
     forward_model=None,
     baseline_logprobs: list[torch.Tensor] | None = None,
-    synthesize_col_weights: bool = True,
 ) -> tuple[dict, dict, dict]:
     """Measure empirical KL costs for profile-declared routed experts.
 
@@ -1195,73 +601,16 @@ def measure_expert_unit_costs(
     stats: dict = {}
     costs: dict = {}
     unit_kls: dict = {}
-    # Cleared up front so a caller cannot read a PREVIOUS call's cross-family
-    # verdict off this function after an early return (no units / no measured
-    # formats) — a stale symmetry certificate is worse than none.
-    measure_expert_unit_costs.last_cross_family_verdict = None
     if not units or not measured_fmts:
         return stats, costs, unit_kls
 
-    has_cb = any(fr.get_format(f).family in _CB_FAMILIES
-                 for f in measured_fmts)
-    if has_cb:
-        # Packed modules can synthesize missing imatrix entries from a module
-        # input capture. Unpacked per-expert Linears already have one harvested
-        # entry per member; those are pooled below with the exporter's exact
-        # virtual-stack rule and missing coverage is a hard error.
-        if col_weights is None:
-            col_weights = {}
-        selected_packed = [
-            (qn, mod) for kind, qn, mod in units if kind == "packed"
-        ]
-        if baseline_logprobs is not None:
-            baseline = baseline_logprobs
-            added = []
-            if selected_packed and synthesize_col_weights:
-                raise ValueError(
-                    "precomputed baseline cannot synthesize packed-expert "
-                    "col_weights because its module-input capture is absent"
-                )
-        elif selected_packed and synthesize_col_weights:
-            baseline, unit_x = _baseline_logprobs(
-                model, calib_ids, capture_units=selected_packed,
-                forward_model=forward_model)
-            added = ensure_unit_col_weights(
-                model, selected_packed, col_weights, unit_x
-            )
-            del unit_x
-        else:
-            baseline = _baseline_logprobs(
-                model, calib_ids, forward_model=forward_model)
-            added = []
-        if added and progress:
-            _log(f"synthesized {len(added)} packed-expert imatrix entries "
-                 f"(module-input pool / down_proj replay): "
-                 f"{added[:4]}{'...' if len(added) > 4 else ''}")
-        measure_expert_unit_costs.last_added_col_weights = added
-        # The packed-expert pooling rule: fuse gate/up in declared order, and
-        # average their per-member imatrix vectors per expert.
-        from prismaquant.routed_experts import packed_expert_col_weights
-        for kind, _qn, unit in units:
-            if kind == "unpacked":
-                col_weights = packed_expert_col_weights(
-                    col_weights, unit.members_by_target, profile
-                )
-    else:
-        baseline = (
-            baseline_logprobs
-            if baseline_logprobs is not None
-            else _baseline_logprobs(
-                model, calib_ids, forward_model=forward_model
-            )
+    baseline = (
+        baseline_logprobs
+        if baseline_logprobs is not None
+        else _baseline_logprobs(
+            model, calib_ids, forward_model=forward_model
         )
-        measure_expert_unit_costs.last_added_col_weights = []
-    ladder = _cb_ladder_split(measured_fmts) if ladder_interp else None
-    # Visible accept/reject rate for the holdout gate (R20): a ladder that
-    # is silently rejecting most units is paying full measurement cost PLUS
-    # the anchors, and the operator must be able to see that from the log.
-    ladder_accept = 0
-    ladder_reject = 0
+    )
     for unit_kind, qn, storage in units:
         if unit_kind == "packed":
             mod = storage
@@ -1326,83 +675,23 @@ def measure_expert_unit_costs(
         kl_scale = (float(num_experts) / float(sample_idx.numel())
                     if sample_idx is not None else 1.0)
 
-        # Per-window unit KLs of every MEASURED rung: the between-draw noise
-        # datum the ladder's holdout gate derives its tolerance from. Free —
-        # _unit_kl already loops window by window.
-        kl_windows: dict[str, list[float]] = {}
-
         def kl_of(fmt):
             if unit_kind == "packed":
                 out = _unit_kl(
                     model, calib_ids, baseline, mod, pnames, fmt,
                     expert_chunk=expert_chunk, col_weights=col_weights,
                     unit_qname=qn, sample_idx=sample_idx,
-                    per_window=ladder is not None,
                     forward_model=forward_model)
             else:
                 out = _unpacked_unit_kl(
                     model, calib_ids, baseline, unit, fmt,
                     expert_chunk=expert_chunk, col_weights=col_weights,
-                    sample_idx=sample_idx, per_window=ladder is not None,
+                    sample_idx=sample_idx,
                     forward_model=forward_model)
-            if ladder is None:
-                return kl_scale * out
-            mean, windows = out
-            kl_windows[fmt] = [kl_scale * w for w in windows]
-            return kl_scale * mean
+            return kl_scale * out
 
-        if ladder is None:
-            kls = {fmt: kl_of(fmt) for fmt in measured_fmts}
-        else:
-            predicted_all = {f for (_, _, _, pred) in ladder for f in pred}
-            kls = {fmt: kl_of(fmt) for fmt in measured_fmts
-                   if fmt not in predicted_all}
-            ladder_meta_all = []
-            for kmap, anchors, holdout, predicted in ladder:
-                # Recorded for EVERY ladder, accepted or not: the family the
-                # curve belongs to and the SIGNED holdout residual. Both are
-                # inputs to the cross-family symmetry gate (ultraplan P5a
-                # item 2, cb_ladder_cross_family) — a per-family accept rate
-                # alone cannot tell a symmetric miss from a biased one.
-                family = _ladder_family_prefix(kmap)
-                signed = _cb_ladder_signed_residual(
-                    kmap, anchors, kls, holdout)
-                pred_kls, rel, tol_used = _cb_ladder_fit(
-                    kls, kmap, anchors, holdout, predicted, ladder_tol,
-                    kl_windows)
-                if pred_kls is None:
-                    # Holdout gate FAILED for this unit/family: fall back to
-                    # full measurement (recon-validated, KL-unproven law).
-                    ladder_reject += 1
-                    if progress:
-                        _log(f"  {qn}: ladder holdout rel_err {rel:.1%} > "
-                             f"{tol_used:.1%} — measuring {predicted}")
-                    kls.update({fmt: kl_of(fmt) for fmt in predicted})
-                    ladder_meta_all.append(
-                        {"accepted": False, "family": family,
-                         "holdout": holdout,
-                         "holdout_rel_err": round(rel, 4),
-                         "holdout_signed_rel_resid": (
-                             round(signed, 6) if signed is not None else None),
-                         "holdout_tol": round(tol_used, 4),
-                         "anchors": anchors})
-                else:
-                    ladder_accept += 1
-                    ladder_meta_all.append({
-                        "accepted": True, "family": family,
-                        "holdout_rel_err": round(rel, 4),
-                        "holdout_signed_rel_resid": (
-                            round(signed, 6) if signed is not None else None),
-                        "holdout_tol": round(tol_used, 4),
-                        "anchors": anchors, "holdout": holdout,
-                        "predicted": predicted,
-                    })
-                    kls.update(pred_kls)
-            kls["_ladder"] = ladder_meta_all
-        ladder_meta = kls.pop("_ladder", None)
+        kls = {fmt: kl_of(fmt) for fmt in measured_fmts}
         unit_kls[qn] = dict(kls)
-        if ladder_meta is not None:
-            unit_kls[qn]["_ladder"] = ladder_meta
         if sample_idx is not None:
             unit_kls[qn]["_sampling"] = {
                 "num_experts": num_experts,
@@ -1451,23 +740,6 @@ def measure_expert_unit_costs(
                 f"{fmt} unit KL = {kls[fmt]:.4e}" for fmt in measured_fmts)
                 + f"  (n_params={n_params_unit / 1e6:.0f}M, "
                   f"experts={num_experts})")
-    if ladder is not None:
-        n_gate = ladder_accept + ladder_reject
-        _log(f"CB ladder holdout gate: {ladder_accept}/{n_gate} accepted "
-             f"({ladder_accept / max(n_gate, 1):.0%}), {ladder_reject} "
-             f"rejected -> measured (tolerance derived per unit from the "
-             f"between-window noise of the measured rungs; "
-             f"{ladder_tol:.0%} where that datum is degenerate)")
-        # Cross-family symmetry gate (ultraplan P5a item 2). A failure does
-        # not abort the run — it says the CROSS-FAMILY verdict this run's
-        # ladder fits could support is not publishable — but it must be loud
-        # here and travel into the artifact provenance.
-        verdict = verdict_from_unit_kls(unit_kls)
-        _log(f"CB ladder cross-family symmetry: {verdict['verdict'].upper()} "
-             f"— {verdict['detail']}")
-        measure_expert_unit_costs.last_cross_family_verdict = verdict
-    else:
-        measure_expert_unit_costs.last_cross_family_verdict = None
     return stats, costs, unit_kls
 
 
@@ -1549,8 +821,6 @@ def _expert_checkpoint_identity(
     unit_identities: Sequence[Mapping[str, object]],
     model_identity: Mapping[str, object],
     expert_chunk: int,
-    ladder_interp: bool,
-    ladder_tol: float,
     expert_sample: int,
     max_units: int,
     unit_filter: str | None,
@@ -1591,14 +861,9 @@ def _expert_checkpoint_identity(
             str(name): _tensor_value_stamp(value)
             for name, value in sorted(col_weights.items())
         },
-        # This stamp value-binds the selected learned bundle/lattice books,
-        # serialization layout, encode tier, and every CB menu semantic.
-        "cb_cost_provenance": cb_cost_provenance(formats),
         "measurement_dtype": str(runner.dtype),
         "expert_chunk": int(expert_chunk),
         "calib_batch": int(_calib_batch()),
-        "ladder_interp": bool(ladder_interp),
-        "ladder_tol": float(ladder_tol),
         "expert_sample": int(expert_sample),
         "max_units": int(max_units),
         "unit_filter": unit_filter,
@@ -1660,8 +925,6 @@ def measure_expert_unit_costs_streamed(
     expert_chunk: int = 16,
     progress: bool = True,
     col_weights: Mapping[str, torch.Tensor] | None = None,
-    ladder_interp: bool = False,
-    ladder_tol: float = 0.10,
     expert_sample: int = 0,
     max_units: int = 0,
     unit_filter: str | None = None,
@@ -1674,7 +937,7 @@ def measure_expert_unit_costs_streamed(
     """Measure routed serving units with one decoder layer resident at once.
 
     The numerical core is the resident ``measure_expert_unit_costs`` function:
-    identical qdq, fp32 log-softmax/KL, window order, ladder, and row builder.
+    identical qdq, fp32 log-softmax/KL, window order, and row builder.
     Streaming changes only model residency.  A target layer stays pinned for
     the complete serving unit so its temporary qdq is restored before the
     context can cache/unload it.
@@ -1777,8 +1040,6 @@ def measure_expert_unit_costs_streamed(
             unit_identities=unit_identities,
             model_identity=model_identity,
             expert_chunk=expert_chunk,
-            ladder_interp=ladder_interp,
-            ladder_tol=ladder_tol,
             expert_sample=expert_sample,
             max_units=max_units,
             unit_filter=unit_filter,
@@ -1825,17 +1086,11 @@ def measure_expert_unit_costs_streamed(
                 expert_chunk=expert_chunk,
                 progress=False,
                 col_weights=weights,
-                ladder_interp=ladder_interp,
-                ladder_tol=ladder_tol,
                 expert_sample=expert_sample,
                 max_units=0,
                 unit_filter=exact_filter,
                 forward_model=runner,
                 baseline_logprobs=baseline,
-                # Packed streamed units must receive complete persisted
-                # imatrix values. Synthesis needs a second mutable live unit
-                # plus router replay and is intentionally fail-closed here.
-                synthesize_col_weights=False,
             )
         if set(unit_kls) != {qname}:
             raise RuntimeError(
@@ -1872,13 +1127,6 @@ def measure_expert_unit_costs_streamed(
         stats.update(state["stats"])
         costs.update(state["costs"])
         unit_kls.update(state["unit_kls"])
-    if ladder_interp and unit_kls:
-        measure_expert_unit_costs.last_cross_family_verdict = (
-            verdict_from_unit_kls(unit_kls)
-        )
-    else:
-        measure_expert_unit_costs.last_cross_family_verdict = None
-    measure_expert_unit_costs.last_added_col_weights = []
     return stats, costs, unit_kls
 
 
@@ -2059,9 +1307,8 @@ def measure_expert_unit_costs_forked(
     that wedged the window-major runs (resident + clone + packed) cannot
     recur; the transient is the packed render alone.
 
-    Fail-closed scope (v1): profiles with per-pass layer state, CB
-    formats (imatrix synthesis not wired), expert subsampling and the CB
-    ladder are refused — use the window-major driver for those. Packed
+    Fail-closed scope (v1): profiles with per-pass layer state and expert
+    subsampling are refused — use the window-major driver for those. Packed
     and unpacked units are both handled; the packed all-zero-stack guard
     fires at fork time (the unpacked variant relies on the window driver's
     discovery-time check if you re-enable it there).
@@ -2078,13 +1325,6 @@ def measure_expert_unit_costs_forked(
     profile = resolve_routed_expert_profile(runner.model, profile)
     menu = _canon_formats(formats)
     measured_fmts = [f for f in menu if f not in PASSTHROUGH_FORMATS]
-    cb_fmts = [f for f in measured_fmts
-               if fr.get_format(f).family in _CB_FAMILIES]
-    if cb_fmts:
-        raise RuntimeError(
-            f"forked expert eval does not support CB formats {cb_fmts}; "
-            "use the window-major streamed driver"
-        )
     weights = {
         str(name): torch.as_tensor(value)
         for name, value in dict(col_weights or {}).items()
@@ -2134,8 +1374,6 @@ def measure_expert_unit_costs_forked(
             unit_identities=unit_identities,
             model_identity=model_identity,
             expert_chunk=expert_chunk,
-            ladder_interp=False,
-            ladder_tol=0.0,
             expert_sample=0,
             max_units=max_units,
             unit_filter=unit_filter,
@@ -2160,14 +1398,9 @@ def measure_expert_unit_costs_forked(
     num_layers = runner.num_layers
 
     def _avail_swap_gb() -> tuple[float, float]:
-        vals = {}
-        with open("/proc/meminfo") as fh:
-            for line in fh:
-                key = line.split(":", 1)[0]
-                if key in ("MemAvailable", "SwapTotal", "SwapFree"):
-                    vals[key] = int(line.split()[1])
-        swap = (vals.get("SwapTotal", 0) - vals.get("SwapFree", 0)) / 1048576
-        return vals.get("MemAvailable", 0) / 1048576, swap
+        vals = io_spans.read_meminfo()
+        swap = (vals.get("SwapTotal", 0) - vals.get("SwapFree", 0)) / 1024 ** 3
+        return vals.get("MemAvailable", 0) / 1024 ** 3, swap
 
     unit_kl_means: dict[str, dict[str, float]] = {qn: {} for qn in pending}
     unit_kl_windows: dict[str, dict[str, list[float]]] = {
@@ -2338,8 +1571,6 @@ def measure_expert_unit_costs_forked(
         stats.update(state["stats"])
         costs.update(state["costs"])
         unit_kls.update(state["unit_kls"])
-    measure_expert_unit_costs.last_cross_family_verdict = None
-    measure_expert_unit_costs.last_added_col_weights = []
     return stats, costs, unit_kls
 
 
@@ -2358,10 +1589,10 @@ def merge_cost_payloads(
     (its guard fail-fasts otherwise), so no name may be costed by both
     estimators.
 
-    CB lane (``replace_experts=True``): the COST_MODE=local payload DOES
-    cost the expert stacks (smoothly — route-flip-blind); those rows are
-    REPLACED by the empirical ones and recorded in provenance, non-expert
-    rows stay untouched (moe_cb_design.md §3).
+    Replace semantics (``replace_experts=True``): a COST_MODE=local base
+    payload DOES cost the expert stacks (smoothly — route-flip-blind); those
+    rows are REPLACED by the empirical ones and recorded in provenance,
+    non-expert rows stay untouched.
     """
     merged = dict(base)
     base_stats = dict(base.get("stats", {}) or {})
@@ -2372,14 +1603,8 @@ def merge_cost_payloads(
             f"hybrid merge collision: {len(overlap)} names costed by BOTH "
             f"the base payload and the expert empirical pass (e.g. "
             f"{sorted(overlap)[:3]}). The base run must omit routed experts "
-            f"(or pass replace_experts for the CB-lane replace semantics).")
+            f"(or pass replace_experts for the replace semantics).")
     canonical_formats = _canon_formats(formats)
-    validate_cb_cost_provenance(
-        base,
-        canonical_formats,
-        context=cb_serialization_context_from_env(),
-        where="expert empirical merge base",
-    )
     if overlap:
         for name in overlap:
             base_costs.pop(name)
@@ -2407,20 +1632,6 @@ def backfill_missing_from_base(
     the backfilled names, and records them in provenance for honesty: these
     rows carry the baseline estimator, not the AURA adjoint.
     """
-    formats = list(payload.get("formats", []) or [])
-    context = cb_serialization_context_from_env()
-    validate_cb_cost_provenance(
-        payload,
-        formats,
-        context=context,
-        where="expert empirical backfill destination",
-    )
-    validate_cb_cost_provenance(
-        base_cost,
-        formats,
-        context=context,
-        where="expert empirical backfill source",
-    )
     base_costs = dict(base_cost.get("costs", {}) or {})
     base_stats = dict(base_cost.get("stats", {}) or {})
     added: list[str] = []
@@ -2474,39 +1685,25 @@ def _build_parser() -> argparse.ArgumentParser:
         "after the merge (MTP/visual sidecars) are copied from it.")
     p.add_argument(
         "--replace-experts", action="store_true",
-        help="CB-lane merge semantics: the COST_MODE=local base payload "
+        help="Replace merge semantics: a COST_MODE=local base payload "
         "costs expert stacks smoothly (route-flip-blind); REPLACE those "
         "rows with the empirical ones (recorded in provenance) instead of "
         "treating the collision as an error.")
     p.add_argument(
         "--col-weights", default=None,
-        help="Pickle {qname: per-input-column importance} (the CB "
-        "exporter's imatrix). REQUIRED when the menu contains CB formats: "
-        "their deliberate render is imatrix-weighted, and the measured "
-        "unit-KL must be of the bytes the exporter ships.")
-    p.add_argument(
-        "--cb-ladder-interp", action="store_true",
-        help="RD-law ladder interpolation for NVFP4_CB_K rungs (measure "
-        "anchors + holdout, predict the rest; holdout-gated PER UNIT). "
-        "Also enabled by PRISMAQUANT_CB_LADDER_INTERP=1. Default OFF — "
-        "the law is recon-validated but KL-unproven (encode_tiers.md §B).")
-    p.add_argument("--ladder-holdout-tol", type=float, default=0.10,
-                   help="FLOOR on the max holdout relative error that "
-                   "accepts a unit's ladder fit; the gate derives its own "
-                   "tolerance from the anchors' residual noise "
-                   "(encode_tiers.md B) and uses the larger. Above it the "
-                   "unit measures every rung.")
+        help="Pickle {qname: per-input-column importance} (the exporter's "
+        "imatrix), bound into the checkpoint identity.")
     p.add_argument(
         "--expert-sample", type=int, default=0,
         help="Quantize only a stratified subsample of N experts per unit and "
-        "extrapolate the unit KL by expert count. REFUTED for CB-fidelity "
-        "menus (encode_tiers.md §C: the bf16 unit KL is a perturbation "
-        "floor — S=1 of 256 already reads ~90%% of the full-stack KL, so "
-        "count-scaling over-predicts ~10x and rung ranks drown in floor "
-        "noise). Kept for floor-regime probing and for coarse-format menus "
-        "where unit KLs sit far above the floor. 0 = full stack (default). "
-        "For CB rungs use the LOCAL cost's PRISMAQUANT_EXPERT_COST_SAMPLE "
-        "instead (MSE sampling is unbiased; KL sampling is not).")
+        "extrapolate the unit KL by expert count. The bf16 unit KL is a "
+        "perturbation floor (measured on the retired codebook lane, archived "
+        "2026-09-25, #1304: S=1 of 256 already read ~90%% of the full-stack "
+        "KL, so count-scaling over-predicted ~10x), so this suits only "
+        "floor-regime probing and coarse-format menus where unit KLs sit far "
+        "above the floor. 0 = full stack (default). The LOCAL cost's "
+        "PRISMAQUANT_EXPERT_COST_SAMPLE is the unbiased alternative (MSE "
+        "sampling is unbiased; KL sampling is not).")
     p.add_argument(
         "--max-units", type=int, default=0,
         help="Measure only the first N units (0 = all). Validation/"
@@ -2650,8 +1847,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         with open(args.col_weights, "rb") as fh:
             col_weights = {k: torch.as_tensor(v)
                            for k, v in pickle.load(fh).items()}
-    ladder_interp = bool(args.cb_ladder_interp) or (
-        os.environ.get("PRISMAQUANT_CB_LADDER_INTERP", "0") == "1")
     if col_weights is None:
         col_weights = {}
     if streamed_runner is not None:
@@ -2677,11 +1872,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if eval_driver == "forked":
                 # O(1) body streams instead of O(units): see
                 # measure_expert_unit_costs_forked. Scope guards live in the
-                # driver (stateless pass, no CB, unpacked units); the CLI
-                # features it does not take are refused here, loudly.
+                # driver (stateless pass, unpacked units); the CLI features
+                # it does not take are refused here, loudly.
                 refused = {
                     "--expert-sample": args.expert_sample,
-                    "--cb-ladder-interp": ladder_interp,
                     "--format-plan": source_format_plan is not None,
                 }
                 on = sorted(k for k, v in refused.items() if v)
@@ -2711,8 +1905,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     formats,
                     expert_chunk=args.expert_chunk,
                     col_weights=col_weights,
-                    ladder_interp=ladder_interp,
-                    ladder_tol=args.ladder_holdout_tol,
                     expert_sample=args.expert_sample,
                     max_units=args.max_units,
                     unit_filter=args.unit_filter,
@@ -2737,24 +1929,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         stats, costs, unit_kls = measure_expert_unit_costs(
             model, profile, calib, formats, expert_chunk=args.expert_chunk,
-            col_weights=col_weights, ladder_interp=ladder_interp,
-            ladder_tol=args.ladder_holdout_tol,
+            col_weights=col_weights,
             expert_sample=args.expert_sample, max_units=args.max_units,
             unit_filter=args.unit_filter)
-    added_cw = getattr(
-        measure_expert_unit_costs, "last_added_col_weights", [])
-    if added_cw and args.col_weights:
-        # Persist the synthesized packed-expert imatrix entries back to the
-        # SHARED col-weights pickle: the exporter must ship the identical
-        # weighting the cost measured (lockstep contract). Atomic replace.
-        tmp = args.col_weights + ".tmp"
-        with open(tmp, "wb") as fh:
-            pickle.dump({k: v.cpu() if hasattr(v, "cpu") else v
-                         for k, v in col_weights.items()}, fh)
-        os.replace(tmp, args.col_weights)
-        _log(f"persisted {len(added_cw)} synthesized imatrix entries into "
-             f"{args.col_weights}")
-
     provenance = {
         "schema": SCHEMA,
         "git_commit": _git_commit(),
@@ -2770,18 +1947,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "formats_measured": [
             f for f in formats if f not in PASSTHROUGH_FORMATS],
         "col_weights": args.col_weights,
-        "cb_ladder_interp": ladder_interp,
-        "encode_tier": os.environ.get("PRISMAQUANT_CB_ENCODE_TIER"),
         "expert_sample": int(args.expert_sample),
         "max_units": int(args.max_units),
         "unit_filter": args.unit_filter,
-        # Cross-family ladder symmetry (ultraplan P5a item 2). None when no
-        # ladder ran; the allocator reads it back through
-        # cb_ladder_cross_family.cross_family_verdict_from_cost_payload and
-        # republishes it in its own diagnostics/selection provenance.
-        CROSS_FAMILY_PROVENANCE_KEY: getattr(
-            measure_expert_unit_costs, "last_cross_family_verdict", None),
-        **cb_cost_provenance(formats),
     }
 
     if args.merge_base:

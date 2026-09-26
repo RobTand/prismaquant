@@ -96,7 +96,7 @@ from pathlib import Path
 import re
 
 from prismaquant.cost_stage_checkpoint import canonical_json, canonical_json_sha256
-from prismaquant.schemas import SchemaValidationError
+from prismaquant.schemas import Contract, SchemaValidationError, strict_json_loads
 
 
 # --------------------------------------------------------------------------
@@ -194,23 +194,9 @@ class DecompositionUnavailable(RuntimeError):
 # --------------------------------------------------------------------------
 
 
-def _fail(message: str) -> None:
-    raise QualityPrefillAdapterError(message)
-
-
-def _exact_mapping(
-    value: object, *, keys: frozenset[str], where: str
-) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        _fail(f"{where} must be an object")
-    if any(type(key) is not str for key in value):
-        _fail(f"{where} keys must be strings")
-    actual = set(value)
-    if actual != keys:
-        missing = sorted(keys - actual)
-        extra = sorted(actual - keys)
-        _fail(f"{where} fields differ: missing={missing}, extra={extra}")
-    return value  # type: ignore[return-value]
+_CHECK = Contract(QualityPrefillAdapterError)
+_fail = _CHECK.fail
+_exact_mapping = _CHECK.exact_mapping
 
 
 def _text(
@@ -286,23 +272,12 @@ def load_strict_json(raw: bytes | str, *, where: str) -> object:
     into a key that another reader would reproduce.
     """
 
-    def pairs(items: Sequence[tuple[str, object]]) -> dict[str, object]:
-        seen: dict[str, object] = {}
-        for key, value in items:
-            if key in seen:
-                _fail(f"{where} repeats the JSON key {key!r}")
-            seen[key] = value
-        return seen
-
-    def constant(text: str) -> object:
-        _fail(f"{where} carries the non-finite number {text}")
-        raise AssertionError("unreachable")  # pragma: no cover
-
     try:
-        return json.loads(
+        return strict_json_loads(
             raw.decode("utf-8") if isinstance(raw, bytes) else raw,
-            object_pairs_hook=pairs,
-            parse_constant=constant,
+            duplicate=lambda key: _CHECK.exception(f"{where} repeats the JSON key {key!r}"),
+            constant=lambda text: _CHECK.exception(
+                f"{where} carries the non-finite number {text}"),
         )
     except QualityPrefillAdapterError:
         raise

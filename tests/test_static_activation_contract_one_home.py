@@ -92,7 +92,10 @@ def test_the_two_predicates_coincide_over_the_whole_registry_today():
     already reads the row rather than the name.
     """
     rows = sorted(fr.REGISTRY)
-    assert len(rows) == 80, (
+    # 80 until 2026-09-25, when the 52 retired codebook rows (NVFP4_CB_K*,
+    # FP8_CB_K*) left the registry (#1304); none of them carried a contract,
+    # so the equivalence below was re-derived and still holds.
+    assert len(rows) == 28, (
         f"the registry grew to {len(rows)} rows; re-derive the equivalence "
         "below before trusting it")
     by_name = {n for n in rows if fr.canonical_format_name(n) == "NVFP4"}

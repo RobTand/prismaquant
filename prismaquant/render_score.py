@@ -457,10 +457,10 @@ def _register_builtins() -> None:
         phase=50,
         gate_metric="weight_mse",
         description=(
-            "Imatrix (per-input-column) weighted search for the CB codebook "
-            "and GGUF k-quant families — their exporters always render "
-            "weighted, so this IS their deliberate render rather than a "
-            "candidate layered on RTN (re-vet R3 / CB Milestone C)."
+            "Imatrix (per-input-column) weighted search for the GGUF k-quant "
+            "families — their exporters always render weighted, so this IS "
+            "their deliberate render rather than a candidate layered on RTN "
+            "(re-vet R3)."
         ),
     ))
     register_render_mechanism(RenderMechanismSpec(

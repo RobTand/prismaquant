@@ -81,6 +81,7 @@ except ModuleNotFoundError:
             yield
 from safetensors.torch import save_file
 
+from . import io_spans
 from . import nvfp4_activation_contract as _nvfp4_activation_contract
 from .allocator_candidates import (
     PASSTHROUGH_SOURCE_REQUIREMENTS,
@@ -105,7 +106,7 @@ from .export_output_safety import (
     transactional_export_directory,
     validate_fresh_export_directory,
 )
-from .nvfp4_cb_footprint import (
+from .footprint import (
     enforce_whole_artifact_budget,
     whole_artifact_budget_from_assignment_payload,
 )
@@ -1638,19 +1639,13 @@ def _coerce_runtime_legal_assignment(
             continue
         if fmt_canonical not in EXPORTABLE_FORMATS:
             from prismaquant.gguf_formats import GGUF_BLOCK_BYTES
-            from prismaquant.cb_layout import CB_FORMAT_NAMES
+            from prismaquant import format_registry as _fr
 
-            if fmt_canonical in CB_FORMAT_NAMES:
-                # Wrong container: an NVFP4-CB / FP8-CB assignment reaching the
-                # compressed-tensors exporter means the pipeline was launched
-                # without EXPORT_CONTAINER=nvfp4_cb. Stock compressed-tensors
-                # schemes cannot express codebooks; coercing to BF16 would ship
-                # a ~16 bpp artifact unrelated to the allocated budget.
-                raise ValueError(
-                    f"{qname}: format {fmt_canonical} ships via the nvfp4_cb "
-                    f"container (prismaquant.export_nvfp4_cb / "
-                    f"EXPORT_CONTAINER=nvfp4_cb), not compressed-tensors"
-                )
+            if _fr.RETIRED_CODEBOOK_FORMAT_RE.fullmatch(fmt_canonical):
+                # A retired codebook rung (the Gridbook lane, archived
+                # 2026-09-25, #1304) refuses with the registry's pointer to
+                # the archive rather than as an unknown research format.
+                _fr.get_format(fmt_canonical)
             if fmt_canonical in GGUF_BLOCK_BYTES:
                 # Wrong container, not a research format: a GGUF assignment
                 # reaching the compressed-tensors exporter means the pipeline
@@ -5870,13 +5865,9 @@ def _quantize_2d_nvfp4_group_batched(
 
 def _host_mem_available_bytes() -> int:
     try:
-        with open("/proc/meminfo") as f:
-            for line in f:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * 1024
-    except OSError:
-        pass
-    return 1 << 30
+        return io_spans.mem_available_bytes()
+    except (OSError, RuntimeError):
+        return 1 << 30
 
 
 def _export_vector_chunk_len(

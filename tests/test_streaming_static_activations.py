@@ -66,7 +66,7 @@ def test_tessera_only_transient_anchor_keeps_fused_static_identity(
                 'synthetic four-row fused-static-scale fixture',
                 [torch.arange(4)], fit_tokens=4),
         }, profile=profile,
-        device=device, col_weights={}, cb_serialization_context=None,
+        device=device, col_weights={},
         calibration_hash='c' * 64, arm_identity={'arm': 'static-anchor-regression'},
         model_identity=_model_identity('static-anchor-source'), max_act_rows=4,
         transient_consumer_identity=consumer,

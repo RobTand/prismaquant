@@ -75,9 +75,9 @@ SCHEMA = "prismaquant.serve_dispatch_table.v1"
 PHASES = ("prefill", "decode")
 
 #: The concrete serving route a row prices. Mirrors
-#: ``serving_profiles.ResolvedServingLane``: a CB rung either rides the
+#: ``serving_profiles.ResolvedServingLane``: a rung either rides the
 #: consumer's fused mid-M kernel or it takes the fallback expand+GEMM route,
-#: and which one is a property of the pinned Gridbook version (P5b), not of
+#: and which one is a property of the pinned serving release (P5b), not of
 #: the format name.
 LANES = ("fused_mid_m", "fallback", "native")
 
@@ -589,23 +589,17 @@ def example_table_path() -> Path | None:
 def dispatch_family_for_format(fmt: str) -> str:
     """Map a format name onto the table's ``format_family`` key.
 
-    CB rungs collapse to their **grid family** (``FP8_CB`` / ``NVFP4_CB``)
-    because the serving route is a property of the grid, not the rung: every
-    fp8-CB rung takes the same expand+GEMM fallback and the same fused
-    prologue when the pinned runtime backs it (the rung-level question is the
-    *lane*, which is a separate axis). Everything else keys on its own
-    canonical name, because ``format_registry``'s coarse ``family`` puts BF16
-    and FP8_E4M3 in one bucket ('fp') and those two have nothing in common at
-    serve time.
+    Every format keys on its own canonical name, because
+    ``format_registry``'s coarse ``family`` puts BF16 and FP8_E4M3 in one
+    bucket ('fp') and those two have nothing in common at serve time. A
+    retired codebook rung (the Gridbook lane, archived 2026-09-25, #1304) is
+    refused through ``get_format`` rather than keyed.
     """
     from . import format_registry as fr
-    from .cb_layout import parse_format_name
 
     canonical = fr.canonical_format_name(fmt)
-    parsed = parse_format_name(canonical)
-    if parsed is not None:
-        family, _rung = parsed
-        return "FP8_CB" if family.grid == "fp8" else "NVFP4_CB"
+    if fr.RETIRED_CODEBOOK_FORMAT_RE.fullmatch(canonical.upper()):
+        fr.get_format(canonical)
     return canonical
 
 

@@ -26,14 +26,14 @@ from .cluster_campaign import _atomic_write_new_bytes
 from .joint_aura import assignment_probe_summary
 from .tessera_formats import (family_q256_bounds, get_tessera_family,
                               parse_tessera_format_name, realisable_rungs)
+from .schemas import Contract
+from .digests import DIRECT_ASCII_LAX
 
 SCHEMA = 'prismaquant.tessera_sampled_stack_proposal.v1'
 PRIMARY_FAMILIES = frozenset({'TESSERA_E4M3_K1', 'TESSERA_BF16_K1'})
 
 
-def _require(ok, message):
-    if not ok:
-        raise ValueError(message)
+_require = Contract(ValueError).require
 
 
 def _domain(families, costs, stats):
@@ -218,13 +218,13 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
             _require(len({expanded[name] for name in members}) == 1,
                      f'{stack}: stack assignment is not one exact rung')
         # The selected menu contains BF16 and Tessera only.  Ask the existing
-        # serialization owner for every expanded tensor; no CB sidecars exist
-        # in this menu, and no float bpp can grant a byte of budget tolerance.
+        # serialization owner for every expanded tensor; no float bpp can
+        # grant a byte of budget tolerance.
         _require(all(fmt == 'BF16' or parse_tessera_format_name(fmt) is not None
                      for fmt in expanded.values()), 'sampled proposal has an unsupported sidecar')
         exact = sum(serialized_candidate_payload(formats[fmt],
                     (stats[name]['out_features'], stats[name]['in_features']),
-                    qname=name, cb_serialization_context=None)[0]
+                    qname=name)[0]
                     for name, fmt in expanded.items())
         trace.append({'attempt': attempt, 'solver_bpp': solver_bpp,
                       'exact_mutable_bytes': exact, 'feasible': exact <= mutable_budget_bytes})
@@ -338,8 +338,7 @@ def selected_assignment_sha256(assignment):
     _require(isinstance(assignment, dict) and assignment and
              all(isinstance(k, str) and isinstance(v, str) for k, v in assignment.items()),
              'selected research assignment must be complete qname/format pairs')
-    return hashlib.sha256(json.dumps(assignment, sort_keys=True,
-                                    separators=(',', ':')).encode()).hexdigest()
+    return DIRECT_ASCII_LAX.sha256(assignment)
 
 
 def bind_pilot_from_inputs(*, joint_binding, plan_binding):

@@ -201,7 +201,8 @@ def test_weights_that_do_not_sum_to_the_probe_h_trace_refuse():
 def test_stack_row_prices_exactly_what_the_expanded_experts_would():
     """A census through the stack path == the per-expert expansion's sum.
 
-    ``tier2_per_expert_counterfactual.expand_packed_expert_rows`` gives each
+    ``expand_packed_expert_rows`` (the per-expert expansion archived with
+    ``tier2_per_expert_counterfactual`` on 2026-09-25, #1304) gives each
     member ``h_trace_per_expert[e] / R``. The stack row must be the quantity
     that, multiplied by the PROBE row's ``h_trace``, reproduces the sum of
     those members' ``predicted_dloss``.

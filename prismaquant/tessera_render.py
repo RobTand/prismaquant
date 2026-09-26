@@ -1265,10 +1265,9 @@ def encode_tessera_unit(
     holds because the whitelist is structural rather than because a caller
     remembered.
 
-    ``hessian_required=True`` is the default for the same reason
-    ``render_production_weight`` defaults ``ldlq_missing_activation_ok=False``:
-    a render that quietly drops its activation input prices a different tensor
-    than the one that ships, and does so silently.  Pass ``False`` to price
+    ``hessian_required=True`` is the default because a render that quietly
+    drops its activation input prices a different tensor than the one that
+    ships, and does so silently.  Pass ``False`` to price
     weights-only *deliberately*; the caller must then stamp that on every row.
     """
     from tessera.unit_artifact import read_unit_artifact

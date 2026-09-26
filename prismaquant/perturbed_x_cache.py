@@ -46,6 +46,7 @@ from prismaquant.memory_management import (
 from prismaquant.nvfp4_activation_contract import (
     require_matching_input_global_scale,
 )
+from .digests import DIRECT_ASCII_STRICT
 
 _FNAME_SUB = re.compile(r"[^A-Za-z0-9_-]")
 _SHARED_FROZEN_WEIGHT_FORMAT_CACHE: OrderedDict[
@@ -960,8 +961,7 @@ class ExactActivationReference:
     sha256: str
 
 
-def _exact_activation_json(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+_exact_activation_json = DIRECT_ASCII_STRICT.text
 
 
 def _activation_file_signature(path):
@@ -2764,15 +2764,6 @@ class PerturbedActivationCache:
                     dtype=param.dtype,
                 ).contiguous()
             else:
-                from .nvfp4_cb_footprint import is_cb_format
-
-                if is_cb_format(fmt):
-                    raise RuntimeError(
-                        f"production_weight_cache is required for CB fallback "
-                        f"({param_plan.name!r}, {fmt!r}); the registry path is "
-                        "unweighted legacy rendering and cannot represent the "
-                        "stamped production serialization contract"
-                    )
                 if (
                     self._production_weight_cache is not None
                     and fmt != "BF16"
@@ -3053,15 +3044,7 @@ class PerturbedActivationCache:
                         f"RTN fallback."
                     )
             if q is None:
-                from .nvfp4_cb_footprint import is_cb_format
-
                 fmt_canon = fr.canonical_format_name(param_plan.spec.name)
-                if is_cb_format(fmt_canon):
-                    raise RuntimeError(
-                        f"production_weight_cache is required for CB fallback "
-                        f"({param_plan.name!r}, {fmt_canon!r}); refusing an "
-                        "unweighted legacy registry render"
-                    )
                 if fr.is_tessera_format_name(fmt_canon):
                     raise RuntimeError(
                         f"production_weight_cache is required for Tessera "

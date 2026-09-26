@@ -45,9 +45,6 @@ def test_real_lfm_parent_bias_capture_matches_forward():
     assert torch.equal(got['gate_weights'][1], weights[:, 0])
     gate, up = torch.nn.functional.linear(x, block.experts.gate_up_proj[1]).chunk(2, -1)
     torch.testing.assert_close(got['down'][1], block.experts.act_fn(gate) * up)
-    from prismaquant.expert_empirical_cost import _replay_down_proj_col_weights
-    col_weights = _replay_down_proj_col_weights(block.experts, block, block.gate, x)
-    torch.testing.assert_close(col_weights[1, 0], got['down'][1].square().mean(0))
 
 
 def test_real_lfm_disabled_parent_bias_still_captures():

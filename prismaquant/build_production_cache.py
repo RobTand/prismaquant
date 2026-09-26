@@ -93,7 +93,7 @@ def _load_col_weights(path, formats) -> dict | None:
         raise SystemExit(
             "[build-prod-cache] ERROR: --col-weights was supplied but the "
             f"format menu {sorted(set(formats))} has no weighted-render "
-            "family (CB / GGUF); nothing would consume the vector and every "
+            "family (GGUF); nothing would consume the vector and every "
             "render would be byte-identical without it. Drop the flag."
         )
     with open(path, "rb") as fh:
@@ -105,35 +105,6 @@ def _load_col_weights(path, formats) -> dict | None:
         flush=True,
     )
     return loaded
-
-
-def _explicit_cb_render_context(formats):
-    """Resolve CB producer settings once, at the CLI boundary.
-
-    Library render/cache code receives the resulting object explicitly and
-    therefore cannot reinterpret a stored cache under a later environment.
-    """
-    from prismaquant.nvfp4_cb_footprint import (
-        cb_serialization_context_from_env,
-        is_cb_format,
-    )
-
-    cb_formats = sorted({str(fmt) for fmt in formats if is_cb_format(str(fmt))})
-    if not cb_formats:
-        return None
-    if "PRISMAQUANT_CB_MINCHAIN" not in os.environ:
-        raise SystemExit(
-            "[build-prod-cache] ERROR: ProductionWeightCache producer: "
-            "missing explicit CB producer setting "
-            "['PRISMAQUANT_CB_MINCHAIN']"
-        )
-    try:
-        return cb_serialization_context_from_env(
-            require_explicit=True,
-            where="ProductionWeightCache producer",
-        )
-    except ValueError as exc:
-        raise SystemExit(f"[build-prod-cache] ERROR: {exc}") from exc
 
 
 def _model_has_packed_experts(model: nn.Module, profile) -> bool:
@@ -286,7 +257,16 @@ def _run_streaming(args, formats, levers, dtype) -> int:
         format_plan = load_format_plan(args.format_plan)
 
     layer_config = args.render_layer_config or args.recache_layer_config
-    if args.render_scope == "assignment" and not layer_config:
+    if args.render_scope != "assignment":
+        # The transient, score-only streamed format menu served only the
+        # retired codebook lane (archived 2026-09-25, #1304).
+        print(
+            "[build-prod-cache] FAIL: --streaming supports only "
+            "--render-scope assignment",
+            flush=True,
+        )
+        return 2
+    if not layer_config:
         print(
             "[build-prod-cache] FAIL: --streaming requires "
             "--render-layer-config for --render-scope assignment",
@@ -313,32 +293,18 @@ def _run_streaming(args, formats, levers, dtype) -> int:
     device = require_cuda_hot_path("build_production_cache")
     print(f"[build-prod-cache] streaming device={device}", flush=True)
 
-    render_assignment = (
-        _load_assignment(layer_config)
-        if args.render_scope == "assignment" else None
+    render_assignment = _load_assignment(layer_config)
+    non_bf16 = sum(
+        1 for fmt in render_assignment.values()
+        if str(fmt).strip().upper() != "BF16"
     )
-    if render_assignment is not None:
-        non_bf16 = sum(
-            1 for fmt in render_assignment.values()
-            if str(fmt).strip().upper() != "BF16"
-        )
-        print(
-            f"[build-prod-cache] streaming assignment render scope: "
-            f"{non_bf16} non-BF16 entries from {layer_config}",
-            flush=True,
-        )
-    else:
-        print(
-            "[build-prod-cache] streaming full format menu: every eligible "
-            f"Linear x {len(formats)} requested formats; renders are consumed "
-            "synchronously and discarded",
-            flush=True,
-        )
-    render_formats = list(formats)
-    if render_assignment is not None:
-        render_formats.extend(render_assignment.values())
+    print(
+        f"[build-prod-cache] streaming assignment render scope: "
+        f"{non_bf16} non-BF16 entries from {layer_config}",
+        flush=True,
+    )
+    render_formats = list(formats) + list(render_assignment.values())
     col_weights = _load_col_weights(args.col_weights, render_formats)
-    cb_serialization_context = _explicit_cb_render_context(render_formats)
 
     # Streaming consumes a probe activation cache instead of replaying the
     # calibration forward, but its pair stamps still bind the exact token
@@ -389,11 +355,8 @@ def _run_streaming(args, formats, levers, dtype) -> int:
         expert_module_token_budget=args.expert_token_budget,
         h_detail_dir=args.h_detail_dir,
         col_weights=col_weights,
-        cb_serialization_context=cb_serialization_context,
         render_scope=args.render_scope,
-        retain_rendered=(args.render_scope == "assignment"),
         calibration_hash=calib_hash,
-        resume=args.resume,
         max_act_rows=args.max_act_rows,
         include_qnames=include_qnames,
         format_plan=(
@@ -405,47 +368,34 @@ def _run_streaming(args, formats, levers, dtype) -> int:
             if format_plan is not None else None
         ),
     )
-    if render_assignment is not None:
-        profile = detect_profile_with_warning(
-            args.model,
-            entrypoint="build-prod-cache/mtp",
-        )
-        fill_profile_mtp_production_cache(
-            cache,
-            args.model,
-            profile=profile,
-            activation_cache_dir=args.activation_cache_dir,
-            formats=formats,
-            render_assignment=render_assignment,
-            cache_dir=args.cache_dir,
-            device=device,
-            dtype=dtype,
-            max_act_rows=args.max_act_rows,
-            h_detail_dir=args.h_detail_dir,
-            include_qnames=include_qnames,
-            col_weights=col_weights,
-            cb_serialization_context=cb_serialization_context,
-        )
+    profile = detect_profile_with_warning(
+        args.model,
+        entrypoint="build-prod-cache/mtp",
+    )
+    fill_profile_mtp_production_cache(
+        cache,
+        args.model,
+        profile=profile,
+        activation_cache_dir=args.activation_cache_dir,
+        formats=formats,
+        render_assignment=render_assignment,
+        cache_dir=args.cache_dir,
+        device=device,
+        dtype=dtype,
+        max_act_rows=args.max_act_rows,
+        h_detail_dir=args.h_detail_dir,
+        include_qnames=include_qnames,
+        col_weights=col_weights,
+    )
     elapsed = time.monotonic() - t0
 
     try:
-        if render_assignment is not None:
-            coverage_assignment = _filter_assignment_to_include_qnames(
-                render_assignment, include_qnames,
-            )
-            validate_render_assignment_cache_coverage(
-                cache, coverage_assignment,
-            )
-        else:
-            artifacts = cache.metadata.get("transient_render_artifacts", {})
-            expected = int(cache.metadata.get("requested_entries", -1))
-            observed = int(artifacts.get("entries", -2))
-            if observed != expected or cache.failed:
-                raise RuntimeError(
-                    "streamed format-menu consumption coverage failure: "
-                    f"expected={expected} consumed={observed} "
-                    f"failed={len(cache.failed)}"
-                )
+        coverage_assignment = _filter_assignment_to_include_qnames(
+            render_assignment, include_qnames,
+        )
+        validate_render_assignment_cache_coverage(
+            cache, coverage_assignment,
+        )
         print("[build-prod-cache] coverage check passed", flush=True)
     except RuntimeError as e:
         if args.allow_incomplete:
@@ -493,9 +443,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument(
         "--format-plan",
         default=None,
-        help="Identity-bound source-class format plan. Streaming format-menu "
-        "renders intersect the requested family with each qname's exact "
-        "legal menu; assignment scope refuses an illegal planned cell.",
+        help="Identity-bound source-class format plan. Format-menu renders "
+        "intersect the requested family with each qname's exact legal menu; "
+        "assignment scope refuses an illegal planned cell.",
     )
     p.add_argument(
         "--render-scope",
@@ -680,19 +630,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Render one decoder layer at a time on top of the streaming "
         "model (no whole-model from_pretrained) so 100B+ / 295B checkpoints "
-        "fit on a 121 GB box. Assignment scope retains only the selected "
-        "weights. Format-menu scope is CB-only: it renders and synchronously "
-        "scores the complete menu, persists identity-bound scalar receipts, "
-        "and discards every rendered tensor. Requires --cache-dir and "
-        "--activation-cache-dir; assignment scope additionally requires "
-        "--render-layer-config.",
-    )
-    p.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume a streaming CB build only from exact per-pair identity "
-        "sidecars in --cache-dir. Transient menu receipts and retained "
-        "assignment shards are both validated fail-closed.",
+        "fit on a 121 GB box. Supports --render-scope assignment only and "
+        "retains only the selected weights. Requires --cache-dir, "
+        "--activation-cache-dir and --render-layer-config.",
     )
     p.add_argument(
         "--activation-cache-dir",
@@ -708,8 +648,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="Per-input-column imatrix pickle ({qname: tensor}, e.g. "
         "artifacts/cb_col_weights.pkl) applied to the weighted-render "
-        "families ONLY (CB codebook rungs, GGUF k-quants) — re-vet R3 / CB "
-        "Milestone C. Their exporters always render weighted, so without this "
+        "families ONLY (GGUF k-quants) — re-vet R3. Their exporters always render weighted, so without this "
         "a cached-menu render of those formats is unfaithful to the shipped "
         "bytes (the rendering confound the lane gates were written to avoid). "
         "NVFP4/FP8/MX/BF16 renders are bit-identical with or without it.",
@@ -886,7 +825,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             (recache_assignment or {}).values()
         )
         col_weights = _load_col_weights(args.col_weights, render_formats)
-        cb_serialization_context = _explicit_cb_render_context(render_formats)
         t0 = time.monotonic()
         cache = fill_production_weight_cache(
             model, calib_ids, qnames,
@@ -903,7 +841,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             recache_microbatch_size=args.recache_microbatch_size,
             h_detail_dir=args.h_detail_dir,
             col_weights=col_weights,
-            cb_serialization_context=cb_serialization_context,
         )
         # R14: stamp the calibration identity onto the cache so every artifact
         # derived from it (production_render_cost's cost table) can be checked
@@ -932,7 +869,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             h_detail_dir=args.h_detail_dir,
             include_qnames=include_qnames,
             col_weights=col_weights,
-            cb_serialization_context=cb_serialization_context,
         )
         # Render packed-MoE experts through the SAME deliberate path. They are
         # 3-D packed tensors, not nn.Linear, so fill_production_weight_cache
@@ -965,7 +901,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 gate_calib_ids=gate_calib_ids,
                 gate_token_budget=args.expert_gate_token_budget,
                 col_weights=col_weights,
-                cb_serialization_context=cb_serialization_context,
             )
             if expert_coverage:
                 if cache.metadata is None:

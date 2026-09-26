@@ -119,21 +119,10 @@ omission:
   used by the compressed-tensors and Tessera lanes.
 - **`prismaquant/trellis_*.py`** — Tessera's own predecessor lineage, not this
   lane's.
-- **The CB format / cost / render plumbing** (`cb_layout.py`,
-  `nvfp4_cb_formats.py`, `nvfp4_cb_footprint.py`, `cb_ldlq*.py`,
-  `cb_minchain.py`, `cb_warm_state.py`, `cb_banked_books.py`,
-  `cb_learned_promotion.py`, `cb_anchored_cost.py`, `cb_ladder_cross_family.py`,
-  `routed_moe_codebooks.py`, `mxfp4_widen.py`, `source_class_format_plan.py`,
-  and the CB branches inside `production_weight_cache.py`, `allocator.py`,
-  `format_registry.py`, `export_native_compressed.py`, `layer_config.py`,
-  `lane_spec.py`, `serve_constraints.py`, `model_profiles/*`). This is the
-  **remainder**, and it is deliberately not in this archive. Removing the lane
-  made those rungs unexportable and unservable, which is the property that
-  matters; excising the code is several hundred diffuse edits concentrated in
-  exactly the files another branch is rewriting, and merging that against a
-  live branch would be more dangerous than the debt. See
-  `docs/measurements/gridbook-lane-retired-2026-09-02.md` for the full
-  file-level remainder list.
+- **The CB format / cost / render plumbing** stayed out of this archive on
+  2026-09-02, as debt D34. It arrived on 2026-09-25; see the last section.
+  `mxfp4_widen.py` and `source_class_format_plan.py`, which that remainder list
+  named, stay in the tree because they serve non-codebook rungs.
 
 ## Do not revive
 
@@ -150,3 +139,32 @@ half of the burn/select pair whose burn producer was archived with the lane.
 It survived the original archival because it imports its producer
 (`dsv4_onlaw_book_burn`), so it has been broken on main since 2026-09-02
 (#811). Retired here by the coordinator's discretion, per Rob.
+
+## Late arrival, archived 2026-09-25
+
+The lane's format, cost and render code, which D34 had left in the tree
+(#1304, epic #1295). Step 1 (#1332) first moved the live helpers out of it:
+the whole-artifact budget to `prismaquant/footprint.py` and the probe imatrix
+to `prismaquant/moe_imatrix.py`. Step 2 (#1328) moved the rest here:
+
+- `prismaquant/`: `cb_anchored_cost`, `cb_banked_books`, `cb_compile_contract`,
+  `cb_ladder_cross_family`, `cb_layout`, `cb_ldlq`, `cb_ldlq_atoms`,
+  `cb_ldlq_gate_telemetry`, `cb_ldlq_refinement`, `cb_learned_bundle`,
+  `cb_learned_promotion`, `cb_minchain`, `cb_source_decode`, `cb_warm_state`,
+  `nvfp4_cb_footprint`, `nvfp4_cb_formats`, `rotation_ldlq_pilot`,
+  `routed_moe_codebooks`, `tier2_per_expert_counterfactual`, and
+  `data/nvfp4_cb_lattices.pt`.
+- `tools/` and `scripts/`: the codebook encode benches, the DSv4 A-FAST,
+  LDLQ and min-chain campaign drivers and reports (`dsv4_afast_burn.py` is the
+  bytes from main after #1335), and the codebook menu, lattice and ladder
+  scripts. 34 files.
+- `tests/`: the 27 test modules whose only subject was the code above.
+
+The codebook branches inside the live modules were deleted, not moved: they
+could run only when a codebook rung was on the menu. `format_registry` no
+longer registers `NVFP4_CB_K*` or `FP8_CB_K*`. A `cost.pkl`,
+`layer_config.json`, `selection.json` or cache key that names one refuses with
+`RetiredFormatError`, which points here and is deliberately not a `KeyError`,
+so no reader can skip the row. The `CB_*` and `PRISMAQUANT_CB_*` stage-settings
+hash entries in `run-pipeline.sh` stay, unread, so no existing `WORK_DIR`
+rebuilds. Nothing in this directory is importable from the live tree.

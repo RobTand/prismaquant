@@ -30,10 +30,17 @@ hits ``LeaseRefused: lease-helper-unavailable`` mid-test: a FAILURE where the
 missing fleet prerequisite should have been a named SKIP (PQ #1097).
 ``require_lease_helper`` below is that guard: it probes the SDK the lane
 actually calls, not a proxy for it.
+
+``prismabuild_imports_restored`` puts back where ``import prismabuild``
+resolves (PQ #1281); ``tests/conftest.py`` wraps every test, and every test
+module, in it.
 """
 from __future__ import annotations
 
+import contextlib
 import importlib.metadata as metadata
+from pathlib import Path
+import sys
 
 import pytest
 
@@ -83,3 +90,76 @@ def require_lease_helper() -> None:
         if exc.kind != "availability":
             raise
         pytest.skip(f"{LEASE_HELPER_SKIP_REASON} (set {HELPER_ROOT_ENV_VAR}: {exc.reason})")
+
+
+def prismabuild_entries() -> dict:
+    """Every ``prismabuild`` entry ``sys.modules`` holds, name to module."""
+
+    from prismaquant.staged_lease import _prismabuild_modules
+
+    return {name: sys.modules[name] for name in _prismabuild_modules()}
+
+
+def _hosts_prismabuild(entry: str) -> bool:
+    try:
+        return (Path(entry or ".") / "prismabuild").is_dir()
+    except OSError:
+        return False
+
+
+@contextlib.contextmanager
+def prismabuild_imports_restored():
+    """Leave ``import prismabuild`` resolving where it did before (PQ #1281).
+
+    Several tests import PrismaBuild from a sealed generation tree: they
+    put its ``src`` on ``sys.path`` and import ``prismabuild.*`` from it
+    (``test_quantum_executable_readset._pb``, ``staged_lease._sdk_from_tree``
+    under the PB-injected ``PRISMABUILD_READER_HELPER_ROOT``). Nothing took
+    either back out, so every later test in that process imported the
+    generation's ``prismabuild`` in place of the installed one, and
+    ``staged_lease.inject_installed_sdk_for_tests`` bound it as the
+    installed SDK. The generation reads its queue from PB's own
+    ``PRISMABUILD_QUEUE_ROOT``, so each strict-reader fixture's claim was
+    looked for in the live fleet queue: ``lease-context-unavailable:
+    no-claim-context``. The reverse order fails too: an installed module
+    left behind refuses a later sealed-tree resolution as divergent
+    (PQ #963, PQ #1032).
+
+    On exit, the ``prismabuild`` entries of ``sys.modules`` are put back
+    exactly: added ones are dropped, replaced or removed ones restored, and
+    a surviving parent package's attribute for each follows its entry. Each
+    ``sys.path`` entry added inside the block that hosts a ``prismabuild``
+    package is dropped; every other path change stays as the test left it.
+    Restoring is silent and unconditional, like the other restore fixtures
+    in ``tests/conftest.py``: importing from a sealed tree is legitimate,
+    only its escape from the test is the defect.
+    """
+
+    saved_path = list(sys.path)
+    saved_modules = prismabuild_entries()
+    try:
+        yield
+    finally:
+        added_paths = {entry for entry in sys.path if entry not in saved_path}
+        if added_paths:
+            dropped = {entry for entry in added_paths if _hosts_prismabuild(entry)}
+            if dropped:
+                # In place: importers hold the list object, not its name.
+                sys.path[:] = [entry for entry in sys.path if entry not in dropped]
+        current = prismabuild_entries()
+        for name in set(current) | set(saved_modules):
+            module = current.get(name)
+            if name in saved_modules and saved_modules[name] is module:
+                continue
+            parent_name, _, leaf = name.rpartition(".")
+            parent = saved_modules.get(parent_name)
+            if name in saved_modules:
+                sys.modules[name] = saved_modules[name]
+                if (parent is not None and module is not None
+                        and getattr(parent, leaf, None) is module):
+                    setattr(parent, leaf, saved_modules[name])
+                continue
+            del sys.modules[name]
+            if (parent is not None and module is not None
+                    and getattr(parent, leaf, None) is module):
+                delattr(parent, leaf)

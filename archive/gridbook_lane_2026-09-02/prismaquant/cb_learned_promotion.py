@@ -14,8 +14,10 @@ import math
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from .cb_imatrix import CB_IMATRIX_FROM_PROBE_SCHEMA
+from .moe_imatrix import IMATRIX_FROM_PROBE_SCHEMA
 from .cb_layout import FP8_PRODUCT_RUNGS, codebook_subtable_shapes, family_for
+from .schemas import Contract, strict_json_loads
+from .digests import DIRECT_UTF8_STRICT
 
 
 CBL_PROMOTION_RECEIPT_SCHEMA = "prismaquant.fp8_cbl_promotion_receipt.v1"
@@ -72,23 +74,14 @@ class ValidatedCBLPromotionReceipt:
 
 def _canonical_json(value: object, *, where: str) -> str:
     try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
+        return DIRECT_UTF8_STRICT.text(value)
     except (TypeError, ValueError) as exc:
         raise CBLPromotionReceiptError(
             f"{where} is not strict canonical JSON data"
         ) from exc
 
 
-def _mapping(value: object, *, where: str) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        raise CBLPromotionReceiptError(f"{where} must be an object")
-    return value
+_mapping = Contract(CBLPromotionReceiptError).mapping
 
 
 def _exact_members(
@@ -357,7 +350,7 @@ def validate_promotion_receipt(
         {"schema", "calibration_hash", "value_sha256"},
         where="promotion receipt.imatrix",
     )
-    if imatrix.get("schema") != CB_IMATRIX_FROM_PROBE_SCHEMA:
+    if imatrix.get("schema") != IMATRIX_FROM_PROBE_SCHEMA:
         raise CBLPromotionReceiptError(
             "promotion receipt imatrix must come from full-probe act_sq_sum"
         )
@@ -565,20 +558,11 @@ def read_promotion_receipt_payload(path: str | Path) -> Mapping[str, object]:
 
     receipt_path = Path(path)
 
-    def reject_duplicates(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise CBLPromotionReceiptError(
-                    f"promotion receipt has duplicate JSON member {key!r}"
-                )
-            result[key] = value
-        return result
-
     try:
-        payload = json.loads(
+        payload = strict_json_loads(
             receipt_path.read_text(),
-            object_pairs_hook=reject_duplicates,
+            duplicate=lambda key: CBLPromotionReceiptError(
+                f"promotion receipt has duplicate JSON member {key!r}"),
         )
     except (OSError, json.JSONDecodeError) as exc:
         raise CBLPromotionReceiptError(

@@ -83,16 +83,16 @@ from .layer_streaming import (
     _unload,
     set_module_tensor_to_device,
 )
+from .io_spans import mem_available_bytes
 from .source_read_plan import select_source_tensors, check_sealed_selection
 from .tied_embeddings import resolve_tied_output_embedding
+from .digests import DIRECT_ASCII_STRICT
 
 
 _STREAMING_INITIALIZATION_SCHEMA = "prismaquant.streaming_initialization.v1"
 
 
-def _initialization_digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                    allow_nan=False).encode()).hexdigest()
+_initialization_digest = DIRECT_ASCII_STRICT.sha256
 
 
 def validate_streaming_initialization_contract(value):
@@ -802,12 +802,20 @@ class StreamingContext:
                  prefetch_min_available_bytes: int = 0,
                  expert_packer=None,
                  concat_merger=None, source_authentication=None,
-                 source_snapshot_only=False, source_fp4_experts=False):
+                 source_snapshot_only=False, source_fp4_experts=False,
+                 source_layers=None, source_scope=None):
         self.model = model
         self.base_model = base_model
         self.layers = layers
         self.layers_prefix = layers_prefix
         self.num_layers = num_layers
+        # The checkpoint layers this context can read: every body layer, or a
+        # source scope's own (``_build_streaming_context(source_scope=...)``).
+        # A scoped context reads, prefetches and installs only those layers
+        # and never runs the body forward (PQ #1316, #1338).
+        self.source_layers = (tuple(range(num_layers)) if source_layers is None
+                              else tuple(int(index) for index in source_layers))
+        self.source_scope = source_scope
         self.install_resolvers = install_resolvers
         self.weight_shard = weight_shard
         self.weight_ckpt = weight_ckpt
@@ -933,8 +941,7 @@ class StreamingContext:
         pressure_floor = self.memory_pressure_floor_bytes()
         if pressure_floor > 0:
             try:
-                import psutil
-                if psutil.virtual_memory().available < pressure_floor:
+                if mem_available_bytes() < pressure_floor:
                     self.prefetch_memory_skips += 1
                     with self._inflight_lock:
                         self._inflight.pop(L, None)
@@ -990,8 +997,7 @@ class StreamingContext:
             return max(1, self.prefetch_workers)
         floor = self.memory_pressure_floor_bytes()
         try:
-            import psutil
-            avail = int(psutil.virtual_memory().available)
+            avail = mem_available_bytes()
         except Exception:
             return max(1, self.prefetch_workers)
         return max(0, (avail - int(floor)) // est)
@@ -1017,6 +1023,10 @@ class StreamingContext:
         return released
 
     def schedule_prefetch(self, L: int):
+        if L not in getattr(self, 'source_layers', (L,)):
+            # Like an index past the last layer: a scope holds no such layer,
+            # so there is nothing to read ahead.
+            return None
         if getattr(self, 'source_snapshot_only', False):
             with self._inflight_lock:
                 if not getattr(self, '_snapshot_source_keys', None):
@@ -1048,8 +1058,7 @@ class StreamingContext:
         pressure_floor = self.memory_pressure_floor_bytes()
         if pressure_floor > 0:
             try:
-                import psutil
-                if psutil.virtual_memory().available < pressure_floor:
+                if mem_available_bytes() < pressure_floor:
                     self.prefetch_memory_skips += 1
                     return None
             except Exception:
@@ -1161,6 +1170,9 @@ class StreamingContext:
         """
         if getattr(self, 'source_snapshot_only', False) and not getattr(self, '_snapshot_source_keys', None):
             raise RuntimeError('snapshot source must be configured before reading')
+        if L not in getattr(self, 'source_layers', (L,)):
+            raise RuntimeError(f'layer {L} is outside the source scope '
+                               f'{getattr(self, "source_scope", None)!r}')
         cached = self.layer_cache.get(L)
         if cached is not None:
             self._claim_inflight(L)
@@ -1242,6 +1254,8 @@ class StreamingContext:
         """Require actual source-state coverage for this complete traversal."""
         if getattr(self, 'source_snapshot_only', False):
             raise RuntimeError('snapshot-only source cannot attest full initialization')
+        if getattr(self, 'source_scope', None) is not None:
+            raise RuntimeError(f'source scope {self.source_scope!r} cannot attest full initialization')
         self._source_initialization_audit = _StreamingInitializationAudit(self)
 
     def source_initialization_contract(self):
@@ -1484,8 +1498,8 @@ class StreamingContext:
         Does NOT touch the loaded model itself (that's the whole point
         of the in-process driver — keep the model+offload index resident).
         """
-        import gc, psutil
-        before_avail = psutil.virtual_memory().available
+        import gc
+        before_avail = mem_available_bytes()
         # Cancel inflight prefetches — they're loading layers based on
         # whatever the prior chunk's reverse sweep was scheduling, which
         # has no relevance to the next chunk's freshly-starting forward.
@@ -1533,7 +1547,7 @@ class StreamingContext:
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
         gc.collect()
-        after_avail = psutil.virtual_memory().available
+        after_avail = mem_available_bytes()
         return {
             "before_avail_gb": before_avail / (1024 ** 3),
             "after_avail_gb": after_avail / (1024 ** 3),
@@ -1894,6 +1908,7 @@ def _build_streaming_context(model_path: str, *,
                              source_snapshot_only: bool = False,
                              sealed_head_tensors=None,
                              planned_source_window_bytes: int | None = None,
+                             source_scope: str | None = None,
                              ) -> StreamingContext:
     """One-time setup: AutoConfig + empty skeleton, then manually
     materialize only the always-resident head pieces. Decoder layers
@@ -1941,7 +1956,17 @@ def _build_streaming_context(model_path: str, *,
     ``planned_source_window_bytes`` is the source window the sealed plan's
     memory rule admits, when the plan budgets one after the head phase
     (Stage B's ``retained_operator_windows``, PQ #1134). It only bounds the
-    prefetch note: see :func:`_prefetch_widening_note`."""
+    prefetch note: see :func:`_prefetch_widening_note`.
+
+    ``source_scope`` names an out-of-body source the profile declares
+    (:meth:`ModelProfile.source_scope`, e.g. GLM's ``"mtp"``). The context
+    then builds the scope's meta skeleton instead of the body's and maps
+    checkpoint keys through the scope's ``live_name``; the weight map, packer,
+    authentication, cache and prefetch pool are this function's own. A scoped
+    context reads, prefetches and installs only the scope's layers: selected
+    snapshots read them, and preparation installs them to check renders against
+    their live source weights (PQ #1338). It never runs the body forward and
+    never attests a full initialization."""
     if type(source_snapshot_only) is not bool:
         raise TypeError('source_snapshot_only must be a bool')
     if source_snapshot_only and source_authentication is None:
@@ -1953,13 +1978,16 @@ def _build_streaming_context(model_path: str, *,
             or max_cache_slots < 1
         ):
             raise ValueError("max_cache_slots must be an integer >= 1 or None")
-    import psutil
     from transformers import AutoConfig
 
     authenticated = ({} if source_authentication is None else
                      {'source_authentication': source_authentication})
     if source_authentication is not None:
         source_authentication.require_unchanged()
+    scope = None
+    if source_scope is not None:
+        from .model_profiles import detect_profile
+        scope = detect_profile(model_path).source_scope(source_scope, model_path)
 
     from .sensitivity_probe import stage_multimodal, stage_text_only
 
@@ -1994,23 +2022,25 @@ def _build_streaming_context(model_path: str, *,
                   flush=True)
             multimodal = True
 
-    bypass_hf_fp8_rewrite = False
-    if multimodal:
-        staged = stage_multimodal(model_path)
+    if scope is not None:
+        skeleton = scope.build_skeleton(attn_implementation)
+        print(f"{log_prefix} source scope {scope.name!r}: layers {list(scope.layers)} "
+              f"under {scope.layers_prefix!r}", flush=True)
     else:
-        bypass_hf_fp8_rewrite = _bypass_hf_fp8_module_rewrite(model_path, **authenticated)
-        staged = stage_text_only(model_path)
-        if bypass_hf_fp8_rewrite:
-            print(f"{log_prefix} manual meta streaming load avoids HF fp8 "
-                  "module rewrite; PrismaQuant will apply weight_scale_inv "
-                  "during layer loads", flush=True)
-    config = AutoConfig.from_pretrained(staged, trust_remote_code=True)
-
-    skeleton = build_streaming_skeleton(config, multimodal=multimodal,
-        log_prefix=log_prefix, attn_implementation=attn_implementation)
+        if multimodal:
+            staged = stage_multimodal(model_path)
+        else:
+            staged = stage_text_only(model_path)
+            if _bypass_hf_fp8_module_rewrite(model_path, **authenticated):
+                print(f"{log_prefix} manual meta streaming load avoids HF fp8 "
+                      "module rewrite; PrismaQuant will apply weight_scale_inv "
+                      "during layer loads", flush=True)
+        config = AutoConfig.from_pretrained(staged, trust_remote_code=True)
+        skeleton = build_streaming_skeleton(config, multimodal=multimodal,
+            log_prefix=log_prefix, attn_implementation=attn_implementation)
     skel_base, skel_layers = _get_layer_list(skeleton)
     base_prefix = _resolve_base_prefix(skeleton, skel_base)
-    num_layers = len(skel_layers)
+    num_layers = len(skel_layers) if scope is None else scope.num_layers
 
     # Find the visual module on the skeleton so we know which names to
     # keep resident in device_map. We rebuild these after `from_pretrained`
@@ -2018,6 +2048,9 @@ def _build_streaming_context(model_path: str, *,
     _skel_visual, skel_visual_prefix = _find_visual_module(skeleton)
 
     layers_prefix = f"{base_prefix}.layers." if base_prefix else "layers."
+    if scope is not None and layers_prefix != scope.layers_prefix:
+        raise RuntimeError(f"source scope {scope.name!r} skeleton puts its layers under "
+                           f"{layers_prefix!r}, not {scope.layers_prefix!r}")
 
     resident_device = 0 if device.type == "cuda" else "cpu"
 
@@ -2034,8 +2067,16 @@ def _build_streaming_context(model_path: str, *,
     for p in model.parameters():
         p.requires_grad_(False)
     base_model, layers = _get_layer_list(model)
+    source_layers = tuple(range(num_layers))
+    if scope is not None:
+        # Sparse: only the scope's layers exist, indexed by checkpoint layer.
+        source_layers = tuple(scope.layers)
+        layers = [layers[str(index)] if index in source_layers else None
+                  for index in range(num_layers)]
 
-    weight_shard, weight_ckpt = _build_weight_map(model_path, multimodal=multimodal, **authenticated)
+    weight_shard, weight_ckpt = _build_weight_map(
+        model_path, multimodal=multimodal, **authenticated,
+        **({'live_name': scope.live_name} if scope is not None else {}))
     # Native-FP8 source dequant map. Populated only for checkpoints that
     # ship `.weight_scale_inv` siblings (MiniMax-M2/M2.7, DeepSeek-V3).
     # Empty dict for plain BF16 checkpoints — `_read_layer_to_device`
@@ -2171,13 +2212,14 @@ def _build_streaming_context(model_path: str, *,
     t_res = time.time()
     install_resolvers = [
         _build_install_resolver(model, f"{layers_prefix}{L}".rstrip("."))
+        if L in source_layers else {}
         for L in range(num_layers)
     ]
     print(f"{log_prefix} resolvers built: "
           f"{sum(len(r) for r in install_resolvers)} tensors across "
           f"{num_layers} layers in {time.time()-t_res:.1f}s", flush=True)
 
-    free_bytes = psutil.virtual_memory().available
+    free_bytes = mem_available_bytes()
     # Resolve headroom: env override > explicit arg > autoscale > legacy 75 GB default.
     resolved_headroom_gb = cache_headroom_gb
     autoscale_diag = None
@@ -2284,5 +2326,7 @@ def _build_streaming_context(model_path: str, *,
         concat_merger=concat_merger,
         source_snapshot_only=source_snapshot_only,
         source_fp4_experts=declared_fp4_expert_dtype(model_path),
+        source_layers=source_layers,
+        source_scope=None if scope is None else scope.name,
         **authenticated,
     )

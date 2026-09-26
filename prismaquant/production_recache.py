@@ -13,7 +13,6 @@ import pickle
 import tempfile
 import time
 import argparse
-import hashlib
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from prismaquant.perturbed_x_cache import (
     iter_calibration_forwards,
 )
 from prismaquant.sensitivity_probe import _prismaquant_temp_parent
+from prismaquant.digests import DIRECT_ASCII_LAX
 
 
 def _unify_fused_max_abs(
@@ -365,12 +365,8 @@ def activation_max_abs_delta_summary(
 
 def assignment_digest(assignment: Mapping[str, str]) -> str:
     """Stable digest for the concrete assignment used during re-cache."""
-    payload = json.dumps(
-        {str(k): str(v) for k, v in sorted(assignment.items())},
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+    return DIRECT_ASCII_LAX.sha256(
+        {str(k): str(v) for k, v in sorted(assignment.items())})
 
 
 @torch.no_grad()

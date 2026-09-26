@@ -32,7 +32,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -45,7 +44,7 @@ from prismaquant.allocator_candidates import (
 )
 from prismaquant.allocator_solver import _shape_from_stats
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes, canonical_json
-from prismaquant.nvfp4_cb_footprint import is_cb_format
+from prismaquant.digests import DIRECT_UTF8_STRICT
 from prismaquant.serving_profiles import serving_lane_route
 
 
@@ -171,14 +170,7 @@ def _plan_digest(body: Mapping[str, object]) -> str:
         if str(key) != "identity_sha256"
     }
     canonical = canonical_json(digest_body, where="source-class format plan")
-    encoded = json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return DIRECT_UTF8_STRICT.sha256(canonical)
 
 
 def parse_format_menu(raw: str | Sequence[str], *, where: str) -> tuple[str, ...]:
@@ -406,7 +398,6 @@ def build_source_class_format_plan(
     *,
     expert_formats: str | Sequence[str],
     nonexpert_formats: str | Sequence[str],
-    cb_serialization_context,
     serving_backed_profile: str | None = None,
 ) -> SourceClassFormatPlan:
     """Derive one exact full-family menu per source-payload class.
@@ -431,13 +422,6 @@ def build_source_class_format_plan(
         serving_backed_profile=serving_backed_profile,
     )
     _validate_declared_menus(expert_menu, nonexpert_menu, family_formats)
-    if any(is_cb_format(name) for name in family_formats):
-        if cb_serialization_context is None:
-            raise ValueError(
-                "source-class CB planning requires an exact "
-                "CBSerializationContext; the allocator deliberately defers "
-                "CB source-rate checks without it"
-            )
 
     units: dict[str, UnitFormatPlan] = {}
     for qname in sorted(str(name) for name in stats):
@@ -468,7 +452,6 @@ def build_source_class_format_plan(
                 fr.get_format(format_name),
                 qname=qname,
                 source_kind=source_kind,
-                cb_serialization_context=cb_serialization_context,
             )
             for format_name in family_formats
         }

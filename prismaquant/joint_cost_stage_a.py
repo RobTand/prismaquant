@@ -49,6 +49,7 @@ import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .dev_mode import NOT_COMPUTED, dev_mode_enabled, seal_check
+from .io_spans import GpuPowerSampler
 from .joint_adjoint_checkpoints import (
     ADJOINT_CAPTURE_ENTRY_POINT,
     ADJOINT_RECEIPT_SCHEMA,
@@ -56,7 +57,6 @@ from .joint_adjoint_checkpoints import (
     DEFAULT_STRIDE,
     QUANTUM_COUNTERS_SCHEMA,
     ChainRegimeRefused,
-    GpuPowerSampler,
     KernelTimeProfiler,
     adjoint_space,
     boundary_entry_directory,

@@ -8,10 +8,6 @@ from prismaquant.allocator import (
     _write_bit_attribution_reports,
 )
 from prismaquant.allocator_solver import Candidate
-from prismaquant.nvfp4_cb_footprint import (
-    CBSerializationContext,
-    cb_assignment_payload_breakdown,
-)
 
 
 def test_parse_role_distinguishes_dense_attn_mlp():
@@ -101,52 +97,6 @@ def test_build_bit_attribution_null_dloss_when_no_candidate():
     assert buckets[0]["predicted_dloss_coverage"] == "0/1"
 
 
-def test_build_bit_attribution_deduplicates_shared_cb_sidecar():
-    fmt = "FP8_CB_K36"
-    assignment = {
-        "model.layers.0.self_attn.q_proj": fmt,
-        "model.layers.1.self_attn.q_proj": fmt,
-    }
-    stats = {
-        name: {
-            "n_params": 2 * 256,
-            "out_features": 2,
-            "in_features": 256,
-            "h_trace": 1.0,
-        }
-        for name in assignment
-    }
-    context = CBSerializationContext.production()
-    exact = cb_assignment_payload_breakdown(
-        assignment,
-        {name: (2, 256) for name in assignment},
-        context=context,
-    )
-    candidates = {
-        name: [Candidate(
-            fmt,
-            0.0,
-            int(exact["per_tensor"][name]["tensor_payload_bytes"]),
-            0.01,
-        )]
-        for name in assignment
-    }
-    _buckets, _rows, totals = _build_bit_attribution(
-        assignment,
-        candidates,
-        stats.get,
-        format_specs={},
-        cb_serialization_context=context,
-    )
-    assert totals["body_tensor_payload_bits"] == (
-        8 * exact["tensor_payload_bytes"]
-    )
-    assert totals["body_shared_cb_sidecar_bits"] == (
-        8 * exact["codebook_sidecar_bytes"]
-    )
-    assert totals["body_assignment_payload_bits"] == 8 * exact["total_bytes"]
-
-
 def test_write_bit_attribution_reports_emit_files(tmp_path):
     assignment = {
         "model.layers.0.self_attn.q_proj": "NVFP4",
@@ -172,7 +122,9 @@ def test_write_bit_attribution_reports_emit_files(tmp_path):
     payload = json.loads(jpath.read_text())
     assert payload["schema"] == "prismaquant.allocator.bit_attribution.v2"
     assert payload["body_bits_per_param"] == exact_bpp
-    assert payload["body_shared_cb_sidecar_bits"] == 0
+    # The codebook sidecar total left with the retired codebook lane
+    # (archived 2026-09-25, #1304); it was always 0 on a live menu.
+    assert "body_shared_cb_sidecar_bits" not in payload
     assert payload["n_body_linears"] == 2
     assert len(payload["buckets"]) == 2
     csv_text = cpath.read_text()

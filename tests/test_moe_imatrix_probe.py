@@ -5,8 +5,8 @@ import pickle
 import pytest
 import torch
 
-from prismaquant.cb_imatrix import (
-    CB_IMATRIX_FROM_PROBE_SCHEMA,
+from prismaquant.moe_imatrix import (
+    IMATRIX_FROM_PROBE_SCHEMA,
     canonical_imatrix_sha256,
     imatrix_from_probe_file,
     imatrix_from_probe_stats,
@@ -33,7 +33,7 @@ def test_probe_marginals_become_dense_and_per_expert_imatrix_values():
         torch.tensor([[[1.0, 2.0]], [[3.0, 4.0]]]),
     )
     assert provenance == {
-        "schema": CB_IMATRIX_FROM_PROBE_SCHEMA,
+        "schema": IMATRIX_FROM_PROBE_SCHEMA,
         "dense_entries": 1,
         "packed_entries": 1,
         "skipped_missing_entries": 1,

@@ -206,18 +206,139 @@ def bind_source_derivative(model, profile, value):
     return json.loads(json.dumps(identity))
 
 
+#: Every definition in the module, as a whole (PQ #1341).
+_MODULE_LEVEL = '<module>'
+
+
+def original_source(raw):
+    """Invert :func:`corrected_source`, refusing unless the result is the pinned original.
+
+    The reviewed correction is one expression. A corrected file that differs
+    from the pinned original anywhere else does not invert to it, so its
+    reach cannot be derived and it is refused.
+    """
+    _require(hashlib.sha256(raw).hexdigest() == CORRECTED_MODELING_SHA256, 'corrected modeling source differs')
+    old, new = ORIGINAL_EXPRESSION.encode(), CORRECTED_EXPRESSION.encode()
+    _require(raw.count(new) == 1, 'reviewed corrected expression is not unique')
+    result = raw.replace(new, old, 1)
+    _require(hashlib.sha256(result).hexdigest() == ORIGINAL_MODELING_SHA256,
+             'corrected source changes more than the reviewed expression')
+    return result
+
+
+def _definitions(raw):
+    """``{key: (ast dump, referenced names)}`` for each definition in a module.
+
+    Keys are a top-level function's name, ``Class.method`` for a method,
+    ``Class.<body>`` for a class's bases, decorators and other statements,
+    and ``<module>`` for all remaining module-level code. The references are
+    every name a definition loads, plus ``Class.attr`` for ``self.attr`` or
+    ``Class.attr`` inside class ``Class``.
+    """
+    import ast
+
+    def refs(nodes, owner):
+        names = set()
+        for node in nodes:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Name):
+                    names.add(sub.id)
+                elif isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name):
+                    base = owner if sub.value.id in ('self', 'cls') else sub.value.id
+                    if base is not None:
+                        names.add(f'{base}.{sub.attr}')
+        return names
+
+    tree = ast.parse(raw)
+    found, module_level = {}, []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found[node.name] = (ast.dump(node), refs([node], None))
+        elif isinstance(node, ast.ClassDef):
+            body = []
+            for member in node.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    found[f'{node.name}.{member.name}'] = (ast.dump(member), refs([member], node.name))
+                else:
+                    body.append(member)
+            head = [*node.bases, *node.keywords, *node.decorator_list, *body]
+            found[f'{node.name}.<body>'] = (repr([ast.dump(x) for x in head]), refs(head, node.name))
+        else:
+            module_level.append(node)
+    found[_MODULE_LEVEL] = (repr([ast.dump(x) for x in module_level]), refs(module_level, None))
+    return found
+
+
+def correction_reach(original, corrected):
+    """The classes whose code can run a definition the correction changed.
+
+    A definition reaches the correction when it changed, or when it names a
+    reaching function, class or method. Names are followed to a fixed point,
+    so the result is closed under calls, subclassing and decoration within
+    the module. The result is ``frozenset({'<module>'})`` when module-level
+    code reaches it: then every class in the file is treated as reached.
+    """
+    before, after = _definitions(original), _definitions(corrected)
+    reached = {key for key in set(before) | set(after) if before.get(key, (None,))[0] != after.get(key, (None,))[0]}
+
+    def aliases(key):
+        if '.' not in key:
+            return {key}
+        owner, member = key.split('.', 1)
+        return {owner} | ({key} if member != '<body>' else set())
+
+    while True:
+        names = set().union(*(aliases(key) for key in reached)) if reached else set()
+        grown = {key for key, (_dump, used) in after.items() if key not in reached and used & names}
+        if not grown:
+            break
+        reached |= grown
+    if _MODULE_LEVEL in reached:
+        return frozenset({_MODULE_LEVEL})
+    return frozenset(key.split('.', 1)[0] if '.' in key else key for key in reached)
+
+
+_REACH = {}
+
+
+def _corrected_reach(path):
+    """``correction_reach`` of a loaded corrected modeling file, once per content."""
+    raw = Path(path).read_bytes()
+    key = (hashlib.sha256(raw).hexdigest(), ORIGINAL_MODELING_SHA256, CORRECTED_MODELING_SHA256)
+    if key not in _REACH:
+        _REACH[key] = correction_reach(original_source(raw), raw)
+    return _REACH[key]
+
+
 def _reject_unbound_corrected_runtime(model):
-    seen = set()
+    """Refuse a model that can run the corrected source without a binding.
+
+    Only the classes the correction reaches (:func:`correction_reach`) can
+    run it. A model without an instance of one runs identical code on either
+    source, so its identity is honestly unbound (PQ #1341: the GLM MTP layer
+    has attention, MoE and norms from this file, and no KDA module).
+    """
+    reach = {}
     for _name, module in model.named_modules():
         name = type(module).__module__
-        if not name.startswith('transformers.models.glm5_next.') or name in seen:
+        if not name.startswith('transformers.models.glm5_next.'):
             continue
-        seen.add(name)
-        loaded = sys.modules.get(name)
-        path = getattr(loaded, '__file__', None)
-        _require(path is not None, 'actual GLM source module is unavailable')
-        _require(sha256(path) != CORRECTED_MODELING_SHA256,
-                 'corrected GLM runtime requires an explicit derivative binding')
+        if name not in reach:
+            loaded = sys.modules.get(name)
+            path = getattr(loaded, '__file__', None)
+            _require(path is not None, 'actual GLM source module is unavailable')
+            if sha256(path) != CORRECTED_MODELING_SHA256:
+                reach[name] = frozenset()
+            else:
+                try:
+                    reach[name] = _corrected_reach(path)
+                except ValueError as error:
+                    raise ValueError('GLM source derivative: corrected GLM runtime requires an explicit '
+                                     f'derivative binding; its reach cannot be derived ({error})') from error
+        classes = reach[name]
+        _require(_MODULE_LEVEL not in classes and type(module).__name__ not in classes,
+                 f'corrected GLM runtime requires an explicit derivative binding '
+                 f'({type(module).__name__} reaches the correction)')
 
 
 def source_derivative_identity(model):

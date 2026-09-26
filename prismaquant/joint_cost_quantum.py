@@ -43,12 +43,12 @@ import torch
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .cost_currency import probe_identity_seals, probe_identity_walls_differ
 from .dev_mode import seal_check
-from .io_spans import IoSpanLog, failure_outcome, read_proc_io, stage_span_log
+from .io_spans import (GpuPowerSampler, IoSpanLog, failure_outcome, read_proc_io,
+                       stage_span_log)
 from .joint_adjoint_checkpoints import (
     QUANTUM_COUNTERS_SCHEMA,
     QUANTUM_RECORD_SCHEMA,
     QUANTUM_STATUS_SCHEMA,
-    GpuPowerSampler,
     KernelTimeProfiler,
     PlaneHostStaging,
     adjoint_space,
@@ -1582,8 +1582,7 @@ def run_layer_quantum_core(
     )
     from .kl_fisher import ROW_PROBE_LAYOUT
     from .production_weight_cache import _cb_cache_tensor_identity
-    from .production_weight_cache import (
-        PWC_WINDOW_LEASE_COUNTERS, production_cache_cb_render_provenance)
+    from .production_weight_cache import PWC_WINDOW_LEASE_COUNTERS
     from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
@@ -1873,11 +1872,6 @@ def run_layer_quantum_core(
 
     # ---- journal ---------------------------------------------------------
     checkpoint_git_commit = _checkpoint_git_commit()
-    from prismaquant.aura_cost import is_cb_format
-
-    cb_provenance = (production_cache_cb_render_provenance(
-        production_cache, require_for_formats=fmts, where="layer quantum cache")
-        if any(is_cb_format(fmt) for fmt in fmts) else {})
     extra = {
         "streaming": True,
         "retained_operator_windows": retained_operator_windows,
@@ -1919,7 +1913,7 @@ def run_layer_quantum_core(
         include_lm_head=False, hook_harvest=True,
         allow_packed_expert_omission=False, probe_microbatch=probe_microbatch,
         collect_col_energy=False, require_production_cache=True,
-        production_cache=production_cache, cb_provenance=cb_provenance,
+        production_cache=production_cache,
         git_commit=checkpoint_git_commit, extra_identity=extra,
     )
     checkpoint_root, checkpoint_identity_sha256, completed_states = (
@@ -3148,7 +3142,7 @@ def run_layer_quantum_core(
         unmeasured_formats_by_qname={}, n_probes=n_probes, token_scope=token_scope,
         seed_base=seed_base, temperature=temperature, dw_dtype="float32",
         measurement_dtype=runner.dtype, n_linear_chunks=1, calib_ids=calib_ids,
-        omitted_packed_experts=[], cb_provenance=cb_provenance,
+        omitted_packed_experts=[],
         checkpoint_git_commit=checkpoint_git_commit, collect_col_energy=False,
         s2=s2, s4=s4, x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
         col_energy={}, weight_mse_diagnostic={}, unit_topology=unit_topology)

@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 import torch.nn as nn
 
+from prismaquant import format_registry as fr
 from prismaquant.model_profiles.base import ModelProfile
 from prismaquant.model_profiles.structure import build_model_graph
 from tools.make_uniform_assignment import (
@@ -216,9 +217,11 @@ def test_no_fallback_means_the_unit_is_omitted(graph, profile):
     assert result.demoted_units == ()
 
 
-def test_reader_only_fp8_cb_rung_cannot_enter_a_uniform_assignment(
+def test_retired_codebook_rung_cannot_enter_a_uniform_assignment(
         graph, profile):
-    with pytest.raises(ValueError, match="reader-only"):
+    # The retired codebook lane, archived 2026-09-25, #1304: the name no
+    # longer resolves, and both gates refuse it by the archive's name.
+    with pytest.raises(fr.RetiredFormatError, match="gridbook_lane"):
         build_uniform_assignment(
             graph,
             "FP8_CB_K29",
@@ -227,7 +230,7 @@ def test_reader_only_fp8_cb_rung_cannot_enter_a_uniform_assignment(
             source_kinds=_bf16_sources(graph),
         )
 
-    with pytest.raises(AssertionError, match="reader-only"):
+    with pytest.raises(AssertionError, match="gridbook_lane"):
         assert_assignment_legal(
             {"model.layers.0.mlp.down_proj": "FP8_CB_K29"},
             graph,

@@ -34,11 +34,6 @@ from .allocator_solver import (
     _shape_from_stats,
     predicted_dloss,
 )
-from .nvfp4_cb_footprint import (
-    CBSerializationContext,
-    cb_breakdown_identity_is_materialized,
-    is_cb_format,
-)
 from .footprint import (
     format_tensor_payload_breakdown,
     plain_source_dtype_tensor_payload_breakdown,
@@ -488,21 +483,12 @@ def serialized_candidate_payload(
     shape: tuple[int, ...],
     *,
     qname: str,
-    cb_serialization_context: CBSerializationContext | None,
 ) -> tuple[int, str | None, str | None]:
-    """Return producer payload bytes + identity for one candidate tensor.
-
-    A CB FormatSpec intentionally describes only the historical nominal body;
-    it cannot encode layout-v1/v2, FP8 row scales, or shared codebook identity.
-    Those formats must use the versioned producer accountant.  Refusing a
-    missing context prevents an old ``4k+16`` estimate from silently leaking
-    back into a production-v2 allocation.
-    """
+    """Return producer payload bytes + identity for one candidate tensor."""
     item = format_tensor_payload_breakdown(
         spec,
         shape,
         qname=qname,
-        cb_serialization_context=cb_serialization_context,
     )
     return (
         int(item["tensor_payload_bytes"]),
@@ -543,7 +529,6 @@ def _source_bpp_applicability(
     *,
     qname: str,
     source_kind: str | None,
-    cb_serialization_context: CBSerializationContext | None,
 ) -> FormatApplicability:
     """Apply the exact candidate-payload <= source-payload legality rule.
 
@@ -572,36 +557,16 @@ def _source_bpp_applicability(
             provenance,
         )
 
-    # Structural-only callers historically use this helper without a CB
-    # producer context.  They cannot price a versioned CB layout exactly, so
-    # leave the rate verdict to ``build_candidates`` / allocator preflight,
-    # both of which own and pass the mandatory context.  Non-CB formats need
-    # no such deferral.
-    if is_cb_format(spec.name) and cb_serialization_context is None:
-        return FormatApplicability(True)
-
-    # Rate first, identity second.  A learned CB book is banked only for the
-    # rungs a unit may actually use, so demanding a materialized codebook here
-    # would make "is this rung legal?" depend on which books happen to exist:
-    # a routed expert that the source-payload ceiling already excludes at K36
-    # would raise instead of returning EXCEEDED, and the exact same menu would
-    # answer differently before and after a bundle rebuild.  Bytes are
-    # identical in both modes, so the verdict below is unchanged; identity is
-    # then re-asserted for the candidates that survive, which are exactly the
-    # ones a render can be asked for.
     candidate_item = format_tensor_payload_breakdown(
         spec,
         shape,
         qname=qname,
-        cb_serialization_context=cb_serialization_context,
-        require_materialized_codebook_identity=False,
     )
     if source_owner.format_name is not None:
         source_item = format_tensor_payload_breakdown(
             source_owner.format_name,
             shape,
             qname=qname,
-            cb_serialization_context=cb_serialization_context,
         )
         source_label = source_owner.format_name
         source_owner_provenance = {
@@ -648,20 +613,6 @@ def _source_bpp_applicability(
             f"{source_bytes} bytes ({provenance['source_bpp']:.10g} bpp); "
             "comparison is exact integer bytes with no tolerance",
             provenance,
-        )
-    if is_cb_format(spec.name) and not cb_breakdown_identity_is_materialized(
-        candidate_item
-    ):
-        # Survived the rate gate, so this cell is one the pipeline may be
-        # asked to render, and its book is missing.  Re-price with identity
-        # required so the real diagnostic is raised here, at the gate, and not
-        # first at export.  A banked cell already carries its proof and pays
-        # nothing for this check.
-        format_tensor_payload_breakdown(
-            spec,
-            shape,
-            qname=qname,
-            cb_serialization_context=cb_serialization_context,
         )
     return FormatApplicability(True, provenance=provenance)
 
@@ -784,15 +735,13 @@ def check_format_applicability(
     qname: str | None = None,
     source_kind: str | None = None,
     target_profile: str | None = None,
-    cb_serialization_context: CBSerializationContext | None = None,
 ) -> FormatApplicability:
     """Return whether a Linear shape can legally use a format.
 
     The verdict captures all cheap preflight constraints that otherwise show
     up later as allocator-invalid choices or RTN/kernel crashes: source
     passthrough integrity, serving profile restrictions, group divisibility,
-    known runtime kernel shape rules, and (when an exact producer context is
-    available for CB) the source bit-rate ceiling.
+    known runtime kernel shape rules, and the source bit-rate ceiling.
     """
     try:
         spec = (
@@ -882,7 +831,6 @@ def check_format_applicability(
         spec,
         qname=str(qname or "<unnamed Linear>"),
         source_kind=source_kind,
-        cb_serialization_context=cb_serialization_context,
     )
 
 
@@ -893,7 +841,6 @@ def check_stats_format_applicability(
     qname: str | None = None,
     source_kind: str | None = None,
     target_profile: str | None = None,
-    cb_serialization_context: CBSerializationContext | None = None,
 ) -> FormatApplicability:
     """Stats-entry wrapper for ``check_format_applicability``.
 
@@ -911,7 +858,6 @@ def check_stats_format_applicability(
         qname=qname,
         source_kind=source_kind,
         target_profile=target_profile,
-        cb_serialization_context=cb_serialization_context,
     )
 
 
@@ -1029,9 +975,10 @@ def _prices_from_output_mse(stats_entry: dict, cost_entry: dict) -> bool:
     gated either, and gating this one would re-create exactly the same
     measured/weight-only basis mix inside an identity-activation family (at
     penalty 1.0, but weight-space vs output-space all the same). No such row
-    exists today — only the two CB-ladder sites stamp ``band_interpolated``,
-    and every format of ``nvfp4_cb`` and ``fp8_cb`` quantizes activations — so
-    this is a statement about the rule, not a live code path.
+    exists: the RD-ladder sites that stamped ``band_interpolated`` served the
+    retired codebook lane (archived 2026-09-25, #1304), whose formats all
+    quantized activations — so this is a statement about the rule, not a live
+    code path.
     """
     return (
         _has_measured_output_mse(stats_entry, cost_entry)
@@ -1141,7 +1088,8 @@ MIXED_COST_SOURCE = "mixed"
 #: The Tessera anchor campaign's fitted rows (``tessera_campaign.py``). Kept
 #: as its own spelling rather than reusing ``band_interpolated`` because the
 #: MECHANISM differs and a shipped artifact has to be able to say which one
-#: priced it: the CB ladder fits a per-tensor law over a handful of declared
+#: priced it: the RD ladder (retired with the codebook lane, archived
+#: 2026-09-25, #1304) fit a per-tensor law over a handful of declared
 #: rungs, while the campaign fits a monotone piecewise-linear surface in
 #: (q256, log2 dloss) over measured anchors of ONE family on ONE unit and
 #: refuses to extrapolate past them. What the two share is the property this
@@ -1157,8 +1105,9 @@ TESSERA_INTERPOLATED_COST_SOURCE = "tessera_campaign_interpolated"
 def cost_entry_is_band_interpolated(cost_entry: dict) -> bool:
     """Whether this row's cost was FITTED from ladder anchors, not measured.
 
-    Stamped by the cost stage's RD-ladder interpolation
-    (``measure_quant_cost``, ``PRISMAQUANT_CB_LADDER_INTERP=1``). Such a row
+    Stamped by the cost stage's RD-ladder interpolation (retired with the
+    codebook lane, archived 2026-09-25, #1304; stale tables may still carry
+    the stamp) and by the Tessera anchor campaign. Such a row
     is not a guess — the tensor's own law had to clear a holdout gate before
     the fit was accepted, and a tensor whose law was rejected had its rungs
     measured instead — but it IS a prediction, and a shipped artifact must be
@@ -1299,7 +1248,7 @@ def drop_census_interpolated_within_loo(
 
     Fails closed when an interpolated cell on the menu has no usable LOO
     record, or when ``loo`` is absent and any row in ``costs`` is
-    interpolated. CB-ladder interpolation (``band_interpolated``/``mixed``)
+    interpolated. RD-ladder interpolation (``band_interpolated``/``mixed``)
     is not this function's subject; see
     :func:`drop_interpolated_candidates_dominated_by_measured`.
     """
@@ -1640,9 +1589,10 @@ def cost_entry_is_anchored_aura_supersurrogate(cost_entry: dict) -> bool:
         already contains the KL-Fisher; extrapolation multiplies by a ratio of
         ``g``, never by a sensitivity a second time.
 
-    **The standing limitation this admission accepts.** Every rung in the CB
-    menus quantizes activations (``act_quant_changes_input`` is True for all of
-    ``nvfp4_cb`` and ``fp8_cb``), while AURA's ``dW`` is weights-only. So these
+    **The standing limitation this admission accepts.** Anchored rows price
+    activation-quantizing rungs (``act_quant_changes_input`` is True for NVFP4
+    and FP8, as it was for every rung of the retired codebook lane, archived
+    2026-09-25, #1304), while AURA's ``dW`` is weights-only. So these
     prices are activation-quantization-blind, and the P5a penalty cannot fix it
     here: an anchored table carries no measured ``output_mse`` rows at all, so
     every family is uncalibrated and ``penalty_for`` already returns exactly
@@ -1911,7 +1861,7 @@ def cost_entry_prices_unmeasured_activation_at_zero(
     written with ``output_mse_measured=False`` (measure_quant_cost), so pricing
     falls through to ``predicted_dloss``/``weight_mse`` — both of which are
     exactly 0.0 for a weight-lossless re-encode (the source is already in that
-    format: MXFP4 over an MXFP4-packed source, NVFP4 over an NVFP4-CB source).
+    format: MXFP4 over an MXFP4-packed source, NVFP4 over an NVFP4 source).
     Nothing in that row ever looked at the activation path, yet the DP reads a
     cost of 0.0: the unbeatable global minimum at any budget, for an assignment
     whose served activations are 4-bit.
@@ -2347,7 +2297,6 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      source_manifest: dict[str, str] | None = None,
                      target_profile: str | None = None,
                      mask_records: list[dict] | None = None,
-                     cb_serialization_context: CBSerializationContext | None = None,
                      activation_pricing: ActivationFairPricing | None = None,
                      bit_precision: float | None = None,
                      tessera_menu_report: dict | None = None,
@@ -2455,7 +2404,6 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                 qname=name,
                 source_kind=source_kind,
                 target_profile=target_profile,
-                cb_serialization_context=cb_serialization_context,
             )
             if not verdict.legal:
                 if mask_records is not None:
@@ -2567,7 +2515,6 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                 spec,
                 shape,
                 qname=name,
-                cb_serialization_context=cb_serialization_context,
             )
             s.setdefault("_memory_bytes_by_format", {})[spec.name] = memory_bytes
             if serialized_identity is not None:

@@ -26,8 +26,10 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import os
 import re
 from contextlib import closing
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -43,6 +45,7 @@ from safetensors.torch import save_file  # noqa: E402
 
 from prismaquant import genuine_weight_initialization  # noqa: E402
 from prismaquant import glm_mtp, glm_mtp_capture  # noqa: E402
+from prismaquant import tessera_hessian as th  # noqa: E402
 from prismaquant.export_native_compressed import _split_packed_expert_tensor  # noqa: E402
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile  # noqa: E402
 from prismaquant.routed_experts import profile_declared_packed_expert_projections  # noqa: E402
@@ -397,6 +400,13 @@ def test_boundary_records_are_checked_before_any_read():
 # --------------------------------------------------------------------------
 
 N_SEQUENCES, SEQ_LEN, MAX_ROWS = 4, 13, 4
+#: The corpus a campaign row's draw names (see the ``mtp_source`` fixture).
+CALIBRATION_TEXT = "the tiny MTP checkpoint's calibration corpus"
+
+
+def _calibration_rows(ids):
+    """The draw as ``tessera_campaign._calibration_tokens`` returns it."""
+    return [ids[index:index + 1] for index in range(ids.shape[0])]
 LAST = BACKBONE - 1
 DENSE_UNIT = "model.language_model.layers.0.mlp.down_proj"
 
@@ -410,10 +420,64 @@ def _runtime():
                 transformers=importlib.metadata.version("transformers"))
 
 
+#: The producer the MTP rows are encoded with (PQ #1271, Option B).
+PINNED_PRODUCER = "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+#: The nominal question the body census asked the producer for each stack.
+BODY_REQUEST = {"grid": "E4M3", "q256": 256, "source_layout": "unpacked_per_expert"}
+
+
+def _producer(monkeypatch):
+    """The pinned producer checkout, for its projection tool and source seal.
+
+    ``TESSERA_REPO`` names it, as it does for the campaign; otherwise the
+    fleet's pinned checkout. Skipped, never failed, where neither exists
+    (GitHub CI has no /mnt/shared). The tool runs in a subprocess, so the
+    checkout's ``src`` goes on ``PYTHONPATH`` as the campaign container puts it.
+    """
+    producer = Path(os.environ.get("TESSERA_REPO") or PINNED_PRODUCER)
+    if not (producer / "experiments" / "tessera_producer_plan.py").is_file():
+        pytest.skip(f"TESSERA_REPO must name the pinned producer checkout ({PINNED_PRODUCER})")
+    monkeypatch.setenv("TESSERA_REPO", str(producer))
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(
+        part for part in (str(producer / "src"), os.environ.get("PYTHONPATH")) if part))
+    return producer
+
+
+def _meta_wrapper(text_config):
+    return glm_mtp.MtpCheckpointModel(glm_mtp.mtp_layer_skeleton(text_config))
+
+
+def _mtp_routed(env):
+    """The tiny checkpoint's routed MTP units (its own expert count)."""
+    return {f"{PREFIX}mlp.experts.{e}.{p}"
+            for e in range(int(env.text_config.n_routed_experts)) for p in PROJECTIONS}
+
+
+def _build_wide_model():
+    """The tiny model at the widths ``test_glm_campaign_streaming`` prices."""
+    from tests.test_glm5_next_streamed_forward_parity import _build_model, _tiny_config
+
+    config = _tiny_config()
+    config.text_config.hidden_size = 256
+    config.text_config.intermediate_size = 512
+    config.text_config.moe_intermediate_size = 256
+    config.vision_config.out_hidden_size = 256
+    torch.manual_seed(20260826)
+    return _build_model(type(config).from_dict(config.to_dict()))
+
+
 @pytest.fixture
-def mtp_source(tmp_path, monkeypatch):
+def mtp_source(request, tmp_path, monkeypatch):
     """A two-layer GLM checkpoint plus its MTP layer (index 2), a body census
-    and a complete canonical capture over one body unit."""
+    and a complete canonical capture over one body unit.
+
+    The MTP layer is stored in float32 unless the test asks for another dtype
+    (``indirect`` parametrization). A ``{"dtype": ..., "wide": True}``
+    parameter widens the model to 256-column Linears, the narrowest a Tessera
+    superblock encodes, for a test that prices through the real producer."""
+    param = getattr(request, "param", torch.float32)
+    mtp_dtype, wide = ((param["dtype"], param.get("wide", False))
+                       if isinstance(param, dict) else (param, False))
     import prismaquant.model_profiles.glm5_next as glm5_profile
     from safetensors import safe_open
     from transformers import AutoConfig
@@ -422,12 +486,14 @@ def mtp_source(tmp_path, monkeypatch):
     from prismaquant.tessera_campaign import calibration_census
 
     monkeypatch.setenv("PRISMAQUANT_TMPDIR", str(tmp_path / "staging"))
+    _producer(monkeypatch)
+    serving_parts = pytest.importorskip("tessera.serving_parts")
     # The profile names GLM-5.3-Flash's MTP layer by its index, 45, and the
     # streamed loader drops it by that name. Here the MTP layer is 2.
     monkeypatch.setattr(glm5_profile, "_MTP_LAYER_RE",
                         re.compile(r"^model\.language_model\.layers\.2\."))
     source = tmp_path / "source"
-    write_original_layout_checkpoint(_build_tiny_model(), source)
+    write_original_layout_checkpoint(_build_wide_model() if wide else _build_tiny_model(), source)
     config = json.loads((source / "config.json").read_text())
     # One MTP layer, and an indexer that keeps every key of a 12-row draft.
     config["text_config"].update(num_nextn_predict_layers=1, index_topk=16,
@@ -435,12 +501,13 @@ def mtp_source(tmp_path, monkeypatch):
     (source / "config.json").write_text(json.dumps(config))
     text_config = AutoConfig.from_pretrained(source).text_config
     text_config._attn_implementation = "eager"
+    dense_shape = [int(text_config.hidden_size), int(text_config.intermediate_size)]
     with genuine_weight_initialization():
         mtp = glm_mtp.Glm5NextMtpLayer(text_config)
     _randomize(mtp, 20260927)
     with torch.no_grad():
         mtp.mlp.gate.e_score_correction_bias.mul_(0.05)
-    mtp = mtp.to(torch.float32).eval()
+    mtp = mtp.to(mtp_dtype).eval()
     mtp_state = _per_expert_checkpoint(mtp)
     save_file({key: value.contiguous() for key, value in mtp_state.items()},
               str(source / "model-mtp.safetensors"))
@@ -457,30 +524,38 @@ def mtp_source(tmp_path, monkeypatch):
         dtype="torch.float32", layers_prefix="model.language_model.layers.",
         num_layers=BACKBONE, persistent_tensors=2, derived_buffers=0,
         state_sha256="a" * 64, source_map_sha256="b" * 64)
-    calibration = {"fit_ids_sha256": "d" * 64, "fit_tokens": N_SEQUENCES * SEQ_LEN,
-                   "nsamples": N_SEQUENCES, "seqlen": SEQ_LEN, "seed": 0,
-                   "source": "synthetic", "split_role": "calibration",
-                   "text_sha256": "e" * 64}
+    # The draw a campaign row recomputes from its own tokens
+    # (``tessera_campaign._calibration_tokens``, which a campaign test replaces
+    # with CALIBRATION_TEXT and these ids): the body census's rows give the
+    # (max, min) pair, as the real body census's do.
+    ids = torch.randint(2, 128, (N_SEQUENCES, SEQ_LEN), generator=torch.Generator().manual_seed(31))
+    calibration = th.calibration_identity(
+        CALIBRATION_TEXT, _calibration_rows(ids), fit_tokens=4,
+        source="wikitext-2-raw-v1/train", split_role="calibration", model=str(source),
+        seed=0, nsamples=N_SEQUENCES, seqlen=SEQ_LEN, fit_tokens_min=4)
+    # The body census's producer block: the producer's own seal of this
+    # checkpoint, and the nominal question the body asked for each stack.
     producer = {"schema": "tessera.expert_projection.v1",
-                "source": {"config_sha256": _sha(source / "config.json")}}
+                "source": serving_parts.source_identity(source), "stacks": {}}
     census = calibration_census(
         {DENSE_UNIT: 4}, {DENSE_UNIT: 3.0},
         args=SimpleNamespace(model=str(source), nsamples=N_SEQUENCES, seqlen=SEQ_LEN,
                              seed=0, layer_stride=1),
         groups={"u:" + DENSE_UNIT: [DENSE_UNIT]}, dense_targets=[DENSE_UNIT],
-        expert_targets=[], shapes={DENSE_UNIT: [64, 128]},
-        identity={"text_sha256": "e" * 64, "fit_ids_sha256": "d" * 64},
-        expert_projection={"producer": producer}, model_load_contract=contract,
+        expert_targets=[], shapes={DENSE_UNIT: dense_shape},
+        identity={key: calibration[key] for key in ("text_sha256", "fit_ids_sha256")},
+        expert_projection={"producer": producer, "request": {
+            "model.language_model.layers.1.mlp.experts": dict(BODY_REQUEST)}},
+        model_load_contract=contract,
         attention_implementation="eager", capture_runtime=_runtime())
     census_path = tmp_path / "census.json"
     census_path.write_text(json.dumps(census))
     canonical = cc.capture_identity(census_path, calibration=calibration, max_act_rows=MAX_ROWS,
         model_load_contract=contract, attention_implementation="eager")
-    rows = torch.randn(4, 128)
+    rows = torch.randn(4, dense_shape[1])
     capture = cc.publish_capture(tmp_path / "canonical", census_path=census_path,
         identity=canonical, acts={DENSE_UNIT: rows}, hessians={DENSE_UNIT: rows.T @ rows},
         counts=census["counts"], maxima=census["max_abs"])
-    ids = torch.randint(2, 128, (N_SEQUENCES, SEQ_LEN), generator=torch.Generator().manual_seed(31))
     return SimpleNamespace(source=source, text_config=text_config, mtp=mtp, census=census,
                            census_path=census_path, canonical=canonical, capture=capture,
                            ids=ids, root=tmp_path)
@@ -583,6 +658,14 @@ def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
         contract = glm_mtp.mtp_layer_initialization_contract(layer, receipt, input_manifest=final_ref)
         wrapper = glm_mtp.MtpCheckpointModel(layer)
         units = glm_mtp.mtp_priced_units(wrapper, PROFILE)
+        # The producer's projection of the MTP stack, asked once on the meta
+        # layer, then checked byte for byte against the loaded one.
+        carried = glm_mtp_capture.mtp_expert_projection(
+            str(env.source), _meta_wrapper(env.text_config), PROFILE, base_census=env.census,
+            out_path=env.root / "projection" / "producer-answer.json")
+        checked = glm_mtp_capture.check_mtp_expert_projection(
+            carried, wrapper, PROFILE, model_path=str(env.source), source_authentication=owner)
+        assert set(checked) == _mtp_routed(env)
         read, stream = glm_mtp_capture.final_hidden_stream(
             final_manifest, N_SEQUENCES, read_ahead_bytes=2 * SEQ_LEN * 64 * 4)
         moe_inputs, finals = [], []
@@ -609,7 +692,7 @@ def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
             units=units, counts=counts, max_abs=maxima, groups=groups,
             model_load_contract=contract,
             attention_implementation=layer.config._attn_implementation,
-            capture_runtime=_runtime())
+            capture_runtime=_runtime(), expert_projection=carried)
         census_path = env.root / "mtp-census.json"
         identity, census_sha256, sealed = glm_mtp_capture.publish_mtp_capture(
             env.root / "mtp-capture", census=census, census_path=census_path,
@@ -658,11 +741,76 @@ def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
     assert counts[gate] == N_SEQUENCES * (SEQ_LEN - 1) == x.shape[0]
     torch.testing.assert_close(hessians[gate], x.T @ x, rtol=1e-5, atol=1e-5)
 
-    # A later consumer binds the published capture like any selected source.
+    # A later consumer binds the published capture like any selected source,
+    # and the campaign prices every routed unit on the census's projection
+    # without asking the producer again.
+    from prismaquant.tessera_campaign import (_project_expert_population,
+                                              _require_campaign_population)
+    from prismaquant.tessera_expert_projection import CARRIED_PROJECTION_SCHEMA
+
+    assert census["expert_projection"] == carried
+    assert carried["schema"] == CARRIED_PROJECTION_SCHEMA
+    assert carried["request"] == {f"{prefix}mlp.experts": BODY_REQUEST}
+    assert carried["producer"]["source"] == env.census["expert_projection"]["producer"]["source"]
+    population = _require_campaign_population(wrapper, PROFILE, 1)
     consumer = cc.authenticate_selected_capture_source(
         census_path, sealed["path"], expected_sha256=sealed["sha256"], model=str(env.source),
         max_act_rows=MAX_ROWS, attention_implementation="eager")
-    consumer.close()
+    try:
+        reused, projected = _project_expert_population(
+            population, weights={member.qname: member.weight for member in population.members},
+            menus={}, model_path=str(env.source), cache_dir=env.root / "campaign-cache",
+            measured=_mtp_routed(env), projection=census["expert_projection"],
+            source_authentication=consumer)
+    finally:
+        consumer.close()
+    assert reused == carried
+    assert set(projected) == _mtp_routed(env)
+    assert not (env.root / "campaign-cache" / "expert_projection.json").exists()
+
+
+def test_projection_is_the_body_census_question_about_the_mtp_stack(mtp_source):
+    """The projection phase asks the producer once, on the meta layer, the
+    nominal question the body census recorded; a base census that recorded
+    none, or several, gives it nothing to derive from."""
+    env = mtp_source
+    stack = f"{PREFIX}mlp.experts"
+    carried = glm_mtp_capture.mtp_expert_projection(
+        str(env.source), _meta_wrapper(env.text_config), PROFILE, base_census=env.census,
+        out_path=env.root / "answer.json")
+    assert set(carried["stacks"]) == {stack}
+    assert set(carried["stacks"][stack]) == _mtp_routed(env)
+    assert carried["producer"]["stacks"][stack]["experts"] == env.text_config.n_routed_experts
+    assert carried["plan_attempts"] == [{"request": {stack: BODY_REQUEST}, "refused": None}]
+
+    mixed = json.loads(json.dumps(env.census))
+    mixed["expert_projection"]["request"]["model.language_model.layers.0.mlp.experts"] = dict(
+        BODY_REQUEST, grid="E2M1")
+    with pytest.raises(RuntimeError, match="nominal"):
+        glm_mtp_capture.mtp_projection_request(mixed, [stack])
+    silent = json.loads(json.dumps(env.census))
+    del silent["expert_projection"]["request"]
+    with pytest.raises(RuntimeError, match="nominal"):
+        glm_mtp_capture.mtp_projection_request(silent, [stack])
+
+
+def test_projection_check_refuses_a_layer_the_producer_did_not_read(mtp_source):
+    """The census carries the projection only after the loaded layer's bytes
+    equal the producer's source tensors, unit by unit."""
+    env = mtp_source
+    carried = glm_mtp_capture.mtp_expert_projection(
+        str(env.source), _meta_wrapper(env.text_config), PROFILE, base_census=env.census,
+        out_path=env.root / "answer.json")
+    layer, _ = glm_mtp.load_mtp_layer(env.source, env.text_config, profile=PROFILE,
+                                      dtype=torch.float32, experts_implementation="eager")
+    wrapper = glm_mtp.MtpCheckpointModel(layer)
+    assert set(glm_mtp_capture.check_mtp_expert_projection(
+        carried, wrapper, PROFILE, model_path=str(env.source))) == _mtp_routed(env)
+    with torch.no_grad():
+        layer.mlp.experts.down_proj[2, 0, 0] += 1.0
+    with pytest.raises(RuntimeError, match="byte-for-byte"):
+        glm_mtp_capture.check_mtp_expert_projection(
+            carried, wrapper, PROFILE, model_path=str(env.source))
 
 
 def test_derived_census_must_name_the_canonical_source(mtp_source, tmp_path):
@@ -704,6 +852,10 @@ def test_derived_census_must_name_the_canonical_source(mtp_source, tmp_path):
         owner.close()
 
 
+# The CLI loads the MTP layer in BF16, as the body's source runner does, and the
+# projection check compares the loaded experts byte for byte with the source.
+# GLM-5.3-Flash's checkpoint is BF16, so the tiny MTP layer is stored in BF16 here.
+@pytest.mark.parametrize("mtp_source", [torch.bfloat16], indirect=True)
 def test_cli_runs_both_phases_from_the_body_plan(mtp_source, monkeypatch):
     """``tools/glm_mtp_capture`` reads the body's plan, its boundary entries
     and its prepared dispatch, and publishes a capture a consumer accepts."""
@@ -762,6 +914,29 @@ def test_cli_runs_both_phases_from_the_body_plan(mtp_source, monkeypatch):
     assert final["inputs"]["plan"]["sha256"] == _sha(plan_path)
     assert final["inputs"]["boundaries"]["sha256"] == _sha(boundary_path)
 
+    projection_dir = env.root / "cli-projection"
+    assert cli.main(["--phase", "projection", "--plan", str(plan_path),
+                     "--plan-sha256", _sha(plan_path), "--out", str(projection_dir)]) == 0
+    report = json.loads((projection_dir / "projection-run.json").read_text())
+    projection_path = projection_dir / "mtp-projection.json"
+    assert report["projection"]["sha256"] == _sha(projection_path)
+    assert report["units"] == len(_mtp_routed(env))
+    projection = json.loads(projection_path.read_text())
+
+    # The projection publishes once, and a second run refuses before the
+    # producer hashes the checkpoint again.
+    from prismaquant import tessera_expert_projection
+
+    def producer_again(*_args, **_kwargs):
+        raise AssertionError("the producer was asked again")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(tessera_expert_projection, "request_expert_projection", producer_again)
+        with pytest.raises(RuntimeError, match="publishes once"):
+            cli.main(["--phase", "projection", "--plan", str(plan_path),
+                      "--plan-sha256", _sha(plan_path), "--out", str(projection_dir)])
+    assert json.loads(projection_path.read_text()) == projection
+
     phase2 = env.root / "cli-capture"
     census_path = env.root / "cli-mtp-census.json"
     capture_args = ["--phase", "capture", "--plan", str(plan_path),
@@ -770,6 +945,11 @@ def test_cli_runs_both_phases_from_the_body_plan(mtp_source, monkeypatch):
                     "--final-hidden-sha256", _sha(final_path), "--out", str(phase2),
                     "--census-out", str(census_path), "--device", "cpu",
                     "--read-ahead-mb", "1"]
+    # A census without the producer's projection cannot price routed units.
+    with pytest.raises(SystemExit):
+        cli.main(capture_args)
+    capture_args += ["--expert-projection", str(projection_path),
+                     "--expert-projection-sha256", _sha(projection_path)]
     assert cli.main(capture_args) == 0
     report = json.loads((phase2 / "capture-run.json").read_text())
     assert report["experts_implementation"] == "eager"
@@ -778,6 +958,8 @@ def test_cli_runs_both_phases_from_the_body_plan(mtp_source, monkeypatch):
     assert census["model_load_contract"]["schema"] == "prismaquant.mtp_layer_initialization.v1"
     assert census["model_load_contract"]["experts_implementation"] == "eager"
     assert census["mtp_extension"]["final_hidden"]["sha256"] == _sha(final_path)
+    assert census["expert_projection"] == projection
+    assert report["projection_checked_units"] == len(_mtp_routed(env))
     consumer = cc.authenticate_selected_capture_source(
         census_path, report["capture"]["path"], expected_sha256=report["capture"]["sha256"],
         model=str(env.source), max_act_rows=MAX_ROWS, attention_implementation="eager")

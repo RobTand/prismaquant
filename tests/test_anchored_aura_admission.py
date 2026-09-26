@@ -1,7 +1,7 @@
 """Allocator admission semantics for anchored-AURA cost rows (P0).
 
-The campaign in ``anchored_cost``/``cb_anchored_cost`` prices a whole menu from
-one production-arm render per unit. Those rows are a distinct provenance, and
+The campaign in ``anchored_cost`` prices a whole menu from one production-arm
+render per unit. Those rows are a distinct provenance, and
 these tests pin the four behaviours the allocator owes them — plus, more
 importantly, the four things the admission must NOT do:
 
@@ -70,9 +70,9 @@ def test_anchored_row_needs_all_three_stamps_and_refuses_near_misses():
 def test_anchored_zero_is_retained_but_the_guard_keeps_full_strength():
     """The zero-admission bypass is scoped, not a global weakening."""
     stats = {"h_trace": 1.0}
-    fmt = "FP8_CB_K28"
+    fmt = "NVFP4"
     assert fr.get_format(fmt).act_quant_changes_input, (
-        "test premise: the CB rungs quantize activations")
+        "test premise: the rung quantizes activations")
 
     anchored_zero = _anchored_entry(predicted_dloss=0.0)
     assert not candidates.cost_entry_prices_unmeasured_activation_at_zero(
@@ -100,7 +100,7 @@ def test_anchored_zero_is_retained_but_the_guard_keeps_full_strength():
 
 def test_anchored_row_is_priced_directly_and_stamped_with_its_own_branch():
     stats = {"h_trace": 2.0}
-    fmt = "FP8_CB_K28"
+    fmt = "FP8_E4M3"
     entry = _anchored_entry(predicted_dloss=7.5e-6)
 
     assert candidates.cost_entry_activation_pricing_branch(
@@ -115,7 +115,7 @@ def test_anchored_row_is_priced_directly_and_stamped_with_its_own_branch():
 
 
 def test_anchored_rows_never_enter_the_p5a_calibration_sample():
-    fmt = fr.get_format("FP8_CB_K28")
+    fmt = fr.get_format("FP8_E4M3")
     stats = {"unit.0": {"h_trace": 1.0}}
     costs = {"unit.0": {fmt.name: _anchored_entry()}}
 
@@ -161,23 +161,32 @@ def test_the_flag_is_not_documented_as_an_activation_error_model():
         "documented on the admission predicate must be re-derived")
 
 
-def test_activation_path_is_constant_across_k_within_each_cb_family():
+# One Tessera family per activation route, at several rates each. Until
+# 2026-09-25 this bound was asserted over the codebook families' K ladders;
+# that lane was archived (#1304), and Tessera's rate ladders are the live
+# within-family ladders an anchored row prices.
+_TESSERA_LADDERS = {
+    "E2M1_K2": ("TESSERA_E2M1_K2_R512", "TESSERA_E2M1_K2_R896"),
+    "E2M1_K1": ("TESSERA_E2M1_K1_R256", "TESSERA_E2M1_K1_R512"),
+    "E4M3_K1": (
+        "TESSERA_E4M3_K1_R512", "TESSERA_E4M3_K1_R896", "TESSERA_E4M3_K1_R1024",
+    ),
+}
+
+
+@pytest.mark.parametrize("family", sorted(_TESSERA_LADDERS))
+def test_activation_path_is_constant_across_rate_within_each_family(family):
     """The bound on the standing limitation, asserted rather than assumed.
 
     Blindness that is constant within a family cannot reorder that family's
     rungs; it can only move the family-choice margin. If a future rung breaks
     this, the limitation stops being merely a family-margin question.
     """
-    by_family: dict[str, set[bool]] = {}
-    for spec in candidates.fr.REGISTRY.values():
-        family = str(getattr(spec, "family", "") or "")
-        if family in ("nvfp4_cb", "fp8_cb"):
-            by_family.setdefault(family, set()).add(
-                bool(spec.act_quant_changes_input))
-
-    assert set(by_family) == {"nvfp4_cb", "fp8_cb"}
-    for family, paths in by_family.items():
-        assert paths == {True}, (family, paths)
+    paths = {
+        bool(fr.get_format(name).act_quant_changes_input)
+        for name in _TESSERA_LADDERS[family]
+    }
+    assert len(paths) == 1, (family, paths)
 
 
 def test_terminals_keep_the_passthrough_contract_not_the_aura_branch():

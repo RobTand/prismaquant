@@ -199,36 +199,6 @@ def test_cb_imatrix_source_is_reuse_identity_for_harvest_and_render(tmp_path):
         assert "CB_IMATRIX_SOURCE" in "\n".join(messages)
 
 
-def test_cb_learned_v2_receipt_and_source_identity_are_reuse_identity(tmp_path):
-    base = _full_settings()
-    base.update({
-        "CB_LEARNED_TRAINER_VERSION": "v1",
-        "CB_LEARNED_PROMOTION_RECEIPT_SHA256": "",
-        "CB_LEARNED_SOURCE_MODEL_IDENTITY_SHA256": "",
-    })
-
-    for changed_key, changed_value in (
-        ("CB_LEARNED_TRAINER_VERSION", "v2"),
-        ("CB_LEARNED_PROMOTION_RECEIPT_SHA256", "a" * 64),
-        (
-            "CB_LEARNED_SOURCE_MODEL_IDENTITY_SHA256",
-            "b" * 64,
-        ),
-    ):
-        artifact = tmp_path / f"bundle-{changed_key}.pqcb"
-        pipeline.check_stage_settings(
-            artifact, "cb-learned-bundle", _document(**base)
-        )
-        artifact.write_bytes(b"bundle")
-
-        changed = dict(base, **{changed_key: changed_value})
-        code, messages = pipeline.check_stage_settings(
-            artifact, "cb-learned-bundle", _document(**changed)
-        )
-        assert code == 2
-        assert changed_key in "\n".join(messages)
-
-
 def test_missing_manifest_is_reused_unverified_and_never_stamped(tmp_path):
     """Renamed 2026-09-16 from `test_missing_manifest_only_warns`.
 
