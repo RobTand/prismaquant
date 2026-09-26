@@ -771,5 +771,7 @@ def test_a_scoped_source_walks_only_its_own_layers(tmp_path, monkeypatch):
     assert set(cache.metadata['verified_cells']) == set(data.cells)
     assert [event for event in events if event[0] == 'install'] == [('install', 2)]
     assert [event for event in events if event[0] == 'unload'] == [('unload', 2)]
-    assert scheduled == [2]
+    # Past the last index a schedule is the no-op the body walk has always
+    # issued; no in-range layer outside the scope is ever scheduled.
+    assert [layer for layer in scheduled if layer < runner.num_layers] == [2]
     assert all(set(event[1]) <= {2} for event in events if event[0] == 'settled')

@@ -803,7 +803,7 @@ class StreamingContext:
                  expert_packer=None,
                  concat_merger=None, source_authentication=None,
                  source_snapshot_only=False, source_fp4_experts=False,
-                 source_layers=None):
+                 source_layers=None, source_scope=None):
         self.model = model
         self.base_model = base_model
         self.layers = layers
@@ -811,8 +811,11 @@ class StreamingContext:
         self.num_layers = num_layers
         # The checkpoint layers this context can read: every body layer, or a
         # source scope's own (``_build_streaming_context(source_scope=...)``).
+        # A scoped context reads, prefetches and installs only those layers
+        # and never runs the body forward (PQ #1316, #1338).
         self.source_layers = (tuple(range(num_layers)) if source_layers is None
                               else tuple(int(index) for index in source_layers))
+        self.source_scope = source_scope
         self.install_resolvers = install_resolvers
         self.weight_shard = weight_shard
         self.weight_ckpt = weight_ckpt
@@ -1020,6 +1023,10 @@ class StreamingContext:
         return released
 
     def schedule_prefetch(self, L: int):
+        if L not in getattr(self, 'source_layers', (L,)):
+            # Like an index past the last layer: a scope holds no such layer,
+            # so there is nothing to read ahead.
+            return None
         if getattr(self, 'source_snapshot_only', False):
             with self._inflight_lock:
                 if not getattr(self, '_snapshot_source_keys', None):
@@ -1163,6 +1170,9 @@ class StreamingContext:
         """
         if getattr(self, 'source_snapshot_only', False) and not getattr(self, '_snapshot_source_keys', None):
             raise RuntimeError('snapshot source must be configured before reading')
+        if L not in getattr(self, 'source_layers', (L,)):
+            raise RuntimeError(f'layer {L} is outside the source scope '
+                               f'{getattr(self, "source_scope", None)!r}')
         cached = self.layer_cache.get(L)
         if cached is not None:
             self._claim_inflight(L)
@@ -1244,6 +1254,8 @@ class StreamingContext:
         """Require actual source-state coverage for this complete traversal."""
         if getattr(self, 'source_snapshot_only', False):
             raise RuntimeError('snapshot-only source cannot attest full initialization')
+        if getattr(self, 'source_scope', None) is not None:
+            raise RuntimeError(f'source scope {self.source_scope!r} cannot attest full initialization')
         self._source_initialization_audit = _StreamingInitializationAudit(self)
 
     def source_initialization_contract(self):
@@ -1950,9 +1962,11 @@ def _build_streaming_context(model_path: str, *,
     (:meth:`ModelProfile.source_scope`, e.g. GLM's ``"mtp"``). The context
     then builds the scope's meta skeleton instead of the body's and maps
     checkpoint keys through the scope's ``live_name``; the weight map, packer,
-    authentication, cache and prefetch pool are this function's own. A scope
-    is snapshot-only: it requires ``source_snapshot_only``, so it has no
-    forward and no initialization audit."""
+    authentication, cache and prefetch pool are this function's own. A scoped
+    context reads, prefetches and installs only the scope's layers: selected
+    snapshots read them, and preparation installs them to check renders against
+    their live source weights (PQ #1338). It never runs the body forward and
+    never attests a full initialization."""
     if type(source_snapshot_only) is not bool:
         raise TypeError('source_snapshot_only must be a bool')
     if source_snapshot_only and source_authentication is None:
@@ -1972,8 +1986,6 @@ def _build_streaming_context(model_path: str, *,
         source_authentication.require_unchanged()
     scope = None
     if source_scope is not None:
-        if not source_snapshot_only:
-            raise RuntimeError(f'source scope {source_scope!r} is snapshot-only')
         from .model_profiles import detect_profile
         scope = detect_profile(model_path).source_scope(source_scope, model_path)
 
@@ -2013,7 +2025,7 @@ def _build_streaming_context(model_path: str, *,
     if scope is not None:
         skeleton = scope.build_skeleton(attn_implementation)
         print(f"{log_prefix} source scope {scope.name!r}: layers {list(scope.layers)} "
-              f"under {scope.layers_prefix!r} (snapshot-only)", flush=True)
+              f"under {scope.layers_prefix!r}", flush=True)
     else:
         if multimodal:
             staged = stage_multimodal(model_path)
@@ -2315,5 +2327,6 @@ def _build_streaming_context(model_path: str, *,
         source_snapshot_only=source_snapshot_only,
         source_fp4_experts=declared_fp4_expert_dtype(model_path),
         source_layers=source_layers,
+        source_scope=None if scope is None else scope.name,
         **authenticated,
     )

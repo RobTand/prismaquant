@@ -2973,8 +2973,22 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/glm-mtp-encode-1271`.
+As of: 2026-09-25 · `claude/glm-mtp-prepare-1338`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/glm-mtp-prepare-1338`) for **joint
+preparation over a source scope** (PQ #1338, M4 of #1271, P1). A source scope
+is no longer snapshot-only. A scoped context installs its own layers, so
+`prepare_cache` can check the GLM MTP layer's renders against live source
+weights. It still refuses the body forward, the full-initialization audit and
+any layer outside the scope. `prepare_cache` walks `runner.source_layers`,
+which is every layer on the body runner, so body preparation is unchanged. A
+joint plan's `source_scope` reaches `build_streamed_causal_lm`. Gates:
+`tests/test_joint_qualification_windows.py` (a scoped walk installs, prefetches
+and settles only its layers), `tests/test_glm_mtp_source_scope.py` (the
+installed MTP layer's live weights equal the MTP loader's bytes, and neither a
+forward nor an out-of-scope read runs) and
+`tests/test_tessera_joint_aura.py` (a plan's scope reaches the builder).
 
 Re-stamped (2026-09-25, `claude/glm-mtp-encode-1271`) for **a
 profile-declared source scope, and the GLM MTP layer priced through it**
@@ -22578,15 +22592,22 @@ KV-cotangent path now grafts through — §7.5), `register_vendored_modeling()` 
 `vllm_fused_moe_scheme_projection_names` (`:443-468`) is intentionally hardcoded to vLLM's
 canonical names — §6.2.
 
-**`source_scope` — an out-of-body source for selected snapshots (PQ #1316).**
+**`source_scope` — an out-of-body source for selected snapshots and preparation (PQ #1316, #1338).**
 `checkpoint_to_live_name` drops layers outside the decoder body, such as GLM's
 MTP layer. A profile that needs one priced declares it by name:
 `source_scope(name, model_path)` returns a `SourceScope` (`base.py`) with the
 checkpoint layers, the index bound, the live layer prefix, the census load
 contract, a `live_name` key map and a meta-skeleton builder. The base refuses
 every name. `glm5_next` declares `mtp`. The streaming context, resource
-planners and campaign take the name (`--source-scope`), and the scope is
-snapshot-only: it has no forward.
+planners and campaign take the name (`--source-scope`). A scoped context reads,
+prefetches and installs only the scope's layers (`StreamingContext.source_layers`):
+it ignores a prefetch of any other layer, refuses to read one, and refuses the
+body forward and the full-initialization audit. Campaign rows snapshot the
+scope's selected tensors; joint preparation (`tessera_joint_aura.prepare_cache`)
+installs them to check renders against live source weights, walking
+`runner.source_layers` with its prefetch and settlement windows over that walk.
+A joint plan names its scope as a top-level `source_scope`, which `execute`
+passes to `build_streamed_causal_lm`.
 
 Routed-expert classification for the AURA hybrid is also a profile boundary, not a shape
 heuristic. `routed_experts.py` treats `packed_expert_format_group(qname)` as the membership
