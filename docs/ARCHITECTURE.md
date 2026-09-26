@@ -6,6 +6,11 @@ below is derived from `prefill_frontier.py`, the allocator's shared writer,
 `layer_config.py`, `tessera_export_lane.py`, and `shipcard.py`. No pipeline
 or serving default changes; no new runtime or placement qualification.
 
+Re-stamped 2026-09-26 (`astra/routed-capture-all-layers-1427`, PQ #1427):
+research native routed-input acquisition now covers GLM source layers 3..44.
+The source initialization schemas and the PACT runtime/placement gates are
+unchanged. This is code coverage, not a recorded 42-layer GPU pass.
+
 The Tessera export preflight joins a GLM allocation in the source namespace
 (2026-09-26, `ws-serve/glm-source-unit-shapes`, PQ #1388). The allocation,
 Tessera's `plan_from_layer_config.py` and its exporter all name units by
@@ -24930,14 +24935,33 @@ library path shared by any two rows must have identical bytes. The intake
 gate recomputes this record from the independently consumed actual panels.
 Legacy contexts keep their existing single-structure grammar and equality.
 
-Fresh GLM native routing can carry a completed `streaming_prefix_initialization.v1`
-witness for source layers 0 through 3. This is a proper-prefix observation from
-`StreamingContext`'s existing initialization auditor, not a full pretrained-load
-contract. Intake checks the complete source identity and live checkpoint map,
-actual head coverage, all four predecessor layers, original calibration sample
-zero, eager capture runtime, and the exact stop before the layer-3 expert call.
-DEV source-cache reuse remains explicitly uncertified in the raw receipt and the
-retained per-operator context of a mixed runtime cohort.
+Fresh GLM native routing carries the existing initialization auditor's witness
+for exactly the source traversal through its routed layer. Layers 3..43 use
+`streaming_prefix_initialization.v1` over every layer 0..L, including actual
+head coverage; layer 44 uses the existing completed
+`streaming_initialization.v1` text-forward witness over all 45 layers. A full
+witness cannot substitute for an earlier prefix, and the proper-prefix schema
+still refuses a full traversal. Neither witness claims an HF pretrained load.
+Intake checks the complete source identity and live checkpoint map, original
+calibration sample zero, eager capture runtime, and the observation boundary
+before the matching layer's original expert call. DEV source-cache reuse stays
+explicitly uncertified in the raw receipt and retained per-operator context.
+
+`tools/capture_glm_routed_layers.py` supplies these inputs in one streamed
+source pass. It binds Stage B's complete 512x512 calibration, but executes only
+its first sequence, the native panel's existing scope, not a full-draw quality
+probe. `StreamedCausalLM.visit_layer_batches` owns traversal and the existing
+two-slot, one-ahead `StreamingContext` owns source residency. The canonical
+capture's `CaptureSourceAuthentication` verifies each consumed shard before
+returning its tensors; there is no all-checkpoint payload verification barrier
+or second loader. A pre-hook records original routes, then the original expert
+forward continues to produce the next layer's input. Each existing raw boundary
+payload passes `routed_boundary_inputs` (including `_calibration_and_capture`)
+before publication. Only a complete 42-entry pass publishes `receipt.json`.
+No runtime world equality, served-route-family, fixed-resource observation,
+shape-only refusal, placement claim, or emitter exit-code gate changes.
+Gates: `tests/test_native_prefix_intake.py`, `tests/test_glm_routing_capture.py`.
+The real GLM pass and its GPU/profile evidence remain separate acceptance.
 
 The acquisition adapter transports leased source spans, wire bytes and PWC renders
 into a private local directory owned by the same admitted action. Same-inode
