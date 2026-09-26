@@ -9,8 +9,9 @@ generation under ``/mnt/shared/prismabuild-fleet/repo`` carries both
 ``src/prismabuild/decomposition.py`` and a ``def decompose(`` entry point in
 ``tools/fleet/pbcampaign.py``, which :func:`decomposition_support` probes.  On
 2026-09-25 the published generation carried the module but not that entry
-point, so the probe still reports it unsupported.  Until it does, the only
-place this adapter is exercised is **in process**, against a PB checkout, by
+point, so the probe still reports it unsupported: decomposition is not
+deployed to the fleet.  Until it is, the only place this adapter is exercised
+is **in process**, against a PB checkout, by
 ``tests/test_quality_prefill_pb_adapter_serve_once.py``.
 
 PrismaBuild advertises no capability token for decomposition the way it does for
