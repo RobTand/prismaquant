@@ -296,6 +296,41 @@ def test_adopted_full_source_sha_reuses_bytes_but_rejects_same_size_mutation(
         owner.close()
 
 
+def test_the_owner_adopts_the_proof_its_pass_just_wrote(complete_source, monkeypatch, tmp_path):
+    """PQ #1363: with no cache bound, the prepare hashed the source twice --
+    once to write the identity cache and again in the owner's completion
+    gate. The owner now adopts the cache the pass wrote, once, and the
+    completion gate reads no payload bytes."""
+    from prismaquant import cost_streaming
+    from prismaquant import tessera_calibration_cache as cc
+    from prismaquant.tessera_joint_aura import _adopt_built_source_identity
+
+    f = complete_source
+    shards, fingerprints = [], []
+    for name in sorted(f.tensors):
+        path = f.root / name
+        shards.append({'path': str(path), 'size': path.stat().st_size, 'sha256': cc.sha256(path)})
+        fingerprints.append(cost_streaming.stat_fingerprint(path, path.stat()))
+    identity = {'shards': shards,
+                'checkpoint_weight_map': json.loads(
+                    (f.root/'model.safetensors.index.json').read_text())['weight_map']}
+    cache = tmp_path / 'source-identity.json'
+    cache_record = {'identity': identity, 'fingerprints': fingerprints}
+    cache.write_text(json.dumps(cache_record))
+    monkeypatch.setattr(cost_streaming, '_read_streamed_model_identity_cache',
+                        lambda *_a, **_k: (cache_record, identity))
+    monkeypatch.setattr(cost_streaming, '_local_checkpoint_shards',
+                        lambda *_a, **_k: (identity['checkpoint_weight_map'],
+                                           [Path(row['path']) for row in shards]))
+    with cc.authenticate_selected_capture_source(**f.kwargs) as owner:
+        assert _adopt_built_source_identity(owner, tmp_path / 'absent.json') == 0
+        assert owner.adopted_identity_cache_sha256 is None
+        assert _adopt_built_source_identity(owner, cache) == len(shards)
+        assert owner.adopted_identity_cache_sha256 is not None
+        assert _adopt_built_source_identity(owner, cache) == 0
+        assert owner.authenticate_complete_source()['payload_bytes_hashed'] == 0
+
+
 @pytest.mark.parametrize('fstype,shift,accepted', [
     ('nfs4', {'device': 2}, True),      # another mount of the same export
     ('ext4', {'device': 2}, False),     # a local device number binds the object
