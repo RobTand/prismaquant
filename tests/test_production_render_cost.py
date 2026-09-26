@@ -14,11 +14,7 @@ from prismaquant.source_class_format_plan import (
     SourceClassFormatPlan,
     UnitFormatPlan,
 )
-from prismaquant.production_weight_cache import (
-    ProductionWeightCache,
-    bind_cb_render_identity_source_weights,
-    build_production_cache_cb_render_identity,
-)
+from prismaquant.production_weight_cache import ProductionWeightCache
 
 
 def _cache_with_scores() -> ProductionWeightCache:
@@ -313,72 +309,10 @@ def test_render_cost_stays_inert_on_pre_r14_artifacts():
     assert payload["meta"]["calib_hash"] is None
 
 
-def test_render_cost_carries_stored_cb_context_not_current_env(monkeypatch):
-    from prismaquant.nvfp4_cb_footprint import (
-        CBSerializationContext,
-        cb_serialization_context_stamp,
-    )
-
-    qname = "layers.0.q_proj"
-    fmt = "NVFP4_CB_K16"
-    context = CBSerializationContext.legacy_v1()
-    col_weights = {qname: torch.linspace(0.1, 1.0, 256)}
-    identity = build_production_cache_cb_render_identity(
-        {qname: (fmt,)},
-        cb_serialization_context=context,
-        col_weights=col_weights,
-        render_levers={"weighted_vq": True},
-        render_mechanism_plan=[],
-    )
-    identity = bind_cb_render_identity_source_weights(
-        identity,
-        {qname: torch.zeros(2, 256)},
-    )
-    cache = ProductionWeightCache(
-        weights={(qname, fmt): torch.ones(2, 256)},
-        levers={"weighted_vq": True},
-        metadata={
-            "cb_render_identity": identity,
-            "render_scores": {
-                "schema": "prismaquant.production_render_scores.v1",
-                "records": {
-                    f"{qname}|{fmt}": {
-                        "qname": qname,
-                        "format": fmt,
-                        "metric": "output_mse",
-                        "score": 0.25,
-                        "score_sum": 2.0,
-                        "normalizer": 8.0,
-                        "activation_rows": 2,
-                    },
-                },
-            },
-        },
-    )
-    baseline = {
-        "formats": [fmt],
-        "costs": {qname: {fmt: {"predicted_dloss": 9.0}}},
-        "provenance": {
-            "cb_serialized_payload": cb_serialization_context_stamp(
-                context,
-                formats=[fmt],
-            ),
-        },
-    }
-    # A consumer launched under today's v2 defaults must not relabel a v1
-    # render cache as v2.
-    monkeypatch.setenv("CB_SCALE_CODING", "two_tier")
-    monkeypatch.setenv("CB_CODEBOOK_SOURCE", "lattice")
-
-    payload = synthesize_production_render_cost_payload(cache, baseline)
-
-    assert payload["provenance"]["cb_serialized_payload"] == (
-        identity["cb_serialized_payload"]
-    )
-    assert payload["provenance"]["cb_render_identity"] == identity
-
-
-def test_render_cost_rejects_legacy_cb_cache_without_identity():
+def test_render_cost_refuses_a_retired_codebook_rung():
+    # A stale cost.pkl naming a retired codebook rung (the retired codebook
+    # lane, archived 2026-09-25, #1304) refuses; it is neither dropped from
+    # the menu nor priced from a leftover cache tensor.
     fmt = "NVFP4_CB_K16"
     qname = "layers.0.q_proj"
     cache = ProductionWeightCache(
@@ -391,108 +325,5 @@ def test_render_cost_rejects_legacy_cb_cache_without_identity():
         "costs": {qname: {fmt: {"predicted_dloss": 9.0}}},
     }
 
-    with pytest.raises(ValueError, match="legacy or partially resumed"):
-        synthesize_production_render_cost_payload(cache, baseline)
-
-
-def test_render_cost_does_not_relabel_stale_cb_score_without_cache_tensor():
-    from prismaquant.nvfp4_cb_footprint import CBSerializationContext
-
-    qname = "layers.0.q_proj"
-    fmt = "NVFP4_CB_K16"
-    source = torch.arange(512, dtype=torch.float32).reshape(2, 256)
-    identity = build_production_cache_cb_render_identity(
-        {qname: [fmt]},
-        cb_serialization_context=CBSerializationContext.production(),
-        col_weights={qname: torch.ones(256)},
-        render_levers={"weighted_vq": True},
-        render_mechanism_plan=[],
-    )
-    identity = bind_cb_render_identity_source_weights(
-        identity,
-        {qname: source},
-    )
-    cache = ProductionWeightCache(
-        # The score exists, but the corresponding fresh rendered tensor does
-        # not. It must not be admitted under the otherwise-valid identity.
-        weights={},
-        levers={"weighted_vq": True},
-        metadata={
-            "cb_render_identity": identity,
-            "render_scores": {
-                "records": {
-                    f"{qname}|{fmt}": {
-                        "qname": qname,
-                        "format": fmt,
-                        "metric": "output_mse",
-                        "score": 0.25,
-                        "score_sum": 2.0,
-                        "normalizer": 8.0,
-                    },
-                },
-            },
-        },
-    )
-    baseline = {
-        "formats": [fmt],
-        "costs": {qname: {fmt: {"predicted_dloss": 9.0}}},
-        "provenance": {
-            "cb_serialized_payload": identity["cb_serialized_payload"],
-            "cb_render_identity": identity,
-        },
-    }
-
-    payload = synthesize_production_render_cost_payload(cache, baseline)
-
-    entry = payload["costs"][qname][fmt]
-    assert entry["predicted_dloss"] == 9.0
-    assert entry["cost_source"] == "fallback_baseline"
-    assert payload["meta"]["render_score_entries"] == 0
-
-
-def test_render_cost_rejects_cb_fallback_from_different_imatrix():
-    from prismaquant.nvfp4_cb_footprint import CBSerializationContext
-
-    qname = "layers.0.q_proj"
-    fmt = "NVFP4_CB_K16"
-    context = CBSerializationContext.production()
-    source = torch.arange(512, dtype=torch.float32).reshape(2, 256)
-    col_a = {qname: torch.ones(256)}
-    col_b = {qname: torch.ones(256) * 2}
-
-    def identity(col_weights):
-        value = build_production_cache_cb_render_identity(
-            {qname: [fmt]},
-            cb_serialization_context=context,
-            col_weights=col_weights,
-            render_levers={"weighted_vq": True},
-            render_mechanism_plan=[],
-        )
-        return bind_cb_render_identity_source_weights(
-            value,
-            {qname: source},
-        )
-
-    cache_identity = identity(col_b)
-    baseline_identity = identity(col_a)
-    cache = ProductionWeightCache(
-        weights={(qname, fmt): source.clone()},
-        levers={"weighted_vq": True},
-        metadata={
-            "cb_render_identity": cache_identity,
-            "render_scores": {"records": {}},
-        },
-    )
-    baseline = {
-        "formats": [fmt],
-        "costs": {qname: {fmt: {"predicted_dloss": 1.0}}},
-        "provenance": {
-            "cb_serialized_payload": baseline_identity[
-                "cb_serialized_payload"
-            ],
-            "cb_render_identity": baseline_identity,
-        },
-    }
-
-    with pytest.raises(ValueError, match="imatrix values differ"):
+    with pytest.raises(fr.RetiredFormatError, match="gridbook_lane"):
         synthesize_production_render_cost_payload(cache, baseline)

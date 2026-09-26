@@ -439,7 +439,7 @@ def test_streaming_render_matches_resident():
 
 
 def test_streaming_cli_requires_scope_specific_inputs_and_cache_dirs():
-    """--streaming validates format-menu/assignment inputs before model load."""
+    """--streaming validates its scope and inputs before model load."""
     import argparse
 
     from prismaquant.build_production_cache import _run_streaming
@@ -457,7 +457,8 @@ def test_streaming_cli_requires_scope_specific_inputs_and_cache_dirs():
         # before it reaches the validation it exists to cover.
         format_plan=None,
     )
-    # Format-menu is supported, but still requires cache + activation dirs.
+    # A streamed format menu is refused: it served only the retired codebook
+    # lane (archived 2026-09-25, #1304).
     assert _run_streaming(
         argparse.Namespace(**base), ["NVFP4"], {}, torch.bfloat16) == 2
     # Assignment scope additionally requires a concrete layer config.

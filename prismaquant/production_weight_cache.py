@@ -5986,9 +5986,15 @@ def fill_production_weight_cache(
         )
 
     from prismaquant import format_registry as fr
+    from prismaquant.schemas import refuse_retired_codebook_format
 
     def _canon(fmt: str) -> str:
-        return fr.canonical_format_name(str(fmt).strip().upper())
+        canonical = fr.canonical_format_name(str(fmt).strip().upper())
+        # The render loop records a render failure and moves on, and resumes
+        # an existing shard without rendering. Neither may absorb a retired
+        # codebook rung (archived 2026-09-25, #1304), so it refuses here.
+        refuse_retired_codebook_format(canonical)
+        return canonical
 
     requested_formats = tuple(
         dict.fromkeys(_canon(f) for f in formats if str(f).strip())
@@ -7502,9 +7508,14 @@ def fill_packed_expert_cache_entries(
     cache_dir_path = Path(cache_dir) if cache_dir is not None else None
     if cache_dir_path is not None:
         cache_dir_path.mkdir(parents=True, exist_ok=True)
+    from prismaquant.schemas import refuse_retired_codebook_format
 
     def _canon(fmt: str) -> str:
-        return fr.canonical_format_name(str(fmt).strip().upper())
+        canonical = fr.canonical_format_name(str(fmt).strip().upper())
+        # A retired codebook rung (archived 2026-09-25, #1304) refuses here,
+        # before the render loop can record it as a failure or resume it.
+        refuse_retired_codebook_format(canonical)
+        return canonical
 
     if force_format is None and render_assignment is None:
         raise ValueError(
