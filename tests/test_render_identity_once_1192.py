@@ -236,7 +236,7 @@ def _rehash_every_read(self, name, fmt, tensor):
 
 MAIN = [(pwc.ProductionWeightCache, "resident_render_identity", _rehash_every_read),
         (pwc.ProductionWeightCache, "_loaded_render_identity",
-         lambda self, tensor, observed: None)]
+         lambda self, tensor, observed, requested=None: None)]
 # The memo alone: hashed lazily, on the main thread, once per load.
 MEMO = MAIN[1:]
 
@@ -393,9 +393,9 @@ def test_a_bad_file_refuses_its_window_and_leaves_nothing_resident(tmp_path, dam
     loads = []
     original = torch.load
 
-    def counted_load(*args, **kwargs):
-        loads.append(True)
-        return original(*args, **kwargs)
+    def counted_load(source, *args, **kwargs):
+        loads.append(source.getvalue() if hasattr(source, "getvalue") else source)
+        return original(source, *args, **kwargs)
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(torch, "load", counted_load)
@@ -404,8 +404,10 @@ def test_a_bad_file_refuses_its_window_and_leaves_nothing_resident(tmp_path, dam
                                        max_workers=1, max_load_buffer_bytes=1 << 20):
                 pytest.fail("a window with a bad file was exposed")
     assert expected[1] in str(caught.value)
-    # One loader: the first file loaded, and the bad one was never
-    # deserialized; a missing file refused before any load.
-    assert len(loads) == (1 if damage == "not-a-zip" else 0)
+    # The bad file was never deserialized (its siblings may have been: the
+    # IO engine reads them concurrently); a missing file refused before any
+    # load.
+    assert b"not a torch archive" not in loads
+    assert len(loads) <= (len(paths) - 1 if damage == "not-a-zip" else 0)
     assert getattr(cache, "_resident_window_files", None) is None
     assert all(isinstance(value, str) for value in cache.weights.values())

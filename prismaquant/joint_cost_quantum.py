@@ -570,6 +570,10 @@ class QuantumCounters:
         # the boundary window it shares that budget with, and per probe the
         # rows read, their bytes and the seconds the pass waited for them.
         self.handoff_incoming = None
+        # The IO engine's read stream over the retained windows' renders
+        # (PQ #1291): entries and bytes read, the per-stream rate, rereads
+        # and reclaims, and every wait the replay spent on a window's loads.
+        self.io_engine = None
         self.phases = [{"name": str(chunk["name"]),
                         "start_bytes": int(chunk["start_bytes"]),
                         "end_bytes": int(chunk["end_bytes"]),
@@ -646,7 +650,8 @@ class QuantumCounters:
             "kernel_active_s": None, "wall_s": None,
         })
 
-    def close_window(self, window_index: int, *, kernel_active_s, wall_s) -> None:
+    def close_window(self, window_index: int, *, kernel_active_s, wall_s,
+                     load_wait_s=None) -> None:
         now = self._snapshot()
         block = self.windows[window_index]
         ram, stage, pool, _refused = self._delta(now, self._window_cursor)
@@ -655,6 +660,9 @@ class QuantumCounters:
         block["bytes_from_pool"] = pool
         block["kernel_active_s"] = kernel_active_s
         block["wall_s"] = wall_s
+        # The seconds the window waited for its renders' loads after its
+        # staged wait (PQ #1291); None when no read stream served it.
+        block["load_wait_s"] = load_wait_s
         self._window_cursor = now
 
     def chain_step(self, *, layers: int, backwards: int, wall_s: float,
@@ -713,6 +721,7 @@ class QuantumCounters:
                else {"handoff_emit": self.handoff_emit}),
             **({} if self.handoff_incoming is None
                else {"handoff_incoming": self.handoff_incoming}),
+            **({} if self.io_engine is None else {"io_engine": self.io_engine}),
             "phases": self.phases,
             "windows": self.windows,
             # Every closed span, in close order (prismaquant.io_spans).
@@ -1348,6 +1357,32 @@ def prepare_retained_window_read(window_index: int, *, record: Mapping,
     ``"unready-<verdict>"`` otherwise (the load below still owns every
     check and refuses on unlanded bytes).
     """
+    window_index = int(window_index)
+    progress.enter_read_phase(executable_render_phase_name(window_index))
+    return await_retained_window_read(window_index, record=record)
+
+
+def _retained_window_ready(window_index, cancel, *, record) -> bool:
+    """Whether the IO engine may read a window's renders now (PQ #1291).
+
+    A window whose renders are staged, or that has nothing to await, is
+    ready. One PrismaBuild has not landed is not read ahead; the window reads
+    it when it opens, after its own wait.
+    """
+    return not await_retained_window_read(
+        window_index, record=record, cancel=cancel).startswith("unready-")
+
+
+def await_retained_window_read(window_index: int, *, record: Mapping,
+                               cancel=None) -> str:
+    """Await one window's staged renders, without entering its phase.
+
+    The wait half of :func:`prepare_retained_window_read`, with its return
+    values. The IO engine calls it ahead of the window's phase to read the
+    next window while this one computes (PQ #1291): a render PrismaBuild has
+    not staged yet is waited on as the landing record says, and ``cancel``
+    (a ``threading.Event``) stops the wait when the reader closes.
+    """
     import time as _time
 
     from .residency_map import RANGE_HIT, residency_resolver
@@ -1360,7 +1395,6 @@ def prepare_retained_window_read(window_index: int, *, record: Mapping,
     window_index = int(window_index)
     block = record.get("executable_readset")
     prepared = block.get("prepared_input") if isinstance(block, dict) else None
-    progress.enter_read_phase(executable_render_phase_name(window_index))
     windows = prepared.get("windows") if isinstance(prepared, dict) else None
     entry = next((window for window in (windows or [])
                   if isinstance(window, dict)
@@ -1383,7 +1417,7 @@ def prepare_retained_window_read(window_index: int, *, record: Mapping,
         resolver, wanted,
         deadline=_time.monotonic() + staged_range_wait_s(),
         published=stage_cover_is_published,
-        published_batch=stage_covers_are_published)
+        published_batch=stage_covers_are_published, cancel=cancel)
     print(f"[residency] retained render window {window_index:02d}: "
           f"{verdict} for {len(wanted)} staged entr"
           f"{'y' if len(wanted) == 1 else 'ies'}", flush=True)
@@ -1537,14 +1571,18 @@ def run_layer_quantum_core(
         render_free_layer_roll,
     )
     from .joint_retained_window_plan import OBSERVED_BASELINE_KEY
+    from .io_engine import FixedBudget, read_stream
     from .joint_statistics_replay import (
+        GuardReadBudget,
         check_operator_allocation,
         observe_and_project_retained_windows,
         operator_window_guard,
+        retained_window_keys,
         statistics_arithmetic_identity,
     )
     from .kl_fisher import ROW_PROBE_LAYOUT
     from .production_weight_cache import _cb_cache_tensor_identity
+    from .production_weight_cache import PWC_WINDOW_LEASE_COUNTERS
     from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
@@ -2267,10 +2305,17 @@ def run_layer_quantum_core(
                     "layer quantum source owners exceed the sealed retained "
                     "source cap")
             if guard is not None:
-                observed = check_operator_allocation(
-                    guard, f"before_quantum_{stage_label}:{layer}", reserve_bytes=0)
+                # The renders the IO engine has read ahead are no declared
+                # owner of this floor (PQ #1291): the reading is taken with the
+                # stream paused and their measured bytes are left out of it.
+                with (render_stream.paused() if render_stream is not None
+                      else nullcontext()):
+                    observed = check_operator_allocation(
+                        guard, f"before_quantum_{stage_label}:{layer}", reserve_bytes=0)
+                    ahead = (0 if render_stream is None
+                             else render_stream.held_actual_bytes())
                 retained_budget.require_observed_baseline(
-                    observed_bytes=observed[OBSERVED_BASELINE_KEY],
+                    observed_bytes=observed[OBSERVED_BASELINE_KEY] - ahead,
                     source_bytes=source_bytes, actual_auxiliary_bytes=0,
                     label=f"before_quantum_{stage_label}:{layer}")
                 check_operator_allocation(
@@ -2283,6 +2328,34 @@ def run_layer_quantum_core(
         if executable:
             progress.enter_read_phase(
                 executable_own_source_phase_name(layer))
+        # ---- the retained windows' renders, read from the pass start ------
+        # PQ #1291: the IO engine reads every pending window's renders in
+        # window order from here, as far ahead as the row's memory allows
+        # (``GuardReadBudget``), so window zero loads while the own source
+        # settles and each later window while the one before it computes.
+        # Each window still admits its renders through the PWC's own checks.
+        render_stream = None
+        stream_specs = {name: tuple(render_formats[name]) for name in names
+                        if render_formats[name]}
+        stream_entries = [
+            entry for index, keys in retained_window_keys(
+                [window["names"] for window in resolved_windows], stream_specs,
+                production_cache, completed_names=set(stream_specs) & completed_units)
+            for entry in production_cache.retained_read_entries(
+                keys, group=index, render_identities=True)]
+        if stream_entries:
+            render_stream = read_stream(
+                stream_entries,
+                budget=(GuardReadBudget(guard, buffer_bytes=retained_budget.load_buffer_bytes)
+                        if guard is not None else FixedBudget(
+                            buffer_bytes=retained_budget.load_buffer_bytes,
+                            headroom=retained_budget.retained_render_cap_bytes)),
+                ready=(partial(_retained_window_ready, record=record)
+                       if executable else None),
+                lease_counters=PWC_WINDOW_LEASE_COUNTERS)
+            handoff_exit.callback(render_stream.close)
+            if guard is not None:
+                handoff_exit.callback(guard.add_reclaimer(render_stream.reclaim))
         with counters.io.span("own-source", layer=int(layer)):
             # The chain step left this layer's read in flight during the
             # roll. The consumer waits for it here, under the phase that
@@ -2780,7 +2853,11 @@ def run_layer_quantum_core(
                 window_kernel = None
             counters.close_window(window_index,
                                   kernel_active_s=kernel_active_s,
-                                  wall_s=time.time() - window_started)
+                                  wall_s=time.time() - window_started,
+                                  load_wait_s=(
+                                      render_stream.counters["groups_taken"][-1]["wait_s"]
+                                      if render_stream is not None
+                                      and render_stream.counters["groups_taken"] else None))
             with counters.io.span("commit", window=int(window_index)) as commit_span:
                 commit_span.attrs["units"] = commit_streamed_units(window_names)
             progress.window_done(resolved_windows[window_index])
@@ -2930,12 +3007,17 @@ def run_layer_quantum_core(
             def spill_replay(*, window_index, probe_index, lease):
                 # Reads nothing: the window's render phase stays current.
                 if guard is not None:
+                    # The pinned read buffers land on the host, the rest on
+                    # the device (PQ #1291); without a device envelope the
+                    # guard charges the sum, as before.
                     check_operator_allocation(
-                        guard, "before_joint_spill_window_replay", reserve_bytes=(
+                        guard, "before_joint_spill_window_replay",
+                        reserve_bytes=spill.replay_reserve_host_bytes,
+                        reserve_device_bytes=(
                             operator_windows["workspace_reserve_bytes"]
                             + lease.statistics_capacity_bytes
                             - lease.resident_statistics_bytes
-                            + spill.replay_reserve_bytes))
+                            + spill.replay_reserve_device_bytes))
                 with counters.io.span("replay", window=int(window_index),
                                       probe=int(probe_index), mode="spill"):
                     spill.replay(window_index, probe_index, lease)
@@ -3004,9 +3086,13 @@ def run_layer_quantum_core(
                 # The loader threads hash each render as they load it, so
                 # _record_joint_operator reads a hash (PQ #1192).
                 render_identities=True,
+                render_stream=render_stream,
             )
             close_skipped_window()
         finally:
+            if render_stream is not None:
+                render_stream.close()
+                counters.io_engine = dict(render_stream.counters)
             if spill is not None:
                 counters.replay["spill"] = dict(spill.telemetry)
             if window_kernel is not None:

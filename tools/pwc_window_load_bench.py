@@ -426,7 +426,7 @@ def _classify(raw_path: Path):
             else:
                 key = 'digest/other'
             main[key] = main.get(key, 0) + count
-        elif '_load_one' in stack:
+        elif '_load_one' in stack or '_read (prismaquant/io_engine' in stack:
             loader_total += count
             for key, pattern in (('lease-enter', '__enter__ (prismaquant/staged_lease'),
                                  ('lease-acquire-entry', 'acquire_entry_window'),
