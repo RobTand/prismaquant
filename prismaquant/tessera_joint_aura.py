@@ -2202,7 +2202,10 @@ def _operator_window_policy(config):
     from .joint_statistics_replay import normalize_operator_windows
     policy = normalize_operator_windows(config['execution'].get('operator_windows'))
     if policy is not None:
-        _require(config['execution'].get('boundary_storage') is not None,
+        # The body replays Stage A's exact boundaries. The MTP scope has no
+        # chain: its inputs are M1's final-hidden entries (PQ #1353).
+        _require(config['execution'].get('boundary_storage') is not None
+                 or config.get('source_scope') == 'mtp',
                  'operator-window campaign requires explicit exact boundary storage')
         _require(policy['max_render_resident_bytes'] <= config['max_render_bytes'],
                  'operator-window PWC cap exceeds campaign render admission')
@@ -2891,36 +2894,47 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             result["wire_validation"] = HISTORICAL_WIRE_VALIDATION
             _live_targets(runner, data.formats_by_qname)
             formats = list(dict.fromkeys(fmt for values in data.formats_by_qname.values() for fmt in values))
-            payload = compute_aura_cost_streamed(runner, eval_ids.to(runner.device), formats,
-                n_probes=execution["n_probes"], probe_microbatch=execution["probe_microbatch"],
-                seed_base=execution["seed_base"], token_scope="all", temperature=1.0,
-                production_cache=cache, require_production_cache=True, joint_activation=True,
-                cost_read_schedule=cost_schedule,
-                # The count PrismaBuild accepts is cumulative across phases, so
-                # the capture continues from what the head already committed
-                # rather than restarting at zero, which is a regression and
-                # buys no time.
-                progress_base=data.progress_committed,
-                prepared_render_identities={pair: cache.metadata["verified_cells"][pair]["rendered_weight"]
-                                            for pair in data.cells},
-                joint_projection_backend=projection_backend,
-                boundary_storage=execution.get("boundary_storage"),
-                **({"operator_windows": operator_policy} if operator_policy is not None else {}),
-                **({"source_transition": source_transition} if source_transition is not None else {}),
-                include_routed_experts=True, include_lm_head=False, dw_dtype="float32",
-                min_free_gib=config["min_free_gib"], formats_by_qname=data.formats_by_qname,
-                checkpoint_dir=Path(config["output_root"]) / "checkpoints", resume=resume,
-                model_identity=source, profile=runner.profile,
-                **({'retained_operator_windows': execution['retained_operator_windows'],
-                    'device_envelope_bytes': declared_device_bytes}
-                   if execution.get('retained_operator_windows') is not None else {}),
-                checkpoint_identity_extra={"tessera_joint_anchor_plan_sha256": plan_sha256,
-                    "prepared_anchor_sha256": prepared["sha256"], "calibration_input": calibration,
-                    **({'joint_eval': eval_panel} if eval_panel is not None else {}),
-                    "reader_identity": reader_identity})
-            _same(set(payload["costs"]), set(data.formats_by_qname), "complete joint output roster")
+            expected_rows = data.formats_by_qname
+            if config.get("source_scope") == "mtp":
+                # The MTP layer is priced on its own head's self-KL, not the body's
+                # end KL (PQ #1353), from the same qualified cache.
+                from .glm_mtp_quantum import priced_formats, run_mtp_scope
+                payload = run_mtp_scope(runner, config=config, data=data, production_cache=cache,
+                    calibration_ids=eval_ids, calibration=calibration, source_model=source,
+                    projection_backend=projection_backend, operator_windows=operator_policy,
+                    device_bytes=declared_device_bytes)
+                expected_rows = {name: priced_formats(fmts) for name, fmts in data.formats_by_qname.items()}
+            else:
+                payload = compute_aura_cost_streamed(runner, eval_ids.to(runner.device), formats,
+                    n_probes=execution["n_probes"], probe_microbatch=execution["probe_microbatch"],
+                    seed_base=execution["seed_base"], token_scope="all", temperature=1.0,
+                    production_cache=cache, require_production_cache=True, joint_activation=True,
+                    cost_read_schedule=cost_schedule,
+                    # The count PrismaBuild accepts is cumulative across phases, so
+                    # the capture continues from what the head already committed
+                    # rather than restarting at zero, which is a regression and
+                    # buys no time.
+                    progress_base=data.progress_committed,
+                    prepared_render_identities={pair: cache.metadata["verified_cells"][pair]["rendered_weight"]
+                                                for pair in data.cells},
+                    joint_projection_backend=projection_backend,
+                    boundary_storage=execution.get("boundary_storage"),
+                    **({"operator_windows": operator_policy} if operator_policy is not None else {}),
+                    **({"source_transition": source_transition} if source_transition is not None else {}),
+                    include_routed_experts=True, include_lm_head=False, dw_dtype="float32",
+                    min_free_gib=config["min_free_gib"], formats_by_qname=data.formats_by_qname,
+                    checkpoint_dir=Path(config["output_root"]) / "checkpoints", resume=resume,
+                    model_identity=source, profile=runner.profile,
+                    **({'retained_operator_windows': execution['retained_operator_windows'],
+                        'device_envelope_bytes': declared_device_bytes}
+                       if execution.get('retained_operator_windows') is not None else {}),
+                    checkpoint_identity_extra={"tessera_joint_anchor_plan_sha256": plan_sha256,
+                        "prepared_anchor_sha256": prepared["sha256"], "calibration_input": calibration,
+                        **({'joint_eval': eval_panel} if eval_panel is not None else {}),
+                        "reader_identity": reader_identity})
+            _same(set(payload["costs"]), set(expected_rows), "complete joint output roster")
             for name, rows in payload["costs"].items():
-                _same(set(rows), set(data.formats_by_qname[name]), f"{name}: joint output candidates")
+                _same(set(rows), set(expected_rows[name]), f"{name}: joint output candidates")
                 for row in rows.values():
                     _require(validate_joint_aura_entry(row), f"{name}: invalid measured joint cost")
             payload["provenance"]["tessera_joint_anchors"] = {
