@@ -19,6 +19,8 @@ from .measured_runtime_prices import (
     OFF_STEP_FIELD, RuntimePriceError, _integer, _object,
     _sha, _string, identity_sha256, RankResources, RuntimeRankResources,
 )
+from .schemas import strict_json_loads
+from .digests import DIRECT_ASCII_LAX
 
 SCHEMA = "prismaquant.runtime_provenance_relation.v1"
 
@@ -68,19 +70,6 @@ class ArtifactReader:
         return path, _strict_json(raw, path, where)
 
 
-def _unique_json_object(pairs, where):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise RuntimePriceError(f"{where}: duplicate JSON key {key!r}")
-        result[key] = value
-    return result
-
-
-def _reject_nonfinite(value):
-    raise ValueError("nonfinite JSON number " + value)
-
-
 def _strict_json(raw, path, where):
     """Producer JSON with the same bar as every other artifact read here.
 
@@ -89,8 +78,9 @@ def _strict_json(raw, path, where):
     twice or through a NaN cannot slip past the coverage check below.
     """
     try:
-        value = json.loads(raw, object_pairs_hook=lambda pairs: _unique_json_object(pairs, where),
-                           parse_constant=_reject_nonfinite)
+        value = strict_json_loads(
+            raw, duplicate=lambda key: RuntimePriceError(f"{where}: duplicate JSON key {key!r}"),
+            constant=lambda value: ValueError("nonfinite JSON number " + value))
     except (ValueError, UnicodeError) as exc:
         raise RuntimePriceError(f"{where}: invalid JSON artifact {path}: {exc}") from exc
     return _mapping(value, where)
@@ -119,8 +109,7 @@ def _source_tree_identity(tree):
     is checked against bytes this side holds, never accepted as stated.
     """
     members = {name: hashlib.sha256(raw).hexdigest() for name, raw in tree.items()}
-    body = json.dumps(members, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(body).hexdigest(), len(members)
+    return DIRECT_ASCII_LAX.sha256(members), len(members)
 
 
 def _package_source(declaration, reader):

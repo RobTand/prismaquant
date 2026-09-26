@@ -7,6 +7,7 @@ import copy
 import json
 import pickle
 from pathlib import Path
+from .schemas import Contract
 
 FORMAT = "TESSERA_E2M1_K2_R896"
 SCHEMA = "prismaquant.joint_served_activation_policy.v1"
@@ -15,9 +16,7 @@ _VERIFIED = {}
 _GROUP_INDEX = {}
 
 
-def _require(value, message):
-    if not value:
-        raise ValueError("served activation policy: " + message)
+_require = Contract(ValueError, "served activation policy: ").require
 
 
 def _policy_bytes(bound, label, read_bound):

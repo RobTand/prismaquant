@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from .quality_prefill_contract import QualityPrefillContractError, canonical_sha256
+from .schemas import Contract
 
 __all__ = [
     "CoverageError",
@@ -70,8 +71,7 @@ class CoverageError(QualityPrefillContractError):
     """Four memberships that should be one set are not one set."""
 
 
-def _fail(message: str) -> None:
-    raise CoverageError(message)
+_fail = Contract(CoverageError).fail
 
 
 def _as_set(value: object, *, where: str) -> frozenset[str]:

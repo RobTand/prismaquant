@@ -19,6 +19,7 @@ from typing import Callable, Mapping
 import zlib
 
 from .joint_retained_window_plan import RetainedWindowBudget
+from .schemas import Contract, strict_json_loads
 
 
 SCHEMA = "prismaquant.prismabuild.data_manifest.v2"
@@ -43,9 +44,8 @@ _WINDOW_KEYS = {"phase", "layer", "window_index", "original_full_target_names",
                 "render_file_upper_bound_bytes", "candidate_count"}
 
 
-def _require(condition: bool, message: str) -> None:
-    if not condition:
-        raise ValueError(f"joint COST read schedule: {message}")
+_CHECK = Contract(ValueError, "joint COST read schedule: ")
+_require = _CHECK.require
 
 
 def _int(value: object, label: str, *, positive: bool = False) -> int:
@@ -73,19 +73,11 @@ def _object(value: object, keys: set[str], label: str) -> dict:
 
 
 def _decode_unique(raw: bytes) -> dict:
-    def pairs_hook(pairs):
-        row = {}
-        for key, value in pairs:
-            _require(key not in row, f"duplicate JSON key {key!r}")
-            row[key] = value
-        return row
-
-    def no_constant(value):
-        raise ValueError(f"joint COST read schedule: non-finite JSON {value}")
-
     try:
-        return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs_hook,
-                          parse_constant=no_constant)
+        return strict_json_loads(
+            raw.decode("utf-8"),
+            duplicate=lambda key: _CHECK.exception(f"duplicate JSON key {key!r}"),
+            constant=lambda value: _CHECK.exception(f"non-finite JSON {value}"))
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("joint COST read schedule: invalid UTF-8 JSON") from exc
 

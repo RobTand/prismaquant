@@ -5,40 +5,8 @@
    "prismaquant/select_validated_frontier.py::_log_error_values"
   ],
   [
-   "prismaquant/artifact_collection.py::_reject_duplicate_members",
-   "prismaquant/artifact_collection_legacy.py::_reject_duplicate_members"
-  ],
-  [
    "prismaquant/aura_cost.py::_atomic_write_bytes",
    "tools/reseal_campaign_identity.py::atomic_write"
-  ],
-  [
-   "prismaquant/aura_cost.py::_canonical_json",
-   "prismaquant/cost_stage_checkpoint.py::canonical_json"
-  ],
-  [
-   "prismaquant/aura_cost.py::_canonical_json",
-   "prismaquant/production_weight_cache.py::_canonical_json_value"
-  ],
-  [
-   "prismaquant/cb_compile_contract.py::_canonical_sha256",
-   "prismaquant/tessera_allocator.py::_canonical_sha256"
-  ],
-  [
-   "prismaquant/cb_compile_contract.py::_canonical_sha256",
-   "tools/measure_vllm_wikitext_ppl.py::_canonical_sha256"
-  ],
-  [
-   "prismaquant/cb_learned_bundle.py::_strict_json_loads.reject_duplicates",
-   "prismaquant/shipcard.py::_strict_json_object._pairs"
-  ],
-  [
-   "prismaquant/cluster_campaign.py::_decode_strict_json.object_pairs",
-   "prismaquant/quality_prefill_contract.py::decode_strict_json.object_from_pairs"
-  ],
-  [
-   "prismaquant/cluster_campaign.py::_decode_strict_json.object_pairs",
-   "prismaquant/quality_prefill_pb_adapter.py::load_strict_json.pairs"
   ],
   [
    "prismaquant/cluster_campaign.py::_file_sha256",
@@ -49,40 +17,16 @@
    "prismaquant/union_production_cache.py::_file_sha256"
   ],
   [
-   "prismaquant/cluster_campaign.py::_integer",
-   "prismaquant/cluster_campaign_contract.py::_integer"
-  ],
-  [
-   "prismaquant/cluster_campaign.py::_integer",
-   "prismaquant/quality_prefill_contract.py::_integer"
-  ],
-  [
    "prismaquant/cluster_campaign.py::validate_campaign_manifest_v2",
    "prismaquant/cluster_campaign_contract.py::validate_campaign_manifest"
   ],
   [
-   "prismaquant/cluster_campaign_contract.py::_exact_mapping",
-   "prismaquant/quality_prefill_contract.py::_exact_mapping"
-  ],
-  [
-   "prismaquant/cluster_campaign_contract.py::_exact_mapping",
-   "prismaquant/quality_prefill_pb_adapter.py::_exact_mapping"
-  ],
-  [
-   "prismaquant/cluster_campaign_contract.py::_integer",
-   "prismaquant/quality_prefill_contract.py::_integer"
-  ],
-  [
-   "prismaquant/cluster_campaign_contract.py::_safe_absolute_path",
-   "prismaquant/quality_prefill_contract.py::_absolute_posix_path"
-  ],
-  [
-   "prismaquant/cost_stage_checkpoint.py::canonical_json",
-   "prismaquant/production_weight_cache.py::_canonical_json_value"
-  ],
-  [
    "prismaquant/cost_streaming.py::_file_sha256",
    "prismaquant/union_production_cache.py::_file_sha256"
+  ],
+  [
+   "prismaquant/digests.py::canonical_json",
+   "prismaquant/production_weight_cache.py::_canonical_json_value"
   ],
   [
    "prismaquant/emu_forward_kl.py::_git_commit",
@@ -141,60 +85,12 @@
    "prismaquant/perturbed_x_cache.py::_first_tensor_location"
   ],
   [
-   "prismaquant/measured_runtime_prices.py::_json.unique",
-   "prismaquant/runtime_provenance.py::_unique_json_object"
-  ],
-  [
    "prismaquant/model_profiles/gemma4.py::Gemma4Profile.matches",
    "prismaquant/model_profiles/lfm2_moe.py::Lfm2MoeProfile.matches"
   ],
   [
-   "prismaquant/nvfp4_cb_footprint.py::_unique_json_object",
-   "prismaquant/tessera_campaign.py::parse_family_restriction.unique_object"
-  ],
-  [
-   "prismaquant/prismasnap_checkpoint.py::_load_json.exact_object",
-   "prismaquant/prismasnap_validation.py::_json_from_bytes.exact_object"
-  ],
-  [
-   "prismaquant/prismasnap_checkpoint.py::_load_json.exact_object",
-   "tools/serve_fingerprint.py::_reject_duplicate_json_keys"
-  ],
-  [
-   "prismaquant/prismasnap_checkpoint.py::_load_json.exact_object",
-   "tools/serve_fingerprint.py::_reject_duplicate_pin_keys"
-  ],
-  [
-   "prismaquant/prismasnap_checkpoint.py::_require_exact_keys",
-   "prismaquant/prismasnap_moe_checkpoint.py::_exact_keys"
-  ],
-  [
-   "prismaquant/prismasnap_validation.py::_json_from_bytes.exact_object",
-   "tools/serve_fingerprint.py::_reject_duplicate_json_keys"
-  ],
-  [
-   "prismaquant/prismasnap_validation.py::_json_from_bytes.exact_object",
-   "tools/serve_fingerprint.py::_reject_duplicate_pin_keys"
-  ],
-  [
-   "prismaquant/quality_prefill_contract.py::_exact_mapping",
-   "prismaquant/quality_prefill_pb_adapter.py::_exact_mapping"
-  ],
-  [
-   "prismaquant/quality_prefill_contract.py::decode_strict_json.object_from_pairs",
-   "prismaquant/quality_prefill_pb_adapter.py::load_strict_json.pairs"
-  ],
-  [
-   "prismaquant/sample_parallel_probe.py::_runtime_snapshot_closure_sha256",
-   "tools/prismaquant_runtime_snapshot.py::_closure_sha256"
-  ],
-  [
    "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
    "prismaquant/sample_parallel_probe_merge.py::_reference_mullo32_scalar"
-  ],
-  [
-   "prismaquant/tessera_allocator.py::_canonical_sha256",
-   "tools/measure_vllm_wikitext_ppl.py::_canonical_sha256"
   ],
   [
    "prismaquant/tessera_runtime_contract.py::TesseraNativeExtension.as_contract_row",
@@ -231,10 +127,6 @@
   [
    "tools/resolve_prismabuild_dev_pin.py::resolve_prismabuild_dev_pin",
    "tools/resolve_tessera_dev_pin.py::resolve_tessera_dev_pin"
-  ],
-  [
-   "tools/stage_fed_demonstration.py::mount_bytes",
-   "tools/staged_read_stream_ab.py::mount_bytes"
   ],
   [
    "tools/tp2_budget_plan.py::_git_sha",
@@ -292,8 +184,7 @@
   "_canonical": [
    "prismaquant/joint_aura_retained_budget_transition.py",
    "prismaquant/joint_aura_run_transition.py",
-   "prismaquant/joint_aura_source_transition.py",
-   "prismaquant/model_walk.py"
+   "prismaquant/joint_aura_source_transition.py"
   ],
   "_canonical_bytes": [
    "prismaquant/artifact_collection.py",
@@ -302,11 +193,8 @@
    "tools/build_prismasnap_27b_campaign.py"
   ],
   "_canonical_json": [
-   "prismaquant/aura_cost.py",
    "prismaquant/cb_banked_books.py",
-   "prismaquant/cb_learned_bundle.py",
    "prismaquant/cb_learned_promotion.py",
-   "prismaquant/cb_warm_state.py",
    "prismaquant/shipcard.py"
   ],
   "_canonical_json_sha256": [
@@ -314,9 +202,7 @@
    "prismaquant/production_weight_cache.py"
   ],
   "_canonical_sha256": [
-   "prismaquant/cb_compile_contract.py",
    "prismaquant/sample_parallel_probe.py",
-   "prismaquant/tessera_allocator.py",
    "tools/measure_served_gold.py",
    "tools/measure_vllm_wikitext_ppl.py",
    "tools/serve_fingerprint.py"
@@ -347,17 +233,12 @@
    "tools/dsv4_afast_burn.py",
    "tools/dsv4_afast_campaign.py"
   ],
-  "_content_key": [
-   "tools/dsv4_afast_allocation_grid.py",
-   "tools/dsv4_ldlq_burn.py"
-  ],
   "_cost_entry": [
    "prismaquant/kl_measurement.py",
    "tools/build_sensitivity_ablation_assignments.py"
   ],
   "_digest": [
    "prismaquant/cb_banked_books.py",
-   "prismaquant/glm_capture_compatibility.py",
    "prismaquant/tessera_anchored_surface.py",
    "tools/stagea_produced_live_cycle.py",
    "tools/union_tessera_census_tables.py"
@@ -383,28 +264,9 @@
    "prismaquant/runtime_provenance.py",
    "tools/union_tessera_census_tables.py"
   ],
-  "_exact_keys": [
-   "prismaquant/artifact_collection.py",
-   "prismaquant/artifact_collection_legacy.py",
-   "prismaquant/prismasnap_moe_checkpoint.py"
-  ],
-  "_exact_mapping": [
-   "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py",
-   "prismaquant/quality_prefill_contract.py",
-   "prismaquant/quality_prefill_pb_adapter.py"
-  ],
   "_fail": [
    "prismaquant/artifact_collection.py",
-   "prismaquant/artifact_collection_legacy.py",
    "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py",
-   "prismaquant/native_runtime_cohort.py",
-   "prismaquant/quality_prefill_contract.py",
-   "prismaquant/quality_prefill_coverage.py",
-   "prismaquant/quality_prefill_knee.py",
-   "prismaquant/quality_prefill_pb_adapter.py",
-   "prismaquant/quality_prefill_screen.py",
    "prismaquant/schemas.py",
    "tools/dspark_memavailable_sampler.py",
    "tools/regenerate_joint_quanta.py"
@@ -489,10 +351,8 @@
   "_integer": [
    "prismaquant/artifact_collection_legacy.py",
    "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py",
    "prismaquant/joint_retained_window_plan.py",
    "prismaquant/measured_runtime_prices.py",
-   "prismaquant/quality_prefill_contract.py",
    "prismaquant/quality_prefill_pb_adapter.py"
   ],
   "_io_counters": [
@@ -603,9 +463,7 @@
   ],
   "_mapping": [
    "prismaquant/artifact_collection.py",
-   "prismaquant/artifact_collection_legacy.py",
    "prismaquant/cb_banked_books.py",
-   "prismaquant/cb_learned_promotion.py",
    "prismaquant/runtime_provenance.py"
   ],
   "_measure_projection": [
@@ -767,8 +625,6 @@
    "prismaquant/staged_lease.py"
   ],
   "_reject_duplicate_members": [
-   "prismaquant/artifact_collection.py",
-   "prismaquant/artifact_collection_legacy.py",
    "prismaquant/dsv4_campaign_completion.py",
    "prismaquant/tessera_serving_runtime_pin.py",
    "tools/container_runtime_identity.py",
@@ -784,17 +640,9 @@
    "prismaquant/joint_aura_run_transition.py",
    "prismaquant/joint_aura_source_transition.py",
    "prismaquant/joint_aura_transitions.py",
-   "prismaquant/joint_catalog_extension.py",
-   "prismaquant/joint_cost_read_schedule.py",
-   "prismaquant/joint_head_walk_quanta.py",
-   "prismaquant/joint_served_activation.py",
-   "prismaquant/joint_stageb_resources.py",
    "prismaquant/serving_runtime_patch_set.py",
-   "prismaquant/tessera_anchored_surface.py",
-   "prismaquant/tessera_joint_aura.py",
    "prismaquant/tessera_route_receipt.py",
    "prismaquant/tessera_runtime_contract.py",
-   "prismaquant/tessera_sampled_stack_proposal.py",
    "tools/extract_raw_cost_table.py"
   ],
   "_require_sha256": [
@@ -833,10 +681,6 @@
   "_runtime_identity": [
    "prismaquant/glm_kda_capture_kernel.py",
    "prismaquant/joint_projection_backend.py"
-  ],
-  "_safe_absolute_path": [
-   "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py"
   ],
   "_safe_inv": [
    "prismaquant/gguf_formats.py",
@@ -885,20 +729,17 @@
    "prismaquant/tessera_materialization.py",
    "tools/band_serial_handoff_live_pair.py",
    "tools/cb_encode_bitcheck.py",
-   "tools/dispatch_stage_a_split.py",
-   "tools/dsv4_afast_burn.py"
+   "tools/dispatch_stage_a_split.py"
   ],
   "_sha256": [
    "prismaquant/artifact_collection.py",
    "prismaquant/cb_ldlq_gate_telemetry.py",
    "prismaquant/cb_learned_promotion.py",
    "prismaquant/cluster_campaign.py",
-   "prismaquant/cluster_campaign_contract.py",
    "prismaquant/emu_forward_kl.py",
    "prismaquant/lane_eligibility.py",
    "prismaquant/prepriced_cost.py",
    "prismaquant/production_cache_stripes.py",
-   "prismaquant/quality_prefill_contract.py",
    "prismaquant/quality_prefill_pb_adapter.py",
    "prismaquant/research_cost_acceptance.py",
    "tools/derive_retained_window_budget.py",
@@ -915,10 +756,6 @@
    "tools/measure_served_gold.py",
    "tools/rerender_bf16_fp8_cb_balanced.py",
    "tools/union_tessera_census_tables.py"
-  ],
-  "_sha256_text": [
-   "tools/build_diverse_calibration.py",
-   "tools/dsv4_afast_campaign.py"
   ],
   "_shape_of": [
    "prismaquant/glm53_stock_reprice.py",
@@ -946,11 +783,6 @@
    "prismaquant/nvfp4_cb_footprint.py",
    "prismaquant/sample_parallel_probe.py"
   ],
-  "_string": [
-   "prismaquant/cluster_campaign_contract.py",
-   "prismaquant/measured_runtime_prices.py",
-   "prismaquant/quality_prefill_contract.py"
-  ],
   "_summary": [
    "prismaquant/boundary_control.py",
    "prismaquant/cb_ldlq_gate_telemetry.py",
@@ -974,10 +806,6 @@
   "_unique_fp8_sidecar_bytes": [
    "tools/dsv4_afast_allocation_grid.py",
    "tools/dsv4_allocation_grid.py"
-  ],
-  "_unique_json_object": [
-   "prismaquant/nvfp4_cb_footprint.py",
-   "prismaquant/runtime_provenance.py"
   ],
   "_validate_runtime": [
    "prismaquant/quality_prefill_contract.py",
@@ -1023,7 +851,7 @@
    "tools/reseal_campaign_identity.py"
   ],
   "canonical_json_bytes": [
-   "prismaquant/cost_stage_checkpoint.py",
+   "prismaquant/digests.py",
    "prismaquant/quality_prefill_contract.py",
    "tools/dsv4_wikitext_inputs.py",
    "tools/full_kl_teacher_payload.py"
@@ -1088,7 +916,6 @@
    "prismaquant/joint_stageb_resources.py"
   ],
   "digest": [
-   "prismaquant/boundary_control.py",
    "tools/nvfp4_served_qdq_bench.py",
    "tools/qualify_t4_overlay.py"
   ],
@@ -1115,7 +942,6 @@
   ],
   "identity_sha256": [
    "prismaquant/joint_aura.py",
-   "prismaquant/measured_runtime_prices.py",
    "tools/reseal_campaign_identity.py",
    "tools/union_tessera_census_tables.py"
   ],
@@ -1153,10 +979,6 @@
    "prismaquant/cost_stage_checkpoint.py",
    "tools/dispatch_tessera_campaign.py"
   ],
-  "mount_bytes": [
-   "tools/stage_fed_demonstration.py",
-   "tools/staged_read_stream_ab.py"
-  ],
   "nvfp4_activation_qdq_served": [
    "prismaquant/format_registry.py",
    "prismaquant/nvfp4_activation_contract.py"
@@ -1168,11 +990,6 @@
   "prepare": [
    "tools/band_serial_handoff_live_pair.py",
    "tools/prepare_extended_joint_quanta.py"
-  ],
-  "proc_io": [
-   "tools/profile_stage_b_head.py",
-   "tools/staged_exact_read_bench.py",
-   "tools/staged_read_stream_ab.py"
   ],
   "read_safetensors_header": [
    "prismaquant/source_read_plan.py",

@@ -43,6 +43,7 @@ from .prismasnap_checkpoint import (
     _BF16_REALIZED_UPDOWN_KEYS,
     _derivation_digest,
 )
+from .schemas import strict_json_loads
 
 
 PROVENANCE_SCHEMA = "prismaquant.prismasnap.provenance.v1"
@@ -332,21 +333,11 @@ def _read_regular_bytes(path: Path, *, where: str) -> bytes:
 
 
 def _json_from_bytes(data: bytes, *, where: str) -> dict[str, Any]:
-    def exact_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"duplicate member {key!r}")
-            result[key] = value
-        return result
-
     try:
-        value = json.loads(
+        value = strict_json_loads(
             data,
-            object_pairs_hook=exact_object,
-            parse_constant=lambda value: (_ for _ in ()).throw(
-                ValueError(f"non-JSON constant {value}")
-            ),
+            duplicate=lambda key: ValueError(f"duplicate member {key!r}"),
+            constant=lambda value: ValueError(f"non-JSON constant {value}"),
         )
     except Exception as exc:
         raise RuntimeError(f"{where} is corrupt") from exc

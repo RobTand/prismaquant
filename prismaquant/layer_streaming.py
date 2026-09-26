@@ -30,6 +30,7 @@ import torch
 import torch.nn as nn
 
 from .autoscale import declared_expert_dtype_covers, declared_fp4_expert_dtype
+from .io_spans import mem_available_bytes
 from .source_read_plan import (
     live_weight_map,
     resident_head_prefixes,
@@ -157,6 +158,7 @@ def _safe_open_kwargs(device: torch.device) -> dict:
 
 def _build_weight_map(model_path: str, *,
                       multimodal: bool = False, source_authentication=None,
+                      live_name=None,
                       ) -> tuple[dict[str, str], dict[str, str]]:
     """Return ({model_key: shard_path}, {model_key: checkpoint_key}).
 
@@ -176,7 +178,11 @@ def _build_weight_map(model_path: str, *,
     streaming skeleton (body at `model.language_model.layers.X.*`,
     visual at `model.visual.*`); no rename is applied and visual/audio
     keys are preserved so `_materialize` can load them onto the visual
-    tower. MTP stays dropped — MTP has its own synthesis path."""
+    tower. MTP stays dropped — MTP has its own synthesis path.
+
+    ``live_name`` replaces the profile's rename: a source scope
+    (``ModelProfile.source_scope``) maps its own out-of-body keys and drops
+    every other one (None)."""
     # Rename strategy is owned by the model_profile (refactor #32).
     # The default ModelProfile.checkpoint_to_live_name preserves the
     # legacy `_rename_text_only` / `_rename_multimodal` behavior;
@@ -196,7 +202,8 @@ def _build_weight_map(model_path: str, *,
             raw = {k: single for k in f.keys()}
     return live_weight_map(
         raw, model_path,
-        lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal))
+        live_name if live_name is not None else
+        (lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal)))
 
 
 def construction_multimodal(profile, multimodal: bool) -> bool:
@@ -2320,8 +2327,7 @@ class LayerCache:
         if self._pressure_threshold_bytes <= 0 or not self._cache:
             return 0
         try:
-            import psutil
-            avail = psutil.virtual_memory().available
+            avail = mem_available_bytes()
         except Exception:
             return 0
         if avail >= self._pressure_threshold_bytes:
@@ -2385,7 +2391,7 @@ class LayerCache:
         # if the projected release did not materialize.
         if freed and self._cache:
             try:
-                avail = psutil.virtual_memory().available
+                avail = mem_available_bytes()
             except Exception:
                 avail = self._pressure_threshold_bytes
             if avail < self._pressure_threshold_bytes:
@@ -2469,12 +2475,11 @@ class LayerCache:
         With dynamic budget disabled (default), returns static max_bytes.
         With dynamic budget on, caps such that completing this put will
         leave the system with at least reserve_bytes of MemAvailable.
-        Falls back to static max if psutil is unavailable."""
+        Falls back to static max if MemAvailable is unreadable."""
         if self._dynamic_reserve_bytes <= 0:
             return self.max_bytes
         try:
-            import psutil
-            avail = psutil.virtual_memory().available
+            avail = mem_available_bytes()
         except Exception:
             return self.max_bytes
         # If we evicted everything, MemAvailable would rise by total_bytes.

@@ -24,6 +24,7 @@ from prismaquant.perturbed_x_cache import (
 )
 from prismaquant.memory_management import env_truthy
 from prismaquant.routed_experts import PackedExpertProjection
+from .digests import DIRECT_ASCII_STRICT
 
 
 JOINT_CURRENCY = "joint_aura_predicted_dloss"
@@ -152,9 +153,7 @@ def validated_probe_identity(probe) -> Mapping:
 def identity_sha256(value) -> str:
     if type(value) is _ValidatedProbeIdentity:
         return value._sha256
-    return hashlib.sha256(json.dumps(
-        value, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode()).hexdigest()
+    return DIRECT_ASCII_STRICT.sha256(value)
 
 
 def activation_identity(spec, activation_max_abs: Mapping, qname: str) -> dict:

@@ -12,15 +12,16 @@ References bind both the semantic identity and the exact portable content.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from functools import partial
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
-from typing import Any
 
 from prismaquant.cost_stage_checkpoint import canonical_json, canonical_json_sha256
-from prismaquant.schemas import SchemaValidationError
+from prismaquant.schemas import SchemaValidationError, strict_json_loads
+from prismaquant.digests import DIRECT_UTF8_STRICT
 
 
 CANDIDATE_SCHEMA = "prismaquant.artifact_collection.candidate.v1"
@@ -128,13 +129,7 @@ def _canonical_bytes(value: object, *, where: str) -> bytes:
         canonical = canonical_json(value, where=where)
     except ValueError as exc:
         raise ArtifactCollectionError(f"{where}: not finite canonical JSON data") from exc
-    return json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
+    return DIRECT_UTF8_STRICT.encoded(canonical)
 
 
 def _validate_locators(value: object, *, where: str) -> dict[str, list[str]]:
@@ -298,25 +293,17 @@ def write_record(path: str | os.PathLike[str], record: Mapping[str, object]) -> 
             pass
 
 
-def _reject_duplicate_members(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            _fail("JSON", f"duplicate member {key!r}")
-        result[key] = value
-    return result
+_strict_json = partial(
+    strict_json_loads,
+    duplicate=lambda key: ArtifactCollectionError(f"JSON: duplicate member {key!r}"),
+    constant=lambda item: ArtifactCollectionError(f"JSON: non-finite value {item}"),
+)
 
 
 def load_record(path: str | os.PathLike[str]) -> dict[str, object]:
     source = Path(path)
     try:
-        value = json.loads(
-            source.read_text(encoding="utf-8"),
-            object_pairs_hook=_reject_duplicate_members,
-            parse_constant=lambda item: (_ for _ in ()).throw(
-                ArtifactCollectionError(f"JSON: non-finite value {item}")
-            ),
-        )
+        value = _strict_json(source.read_text(encoding="utf-8"))
     except ArtifactCollectionError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:

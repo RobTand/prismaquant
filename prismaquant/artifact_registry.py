@@ -1,7 +1,6 @@
 """JSON-backed registry for shipped and candidate PrismaQuant artifacts."""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import uuid
@@ -11,6 +10,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .pipeline import MetricGateSpec
+from .digests import DIRECT_ASCII_LAX
 
 
 DEFAULT_REGISTRY_PATH = Path("/home/rob/dq-runs/prismaquant-artifact-registry.json")
@@ -58,14 +58,10 @@ def utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def canonical_layer_config_json(layer_config: Mapping) -> str:
-    return json.dumps(layer_config, sort_keys=True, separators=(",", ":"))
+canonical_layer_config_json = DIRECT_ASCII_LAX.text
 
 
-def layer_config_sha256(layer_config: Mapping) -> str:
-    return hashlib.sha256(
-        canonical_layer_config_json(layer_config).encode("utf-8")
-    ).hexdigest()
+layer_config_sha256 = DIRECT_ASCII_LAX.sha256
 
 
 def load_layer_config(layer_config: Mapping | str | Path) -> dict:

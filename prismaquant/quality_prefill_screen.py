@@ -41,6 +41,7 @@ from .quality_prefill_population import (
     SCREEN_POLICY_ID,
     stable_rank,
 )
+from .schemas import Contract
 
 __all__ = [
     "ScreenError",
@@ -78,8 +79,7 @@ class ScreenError(QualityPrefillContractError):
     """
 
 
-def _fail(message: str) -> None:
-    raise ScreenError(message)
+_fail = Contract(ScreenError).fail
 
 
 @dataclass(frozen=True)

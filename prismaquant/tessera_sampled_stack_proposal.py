@@ -26,14 +26,14 @@ from .cluster_campaign import _atomic_write_new_bytes
 from .joint_aura import assignment_probe_summary
 from .tessera_formats import (family_q256_bounds, get_tessera_family,
                               parse_tessera_format_name, realisable_rungs)
+from .schemas import Contract
+from .digests import DIRECT_ASCII_LAX
 
 SCHEMA = 'prismaquant.tessera_sampled_stack_proposal.v1'
 PRIMARY_FAMILIES = frozenset({'TESSERA_E4M3_K1', 'TESSERA_BF16_K1'})
 
 
-def _require(ok, message):
-    if not ok:
-        raise ValueError(message)
+_require = Contract(ValueError).require
 
 
 def _domain(families, costs, stats):
@@ -338,8 +338,7 @@ def selected_assignment_sha256(assignment):
     _require(isinstance(assignment, dict) and assignment and
              all(isinstance(k, str) and isinstance(v, str) for k, v in assignment.items()),
              'selected research assignment must be complete qname/format pairs')
-    return hashlib.sha256(json.dumps(assignment, sort_keys=True,
-                                    separators=(',', ':')).encode()).hexdigest()
+    return DIRECT_ASCII_LAX.sha256(assignment)
 
 
 def bind_pilot_from_inputs(*, joint_binding, plan_binding):

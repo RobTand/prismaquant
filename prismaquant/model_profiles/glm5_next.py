@@ -465,6 +465,46 @@ class Glm5NextProfile(ModelProfile):
         return name
 
     # ------------------------------------------------------------
+    # Out-of-body source: the MTP layer
+    # ------------------------------------------------------------
+    def source_scope(self, name: str, model_path):
+        """``"mtp"``: the checkpoint's MTP layer, ``layers.<num_hidden_layers>``.
+
+        ``checkpoint_to_live_name`` drops that layer from the body's map. The
+        scope keeps its keys under their checkpoint names, which are also the
+        names of ``glm_mtp.MtpCheckpointModel``, its skeleton. Its captures
+        carry the MTP layer's load contract.
+        """
+        if name != "mtp":
+            return super().source_scope(name, model_path)
+        import copy
+
+        from transformers import AutoConfig
+
+        from ..glm_mtp import (MtpCheckpointModel, mtp_checkpoint_prefix, mtp_layer_index,
+                               mtp_layer_skeleton)
+        from ..streaming_model import _MTP_LAYER_INITIALIZATION_SCHEMA
+        from .base import SourceScope
+
+        text_config = AutoConfig.from_pretrained(str(model_path)).text_config
+        index = mtp_layer_index(text_config)
+        prefix = mtp_checkpoint_prefix(index)
+
+        def live_name(key: str):
+            return key if key.startswith(prefix) else None
+
+        def build_skeleton(attn_implementation):
+            config = copy.deepcopy(text_config)
+            config._attn_implementation = attn_implementation
+            return MtpCheckpointModel(mtp_layer_skeleton(config))
+
+        return SourceScope(
+            name="mtp", layers=(index,), num_layers=index + 1,
+            layers_prefix=prefix[:-len(f"{index}.")],
+            load_contract_schema=_MTP_LAYER_INITIALIZATION_SCHEMA,
+            live_name=live_name, build_skeleton=build_skeleton)
+
+    # ------------------------------------------------------------
     # Source keys this profile knowingly cannot bridge (none)
     # ------------------------------------------------------------
     def unbridged_source_keys(self) -> tuple[str, ...]:

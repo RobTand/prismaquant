@@ -54,10 +54,12 @@ PHASES = ("both", "parse", "loader")
 
 
 def _gib(field: str) -> float:
-    for line in Path("/proc/self/status").read_text().splitlines():
-        if line.startswith(field):
-            return round(int(line.split()[1]) / 1024 ** 2, 3)
-    raise RuntimeError(f"no {field} in /proc/self/status")
+    from prismaquant.io_spans import read_proc_status
+
+    value = read_proc_status().get(field.rstrip(":"))
+    if value is None:
+        raise RuntimeError(f"no {field} in /proc/self/status")
+    return round(value / 1024 ** 3, 3)
 
 
 def _report(step: str, **extra) -> None:

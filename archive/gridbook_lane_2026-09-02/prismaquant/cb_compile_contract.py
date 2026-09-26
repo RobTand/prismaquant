@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-import json
 import os
 import threading
 from typing import Any
+from .digests import DIRECT_UTF8_STRICT
 
 
 CB_COMPILE_FAIL_CLOSED_ENV = "PRISMAQUANT_CB_COMPILE_FAIL_CLOSED"
@@ -75,17 +75,7 @@ def cb_compile_fail_closed() -> bool:
     }
 
 
-def _canonical_sha256(value: object) -> str:
-    import hashlib
-
-    encoded = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+_canonical_sha256 = DIRECT_UTF8_STRICT.sha256
 
 
 @dataclass

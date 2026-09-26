@@ -11,11 +11,14 @@ from collections.abc import Mapping, Sequence
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
 
 from prismaquant.artifact_collection import (
     ArtifactCollectionError,
     LEGACY_AUDIT_SCHEMA,
+    _exact_keys,
+    _fail,
+    _mapping,
+    _strict_json,
     make_reference,
     seal_record,
     verify_record,
@@ -41,26 +44,6 @@ _DTYPE_BITS = {
 }
 
 
-def _fail(where: str, message: str) -> None:
-    raise ArtifactCollectionError(f"{where}: {message}")
-
-
-def _mapping(value: object, *, where: str) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        _fail(where, "expected a JSON object")
-    return value
-
-
-def _exact_keys(value: Mapping[str, object], expected: set[str], *, where: str) -> None:
-    if set(value) != expected:
-        _fail(
-            where,
-            "field set differs "
-            f"(missing={sorted(expected - set(value))}, "
-            f"extra={sorted(set(value) - expected)})",
-        )
-
-
 def _integer(value: object, *, where: str, nonnegative: bool = True) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         _fail(where, "expected an integer")
@@ -69,27 +52,12 @@ def _integer(value: object, *, where: str, nonnegative: bool = True) -> int:
     return value
 
 
-def _reject_duplicate_members(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            _fail("JSON", f"duplicate member {key!r}")
-        result[key] = value
-    return result
-
-
 def _load_json_source(
     path: Path, *, logical_schema: str
 ) -> tuple[dict[str, object], dict[str, object], str]:
     try:
         encoded = path.read_bytes()
-        value = json.loads(
-            encoded.decode("utf-8"),
-            object_pairs_hook=_reject_duplicate_members,
-            parse_constant=lambda item: (_ for _ in ()).throw(
-                ArtifactCollectionError(f"JSON: non-finite value {item}")
-            ),
-        )
+        value = _strict_json(encoded.decode("utf-8"))
     except ArtifactCollectionError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:

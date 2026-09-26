@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import math
 import os
@@ -34,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import torch
 
 from prismaquant import format_registry as fr
+from prismaquant.io_spans import mem_available_bytes
 from prismaquant.cb_minchain import (
     MINCHAIN_SCHEMA,
     chain_identity_from_digest,
@@ -60,7 +60,6 @@ from tools.dsv4_afast_campaign import (
     RSSLimitExceeded,
     SCHEMA as PILOT_CAMPAIGN_SCHEMA,
     _encode_free,
-    _host_available_bytes,
     _reclaim,
     _rss_bytes,
     LAW_DETECT,
@@ -109,6 +108,7 @@ BASE_LAYER_ROOT = Path(
     "artifacts-mxfp4/probe-k12k18/by-layer"
 )
 from tools import dsv4_cbl_kernels as cblk
+from prismaquant.digests import DIRECT_ASCII_STRICT
 
 CBL_MICROCHECK_LAYER = int(os.environ.get("DSV4_CBL_MICROCHECK_LAYER", "0"))
 
@@ -157,11 +157,7 @@ def _load(path: Path) -> dict:
         return pickle.load(handle)
 
 
-def _sha(payload: Mapping[str, Any]) -> str:
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode()
-    return hashlib.sha256(raw).hexdigest()
+_sha = DIRECT_ASCII_STRICT.sha256
 
 
 def _audit_rung(layer: int) -> int:
@@ -1938,7 +1934,7 @@ def run_shakedown_worker() -> int:
     _amendment_gate()
     if not torch.cuda.is_available():
         raise SystemExit("A-FAST shakedown requires CUDA")
-    before = _host_available_bytes()
+    before = mem_available_bytes()
     with COL_WEIGHTS.open("rb") as handle:
         all_col_weights = pickle.load(handle)
     _, verified = load_layer_identity(0)
@@ -1987,7 +1983,7 @@ def run_shakedown_worker() -> int:
             },
             "peak_rss_bytes": rss_guard.peak_bytes,
             "host_available_before_bytes": before,
-            "host_available_after_bytes": _host_available_bytes(),
+            "host_available_after_bytes": mem_available_bytes(),
         }
         # The durable cell envelope, not the per-expert chain identity, owns
         # the content key. Preserve it directly for the shakedown audit.

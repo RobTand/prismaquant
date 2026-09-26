@@ -43,11 +43,18 @@ not durable work, and PB #480 counts only durable work as progress.
 be read is recorded as ``None`` with the reason, and a failure to build or
 print a record is printed and dropped. A workload exception passes through
 the span unchanged. The span records it as the outcome.
+
+**Telemetry readers and the sampler thread.** This module is the one home
+of the process and host readers (``/proc/self/io``, ``/proc/meminfo``,
+``/proc/self/status`` and ``nvidia-smi`` GPU power) and of the one sampler
+thread, :class:`PeriodicSampler`, which every periodic sampler is built on
+(PQ #1299). It imports nothing from PrismaQuant, so any stage can use it.
 """
 from __future__ import annotations
 
 import json
 import math
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -107,7 +114,7 @@ class GpuPowerSpanSource:
     """Watts over a span, from a running 1 Hz power sampler.
 
     ``sampler`` is anything with a ``samples`` list of watts and an
-    ``interval_s`` (``joint_adjoint_checkpoints.GpuPowerSampler``). A span
+    ``interval_s`` (:class:`GpuPowerSampler`). A span
     shorter than the interval can see no sample, and then reports none.
     """
 
@@ -454,10 +461,285 @@ def failure_outcome(error: BaseException, *, open_spans=()) -> dict:
             "error": _error_text(error), "open_spans": list(open_spans)}
 
 
+# -- host and process readers (PQ #1299) -----------------------------------
+
+
+def _read_kb_table(path) -> dict[str, int]:
+    """``Key: value [kB]`` lines as integers, with ``kB`` values in bytes.
+
+    ``/proc/meminfo`` and ``/proc/<pid>/status`` share this format. A line
+    whose first value is not an integer (``Name``, ``State``,
+    ``Cpus_allowed_list``) is skipped; a unitless count is kept as is.
+    Raises ``OSError`` when the file cannot be read.
+    """
+    values = {}
+    for line in Path(path).read_text().splitlines():
+        key, _, rest = line.partition(":")
+        fields = rest.split()
+        if not fields:
+            continue
+        try:
+            value = int(fields[0])
+        except ValueError:
+            continue
+        values[key.strip()] = value * 1024 if fields[1:2] == ["kB"] else value
+    return values
+
+
+def read_meminfo(path: str | Path = "/proc/meminfo") -> dict[str, int]:
+    """Every ``/proc/meminfo`` field; the ``kB`` ones in bytes."""
+    return _read_kb_table(path)
+
+
+def read_proc_status(path: str | Path = "/proc/self/status") -> dict[str, int]:
+    """The integer fields of ``/proc/self/status``; the ``kB`` ones in bytes."""
+    return _read_kb_table(path)
+
+
+def mem_available_bytes(path: str | Path = "/proc/meminfo") -> int:
+    """The host's ``MemAvailable`` in bytes.
+
+    On GB10 unified memory this is the box-level free memory that host and
+    device allocations both draw from. Raises ``OSError`` when the file
+    cannot be read and ``RuntimeError`` when it has no ``MemAvailable``.
+    """
+    value = read_meminfo(path).get("MemAvailable")
+    if value is None:
+        raise RuntimeError("/proc/meminfo has no MemAvailable")
+    return value
+
+
+def read_mountstats(path: str | Path = "/proc/self/mountstats") -> dict[str, dict]:
+    """Per mount point, the NFS client's ``bytes`` row and every per-op row.
+
+    ``{mount: {"bytes": [...] or None, "ops": {OP: [...]}}}``, every value
+    an integer in the kernel's column order. ``bytes`` columns 0 and 4 are
+    the client's and the server's read bytes; an op's columns are ops,
+    transmissions, timeouts, bytes sent, bytes received, and queue, RTT and
+    execute milliseconds, with an error count on newer kernels. A mount that
+    is not NFS has neither. Raises ``OSError`` when the file cannot be read.
+    """
+    out: dict[str, dict] = {}
+    row, per_op = None, False
+    for line in Path(path).read_text().splitlines():
+        if line.startswith("device "):
+            parts = line.split()
+            row = (out.setdefault(parts[parts.index("on") + 1], {"bytes": None, "ops": {}})
+                   if "on" in parts[:-1] else None)
+            per_op = False
+            continue
+        if row is None:
+            continue
+        text = line.strip()
+        if text.startswith("bytes:"):
+            row["bytes"] = [int(value) for value in text.split()[1:]]
+        elif text.startswith("per-op statistics"):
+            per_op = True
+        elif per_op:
+            name, sep, rest = text.partition(":")
+            fields = rest.split()
+            if sep and fields and all(field.isdigit() for field in fields):
+                row["ops"][name] = [int(field) for field in fields]
+    return out
+
+
+def nfs_read_bytes(path: str | Path = "/proc/self/mountstats") -> dict[str, tuple[int, int]]:
+    """``{mount: (client_read_bytes, server_read_bytes)}`` for every NFS mount."""
+    return {mount: (row["bytes"][0], row["bytes"][4])
+            for mount, row in read_mountstats(path).items() if row["bytes"]}
+
+
+# -- the sampler thread (PQ #1299) -----------------------------------------
+
+
+class PeriodicSampler:
+    """The one sampler thread: call ``tick`` every ``interval_s`` seconds.
+
+    ``tick`` takes and keeps one reading. It returns ``False`` to end the
+    thread; an exception it raises also ends it, so a tick catches what it
+    means to survive. ``tick_first`` takes the first reading at once;
+    otherwise the thread waits one interval first. The thread is a daemon,
+    so a sampler nobody stops never holds the process open.
+    """
+
+    def __init__(self, tick: Callable[[], Any], *, interval_s: float, name: str,
+                 tick_first: bool = True):
+        self.interval_s = float(interval_s)
+        self._tick = tick
+        self._tick_first = bool(tick_first)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name=name, daemon=True)
+
+    @property
+    def stopping(self) -> bool:
+        return self._stop.is_set()
+
+    def start(self) -> "PeriodicSampler":
+        self._thread.start()
+        return self
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    def join(self, timeout: float | None = None) -> None:
+        if self._thread.ident is not None:
+            self._thread.join(timeout)
+
+    def stop(self, timeout: float | None = None) -> None:
+        self.request_stop()
+        self.join(timeout)
+
+    def __enter__(self) -> "PeriodicSampler":
+        return self.start()
+
+    def __exit__(self, *_exc) -> None:
+        self.stop()
+
+    def _run(self) -> None:
+        if not self._tick_first and self._stop.wait(self.interval_s):
+            return
+        while not self._stop.is_set():
+            if self._tick() is False:
+                return
+            self._stop.wait(self.interval_s)
+
+
+class MemAvailableFloor:
+    """The box's lowest ``MemAvailable`` over a window, sampled on a thread.
+
+    On GB10 unified memory, device allocations are host memory, so
+    ``MemAvailable`` is the box-level reading of what a phase takes. The
+    window is read once on entry and once on exit as well as every
+    ``interval_s``. ``minimum`` is ``{"bytes", "unix"}`` of the lowest
+    reading and ``first`` the entry reading.
+    """
+
+    def __init__(self, interval_s: float, *, name: str = "mem-available-floor"):
+        self.interval_s = float(interval_s)
+        self._lock = threading.Lock()
+        self.first = None
+        self.minimum = None
+        self.samples = 0
+        self._sampler = PeriodicSampler(self._tick, interval_s=interval_s, name=name)
+
+    def _sample(self) -> None:
+        value, now = mem_available_bytes(), time.time()
+        with self._lock:
+            self.samples += 1
+            if self.first is None:
+                self.first = {"bytes": value, "unix": now}
+            if self.minimum is None or value < self.minimum["bytes"]:
+                self.minimum = {"bytes": value, "unix": now}
+
+    def _tick(self) -> None:
+        try:
+            self._sample()
+        except (OSError, RuntimeError):
+            pass
+
+    def __enter__(self) -> "MemAvailableFloor":
+        self._sample()
+        self._sampler.start()
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self._sampler.stop()
+        self._sample()
+
+
+class GpuPowerSampler:
+    """``nvidia-smi --query-gpu=power.draw`` sampling in-process, 1 Hz by default.
+
+    ``nvidia_smi.gpu_utilization`` is non-diagnostic on GB10 (AGENTS.md
+    principle 13), so the counters carry joules, watts and the kernel-active
+    ratio instead. A missing or failing sampler is recorded, never silent and
+    never zero. ``times`` holds each sample's host ``time.time()``, so
+    :meth:`watts_between` can read the watts over any span of a run.
+    """
+
+    def __init__(self, interval_s: float = 1.0):
+        self.interval_s = float(interval_s)
+        self.samples: list[float] = []
+        self.times: list[float] = []
+        self.error: str | None = None
+        self._process = None
+        self._sampler = None
+
+    def start(self) -> "GpuPowerSampler":
+        import subprocess
+
+        # ``-l`` takes whole seconds; a shorter interval needs ``-lms``.
+        loop = (["-l", str(int(self.interval_s))] if self.interval_s == int(self.interval_s)
+                else ["-lms", str(round(self.interval_s * 1000))])
+        try:
+            self._process = subprocess.Popen(
+                ["nvidia-smi", "--query-gpu=power.draw",
+                 "--format=csv,noheader,nounits", *loop],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            )
+        except (OSError, ValueError) as exc:
+            self.error = f"sampler launch failed: {exc}"
+            return self
+        # nvidia-smi paces the readings, so the thread blocks on the next
+        # line rather than waiting an interval of its own.
+        self._sampler = PeriodicSampler(self._read_line, interval_s=0, name="gpu-power")
+        self._sampler.start()
+        return self
+
+    def _read_line(self) -> bool:
+        try:
+            line = self._process.stdout.readline()
+        except (OSError, ValueError) as exc:
+            if not self._sampler.stopping:
+                self.error = f"sampler read failed: {exc}"
+            return False
+        if not line or self._sampler.stopping:
+            return False
+        value = line.strip().split(",")[0].strip()
+        try:
+            watts = float(value)
+        except ValueError:
+            return True
+        self.times.append(time.time())
+        self.samples.append(watts)
+        return True
+
+    def watts_between(self, start: float, end: float) -> list[float]:
+        """The watts sampled at host times ``start <= t <= end``."""
+        return [watts for when, watts in zip(self.times, self.samples)
+                if start <= when <= end]
+
+    def stop(self) -> dict:
+        if self._sampler is not None:
+            self._sampler.request_stop()
+        try:
+            if self._process is not None:
+                self._process.terminate()
+                self._process.wait(timeout=5)
+        except Exception:  # noqa: BLE001 - teardown best effort, sample list stands
+            pass
+        if self._sampler is not None:
+            self._sampler.join(timeout=2)
+        watts = sorted(self.samples)
+        block = {
+            "sample_count": len(watts),
+            "interval_s": self.interval_s,
+            "gpu_joules": sum(watts) * self.interval_s if watts else None,
+            "gpu_power_w_p50": watts[len(watts) // 2] if watts else None,
+            "gpu_power_w_p95": watts[max(0, int(0.95 * len(watts)) - 1)] if watts else None,
+            "gpu_power_w_max": watts[-1] if watts else None,
+        }
+        if self.error:
+            block["sampler_error"] = self.error
+        return block
+
+
 __all__ = [
-    "GB10_POWER_ENVELOPE_W", "GpuPowerSpanSource", "IO_SPAN_MARKER",
-    "IO_SPAN_SCHEMA", "IoSpan", "IoSpanLog", "PROC_IO_FIELDS",
+    "GB10_POWER_ENVELOPE_W", "GpuPowerSampler", "GpuPowerSpanSource",
+    "IO_SPAN_MARKER", "IO_SPAN_SCHEMA", "IoSpan", "IoSpanLog",
+    "MemAvailableFloor", "PROC_IO_FIELDS", "PeriodicSampler",
     "READ_RATE_MARKER", "READ_RATE_SCHEMA", "RESIDENCY_TIER_KEYS",
-    "ReadRateReporter", "counter_delta", "failure_outcome", "read_proc_io",
-    "residency_tier_bytes", "stage_span_log",
+    "ReadRateReporter", "counter_delta", "failure_outcome",
+    "mem_available_bytes", "nfs_read_bytes", "read_meminfo", "read_mountstats",
+    "read_proc_io", "read_proc_status", "residency_tier_bytes", "stage_span_log",
 ]
