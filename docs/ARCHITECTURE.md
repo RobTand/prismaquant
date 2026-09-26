@@ -3097,8 +3097,31 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/stageb-window-readahead-1291`.
+As of: 2026-09-25 · `claude/glm-mtp-allocate-m6`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-25, `claude/glm-mtp-allocate-m6`) for the **allocator's
+GLM MTP path** (PQ #1346, M6 of #1271, P1). The GLM-5.3 MTP layer
+(`model.language_model.layers.45.*`) is priced in its own table, on the MTP
+head's self-KL (`glm_mtp.MTP_OBJECTIVE`). The body join refuses that currency.
+`--mtp-joint-cost` (payload `prismaquant.glm_mtp_cost.v1`), `--mtp-byte-budget`
+and `--mtp-serve-constants`, with optional `--mtp-acceptance-points`, run
+`glm_mtp_selection.select_mtp_rungs` after the body is final:
+- `mtp_rung_selection.group_product_menu` builds one uniform rung per declared
+  group (routed stack, shared expert), with `E` and bytes summed over the units;
+- a group whose source is BF16 is also offered BF16 passthrough at zero cost;
+- a priced Tessera rung is offered only if the pinned runtime attests it for
+  that unit (`format_is_producer_eligible`, asked about the unit's serving
+  context under a declared scope; principle 14); the record counts every
+  priced rung it left out (`unattested_rungs`);
+- the canon `select_rung` chooses under the sub-budget, and with no acceptance
+  points it is degenerate: the lowest-E rung within the budget.
+
+The selection writes the layer-45 entries and a `mtp_selection` record into the
+layer-config metadata. It moves no body byte and no body bpp (principle 12). A
+unit that the body also assigned is refused. There is no λ. Without the flag,
+the output is byte-identical. Gates: `tests/test_glm_mtp_selection.py` and
+`tests/test_allocator_output_pin_1304.py`.
 
 Re-stamped (2026-09-25, `claude/stageb-window-readahead-1291`) for **Stage B
 render read-ahead through the IO engine** (PQ #1291, #1294): the retained

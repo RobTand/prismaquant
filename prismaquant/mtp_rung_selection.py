@@ -109,6 +109,55 @@ class AcceptancePoint:
         return self.bits if self.bits is not None else self.rung_name
 
 
+def group_product_menu(groups: Mapping, rows: Mapping, *, params: Mapping):
+    """Draft rungs from per-unit rows: one uniform rung per declared group.
+
+    ``groups`` maps a group name to its unit names; every unit of a group takes
+    the same rung (a routed stack is uniform per layer; a fused pair shares one
+    scheme). ``rows[unit][rung]`` is ``(E, resident_bytes)``, and ``params``
+    gives each unit's parameter count. A menu point is one rung per group; its
+    ``E`` and ``resident_bytes`` are sums over every unit, and ``bits`` is the
+    params-weighted ``8 * bytes / params``.
+
+    A rung some unit of a group lacks cannot be that group's uniform rung, so
+    it is left out of the menu and reported in ``incomplete``
+    (``{group: {rung: [units lacking it]}}``). Returns ``(menu, incomplete)``.
+    """
+    import itertools
+
+    names = list(groups)
+    if not names or any(not groups[g] for g in names):
+        raise ValueError("group_product_menu: every group needs at least one unit")
+    seen = [unit for g in names for unit in groups[g]]
+    if len(seen) != len(set(seen)):
+        raise ValueError("group_product_menu: a unit belongs to two groups")
+    offered, incomplete = {}, {}
+    for g in names:
+        units = list(groups[g])
+        rungs = sorted({rung for unit in units for rung in rows.get(unit, {})})
+        offered[g] = [r for r in rungs if all(r in rows.get(u, {}) for u in units)]
+        missing = {r: sorted(u for u in units if r not in rows.get(u, {}))
+                   for r in rungs if r not in offered[g]}
+        if missing:
+            incomplete[g] = missing
+        if not offered[g]:
+            raise ValueError(f"group_product_menu: group {g!r} has no rung priced for every unit")
+    total_params = sum(int(params[u]) for u in seen)
+    if total_params <= 0:
+        raise ValueError("group_product_menu: parameter count must be positive")
+    menu = []
+    for combo in itertools.product(*(offered[g] for g in names)):
+        E = resident = 0
+        for g, rung in zip(names, combo):
+            for unit in groups[g]:
+                unit_E, unit_bytes = rows[unit][rung]
+                E += float(unit_E)
+                resident += int(unit_bytes)
+        menu.append(RungPoint(name="|".join(f"{g}={r}" for g, r in zip(names, combo)),
+                              bits=8.0 * resident / total_params, resident_bytes=resident, E=E))
+    return menu, incomplete
+
+
 # --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
