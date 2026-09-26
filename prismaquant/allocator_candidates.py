@@ -45,6 +45,7 @@ from .name_projection import (
     MAPPED,
     NameProjection,
 )
+from .schemas import refuse_retired_ladder_cost_source
 from .serving_profiles import (
     SERVING_LANE_SCHEMA,
     check_serving_format,
@@ -905,28 +906,16 @@ def _has_measured_output_mse(stats_entry: dict, cost_entry: dict) -> bool:
 
 
 def _has_interpolated_output_mse(cost_entry: dict) -> bool:
-    """Whether this row carries a USABLE band-interpolated ``output_mse``.
+    """Whether this row carries a USABLE interpolated ``output_mse``.
 
-    A band-interpolated row (``cost_source: band_interpolated``/``mixed``) is
-    stamped ``output_mse_measured=False`` and its ``output_mse`` is the
-    tensor's own holdout-gated ladder fit rather than an observation. It is
-    still an output-space number, which is what makes it usable as a price.
+    An interpolated row (``cost_entry_is_band_interpolated``) is stamped
+    ``output_mse_measured=False`` and its ``output_mse`` is a fit over the
+    unit's own measured anchors rather than an observation. It is still an
+    output-space number, which is what makes it usable as a price.
 
-    Strict positivity is load-bearing, not a defensive nicety — it is what
-    keeps the two placeholder classes on the weight-only branch, where they
-    belong:
-
-      * the PACKED-expert ladder path (``measure_quant_cost``, the mixed
-        accepted/rejected slice fallback) accumulates
-        ``output_mse=0.0, rel_output_mse=0.0`` alongside
-        ``cost_source=band_interpolated``/``mixed``, because that path fits in
-        WEIGHT space only and never produced an output number at all;
-      * the dense ladder path writes ``float(fills["output_mse"] or 0.0)``, so
-        a row whose output_mse fit could not be made (a non-positive anchor)
-        also lands at exactly 0.0.
-
-    In both cases there is no output-space information in the row, and a 0.0
-    price would be the DP's global optimum — precisely what
+    Strict positivity is load-bearing, not a defensive nicety: a row at
+    exactly 0.0 carries no output-space information, and a 0.0 price would be
+    the DP's global optimum — precisely what
     ``cost_entry_prices_unmeasured_activation_at_zero`` exists to catch. A
     non-finite value is rejected for the same reason: it is not a price.
     """
@@ -1083,13 +1072,12 @@ def cost_entry_is_source_passthrough(
     return not spec.act_quant_changes_input
 
 
-BAND_INTERPOLATED_COST_SOURCE = "band_interpolated"
-MIXED_COST_SOURCE = "mixed"
 #: The Tessera anchor campaign's fitted rows (``tessera_campaign.py``). Kept
-#: as its own spelling rather than reusing ``band_interpolated`` because the
+#: as its own spelling rather than reusing the retired RD ladder's
+#: ``band_interpolated``/``mixed`` (codebook lane, archived 2026-09-25, #1304;
+#: ``schemas.refuse_retired_ladder_cost_source`` refuses those) because the
 #: MECHANISM differs and a shipped artifact has to be able to say which one
-#: priced it: the RD ladder (retired with the codebook lane, archived
-#: 2026-09-25, #1304) fit a per-tensor law over a handful of declared
+#: priced it: the RD ladder fit a per-tensor law over a handful of declared
 #: rungs, while the campaign fits a monotone piecewise-linear surface in
 #: (q256, log2 dloss) over measured anchors of ONE family on ONE unit and
 #: refuses to extrapolate past them. What the two share is the property this
@@ -1103,21 +1091,17 @@ TESSERA_INTERPOLATED_COST_SOURCE = "tessera_campaign_interpolated"
 
 
 def cost_entry_is_band_interpolated(cost_entry: dict) -> bool:
-    """Whether this row's cost was FITTED from ladder anchors, not measured.
+    """Whether this row's cost was FITTED from anchors, not measured.
 
-    Stamped by the cost stage's RD-ladder interpolation (retired with the
-    codebook lane, archived 2026-09-25, #1304; stale tables may still carry
-    the stamp) and by the Tessera anchor campaign. Such a row
-    is not a guess — the tensor's own law had to clear a holdout gate before
-    the fit was accepted, and a tensor whose law was rejected had its rungs
-    measured instead — but it IS a prediction, and a shipped artifact must be
-    able to say which of its selected prices were predictions.
+    Stamped by the Tessera anchor campaign. Such a row is not a guess — the
+    fit had to clear the campaign's leave-one-anchor-out check — but it IS a
+    prediction, and a shipped artifact must be able to say which of its
+    selected prices were predictions. A row the retired RD ladder stamped
+    (``band_interpolated``/``mixed``, codebook lane archived 2026-09-25,
+    #1304) refuses here instead of being priced.
     """
-    return cost_entry.get("cost_source") in {
-        BAND_INTERPOLATED_COST_SOURCE,
-        MIXED_COST_SOURCE,
-        TESSERA_INTERPOLATED_COST_SOURCE,
-    }
+    refuse_retired_ladder_cost_source(cost_entry)
+    return cost_entry.get("cost_source") == TESSERA_INTERPOLATED_COST_SOURCE
 
 
 def drop_interpolated_candidates_dominated_by_measured(
@@ -1248,9 +1232,7 @@ def drop_census_interpolated_within_loo(
 
     Fails closed when an interpolated cell on the menu has no usable LOO
     record, or when ``loo`` is absent and any row in ``costs`` is
-    interpolated. RD-ladder interpolation (``band_interpolated``/``mixed``)
-    is not this function's subject; see
-    :func:`drop_interpolated_candidates_dominated_by_measured`.
+    interpolated.
     """
     if loo is None:
         interpolated_rows = sum(

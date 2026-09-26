@@ -350,3 +350,38 @@ def test_unknown_allowlisted_mtp_qname_fails_closed(tmp_path, monkeypatch):
         )
 
     assert all(not key[0].startswith("mtp.") for key in cache.weights)
+
+
+@pytest.mark.parametrize("fmt", ["NVFP4_CB_K16", "FP8_CB_K28"])
+def test_retired_codebook_mtp_rung_refuses_before_any_render(
+    tmp_path, monkeypatch, fmt,
+):
+    """A retired codebook rung (#1304) on the MTP menu refuses, naming the
+    archive, before anything is rendered or appended (#1345)."""
+    import traceback
+
+    from prismaquant.format_registry import RETIRED_CODEBOOK_ARCHIVE, RetiredFormatError
+
+    _patch_auto_config(monkeypatch)
+    activation_dir = tmp_path / "activations"
+    _write_activation(activation_dir, "mtp.fc", torch.randn(3, 4))
+    _write_activation(activation_dir, "mtp.proj", torch.randn(3, 4))
+    cache = _empty_cache()
+
+    with pytest.raises(RetiredFormatError) as info:
+        fill_profile_mtp_production_cache(
+            cache,
+            "/fake/model",
+            profile=_TinyMtpProfile(),
+            activation_cache_dir=activation_dir,
+            formats=(fmt,),
+            device="cpu",
+            dtype=torch.float32,
+            progress=False,
+        )
+
+    assert RETIRED_CODEBOOK_ARCHIVE in str(info.value)
+    frames = [frame.name for frame in traceback.extract_tb(info.tb)]
+    assert "_preflight_weighted_rows" in frames, frames
+    assert all(not key[0].startswith("mtp.") for key in cache.weights)
+    assert "mtp_render" not in cache.metadata
