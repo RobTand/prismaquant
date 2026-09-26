@@ -21,6 +21,7 @@ import re
 
 from prismaquant.cost_stage_checkpoint import canonical_json, canonical_json_sha256
 from prismaquant.schemas import SchemaValidationError, strict_json_loads
+from prismaquant.digests import DIRECT_UTF8_STRICT
 
 
 CANDIDATE_SCHEMA = "prismaquant.artifact_collection.candidate.v1"
@@ -128,13 +129,7 @@ def _canonical_bytes(value: object, *, where: str) -> bytes:
         canonical = canonical_json(value, where=where)
     except ValueError as exc:
         raise ArtifactCollectionError(f"{where}: not finite canonical JSON data") from exc
-    return json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
+    return DIRECT_UTF8_STRICT.encoded(canonical)
 
 
 def _validate_locators(value: object, *, where: str) -> dict[str, list[str]]:

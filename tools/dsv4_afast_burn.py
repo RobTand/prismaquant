@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import math
 import os
@@ -109,6 +108,7 @@ BASE_LAYER_ROOT = Path(
     "artifacts-mxfp4/probe-k12k18/by-layer"
 )
 from tools import dsv4_cbl_kernels as cblk
+from prismaquant.digests import DIRECT_ASCII_STRICT
 
 CBL_MICROCHECK_LAYER = int(os.environ.get("DSV4_CBL_MICROCHECK_LAYER", "0"))
 
@@ -157,11 +157,7 @@ def _load(path: Path) -> dict:
         return pickle.load(handle)
 
 
-def _sha(payload: Mapping[str, Any]) -> str:
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode()
-    return hashlib.sha256(raw).hexdigest()
+_sha = DIRECT_ASCII_STRICT.sha256
 
 
 def _audit_rung(layer: int) -> int:

@@ -55,6 +55,7 @@ from prismaquant.routed_moe_codebooks import (
     normalize_routed_book_keying,
 )
 from .schemas import strict_json_loads
+from .digests import DIRECT_UTF8_STRICT
 
 
 CB_LEARNED_BUNDLE_SCHEMA = "prismaquant.cb_learned_codebook_bundle.v1"
@@ -808,14 +809,7 @@ def _tensor_identity(tensor: torch.Tensor) -> dict[str, object]:
     return {"shape": shape, "sha256": digest}
 
 
-def _canonical_json(value: object) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
+_canonical_json = DIRECT_UTF8_STRICT.text
 
 
 def _validated_complete_source_identity(

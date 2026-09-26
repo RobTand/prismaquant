@@ -85,6 +85,7 @@ from tools.dsv4_ldlq_cost_campaign import (
     sha256_file,
 )
 from tools.dsv4_minchain_pilot import _evaluate_all, _refine_all
+from prismaquant.digests import DIRECT_ASCII_LAX
 
 
 LAYER_COUNT = 43
@@ -122,9 +123,7 @@ def _load(path: Path) -> dict:
         return pickle.load(handle)
 
 
-def _content_key(payload: Mapping[str, Any]) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(raw).hexdigest()
+_content_key = DIRECT_ASCII_LAX.sha256
 
 
 def _method_from_pilot() -> tuple[str, dict]:

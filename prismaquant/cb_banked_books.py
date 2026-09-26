@@ -31,6 +31,7 @@ from .routed_moe_codebooks import (
     ROUTED_MOE_CBL_BANK_RUNGS,
 )
 from .schemas import strict_json_loads
+from .digests import DIRECT_ASCII_STRICT
 
 
 BURN_CELL_SCHEMA = "prismaquant.dsv4_afast_burn_cell.v4"
@@ -277,12 +278,7 @@ def _expert_ids(value: object, *, where: str) -> tuple[int, ...]:
 
 def _canonical_json(value: object) -> str:
     try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return DIRECT_ASCII_STRICT.text(value)
     except (TypeError, ValueError) as exc:
         raise BankedCBLBookError(
             f"burn identity is not canonical JSON data: {exc}"
