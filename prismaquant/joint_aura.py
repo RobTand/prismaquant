@@ -622,6 +622,10 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         if self.statistics_capacity_bytes > max_statistics_bytes:
             raise RuntimeError("joint statistics matrices exceed statistics budget")
         self._operators = {}
+        # Bytes held in ``_operators``, kept by ``_accumulate`` as it inserts:
+        # the peak telemetry reads it on every observed invocation, and a sum
+        # over every held matrix there made each hook O(held keys) (PQ #1395).
+        self._resident_statistics_bytes = 0
         self._activation_terms = {}
         self._results = {}
         self._pending_backwards = 0
@@ -650,7 +654,11 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
 
     @property
     def resident_statistics_bytes(self):
-        return sum(value.numel() * value.element_size() for value in self._operators.values())
+        return self._resident_statistics_bytes
+
+    def _clear_operators(self):
+        self._operators.clear()
+        self._resident_statistics_bytes = 0
 
     def arithmetic_identity(self, measurement_dtype):
         from .joint_statistics_replay import statistics_arithmetic_identity
@@ -669,12 +677,14 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         return super().__enter__()
 
     def _accumulate(self, key, matrix):
+        # ``add_`` never resizes a held matrix, so only an insert moves the count.
         if key in self._operators:
             self._operators[key].add_(matrix)
         else:
             self._operators[key] = matrix
+            self._resident_statistics_bytes += matrix.numel() * matrix.element_size()
         self.telemetry['peak_statistics_bytes'] = max(
-            self.telemetry['peak_statistics_bytes'], self.resident_statistics_bytes)
+            self.telemetry['peak_statistics_bytes'], self._resident_statistics_bytes)
 
     def _release_observation_inputs(self):
         for inputs in self._observation_inputs.values():
@@ -687,7 +697,7 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         self._phase, self.active = 'failed', False
         self._remove_observers()
         self.modules.clear()
-        self._operators.clear()
+        self._clear_operators()
         self._release_observation_inputs()
 
     @torch.no_grad()
@@ -901,7 +911,7 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         if set(self._results) != set(self._format_groups):
             raise RuntimeError("joint statistics candidate coverage is incomplete")
         result = {key: dict(value) for key, value in self._results.items()}
-        self._operators.clear()
+        self._clear_operators()
         self._activation_terms.clear()
         self._results.clear()
         self._phase = 'complete'
@@ -914,7 +924,7 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         super().__exit__(*_args)
         self.modules.clear()
         self._release_observation_inputs()
-        self._operators.clear()
+        self._clear_operators()
         self._activation_terms.clear()
         self._results.clear()
         self._phase = 'closed'

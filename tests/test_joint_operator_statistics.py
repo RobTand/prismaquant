@@ -341,3 +341,70 @@ def test_retained_output_does_not_retain_observer_input_after_consumption_or_abo
         gc.collect()
         assert observed and observed[0]() is None
     assert output.shape == (2, 4)
+
+
+class _CountingOperators(dict):
+    """A lease's operator table that counts every walk over its held matrices."""
+
+    walks = 0
+
+    def values(self):
+        type(self).walks += 1
+        return super().values()
+
+    def items(self):
+        type(self).walks += 1
+        return super().items()
+
+    def __iter__(self):
+        type(self).walks += 1
+        return super().__iter__()
+
+
+def test_accumulate_keeps_the_byte_count_without_walking_held_matrices():
+    """PQ #1395: every observed invocation updates the peak telemetry.
+
+    Summing every held matrix there made one hook O(held keys), and an MTP
+    window holds hundreds (experts x projections x QDQ groups): 62% of the
+    autograd thread's Python in the live GLM-5.3 M5 run. The count moves only
+    on an insert, because ``add_`` never resizes a held matrix.
+    """
+    generator = torch.Generator().manual_seed(1393)
+    qdq = lambda x: torch.round(x * 2) / 2
+    layers = {f'u{i}': _linear(torch.randn(4, 3, generator=generator)) for i in range(16)}
+    specs = {name: {'q': _spec('q', qdq), 'identity': _spec('identity', lambda x: x, act_bits=None)}
+             for name in layers}
+    draws = [(torch.randn(2, 3, generator=generator), torch.randn(2, 4, generator=generator))
+             for _ in range(3)]
+    with _lease(layers, specs) as lease:
+        lease.begin_probe()
+        lease._operators = _CountingOperators(lease._operators)
+        _CountingOperators.walks = 0
+        for x, g in draws:
+            for layer in layers.values():
+                layer(x).backward(g)
+        assert _CountingOperators.walks == 0, 'an accumulate walked the held matrices'
+        held = sum(value.numel() * value.element_size()
+                   for value in dict.values(lease._operators))
+        # One GW and one GA plane per Linear: 2 x 4 x 3 FP32 each.
+        assert held == 16 * 2 * 4 * 3 * 4
+        assert lease.resident_statistics_bytes == held
+        # Inserts only ever grow the table, so the peak is the final count.
+        assert lease.telemetry['peak_statistics_bytes'] == held
+        lease.finish_observations()
+        lease.project({(name, fmt): torch.zeros(4, 3) for name in layers for fmt in specs[name]})
+        lease.finish_projections()
+        assert lease.resident_statistics_bytes == 0
+        assert lease.telemetry['peak_statistics_bytes'] == held
+
+
+def test_a_failed_observation_zeroes_the_byte_count():
+    layer, _, specs, draws = _fixture(1)
+    lease = _lease({'u': layer}, {'u': specs})
+    with lease:
+        lease.begin_probe()
+        x, g = draws[0]
+        layer(x).backward(g)
+        assert lease.resident_statistics_bytes == 96
+        lease._fail_observation()
+        assert lease.resident_statistics_bytes == 0 and not lease._operators
