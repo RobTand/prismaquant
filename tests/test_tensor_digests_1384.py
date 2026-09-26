@@ -140,3 +140,14 @@ def test_hessian_capture_digest_keeps_its_value(device):
     }, PROVENANCE))
     GOLDEN.call(lambda: fn({"model.layers.0.mlp.up_proj": tensors[13]}, PROVENANCE))
     GOLDEN.call(lambda: fn({}, {}))
+
+
+# ---------------------------------------------------------------------------
+# PrismaSnap's tensor payload digest: canonical JSON over the byte digest.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("device", DEVICES)
+def test_prismasnap_tensor_payload_digest_keeps_its_value(device):
+    fn = _site("prismaquant.prismasnap_checkpoint._tensor_payload_sha256")
+    for value in _tensors(device):
+        GOLDEN.call(lambda: fn(value, where="golden"))
+    GOLDEN.call(lambda: fn(None, where="golden"))
