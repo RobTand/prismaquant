@@ -141,18 +141,9 @@ def _render_dense_layer(
     fisher_rows: _FisherRowWeightCache | None,
     render_score_records: dict[str, dict[str, object]],
     col_weights: Mapping[str, torch.Tensor] | None,
-    cb_serialization_context,
     retain_rendered: bool,
     consume_render: Callable[..., Mapping[str, object]] | None,
-    consumer_identity: Mapping[str, object] | None,
-    calibration_hash: str | None,
-    resume: bool,
     max_act_rows: int,
-    cb_pair_identities: dict[tuple[str, str], dict[str, object]],
-    cb_pair_artifacts: dict[str, dict[str, object]],
-    transient_results: dict[str, dict[str, object]],
-    cb_git_commit: str | None,
-    cb_producer_source_sha256: str | None,
     joint_scale_modules: Mapping[str, nn.Module] | None = None,
     declared_cold_qnames: frozenset[str] = frozenset(),
     progress: bool,
@@ -168,7 +159,6 @@ def _render_dense_layer(
     from prismaquant.decision_units import fused_group_key
     from prismaquant.export_native_compressed import _compute_nvfp4_joint_global
     from prismaquant.production_weight_cache import (
-        _check_resumed_render_score_policies,
         _render_levers_input_global_scale_policy,
     )
 
@@ -177,6 +167,10 @@ def _render_dense_layer(
     # renders must price identically, so neither may re-read the environment
     # per layer.
     stream_score_policy = _render_levers_input_global_scale_policy(levers)
+    if not retain_rendered and consume_render is None:
+        raise ValueError(
+            "a transient streamed render requires a consume_render callback"
+        )
     layer_formats: dict[str, tuple[str, ...]] = {}
     for qname in layer_dense_modules:
         fmts = tuple(render_formats_by_qname.get(qname, ()))
@@ -187,147 +181,6 @@ def _render_dense_layer(
     }
     if not qname_to_module:
         return 0
-
-    _extend_production_cache_cb_render_identity(
-        cache,
-        layer_formats,
-        cb_serialization_context=cb_serialization_context,
-        col_weights=col_weights,
-    )
-    dense_cb_source_weights = {
-        qname: qname_to_module[qname].weight.detach()
-        for qname, fmts in layer_formats.items()
-        if any(_is_cb_format_name(fmt) for fmt in fmts)
-    }
-    if dense_cb_source_weights:
-        bind_production_cache_cb_source_weights(
-            cache,
-            dense_cb_source_weights,
-            require_complete=False,
-            where="streaming ProductionWeightCache dense source binding",
-        )
-
-    expected_rerenders: dict[tuple[str, str], dict[str, object]] = {}
-    completed: set[tuple[str, str]] = set()
-    if dense_cb_source_weights:
-        if not calibration_hash:
-            raise ValueError(
-                "streaming CB render requires an exact calibration_hash for "
-                "per-pair identity"
-            )
-        cb_identity = cache.metadata.get(CB_RENDER_IDENTITY_METADATA_KEY)
-        cb_layer_scope = {
-            qname: tuple(
-                fmt for fmt in fmts if _is_cb_format_name(fmt)
-            )
-            for qname, fmts in layer_formats.items()
-            if any(_is_cb_format_name(fmt) for fmt in fmts)
-        }
-        validated_context = validate_cb_render_identity_metadata(
-            cb_identity,
-            expected_context=cb_serialization_context,
-            expected_formats_by_qname=cb_layer_scope,
-            require_source_complete=False,
-            where="streaming ProductionWeightCache dense pair identity",
-        )
-        if cb_git_commit is None or cb_producer_source_sha256 is None:
-            raise RuntimeError("streaming CB producer identity was not resolved")
-        for qname, fmts in cb_layer_scope.items():
-            weight_dtype = qname_to_module[qname].weight.dtype
-            for fmt in fmts:
-                key = (qname, fmt)
-                pair_identity = build_cb_cache_pair_identity(
-                    cb_identity,
-                    qname=qname,
-                    fmt=fmt,
-                    calibration_hash=calibration_hash,
-                    git_commit=cb_git_commit,
-                    source_weight_dtype=weight_dtype,
-                    cb_serialization_context=cb_serialization_context,
-                    render_input_contract={
-                        "path": "dense",
-                        "max_act_rows": int(max_act_rows),
-                    },
-                    validated_context=validated_context,
-                    producer_source_sha256=cb_producer_source_sha256,
-                )
-                cb_pair_identities[key] = pair_identity
-                if cache_dir_path is None:
-                    continue
-                shard_path = cache_dir_path / _cache_weight_filename(qname, fmt)
-                sidecar_path = (
-                    cache_dir_path / _cache_pair_identity_filename(qname, fmt)
-                )
-                if not resume and (shard_path.exists() or sidecar_path.exists()):
-                    raise RuntimeError(
-                        "streaming production cache destination is not fresh "
-                        f"for {qname}@{fmt}; pass resume=True only when the "
-                        "identity-bound sidecar should be admitted"
-                    )
-                if not resume:
-                    continue
-                admitted = _validate_cb_cache_pair_resume(
-                    cache_dir_path=cache_dir_path,
-                    qname=qname,
-                    fmt=fmt,
-                    expected_identity=pair_identity,
-                    require_render_score=True,
-                    allow_missing_shard=True,
-                    require_consumer_receipt=not retain_rendered,
-                    expected_consumer_identity=(
-                        consumer_identity if not retain_rendered else None
-                    ),
-                )
-                if admitted is None:
-                    continue
-                score = admitted.get("render_score")
-                if not isinstance(score, Mapping):
-                    raise RuntimeError(
-                        f"admitted CB pair {qname}@{fmt} has no render score"
-                    )
-                score_key = _render_score_record_key(qname, fmt)
-                if shard_path.is_file():
-                    if not retain_rendered:
-                        raise RuntimeError(
-                            f"transient CB resume found an unexpected retained "
-                            f"shard for {qname}@{fmt}: {shard_path}"
-                        )
-                    cache.weights[key] = _cache_weight_filename(qname, fmt)
-                    completed.add(key)
-                elif retain_rendered:
-                    expected_rerenders[key] = admitted
-                else:
-                    receipt = admitted.get("consumer_receipt")
-                    result = (
-                        receipt.get("result")
-                        if isinstance(receipt, Mapping) else None
-                    )
-                    if not isinstance(result, Mapping):
-                        raise RuntimeError(
-                            f"admitted transient CB pair {qname}@{fmt} has no "
-                            "consumer result"
-                        )
-                    transient_results[score_key] = dict(result)
-                    completed.add(key)
-                render_score_records[score_key] = dict(score)
-                # An admitted pair's cost is being reused: it answers the
-                # activation-scale policy question like any other retained
-                # score (#227).
-                _check_resumed_render_score_policies(
-                    {score_key: dict(score)},
-                    policy=stream_score_policy,
-                    where=f"streamed CB pair resume for {qname}@{fmt}",
-                )
-                cb_pair_artifacts[score_key] = {
-                    "identity": pair_identity,
-                    "tensor": admitted.get("tensor"),
-                    "render_score": dict(score),
-                    "render_score_sha256": admitted.get(
-                        "render_score_sha256"
-                    ),
-                    "consumer_receipt": admitted.get("consumer_receipt"),
-                    "retained_weight": bool(shard_path.is_file()),
-                }
 
     render_base_fmts = {
         _render_base_format(f)
@@ -382,12 +235,7 @@ def _render_dense_layer(
 
     rendered = 0
     for qname, mod in qname_to_module.items():
-        pending_formats = [
-            fmt for fmt in layer_formats[qname]
-            if (qname, fmt) not in completed
-        ]
-        if not pending_formats:
-            continue
+        pending_formats = layer_formats[qname]
         weight = mod.weight.data
         canonical = resolve_cost_target_name(qname, act_index, profile)
         cold_declared = qname in declared_cold_qnames
@@ -416,8 +264,8 @@ def _render_dense_layer(
         # on CPU (and diverges from the resident render dtype).
         X = X_cpu.to(device=device, dtype=torch.float32)
         # A provenance-authorized never-routed expert has no activation rows
-        # by definition.  Keep the mapping empty so LDLQ takes its explicit
-        # raw-render fallback; an empty matrix would look like a successfully
+        # by definition.  Keep the mapping empty so the render sees no
+        # activations at all; an empty matrix would look like a successfully
         # loaded (but degenerate) calibration input to downstream code.
         activations = {} if cold_declared else {qname: X}
         joint = joint_globals.get(qname)
@@ -440,12 +288,6 @@ def _render_dense_layer(
         for fmt in pending_formats:
             render_fmt = _render_base_format(fmt)
             gate_trace: list[dict[str, object]] = []
-            timed_cb_pair = (
-                cache_dir_path is not None and _is_cb_format_name(fmt)
-            )
-            if timed_cb_pair and weight.device.type == "cuda":
-                torch.cuda.synchronize(weight.device)
-            encode_started = time.perf_counter()
             w_dq = render_production_weight(
                 weight, render_fmt,
                 qname=qname,
@@ -457,15 +299,7 @@ def _render_dense_layer(
                 col_weights=(
                     None if col_weights is None else col_weights.get(qname)
                 ),
-                cb_serialization_context=cb_serialization_context,
                 gate_trace=gate_trace,
-                ldlq_missing_activation_ok=cold_declared,
-            )
-            if timed_cb_pair and weight.device.type == "cuda":
-                torch.cuda.synchronize(weight.device)
-            encode_seconds = (
-                time.perf_counter() - encode_started
-                if timed_cb_pair else 0.0
             )
             score_key = _render_score_record_key(qname, fmt)
             render_score = _render_score_record(
@@ -479,94 +313,25 @@ def _render_dense_layer(
                 input_global_scale_policy=stream_score_policy,
             )
             render_score_records[score_key] = render_score
-            canonical_render = _canonical_rendered_weight_tensor(
-                w_dq,
-                weight_dtype=weight.dtype,
-            )
-            expected_sidecar = expected_rerenders.get((qname, fmt))
-            if expected_sidecar is not None:
-                observed_tensor = _cb_cache_tensor_identity(canonical_render)
-                tensor_difference = first_identity_difference(
-                    expected_sidecar.get("tensor"),
-                    observed_tensor,
-                    path="tensor",
-                )
-                if tensor_difference is not None:
-                    field, stored, rerendered = tensor_difference
-                    raise RuntimeError(
-                        "selected CB assignment re-render differs from the "
-                        f"streamed scalar for {qname}@{fmt} at '{field}': "
-                        f"stored={identity_value_for_error(stored)} "
-                        f"rerendered={identity_value_for_error(rerendered)}; "
-                        "refusing publication"
-                    )
-
-            receipt = None
             if not retain_rendered:
-                if consume_render is None:
-                    result = dict(render_score)
-                else:
-                    result = consume_render(
-                        qname=qname,
-                        fmt=fmt,
-                        reference_weight=weight,
-                        rendered_weight=canonical_render,
-                        render_score=render_score,
-                    )
+                canonical_render = _canonical_rendered_weight_tensor(
+                    w_dq,
+                    weight_dtype=weight.dtype,
+                )
+                result = consume_render(
+                    qname=qname,
+                    fmt=fmt,
+                    reference_weight=weight,
+                    rendered_weight=canonical_render,
+                    render_score=render_score,
+                )
+                del canonical_render
                 if not isinstance(result, Mapping):
                     raise TypeError(
                         "streamed render consumer must return a Mapping for "
                         f"{qname}@{fmt}, got {type(result).__name__}"
                     )
-                # A receipt hashes the full canonical tensor and exists to
-                # authenticate a durable transient sidecar. Production-anchor
-                # AURA has no pair sidecar/cache directory; its exact consumer
-                # contract is already nested in the checkpoint identity, so a
-                # throwaway per-anchor tensor hash only burns CPU and UMA
-                # bandwidth on the hot path.
-                if cache_dir_path is not None:
-                    if consumer_identity is None:
-                        raise ValueError(
-                            "durable transient streamed render requires "
-                            "consumer_identity"
-                        )
-                    receipt = _build_cb_transient_consumer_receipt(
-                        qname=qname,
-                        fmt=fmt,
-                        tensor=canonical_render,
-                        render_score=render_score,
-                        consumer_identity=consumer_identity,
-                        result=result,
-                    )
-                transient_results[score_key] = dict(result)
-
-            if cache_dir_path is not None and _is_cb_format_name(fmt):
-                pair_identity = cb_pair_identities.get((qname, fmt))
-                if pair_identity is None:
-                    raise RuntimeError(
-                        f"streaming CB pair identity missing for {qname}@{fmt}"
-                    )
-                _write_cb_cache_pair_sidecar(
-                    cache_dir_path=cache_dir_path,
-                    qname=qname,
-                    fmt=fmt,
-                    identity=pair_identity,
-                    tensor=canonical_render,
-                    encode_seconds=encode_seconds,
-                    render_score=render_score,
-                    consumer_receipt=receipt,
-                    retained_weight=retain_rendered,
-                )
-                cb_pair_artifacts[score_key] = {
-                    "identity": pair_identity,
-                    "tensor": _cb_cache_tensor_identity(canonical_render),
-                    "render_score": render_score,
-                    "render_score_sha256": receipt.get("render_score_sha256")
-                    if isinstance(receipt, Mapping) else None,
-                    "consumer_receipt": receipt,
-                    "retained_weight": bool(retain_rendered),
-                }
-            if retain_rendered:
+            else:
                 _store_rendered_weight_entry(
                     weights=cache.weights,
                     cache_dir_path=cache_dir_path,
@@ -574,10 +339,9 @@ def _render_dense_layer(
                     fmt=fmt,
                     tensor=w_dq,
                     weight_dtype=weight.dtype,
-                    durable=_is_cb_format_name(fmt),
                 )
             rendered += 1
-            del canonical_render, w_dq
+            del w_dq
         del X
         activations.clear()
     if progress and rendered:

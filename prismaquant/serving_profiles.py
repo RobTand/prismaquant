@@ -761,8 +761,10 @@ class ServingLaneSpec:
         )
 
     def resolve(self, fmt: str, *, runtime_version: str,
-                rung: int | None,
                 target_platform: str | None = None) -> ResolvedServingLane:
+        # No live format names a fused mid-M k-rung: the only rung-bearing
+        # names were the retired codebook lane's (archived 2026-09-25, #1304),
+        # so ``rung`` is None and ``fused_mid_m_backed`` False for every lane.
         rungs, source = self.backed_rungs(runtime_version)
         status, flags, status_source = self.route_status_for(
             fmt, platform=target_platform)
@@ -771,12 +773,12 @@ class ServingLaneSpec:
             format=fr.canonical_format_name(fmt),
             activation_contract=self.activation_contract,
             fallback_route=self.fallback_route,
-            fused_mid_m_backed=bool(rung is not None and rung in rungs),
+            fused_mid_m_backed=False,
             fused_mid_m_rungs=rungs,
             fused_mid_m_range=self.fused_mid_m_range,
             runtime_version=runtime_version,
             rungs_source=source,
-            rung=rung,
+            rung=None,
             detail=self.detail,
             route_status=status,
             requires_serve_flags=flags,
@@ -1027,7 +1029,6 @@ class ServingProfile:
                 if runtime_version is not None
                 else serving_runtime_version()
             ),
-            rung=_cb_rung_of(fmt),
             target_platform=self.target_platform,
         )
 
@@ -1457,14 +1458,6 @@ def serving_runtime_version() -> str:
     if _RUNTIME_VERSION is None:
         _RUNTIME_VERSION = ""
     return _RUNTIME_VERSION
-
-
-def _cb_rung_of(fmt: str) -> int | None:
-    """The CB k-rung of a format name, or None for a non-CB format."""
-    from .cb_layout import parse_format_name
-
-    parsed = parse_format_name(fr.canonical_format_name(fmt))
-    return None if parsed is None else int(parsed[1])
 
 
 def serving_lane_route(

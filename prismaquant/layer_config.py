@@ -12,7 +12,6 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
-from prismaquant.cb_layout import ACCEPTED_CB_FORMAT_NAMES
 from prismaquant.schemas import validate_layer_config_payload
 
 
@@ -55,10 +54,12 @@ _GGUF_FORMAT_NAMES = frozenset(
      "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ3_XXS", "IQ3_S", "IQ4_XS", "IQ4_NL"}
 )
 
-# Backwards-compatible private name used by exporters. The canonical producer
-# reader surface is torch-free ``cb_layout.ACCEPTED_CB_FORMAT_NAMES``; do not
-# rebuild it here. Producer menus use ``PRODUCT_CB_FORMAT_NAMES`` instead.
-_NVFP4_CB_FORMAT_NAMES = ACCEPTED_CB_FORMAT_NAMES
+#: Shape of a retired codebook rung name (the Gridbook lane, archived
+#: 2026-09-25, #1304). Only a shape test, like ``_TESSERA_FORMAT_NAME`` below:
+#: the authority is ``format_registry.RETIRED_CODEBOOK_FORMAT_RE``, which
+#: ``_refuse_retired_codebook`` reaches through ``get_format``.
+_RETIRED_CODEBOOK_NAME = re.compile(r"^(?:NVFP4_CB_K|FP8_CB_K)\d+$")
+_RETIRED_CODEBOOK_DATA_TYPES = {"nvfp4_cb": "NVFP4_CB_K", "fp8_cb": "FP8_CB_K"}
 
 # Checkpoint ``quantization_config.scale_fmt`` spellings that mean a one-byte
 # UE8M0 block exponent. Kept as a literal so this module stays torch-free;
@@ -70,6 +71,19 @@ _UE8M0_SCALE_FMTS = frozenset({"ue8m0", "e8m0"})
 #: that keeps a malformed recipe out of a torch-free parser, and it is
 #: deliberately the same anchored family/arity/rung grammar.
 _TESSERA_FORMAT_NAME = re.compile(r"^TESSERA_[A-Z0-9]+_K\d+_R\d+$")
+
+
+def _refuse_retired_codebook(name: str) -> None:
+    """Refuse a stale recipe that names a retired codebook rung.
+
+    ``get_format`` raises ``RetiredFormatError`` naming the archive. The import
+    is local because ``format_registry`` imports torch and this module stays
+    torch-free on every path except this refusal.
+    """
+    from prismaquant.format_registry import get_format
+
+    get_format(name)
+    raise AssertionError(f"{name!r} is a retired codebook rung but resolved")
 
 
 def canonicalize_format(entry: dict | str | int) -> str:
@@ -87,27 +101,10 @@ def canonicalize_format(entry: dict | str | int) -> str:
             if gguf_type not in _GGUF_FORMAT_NAMES:
                 raise ValueError(f"unsupported gguf scheme: {entry!r}")
             return gguf_type
-        if dt == "nvfp4_cb":
-            # ``cb_mode`` no longer selects a prefix: the signed family was
-            # deleted 2026-08-17, so every NVFP4-CB rung is an unsigned
-            # product rung. Refuse a stale recipe that still asks for signed
-            # rather than silently serving it the product rung of the same k,
-            # which is a different codebook with the same name.
-            if str(entry.get("cb_mode", "")) == "signed":
-                raise ValueError(
-                    "signed NVFP4-CB rungs (NVFP4_CB_S*) were deleted "
-                    "2026-08-17 -- no native Gridbook kernel serves the "
-                    f"n_sub=1 layout. Re-allocate on a product rung: {entry!r}"
-                )
-            name = f"NVFP4_CB_K{int(entry['cb_k'])}"
-            if name not in _NVFP4_CB_FORMAT_NAMES:
-                raise ValueError(f"unsupported nvfp4_cb scheme: {entry!r}")
-            return name
-        if dt == "fp8_cb":
-            name = f"FP8_CB_K{int(entry['cb_k'])}"
-            if name not in _NVFP4_CB_FORMAT_NAMES:
-                raise ValueError(f"unsupported fp8_cb scheme: {entry!r}")
-            return name
+        if dt in _RETIRED_CODEBOOK_DATA_TYPES:
+            _refuse_retired_codebook(
+                f"{_RETIRED_CODEBOOK_DATA_TYPES[dt]}{int(entry.get('cb_k', 0))}"
+            )
         if dt == "tessera":
             # A Tessera rung is a point on a continuous rate axis, not a
             # scheme: thousands of rungs per shape across four families, and
@@ -187,8 +184,8 @@ def canonicalize_format(entry: dict | str | int) -> str:
             return value.upper()
         if value.upper() in _GGUF_FORMAT_NAMES:
             return value.upper()
-        if value.upper() in _NVFP4_CB_FORMAT_NAMES:
-            return value.upper()
+        if _RETIRED_CODEBOOK_NAME.fullmatch(value.upper()):
+            _refuse_retired_codebook(value.upper())
         if value in ("nvfp4", "fp4", "4"):
             return "NVFP4"
         if value in ("mxfp4_source", "mx_fp4_source"):

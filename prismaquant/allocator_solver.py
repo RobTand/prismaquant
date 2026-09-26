@@ -78,13 +78,15 @@ class Candidate:
     memory_bytes: int
     predicted_dloss: float
     # Versioned producer-layout identity. None for formats whose FormatSpec is
-    # already a complete serialized description. Kept out of solver logic for
-    # backwards compatibility; reports/assertions use it to distinguish e.g.
-    # FP4-CB v1 from v2 and lattice from learned sidecars.
+    # already a complete serialized description; a Tessera rung carries its
+    # pre-render recipe identity here. Kept out of solver logic; reports and
+    # assertions use it to distinguish serializations of one format name.
     serialized_identity: str | None = None
-    # Physical codebook-table identity, kept separately so aggregation and
-    # export assertions can deduplicate/compare sidecars without parsing the
-    # complete tensor-layout JSON above.
+    # Shared-sidecar identity, kept separately so aggregation and export
+    # assertions can compare sidecars without parsing the complete layout
+    # identity above. No live format sets it since the codebook lane retired
+    # (archived 2026-09-25, #1304); the field stays so candidate records keep
+    # their shape.
     serialized_sidecar_identity: str | None = None
     # WHICH estimator priced this candidate's activation contract (ultraplan
     # P5a). One of activation_fair_pricing.BRANCH_*: measured_output_mse,
@@ -1592,8 +1594,8 @@ def compute_achieved(stats: dict, assignment: dict[str, str],
     """Return additive proposal ``(avg_bits, total_predicted_dloss)``.
 
     ``Candidate.memory_bytes`` is deliberately tensor-local, so this helper
-    does not charge assignment-shared CB codebooks or other non-additive
-    artifact costs. Producer callers must exact-price the expanded assignment
+    does not charge non-additive artifact costs (NVFP4 global scales,
+    serving-promotion expansion). Producer callers must exact-price the expanded assignment
     before reporting a final achieved rate; :mod:`prismaquant.allocator` does
     that in its proposal-then-exact-filter loop.
 
