@@ -53,10 +53,67 @@ def test_device_only_difference_reuses_in_dev(monkeypatch, field, value):
     assert stat_fingerprint_reusable(_fingerprint(), _fingerprint(**{field: value}))
 
 
+def _filesystem(monkeypatch, fstype):
+    monkeypatch.setattr(cs, "_mount_filesystem_type", lambda _path: fstype)
+
+
 def test_device_only_difference_is_strict_in_certified(monkeypatch):
     _dev_off(monkeypatch)
+    _filesystem(monkeypatch, "ext4")
     from prismaquant.cost_streaming import stat_fingerprint_reusable
     assert not stat_fingerprint_reusable(_fingerprint(), _fingerprint(device=75))
+
+
+@pytest.mark.parametrize("fstype", ["nfs", "nfs4"])
+def test_two_nfs_mounts_of_one_object_reuse_in_certified(monkeypatch, fstype):
+    """PQ #1363: the pool export read st_dev 64 on one mount and 66 on
+    another with identical inode, size, mtime and ctime on all 120 shards.
+    On NFS the device number names the client's mount, so certified mode
+    admits it, and says it was a mount difference rather than dev mode."""
+    _dev_off(monkeypatch)
+    _filesystem(monkeypatch, fstype)
+    assert cs.stat_fingerprint_reuse(_fingerprint(device=66), _fingerprint()) == "mount"
+    assert cs.stat_fingerprint_reuse(_fingerprint(), _fingerprint()) == "exact"
+    _dev_on(monkeypatch)
+    assert cs.stat_fingerprint_reuse(_fingerprint(device=66), _fingerprint()) == "mount"
+    _filesystem(monkeypatch, "ext4")
+    assert cs.stat_fingerprint_reuse(_fingerprint(device=66), _fingerprint()) == "dev"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("size", 5368221857), ("mtime_ns", 1788063368825961509),
+    ("ctime_ns", 1788063368825961509)])
+def test_a_swapped_object_with_the_same_inode_refuses_on_nfs(monkeypatch, field, value):
+    """The mount relaxation drops only the device number: an object that
+    reuses the inode but differs in any other field is another object."""
+    _filesystem(monkeypatch, "nfs4")
+    for dev in (_dev_off, _dev_on):
+        dev(monkeypatch)
+        for device in (64, 66):
+            assert cs.stat_fingerprint_reuse(
+                _fingerprint(device=device, **{field: value}), _fingerprint()) is None
+
+
+def test_mountinfo_names_the_longest_mount_holding_the_path(monkeypatch, tmp_path):
+    info = tmp_path / "mountinfo"
+    info.write_text("\n".join([
+        "22 1 259:2 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p2 rw",
+        "95 22 0:64 / /pq1363/shared rw,relatime shared:50 - nfs4 dl380g10:/pool rw",
+        "96 95 0:65 / /pq1363/shared/local\\040disk rw - ext4 /dev/sdb1 rw",
+        "97 22 0:66 /pool/pq1363-models /pq1363-models rw - nfs4 dl380g10:/pool rw",
+        "not a mountinfo line",
+    ]) + "\n")
+    monkeypatch.setattr(cs, "_MOUNTINFO", info)
+    assert cs._mount_filesystem_type("/pq1363/shared/pq1363-models/a.safetensors") == "nfs4"
+    assert cs._mount_filesystem_type("/pq1363/shared") == "nfs4"
+    assert cs._mount_filesystem_type("/pq1363/shared/local disk/a") == "ext4"
+    assert cs._mount_filesystem_type("/pq1363/sharedx/a") == "ext4"
+    assert cs._mount_filesystem_type("/pq1363-models/GLM/a.safetensors") == "nfs4"
+    assert cs.device_number_is_client_local("/pq1363-models/GLM/a.safetensors")
+    assert not cs.device_number_is_client_local("/home/rob/a")
+    monkeypatch.setattr(cs, "_MOUNTINFO", tmp_path / "missing")
+    assert cs._mount_filesystem_type("/pq1363/shared/a") is None
+    assert not cs.device_number_is_client_local("/pq1363/shared/a")
 
 
 @pytest.mark.parametrize("field,value", [
