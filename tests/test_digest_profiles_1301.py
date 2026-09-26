@@ -1,21 +1,18 @@
 """PQ #1301: every digest site moved onto ``prismaquant.digests`` keeps its bytes.
 
 A digest in this tree is an identity: another run, host or tool must reproduce
-it byte for byte. For each replaced function this file holds the code as it
-stood before the move (``git show c89726e4834:<file>``), runs it next to the
-migrated site on the same inputs, and requires the same outcome: the same
-return value, or the same exception type, the same ``str()`` and the same
-chained cause. The old code runs over a copy of its own module's globals, so it
-raises the module's own exception classes and calls the module's own helpers.
+it byte for byte. The migrating PR ran each replaced function's pre-move code
+(``git show c89726e4834:<file>``) next to the migrated site on the inputs below
+and required the same outcome: the same return value, or the same exception
+type, ``str()`` and chained cause. Those outcomes are frozen in
+``fixtures/digest_profiles_1301.json`` (PQ #1330), and each site is checked
+against them.
 """
 from __future__ import annotations
 
 import ast
-import hashlib
 import importlib
 import importlib.util
-import json
-import math
 from pathlib import Path, PurePosixPath
 import sys
 
@@ -29,513 +26,10 @@ from prismaquant.digests import (
     DIRECT_UTF8_STRICT,
     JsonProfile,
 )
+from tests.golden_table import GoldenTable, outcome
 
 
-# ---------------------------------------------------------------------------
-# The old code, verbatim.
-# ---------------------------------------------------------------------------
-
-#: ``cost_stage_checkpoint``'s round-trip encoding, which moved to ``digests``.
-OLD_ROUND_TRIP = '''\
-def canonical_json(value: object, *, where: str) -> object:
-    try:
-        encoded = json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{where} is not canonical JSON data") from exc
-    return json.loads(encoded)
-
-
-def canonical_json_bytes(value: object, *, where: str) -> bytes:
-    """The exact bytes ``canonical_json_sha256`` digests.
-
-    Consumers that must *publish* canonical bytes -- not only hash them --
-    read them here, so there is one canonical JSON encoding in the tree
-    rather than a second spelling of the same ``json.dumps`` keywords.
-    """
-    canonical = canonical_json(value, where=where)
-    try:
-        return json.dumps(
-            canonical,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{where} is not canonical JSON data") from exc
-
-
-def canonical_json_sha256(value: object, *, where: str) -> str:
-    return hashlib.sha256(canonical_json_bytes(value, where=where)).hexdigest()
-
-
-#: The exact types ``json.loads`` produces. Exact, not ``isinstance``: a subclass
-#: may override ``__str__``/``__repr__``, which would encode to bytes the stdlib
-#: encoder would never write for parsed JSON.
-_ALLOWED_SCALARS = (str, int, float, bool, type(None))
-
-#: One encoder with the one canonical set of options, so the normalized path and
-#: the generic path cannot drift apart in a keyword.
-_CANONICAL_ENCODER = json.JSONEncoder(
-    sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-
-
-def _require_normalized_json(value: object, *, where: str) -> None:
-    """Refuse anything ``json.loads`` cannot produce, before encoding it.
-
-    The generic path normalizes first: ``json.dumps`` stringifies an ``int``,
-    ``float``, ``bool`` or ``None`` key, so a graph whose keys are not strings
-    encodes to bytes that a reload would encode again differently. That
-    normalization is why the generic path cannot simply be streamed, and it is
-    why this path refuses such a graph instead of digesting different bytes. A
-    ``tuple`` key is refused by ``json`` itself, in both paths.
-    """
-    active: set = set()
-    stack = [(value, False)]
-    while stack:
-        item, leaving = stack.pop()
-        if leaving:
-            active.discard(id(item))
-            continue
-        if item is None or item is True or item is False:
-            continue
-        kind = type(item)
-        if kind is str or kind is int:
-            continue
-        if kind is float:
-            if not math.isfinite(item):
-                raise ValueError(f"{where} is not canonical JSON data")
-            continue
-        if kind is list:
-            marker = id(item)
-            if marker in active:
-                raise ValueError(f"{where} is not canonical JSON data: a cycle")
-            active.add(marker)
-            stack.append((item, True))
-            stack.extend((child, False) for child in item)
-            continue
-        if kind is dict:
-            marker = id(item)
-            if marker in active:
-                raise ValueError(f"{where} is not canonical JSON data: a cycle")
-            active.add(marker)
-            stack.append((item, True))
-            for key, child in item.items():
-                if type(key) is not str:
-                    raise ValueError(
-                        f"{where} is not normalized JSON: a mapping key is not a "
-                        f"string but {type(key).__name__}")
-                stack.append((child, False))
-            continue
-        raise ValueError(
-            f"{where} is not normalized JSON: {kind.__name__} has no canonical "
-            "JSON encoding")
-
-
-def canonical_json_sha256_normalized(value: object, *, where: str) -> str:
-    """``canonical_json_sha256``, for input that is already normalized JSON.
-
-    ``json.loads`` output is normalized by construction: object keys are
-    ``str``, containers are ``dict`` and ``list``, scalars are the JSON scalars.
-    For that shape the ``dumps``->``loads`` in ``canonical_json`` is the
-    identity on the encoding, so this validates the shape and then streams
-    ``json.JSONEncoder.iterencode`` -- the stdlib encoder, with the same options
-    -- into the digest, instead of building the encoded string, the second
-    graph, and the second encoded string.
-
-    The digest is the value ``canonical_json_sha256`` returns for the same
-    value. ``tests/test_canonical_json_normalized.py`` holds that equality over
-    Unicode, escapes, floats, negative zero, null, booleans and key order, and
-    holds the refusals for input that is not normalized. A caller whose value is
-    not already normalized JSON -- a non-string key, a tuple, a cycle -- must
-    use ``canonical_json_sha256``; a tuple key is refused by ``json`` in both.
-    """
-    _require_normalized_json(value, where=where)
-    digest = hashlib.sha256()
-    for chunk in _CANONICAL_ENCODER.iterencode(value):
-        digest.update(chunk.encode("utf-8"))
-    return digest.hexdigest()
-'''
-
-#: Each replaced function, by module.
-OLD_SOURCES = {
-    'prismaquant.aura_cost': '''\
-def _canonical_json(value: object, *, where: str) -> object:
-    try:
-        encoded = json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{where} is not canonical JSON data") from exc
-    return json.loads(encoded)
-
-
-def _canonical_json_sha256(value: object, *, where: str) -> str:
-    canonical = _canonical_json(value, where=where)
-    return hashlib.sha256(json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")).hexdigest()
-''',
-    'prismaquant.source_class_format_plan': '''\
-def _plan_digest(body: Mapping[str, object]) -> str:
-    digest_body = {
-        str(key): value
-        for key, value in body.items()
-        if str(key) != "identity_sha256"
-    }
-    canonical = canonical_json(digest_body, where="source-class format plan")
-    encoded = json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-''',
-    'prismaquant.artifact_collection': '''\
-def _canonical_bytes(value: object, *, where: str) -> bytes:
-    try:
-        canonical = canonical_json(value, where=where)
-    except ValueError as exc:
-        raise ArtifactCollectionError(f"{where}: not finite canonical JSON data") from exc
-    return json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-''',
-    'prismaquant.cb_compile_contract': '''\
-def _canonical_sha256(value: object) -> str:
-    import hashlib
-
-    encoded = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-''',
-    'prismaquant.glm_capture_compatibility': '''\
-def _digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
-''',
-    'prismaquant.boundary_control': '''\
-def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
-                                    separators=(",", ":"), allow_nan=False).encode()).hexdigest()
-''',
-    'prismaquant.sample_parallel_probe': '''\
-def _canonical_sha256(value: object, *, where: str) -> str:
-    try:
-        encoded = json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
-        raise SampleParallelProbeError(
-            f"{where} is not canonical JSON data"
-        ) from exc
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _runtime_snapshot_closure_sha256(
-    entries: Sequence[Mapping[str, object]],
-) -> str:
-    encoded = json.dumps(
-        list(entries), sort_keys=True, separators=(",", ":"),
-        ensure_ascii=True, allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-''',
-    'prismaquant.cb_learned_bundle': '''\
-def _canonical_json(value: object) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
-''',
-    'prismaquant.cb_warm_state': '''\
-def _canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
-''',
-    'prismaquant.cb_learned_promotion': '''\
-def _canonical_json(value: object, *, where: str) -> str:
-    try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise CBLPromotionReceiptError(
-            f"{where} is not strict canonical JSON data"
-        ) from exc
-''',
-    'prismaquant.joint_aura': '''\
-def identity_sha256(value) -> str:
-    if type(value) is _ValidatedProbeIdentity:
-        return value._sha256
-    return hashlib.sha256(json.dumps(
-        value, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode()).hexdigest()
-''',
-    'prismaquant.measured_runtime_prices': '''\
-def identity_sha256(payload: Any) -> str:
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()
-''',
-    'prismaquant.glm_mtp_capture': '''\
-def _json_sha256(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()
-''',
-    'prismaquant.streaming_model': '''\
-def _initialization_digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                    allow_nan=False).encode()).hexdigest()
-''',
-    'prismaquant.tessera_allocator': '''\
-def _canonical_sha256(value: Mapping[str, object]) -> str:
-    payload = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        allow_nan=False,
-    ).encode("ascii")
-    return hashlib.sha256(payload).hexdigest()
-''',
-    'tools.dsv4_afast_burn': '''\
-def _sha(payload: Mapping[str, Any]) -> str:
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode()
-    return hashlib.sha256(raw).hexdigest()
-''',
-    'tools.dsv4_afast_campaign': '''\
-def _sha256_text(payload: Mapping[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")).hexdigest()
-''',
-    'tools.dsv4_afast_allocation_grid': '''\
-def _content_key(identity: Mapping[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(
-        identity, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")).hexdigest()
-''',
-    'prismaquant.cb_banked_books': '''\
-def _canonical_json(value: object) -> str:
-    try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise BankedCBLBookError(
-            f"burn identity is not canonical JSON data: {exc}"
-        ) from exc
-
-
-def _burn_content_key(identity: Mapping[str, Any]) -> str:
-    return hashlib.sha256(_canonical_json(identity).encode("utf-8")).hexdigest()
-''',
-    'prismaquant.perturbed_x_cache': '''\
-def _exact_activation_json(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
-''',
-    'prismaquant.native_operator_panel': '''\
-def operator_route_identity(route):
-    """The route class a table binding names, not the GEMM symbol alone.
-
-    `TESSERA_FP8` and `TESSERA_NVFP4` both execute `torch._scaled_mm`, on
-    differently packed operands under different activation contracts. A
-    binding that carried only the symbol made the two indistinguishable in the
-    one field a downstream consumer compares, so two route classes read as one.
-
-    The identity is therefore the declared route itself -- every coordinate the
-    producer declared and `consume_native_receipt` admitted the observed route
-    against -- spelled by the same canonical `json.dumps` `identity_sha256`
-    hashes with, so no second canonical form of a route exists in this tree and
-    key order is not part of the answer. A route with no named symbol is
-    refused rather than given an identity: a route nobody can execute is not a
-    class.
-    """
-    if not isinstance(route, Mapping) or not isinstance(route.get("symbol"), str) or not route["symbol"].strip():
-        raise ValueError("a declared route must name the symbol it executes")
-    return json.dumps(route, sort_keys=True, separators=(",", ":"), allow_nan=False)
-''',
-    'prismaquant.artifact_registry': '''\
-def canonical_layer_config_json(layer_config: Mapping) -> str:
-    return json.dumps(layer_config, sort_keys=True, separators=(",", ":"))
-
-
-def layer_config_sha256(layer_config: Mapping) -> str:
-    return hashlib.sha256(
-        canonical_layer_config_json(layer_config).encode("utf-8")
-    ).hexdigest()
-''',
-    'prismaquant.cost_streaming': '''\
-def canonical_fingerprint_key(fingerprint: dict[str, object]) -> str:
-    return json.dumps(fingerprint, sort_keys=True, separators=(",", ":"))
-''',
-    'prismaquant.nvfp4_cb_footprint': '''\
-def _identity_key(identity: Mapping) -> str:
-    return json.dumps(identity, sort_keys=True, separators=(",", ":"))
-''',
-    'tools.dsv4_ldlq_burn': '''\
-def _content_key(payload: Mapping[str, Any]) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(raw).hexdigest()
-''',
-    'prismaquant.production_recache': '''\
-def assignment_digest(assignment: Mapping[str, str]) -> str:
-    """Stable digest for the concrete assignment used during re-cache."""
-    payload = json.dumps(
-        {str(k): str(v) for k, v in sorted(assignment.items())},
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-''',
-    'prismaquant.tessera_sampled_stack_proposal': '''\
-def selected_assignment_sha256(assignment):
-    """Bind the expanded member assignment, not its optimizer super-item IDs."""
-    _require(isinstance(assignment, dict) and assignment and
-             all(isinstance(k, str) and isinstance(v, str) for k, v in assignment.items()),
-             'selected research assignment must be complete qname/format pairs')
-    return hashlib.sha256(json.dumps(assignment, sort_keys=True,
-                                    separators=(',', ':')).encode()).hexdigest()
-''',
-    'prismaquant.runtime_provenance': '''\
-def _source_tree_identity(tree):
-    """The source-tree installer's own identity, recomputed from the bytes.
-
-    ``experiments/full_engine_plugin_install.py`` seals a source-tree install
-    as a SHA-256 over the compact JSON map ``{archive member: sha256}`` of the
-    build metadata plus every file under ``src/``, and records the map's size
-    as ``plugin_source_members``. That installer emits no archive digest, so
-    an archive-only binding refuses every source-tree install outright. This
-    is Tessera's function recomputed here, the way :func:`_source_digest`
-    already recomputes its source-byte seal: the producer's declared identity
-    is checked against bytes this side holds, never accepted as stated.
-    """
-    members = {name: hashlib.sha256(raw).hexdigest() for name, raw in tree.items()}
-    body = json.dumps(members, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(body).hexdigest(), len(members)
-''',
-    'prismaquant.tessera_footprint': '''\
-def _recipe_identity(breakdown: Mapping[str, object]) -> str:
-    """SHA-256 over canonical JSON of everything but the digest itself.
-
-    A content address, not an authorization signature.  Recomputing it detects
-    a report that has been edited or has drifted from the layout that produced
-    it -- which is exactly what a downstream price must not be built on.
-    """
-    body = {k: v for k, v in breakdown.items()
-            if k != "pre_render_recipe_identity_sha256"}
-    payload = json.dumps(body, sort_keys=True, separators=(",", ":"),
-                         default=str).encode()
-    return hashlib.sha256(payload).hexdigest()
-''',
-    'prismaquant.model_walk': '''\
-def _canonical(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
-''',
-}
-
-
-# ---------------------------------------------------------------------------
-# Running old and new side by side.
-# ---------------------------------------------------------------------------
-
-def _compile(source: str, label: str) -> object:
-    # ``from __future__ import annotations`` keeps the old annotations
-    # (``Mapping[str, Any]`` and the like) from being evaluated at definition
-    # time; it changes nothing the functions do.
-    return compile("from __future__ import annotations\n" + source, label, "exec")
-
-
-def _old_round_trip() -> dict:
-    namespace = {"__name__": "old_cost_stage_checkpoint",
-                 "hashlib": hashlib, "json": json, "math": math}
-    exec(_compile(OLD_ROUND_TRIP, "<old cost_stage_checkpoint>"), namespace)
-    return namespace
-
-
-ROUND_TRIP_NAMES = (
-    "canonical_json",
-    "canonical_json_bytes",
-    "canonical_json_sha256",
-    "canonical_json_sha256_normalized",
-)
-
-
-def _old_namespace(module_name: str) -> dict:
-    """The site's module globals, with the old code defined over them.
-
-    The migration removed ``hashlib``/``json`` imports that only the old code
-    used, so both are put back. ``canonical_json`` is the old round-trip copy,
-    the one the old code imported from ``cost_stage_checkpoint``.
-    """
-    module = importlib.import_module(module_name)
-    namespace = dict(vars(module))
-    namespace.update(hashlib=hashlib, json=json)
-    old_round_trip = _old_round_trip()
-    for name in ROUND_TRIP_NAMES:
-        namespace[name] = old_round_trip[name]
-    exec(_compile(OLD_SOURCES[module_name], f"<old {module_name}>"), namespace)
-    return namespace
-
-
-def _outcome(function, value, kwargs):
-    """The return value, or the exception type, text and chained cause.
-
-    Values are compared by ``repr`` as well as type, so ``-0.0`` and ``0.0``
-    or ``1`` and ``True`` cannot pass as equal.
-    """
-    try:
-        result = function(value, **kwargs)
-    except Exception as exc:  # noqa: BLE001 -- the refusal is the outcome
-        cause = exc.__cause__
-        return ("raises", type(exc), str(exc),
-                None if cause is None else (type(cause), str(cause)))
-    return ("returns", type(result), repr(result))
+GOLDEN = GoldenTable("digest_profiles_1301")
 
 
 _CYCLE_LIST: list = []
@@ -677,31 +171,27 @@ def _inputs(module_name: str, name: str) -> tuple:
     return GENERIC_INPUTS + SITE_INPUTS.get((module_name, name), ())
 
 
-def _mismatches(old, new, inputs, kwargs) -> list:
-    found = []
-    for index, value in enumerate(inputs):
-        before = _outcome(old, value, kwargs)
-        after = _outcome(new, value, kwargs)
-        if before != after:
-            found.append((index, before, after))
-    return found
+ROUND_TRIP_NAMES = (
+    "canonical_json",
+    "canonical_json_bytes",
+    "canonical_json_sha256",
+    "canonical_json_sha256_normalized",
+)
 
 
-def test_every_old_source_is_a_site():
-    assert sorted({module for module, _, _ in SITES}) == sorted(OLD_SOURCES)
+def _check_inputs(function, inputs, kwargs) -> set:
+    """Check each input's outcome against its frozen row; return the kinds seen."""
+    return {next(iter(GOLDEN.call(lambda value=value: function(value, **kwargs))))
+            for value in inputs}
 
 
 @pytest.mark.parametrize(("module_name", "name", "kwargs"), SITES,
                          ids=[f"{module}.{name}" for module, name, _ in SITES])
 def test_site_keeps_its_bytes_and_refusals(module_name, name, kwargs):
-    old = _old_namespace(module_name)[name]
     new = getattr(importlib.import_module(module_name), name)
-    assert old is not new
-    inputs = _inputs(module_name, name)
-    assert _mismatches(old, new, inputs, kwargs) == []
+    kinds = _check_inputs(new, _inputs(module_name, name), kwargs)
     # The inputs must reach both outcomes, or the comparison proves little.
-    kinds = {_outcome(new, value, kwargs)[0] for value in inputs}
-    assert kinds == {"returns", "raises"}
+    assert kinds == {"returned", "raised"}
 
 
 def test_joint_aura_keeps_the_validated_identity_short_circuit():
@@ -710,19 +200,15 @@ def test_joint_aura_keeps_the_validated_identity_short_circuit():
     identity = object.__new__(joint_aura._ValidatedProbeIdentity)
     object.__setattr__(identity, "_fields", ())
     object.__setattr__(identity, "_sha256", "f" * 64)
-    old = _old_namespace("prismaquant.joint_aura")["identity_sha256"]
-    assert old(identity) == joint_aura.identity_sha256(identity) == "f" * 64
+    assert joint_aura.identity_sha256(identity) == "f" * 64
 
 
 @pytest.mark.parametrize("name", ROUND_TRIP_NAMES)
-def test_round_trip_moved_verbatim(name):
-    """``digests`` holds the old ``cost_stage_checkpoint`` text, and the old
-    import path still hands out the same function."""
-    assert OLD_ROUND_TRIP in Path(digests.__file__).read_text(encoding="utf-8")
+def test_round_trip_keeps_its_bytes(name):
+    """The old ``cost_stage_checkpoint`` import path hands out the owner's function."""
     assert getattr(cost_stage_checkpoint, name) is getattr(digests, name)
-    old = _old_round_trip()[name]
     inputs = GENERIC_INPUTS + ({"k": "v", "n": [1, 2.5, None]},)
-    assert _mismatches(old, getattr(digests, name), inputs, _WHERE) == []
+    _check_inputs(getattr(digests, name), inputs, _WHERE)
 
 
 #: Sites that became a binding to a profile method: (module, name, profile, method).
@@ -801,7 +287,7 @@ def test_profile_bytes_are_pinned(profile, text, sha256):
      {"p": PurePosixPath("/x")}),
 ), ids=("round-trip-vs-direct", "utf8-vs-ascii", "strict-vs-lax", "lax-vs-default-str"))
 def test_profiles_are_not_interchangeable(left, right, value):
-    assert _outcome(left, value, {}) != _outcome(right, value, {})
+    assert outcome(lambda: left(value)) != outcome(lambda: right(value))
 
 
 def test_round_trip_and_direct_order_integer_keys_differently():
