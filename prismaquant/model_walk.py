@@ -145,6 +145,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.overrides import TorchFunctionMode
+from .digests import DIRECT_ASCII_LAX_DEFAULT_STR
 
 __all__ = [
     "BYTE_POLICY_REPLICATED",
@@ -752,8 +753,7 @@ def claim_rules_to_json(rules: Sequence[ClaimRule]) -> tuple[dict, ...]:
     return tuple(out)
 
 
-def _canonical(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+_canonical = DIRECT_ASCII_LAX_DEFAULT_STR.text
 
 
 def _claim_rules_digest(rules: Sequence[ClaimRule]) -> str:

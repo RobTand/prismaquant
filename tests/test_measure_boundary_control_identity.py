@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -91,7 +92,7 @@ def test_unchanged_content_is_stable_and_carries_exact_pre_post_manifests(campai
     assert first["measurement"]["binding"]["artifact_id"] == second["measurement"]["binding"]["artifact_id"]
     assert first["artifact_pre"] == first["artifact_post"] == second["artifact_pre"]
     content = first["artifact_pre"]["weight_content_manifest"]
-    assert content["files"][weight.name]["sha256"] == bc.hashlib.sha256(weight.read_bytes()).hexdigest()
+    assert content["files"][weight.name]["sha256"] == hashlib.sha256(weight.read_bytes()).hexdigest()
     assert first["measurement"]["binding"]["artifact_id"] == bc.digest(first["artifact_pre"])
 
 

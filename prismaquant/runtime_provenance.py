@@ -20,6 +20,7 @@ from .measured_runtime_prices import (
     _sha, _string, identity_sha256, RankResources, RuntimeRankResources,
 )
 from .schemas import strict_json_loads
+from .digests import DIRECT_ASCII_LAX
 
 SCHEMA = "prismaquant.runtime_provenance_relation.v1"
 
@@ -108,8 +109,7 @@ def _source_tree_identity(tree):
     is checked against bytes this side holds, never accepted as stated.
     """
     members = {name: hashlib.sha256(raw).hexdigest() for name, raw in tree.items()}
-    body = json.dumps(members, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(body).hexdigest(), len(members)
+    return DIRECT_ASCII_LAX.sha256(members), len(members)
 
 
 def _package_source(declaration, reader):

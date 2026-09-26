@@ -1,6 +1,7 @@
 """A campaign must account for the live packed expert population."""
 from types import ModuleType, SimpleNamespace
 import json
+import os
 import pickle
 import sys
 
@@ -234,6 +235,14 @@ def test_main_refuses_a_packed_parameter_the_profile_does_not_split(monkeypatch,
 HIDDEN, INTER, EXPERTS = 64, 64, 2
 STACK = "model.layers.2.feed_forward.experts"
 RUNG = "TESSERA_E4M3_K1_R1024"
+#: A rung whose family the pinned producer has no expert route for.
+UNROUTED_RUNG = "TESSERA_BF16_K1_R1792"
+
+
+def _grid(format_name):
+    from prismaquant.tessera_formats import parse_tessera_format_name
+
+    return parse_tessera_format_name(format_name)[0].payload_grid().name
 
 
 class _WideExperts(torch.nn.Module):
@@ -323,6 +332,23 @@ def _write_source_checkpoint(model, root, *, perturb=None):
     }, indent=1))
 
 
+def _pinned_producer_checkout():
+    """The fleet's checkout of the pinned Tessera release, or None.
+
+    pbtest cannot set ``TESSERA_REPO``, so without this every bridge test
+    skipped on the fleet and a green receipt certified nothing about the
+    bridge (PQ #1329). The commit is the one PQ pins
+    (``tessera_runtime/tessera_serving_runtime_pin.json``); GitHub CI has no
+    ``/mnt/shared`` and still skips.
+    """
+    from pathlib import Path
+
+    pin = json.loads((Path(__file__).resolve().parents[1] / "prismaquant" / "tessera_runtime"
+                      / "tessera_serving_runtime_pin.json").read_text())
+    checkout = Path("/mnt/shared/tessera-pins") / pin["commit"]
+    return checkout if (checkout / "experiments").is_dir() else None
+
+
 def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     """main() with a real capture, projection, encode and receipt; no route scoring.
 
@@ -340,6 +366,9 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
     from prismaquant.tessera_expert_projection import ExpertProjectionError, producer_plan_tool
 
+    pinned = _pinned_producer_checkout()
+    if not os.environ.get("TESSERA_REPO") and pinned is not None:
+        monkeypatch.setenv("TESSERA_REPO", str(pinned))
     try:
         producer_plan_tool()
     except ExpertProjectionError as exc:
@@ -562,9 +591,9 @@ def test_wire_backed_units_keep_only_measured_rows():
 def test_projection_walks_the_menu_to_a_family_with_an_expert_route(monkeypatch, tmp_path):
     """The cheapest rung's family need not have an expert route (#280).
 
-    The menu is ordered by rate, so its first rung is NVFP4 here.  The pinned
-    producer refuses an NVFP4 expert stack -- ``scheme.MOE_BUILDERS`` names
-    only ``TESSERA_FP8`` on this build -- and the campaign must ask the next
+    The menu's first rung is BF16 here.  The pinned producer refuses a BF16
+    expert stack -- ``scheme.MOE_BUILDERS`` names ``TESSERA_FP8`` and
+    ``TESSERA_NVFP4`` only on this build -- and the campaign must ask the next
     family rather than refuse the whole population.  The refusal is the
     producer's real one: nothing about the route is mocked.
     """
@@ -574,8 +603,8 @@ def test_projection_walks_the_menu_to_a_family_with_an_expert_route(monkeypatch,
     population = campaign._require_campaign_population(model, Lfm2MoeProfile(), 1)
     assert population.declared, "fixture must declare a packed expert stack"
     weights = {member.qname: member.weight.detach() for member in population.members}
-    ladder = [SimpleNamespace(format_name="TESSERA_E2M1_K2_R128", family="TESSERA_E2M1_K2",
-                              body_rate_q256=128, bpp=0.5),
+    ladder = [SimpleNamespace(format_name=UNROUTED_RUNG, family="TESSERA_BF16_K1",
+                              body_rate_q256=1792, bpp=7.0),
               SimpleNamespace(format_name=RUNG, family="TESSERA_E4M3_K1",
                               body_rate_q256=1024, bpp=4.0)]
     menus = {name: list(ladder) for name in weights}
@@ -588,13 +617,13 @@ def test_projection_walks_the_menu_to_a_family_with_an_expert_route(monkeypatch,
     attempts = carried["plan_attempts"]
     assert len(attempts) == 2, attempts
     first = attempts[0]
-    assert first["refused"], "the producer must have refused the NVFP4 stack"
+    assert first["refused"], "the producer must have refused the BF16 stack"
     assert "no expert route" in first["refused"]
-    assert {entry["grid"] for entry in first["request"].values()} == {"E2M1x2"}
+    assert {entry["grid"] for entry in first["request"].values()} == {_grid(UNROUTED_RUNG)}
     assert attempts[-1]["refused"] is None
     grids = {entry["grid"] for entry in carried["request"].values()}
     assert grids == {entry["grid"] for entry in attempts[-1]["request"].values()}
-    assert "E2M1" not in "".join(grids)
+    assert grids == {_grid(RUNG)}
 
 
 def test_projection_matches_family_names_across_different_stack_menus(monkeypatch, tmp_path):
@@ -620,8 +649,10 @@ def test_projection_matches_family_names_across_different_stack_menus(monkeypatc
     population = campaign._require_campaign_population(model, Lfm2MoeProfile(), 1)
     assert set(population.declared) == {STACK, second_stack}
     weights = {member.qname: member.weight.detach() for member in population.members}
-    first = ["TESSERA_E2M1_K2_R128", RUNG]
-    second = [RUNG, "TESSERA_BF16_K1_R1792"]
+    # Each stack names the unrouted family at another position, so neither
+    # index-aligned plan routes; only asking the common family by name does.
+    first = [UNROUTED_RUNG, RUNG]
+    second = [RUNG, UNROUTED_RUNG]
     menus = {name: [SimpleNamespace(format_name=fmt) for fmt in
                    (first if name.startswith(STACK + ".") else second)]
              for name in weights}
@@ -632,4 +663,6 @@ def test_projection_matches_family_names_across_different_stack_menus(monkeypatc
 
     assert set(projected) == set(weights)
     assert {row["grid"] for row in carried["request"].values()} == {"E4M3"}
-    assert carried["plan_attempts"][-1]["refused"] is None
+    attempts = carried["plan_attempts"]
+    assert attempts[-1]["refused"] is None
+    assert all(attempt["refused"] for attempt in attempts[:-1]) and len(attempts) > 1, attempts

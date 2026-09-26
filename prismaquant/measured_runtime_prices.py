@@ -24,6 +24,7 @@ from typing import Any, Mapping, Sequence
 from .lane_eligibility import ServingContext
 from .serve_dispatch_table import DispatchTableError
 from .schemas import strict_json_loads
+from .digests import DIRECT_ASCII_STRICT
 
 SCHEMA = "prismaquant.measured_runtime_prices.v1"
 CONTEXT_SCHEMA = "prismaquant.measured_runtime_context.v1"
@@ -174,9 +175,7 @@ def _json(path: str | Path) -> dict:
         raise RuntimePriceError(f"cannot load {path}: {exc}") from exc
 
 
-def identity_sha256(payload: Any) -> str:
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()
+identity_sha256 = DIRECT_ASCII_STRICT.sha256
 
 
 @dataclass(frozen=True)

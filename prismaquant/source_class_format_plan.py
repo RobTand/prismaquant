@@ -32,7 +32,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -45,6 +44,7 @@ from prismaquant.allocator_candidates import (
 )
 from prismaquant.allocator_solver import _shape_from_stats
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes, canonical_json
+from prismaquant.digests import DIRECT_UTF8_STRICT
 from prismaquant.nvfp4_cb_footprint import is_cb_format
 from prismaquant.serving_profiles import serving_lane_route
 
@@ -171,14 +171,7 @@ def _plan_digest(body: Mapping[str, object]) -> str:
         if str(key) != "identity_sha256"
     }
     canonical = canonical_json(digest_body, where="source-class format plan")
-    encoded = json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return DIRECT_UTF8_STRICT.sha256(canonical)
 
 
 def parse_format_menu(raw: str | Sequence[str], *, where: str) -> tuple[str, ...]:

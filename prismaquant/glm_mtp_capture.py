@@ -41,6 +41,7 @@ from pathlib import Path
 import torch
 
 from . import glm_mtp
+from .digests import DIRECT_ASCII_STRICT
 
 FINAL_HIDDEN_SCHEMA = "prismaquant.glm_mtp.final_hidden.v1"
 CENSUS_EXTENSION_SCHEMA = "prismaquant.glm_mtp.census_extension.v1"
@@ -125,9 +126,7 @@ class MtpCaptureFeed:
             raise RuntimeError(f"MTP capture fed {self.fed} of {total} calibration rows")
 
 
-def _json_sha256(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()
+_json_sha256 = DIRECT_ASCII_STRICT.sha256
 
 
 def read_bound_json(path, expected_sha256):

@@ -13,7 +13,6 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-import hashlib
 import heapq
 import json
 import math
@@ -40,6 +39,7 @@ from .tessera_formats import (
     TesseraRateSurface,
     get_tessera_family,
 )
+from .digests import DIRECT_ASCII_STRICT
 
 
 TESSERA_ALLOCATOR_CANDIDATE_SCHEMA = (
@@ -54,15 +54,7 @@ _VARIANT_LABEL = re.compile(r"[A-Za-z0-9_.-]+")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
-def _canonical_sha256(value: Mapping[str, object]) -> str:
-    payload = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        allow_nan=False,
-    ).encode("ascii")
-    return hashlib.sha256(payload).hexdigest()
+_canonical_sha256 = DIRECT_ASCII_STRICT.sha256
 
 
 def _deep_freeze(value: object) -> object:

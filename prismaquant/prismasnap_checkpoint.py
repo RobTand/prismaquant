@@ -520,6 +520,8 @@ def _producer_identity() -> dict[str, object]:
         repository / "prismaquant" / "prismasnap_contract.py",
         repository / "prismaquant" / "export_native_compressed.py",
         repository / "prismaquant" / "cost_stage_checkpoint.py",
+        # The canonical JSON encoding cost_stage_checkpoint re-exports (#1301).
+        repository / "prismaquant" / "digests.py",
         repository / "prismaquant" / "cost_streaming.py",
         repository / "tools" / "prismasnap.py",
     ]

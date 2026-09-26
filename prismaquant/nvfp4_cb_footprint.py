@@ -55,6 +55,7 @@ from .cb_layout import (
 from .routed_moe_codebooks import bundle_role_qname
 from .shard_layout import SHARD_INDEX_NAME, describe_container_layout
 from .schemas import strict_json_loads
+from .digests import DIRECT_ASCII_LAX
 
 CB_SERIALIZED_PAYLOAD_SCHEMA = "prismaquant.cb_serialized_payload.v3"
 MINCHAIN_CB_SERIALIZED_PAYLOAD_SCHEMA = "prismaquant.cb_serialized_payload.v4"
@@ -2583,8 +2584,7 @@ def _tensor_sidecar_identities(
     )
 
 
-def _identity_key(identity: Mapping) -> str:
-    return json.dumps(identity, sort_keys=True, separators=(",", ":"))
+_identity_key = DIRECT_ASCII_LAX.text
 
 
 def cb_tensor_payload_breakdown(
