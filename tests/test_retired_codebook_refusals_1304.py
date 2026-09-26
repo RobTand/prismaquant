@@ -90,6 +90,19 @@ def _layer_config_scheme(name, _tmp_path):
     canonicalize_format(_codebook_entry(name))
 
 
+def _layer_config_file(name, tmp_path):
+    import json
+
+    from prismaquant.layer_config import load_assignment
+
+    path = tmp_path / "layer_config.json"
+    path.write_text(json.dumps({
+        "model.layers.0.mlp.down_proj": _codebook_entry(name),
+        "model.layers.0.mlp.up_proj": name,
+    }))
+    load_assignment(path)
+
+
 def _cost_payload_menu(name, _tmp_path):
     schemas.validate_cost_payload({"costs": {}, "formats": ["NVFP4", name]})
 
@@ -155,6 +168,7 @@ READERS = [
     pytest.param(_layer_config_string, id="layer_config.canonicalize_format[str]"),
     pytest.param(
         _layer_config_scheme, id="layer_config.canonicalize_format[scheme]"),
+    pytest.param(_layer_config_file, id="layer_config.load_assignment[file]"),
     pytest.param(_cost_payload_menu, id="schemas.validate_cost_payload[formats]"),
     pytest.param(_cost_payload_row, id="schemas.validate_cost_payload[costs]"),
     pytest.param(
