@@ -12,7 +12,10 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
-from prismaquant.schemas import validate_layer_config_payload
+from prismaquant.schemas import (
+    refuse_retired_codebook_format,
+    validate_layer_config_payload,
+)
 
 
 def strip_weight(name: str) -> str:
@@ -54,11 +57,8 @@ _GGUF_FORMAT_NAMES = frozenset(
      "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ3_XXS", "IQ3_S", "IQ4_XS", "IQ4_NL"}
 )
 
-#: Shape of a retired codebook rung name (the Gridbook lane, archived
-#: 2026-09-25, #1304). Only a shape test, like ``_TESSERA_FORMAT_NAME`` below:
-#: the authority is ``format_registry.RETIRED_CODEBOOK_FORMAT_RE``, which
-#: ``_refuse_retired_codebook`` reaches through ``get_format``.
-_RETIRED_CODEBOOK_NAME = re.compile(r"^(?:NVFP4_CB_K|FP8_CB_K)\d+$")
+#: Recipe ``data_type`` spellings of the retired codebook lane (archived
+#: 2026-09-25, #1304); ``schemas.refuse_retired_codebook_format`` refuses them.
 _RETIRED_CODEBOOK_DATA_TYPES = {"nvfp4_cb": "NVFP4_CB_K", "fp8_cb": "FP8_CB_K"}
 
 # Checkpoint ``quantization_config.scale_fmt`` spellings that mean a one-byte
@@ -71,19 +71,6 @@ _UE8M0_SCALE_FMTS = frozenset({"ue8m0", "e8m0"})
 #: that keeps a malformed recipe out of a torch-free parser, and it is
 #: deliberately the same anchored family/arity/rung grammar.
 _TESSERA_FORMAT_NAME = re.compile(r"^TESSERA_[A-Z0-9]+_K\d+_R\d+$")
-
-
-def _refuse_retired_codebook(name: str) -> None:
-    """Refuse a stale recipe that names a retired codebook rung.
-
-    ``get_format`` raises ``RetiredFormatError`` naming the archive. The import
-    is local because ``format_registry`` imports torch and this module stays
-    torch-free on every path except this refusal.
-    """
-    from prismaquant.format_registry import get_format
-
-    get_format(name)
-    raise AssertionError(f"{name!r} is a retired codebook rung but resolved")
 
 
 def canonicalize_format(entry: dict | str | int) -> str:
@@ -102,7 +89,7 @@ def canonicalize_format(entry: dict | str | int) -> str:
                 raise ValueError(f"unsupported gguf scheme: {entry!r}")
             return gguf_type
         if dt in _RETIRED_CODEBOOK_DATA_TYPES:
-            _refuse_retired_codebook(
+            refuse_retired_codebook_format(
                 f"{_RETIRED_CODEBOOK_DATA_TYPES[dt]}{int(entry.get('cb_k', 0))}"
             )
         if dt == "tessera":
@@ -184,8 +171,7 @@ def canonicalize_format(entry: dict | str | int) -> str:
             return value.upper()
         if value.upper() in _GGUF_FORMAT_NAMES:
             return value.upper()
-        if _RETIRED_CODEBOOK_NAME.fullmatch(value.upper()):
-            _refuse_retired_codebook(value.upper())
+        refuse_retired_codebook_format(value)
         if value in ("nvfp4", "fp4", "4"):
             return "NVFP4"
         if value in ("mxfp4_source", "mx_fp4_source"):

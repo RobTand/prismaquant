@@ -299,7 +299,7 @@ def build_declarations(
             # bytes, priced at their true zero.
             payload, _, _ = serialized_candidate_payload(
                 fr.get_format(terminal), shape,
-                qname=qname, cb_serialization_context=None,
+                qname=qname,
             )
             pinned[qname] = (terminal, int(payload))
             continue
@@ -307,7 +307,7 @@ def build_declarations(
         for name in (costed_format, terminal):
             payload, _, _ = serialized_candidate_payload(
                 fr.get_format(name), shape,
-                qname=qname, cb_serialization_context=None,
+                qname=qname,
             )
             payload_bytes[name] = int(payload)
         declaration = StockUnitDeclaration(

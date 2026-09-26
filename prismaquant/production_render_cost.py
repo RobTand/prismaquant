@@ -90,113 +90,6 @@ def _cache_render_score_records(cache: object) -> dict[tuple[str, str], dict]:
     return out
 
 
-def _attested_transient_cb_pairs(cache: object) -> set[tuple[str, str]]:
-    """Validate score-only CB artifacts and return their admitted pair scope.
-
-    A bare ``render_scores`` row is deliberately insufficient.  The transient
-    producer must bind it to the canonical rendered tensor, synchronous
-    consumer result, exact pair identity, and the complete artifact-set digest.
-    """
-    meta = getattr(cache, "metadata", None)
-    if not isinstance(meta, Mapping):
-        return set()
-    transient = meta.get("transient_render_artifacts")
-    if not isinstance(transient, Mapping):
-        return set()
-    records = transient.get("records")
-    consumer_identity = transient.get("consumer_identity")
-    pair_set = meta.get("cb_cache_pair_identity")
-    if (
-        transient.get("schema")
-        != "prismaquant.production_weight_cache.transient_render_artifacts.v1"
-        or not isinstance(records, Mapping)
-        or not isinstance(consumer_identity, Mapping)
-        or not isinstance(pair_set, Mapping)
-    ):
-        raise ValueError("malformed transient CB render artifact manifest")
-
-    from prismaquant.production_weight_cache import (
-        CB_TRANSIENT_CONSUMER_RECEIPT_SCHEMA,
-        _canonical_json_sha256,
-        first_identity_difference,
-    )
-
-    if int(transient.get("entries", -1)) != len(records):
-        raise ValueError("transient CB render artifact entry count differs")
-    if int(pair_set.get("published_entries", -1)) != len(records):
-        raise ValueError("transient CB pair publication count differs")
-    observed_artifact_sha256 = _canonical_json_sha256(
-        records,
-        where="transient CB render artifact set",
-    )
-    if pair_set.get("artifact_sha256") != observed_artifact_sha256:
-        raise ValueError("transient CB render artifact set digest differs")
-
-    score_records = _cache_render_score_records(cache)
-    admitted: set[tuple[str, str]] = set()
-    for raw_key, artifact in records.items():
-        if not isinstance(artifact, Mapping):
-            raise ValueError(f"malformed transient CB artifact {raw_key!r}")
-        identity = artifact.get("identity")
-        tensor = artifact.get("tensor")
-        render_score = artifact.get("render_score")
-        receipt = artifact.get("consumer_receipt")
-        if not all(isinstance(value, Mapping) for value in (
-            identity, tensor, render_score, receipt,
-        )):
-            raise ValueError(
-                f"transient CB artifact {raw_key!r} is not value-bearing"
-            )
-        qname = canonical_cost_name(str(identity.get("qname", "")))
-        fmt = fr.canonical_format_name(str(identity.get("format", "")))
-        expected_binding = {
-            "schema": CB_TRANSIENT_CONSUMER_RECEIPT_SCHEMA,
-            "qname": str(identity.get("qname", "")),
-            "format": fmt,
-            "consumer_identity": dict(consumer_identity),
-            "tensor": dict(tensor),
-            "render_score_sha256": _canonical_json_sha256(
-                render_score,
-                where=f"transient CB render score {raw_key}",
-            ),
-        }
-        observed_binding = {
-            field: receipt.get(field) for field in expected_binding
-        }
-        if first_identity_difference(
-            observed_binding,
-            expected_binding,
-            path="consumer_receipt",
-        ) is not None:
-            raise ValueError(
-                f"transient CB consumer receipt differs for {raw_key}"
-            )
-        result = receipt.get("result")
-        if not isinstance(result, Mapping) or receipt.get(
-            "result_sha256"
-        ) != _canonical_json_sha256(
-            result,
-            where=f"transient CB consumer result {raw_key}",
-        ):
-            raise ValueError(
-                f"transient CB consumer result digest differs for {raw_key}"
-            )
-        manifest_score = score_records.get((qname, fmt))
-        if (
-            manifest_score is None
-            or _canonical_json_sha256(
-                manifest_score,
-                where=f"cache render score {raw_key}",
-            )
-            != expected_binding["render_score_sha256"]
-        ):
-            raise ValueError(
-                f"transient CB render score manifest differs for {raw_key}"
-            )
-        admitted.add((qname, fmt))
-    return admitted
-
-
 def _calibration_hashes(*sources: object) -> list[str]:
     """Union of R14 calibration identities carried by upstream artifacts.
 
@@ -451,62 +344,10 @@ def synthesize_production_render_cost_payload(
             format_plan,
         )
 
-    cb_context = None
-    cb_render_provenance: dict[str, object] = {}
-    valid_cb_render_records: set[tuple[str, str]] = set()
-    if any(
-        fr.get_format(fmt).family in {"nvfp4_cb", "fp8_cb"}
-        for fmt in output_formats
-    ):
-        from prismaquant.nvfp4_cb_footprint import validate_cb_cost_provenance
-        from prismaquant.production_weight_cache import (
-            production_cache_cb_render_provenance,
-        )
-
-        cb_render_provenance = production_cache_cb_render_provenance(
-            production_cache,
-            require_for_formats=output_formats,
-            where="production render cost cache",
-        )
-        from prismaquant.nvfp4_cb_footprint import (
-            cb_serialization_context_from_stamp,
-        )
-
-        cb_context = cb_serialization_context_from_stamp(
-            cb_render_provenance["cb_serialized_payload"],
-            where="production render cost cache",
-        )
-        # Fallback rows still come from the baseline table.  Both sources must
-        # describe the same serialized CB artifact before their rows can be
-        # combined under one provenance stamp.
-        validate_cb_cost_provenance(
-            baseline_cost_payload,
-            output_formats,
-            context=cb_context,
-            where="production render baseline cost",
-        )
-        identity_scope = cb_render_provenance[
-            "cb_render_identity"
-        ]["cb_formats_by_qname"]
-        identity_pairs = {
-            (canonical_cost_name(qname), fr.canonical_format_name(fmt))
-            for qname, formats_for_qname in identity_scope.items()
-            for fmt in formats_for_qname
-        }
-        cache_pairs = {
-            (canonical_cost_name(qname), fr.canonical_format_name(fmt))
-            for qname, fmt in (getattr(production_cache, "weights", {}) or {})
-            if fr.get_format(fr.canonical_format_name(fmt)).family
-            in {"nvfp4_cb", "fp8_cb"}
-        }
-        transient_pairs = _attested_transient_cb_pairs(production_cache)
-        # A score is usable only when both the value-bearing identity and an
-        # actual admitted cache tensor cover the row.  This prevents an old
-        # render_scores.json entry (including one left after a failed fresh
-        # render) from being relabeled under today's identity.
-        valid_cb_render_records = identity_pairs & (
-            cache_pairs | transient_pairs
-        )
+    # Resolving every rung refuses a retired codebook name from a stale
+    # cost.pkl (the retired codebook lane, archived 2026-09-25, #1304).
+    for fmt in output_formats:
+        fr.get_format(fmt)
 
     records = _cache_render_score_records(production_cache)
 
@@ -515,7 +356,6 @@ def synthesize_production_render_cost_payload(
     fallback_entries = 0
     missing: list[dict[str, str]] = []
     non_output_metric: list[dict[str, str]] = []
-    cb_fallback_scope: dict[str, list[str]] = {}
 
     for qname, per_name_raw in baseline_costs.items():
         cname = canonical_cost_name(str(qname))
@@ -542,11 +382,6 @@ def synthesize_production_render_cost_payload(
                 continue
 
             record = _lookup_record(records, qname, fmt_c)
-            if (
-                fr.get_format(fmt_c).family in {"nvfp4_cb", "fp8_cb"}
-                and (cname, fmt_c) not in valid_cb_render_records
-            ):
-                record = None
             if record is not None:
                 metric = str(record.get("metric", ""))
                 if require_output_metric and metric not in {
@@ -579,8 +414,6 @@ def synthesize_production_render_cost_payload(
             if fallback is None:
                 fallback = {"error": "missing production render score"}
             else:
-                if fr.get_format(fmt_c).family in {"nvfp4_cb", "fp8_cb"}:
-                    cb_fallback_scope.setdefault(str(qname), []).append(fmt_c)
                 fallback["cost_source"] = fallback.get(
                     "cost_source",
                     "fallback_baseline",
@@ -588,29 +421,6 @@ def synthesize_production_render_cost_payload(
             synthesized[fmt_c] = fallback
             fallback_entries += 1
         output_costs[str(qname)] = synthesized
-
-    if cb_fallback_scope:
-        # A context-only match is insufficient: a baseline measured with
-        # imatrix A cannot be relabeled as cache/imatrix B merely because both
-        # used layout v2.  Require value-bearing provenance and compare every
-        # CB row actually consumed as a fallback.
-        from prismaquant.production_weight_cache import (
-            validate_cb_render_provenance,
-            validate_matching_cb_render_identities,
-        )
-
-        _baseline_context, baseline_identity = validate_cb_render_provenance(
-            baseline_cost_payload,
-            expected_context=cb_context,
-            expected_formats_by_qname=cb_fallback_scope,
-            where="production render baseline CB fallback",
-        )
-        validate_matching_cb_render_identities(
-            cb_render_provenance["cb_render_identity"],
-            baseline_identity,
-            cb_fallback_scope,
-            where="production render baseline CB fallback",
-        )
 
     if require_render_scores and missing:
         sample = ", ".join(
@@ -640,11 +450,6 @@ def synthesize_production_render_cost_payload(
         if isinstance(baseline_provenance, Mapping)
         else {}
     )
-    if cb_context is not None:
-        # The rendered rows came from the cache. Carry the complete persisted
-        # value-bearing identity; reconstructing a fresh stamp here would lose
-        # the exact imatrix qname scope/content binding.
-        inherited_provenance.update(cb_render_provenance)
     if format_plan is not None:
         inherited_provenance["source_format_plan_identity_sha256"] = (
             format_plan.identity_sha256
@@ -687,8 +492,7 @@ def synthesize_production_render_cost_payload(
         "formats": output_formats,
         # The synthesized table consumes the baseline render for every
         # fallback and the production cache was built under the same guarded
-        # stage settings. Preserve the CB serialization identity so the
-        # allocator can reject an unknown/stale v1-v2 cache.
+        # stage settings, so the baseline provenance carries over.
         "provenance": inherited_provenance,
         "meta": {
             # R14: inherited calibration identity — see _calibration_hashes.

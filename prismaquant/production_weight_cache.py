@@ -3139,11 +3139,9 @@ def _is_cb_format_name(fmt: str) -> bool:
     ``assignment_keys``, ``_validate_loaded_cb_pair_tensor`` and ``get``);
     delete it with those call sites once #1318 lands (#1328).
     """
-    from prismaquant import format_registry as fr
+    from prismaquant.schemas import refuse_retired_codebook_format
 
-    name = str(fmt).strip()
-    if fr.RETIRED_CODEBOOK_FORMAT_RE.fullmatch(name.upper()):
-        fr.get_format(name)  # raises fr.RetiredFormatError
+    refuse_retired_codebook_format(str(fmt).strip())
     return False
 
 

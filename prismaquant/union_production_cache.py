@@ -42,12 +42,12 @@ from prismaquant.cost_stage_checkpoint import (
 from prismaquant.cost_streaming import validate_streamed_model_identity
 from prismaquant.layer_config import load_assignment
 from prismaquant.footprint import assignment_serialization_sha256
+from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.production_weight_cache import (
     ACTIVATION_HOOK_SCOPE_KEY,
     ACTIVATION_HOOK_SCOPE_SCHEMA,
     PACKED_ACTIVATION_HOOK_SCOPE_KEY,
     ProductionWeightCache,
-    _is_cb_format_name,
     _production_cache_git_commit,
     _production_cache_source_sha256,
     first_identity_difference,
@@ -738,11 +738,7 @@ def _backing_records(
             raise ValueError(
                 f"cache key {key!r} does not use its canonical format name"
             )
-        if _is_cb_format_name(fmt):
-            raise ValueError(
-                "exact cache union does not yet merge CB pair identities; "
-                "refusing rather than dropping their integrity metadata"
-            )
+        refuse_retired_codebook_format(fmt)
         if isinstance(value, torch.Tensor):
             raise ValueError(
                 f"cache key {key!r} is in-memory; shard union requires a "

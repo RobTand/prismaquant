@@ -21,6 +21,7 @@ import torch
 import torch.nn as nn
 
 from prismaquant import format_registry as fr
+from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.measure_quant_cost import (
     ActivationIndex,
     resolve_cost_target_name,
@@ -31,7 +32,6 @@ from prismaquant.production_weight_cache import (
     _FisherRowWeightCache,
     _check_and_record_append_identity,
     _fused_sibling_leaf_mapping_from_profile,
-    _is_cb_format_name,
     _weighted_render_family,
     _write_render_score_sidecar,
     build_mtp_append_identity,
@@ -260,12 +260,7 @@ def _preflight_weighted_rows(
 ) -> None:
     for qname, formats in formats_by_qname.items():
         for fmt in formats:
-            if _is_cb_format_name(fmt):
-                raise RuntimeError(
-                    "MTP ProductionWeightCache rendering does not yet "
-                    f"publish the identity-bound CB pair contract: "
-                    f"{qname}@{fmt}"
-                )
+            refuse_retired_codebook_format(fmt)
             if _weighted_render_family(fmt) is None:
                 continue
             value = None if col_weights is None else col_weights.get(qname)
@@ -296,7 +291,6 @@ def fill_profile_mtp_production_cache(
     h_detail_dir: str | Path | None = None,
     include_qnames: Sequence[str] | None = None,
     col_weights: Mapping[str, torch.Tensor] | None = None,
-    cb_serialization_context=None,
     progress: bool = True,
 ) -> int:
     """Append exact profile-synthesized ``mtp.*`` production renders.
@@ -505,18 +499,9 @@ def fill_profile_mtp_production_cache(
             fisher_rows=fisher_rows,
             render_score_records=render_score_records,
             col_weights=col_weights,
-            cb_serialization_context=cb_serialization_context,
             retain_rendered=True,
             consume_render=None,
-            consumer_identity=None,
-            calibration_hash=str(cache.metadata.get("calib_hash") or "") or None,
-            resume=False,
             max_act_rows=max_act_rows,
-            cb_pair_identities={},
-            cb_pair_artifacts={},
-            transient_results={},
-            cb_git_commit=None,
-            cb_producer_source_sha256=None,
             joint_scale_modules=selected_linears,
             progress=False,
         )
