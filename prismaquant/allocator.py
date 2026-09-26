@@ -5103,9 +5103,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 and max_bytes_pick["target_bits"] == grid_pick["target_bits"]),
             "whole_artifact_budget": selected_whole_artifact_budget_stamp,
             # Ultraplan P5a/P5b provenance for the SHIPPED assignment: how
-            # each selected unit's activation cost was priced and which
-            # selected rungs ride a backed fused mid-M lane vs the
-            # expand+GEMM fallback.
+            # each selected unit's activation cost was priced, and the route
+            # status and activation contract each selected unit resolves to.
             "activation_fair_pricing": activation_pricing.as_dict(),
             "serving_lane_provenance": selection_serving_lane_provenance(
                 chosen_info["assignment"], candidates, target_profile,

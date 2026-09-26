@@ -96,7 +96,11 @@ already owns. It does not make the row a measurement: the row keeps
 ``cost_source: band_interpolated`` and ``output_mse_measured: false``, it is
 still barred from the calibration sample below (its ``output_mse`` is derived,
 so admitting it would be circular), and it is stamped
-``BRANCH_INTERPOLATED_OUTPUT`` rather than ``BRANCH_MEASURED``. The general
+``BRANCH_INTERPOLATED_OUTPUT`` rather than ``BRANCH_MEASURED``. (That ladder's
+``band_interpolated``/``mixed`` stamps are retired with the codebook lane and
+now refused by ``schemas.refuse_retired_ladder_cost_source`` (#1345); the live
+producer of interpolated rows is the Tessera campaign, whose rows carry
+``cost_source: tessera_campaign_interpolated``.) The general
 lesson is recorded here rather than in the NVFP4 code: ANY family that mixes
 the measured and weight-only branches and has a heterogeneous ratio has this
 defect. ``fp8_cb`` escaped it only because its interpolated rows happen to be
@@ -164,7 +168,7 @@ BRANCH_SOURCE_PASSTHROUGH = "source_passthrough"
 BRANCH_MEASURED = "measured_output_mse"
 # Priced from the row's OWN ``output_mse``, which for this row is the tensor's
 # holdout-gated ladder interpolation rather than a measurement
-# (``cost_source: band_interpolated``/``mixed``; ``output_mse_measured:
+# (``cost_source: tessera_campaign_interpolated``; ``output_mse_measured:
 # false``). It shares the output-space branch with ``BRANCH_MEASURED`` because
 # the number is already in output space and already carries the activation
 # contract — the anchors it interpolates between were measured with

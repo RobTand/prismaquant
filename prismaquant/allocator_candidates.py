@@ -2625,9 +2625,8 @@ def selection_serving_lane_provenance(
     "Neither repo can price an unbacked lane" only holds if the shipped
     artifact says which lane every selected unit actually rides. This walks
     the FINAL (expanded) assignment and reports, per unit, format and in aggregate:
-    the activation contract, whether the consumer's fused mid-M kernel backs
-    that rung, the fallback route it takes when it does not, and which
-    estimator priced the unit's activation cost.
+    the activation contract, the route status the pinned runtime's contract
+    gives it, and which estimator priced the unit's activation cost.
 
     Routes are read from the chosen ``Candidate`` where one exists — the
     candidate is the object the DP actually saw — and re-resolved from the
@@ -2644,9 +2643,6 @@ def selection_serving_lane_provenance(
     branch_counts: Counter[str] = Counter()
     contract_counts: Counter[str] = Counter()
     route_status_counts: Counter[str] = Counter()
-    backed_rungs: set[int] = set()
-    fallback_rungs: set[int] = set()
-    n_backed = n_fallback = n_no_lane = 0
 
     for name in sorted(assignment):
         fmt = str(assignment[name])
@@ -2692,51 +2688,33 @@ def selection_serving_lane_provenance(
         row["units"] += 1
         branch_counts[str(branch) if branch else "unrecorded"] += 1
         if lane is None:
-            n_no_lane += 1
             # A unit whose profile declares no lane has no route status either.
             # "no_declared_lane" is NOT "backed" and NOT a zero: it is the
-            # vanilla-vLLM state, where absence of evidence was being rendered
-            # as evidence of absence (units_on_fallback_route = 0 was reachable
-            # only by never having looked).
+            # vanilla-vLLM state, where absence of evidence was once rendered
+            # as evidence of absence (a retired fallback counter read 0 only by
+            # never having looked).
             route_status_counts["no_declared_lane"] += 1
             continue
         contract_counts[lane.activation_contract or "unspecified"] += 1
         route_status_counts[
             getattr(lane, "route_status", None) or "no_declared_lane"] += 1
-        if lane.fused_mid_m_backed:
-            n_backed += 1
-            if lane.rung is not None:
-                backed_rungs.add(int(lane.rung))
-        else:
-            n_fallback += 1
-            if lane.rung is not None:
-                fallback_rungs.add(int(lane.rung))
 
     report = {
         "schema": SERVING_LANE_SCHEMA,
         "target_profile": str(target_profile or "research"),
         "serving_runtime_version": serving_runtime_version(),
         "units_total": len(assignment),
-        "units_on_backed_fused_mid_m_lane": n_backed,
-        "units_on_fallback_route": n_fallback,
-        "units_without_declared_lane": n_no_lane,
         # --- Structured route status (campaign rule R3, principle 9). -------
-        # READ THIS BEFORE QUOTING units_on_fallback_route. That counter is
-        # about the FUSED MID-M lane only, and a zero there means "no unit
-        # selected an off-law rung", not "every route is native". The route
-        # status census below is the field that answers the route question,
-        # and its ``unattested`` / ``no_declared_lane`` buckets are how a
-        # lane that has never been looked at is told apart from one that was
-        # looked at and came back clean. Principle 12 requires whichever of
-        # the two is true to travel next to any bpp or KL claim.
+        # The one answer to the route question. Its ``unattested`` /
+        # ``no_declared_lane`` buckets tell a lane that was never looked at
+        # from one that was looked at and came back clean. Principle 12
+        # requires this histogram, with ``activation_contracts``, to travel
+        # next to any bpp or KL claim: ``shipcard.route_histogram_claim``
+        # copies both onto the card (#1377). The fused mid-M counters that
+        # stood here belonged to the Gridbook lane retired 2026-09-02; no
+        # pinned runtime publishes a fused mid-M table, so they counted every
+        # unit with a lane as "fallback" whatever its route status said.
         "route_status_counts": dict(sorted(route_status_counts.items())),
-        "route_status_attested": bool(
-            route_status_counts
-            and not (route_status_counts.keys() & {
-                "unattested", "no_declared_lane"})
-        ),
-        "selected_rungs_fused_mid_m_backed": sorted(backed_rungs),
-        "selected_rungs_on_fallback_route": sorted(fallback_rungs),
         "activation_contracts": dict(sorted(contract_counts.items())),
         "activation_pricing_branches": dict(sorted(branch_counts.items())),
         "by_format": {
