@@ -1577,7 +1577,6 @@ def run_layer_quantum_core(
     )
     from .joint_retained_window_plan import OBSERVED_BASELINE_KEY
     from .io_engine import FixedBudget, read_stream
-    from .memory_management import ordered_reclaimer
     from .joint_statistics_replay import (
         GuardReadBudget,
         RetainedRenderDeviceCache,
@@ -2378,16 +2377,12 @@ def run_layer_quantum_core(
             lambda: _retained_replay.UNGUARDED_RENDER_CACHE_BYTES - render_cache.bytes_held)
         handoff_exit.callback(render_cache.clear)
         if guard is not None:
-            # One pool on GB10, so one order for a host shortfall, cheapest to
-            # restore first: spill chunks read ahead (a 64 MiB local read
-            # each), then renders kept on the device (a copy from the
-            # resident host render), then renders read ahead (gigabytes of
-            # stage). A device-envelope shortfall asks the render cache alone.
-            handoff_exit.callback(guard.add_reclaimer(ordered_reclaimer(
-                None if spill is None else spill.reclaim_replay,
-                render_cache.reclaim,
-                None if render_stream is None else render_stream.reclaim)))
-            handoff_exit.callback(guard.add_reclaimer(render_cache.reclaim, device=True))
+            # PQ #1383: each reclaimer is asked only for a refused term that
+            # reads what its frees lower, and the guard reads the process
+            # again after each one.
+            handoff_exit.callback(_retained_replay.register_replay_reclaimers(
+                guard, spill=spill, render_cache=render_cache,
+                render_stream=render_stream))
         with counters.io.span("own-source", layer=int(layer)):
             # The chain step left this layer's read in flight during the
             # roll. The consumer waits for it here, under the phase that
@@ -2837,6 +2832,12 @@ def run_layer_quantum_core(
             values.update({f"render_cache_{key}": value
                            for key, value in render_cache.counters.items()
                            if key != "peak_bytes_held"})
+            if guard is not None:
+                # PQ #1383: each guard reclaimer's asks and skips, and what
+                # the guard's readings did around each ask.
+                values.update({f"guard_reclaim_{name}_{key}": value
+                               for name, counters in guard.reclaim_counters.items()
+                               for key, value in counters.items()})
             return values
 
         def close_render_session(exc=None):

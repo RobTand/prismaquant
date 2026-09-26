@@ -194,7 +194,7 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
     from . import format_registry as fr
     from .glm_mtp_capture import sequence_progress
     from .joint_aura import (activation_identity, identity_sha256, make_joint_aura_entry,
-                             source_execution_identity, validate_joint_aura_entry,
+                             source_execution_identity,
                              validated_probe_identity)
     from .joint_served_activation import joint_activation_maxima
     from .joint_statistics_replay import (observe_and_project_windows,
@@ -319,12 +319,18 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
     for name in modules:
         costs[name] = {}
         for fmt in rungs[name]:
+            # make_joint_aura_entry validated this row against ``validated``,
+            # whose source model was checked once, above. The published row
+            # carries the ordinary ``probe_identity``, and the check after this
+            # loop re-proves that it still hashes to the validated digest.
+            # Validating each row again after the swap re-hashed the whole
+            # streamed source identity once per row: about 4 GPU-idle minutes
+            # for GLM-5.3's 1734 rows (PQ #1396). The body producer
+            # (joint_cost_quantum) makes the same swap without it.
             row = make_joint_aura_entry(operator_identity=operators[(name, fmt)],
                                         probe_identity=validated,
                                         signed_components=components[(name, fmt)])
             row["probe_identity"] = probe_identity
-            if not validate_joint_aura_entry(row):
-                raise RuntimeError(f"MTP row {name}@{fmt} is not a joint-AURA entry")
             costs[name][fmt] = row
     if identity_sha256(probe_identity) != probe_sha256:
         raise RuntimeError("MTP probe identity changed during measurement")

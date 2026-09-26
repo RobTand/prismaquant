@@ -24,6 +24,16 @@ the routed unit's attesting cells. The last is the fixture's doing: since v38
 images, so the routed unit is attested by the dense E2M1 pair's routed
 projection (``resident|streamed``) instead of the routed E2M1 pair on its own
 image (``resident``).
+
+It was re-taken again on 2026-09-26 for PQ #1377 (#1390), which retired six
+counters from ``serving_lane_provenance`` in favour of ``route_status_counts``.
+Diffing the normalised file at 07105b50b05 (before) and 634bc923e48 (after),
+the allocation is unchanged and exactly six keys leave
+``__prismaquant__.serving_lane_provenance``: ``units_on_backed_fused_mid_m_lane``,
+``units_on_fallback_route`` (3 on this all-Tessera fixture, beside
+``route_status_attested: true``), ``units_without_declared_lane``,
+``route_status_attested``, ``selected_rungs_fused_mid_m_backed`` and
+``selected_rungs_on_fallback_route`` (PQ #1404).
 """
 from __future__ import annotations
 
@@ -68,7 +78,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "658e614fe614281454b535be5b44bd631e2bdaf84d187fe15f3d75b928382ad2"
+        "8850afe16a4d2fd06cdcec50d3cd984907cb488270425992a185f752d77eb7d4"
     ),
     "pareto.csv": (
         "0abb6a82a89d9cd9686c6a250368bb77603d3904dc2707ccb69a13c9eec70c5a"
