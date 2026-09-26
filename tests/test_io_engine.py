@@ -12,6 +12,7 @@ bound, so every read is the declared file's.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import threading
 import time
@@ -350,3 +351,244 @@ def test_a_check_reclaims_read_ahead_bytes_before_it_would_refuse(tmp_path, monk
     with pytest.raises(RuntimeError, match="refusal"):
         guard.check("phase", reserve_bytes=GiB)
     assert len(asked) == 1
+
+
+# -- range entries and a stream read beside another (PQ #1348) ------------
+
+
+def _range_entries(groups=4, held=SIZE):
+    """One range entry per group; its reader returns bytes it makes itself."""
+    calls = []
+
+    def reader(group):
+        calls.append(group)
+        return bytes([group]) * held, ({"group": group},)
+
+    entries = [io_engine.ReadEntry(
+        key=("chunk", group), path=None, size=held, limit=held, held_bytes=held,
+        expected_sha256=None, decoder=None, group=("chunk", group),
+        reader=lambda group=group: reader(group)) for group in range(groups)]
+    return entries, calls
+
+
+def test_range_entries_are_read_by_their_reader_and_charged_their_held_bytes():
+    """A range entry pins nothing and holds no serialized buffer.
+
+    Its depth is its held bytes against the headroom, so a budget whose
+    serialized-buffer bound is one byte still reads ahead, and order,
+    delivery and the counters are the stream's.
+    """
+    entries, calls = _range_entries()
+    assert all(entry.raw_bytes == 0 for entry in entries)
+    budget = io_engine.FixedBudget(buffer_bytes=1, headroom=2 * SIZE)
+    with io_engine.read_stream(entries, budget=budget) as stream:
+        assert _quiet(stream) == (2 * SIZE, 2)
+        for group in range(4):
+            delivered = stream.take(("chunk", group))
+            assert [item.value for item in delivered] == [bytes([group]) * SIZE]
+            assert delivered[0].observed == ({"group": group},)
+            stream.release()
+    assert calls == [0, 1, 2, 3]
+    assert stream.counters["entries_read"] == 4
+    assert stream.counters["bytes_read"] == 4 * SIZE
+    assert stream.counters["read_s"] > 0
+
+
+def test_a_range_entry_names_no_file_and_a_file_entry_needs_one():
+    entries, _calls = _range_entries(groups=1)
+    budget = io_engine.FixedBudget(buffer_bytes=SIZE, headroom=0)
+    for field, value in (("path", "/x"), ("decoder", _decode), ("expected_sha256", "0" * 64)):
+        bad = [dataclasses.replace(entries[0], **{field: value})]
+        with pytest.raises(ValueError, match="reader reads and verifies its own bytes"):
+            io_engine.read_stream(bad, budget=budget)
+    bare = [dataclasses.replace(entries[0], reader=None)]
+    with pytest.raises(ValueError, match="needs a path and a decoder"):
+        io_engine.read_stream(bare, budget=budget)
+
+
+def test_a_failed_range_read_surfaces_at_its_consumer_by_key():
+    def reader():
+        raise OSError("short read")
+
+    entries = [io_engine.ReadEntry(
+        key="bad", path=None, size=SIZE, limit=SIZE, held_bytes=SIZE,
+        expected_sha256=None, decoder=None, group=0, reader=reader)]
+    with io_engine.read_stream(entries, budget=io_engine.FixedBudget(
+            buffer_bytes=SIZE, headroom=0)) as stream:
+        with pytest.raises(io_engine.EntryError) as caught:
+            stream.take(0)
+    assert caught.value.key == "bad"
+
+
+def test_next_group_and_unread_bytes_read_the_stream_and_mark_nothing(tmp_path):
+    entries, _contents = _stream_files(tmp_path)
+    budget = io_engine.FixedBudget(buffer_bytes=SIZE, headroom=0)
+    with io_engine.read_stream(entries, budget=budget) as stream:
+        assert _quiet(stream) == (0, 0)
+        assert stream.next_group() == 0
+        # Two entries not read yet: each will hold its decoded bytes.
+        assert stream.unread_bytes(0) == 2 * SIZE
+        # Asking marks nothing: group 0 is still not demanded, so not read.
+        assert _quiet(stream) == (0, 0)
+        stream.take(0)
+        assert stream.unread_bytes(0) == 0
+        assert stream.next_group() == 1
+        stream.take(1)
+        stream.take(2)
+        assert stream.next_group() is None
+        assert stream.unread_bytes("absent") == 0
+
+
+def test_a_yielding_budget_leaves_the_other_streams_next_group_its_room(tmp_path):
+    """The spill replay's budget beside the render stream (PQ #1348).
+
+    The live reading less what the render stream's next group will still
+    hold, and never below the floor the phase reserved for the reader.
+    """
+    from types import SimpleNamespace
+
+    entries, _contents = _stream_files(tmp_path)
+    reading = {"headroom": 10 * SIZE}
+    guard = SimpleNamespace(headroom_bytes=lambda: reading["headroom"])
+    budget = io_engine.FixedBudget(buffer_bytes=SIZE, headroom=0)
+    with io_engine.read_stream(entries, budget=budget) as renders:
+        assert _quiet(renders) == (0, 0)
+        spill = GuardReadBudget(guard, buffer_bytes=SIZE, yield_to=renders,
+                                floor_bytes=3 * SIZE)
+        # The reading already holds what the spill holds: only the render
+        # stream's next group (two unread entries) comes off it.
+        assert spill.headroom_bytes(5 * SIZE) == 10 * SIZE - 2 * SIZE
+        reading["headroom"] = SIZE
+        # Below the floor the reader keeps what its phase reserved for it.
+        assert spill.headroom_bytes(0) == 3 * SIZE
+        assert spill.headroom_bytes(2 * SIZE) == SIZE
+        assert spill.headroom_bytes(4 * SIZE) == -SIZE
+        renders.take(0)
+        reading["headroom"] = 10 * SIZE
+        # Group 1 is next now, still unread.
+        assert spill.headroom_bytes(0) == 8 * SIZE
+        renders.take(1)
+        renders.take(2)
+        # Every group taken: nothing to yield to.
+        assert spill.headroom_bytes(0) == 10 * SIZE
+    # Without a stream to yield to it is the guard's reading, as before.
+    assert GuardReadBudget(guard, buffer_bytes=SIZE).headroom_bytes(7 * SIZE) == 10 * SIZE
+    with pytest.raises(ValueError, match="floor"):
+        GuardReadBudget(guard, buffer_bytes=SIZE, floor_bytes=-1)
+
+
+
+def test_the_device_headroom_is_every_limit_a_cuda_allocation_lands_in(
+        tmp_path, monkeypatch):
+    """PQ #1348: the device side's headroom, for a cache of CUDA tensors.
+
+    The aggregate guard: 20 GiB reserved on the device and the phase's
+    4 GiB device reservation leave 44 GiB of the 68 GiB envelope; the
+    aggregate envelope and the host floor are the other two limits.
+    """
+    guard, _scope, state = _guard(tmp_path, monkeypatch, cap=28 * GiB,
+                                  current=13 * GiB, reserved=20 * GiB,
+                                  available=80 * GiB)
+    guard.check("phase", reserve_bytes=GiB, reserve_device_bytes=4 * GiB)
+    limit = 28 * GiB - guard.margin_bytes
+    expected = min(68 * GiB - 20 * GiB - 4 * GiB,
+                   80 * GiB - guard.host_floor_bytes - GiB - 4 * GiB,
+                   limit + 68 * GiB - (13 * GiB + 20 * GiB + GiB + 4 * GiB))
+    assert guard.device_headroom_bytes() == expected
+    state["reserved"] += expected
+    assert guard.device_headroom_bytes() == 0
+
+
+def test_a_device_shortfall_asks_only_device_side_reclaimers(tmp_path, monkeypatch):
+    guard, _scope, state = _guard(tmp_path, monkeypatch, cap=28 * GiB,
+                                  current=13 * GiB, reserved=66 * GiB,
+                                  available=80 * GiB)
+    asked = {"host": [], "device": []}
+
+    def host(shortfall):
+        asked["host"].append(shortfall)
+        return shortfall
+
+    def device(shortfall):
+        asked["device"].append(shortfall)
+        state["reserved"] -= 6 * GiB
+        return 6 * GiB
+
+    remove_host = guard.add_reclaimer(host)
+    remove_device = guard.add_reclaimer(device, device=True)
+    # 66 GiB reserved and 4 GiB more asked of a 68 GiB envelope: 2 GiB short
+    # on the device alone.
+    guard.check("phase", reserve_device_bytes=4 * GiB)
+    assert asked == {"host": [], "device": [2 * GiB]}
+    assert guard.last["cuda_reserved_bytes"] == 60 * GiB
+    remove_device()
+    remove_host()
+    state["reserved"] = 66 * GiB
+    with pytest.raises(RuntimeError, match="device memory refusal"):
+        guard.check("phase", reserve_device_bytes=4 * GiB)
+    assert asked["device"] == [2 * GiB]
+
+
+def test_a_host_shortfall_asks_only_host_reclaimers(tmp_path, monkeypatch):
+    guard, scope, _state = _guard(tmp_path, monkeypatch, cap=28 * GiB,
+                                  current=13 * GiB, reserved=20 * GiB,
+                                  available=80 * GiB)
+    limit = 28 * GiB - guard.margin_bytes
+    asked = {"host": [], "device": []}
+
+    def host(shortfall):
+        asked["host"].append(shortfall)
+        (scope / "memory.current").write_text(str(limit - GiB))
+        return shortfall
+
+    guard.add_reclaimer(host)
+    guard.add_reclaimer(lambda shortfall: asked["device"].append(shortfall) or 0,
+                        device=True)
+    (scope / "memory.current").write_text(str(limit + GiB))
+    guard.check("phase", reserve_bytes=GiB)
+    assert asked == {"host": [GiB], "device": []}
+
+
+def test_the_device_headroom_reads_the_host_pool_not_the_cuda_driver(
+        tmp_path, monkeypatch):
+    """On unified memory the host floor bounds a CUDA allocation (PQ #1348).
+
+    The device envelope is loose here, so MemAvailable decides: the reading
+    comes from ``/proc/meminfo`` less the host floor and the phase's
+    reservations, the same term ``check`` refuses on, and the torch
+    reservation only against the device envelope. The CUDA driver's own
+    free-memory figure is never read.
+    """
+    guard, _scope, state = _guard(tmp_path, monkeypatch, cap=28 * GiB,
+                                  current=13 * GiB, reserved=20 * GiB,
+                                  available=30 * GiB)
+    guard.check("phase", reserve_bytes=GiB, reserve_device_bytes=4 * GiB)
+    monkeypatch.setattr(torch.cuda, "mem_get_info",
+                        lambda *args, **kwargs: pytest.fail("mem_get_info is read"))
+    headroom = guard.device_headroom_bytes()
+    assert headroom == 30 * GiB - guard.host_floor_bytes - GiB - 4 * GiB
+    # A CUDA allocation takes MemAvailable and the torch reservation alike:
+    # after one of the headroom's size the reading is zero, and the check at
+    # that point still passes.
+    state["available"] -= headroom
+    state["reserved"] += headroom
+    assert guard.device_headroom_bytes() == 0
+    guard.check("phase", reserve_bytes=GiB, reserve_device_bytes=4 * GiB)
+
+
+def test_an_ordered_reclaimer_asks_each_in_turn_for_what_is_still_short():
+    asked = []
+
+    def step(name, frees):
+        def reclaim(shortfall):
+            asked.append((name, shortfall))
+            return frees
+        return reclaim
+
+    reclaim = mm.ordered_reclaimer(step("spill", 3), None, step("cache", 4),
+                                   step("renders", 10))
+    assert reclaim(6) == 7
+    assert asked == [("spill", 6), ("cache", 3)]
+    asked.clear()
+    assert reclaim(20) == 17
+    assert asked == [("spill", 20), ("cache", 17), ("renders", 13)]

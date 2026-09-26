@@ -356,7 +356,11 @@ class _RecordingGuard:
         # stream reads each window when the window asks for it.
         return 0
 
-    def add_reclaimer(self, reclaim):
+    def device_headroom_bytes(self):
+        # Nor any device headroom: the render cache keeps nothing (PQ #1348).
+        return 0
+
+    def add_reclaimer(self, reclaim, *, device=False):
         return lambda: None
 
 
@@ -853,6 +857,11 @@ def test_spill_replay_is_bitwise_the_windowed_replay(campaign, monkeypatch, tmp_
         assert replay["noncontiguous_cotangent_seeds"] == 0
         telemetry = replay["spill"]
         assert telemetry["threads"] is threads
+        # PQ #1348: every chunk came through the IO engine, one group each,
+        # and what it read is what the replay counted.
+        stream = telemetry["replay_stream"]
+        assert stream["groups_taken"] > 0 and stream["entries_read"] >= stream["groups_taken"]
+        assert telemetry["read_calls"] > 0 and stream["bytes_read"] >= telemetry["bytes_read"]
         assert telemetry["x_digest_checks"] > 0
         assert len(set(telemetry["records_per_probe"])) == 1
         assert telemetry["records_per_probe"][0] > 0
@@ -879,6 +888,148 @@ def test_spill_replay_is_bitwise_the_windowed_replay(campaign, monkeypatch, tmp_
     assert shared_inputs > 0
     _report(f"bitwise-{campaign.device.type}-{'threaded' if threads else 'inline'}",
             evidence)
+
+
+def test_render_pass_profile_times_each_probe_of_its_window_and_changes_no_byte(
+        campaign, monkeypatch, tmp_path):
+    """PQ #1348: a render session times one window's probes, traces one.
+
+    Its units are the window's probes; each carries the spill reader's
+    counter deltas. No capture or shadow session runs, and the checkpoint,
+    the journal and every cost row are the unprofiled run's bytes.
+    """
+    from prismaquant.stage_b_pass_profile import PROFILE_ENV, SPEC_ENV
+
+    layer = 0
+    assert len(campaign.preflight[layer]) >= 2
+    monkeypatch.delenv(PROFILE_ENV, raising=False)
+    monkeypatch.delenv(SPEC_ENV, raising=False)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "plain"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    plain = _evidence(campaign, layer, payload)
+
+    profile_dir = tmp_path / "profile"
+    monkeypatch.setenv(PROFILE_ENV, str(profile_dir))
+    monkeypatch.setenv(SPEC_ENV, "capture=,windowed=none,render=1,"
+                                 "render_wait=1,render_warmup=0,render_active=1")
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "profiled"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    assert _evidence(campaign, layer, payload) == plain
+
+    stem = f"{campaign.records[layer]['quantum_id']}-w1-render"
+    assert sorted(path.name for path in profile_dir.iterdir()) == sorted(
+        f"{stem}{suffix}" for suffix in (
+            ".key_averages.txt", ".timing.json", ".trace.json.gz"))
+    timing = json.loads((profile_dir / f"{stem}.timing.json").read_text())
+    assert (timing["kind"], timing["window"], timing["probe"]) == ("render", 1, None)
+    assert timing["errors"] == [] and timing["ended_by"] is None
+    assert [unit["profiler"] for unit in timing["units"]] == (
+        ["wait", "active"] + ["after"] * (N_PROBES - 2))
+    import gzip
+    events = json.loads(gzip.open(profile_dir / f"{stem}.trace.json.gz").read())
+    events = events["traceEvents"] if isinstance(events, dict) else events
+    names = {event.get("name") for event in events}
+    # The traced probe is split: its spill replay, then its projections.
+    assert {"pq_stage_b_render_unit", "pq_stage_b_render_spill_replay"} <= names
+    for unit in timing["units"]:
+        deltas = unit["counter_deltas"]
+        assert deltas["read_calls"] > 0 and deltas["bytes_read"] > 0
+        assert deltas["reader_wait_s"] >= 0 and deltas["replay_wall_s"] > 0
+    replay = state.counters_block["replay"]["spill"]
+    assert sum(unit["counter_deltas"]["read_calls"] for unit in timing["units"]) < (
+        replay["read_calls"])
+
+
+def test_spill_chunks_dropped_ahead_are_read_again_and_change_no_byte(
+        campaign, monkeypatch, tmp_path):
+    """PQ #1348: the replay's chunks read ahead are reclaimable.
+
+    The replay reads its chunks through the IO engine, ahead of its
+    consumer. Before every replay the spill drops all it holds ahead, as a
+    guard shortfall asks it to; those chunks are read again when their turn
+    comes, and the checkpoint, the journal and every cost row are the plain
+    run's bytes.
+    """
+    layer = 0
+    # One tensor pair per chunk: many chunks, so some are always ahead.
+    monkeypatch.setattr(spill_mod, "READ_BYTES", 1)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "plain"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    plain = _evidence(campaign, layer, payload)
+    assert state.counters_block["replay"]["spill"]["replay_stream"]["rereads"] == 0
+
+    original = spill_mod.StageBReplaySpill.replay
+    dropped = []
+
+    def replay(self, window_index, probe_index, lease):
+        stream = self._replay_stream
+        if stream is not None:
+            # No read in flight: what is ahead is whole, and all of it goes.
+            with stream.paused():
+                dropped.append(stream.held_bytes())
+                self.reclaim_replay(1 << 62)
+        return original(self, window_index, probe_index, lease)
+
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "replay", replay)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "dropped"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    assert _evidence(campaign, layer, payload) == plain
+    telemetry = state.counters_block["replay"]["spill"]
+    stream = telemetry["replay_stream"]
+    assert sum(dropped) > 0 and stream["evicted_bytes"] == sum(dropped)
+    assert stream["rereads"] == stream["evictions"] > 0
+    assert telemetry["replay_reclaims"] > 0
+
+
+def test_a_device_render_cache_changes_no_byte_of_the_quantum(
+        campaign, monkeypatch, tmp_path):
+    """PQ #1348: each window's renders kept on the device across its probes.
+
+    Unguarded, the cache keeps nothing, and every keep is refused. Given
+    room, each window's first probe keeps its renders and the other probes
+    read the kept copies. The checkpoint, the journal and every cost row are
+    the same bytes either way, and each window's counters say what hit.
+    """
+    import prismaquant.joint_statistics_replay as retained
+
+    layer = 0
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "plain"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    plain = _evidence(campaign, layer, payload)
+    blocks = [block for block in state.counters_block["windows"] if "reads" in block]
+    assert len(blocks) >= 2
+    for block in blocks:
+        reads = block["reads"]
+        assert reads["render_cache_hits"] == reads["render_cache_admitted"] == 0
+        assert reads["render_cache_refused"] == reads["render_cache_misses"] * (
+            N_PROBES - 1) // N_PROBES > 0
+        # The spill's consumer wait sits beside the render stream's.
+        assert reads["reader_wait_s"] >= 0 and reads["replay_wall_s"] > 0
+        assert block["load_wait_s"] is not None
+
+    monkeypatch.setattr(retained, "UNGUARDED_RENDER_CACHE_BYTES", 1 << 40)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "cached"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    assert _evidence(campaign, layer, payload) == plain
+    blocks = [block for block in state.counters_block["windows"] if "reads" in block]
+    for block in blocks:
+        reads = block["reads"]
+        assert reads["render_cache_misses"] == reads["render_cache_admitted"] > 0
+        assert reads["render_cache_hits"] == reads["render_cache_misses"] * (N_PROBES - 1)
+        assert reads["render_cache_refused"] == reads["render_cache_reclaims"] == 0
+        assert reads["render_cache_peak_bytes_held"] > 0
 
 
 def test_spill_resume_after_partial_completion_is_bitwise(campaign, monkeypatch,
@@ -1665,6 +1816,57 @@ def test_spill_scratch_is_unnamed_and_bounded(tmp_path):
         StageBSpillScratch(directory=root, max_bytes=1 << 20, nbytes=4096,
                            alignment=768)
     assert not _open_under(root) and os.listdir(root) == []
+
+
+def test_a_spill_buffer_is_charged_what_the_host_allocator_holds():
+    """PQ #1348: a buffer asks one grid block over its size to align; a pinned
+    request rounds up to a power of two, and a pageable one does not.
+
+    Before, a 64 MiB read buffer asked 64 MiB plus a block, the pinned
+    allocator held 128 MiB, and the guard was charged the request. The
+    geometry's buffers are now one block under the power of two.
+    """
+    block = 4096
+    assert spill_mod._host_buffer_bytes((64 << 20) - block, block, True) == 64 << 20
+    assert spill_mod._host_buffer_bytes(64 << 20, block, True) == 128 << 20
+    assert spill_mod._host_buffer_bytes(150 << 20, block, True) == 256 << 20
+    assert spill_mod._host_buffer_bytes(64 << 20, block, False) == (64 << 20) + block
+    for pinned in (False, True):
+        read = spill_mod._host_buffer_bytes(
+            spill_mod.READ_BYTES - block, block, pinned)
+        arena = spill_mod._host_buffer_bytes(
+            spill_mod.ARENA_BYTES - block, block, pinned)
+        assert (read, arena) == (spill_mod.READ_BYTES, spill_mod.ARENA_BYTES)
+    buffer = spill_mod._aligned_buffer(3 * block, block, False)
+    assert buffer.numel() == 3 * block and buffer.data_ptr() % block == 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(),
+                    reason="needs CUDA (the pinned host allocator)")
+def test_a_pinned_spill_buffer_holds_its_charge_and_empties_back():
+    """PQ #1348: a pinned buffer sits on the grid and holds its charge.
+
+    Small ones too: the GB10 pinned allocator returns small blocks off the
+    4 KiB grid. ``_empty_host_cache`` hands a freed block back, which a spill
+    reclaim relies on for the guard's reading to drop.
+    """
+    stats = torch.cuda.memory.host_memory_stats
+    torch.zeros(1, device="cuda")
+    torch._C._host_emptyCache()
+    before = stats().get("allocated_bytes.current", 0)
+    block = 4096
+    for nbytes, held in (((64 << 20) - block, 64 << 20),
+                         ((64 << 20) - 3 * block, 64 << 20),
+                         (3 * block, 4 * block), (5 * block, 8 * block)):
+        buffer = spill_mod._aligned_buffer(nbytes, block, True)
+        assert buffer.is_pinned() and buffer.numel() == nbytes
+        assert buffer.data_ptr() % block == 0
+        charge = spill_mod._host_buffer_bytes(nbytes, block, True)
+        assert charge == held
+        assert stats()["allocated_bytes.current"] - before == charge
+        del buffer
+        assert spill_mod._empty_host_cache() == charge
+        assert stats().get("allocated_bytes.current", 0) == before
 
 
 def test_spill_slot_keeps_the_replay_residue_on_the_grid():

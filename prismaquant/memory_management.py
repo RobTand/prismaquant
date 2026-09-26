@@ -440,11 +440,22 @@ class CaptureMemoryGuard:
             observed = self._observe()
             deficits = self._deficits(observed, reserve_bytes, reserve_device_bytes)
             shortfall = max(deficits['budget'], deficits['host'])
-            if shortfall > 0 and self._reclaimers:
+            device_shortfall = deficits['device']
+            if (shortfall > 0 or device_shortfall > 0) and self._reclaimers:
                 # Bytes a reader holds ahead of its consumer are reclaimable
                 # (``io_engine.ReadStream.reclaim``): they are dropped before
-                # this check would refuse, and it reads the process again.
-                if sum(int(reclaim(shortfall)) for reclaim in list(self._reclaimers)):
+                # this check would refuse, and it reads the process again. A
+                # budget or host-floor shortfall asks the host reclaimers; a
+                # device-envelope shortfall asks the device ones (CUDA tensors
+                # kept for reuse, PQ #1348). On unified memory both sides
+                # draw on one pool, so a host reclaimer that holds CUDA bytes
+                # frees them in its own order (``ordered_reclaimer``).
+                freed = 0
+                for reclaim, device_side in list(self._reclaimers):
+                    need = device_shortfall if device_side else shortfall
+                    if need > 0:
+                        freed += int(reclaim(need))
+                if freed:
                     observed = self._observe()
                     deficits = self._deficits(observed, reserve_bytes, reserve_device_bytes)
             cap, stat, current = observed['cap'], observed['stat'], observed['current']
@@ -612,18 +623,48 @@ class CaptureMemoryGuard:
                                   host_reserve=True)
         return -max(deficits['budget'], deficits['host'])
 
-    def add_reclaimer(self, reclaim):
+    def device_headroom_bytes(self) -> int:
+        """Device bytes that may still be allocated now without a refusal (PQ #1348).
+
+        The device side's :meth:`headroom_bytes`: the largest CUDA allocation
+        that keeps every term of the most recent check's reservations within
+        each limit that allocation lands in. Without a device envelope CUDA is
+        charged beside the cgroup, so that is the budget; with one it is the
+        device envelope, and the aggregate envelope where this guard holds
+        one. The host floor counts either way: on unified memory a CUDA
+        allocation takes host pages. A reading, not a check; negative when
+        the process is already past one of them.
+        """
+        if self.failure is not None:
+            return 0
+        reserve_bytes, reserve_device_bytes = self._reserve
+        observed = self._observe()
+        deficits = self._deficits(observed, reserve_bytes, reserve_device_bytes)
+        if self.device_bytes is None:
+            return -max(deficits['budget'], deficits['host'])
+        terms = [deficits['device'], deficits['host']]
+        if self.aggregate_envelope:
+            terms.append(observed['committed'] + observed['reserved'] + reserve_bytes
+                         + reserve_device_bytes
+                         - (observed['cap'] - self.margin_bytes + self.device_bytes))
+        return -max(terms)
+
+    def add_reclaimer(self, reclaim, *, device=False):
         """Let ``reclaim(shortfall_bytes) -> freed`` drop bytes before a refusal.
 
         Returns a callable that removes it again. A check that would refuse on
-        the budget or the host floor calls every reclaimer with its shortfall
-        first and then reads the process again.
+        the budget or the host floor calls every host reclaimer with its
+        shortfall first and then reads the process again. ``device=True``
+        registers a device reclaimer instead (PQ #1348): a check that would
+        refuse on the device envelope calls it with that shortfall, and a
+        host shortfall does not.
         """
-        self._reclaimers.append(reclaim)
+        entry = (reclaim, bool(device))
+        self._reclaimers.append(entry)
 
         def remove():
-            if reclaim in self._reclaimers:
-                self._reclaimers.remove(reclaim)
+            if entry in self._reclaimers:
+                self._reclaimers.remove(entry)
         return remove
 
     def snapshot(self):
@@ -741,6 +782,27 @@ def _use_host_available_for_uma(device: torch.device | None = None) -> bool:
     except Exception:
         return False
     return bool(getattr(props, "is_integrated", False))
+
+
+def ordered_reclaimer(*reclaims):
+    """One reclaimer that asks each of ``reclaims`` in turn for what is still short.
+
+    A guard asks every reclaimer it holds for the whole shortfall. Where
+    several draw on one pool (GB10's unified memory: renders and spill
+    chunks read ahead, CUDA tensors kept for reuse), registering them as one
+    ordered reclaimer drops the cheapest to restore first and stops once the
+    shortfall is covered (PQ #1348). ``None`` entries are skipped.
+    """
+    reclaims = tuple(reclaim for reclaim in reclaims if reclaim is not None)
+
+    def reclaim(shortfall_bytes):
+        freed = 0
+        for step in reclaims:
+            if freed >= shortfall_bytes:
+                break
+            freed += int(step(shortfall_bytes - freed))
+        return freed
+    return reclaim
 
 
 def _host_memory_info() -> tuple[int, int] | None:

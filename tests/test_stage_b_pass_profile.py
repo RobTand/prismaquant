@@ -32,9 +32,59 @@ def test_defaults(tmp_path):
     assert request.capture_probes == {1: False}
     assert request.windowed_probe == 1
     assert request.shadow_batches == 48
+    assert request.render_window is None and not request.profiles_render(0)
 
 
-@pytest.mark.parametrize("spec", ["bogus=1", "capture=1:deep", "active=0", "nokey"])
+def test_spec_parses_a_render_window_and_its_schedule(tmp_path):
+    request = pass_profile_request({
+        PROFILE_ENV: str(tmp_path),
+        SPEC_ENV: "capture=,windowed=none,render=5:stack,render_wait=0,render_active=2"})
+    assert request.capture_probes == {} and request.windowed_probe is None
+    assert request.render_window == 5 and request.render_stack is True
+    assert (request.render_wait, request.render_warmup, request.render_active) == (0, 1, 2)
+    assert request.profiles_render(5) and not request.profiles_render(4)
+
+
+def test_render_zero_refuses_nested_capture_sessions(tmp_path):
+    # Window zero holds the spill captures; two profilers cannot nest.
+    with pytest.raises(ValueError, match="render=0"):
+        pass_profile_request({PROFILE_ENV: str(tmp_path), SPEC_ENV: "render=0"})
+    request = pass_profile_request({
+        PROFILE_ENV: str(tmp_path), SPEC_ENV: "capture=,windowed=none,render=0"})
+    assert request.profiles_render(0)
+
+
+def test_render_session_names_its_window_and_records_counter_deltas(tmp_path):
+    request = pass_profile_request({
+        PROFILE_ENV: str(tmp_path),
+        SPEC_ENV: "capture=,windowed=none,render=3,render_wait=1,render_warmup=0"})
+    counters = {"reader_wait_s": 0.0, "read_calls": 0}
+    session = request.session(kind="render", window=3, counters=lambda: counters,
+                              identity={"quantum_id": "layer-007"})
+    with session:
+        for probe in range(3):
+            session.unit_begin()
+            counters["reader_wait_s"] += 0.5
+            counters["read_calls"] += probe + 1
+            session.unit_end()
+    timing = json.loads((tmp_path / "layer-007-w3-render.timing.json").read_text())
+    assert (timing["kind"], timing["window"], timing["probe"]) == ("render", 3, None)
+    assert [u["profiler"] for u in timing["units"]] == ["wait", "active", "after"]
+    assert [u["counter_deltas"] for u in timing["units"]] == [
+        {"reader_wait_s": 0.5, "read_calls": 1},
+        {"reader_wait_s": 0.5, "read_calls": 2},
+        {"reader_wait_s": 0.5, "read_calls": 3}]
+    assert (tmp_path / "layer-007-w3-render.trace.json.gz").exists()
+
+
+def test_a_render_session_names_its_window(tmp_path):
+    request = pass_profile_request({PROFILE_ENV: str(tmp_path)})
+    with pytest.raises(ValueError, match="window"):
+        request.session(kind="render", identity={})
+
+
+@pytest.mark.parametrize("spec", ["bogus=1", "capture=1:deep", "active=0", "nokey",
+                                  "render=2:deep", "render=2,render_active=0"])
 def test_malformed_spec_refuses(tmp_path, spec):
     with pytest.raises(ValueError):
         pass_profile_request({PROFILE_ENV: str(tmp_path), SPEC_ENV: spec})
