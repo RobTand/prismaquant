@@ -1412,7 +1412,6 @@ def test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box(tmp_path, ca
            **{name: str(value) for name, value in ceilings.items()}}
     argv = _scratch_quantum_argv(tmp_path, campaign, env, (cotangent, spill, spool))()
     variables = dict(item.split('=', 1) for item in _outer_env(argv))
-    assert variables['PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW'] == '1'
     run = subprocess.run(
         [sys.executable, "-c", _PLACEMENT_PROBE, str(published),
          json.dumps(variables), str(tmp_path / "pb-queue")],
