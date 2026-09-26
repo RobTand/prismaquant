@@ -395,7 +395,14 @@ def _rtn_uniform_int(w: torch.Tensor, bits: int, group_size: int,
 
 
 def _mx_rounded_amax_power2(amax: torch.Tensor) -> torch.Tensor:
-    """Round a block amax to the MX scale power-of-two grid."""
+    """Round a block amax to the MX scale power-of-two grid.
+
+    This is compressed-tensors' rule: MXFP4/MXFP8 E8M0 scales come from the
+    block amax rounded to a power of two with the FP4 mantissa-aware bit-mask,
+    then offset by the element format's exponent. The render and the exporter
+    (``export_native_compressed``) share this one copy, so the stored scales
+    stay byte-identical to what the served consumer derives (#1394).
+    """
     x = amax.to(torch.float32).clamp_min(torch.finfo(torch.float32).tiny)
     raw = x.view(torch.int32).to(torch.int64)
     val_to_add = 1 << (23 - 1 - 1)
