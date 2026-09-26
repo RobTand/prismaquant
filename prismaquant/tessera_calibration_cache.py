@@ -259,6 +259,11 @@ class CaptureSourceAuthentication:
                 state['sha256'] = digest
                 state['sha256_source'] = 'fresh_descriptor_sha256'
 
+    @property
+    def adopted_identity_cache_sha256(self):
+        """The SHA-256 of the identity cache this owner adopted, or ``None``."""
+        return getattr(self, '_adopted_cache_sha256', None)
+
     def adopt_streamed_identity_cache(self, cache_path):
         """Reuse the existing full-checkpoint SHA proof for held source objects.
 
@@ -400,7 +405,7 @@ class CaptureSourceAuthentication:
 
     def receipt(self):
         self.require_unchanged()
-        adopted = getattr(self, '_adopted_cache_sha256', None) is not None
+        adopted = self.adopted_identity_cache_sha256 is not None
         verified = [{"name": name, "sha256": state['sha256'],
             "bytes_hashed": (state['before'].st_size if state['sha256_source'] ==
                              'fresh_descriptor_sha256' else 0),
