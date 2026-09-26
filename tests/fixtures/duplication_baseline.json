@@ -38,28 +38,8 @@
  ],
  "near_duplicates": [
   [
-   "prismaquant/allocator.py::_log_error_values",
-   "prismaquant/select_validated_frontier.py::_log_error_values"
-  ],
-  [
    "prismaquant/aura_cost.py::_atomic_write_bytes",
    "tools/reseal_campaign_identity.py::atomic_write"
-  ],
-  [
-   "prismaquant/export_gguf.py::build_imatrix_from_act_cache",
-   "prismaquant/export_gguf_direct.py::build_direct_imatrix"
-  ],
-  [
-   "prismaquant/export_native_compressed.py::_mx_rounded_amax_power2",
-   "prismaquant/format_registry.py::_mx_rounded_amax_power2"
-  ],
-  [
-   "prismaquant/incremental_probe.py::_marginal_chunk",
-   "prismaquant/sensitivity_probe.py::FisherAccumulator._dense_marginal_chunk"
-  ],
-  [
-   "prismaquant/incremental_probe.py::build_layer_shard_regexes",
-   "prismaquant/model_profiles/base.py::_build_layer_shard_regexes"
   ],
   [
    "prismaquant/joint_aura_retained_budget_transition.py::_actual_execution",
@@ -320,10 +300,6 @@
    "prismaquant/glm53_stock_harvest.py",
    "tools/pwc_window_load_bench.py"
   ],
-  "_log_error_values": [
-   "prismaquant/allocator.py",
-   "prismaquant/select_validated_frontier.py"
-  ],
   "_manifest": [
    "tools/band_serial_handoff_live_pair.py",
    "tools/kl_ab.py"
@@ -335,10 +311,6 @@
   "_mount_options": [
    "prismaquant/residency_shard_reader.py",
    "prismaquant/staged_lease.py"
-  ],
-  "_mx_rounded_amax_power2": [
-   "prismaquant/export_native_compressed.py",
-   "prismaquant/format_registry.py"
   ],
   "_number": [
    "prismaquant/measured_runtime_prices.py",
