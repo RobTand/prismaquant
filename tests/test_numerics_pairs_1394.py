@@ -185,13 +185,21 @@ def act_dir(tmp_path_factory):
     root = tmp_path_factory.mktemp("act")
 
     def rows(t, n, dtype):
-        # Vary the signs across rows but hold each column's magnitude fixed.
-        # Its squared mean is then exact even for 5, 17 and 33 row files.
+        # Rotate a 0/1/2 pattern per column. Each magnitude-2 row contributes
+        # four to the squared sum; t % 4 rows of magnitude 1 complete it.
+        # The squared sum is exactly t, even when t is 5, 17 or 33.
         columns = torch.arange(n, dtype=torch.int32)
-        magnitudes = torch.tensor([0.25, 0.5, 1.0, 2.0, 4.0])[columns % 5]
+        if t == 0:
+            return torch.empty((0, n), dtype=dtype)
+        positions = (torch.arange(t, dtype=torch.int32)[:, None]
+                     + columns[None, :]) % t
+        magnitudes = 2 * (positions < t // 4).to(torch.int32)
+        magnitudes += ((positions >= t // 4) &
+                       (positions < t // 4 + t % 4)).to(torch.int32)
+        scales = torch.tensor([0.25, 0.5, 1.0, 2.0, 4.0])[columns % 5]
         row_signs = 1 - 2 * ((torch.arange(t, dtype=torch.int32)[:, None]
                               + columns[None, :]) % 2)
-        return (row_signs.to(torch.float32) * magnitudes).to(dtype)
+        return (row_signs.to(torch.float32) * magnitudes * scales).to(dtype)
 
     blobs = {
         # The probe's own schema, in the dtypes it caches.
@@ -214,6 +222,18 @@ def act_dir(tmp_path_factory):
         torch.save(blob, root / f"{stem}.pt")
     (root / "ignored.txt").write_text("not an activation")
     return root
+
+
+def test_imatrix_fixture_requires_averaging(act_dir):
+    """A first-row shortcut or dropped first row changes the intended output."""
+    for stem in ("model__layers__0__self_attn__q_proj",
+                 "model__layers__0__mlp__experts",
+                 "model__layers__1__mlp__down_proj", "zz_duplicate"):
+        inputs = torch.load(act_dir / f"{stem}.pt", weights_only=False)["inputs"].float()
+        squared = inputs.square()
+        whole = squared.mean(dim=0)
+        assert not torch.equal(whole, squared[0])
+        assert not torch.equal(whole, squared[1:].mean(dim=0))
 
 
 def _imatrix_bits(value):
