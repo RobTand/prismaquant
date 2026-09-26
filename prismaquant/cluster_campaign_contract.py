@@ -18,6 +18,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+from prismaquant.schemas import Contract, strict_json_loads
 
 
 CAMPAIGN_MANIFEST_SCHEMA = "prismaquant.cluster_campaign.manifest.v1"
@@ -162,63 +163,16 @@ _COMPLETION_KEYS = frozenset(
 _ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
 _HOST_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,252}\Z")
 _USER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,63}\Z")
-_PATH_COMPONENT_RE = re.compile(r"[A-Za-z0-9._-]+\Z")
-_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _GIT_SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 _IMAGE_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
-def _fail(message: str) -> None:
-    raise ClusterCampaignContractError(message)
-
-
-def _exact_mapping(
-    value: object,
-    *,
-    keys: frozenset[str],
-    where: str,
-) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        _fail(f"{where} must be an object")
-    if any(type(key) is not str for key in value):
-        _fail(f"{where} keys must be strings")
-    actual = set(value)
-    if actual != keys:
-        missing = sorted(keys - actual)
-        extra = sorted(actual - keys)
-        _fail(f"{where} fields differ: missing={missing}, extra={extra}")
-    return value
-
-
-def _string(
-    value: object,
-    *,
-    where: str,
-    pattern: re.Pattern[str] | None = None,
-) -> str:
-    if type(value) is not str or not value:
-        _fail(f"{where} must be a non-empty string")
-    if value != value.strip() or any(ord(char) < 32 for char in value):
-        _fail(f"{where} contains whitespace padding or control characters")
-    if pattern is not None and pattern.fullmatch(value) is None:
-        _fail(f"{where} has an invalid value")
-    return value
-
-
-def _integer(
-    value: object,
-    *,
-    where: str,
-    minimum: int,
-    maximum: int = 2**63 - 1,
-) -> int:
-    if type(value) is not int or not minimum <= value <= maximum:
-        _fail(f"{where} must be an integer in [{minimum}, {maximum}]")
-    return value
-
-
-def _sha256(value: object, *, where: str) -> str:
-    return _string(value, where=where, pattern=_SHA256_RE)
+_CHECK = Contract(ClusterCampaignContractError)
+_fail = _CHECK.fail
+_exact_mapping = _CHECK.exact_mapping
+_string = _CHECK.string
+_integer = _CHECK.integer
+_sha256 = _CHECK.sha256
 
 
 def canonical_sha256(value: object) -> str:
@@ -232,23 +186,7 @@ def canonical_sha256(value: object) -> str:
         ) from exc
 
 
-def _safe_absolute_path(value: object, *, where: str) -> str:
-    raw = _string(value, where=where)
-    if not raw.startswith("/") or raw == "/":
-        _fail(f"{where} must be a non-root absolute POSIX path")
-    components = raw.split("/")[1:]
-    if (
-        not components
-        or any(
-            not component
-            or component in {".", ".."}
-            or _PATH_COMPONENT_RE.fullmatch(component) is None
-            for component in components
-        )
-        or str(PurePosixPath(raw)) != raw
-    ):
-        _fail(f"{where} must be normalized and traversal-free")
-    return raw
+_safe_absolute_path = _CHECK.absolute_posix_path
 
 
 def _is_ancestor(left: str, right: str) -> bool:
@@ -547,22 +485,13 @@ def parse_campaign_manifest(text: str) -> dict[str, object]:
     if type(text) is not str:
         _fail("campaign manifest JSON must be text")
 
-    def object_from_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, item in pairs:
-            if key in result:
-                _fail(f"campaign manifest contains duplicate JSON member {key!r}")
-            result[key] = item
-        return result
-
-    def reject_constant(value: str) -> object:
-        _fail(f"campaign manifest contains non-JSON constant {value}")
-
     try:
-        decoded = json.loads(
+        decoded = strict_json_loads(
             text,
-            object_pairs_hook=object_from_pairs,
-            parse_constant=reject_constant,
+            duplicate=lambda key: _CHECK.exception(
+                f"campaign manifest contains duplicate JSON member {key!r}"),
+            constant=lambda value: _CHECK.exception(
+                f"campaign manifest contains non-JSON constant {value}"),
         )
     except ClusterCampaignContractError:
         raise

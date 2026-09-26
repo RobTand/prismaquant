@@ -13,7 +13,9 @@ reader path -- strict staged read, byte/draw checks, allowed serving
 tier, exact live lease held and cleanly released -- and reports
 pool-origin I/O qualification separately instead of failing closed on
 missing mount-wide counters (the live cold-read result: everything
-passed, ``pool_reads_observed: false`` alone forced exit 2). Unknown
+passed, ``pool_reads_observed: false`` alone forced exit 2; that
+``false`` came from this module's own mountstats parser, which tested
+``" on "`` against the split tokens and so never found a mount, PQ #1299). Unknown
 telemetry stays unknown in every mode: the result always carries
 ``pool_reads_observed``/``pool_client_read_delta`` as observed, plus
 ``functional_success``, ``io_qualification`` and ``validation_scope`` --
@@ -40,20 +42,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def _mountstats() -> dict:
-    out, cur = {}, None
+    from prismaquant.io_spans import nfs_read_bytes
+
     try:
-        lines = open("/proc/self/mountstats").read().splitlines()
+        reads = nfs_read_bytes()
     except OSError:
-        return out
-    for line in lines:
-        if line.startswith("device "):
-            parts = line.split()
-            cur = parts[parts.index("on") + 1] if " on " in parts else None
-        elif cur is not None and line.strip().startswith("bytes:"):
-            fields = [int(x) for x in line.split()[1:]]
-            out[cur] = {"client_read": fields[0], "server_read": fields[4]}
-            cur = None
-    return out
+        return {}
+    return {mount: {"client_read": client, "server_read": server}
+            for mount, (client, server) in reads.items()}
 
 
 def _mount_of(path: str) -> str | None:

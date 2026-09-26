@@ -82,6 +82,7 @@ from .nvfp4_activation_contract import (
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
 from .tessera_publication import PublicationJob
+from .schemas import strict_json_loads
 
 __all__ = [
     "CENSUS_SCHEMA",
@@ -204,16 +205,9 @@ def parse_family_restriction(value):
         return None
     from .tessera_formats import get_tessera_family
 
-    def unique_object(pairs):
-        result = {}
-        for key, item in pairs:
-            if key in result:
-                raise ValueError(f"family restriction repeats field {key!r}")
-            result[key] = item
-        return result
-
     if isinstance(value, str):
-        value = json.loads(value, object_pairs_hook=unique_object)
+        value = strict_json_loads(value, duplicate=lambda key: ValueError(
+            f"family restriction repeats field {key!r}"))
     if not isinstance(value, Mapping) or set(value) != {"schema", "dense", "routed_moe"}:
         raise ValueError("family restriction requires exactly schema, dense and routed_moe")
     if value["schema"] != FAMILY_RESTRICTION_SCHEMA:

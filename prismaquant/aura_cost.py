@@ -53,6 +53,7 @@ from prismaquant.kl_fisher import (
     select_token_scope,
     token_count_for_logits,
 )
+from prismaquant.io_spans import mem_available_bytes
 from prismaquant.perturbed_x_cache import calibration_data_hash
 from prismaquant.nvfp4_cb_footprint import (
     cb_cost_provenance,
@@ -67,6 +68,7 @@ from prismaquant.routed_experts import (
     refresh_packed_expert_projections,
     resolve_routed_expert_profile,
 )
+from .digests import DIRECT_UTF8_STRICT, canonical_json
 
 SCHEMA = "prismaquant.aura_cost.v1"
 AURA_CHECKPOINT_IDENTITY_SCHEMA = "prismaquant.aura_checkpoint.identity.v1"
@@ -134,29 +136,14 @@ def _aura_source_sha256() -> str:
     return _production_cache_source_sha256()
 
 
-def _canonical_json(value: object, *, where: str) -> object:
-    try:
-        encoded = json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{where} is not canonical JSON data") from exc
-    return json.loads(encoded)
+_canonical_json = canonical_json
 
 
 def _canonical_json_sha256(value: object, *, where: str) -> str:
-    canonical = _canonical_json(value, where=where)
-    return hashlib.sha256(json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")).hexdigest()
+    # Not ``digests.canonical_json_sha256``: that one wraps an encode failure
+    # (a lone surrogate) in ``ValueError``; this site has always let the
+    # ``UnicodeEncodeError`` through. Same bytes on every input it accepts.
+    return DIRECT_UTF8_STRICT.sha256(_canonical_json(value, where=where))
 
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
@@ -555,15 +542,10 @@ def _resolve_auto_dtype(
     approx_params = total_bytes / bytes_per_param
     fp32_need = approx_params * 4
     if available_bytes is None:
-        available_bytes = 0
         try:
-            with open("/proc/meminfo") as fh:
-                for line in fh:
-                    if line.startswith("MemAvailable:"):
-                        available_bytes = int(line.split()[1]) * 1024
-                        break
+            available_bytes = mem_available_bytes()
         except Exception:
-            pass
+            available_bytes = 0
     fits = (
         available_bytes > 0
         and fp32_need + min_free_gib * 1024**3 <= available_bytes
@@ -591,10 +573,7 @@ def _free_gib() -> float:
     free aborts spuriously whenever a large file was just read. Fall back to
     the CUDA figure off-Linux / if /proc is unreadable."""
     try:
-        with open("/proc/meminfo") as fh:
-            for line in fh:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) / (1024 ** 2)  # kB -> GiB
+        return mem_available_bytes() / (1024 ** 3)
     except Exception:
         pass
     try:

@@ -37,6 +37,8 @@ from prismaquant.sample_parallel_probe_contract import (
     validate_activation_priority_domain,
 )
 from prismaquant.sensitivity_probe import load_calibration
+from .schemas import strict_json_loads
+from .digests import DIRECT_ASCII_STRICT, DIRECT_UTF8_STRICT
 
 
 CALIBRATION_SCHEMA = "prismaquant.sample_parallel_probe.calibration.v1"
@@ -149,18 +151,9 @@ def _strict_json_loads(payload: str, *, where: str) -> object:
     duplicate object key.  Contract digests and closed schemas must instead
     have one unambiguous parse at every nesting level.
     """
-    def _object_from_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, value in pairs:
-            if key in result:
-                raise SampleParallelProbeError(
-                    f"{where} contains duplicate JSON member {key!r}"
-                )
-            result[key] = value
-        return result
-
     try:
-        return json.loads(payload, object_pairs_hook=_object_from_pairs)
+        return strict_json_loads(payload, duplicate=lambda key: SampleParallelProbeError(
+            f"{where} contains duplicate JSON member {key!r}"))
     except SampleParallelProbeError:
         raise
     except (TypeError, ValueError) as exc:
@@ -169,13 +162,7 @@ def _strict_json_loads(payload: str, *, where: str) -> object:
 
 def _canonical_sha256(value: object, *, where: str) -> str:
     try:
-        encoded = json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
+        encoded = DIRECT_UTF8_STRICT.encoded(value)
     except (TypeError, ValueError) as exc:
         raise SampleParallelProbeError(
             f"{where} is not canonical JSON data"
@@ -2170,11 +2157,7 @@ def _runtime_snapshot_entries(root: Path) -> list[dict[str, object]]:
 def _runtime_snapshot_closure_sha256(
     entries: Sequence[Mapping[str, object]],
 ) -> str:
-    encoded = json.dumps(
-        list(entries), sort_keys=True, separators=(",", ":"),
-        ensure_ascii=True, allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return DIRECT_ASCII_STRICT.sha256(list(entries))
 
 
 def validate_local_producer_snapshot(
