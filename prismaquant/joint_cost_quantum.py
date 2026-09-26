@@ -1667,7 +1667,7 @@ def run_layer_quantum_core(
     workspace_profile = profile_request()
     # PQ #1269: an opt-in torch.profiler timeline of named capture passes and
     # a bounded shadow of the windowed replay's pass. Off unless requested.
-    from .stage_b_pass_profile import pass_profile_request
+    from .stage_b_pass_profile import RENDER_OWNS_KERNEL_PROFILER, pass_profile_request
     pass_profile = pass_profile_request()
     # PQ #1011: an executable read plan is sealed for one replay mode, and a
     # launch in the other mode would stage reads this quantum never makes.
@@ -2745,6 +2745,8 @@ def run_layer_quantum_core(
                         pass_session.unit_end()
 
         def consume_window_probe(probe_index, terms, diagnostics, window_receipt):
+            if render_session is not None:
+                render_session.unit_end()
             operator_window_receipts.append(dict(layer=layer,
                                                  probe_index=probe_index,
                                                  **window_receipt))
@@ -2774,6 +2776,29 @@ def run_layer_quantum_core(
         window_kernel: KernelTimeProfiler | None = None
         window_started = time.time()
         replay_window: int | None = None
+        # PQ #1348: a render pass profile's session, open for its one window.
+        render_session = None
+
+        def render_counters():
+            # The spill reader's and the render stream's cumulative counters;
+            # each profiled probe records their deltas.
+            values = {}
+            if spill is not None:
+                values.update({key: spill.telemetry[key] for key in (
+                    "reader_wait_s", "replay_wall_s", "bytes_read",
+                    "file_bytes_read", "reads", "read_calls", "row_chunks")
+                    if key in spill.telemetry})
+            if render_stream is not None:
+                values["io_engine_consumer_wait_s"] = render_stream.counters.get(
+                    "consumer_wait_s", 0.0)
+            return values
+
+        def close_render_session(exc=None):
+            nonlocal render_session
+            session, render_session = render_session, None
+            if session is not None:
+                session.__exit__(None if exc is None else type(exc), exc,
+                                 None if exc is None else exc.__traceback__)
         # One span per window, opened before its staged-render wait and
         # closed after its units commit. A window whose units were all
         # journalled earlier gets no after_window call; its span closes as
@@ -2782,6 +2807,7 @@ def run_layer_quantum_core(
 
         def close_skipped_window():
             nonlocal window_span, window_kernel
+            close_render_session()
             if window_kernel is not None:
                 # A skipped window's profiler ends here, not at an
                 # after_window. On a resume it holds the spill captures
@@ -2813,12 +2839,38 @@ def run_layer_quantum_core(
                     prepare_retained_window_read(
                         window_index, record=record, progress=progress)
             replay_window = int(window_index)
-            window_kernel = _stage_b_kernel_profiler()
+            profiled = (pass_profile is not None
+                        and pass_profile.profiles_render(window_index))
+            # One torch.profiler at a time: a profiled window's render
+            # session owns it (PQ #1348).
+            window_kernel = (
+                KernelTimeProfiler(not_measured=RENDER_OWNS_KERNEL_PROFILER)
+                if profiled else _stage_b_kernel_profiler())
             window_kernel.__enter__()
             window_started = time.time()
             counters.enter_phase()
             counters.open_window(window_index,
                                  resolved_windows[window_index])
+            if profiled:
+                open_render_session(window_index)
+
+        def open_render_session(window_index):
+            nonlocal render_session
+            window = resolved_windows[window_index]
+            session = pass_profile.session(
+                kind="render", window=window_index, counters=render_counters,
+                identity={"quantum_id": quantum_id, "layer": layer,
+                          "record_identity_sha256": record.get("identity_sha256"),
+                          "replay_regime": dict(replay_regime),
+                          "capture_batch": capture_batch,
+                          "window_index": int(window_index),
+                          "window_units": len(window["names"]),
+                          "candidate_count": int(window["candidate_count"]),
+                          "n_probes": n_probes,
+                          "spill": spill is not None,
+                          "git_commit": _checkpoint_git_commit()})
+            session.__enter__()
+            render_session = session
 
         def backward_reporting(*, probe_index, final, lease):
             # Report each replay probe pass under the executable contract.
@@ -2829,6 +2881,8 @@ def run_layer_quantum_core(
             # the retained PWC lifetime already holds when the replay phase
             # is entered here and the boundary prefetch inside
             # replay_backward runs under the already-reported phase.
+            if render_session is not None and lease is not None:
+                render_session.unit_begin()
             if executable:
                 # A spill-sealed plan has no window replay phases: the
                 # zero-pending resume reads under the probe's spill phase.
@@ -2842,6 +2896,8 @@ def run_layer_quantum_core(
 
         def after_window(window_index, window_names):
             nonlocal window_kernel
+            # The commit below is outside the render session (PQ #1348).
+            close_render_session()
             kernel_active_s = None
             try:
                 if window_kernel is not None:
@@ -3006,6 +3062,8 @@ def run_layer_quantum_core(
 
             def spill_replay(*, window_index, probe_index, lease):
                 # Reads nothing: the window's render phase stays current.
+                if render_session is not None:
+                    render_session.unit_begin()
                 if guard is not None:
                     # The pinned read buffers land on the host, the rest on
                     # the device (PQ #1291); without a device envelope the
@@ -3019,7 +3077,9 @@ def run_layer_quantum_core(
                             - lease.resident_statistics_bytes
                             + spill.replay_reserve_device_bytes))
                 with counters.io.span("replay", window=int(window_index),
-                                      probe=int(probe_index), mode="spill"):
+                                      probe=int(probe_index), mode="spill"), (
+                        nullcontext() if render_session is None
+                        else render_session.span("spill_replay")):
                     spill.replay(window_index, probe_index, lease)
 
             spill_driver = SimpleNamespace(capture=spill_capture, replay=spill_replay)
@@ -3089,6 +3149,9 @@ def run_layer_quantum_core(
                 render_stream=render_stream,
             )
             close_skipped_window()
+        except BaseException as exc:
+            close_render_session(exc)
+            raise
         finally:
             if render_stream is not None:
                 render_stream.close()

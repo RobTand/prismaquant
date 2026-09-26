@@ -881,6 +881,60 @@ def test_spill_replay_is_bitwise_the_windowed_replay(campaign, monkeypatch, tmp_
             evidence)
 
 
+def test_render_pass_profile_times_each_probe_of_its_window_and_changes_no_byte(
+        campaign, monkeypatch, tmp_path):
+    """PQ #1348: a render session times one window's probes, traces one.
+
+    Its units are the window's probes; each carries the spill reader's
+    counter deltas. No capture or shadow session runs, and the checkpoint,
+    the journal and every cost row are the unprofiled run's bytes.
+    """
+    from prismaquant.stage_b_pass_profile import PROFILE_ENV, SPEC_ENV
+
+    layer = 0
+    assert len(campaign.preflight[layer]) >= 2
+    monkeypatch.delenv(PROFILE_ENV, raising=False)
+    monkeypatch.delenv(SPEC_ENV, raising=False)
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "plain"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    plain = _evidence(campaign, layer, payload)
+
+    profile_dir = tmp_path / "profile"
+    monkeypatch.setenv(PROFILE_ENV, str(profile_dir))
+    monkeypatch.setenv(SPEC_ENV, "capture=,windowed=none,render=1,"
+                                 "render_wait=1,render_warmup=0,render_active=1")
+    _clear_output(campaign, layer)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path / "profiled"), ceiling=1 << 30)
+    assert payload is not None, _chain(state.error)
+    assert _evidence(campaign, layer, payload) == plain
+
+    stem = f"{campaign.records[layer]['quantum_id']}-w1-render"
+    assert sorted(path.name for path in profile_dir.iterdir()) == sorted(
+        f"{stem}{suffix}" for suffix in (
+            ".key_averages.txt", ".timing.json", ".trace.json.gz"))
+    timing = json.loads((profile_dir / f"{stem}.timing.json").read_text())
+    assert (timing["kind"], timing["window"], timing["probe"]) == ("render", 1, None)
+    assert timing["errors"] == [] and timing["ended_by"] is None
+    assert [unit["profiler"] for unit in timing["units"]] == (
+        ["wait", "active"] + ["after"] * (N_PROBES - 2))
+    import gzip
+    events = json.loads(gzip.open(profile_dir / f"{stem}.trace.json.gz").read())
+    events = events["traceEvents"] if isinstance(events, dict) else events
+    names = {event.get("name") for event in events}
+    # The traced probe is split: its spill replay, then its projections.
+    assert {"pq_stage_b_render_unit", "pq_stage_b_render_spill_replay"} <= names
+    for unit in timing["units"]:
+        deltas = unit["counter_deltas"]
+        assert deltas["read_calls"] > 0 and deltas["bytes_read"] > 0
+        assert deltas["reader_wait_s"] >= 0 and deltas["replay_wall_s"] > 0
+    replay = state.counters_block["replay"]["spill"]
+    assert sum(unit["counter_deltas"]["read_calls"] for unit in timing["units"]) < (
+        replay["read_calls"])
+
+
 def test_spill_resume_after_partial_completion_is_bitwise(campaign, monkeypatch,
                                                          tmp_path):
     layer = 1

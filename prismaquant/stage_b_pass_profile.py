@@ -20,10 +20,21 @@ With it set, the quantum records, for each probe the request names:
   windows do. It stops after ``shadow_batches`` stored batches, and the lease
   is discarded unread. Its batches are profiled with the same schedule.
 
-Each session writes ``<dir>/<quantum>-p<probe>-<kind>.trace.json.gz`` (Chrome
-trace), ``.key_averages.txt`` and ``.timing.json``. The pass's result bytes do
-not change, but the shadow adds a pass's worth of time to its probe, so a
-profiled row is a measurement, never a campaign row.
+* ``render``: one retained render window of the spill replay (PQ #1348).
+  Its units are the window's probes: each spans the probe's spill replay,
+  its operator records and its projections, up to the probe's consumer. The
+  commit after the last probe is outside every unit. The unit records carry
+  the spill reader's counter deltas (reader wait, bytes and read calls), so a
+  host gap in the trace can be named. The window's per-window kernel-time
+  profiler is off while this session owns the window's profiler.
+
+Each capture or shadow session writes
+``<dir>/<quantum>-p<probe>-<kind>.trace.json.gz`` (Chrome trace),
+``.key_averages.txt`` and ``.timing.json``; a render session writes
+``<dir>/<quantum>-w<window>-render.*``. The pass's result bytes do not
+change, but the shadow adds a pass's worth of time to its probe and a trace
+export stalls its window, so a profiled row is a measurement, never a
+campaign row.
 
 ``PRISMAQUANT_STAGE_B_PASS_PROFILE_SPEC`` is comma-separated ``key=value``:
 
@@ -34,7 +45,14 @@ profiled row is a measurement, never a campaign row.
 * ``shadow_batches=48`` -- stored batches the shadow runs (default 48);
 * ``wait=8,warmup=1,active=2`` -- the capture schedule, in capture groups;
 * ``shadow_wait=16,shadow_warmup=2,shadow_active=8`` -- the shadow's, in
-  stored batches.
+  stored batches;
+* ``render=5`` -- the retained window whose probes are profiled, optionally
+  ``:stack``, or ``none`` (default ``none``);
+* ``render_wait=1,render_warmup=1,render_active=1`` -- the render schedule,
+  in probes.
+
+A render-only row names ``capture=,windowed=none``, or the defaults also
+profile probe 1's capture and run its shadow.
 """
 from __future__ import annotations
 
@@ -59,7 +77,14 @@ _DEFAULTS = {
     "shadow_wait": "16",
     "shadow_warmup": "2",
     "shadow_active": "8",
+    "render": "none",
+    "render_wait": "1",
+    "render_warmup": "1",
+    "render_active": "1",
 }
+
+RENDER_OWNS_KERNEL_PROFILER = (
+    "the render pass profile (PQ #1348) owns this window's torch.profiler")
 
 
 class ShadowPassDone(Exception):
@@ -78,22 +103,38 @@ class PassProfileRequest:
     shadow_wait: int
     shadow_warmup: int
     shadow_active: int
+    render_window: int | None = None
+    render_stack: bool = False
+    render_wait: int = 1
+    render_warmup: int = 1
+    render_active: int = 1
 
     def profiles_capture(self, probe: int) -> bool:
         return int(probe) in self.capture_probes
 
-    def session(self, *, kind: str, probe: int, identity: dict, stop_after=None):
+    def profiles_render(self, window: int) -> bool:
+        return self.render_window is not None and int(window) == self.render_window
+
+    def session(self, *, kind: str, probe: int | None = None, identity: dict,
+                stop_after=None, window: int | None = None, counters=None):
         if kind == "capture":
             schedule = (self.wait, self.warmup, self.active)
             stack = bool(self.capture_probes.get(int(probe), False))
         elif kind == "windowed":
             schedule = (self.shadow_wait, self.shadow_warmup, self.shadow_active)
             stack = False
+        elif kind == "render":
+            if window is None:
+                raise ValueError("a render pass profile names its window")
+            schedule = (self.render_wait, self.render_warmup, self.render_active)
+            stack = self.render_stack
         else:
             raise ValueError(f"unknown pass profile kind {kind!r}")
         return PassProfileSession(
-            self.out_dir, kind=kind, probe=int(probe), schedule=schedule,
-            with_stack=stack, identity=identity, stop_after=stop_after)
+            self.out_dir, kind=kind, probe=None if probe is None else int(probe),
+            schedule=schedule, with_stack=stack, identity=identity,
+            stop_after=stop_after, window=None if window is None else int(window),
+            counters=counters)
 
 
 def _spec_int(spec, key, minimum=0):
@@ -123,6 +164,17 @@ def pass_profile_request(environ=None) -> PassProfileRequest | None:
             raise ValueError(f"{SPEC_ENV}: capture flag {flag!r} is not 'stack'")
         captures[int(probe)] = flag == "stack"
     windowed = None if spec["windowed"] in ("", "none") else int(spec["windowed"])
+    render_window, render_stack = None, False
+    if spec["render"] not in ("", "none"):
+        window, _, flag = spec["render"].partition(":")
+        if flag not in ("", "stack"):
+            raise ValueError(f"{SPEC_ENV}: render flag {flag!r} is not 'stack'")
+        render_window, render_stack = int(window), flag == "stack"
+        if render_window == 0 and (captures or windowed is not None):
+            # Window zero's slot holds the spill captures (PQ #1172), and
+            # two torch.profiler sessions cannot nest.
+            raise ValueError(f"{SPEC_ENV}: render=0 profiles the window that "
+                             "holds the captures; name capture=,windowed=none")
     return PassProfileRequest(
         out_dir=Path(raw_dir), capture_probes=captures, windowed_probe=windowed,
         shadow_batches=_spec_int(spec, "shadow_batches", 1),
@@ -130,7 +182,11 @@ def pass_profile_request(environ=None) -> PassProfileRequest | None:
         active=_spec_int(spec, "active", 1),
         shadow_wait=_spec_int(spec, "shadow_wait"),
         shadow_warmup=_spec_int(spec, "shadow_warmup"),
-        shadow_active=_spec_int(spec, "shadow_active", 1))
+        shadow_active=_spec_int(spec, "shadow_active", 1),
+        render_window=render_window, render_stack=render_stack,
+        render_wait=_spec_int(spec, "render_wait"),
+        render_warmup=_spec_int(spec, "render_warmup"),
+        render_active=_spec_int(spec, "render_active", 1))
 
 
 @dataclass
@@ -139,12 +195,16 @@ class PassProfileSession:
 
     out_dir: Path
     kind: str
-    probe: int
+    probe: int | None
     schedule: tuple
     with_stack: bool
     identity: dict
     stop_after: int | None = None
+    window: int | None = None
+    # A callable returning numeric counters; each unit records their deltas.
+    counters: object = None
     units: list = field(default_factory=list)
+    _unit_counters: dict | None = None
     _profiler: object = None
     _unit_start: float | None = None
     _pass_start: float | None = None
@@ -157,6 +217,8 @@ class PassProfileSession:
     @property
     def stem(self) -> str:
         quantum = str(self.identity.get("quantum_id", "quantum"))
+        if self.window is not None:
+            return f"{quantum}-w{self.window}-{self.kind}"
         return f"{quantum}-p{self.probe}-{self.kind}"
 
     def __enter__(self):
@@ -212,7 +274,14 @@ class PassProfileSession:
 
         self._annotation = record_function(f"pq_stage_b_{self.kind}_unit")
         self._annotation.__enter__()
+        self._unit_counters = dict(self.counters()) if self.counters is not None else None
         self._unit_start = time.perf_counter()
+
+    def span(self, label: str):
+        """A CPU annotation inside a unit, so the trace splits the unit."""
+        from torch.profiler import record_function
+
+        return record_function(f"pq_stage_b_{self.kind}_{label}")
 
     def unit_end(self) -> None:
         end = time.perf_counter()
@@ -224,11 +293,17 @@ class PassProfileSession:
         wait, warmup, active = self.schedule
         state = ("wait" if index < wait else "warmup" if index < wait + warmup
                  else "active" if index < wait + warmup + active else "after")
-        self.units.append({"index": index,
-                           "start_s": start - self._pass_start_perf,
-                           "end_s": end - self._pass_start_perf,
-                           "wall_s": end - start, "profiler": state})
+        unit = {"index": index, "start_s": start - self._pass_start_perf,
+                "end_s": end - self._pass_start_perf,
+                "wall_s": end - start, "profiler": state}
+        if self._unit_counters is not None:
+            now = dict(self.counters())
+            unit["counter_deltas"] = {key: now[key] - before
+                                      for key, before in self._unit_counters.items()
+                                      if key in now}
+        self.units.append(unit)
         self._unit_start = None
+        self._unit_counters = None
         self._profiler.step()
         if self.stop_after is not None and len(self.units) >= self.stop_after:
             raise ShadowPassDone()
@@ -250,6 +325,7 @@ class PassProfileSession:
         pass_wall = end_perf - self._pass_start_perf
         record = {
             "schema": SCHEMA, "kind": self.kind, "probe": self.probe,
+            "window": self.window,
             "identity": self.identity, "host": socket.gethostname(),
             "schedule": dict(zip(("wait", "warmup", "active"), self.schedule)),
             "with_stack": self.with_stack,

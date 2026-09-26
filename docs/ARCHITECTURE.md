@@ -1239,9 +1239,15 @@ pass traces a bounded run of capture groups and times every group and every
 gap between groups. `windowed=P` first runs a bounded windowed-replay shadow
 of probe P under a throwaway lease on window 0, whose statistics are
 discarded. Each traced pass writes `<quantum>-p<probe>-<kind>.trace.json.gz`,
-`.key_averages.txt` and `.timing.json`. Unset, the row runs the same code as
-before. It is a development instrument: no format, pipeline default or ship
-gate changes. Gate: `tests/test_stage_b_pass_profile.py`.
+`.key_averages.txt` and `.timing.json`. `render=W` (2026-09-26, PQ #1348)
+traces retained window W instead: one unit per probe, spanning the probe's
+spill replay, operator records and projections, each unit carrying the spill
+reader's counter deltas; it writes `<quantum>-w<window>-render.*`, and that
+window's kernel-time session is not opened. Unset, the row runs the same code
+as before. It is a development instrument: no format, pipeline default or ship
+gate changes. Gate: `tests/test_stage_b_pass_profile.py`,
+`tests/test_stageb_one_pass_spill.py`
+(`test_render_pass_profile_times_each_probe_of_its_window_and_changes_no_byte`).
 
 Checkpoint planes stream in leased windows (2026-09-24,
 `ws-rd/1142-grouped-reads`, PQ #1142). Stage B checkpoint-load and
@@ -3099,8 +3105,14 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-26 · `ws-ra/spool-window-1364`.
+As of: 2026-09-26 · `claude/stageb-render-window-profile-1348`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `claude/stageb-render-window-profile-1348`) for
+**the Stage B render window profile** (PQ #1348), an opt-in development
+instrument: `render=W` in `PRISMAQUANT_STAGE_B_PASS_PROFILE_SPEC` traces one
+retained window's probes. Unset, the row runs the same code as before. No
+format, pipeline default or ship gate changes.
 
 Re-stamped (2026-09-26, `ws-ra/spool-window-1364`) for **charging every
 row's produced spool at placement** (PQ #1364, P2). `dispatch_joint_quanta.
