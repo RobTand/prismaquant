@@ -3099,8 +3099,22 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-25 · `claude/stream-head-progress-1362`.
+As of: 2026-09-26 · `ws-ra/spool-window-1364`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `ws-ra/spool-window-1364`) for **charging every
+row's produced spool at placement** (PQ #1364, P2). `dispatch_joint_quanta.
+_container_wrap` sealed `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1` only for the
+Stage A row (PQ #1120). A Stage B quantum row sealed the spec's spool root and
+bound without it, so pbrun's `spool_window_terms` charged nothing for the spool:
+prof-1 (PQ #1348) held `spool_gb=218` for its 185.38 GiB spill and 32 GiB
+cotangent scratch, beside an uncharged 32 GiB spool. Every row whose spec
+declares a spool with a well-formed bound now seals the opt-in, in the request
+and in the launched spec, and a spec that declares it `0` refuses.
+`tests/test_dispatch_joint_quanta.py` runs PrismaBuild's published
+`pbrun.local_disk_terms` on a Stage B row's sealed environment and requires
+one `spool_gb` term covering the spill, the cotangent scratch and the spool.
+No format, pipeline default, stage or ship gate changes.
 
 Re-stamped (2026-09-25, `claude/stream-head-progress-1362`) for **progress on
 the stream head before its journal exists** (PQ #1362, P1). Before this
@@ -25711,12 +25725,11 @@ the two allowances are equal.
   interpreter whose `prismabuild` predates #1035, naming the one it found;
   its wire-format tests run everywhere.
 - PrismaBuild charges the spool to a box's `spool_gb` only with
-  `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1`. The Stage A row seals it
-  (PQ #1120); a quantum row does not, so its spool is refused at bind, not
-  at placement. The box's offer is measured from its free disk when no
-  action holds `spool_gb` there (PrismaBuild `supervise.py`
-  `_spool_budget`), so bytes a quantum row writes are seen only by the next
-  measurement.
+  `PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1`. Every row whose spec declares a
+  spool with a bound seals it: the Stage A row since PQ #1120, a quantum row
+  since PQ #1364 (before, a quantum row's spool went uncharged at placement).
+  The box's offer is measured from its free disk when no action holds
+  `spool_gb` there (PrismaBuild `supervise.py` `_spool_budget`).
 - The fixture chain (`tests/test_stage_a_same_box_readback.py`) and the real
   PrismaBuild exporter test check behavior, not real-scale time. A
   real-scale profile of one GLM step is owed.

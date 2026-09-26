@@ -1900,12 +1900,14 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     positive decimal byte count, is left as it is, so the row's spool check
     (:func:`produced_spool_row_environment`) refuses it as before.
 
-    With the bound it seals the host window opt-in
-    (``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1``, PB #910), so PrismaBuild
-    charges that window to the executing box's ``spool_gb`` at placement
-    and two rows cannot together overrun one box's spool disk (PQ #1120). A
-    spec that declares the opt-in off refuses: the row reads its planes
-    back from the spool, and an uncharged window is refused only at bind.
+    Every row whose spec declares a produced spool with a well-formed bound
+    seals the host window opt-in (``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1``,
+    PB #910), so PrismaBuild charges that window to the executing box's
+    ``spool_gb`` at placement and two rows cannot together overrun one box's
+    spool disk: the Stage A row since PQ #1120, every quantum row since
+    PQ #1364 (a Stage B row's spool had gone uncharged beside its charged
+    spill and cotangent scratch). A spec that declares the opt-in off
+    refuses: the window would go uncharged.
 
     ``spill_bound`` is the row's sealed Stage B spill bound
     (:func:`_sealed_spill_bound`). Its reservation replaces the spec's
@@ -1941,18 +1943,19 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                 "regenerate the executable readsets with the spec's regime")
         spec["env"] = {**env, STAGE_B_SPILL_ENV[1]: str(int(spill_bound["reservation_bytes"]))}
     declared = spec.get("env", {}).get(PRODUCED_SPOOL_MAX_ENV)
-    if (spool_max_bytes is not None
-            and PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})
+    if (PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})
             and isinstance(declared, str) and declared.isascii()
             and declared.isdigit() and int(declared) > 0):
         window = spec["env"].get(PRODUCED_SPOOL_HOST_WINDOW_ENV)
         if window == "0":
             raise DispatchRefused(
                 f"spec {spec_path} declares {PRODUCED_SPOOL_HOST_WINDOW_ENV}=0, "
-                "but this row reads its cotangent planes back from its spool: "
-                "its window must be charged to the box at placement (PQ #1120)")
-        spec["env"] = {**spec["env"],
-                       PRODUCED_SPOOL_MAX_ENV: str(int(spool_max_bytes))}
+                "but this row writes a produced spool on the executing box's "
+                "disk: its window must be charged to the box at placement "
+                "(PQ #1120, PQ #1364)")
+        spec["env"] = dict(spec["env"])
+        if spool_max_bytes is not None:
+            spec["env"][PRODUCED_SPOOL_MAX_ENV] = str(int(spool_max_bytes))
         # A value other than "0" or "1" is left for the row's spool check,
         # which refuses it.
         if window in (None, "1"):
