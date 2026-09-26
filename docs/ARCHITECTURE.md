@@ -3254,6 +3254,36 @@ allowance. This is progress-write coalescing, not relaxed authentication.
 As of: 2026-09-25 · `claude/dedup-digests-files-1361`.
 Stamps follow, newest first, each recording its own branch and date.
 
+Re-stamped (2026-09-26, `claude/identity-quantum-1374`) for **the source
+identity built in a CPU-only quantum, not under a GPU** (PQ #1374, P2). A
+first-time joint prepare hashed the whole GLM-5.3 source, about 640 GB for
+about 70 minutes at 12.8 W of 140, inside its GPU reservation.
+
+- **The quantum.** `python -m prismaquant.tessera_joint_aura identity
+  --model M --out D` writes `build_source_checkpoint_identity`'s runner-free
+  digest cache. It takes no plan, lease, runner or device, and a rerun hashes
+  only shards whose stat fingerprint changed.
+- **The binding.** A joint plan may bind `source_digest_cache: {path,
+  sha256}`, admitted like `source_identity_cache`. `build_streamed_model_identity`
+  takes it as `digest_cache_path` and fills every shard the identity cache
+  misses from it, using the same lookup and fingerprint predicate as
+  `build_source_checkpoint_identity` (`_digest_cache_digests`, one owner).
+- **The refusal.** `prepare` and `run` pass `refuse_uncovered`: when neither
+  cache covers a shard, the pass refuses before hashing a byte, with the
+  uncovered bytes and the quantum's command in the message. This holds in
+  both modes; it is a performance gate, not a seal.
+- **Run seeding.** With nothing bound, `_seed_source_identity_cache` starts a
+  pass from `<output_root>/prepare/source-identity.json` when its own slot
+  is empty. The capture owner already adopted that file; the run's streamed
+  identity build did not, and rehashed the whole source under its GPU. The
+  copy is a starting point: each digest is still reused only where the live
+  fingerprint admits it.
+- **Measured (M4 R896, before the code change, the proof bound by hand).** The
+  prepare took 356 s with 100.7 GB `read_bytes` and 0 payload bytes hashed,
+  against 4,660 s, 1,346 GB and 642.65 GB for the R1024 prepare that hashed.
+
+No stored format, rendered byte, pipeline default or ship gate changes.
+
 Re-stamped (2026-09-25, `claude/dedup-digests-files-1361`) for **one owner per
 file, bytes and text digest** (PQ #1361, #1301 part 2, P1, part of epic #1295).
 `prismaquant/digests.py` gains `file_sha256hex` (read in 8 MiB blocks unless a
@@ -8283,7 +8313,11 @@ because the loader reads tensors after authenticating their shard.
 An optional plan binding `source_identity_cache: {path, sha256}` seeds the
 existing per-pass `source-identity.json` slot in a new output root, with an
 exact checksum and conflict refusal; it does not create a weight or activation
-cache. A cache proven on another host's NFS mount is portable in dev mode
+cache. Since PQ #1374 a plan may also bind `source_digest_cache`, the output
+of the CPU-only `tessera_joint_aura identity` quantum. A prepare or run whose
+two caches leave a shard uncovered refuses rather than hashing under its GPU
+reservation, and a pass with nothing bound starts from the prepare's own
+`source-identity.json` in the same output root. A cache proven on another host's NFS mount is portable in dev mode
 only, and only when every mutation-sensitive field matches and the sole
 difference is the client-local `st_dev` (same export, two mounts): certified
 mode still refuses it, and dev records the `[DEV-MODE]` trust line on every
