@@ -10,9 +10,6 @@ See docs/lanes/nvfp4-cb/source-passthrough.md.
 """
 from __future__ import annotations
 
-import json
-import struct
-
 import pytest
 import torch
 
@@ -26,21 +23,16 @@ from prismaquant.allocator_candidates import (
     passthrough_serving_notes,
     ROUTE_PENDING_PASSTHROUGH_FORMATS,
     SOURCE_PASSTHROUGH_CONTRACTS,
-    SOURCE_BPP_EXCEEDED_REASON,
     SOURCE_PASSTHROUGH_COST_SOURCE,
     SOURCE_PASSTHROUGH_FORMATS,
-    build_candidates,
-    check_format_applicability,
     cost_entry_activation_pricing_branch,
     cost_entry_is_exact_by_construction,
     cost_entry_is_source_passthrough,
     cost_entry_predicted_dloss,
     cost_entry_source,
     cost_entry_uses_measured_output_mse,
-    selection_serving_lane_provenance,
     synthesized_source_passthrough_cost_entry,
 )
-from prismaquant.serving_profiles import check_serving_format, serving_lane_route
 
 # The DSv4-Flash-0731 routed-expert and body shapes, and the byte counts the
 # checkpoint's own safetensors headers report for them. These are measurements,
@@ -168,8 +160,8 @@ def test_passthrough_provenance_cannot_be_forged_for_another_format():
     """
     forged = {"cost_source": SOURCE_PASSTHROUGH_COST_SOURCE,
               "predicted_dloss": 0.0}
-    assert not cost_entry_is_source_passthrough(forged, "NVFP4_CB_K14")
-    assert not cost_entry_is_exact_by_construction(forged, "NVFP4_CB_K14")
+    assert not cost_entry_is_source_passthrough(forged, "NVFP4")
+    assert not cost_entry_is_exact_by_construction(forged, "NVFP4")
     assert not cost_entry_is_source_passthrough(forged, "NOT_A_FORMAT")
     # ...and a passthrough format still needs the provenance to claim it.
     assert not cost_entry_is_source_passthrough(
@@ -264,37 +256,4 @@ def test_serving_notes_carry_requirement_and_evidence():
     )
     for entry in notes.values():
         assert entry["evidence"]
-
-
-# ---------------------------------------------------------------------------
-# 4. Allocation integration
-# ---------------------------------------------------------------------------
-
-def _expert_tables(n_layers=2, n_experts=2):
-    """A miniature DSv4-shaped MoE: per-expert 2-D Linears, mxfp4 source.
-
-    Layer 1 is made far more sensitive than layer 0 (h_trace 1000x), so a DP
-    that respects cost must protect it.
-    """
-    stats, costs, manifest = {}, {}, {}
-    for layer in range(n_layers):
-        for expert in range(n_experts):
-            for proj, shape in (("gate_proj", EXPERT_W13_SHAPE),
-                                ("up_proj", EXPERT_W13_SHAPE),
-                                ("down_proj", EXPERT_W2_SHAPE)):
-                name = f"model.layers.{layer}.mlp.experts.{expert}.{proj}"
-                stats[name] = {
-                    "h_trace": 1.0 if layer == 0 else 1000.0,
-                    "n_params": shape[0] * shape[1],
-                    "out_features": shape[0], "in_features": shape[1],
-                }
-                costs[name] = {
-                    "NVFP4_CB_K14": {"weight_mse": 1e-3, "output_mse": 2e-3,
-                                     "output_mse_measured": True},
-                    "FP8_CB_K36": {"weight_mse": 1e-5, "output_mse": 2e-5,
-                                   "output_mse_measured": True},
-                }
-                manifest[name] = "mxfp4"
-    return stats, costs, manifest
-
 

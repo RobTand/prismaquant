@@ -8,8 +8,9 @@ This module is that payload map, and it is exact (not the handover's hand-fit
 ``model.safetensors.index.json`` ``metadata.total_size``.  That metadata is a
 tensor-payload total, not a filesystem-size total: safetensors headers,
 container metadata, JSON configs, tokenizer assets, and other non-weight files
-are intentionally outside this pre-export budget.  CB exporters persist a
-separate measured ``provenance.artifact_inventory`` after writing every file.
+are intentionally outside this pre-export budget. The exporters measure the
+completed directory against the whole-artifact budget stamp instead
+(:func:`enforce_whole_artifact_budget`, at the end of this module).
 
 The accounting is the same identity the streaming exporter ships:
 
@@ -83,12 +84,6 @@ from .name_projection import (
     packed_expert_alias,
     strip_weight_leaf,
 )
-from .nvfp4_cb_footprint import (
-    CBSerializationContext,
-    cb_assignment_payload_breakdown,
-    cb_tensor_payload_breakdown,
-    is_cb_format,
-)
 
 # safetensors header dtype -> bytes per element (header carries the source
 # dtype string; we only need it to derive source-bytes-per-param when the
@@ -107,27 +102,13 @@ def format_tensor_payload_breakdown(
     shape: tuple[int, ...],
     *,
     qname: str,
-    cb_serialization_context: CBSerializationContext | None = None,
-    require_materialized_codebook_identity: bool = True,
 ) -> dict:
     """Return the exact additive payload for one candidate tensor.
 
-    ``require_materialized_codebook_identity=False`` prices a CB candidate
-    whose learned codebook has not been banked -- a rate-only question; see
-    :func:`prismaquant.nvfp4_cb_footprint.cb_tensor_payload_breakdown`.  The
-    byte counts are identical either way; only the identity is left unproven,
-    so this is for legality probes and never for a caller producing bytes.
-
     This is the per-unit primitive shared by allocator legality, candidate
-    pricing, and whole-assignment footprint accounting.  It deliberately
-    excludes shared/deduplicated sidecars: a candidate is compared with the
-    source representation of the same unit, while assignment-level accounting
-    pays each shared codebook once.
-
-    CB formats cannot use their nominal :class:`FormatSpec` byte formula;
-    their row scales and versioned layout live in
-    :func:`cb_tensor_payload_breakdown`.  All other formats use the registered
-    shape-exact producer formula.
+    pricing, and whole-assignment footprint accounting. Every registered
+    format uses its shape-exact producer formula. ``qname`` names the unit in
+    callers' diagnostics and is part of the shared call shape.
     """
     spec = (
         format_spec_or_name
@@ -136,24 +117,6 @@ def format_tensor_payload_breakdown(
     )
     canonical = fr.canonical_format_name(spec.name)
     dims = tuple(int(dim) for dim in shape)
-    if is_cb_format(canonical):
-        if cb_serialization_context is None:
-            raise ValueError(
-                f"{qname}: exact bytes for {canonical} require an explicit "
-                "CBSerializationContext (scale coding/layout + codebook "
-                "identity); refusing to price the legacy FormatSpec "
-                "approximation"
-            )
-        return cb_tensor_payload_breakdown(
-            canonical,
-            dims,
-            qname=qname,
-            context=cb_serialization_context,
-            require_materialized_codebook_identity=(
-                require_materialized_codebook_identity
-            ),
-        )
-
     payload_bytes = int(spec.memory_bytes_for_shape(dims))
     return {
         "format": canonical,
@@ -849,165 +812,6 @@ _NVFP4_INPUT_GLOBAL_SCALE_BYTES_PER_LINEAR = 4
 # in the tree today.
 _PACKED_LEAF_PROJECTIONS = {"gate_up_proj": 2}
 
-_PER_EXPERT_QNAME_RE = re.compile(
-    r"^(?P<prefix>.+[.]experts)[.](?P<expert>[0-9]+)[.]"
-    r"(?P<projection>gate_proj|up_proj|down_proj|w1|w2|w3)$"
-)
-_PER_EXPERT_W13_PROJECTIONS = frozenset({"gate_proj", "up_proj", "w1", "w3"})
-_PER_EXPERT_W2_PROJECTIONS = frozenset({"down_proj", "w2"})
-
-
-def per_expert_format_group_payload_breakdown(
-    assignment: Mapping[str, str],
-    stats: Mapping[str, dict],
-    *,
-    context: CBSerializationContext,
-) -> dict:
-    """Exact producer bytes for split expert stacks before export.
-
-    Per-expert cost rows are 2-D, while the artifact packs one 3-D sub-stack
-    per ``(layer, w13/w2 family, format)``.  Weight/index/row-scale bytes add
-    over members, but the static FP4 activation scalar and codebook sidecar are
-    emitted once per sub-stack.  This is the allocator-side twin of the
-    streaming exporter's ``per_expert_format_group_payload`` provenance.
-    """
-
-    grouped: dict[tuple[str, str], dict[int, dict[str, tuple[str, str]]]] = {}
-    for qname, raw_format in assignment.items():
-        match = _PER_EXPERT_QNAME_RE.match(str(qname))
-        if match is None:
-            continue
-        projection = match.group("projection")
-        family = (
-            "w13" if projection in _PER_EXPERT_W13_PROJECTIONS else "w2"
-        )
-        grouped.setdefault(
-            (match.group("prefix"), family), {}
-        ).setdefault(int(match.group("expert")), {})[projection] = (
-            str(qname), fr.canonical_format_name(raw_format)
-        )
-
-    records: dict[str, dict] = {}
-    cb_tensor_total = 0
-    cb_sidecar_total = 0
-    cb_total = 0
-    all_tensor_total = 0
-    mixed_prefixes = {
-        prefix
-        for prefix, _family in grouped
-        if len({
-            format_name
-            for (candidate, _candidate_family), experts in grouped.items()
-            if candidate == prefix
-            for members in experts.values()
-            for _qname, format_name in members.values()
-        }) > 1
-    }
-    for (prefix, family), experts in sorted(grouped.items()):
-        if prefix not in mixed_prefixes:
-            continue
-        expert_ids = sorted(experts)
-        if expert_ids != list(range(len(expert_ids))):
-            raise ValueError(
-                f"[footprint] {prefix}/{family}: expert ids must be contiguous "
-                f"from zero, got {expert_ids}"
-            )
-        by_format: dict[str, list[tuple[int, list[str]]]] = {}
-        for expert_id in expert_ids:
-            members = experts[expert_id]
-            required = 2 if family == "w13" else 1
-            if len(members) != required:
-                raise ValueError(
-                    f"[footprint] {prefix}/{family} expert {expert_id}: "
-                    f"expected {required} coupled projection row(s), got "
-                    f"{sorted(members)}"
-                )
-            formats = {format_name for _qname, format_name in members.values()}
-            if len(formats) != 1:
-                raise ValueError(
-                    f"[footprint] {prefix}/{family} expert {expert_id}: "
-                    f"coupled projections disagree on format {sorted(formats)}"
-                )
-            format_name = formats.pop()
-            by_format.setdefault(format_name, []).append((
-                expert_id,
-                [members[name][0] for name in sorted(members)],
-            ))
-
-        for format_name, expert_rows in sorted(by_format.items()):
-            member_names = [
-                qname for _expert_id, names in expert_rows for qname in names
-            ]
-            tensor_bytes = 0
-            codebook_bytes = 0
-            if is_cb_format(format_name):
-                items = []
-                for qname in member_names:
-                    entry = stats.get(qname)
-                    if not isinstance(entry, dict):
-                        raise KeyError(
-                            f"[footprint] {prefix}/{family}: no stats for "
-                            f"per-expert row {qname!r}"
-                        )
-                    item = cb_tensor_payload_breakdown(
-                        format_name,
-                        _shape_from_stats(entry),
-                        qname=qname,
-                        context=context,
-                    )
-                    items.append(item)
-                    tensor_bytes += int(item["tensor_payload_bytes"])
-                # The packed subgroup carries one static input scalar, not one
-                # scalar per original 2-D allocation row.
-                scalar_bytes = sum(
-                    int(item["input_global_scale_bytes"]) for item in items
-                )
-                if scalar_bytes:
-                    tensor_bytes -= scalar_bytes - 4
-                codebook_bytes = int(items[0]["sidecar_payload_bytes"])
-                cb_tensor_total += tensor_bytes
-                cb_sidecar_total += codebook_bytes
-                cb_total += tensor_bytes + codebook_bytes
-            else:
-                # MXFP4_SOURCE stays as verbatim per-expert slices.  Its closed
-                # form is checked against real source spans by the outer
-                # assignment footprint path exactly as before.
-                if format_name != "MXFP4_SOURCE":
-                    raise ValueError(
-                        f"[footprint] {prefix}/{family}: unsupported "
-                        f"per-expert format {format_name}"
-                    )
-                for qname in member_names:
-                    entry = stats.get(qname)
-                    if not isinstance(entry, dict):
-                        raise KeyError(
-                            f"[footprint] {prefix}/{family}: no stats for "
-                            f"per-expert row {qname!r}"
-                        )
-                    tensor_bytes += fr.get_format(format_name).memory_bytes_for_shape(
-                        _shape_from_stats(entry)
-                    )
-            all_tensor_total += tensor_bytes
-            key = f"{prefix}/{family}/{format_name}"
-            records[key] = {
-                "format": format_name,
-                "expert_ids": [expert_id for expert_id, _names in expert_rows],
-                "member_qnames": member_names,
-                "tensor_payload_bytes": int(tensor_bytes),
-                "codebook_sidecar_bytes": int(codebook_bytes),
-                "total_bytes": int(tensor_bytes + codebook_bytes),
-            }
-    return {
-        "schema": "prismaquant.per_expert_format_group_payload.v1",
-        "tensor_payload_bytes": int(all_tensor_total),
-        "cb_tensor_payload_bytes": int(cb_tensor_total),
-        "codebook_sidecar_bytes": int(cb_sidecar_total),
-        "cb_total_bytes": int(cb_total),
-        "total_bytes": int(all_tensor_total + cb_sidecar_total),
-        "groups": records,
-    }
-
-
 def nvfp4_global_sidecar_bytes(
     qname: str,
     shape: tuple[int, ...],
@@ -1044,16 +848,13 @@ def assignment_artifact_bytes(
     regime: str = "bf16",
     canonicalize: bool = True,
     context: str = "assignment_artifact_bytes",
-    cb_serialization_context: CBSerializationContext | None = None,
-    per_expert_assignment: Mapping[str, str] | None = None,
 ) -> dict:
     """Exact serialized tensor-data bytes for ``assignment``.
 
     The historical ``artifact_bytes`` result key is retained for API and
     recipe compatibility, but its scope is explicitly tensor data spans.  It
     does *not* include safetensors headers/container metadata or non-weight
-    files.  A completed CB export records those measured filesystem bytes
-    separately under ``provenance.artifact_inventory``.
+    files.
 
     ``assignment`` maps Linear qname -> format name (the allocator's *expanded*,
     post-promotion per-Linear assignment, so fused-sibling / packed-MoE coupling
@@ -1099,49 +900,15 @@ def assignment_artifact_bytes(
     (``resolve_reencoded_source_bytes`` / ``check_floor_non_negative``) so a
     sweeping caller can name the rung it was pricing.
 
-    ``per_expert_assignment`` opts into the split-stack producer contract.
-    Its routed-expert rows override ``assignment`` and are priced as physical
-    format sub-stacks; ordinary rows retain the base assignment.  Omit it for
-    the legacy uniform-stack artifact, whose bytes remain unchanged.
-
     Returns a dict: compatibility alias ``artifact_bytes``, explicit
     ``artifact_payload_bytes`` / ``artifact_byte_scope``, ``floor_bytes``,
-    ``body_quant_bytes``,
-    ``cb_tensor_payload_bytes``, ``cb_codebook_sidecar_bytes``,
-    ``cb_serialized_payload``, ``reencoded_source_bytes``, ``n_reencoded``,
+    ``body_quant_bytes``, ``reencoded_source_bytes``, ``n_reencoded``,
     ``n_missing_stats``, ``missing_stats_names``, ``regime``,
-    ``source_accounting``, ``per_expert_format_group_payload``. CB assignments require
-    ``cb_serialization_context`` so a v1/v2 layout or sidecar sharing policy is
-    never inferred silently.
+    ``source_accounting``.
     """
     from prismaquant.allocator_candidates import SOURCE_PASSTHROUGH_FORMATS
 
-    if per_expert_assignment is not None:
-        assignment = {**assignment, **per_expert_assignment}
-        if cb_serialization_context is None and any(
-            is_cb_format(fr.canonical_format_name(format_name))
-            for format_name in per_expert_assignment.values()
-        ):
-            raise ValueError(
-                f"[footprint] {context}: per-expert CB selection requires "
-                "CBSerializationContext"
-            )
-    per_expert_payload = (
-        per_expert_format_group_payload_breakdown(
-            assignment, stats, context=cb_serialization_context
-        )
-        if per_expert_assignment is not None else None
-    )
-    grouped_cb_qnames = {
-        qname
-        for group in (per_expert_payload or {}).get("groups", {}).values()
-        if is_cb_format(group["format"])
-        for qname in group["member_qnames"]
-    }
-
     body_quant = 0
-    cb_assignment: dict[str, str] = {}
-    cb_shapes: dict[str, tuple[int, ...]] = {}
     reenc_by_name: dict[str, int] = {}
     priced: list[str] = []
     missing_stats: list[str] = []
@@ -1188,19 +955,6 @@ def assignment_artifact_bytes(
                     "while the body would add the closed form."
                 )
             body_quant += span
-        elif is_cb_format(name) and qname in grouped_cb_qnames:
-            # Replaced below by one physical sub-stack per format group.
-            pass
-        elif is_cb_format(name):
-            if cb_serialization_context is None:
-                raise ValueError(
-                    f"[footprint] {context}: assignment contains {name} but "
-                    "no CBSerializationContext was supplied. Exact CB bytes "
-                    "need scale coding/layout and codebook identity; refusing "
-                    "to silently price legacy-v1 FormatSpec bytes."
-                )
-            cb_assignment[qname] = name
-            cb_shapes[qname] = shape
         else:
             body_quant += fr.get_format(name).memory_bytes_for_shape(shape)
         if name == "NVFP4":
@@ -1213,18 +967,6 @@ def assignment_artifact_bytes(
             reenc_by_name[qname] = reencoded_source_bytes_for_shape(
                 shape, regime)
         priced.append(qname)
-    cb_payload = None
-    if cb_assignment:
-        cb_payload = cb_assignment_payload_breakdown(
-            cb_assignment,
-            cb_shapes,
-            context=cb_serialization_context,
-        )
-        # Includes each packed/row-scale tensor plus each FP16 codebook table
-        # set once per (codebook_ref, format).
-        body_quant += int(cb_payload["total_bytes"])
-    if per_expert_payload is not None:
-        body_quant += int(per_expert_payload["cb_total_bytes"])
     if source_manifest is not None:
         reenc_by_name = resolve_reencoded_source_bytes(
             source_manifest, priced, context=context)
@@ -1243,20 +985,6 @@ def assignment_artifact_bytes(
         "export_directory_bytes": None,
         "floor_bytes": floor,
         "body_quant_bytes": body_quant,
-        "cb_tensor_payload_bytes": (
-            (int(cb_payload["tensor_payload_bytes"]) if cb_payload else 0)
-            + int((per_expert_payload or {}).get(
-                "cb_tensor_payload_bytes", 0
-            ))
-        ),
-        "cb_codebook_sidecar_bytes": (
-            (int(cb_payload["codebook_sidecar_bytes"]) if cb_payload else 0)
-            + int((per_expert_payload or {}).get(
-                "codebook_sidecar_bytes", 0
-            ))
-        ),
-        "cb_serialized_payload": cb_payload,
-        "per_expert_format_group_payload": per_expert_payload,
         "reencoded_source_bytes": reenc_src,
         "n_reencoded": len(priced),
         "n_missing_stats": len(missing_stats),
@@ -1274,7 +1002,6 @@ def assignment_artifact_gb(
     source_total_bytes: int,
     source_manifest: Mapping[str, int] | None,
     regime: str = "bf16",
-    cb_serialization_context: CBSerializationContext | None = None,
 ) -> float:
     """Convenience: tensor-data payload GB (decimal, matches index.json).
 
@@ -1287,7 +1014,6 @@ def assignment_artifact_gb(
         source_total_bytes=source_total_bytes,
         regime=regime,
         source_manifest=source_manifest,
-        cb_serialization_context=cb_serialization_context,
     )["artifact_bytes"] / GB
 
 

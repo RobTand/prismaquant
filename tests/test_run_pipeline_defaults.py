@@ -151,7 +151,7 @@ def test_production_render_score_is_unlicensed_on_a_cb_menu():
 # `test_cb_activation_scope_is_validated_exported_and_stage_bound`). Their
 # subject -- `EXPORT_CONTAINER=nvfp4_cb`'s lane inheritance, strict producer
 # policy and CB_ACTIVATION_SCOPE plumbing -- no longer exists; that container
-# now `exit 2`s. The guard below survives because its FORMATS limb does.
+# now `exit 2`s.
 
 
 # RETIRED 2026-09-02 with the Gridbook codebook lane
@@ -163,67 +163,45 @@ def test_production_render_score_is_unlicensed_on_a_cb_menu():
 # skipped: a gate test for a gate that cannot be reached asserts nothing.
 
 
-def test_cb_unlicensed_guard_actually_fires():
-    """Execute the guard's real predicate; a gate never seen firing is not a gate.
+def test_retired_codebook_lane_is_refused_by_the_container_gate():
+    """Execute the retired-container gate's real predicate.
 
-    Text assertions alone would only prove the string exists -- the exact
-    guard-scope failure this repo keeps paying for. So pull the condition out
-    of the shipped script and evaluate it under both CB signals and both
-    non-CB controls.
+    Until 2026-09-25 this also executed a `FORMATS == *_CB_*` limb inside the
+    `production-render-score` cost mode, because the CB format/cost/render
+    plumbing outlived the Gridbook lane (debt D34) and a CB menu was still
+    nameable. That plumbing is archived now (#1304), and the registry refuses
+    every NVFP4_CB_K* / FP8_CB_K* name with `RetiredFormatError` before any
+    stage prices it (pinned per reader in
+    `tests/test_retired_codebook_refusals_1304.py`). A shell guard for an input
+    the registry already refuses would be a second gate for the same fact.
     """
     import subprocess
 
     path = (
         Path(__file__).resolve().parent.parent / "prismaquant" / "run-pipeline.sh"
     )
-    cond = None
-    for line in path.read_text().splitlines():
-        if 'FORMATS:-}" == *_CB_*' in line:
-            cond = line.strip().removeprefix("if ").removesuffix("; then")
-            break
-    assert cond is not None, "CB-unlicensed guard condition not found in script"
+    script = path.read_text()
+    assert '== *_CB_*' not in script
 
-    def fires(export_container: str, formats: str) -> bool:
+    container_cond = None
+    for line in script.splitlines():
+        if '"$EXPORT_CONTAINER" == "nvfp4_cb"' in line and line.strip().startswith("if "):
+            container_cond = line.strip().removeprefix("if ").removesuffix("; then")
+            break
+    assert container_cond is not None, "retired-container gate not found in script"
+
+    def fires(export_container: str) -> bool:
         proc = subprocess.run(
-            ["bash", "-c", f"if {cond}; then exit 7; else exit 0; fi"],
-            env={
-                "PATH": "/usr/bin:/bin",
-                "EXPORT_CONTAINER": export_container,
-                "FORMATS": formats,
-            },
+            ["bash", "-c", f"if {container_cond}; then exit 7; else exit 0; fi"],
+            env={"PATH": "/usr/bin:/bin", "EXPORT_CONTAINER": export_container},
             check=False,
         )
         assert proc.returncode in (0, 7), proc.returncode
         return proc.returncode == 7
 
-    # The FORMATS signal must trip it. This is the limb that still matters:
-    # the CB format/cost/render plumbing outlived the Gridbook lane (D34), so a
-    # `*_CB_*` menu is still nameable and still mis-priced by this estimator.
-    assert fires("compressed-tensors", "FP8_CB_K28,FP8_CB_K43")
-    # The EXPORT_CONTAINER signal is GONE from this guard as of 2026-09-02, and
-    # its absence is the correct state, not drift: `EXPORT_CONTAINER=nvfp4_cb`
-    # is now refused outright by the container gate before any cost mode is
-    # considered (archive/gridbook_lane_2026-09-02/). A second refusal for the
-    # same input would be dead code pretending to be a gate.
-    assert not fires("nvfp4_cb", "NVFP4,FP8_DYNAMIC,BF16")
-    # ...and neither control may.
-    assert not fires("compressed-tensors", "NVFP4,FP8_DYNAMIC,BF16")
-    assert not fires("", "")
-
-    # So prove the container gate is what refuses it now, by executing that
-    # gate's own predicate the same way.
-    container_cond = None
-    for line in path.read_text().splitlines():
-        if '"$EXPORT_CONTAINER" == "nvfp4_cb"' in line and line.strip().startswith("if "):
-            container_cond = line.strip().removeprefix("if ").removesuffix("; then")
-            break
-    assert container_cond is not None, "retired-container gate not found in script"
-    proc = subprocess.run(
-        ["bash", "-c", f"if {container_cond}; then exit 7; else exit 0; fi"],
-        env={"PATH": "/usr/bin:/bin", "EXPORT_CONTAINER": "nvfp4_cb"},
-        check=False,
-    )
-    assert proc.returncode == 7
+    assert fires("nvfp4_cb")
+    assert not fires("compressed-tensors")
+    assert not fires("gguf")
 
 
 def test_core_recipe_defaults_are_pinned():
