@@ -135,12 +135,8 @@ def test_a_correction_that_reaches_the_mtp_attention_refuses_it(tmp_path, monkey
 
 
 def test_a_correction_beyond_the_reviewed_expression_refuses_every_model(tmp_path, monkeypatch):
-    """Mutation: the corrected file also changes a non-KDA definition."""
-    stock = _stock_raw()
-    corrected = derivative.corrected_source(stock)
-    target = b"class Glm5NextTextRMSNorm(nn.Module):"
-    assert corrected.count(target) == 1
-    changed = corrected.replace(target, b"_UNREVIEWED = 1\n\n\n" + target)
+    """Mutation: the corrected file also changes code outside the reviewed expression."""
+    changed = derivative.corrected_source(_stock_raw()) + b"\n_UNREVIEWED = 1\n"
     monkeypatch.setattr(derivative, "CORRECTED_MODELING_SHA256", hashlib.sha256(changed).hexdigest())
     with pytest.raises(ValueError, match="more than the reviewed expression"):
         derivative.original_source(changed)
