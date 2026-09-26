@@ -47,6 +47,7 @@ from prismaquant.nvfp4_activation_contract import (
     require_matching_input_global_scale,
 )
 from .digests import DIRECT_ASCII_STRICT
+from .tensor_digests import tensor_hash_update as _tensor_hash_update
 
 _FNAME_SUB = re.compile(r"[^A-Za-z0-9_-]")
 _SHARED_FROZEN_WEIGHT_FORMAT_CACHE: OrderedDict[
@@ -2322,13 +2323,6 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             live_windows.pop().__exit__(None, None, None)
         if reserved:
             residency_check(-nbytes)
-
-
-def _tensor_hash_update(h: "hashlib._Hash", tensor: torch.Tensor) -> None:
-    t = tensor.detach().to("cpu").contiguous()
-    h.update(str(tuple(t.shape)).encode())
-    h.update(str(t.dtype).encode())
-    h.update(t.view(torch.uint8).numpy().tobytes())
 
 
 def calibration_data_hash(calibration_data) -> str:

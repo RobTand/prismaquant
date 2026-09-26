@@ -1360,7 +1360,7 @@ def hessian_capture_sha256(hessians: "Mapping[str, Any]",
     """
     import hashlib
 
-    import torch
+    from .tensor_digests import tensor_bytes
 
     _require_capture_context_roster()
     if _is_hessian_reference(hessians):
@@ -1382,7 +1382,7 @@ def hessian_capture_sha256(hessians: "Mapping[str, Any]",
                                 "shape": list(value.shape)},
                                sort_keys=True).encode())
         unit.update(b"\0")
-        unit.update(value.view(torch.uint8).numpy().tobytes())
+        unit.update(tensor_bytes(value))
         digest.update(b"\0" + name.encode() + b"\0")
         digest.update(unit.hexdigest().encode())
     return digest.hexdigest()

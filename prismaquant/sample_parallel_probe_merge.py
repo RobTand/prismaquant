@@ -57,6 +57,7 @@ from prismaquant.sample_parallel_probe_contract import (
     activation_row_priorities,
 )
 from prismaquant.sensitivity_probe import finalize_fisher_stats
+from prismaquant.tensor_digests import tensor_identity as _tensor_identity
 
 
 SAMPLE_PARALLEL_SHARD_SCHEMA = "prismaquant.sample_parallel_probe.partition.v1"
@@ -1155,16 +1156,6 @@ def merge_sample_parallel_probe_payloads(
         "expert_route_stats": {},
         "expert_info": {},
         "meta": first_meta,
-    }
-
-
-def _tensor_identity(tensor: torch.Tensor) -> dict[str, object]:
-    value = tensor.detach().to("cpu").contiguous()
-    raw = value.view(torch.uint8).numpy().tobytes()
-    return {
-        "dtype": str(value.dtype),
-        "shape": [int(dim) for dim in value.shape],
-        "sha256": hashlib.sha256(raw).hexdigest(),
     }
 
 
