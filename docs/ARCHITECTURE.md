@@ -1,7 +1,16 @@
 # PrismaQuant Architecture
 
+Tessera's exact pin advances again on 2026-09-26 from `d2a6455025…` to
+`09d6559d7…` (Tessera #633, PQ #1413). The new serving mapper and route-census
+implementation address GLM MTP layer 45's runtime `mtp_block` module names.
+The packaged v38 contract, SHA-256 `04d5a20a…9d22e4`, and the reviewed
+admission answer stay unchanged. The previously completed body-only text
+trial used `f790bcc1a…`; its result is historical and does not itself prove
+MTP generation or quality. The MTP original-wire preflight is refreshed under
+this exact pin before a combined export.
+
 Tessera pin retake (2026-09-26, PQ #1413): the exact reader and serving pin
-moves from `af7a86d43d…` to `d2a6455025…` after Tessera #625, #626 and
+moved from `af7a86d43d…` to `d2a6455025…` after Tessera #625, #626 and
 #630. Hessian-reference collections and composed original cached cohorts are
 now available to the selected-wire export path described below. The packaged
 runtime contract remains v38, SHA-256 `04d5a20a…9d22e4`; the reviewed
@@ -3554,6 +3563,10 @@ Re-stamped (2026-09-26, PQ #1413) for the exact Tessera pin retake to
 `d2a6455025…` after #625, #626 and #630. The packaged v38 digest and
 admission answer are unchanged; the reader gains composed original Hessian
 references and cached-unit cohorts without changing child receipts.
+
+Re-stamped (2026-09-26, PQ #1413) for the further exact Tessera pin move to
+`09d6559d7…` after #633. Its GLM MTP mapper and route census are new serving
+code under the unchanged packaged v38 digest and admission answer.
 
 Re-stamped (2026-09-25, `claude/identity-cache-portable-1363`) for **source
 identity proofs that survive another NFS mount, checked by one predicate**
@@ -24393,9 +24406,10 @@ top-1024 intersection bound, because no instrument in either repository
 produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `d2a6455025040a0826395182c44ea742b582f232` (master after #630,
+Tessera `09d6559d7f386c94d69cf61f080cc7fac5bf0eb0` (master after #633,
 re-pinned 2026-09-26; version `0.1.0`, contract v38, lane schema v10, which
-v35-v38 keep). The prior `af7a86d43d…` pin introduced v38.
+v35-v38 keep). `d2a6455025…` introduced the composed cached reader without
+moving the contract; the prior `af7a86d43d…` pin introduced v38.
 v35-v38 are not additive: v37 withdraws the dense BF16 q1792 pair and v38 reuses
 the two routed E4M3 cell ids for q896 on a different image. v34 was pinned at
 `07bfcc0e9b…` and first at `acf9eafa6a…`

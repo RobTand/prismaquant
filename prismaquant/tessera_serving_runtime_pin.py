@@ -278,8 +278,10 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: Re-pinned 2026-09-26 to d2a645502 after Tessera #625, #626 and #630.
 #: The packaged v38 contract and reviewed answer below are byte-identical to
 #: af7a86d43's; f790bcc1a's serving source is unchanged at this commit.
+#: Re-pinned 2026-09-26 to 09d6559d7 after Tessera #633. The GLM MTP runtime
+#: mapper and route census move; contract v38 and this reviewed answer do not.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "d2a6455025040a0826395182c44ea742b582f232"
+    "09d6559d7f386c94d69cf61f080cc7fac5bf0eb0"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
