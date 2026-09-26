@@ -32,8 +32,8 @@ missing fleet prerequisite should have been a named SKIP (PQ #1097).
 actually calls, not a proxy for it.
 
 ``prismabuild_imports_restored`` puts back where ``import prismabuild``
-resolves after a test (PQ #1281); ``tests/conftest.py`` wraps every test in
-it.
+resolves (PQ #1281); ``tests/conftest.py`` wraps every test, and every test
+module, in it.
 """
 from __future__ import annotations
 

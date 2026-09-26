@@ -69,10 +69,11 @@ def test_a_foreign_prismabuild_does_not_outlive_its_block(tmp_path):
         assert not getattr(module, "FOREIGN", False)
 
 
-def test_every_test_runs_inside_the_restore(request):
-    """``tests/conftest.py`` applies the restore to every test, this one too."""
+def test_every_test_and_module_runs_inside_the_restore(request):
+    """``tests/conftest.py`` applies the restore to every test and module."""
 
     assert "_no_prismabuild_import_carried_between_tests" in request.fixturenames
+    assert "_no_prismabuild_import_carried_between_modules" in request.fixturenames
 
 
 def test_injection_refuses_a_prismabuild_it_did_not_install(tmp_path):
