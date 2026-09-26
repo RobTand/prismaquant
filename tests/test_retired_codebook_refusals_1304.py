@@ -156,6 +156,12 @@ def _reprice(name, _tmp_path):
     )
 
 
+def _serve_dispatch_family(name, _tmp_path):
+    from prismaquant.serve_dispatch_table import dispatch_family_for_format
+
+    dispatch_family_for_format(name)
+
+
 def _aqua_activation_formats(name, _tmp_path):
     from prismaquant.aqua_activation_cost import required_activation_formats
 
@@ -179,6 +185,10 @@ READERS = [
     ),
     pytest.param(_cache_key, id="production_weight_cache._is_cb_format_name"),
     pytest.param(_reprice, id="per_row_pricing.reprice_assignment"),
+    pytest.param(
+        _serve_dispatch_family,
+        id="serve_dispatch_table.dispatch_family_for_format",
+    ),
     pytest.param(
         _aqua_activation_formats,
         id="aqua_activation_cost.required_activation_formats",
