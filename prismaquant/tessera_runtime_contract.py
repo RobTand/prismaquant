@@ -356,8 +356,9 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: completed GLM text-only trial's source. The packaged v38 contract and the
 #: reviewed admission answer below are unchanged from af7a86d43.
 #: Re-pinned 2026-09-26 to 09d6559d7 after Tessera #633. Its GLM MTP
-#: mapper and route-census implementation qualify the same v38 BF16 routed
-#: R1024 cell for the actual layer-45 runtime module path. The packaged
+#: mapper and route-census implementation map layer-45 MTP module names onto
+#: the existing v38 BF16 routed R1024 cell; MTP serving qualification is still
+#: pending. The packaged
 #: contract bytes and the admission answer below remain unchanged.
 TESSERA_DEV_PIN_COMMIT = "09d6559d7f386c94d69cf61f080cc7fac5bf0eb0"
 
