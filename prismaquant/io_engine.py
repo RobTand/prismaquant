@@ -64,6 +64,16 @@ states a depth or a worker count:
   the reads and released after them. A group that is not ready yet waits until
   the consumer asks for it.
 
+**Range entries** (PQ #1348). An entry with a ``reader`` is not a file: the
+stream calls ``reader()`` on a pool thread and delivers what it returns.
+Stage B's spill replay reads its chunks this way, byte ranges of its own
+job-local scratch file into a buffer the reader allocates. A range entry has
+no path, so it is neither staged nor pinned, and no serialized buffer, so it
+is charged its held bytes only. It carries no digest, and the stream checks
+none: whatever holds its bytes to what was written is the reader's (the
+spill checks only that each read is whole and on its grid). Depth, workers,
+order, reclaim and the consumer's waits are the stream's, as for a file.
+
 Every consumer wait is timed; ``ReadStream.counters`` is the record the caller
 writes to its counters (Stage B: ``counters.json``'s ``io_engine`` block).
 """
@@ -588,20 +598,30 @@ class ReadEntry:
     file's pages in its value; one that copies it holds its copy. The read in
     flight is charged ``size + held_bytes`` either way, which overstates a
     mapping decoder by ``size`` for the reads in flight only.
+
+    ``reader() -> (value, observed)`` makes a range entry (module
+    docstring): ``path``, ``decoder`` and ``expected_sha256`` are ``None``,
+    ``size`` is the bytes it reads and ``held_bytes`` what its value holds.
     """
 
     key: Hashable
-    path: str
+    path: str | None
     size: int
     limit: int
     held_bytes: int
     expected_sha256: str | None
-    decoder: Callable[[bytes, dict, bool], tuple[Any, Any]]
+    decoder: Callable[[bytes, dict, bool], tuple[Any, Any]] | None
     group: Hashable
     declared_stat: Any = None
     derive: Callable[[Any, tuple], dict] | None = None
     measure: Callable[[Any], int] | None = None
     tier_hint: str | None = None
+    reader: Callable[[], tuple[Any, Any]] | None = None
+
+    @property
+    def raw_bytes(self) -> int:
+        """The serialized buffer this read holds in flight: none for a range."""
+        return 0 if self.reader is not None else self.size
 
 
 @dataclass
@@ -646,12 +666,21 @@ class ReadStream:
         groups: list = []
         members: dict = {}
         for index, entry in enumerate(entries):
+            if entry.reader is not None:
+                if not callable(entry.reader) or any(
+                        value is not None for value in (
+                            entry.path, entry.decoder, entry.expected_sha256)):
+                    raise ValueError(
+                        f"io range entry {entry.key!r} names a path, a decoder or a "
+                        "digest; its reader reads and verifies its own bytes")
+            elif entry.path is None or entry.decoder is None:
+                raise ValueError(f"io entry {entry.key!r} needs a path and a decoder")
             if entry.group not in members:
                 groups.append(entry.group)
                 members[entry.group] = []
             elif groups[-1] != entry.group:
                 raise ValueError(f"io stream group {entry.group!r} is not contiguous")
-            if entry.size > budget.buffer_bytes:
+            if entry.raw_bytes > budget.buffer_bytes:
                 raise ValueError(
                     f"io entry {entry.key!r}: its serialized buffer exceeds the budget's")
             members[entry.group].append(index)
@@ -722,6 +751,31 @@ class ReadStream:
     def group_keys(self, group) -> tuple:
         """The keys of ``group``'s entries, in stream order."""
         return tuple(self._entries[i].key for i in self._members.get(group, ()))
+
+    def next_group(self):
+        """The group the consumer takes next, or ``None`` once all are taken."""
+        with self._cond:
+            return self._groups[self._taken] if self._taken < len(self._groups) else None
+
+    def unread_bytes(self, group) -> int:
+        """Bytes ``group``'s unread entries will still hold; marks nothing.
+
+        An entry not read yet will hold its ``held_bytes``; one in flight is
+        charged its serialized buffer too, which a reading of the process
+        may not see yet. Another stream's budget subtracts this for the group
+        this stream's consumer needs next, so a stream read in parallel
+        leaves it room (Stage B's spill replay leaves the next window's
+        renders theirs, PQ #1348).
+        """
+        with self._cond:
+            total = 0
+            for i in self._members.get(group, ()):
+                entry = self._entries[i]
+                if self._state[i] in (_PENDING, _FAILED):
+                    total += entry.held_bytes
+                elif self._state[i] == _READING:
+                    total += entry.raw_bytes + entry.held_bytes
+            return total
 
     def demand(self, group) -> tuple[int, int]:
         """Mark ``group`` as the consumer's next; return what is still unread.
@@ -931,7 +985,7 @@ class ReadStream:
         return max(1, min(width, math.ceil(need / (rate * remaining))))
 
     def _fits(self, entry) -> bool:
-        need = entry.size + entry.held_bytes
+        need = entry.raw_bytes + entry.held_bytes
         held = self._held + self._unreleased
         return need <= self._budget.headroom_bytes(held) - self._inflight_charge
 
@@ -961,15 +1015,16 @@ class ReadStream:
                 return
             if self._active >= workers:
                 return
-            if self._inflight_raw and self._inflight_raw + entry.size > self._budget.buffer_bytes:
+            raw = entry.raw_bytes
+            if raw and self._inflight_raw and self._inflight_raw + raw > self._budget.buffer_bytes:
                 return
             if not demanded and not self._fits(entry):
                 return
             self._state[index] = _READING
             self._active += 1
             self.counters["peak_workers"] = max(self.counters["peak_workers"], self._active)
-            self._inflight_raw += entry.size
-            self._inflight_charge += entry.size + entry.held_bytes
+            self._inflight_raw += raw
+            self._inflight_charge += raw + entry.held_bytes
             self._outstanding[group] += 1
             self._engine.submit(self._read, index)
 
@@ -980,11 +1035,11 @@ class ReadStream:
         try:
             if self._ready is not None:
                 ready = bool(self._ready(group, self._cancel))
-            if ready and not self._cancel.is_set():
-                indices = self._members[group]
-                leases = pin_group(
-                    [(self._entries[i].path, self._entries[i].expected_sha256)
-                     for i in indices], live, counters=self._lease_counters)
+            files = [(self._entries[i].path, self._entries[i].expected_sha256)
+                     for i in self._members[group] if self._entries[i].reader is None]
+            if ready and not self._cancel.is_set() and files:
+                # A range entry names no file: there is nothing to pin.
+                leases = pin_group(files, live, counters=self._lease_counters)
         except CancelledError:
             ready = False
         except BaseException as exc:  # noqa: BLE001 -- surfaced at the consumer
@@ -1022,15 +1077,21 @@ class ReadStream:
         try:
             if self._cancel.is_set():
                 raise CancelledError("io stream closed")
-            leases = self._leases.get(entry.group) or {}
-            decode = (entry.decoder if entry.expected_sha256 is None
-                      else partial(_verified_decode, entry.expected_sha256, entry.decoder))
-            value, observed = load_file(
-                Path(entry.path), entry.limit, binding=entry.expected_sha256,
-                decode=decode,
-                declared_signature=(None if entry.declared_stat is None
-                                    else _stat_signature(entry.declared_stat)),
-                lease=leases.get(entry.path), timing=timing, sealed=True)
+            if entry.reader is not None:
+                started = time.perf_counter()
+                value, observed = entry.reader()
+                timing["read_s"] = time.perf_counter() - started
+            else:
+                leases = self._leases.get(entry.group) or {}
+                decode = (entry.decoder if entry.expected_sha256 is None
+                          else partial(_verified_decode, entry.expected_sha256,
+                                       entry.decoder))
+                value, observed = load_file(
+                    Path(entry.path), entry.limit, binding=entry.expected_sha256,
+                    decode=decode,
+                    declared_signature=(None if entry.declared_stat is None
+                                        else _stat_signature(entry.declared_stat)),
+                    lease=leases.get(entry.path), timing=timing, sealed=True)
             derived = entry.derive(value, observed) if entry.derive is not None else None
             actual = entry.held_bytes if entry.measure is None else int(entry.measure(value))
             if not 0 <= actual <= entry.held_bytes:
@@ -1043,8 +1104,8 @@ class ReadStream:
         with self._cond:
             group = entry.group
             self._active -= 1
-            self._inflight_raw -= entry.size
-            self._inflight_charge -= entry.size + entry.held_bytes
+            self._inflight_raw -= entry.raw_bytes
+            self._inflight_charge -= entry.raw_bytes + entry.held_bytes
             self._outstanding[group] -= 1
             self._reads[index] += 1
             if self._reads[index] > 1:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 import os
 
 import torch
@@ -235,15 +236,132 @@ class GuardReadBudget:
     of the process, so the renders the stream already holds are in it and
     ``held_bytes`` is not subtracted again. The serialized buffers in flight
     are held to the sealed load buffer.
+
+    Two terms for a stream read beside another (PQ #1348, Stage B's spill
+    replay beside the render stream). ``yield_to`` is the stream whose next
+    group comes first: what reading that group still charges
+    (``ReadStream.unread_bytes``) is taken off the reading, so the second
+    stream never reads into the room the first one's next group needs.
+    ``floor_bytes`` is what the phase already reserved for this stream at its
+    guard check (the spill's own read buffers): the stream may always hold
+    that much, read ahead or taken, whatever the reading says.
     """
 
-    def __init__(self, guard, *, buffer_bytes):
+    def __init__(self, guard, *, buffer_bytes, yield_to=None, floor_bytes=0):
+        if type(floor_bytes) is not int or floor_bytes < 0:
+            raise ValueError('a read budget floor must be nonnegative bytes')
         self.guard = guard
         self.buffer_bytes = int(buffer_bytes)
+        self.yield_to = yield_to
+        self.floor_bytes = floor_bytes
 
     def headroom_bytes(self, held_bytes: int) -> int:
-        del held_bytes
-        return self.guard.headroom_bytes()
+        live = self.guard.headroom_bytes()
+        if self.yield_to is not None:
+            group = self.yield_to.next_group()
+            if group is not None:
+                live -= self.yield_to.unread_bytes(group)
+        return max(live, self.floor_bytes - held_bytes)
+
+
+#: The device bytes a render cache may hold when no capture guard reads the
+#: row (a CPU run, or a test that drives the quantum unguarded): none. Every
+#: CUDA quantum runs under a guard, whose device headroom admits instead.
+UNGUARDED_RENDER_CACHE_BYTES = 0
+
+
+class RetainedRenderDeviceCache:
+    """One retained window's renders, kept on the device across its probes (PQ #1348).
+
+    Each probe of a window builds every candidate's delta,
+    ``render - source`` in FP32 on the source's device, from the same
+    resident render. The first probe copies the render to the device as it
+    is (its own dtype) and keeps that copy while ``headroom()`` admits its
+    bytes; a later probe widens the kept copy instead of copying the host
+    render again. The delta is the same bytes either way: the device copy is
+    exact, and so is the widening of a narrower float to FP32. A render not
+    admitted, or dropped by :meth:`reclaim`, takes the uncached path, the
+    one every probe took before.
+
+    ``headroom()`` is the device bytes that may still be allocated
+    (``CaptureMemoryGuard.device_headroom_bytes``). :meth:`reclaim` is a
+    device-side guard reclaimer. ``counters`` are cumulative over the pass;
+    ``bytes_held`` is what the window holds now, and
+    ``last_window_peak_bytes`` the most the last cleared window held.
+    """
+
+    def __init__(self, headroom):
+        if not callable(headroom):
+            raise TypeError('a render device cache needs a headroom callable')
+        self._headroom = headroom
+        self._held: dict = {}
+        self.bytes_held = 0
+        self._window_peak = 0
+        self.last_window_peak_bytes = 0
+        self.counters = {'hits': 0, 'misses': 0, 'admitted': 0, 'refused': 0,
+                         'reclaims': 0, 'reclaimed_bytes': 0, 'peak_bytes_held': 0}
+
+    def delta(self, key, rendered, source, *, keep):
+        """``rendered - source`` in FP32 on ``source.device``.
+
+        ``rendered`` is the resident render, or a callable returning it,
+        called only on a miss. ``keep`` says a later probe of this window
+        will ask for ``key`` again, so a miss may keep its device copy.
+        """
+        held = self._held.get(key)
+        if held is not None:
+            self.counters['hits'] += 1
+            delta = held.to(dtype=torch.float32, copy=True)
+        else:
+            self.counters['misses'] += 1
+            if callable(rendered):
+                rendered = rendered()
+            nbytes = rendered.numel() * rendered.element_size()
+            if keep and nbytes <= self._headroom():
+                held = rendered.to(device=source.device, copy=True)
+                self._held[key] = held
+                self.bytes_held += nbytes
+                self.counters['admitted'] += 1
+                self._window_peak = max(self._window_peak, self.bytes_held)
+                self.counters['peak_bytes_held'] = max(
+                    self.counters['peak_bytes_held'], self.bytes_held)
+                delta = held.to(dtype=torch.float32, copy=True)
+            else:
+                self.counters['refused'] += int(keep)
+                delta = rendered.to(device=source.device, dtype=torch.float32, copy=True)
+        held = rendered = None
+        delta.sub_(source)
+        return delta
+
+    def reclaim(self, shortfall_bytes):
+        """Drop kept renders until ``shortfall_bytes`` is freed; a guard reclaimer.
+
+        The dropped copies are CUDA allocations the caching allocator would
+        keep reserved, so their blocks go back to the device before the
+        guard reads it again.
+        """
+        freed, cuda = 0, False
+        for key in list(self._held):
+            if freed >= shortfall_bytes:
+                break
+            tensor = self._held.pop(key)
+            nbytes = tensor.numel() * tensor.element_size()
+            cuda = cuda or tensor.is_cuda
+            tensor = None
+            self.bytes_held -= nbytes
+            freed += nbytes
+        if freed:
+            self.counters['reclaims'] += 1
+            self.counters['reclaimed_bytes'] += freed
+            if cuda:
+                torch.cuda.empty_cache()
+        return freed
+
+    def clear(self):
+        """The window is done: drop every kept render."""
+        self._held.clear()
+        self.bytes_held = 0
+        self.last_window_peak_bytes, self._window_peak = self._window_peak, 0
 
 
 def retained_admission_targets(statistics_plan, specs, cache):
@@ -356,7 +474,7 @@ def observe_and_project_retained_windows(
         source_bytes, backward, record_operator, consume_probe,
         collect_col_energy, backend, guard=None, source_fingerprints=None,
         completed_names=(), sealed_windows=None, before_window=None, after_window=None,
-        spill=None, render_identities=False, render_stream=None):
+        spill=None, render_identities=False, render_stream=None, render_cache=None):
     """Replay all probes inside each admitted target's retained PWC lifetime.
 
     The selected-key-only PWC preflight and scalar target planner run before
@@ -395,6 +513,15 @@ def observe_and_project_retained_windows(
     stream's groups must equal the windows opened here, or the replay refuses
     before any window opens. Without it each window reads its own renders when
     it opens.
+
+    ``record_operator`` runs twice per window and candidate (PQ #1348): on
+    the window's first probe, which records it, and after its last probe,
+    which compares the resident render with the record once more before
+    ``after_window`` commits the window. A probe between them reads the
+    render the first probe recorded, from the same resident PWC tensor.
+    ``render_cache`` (a :class:`RetainedRenderDeviceCache`) keeps the
+    window's renders on the device across its probes; without it every
+    probe copies each render from the host.
 
     ``source_bytes`` is the caller's declared, separately checked source-owner
     cap. Passing a varying per-layer observation here would change the sealed
@@ -529,60 +656,82 @@ def observe_and_project_retained_windows(
                 render_identities=render_identities,
                 stream=render_stream, stream_group=window_index,
                 ) as candidate_receipt:
-            for probe_index in range(n_probes):
-                require_sources()
-                if spill is not None and window_index == first_active == 0:
-                    spill.capture(probe_index)
+            try:
+                for probe_index in range(n_probes):
                     require_sources()
-                if guard is not None:
-                    check_operator_allocation(
-                        guard, 'before_joint_retained_statistics_probe',
-                        reserve_bytes=retained_budget.boundary_reserve_bytes,
-                        reserve_device_bytes=(window.statistics_bytes
-                                              + retained_budget.workspace_reserve_bytes
-                                              + retained_budget.candidate_delta_bytes))
-                with JointOperatorStatisticsLease(
-                        selected, selected_specs,
-                        max_statistics_bytes=retained_budget.statistics_cap_bytes,
-                        max_candidate_bytes=retained_budget.candidate_delta_bytes,
-                        activation_max_abs=joint_activation_maxima(cache),
-                        projection_backend=backend) as lease:
-                    lease.begin_probe()
-                    if spill is None:
-                        backward(probe_index=probe_index,
-                                 final=window_index == last_active,
-                                 lease=lease)
-                    else:
-                        spill.replay(window_index=window_index,
-                                     probe_index=probe_index, lease=lease)
-                    require_sources()
-                    lease.finish_observations()
-                    diagnostics = lease.operator_diagnostics(
-                        collect_col_energy=collect_col_energy)
-                    for name, fmt in requested:
-                        rendered = source = delta = None
-                        try:
-                            source = modules[name].weight.detach()
-                            rendered = cache.get_resident(name, fmt)
-                            record_operator(name, fmt, source, rendered)
-                            require_sources()
-                            delta = rendered.to(
-                                device=source.device, dtype=torch.float32, copy=True)
-                            delta.sub_(source)
-                            lease.project({(name, fmt): delta})
-                        finally:
+                    if spill is not None and window_index == first_active == 0:
+                        spill.capture(probe_index)
+                        require_sources()
+                    if guard is not None:
+                        check_operator_allocation(
+                            guard, 'before_joint_retained_statistics_probe',
+                            reserve_bytes=retained_budget.boundary_reserve_bytes,
+                            reserve_device_bytes=(window.statistics_bytes
+                                                  + retained_budget.workspace_reserve_bytes
+                                                  + retained_budget.candidate_delta_bytes))
+                    with JointOperatorStatisticsLease(
+                            selected, selected_specs,
+                            max_statistics_bytes=retained_budget.statistics_cap_bytes,
+                            max_candidate_bytes=retained_budget.candidate_delta_bytes,
+                            activation_max_abs=joint_activation_maxima(cache),
+                            projection_backend=backend) as lease:
+                        lease.begin_probe()
+                        if spill is None:
+                            backward(probe_index=probe_index,
+                                     final=window_index == last_active,
+                                     lease=lease)
+                        else:
+                            spill.replay(window_index=window_index,
+                                         probe_index=probe_index, lease=lease)
+                        require_sources()
+                        lease.finish_observations()
+                        diagnostics = lease.operator_diagnostics(
+                            collect_col_energy=collect_col_energy)
+                        keep = probe_index + 1 < n_probes
+                        for name, fmt in requested:
                             rendered = source = delta = None
-                    terms = lease.finish_projections()
-                probe_receipt = {
-                    'plan': {'schema': 'prismaquant.joint_retained_target_plan.v1',
-                             'window_count': len(retained_plan.windows),
-                             'footprint_scope': retained_plan.footprint_scope},
-                    'window_index': window_index,
-                    'window_names': names,
-                    'candidate_window': dict(candidate_receipt),
-                }
-                consume_probe(probe_index, terms, diagnostics, probe_receipt)
-                require_sources()
+                            try:
+                                source = modules[name].weight.detach()
+                                if probe_index == 0:
+                                    rendered = cache.get_resident(name, fmt)
+                                    record_operator(name, fmt, source, rendered)
+                                require_sources()
+                                if render_cache is None:
+                                    if rendered is None:
+                                        rendered = cache.get_resident(name, fmt)
+                                    delta = rendered.to(
+                                        device=source.device, dtype=torch.float32, copy=True)
+                                    delta.sub_(source)
+                                else:
+                                    delta = render_cache.delta(
+                                        (name, fmt),
+                                        (rendered if rendered is not None else
+                                         partial(cache.get_resident, name, fmt)),
+                                        source, keep=keep)
+                                lease.project({(name, fmt): delta})
+                            finally:
+                                rendered = source = delta = None
+                        terms = lease.finish_projections()
+                    probe_receipt = {
+                        'plan': {'schema': 'prismaquant.joint_retained_target_plan.v1',
+                                 'window_count': len(retained_plan.windows),
+                                 'footprint_scope': retained_plan.footprint_scope},
+                        'window_index': window_index,
+                        'window_names': names,
+                        'candidate_window': dict(candidate_receipt),
+                    }
+                    consume_probe(probe_index, terms, diagnostics, probe_receipt)
+                    require_sources()
+            finally:
+                # Every path out of the window drops its kept renders.
+                if render_cache is not None:
+                    render_cache.clear()
+            # The window's close: every candidate's resident render is
+            # compared with its record once more before the window commits.
+            for name, fmt in requested:
+                record_operator(name, fmt, modules[name].weight.detach(),
+                                cache.get_resident(name, fmt))
+            require_sources()
             candidate_receipts.append(dict(candidate_receipt))
         if after_window is not None:
             after_window(window_index, names)
