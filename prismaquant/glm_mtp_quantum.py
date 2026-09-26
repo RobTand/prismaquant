@@ -142,8 +142,21 @@ def mtp_priced_modules(model, profile) -> dict:
     return dict(sorted(modules.items()))
 
 
+def _reporter(label, total):
+    """A line about sixteen times per pass: the passes run for minutes each."""
+    started = time.monotonic()
+    step = max(1, int(total) // 16)
+
+    def report(done):
+        if done % step == 0 or done == total:
+            print(f"{label}: {done}/{total} sequences, {time.monotonic() - started:.0f} s",
+                  flush=True)
+
+    return report
+
+
 def mtp_backward(model, embed_tokens, lm_head, calibration_ids, hidden_states, *,
-                 seed: int, device, min_free_gib=None, free_gib=None):
+                 seed: int, device, min_free_gib=None, free_gib=None, report=None):
     """One probe's forward and backward over every calibration sequence.
 
     Sequence ``i`` is its own global row block (``global_row_offset=i``), so
@@ -163,6 +176,8 @@ def mtp_backward(model, embed_tokens, lm_head, calibration_ids, hidden_states, *
                                           n_sequences=n)
         scalar.backward()
         del ids, hidden, logits, scalar
+        if report is not None:
+            report(index + 1)
 
 
 def _group_units(census, names):
@@ -234,25 +249,30 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
     validated = validated_probe_identity(probe_identity)
     probe_sha256 = identity_sha256(validated)
 
-    sources, operators = {}, {}
+    # The installed sources and the activation contracts depend on nothing a
+    # probe computes, so they are checked against the preparation before the
+    # first forward, not after a full backward pass.
+    sources, activations, operators = {}, {}, {}
+    for name, module in modules.items():
+        sources[name] = _cb_cache_tensor_identity(module.weight.detach())
+        for fmt in rungs[name]:
+            cell = verified[(name, fmt)]
+            if sources[name] != cell["source_weight"]:
+                raise RuntimeError(f"MTP source weight differs from the prepared one for {name}")
+            activations[(name, fmt)] = activation_identity(specs[name][fmt], maxima, name)
+            if activations[(name, fmt)] != cell["activation"]:
+                raise RuntimeError(f"MTP activation contract differs from the prepared one for "
+                                   f"{name}@{fmt}")
 
     def record_operator(name, fmt, source, rendered):
         # Hashed once per pair: every later load of the same render is checked
         # against the prepared file SHA-256 by the cache itself.
         if (name, fmt) in operators:
             return
-        cell = verified[(name, fmt)]
-        if name not in sources:
-            sources[name] = _cb_cache_tensor_identity(source)
-        if sources[name] != cell["source_weight"]:
-            raise RuntimeError(f"MTP source weight differs from the prepared one for {name}")
         rendered_identity = _cb_cache_tensor_identity(rendered)
-        if rendered_identity != cell["rendered_weight"]:
+        if rendered_identity != verified[(name, fmt)]["rendered_weight"]:
             raise RuntimeError(f"MTP render differs from the prepared one for {name}@{fmt}")
-        activation = activation_identity(specs[name][fmt], maxima, name)
-        if activation != cell["activation"]:
-            raise RuntimeError(f"MTP activation contract differs from the prepared one for "
-                               f"{name}@{fmt}")
+        activation = activations[(name, fmt)]
         operators[(name, fmt)] = {
             "schema": "prismaquant.joint_aura.operator.v2",
             "qname": name, "format": fmt,
@@ -261,6 +281,7 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
             "probe_identity_sha256": probe_sha256,
         }
 
+    n_sequences = int(calibration_ids.shape[0])
     components = {(name, fmt): [] for name in modules for fmt in rungs[name]}
     receipts, timings = [], []
     measured = {name: module for name, module in modules.items()}
@@ -274,7 +295,9 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
             passes[0] += 1
             mtp_backward(model, embed_tokens, lm_head, calibration_ids, hidden_states,
                          seed=int(seed_base) + _probe, device=device,
-                         min_free_gib=min_free_gib, free_gib=free_gib)
+                         min_free_gib=min_free_gib, free_gib=free_gib,
+                         report=_reporter(f"[mtp-quantum] probe {_probe + 1}/{n_probes} "
+                                          f"pass {passes[0]}", n_sequences))
 
         terms, diagnostics, receipt = observe_and_project_windows(
             measured, specs, production_cache, operator_windows, backward=backward,
@@ -298,6 +321,9 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
         timings.append({"probe_index": probe_index, "seconds": time.monotonic() - started,
                         "passes": passes[0],
                         "unobserved_units": len(silent)})
+        print(f"[mtp-quantum] probe {probe_index + 1}/{n_probes} projected "
+              f"{len(terms)} renders in {timings[-1]['seconds']:.0f} s over "
+              f"{passes[0]} pass(es)", flush=True)
         if progress is not None:
             progress(probe_index + 1)
 

@@ -257,12 +257,27 @@ def test_a_render_that_differs_from_the_prepared_one_refuses(env):
         env.run()
 
 
-def test_a_source_that_differs_from_the_prepared_one_refuses(env):
+def _no_forward(monkeypatch):
+    monkeypatch.setattr(quantum, "mtp_backward", lambda *a, **k: pytest.fail(
+        "a probe ran before the preparation's identities were checked"))
+
+
+def test_a_source_that_differs_from_the_prepared_one_refuses_before_a_probe(env, monkeypatch):
     name = f"{PREFIX}experts.0.gate_proj"
     for fmt in RUNGS:
         cell = env.cache.metadata["verified_cells"][(name, fmt)]
         cell["source_weight"] = dict(cell["source_weight"], content_sha256="0" * 64)
+    _no_forward(monkeypatch)
     with pytest.raises(RuntimeError, match="source weight differs"):
+        env.run()
+
+
+def test_an_activation_contract_that_differs_refuses_before_a_probe(env, monkeypatch):
+    name = f"{PREFIX}shared_experts.gate_proj"
+    cell = env.cache.metadata["verified_cells"][(name, E4M3_RUNG)]
+    cell["activation"] = dict(cell["activation"], activation_max_abs=1234.0)
+    _no_forward(monkeypatch)
+    with pytest.raises(RuntimeError, match="activation contract differs"):
         env.run()
 
 
