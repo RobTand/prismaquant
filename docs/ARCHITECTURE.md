@@ -3237,7 +3237,13 @@ silently grows to complete the capture. No scientific plan is rewritten.
 
 An explicit `joint_served_activation_policy.v1` permits newly added routed
 E2M1-K2 q896 candidates to be priced at the fused MoE runtime's executed-stage
-scale. Its bound original full-512 preparation and census independently derive
+scale. A `joint_served_activation_policy.v2` (PQ #1437) names several added
+routed A4 formats in `formats` (`joint_served_activation.policy_formats`;
+`--format`, repeatable, on its CLI). Each must quantize its input to 4 bits,
+and no group member may already offer one. The group maximum belongs to the
+routed unit, not to the weight format, so every policy format of a member is
+priced at the same executed-group scale, and activation requires every member
+to carry every policy format. Its bound original full-512 preparation and census independently derive
 the complete w13/w2 maxima through `routed_executed_max_abs`. The old PWC maxima,
 candidate qualification activations, renders, wires and source/H identities stay
 unchanged. Only a transient A4-specific pricing view applies the grouped maxima;
@@ -3386,8 +3392,22 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-26 · `claude/pact-gamut-catalog-n-formats`.
+As of: 2026-09-26 · `claude/pact-gamut-stageb-multiformat`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `claude/pact-gamut-stageb-multiformat`) for **Stage B
+inputs over a several-format catalog** (PQ #1437). The Stage B control
+closure (`tools/prepare_extended_joint_quanta.control_digests`) reads a v1 or
+v2 overlay catalog through `joint_catalog_extension.catalog_control_bindings`:
+each source's cost run, and each reseal proof with its fixture and arm
+results, where a source has one. The served activation policy gains a v2 that
+prices several added routed A4 formats. The resource derivation
+(`joint_stageb_resources.derive_policy`) takes the priced formats from that
+policy; a v1 catalog keeps its full-roster rule, and a v2 catalog's cells must
+each add a format its unit does not offer, with every executed-group member
+gaining exactly the policy's formats among its added A4 formats. Rosters
+extend by `extended_roster`, which for a v1 catalog is the order the
+derivation used before. No default, stage, format, lane or ship gate changes.
 
 Re-stamped (2026-09-26, `claude/pact-gamut-catalog-n-formats`) for **a joint
 catalog extension over several Tessera formats** (PQ #1432, full-gamut PACT).
