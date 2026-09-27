@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.digests import file_sha256hex
+from prismaquant.tessera_export_lane import read_cached_unit_bundle
 from tessera.cached_unit import (CACHE_SCHEMA, COMPOSED_CACHE_SCHEMA,
                                  CachedUnitBundle, read_manifest)
 
@@ -47,7 +48,7 @@ def compose(children: list[dict], *, output: Path) -> tuple[dict, CachedUnitBund
             raise ValueError('original v1 child has no historical producer package')
     manifest = {'schema': COMPOSED_CACHE_SCHEMA, 'source': source,
                 'children': sorted(children, key=lambda child: child['manifest']['path'])}
-    bundle = CachedUnitBundle(manifest, output.parent, units, source)
+    bundle = read_cached_unit_bundle(manifest, output.parent, units, source)
     return manifest, bundle
 
 
@@ -76,6 +77,8 @@ def main(argv=None):
                       'manifest_sha256': hashlib.sha256(raw).hexdigest(),
                       'children': bundle.child_manifests,
                       'units': len(bundle.units),
+                      'encoder_source_proof_mode': bundle.encoder_source_proof_mode,
+                      'warnings': bundle.warnings,
                       'export_qualified': False, 'serving_qualified': False},
                      sort_keys=True))
     return 0
