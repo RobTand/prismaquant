@@ -101,3 +101,26 @@ receipt directory above.
 Full CI for the final PR head is recorded on PR #1464, independently of these
 PB checks. The PR remains unmerged until Claude coordinates all workers'
 new `--python` paths; old interpreters were not modified.
+
+## Producer halves integrated
+
+After #1440 and #1441 merged, this branch integrated main
+`fc0f2ebe158c9bb7e4515b64cd5905a79cc1d988`; the only merge conflict was the
+architecture provenance stamp, which retains both entries. The actual
+proof-less #1441 manifest now reaches the new reader through the producer
+helper in `tests/test_tessera_selected_cache.py`: dev accepts it with per-unit
+warnings and matched served scales; certified mode refuses the same document.
+
+The expanded bridge test was red on pre-producer-main `6d490b228a8` with its
+old pin: PB `54b2e14f1d843e83767bdcbc6ac5ebca3004d4c89557372790b2f8996a86ffe9`,
+18 passed / one failed, `producer package differs from accepted migration
+proof`. The integrated branch then passed 19 selected-cache cases under PB
+`27ee11a8caffad05c22b62ca0c82fd72c118e357f1a8e5567f3546390e87a8d3`, plus
+15 served-activation policy cases under
+`4b5763f26c1ab0554f4518ddf2700d37bedb87de24f3d20754f3ccea8f6017e6`.
+Both are CPU-only Spark/Python3.12.3/torch2.11.0+cu130 (CUDA hidden),
+transformers5.16.1, xdist2/native1, zero skips, rc0 and present CAS receipts
+with matching log bytes. Timeout900, otherwise the same pbtest invocation
+above. Receipts: `pq-producer-bridge-{before,after}.json` in the receipt
+directory. The separate helper and CLI pre-fix regressions also failed before
+the reader-mode wiring; the end-to-end bridge does not replace those checks.
