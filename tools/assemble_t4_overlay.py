@@ -8,6 +8,16 @@ the digest of the cell it qualified. With ``--rebinding``
 catalog's cell is admitted for the new cell when the two differ only in
 ``anchor``. The rebinding proves this, and it is checked again here per cell.
 
+A catalog may add several formats (PQ #1432). Each unit's added formats go,
+sorted, before its terminal BF16 (``joint_catalog_extension.extended_roster``),
+the order the loader and the pair check use. Results for one format live in
+one directory keyed by qname: ``--qualified-dir`` is the default and
+``--format-qualified-dir FORMAT=DIR`` names another directory for one format.
+A rebinding may bind this catalog, or a catalog this one declares in
+``carried_from``; its rows admit the cells they name, and every other cell
+needs a result that binds it directly. The published PWC holds the original
+PWC's cells plus every catalog cell, and that count is derived, not declared.
+
 The original plan and prepared are named by ``--original-plan`` and
 ``--original-prepared``, each with its SHA-256; a path without its digest, or
 a digest without its path, refuses. With neither, the assembler binds
@@ -34,8 +44,6 @@ from prismaquant.digests import bytes_sha256hex
 PANEL = Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/allocation/joint-panel')
 OLDPLAN = PANEL / 'complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.plan.json'
 OLDPREP = PANEL / 'complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02/prepare/prepared.json'
-#: The original panel's PWC plus every catalog cell.
-EXTENDED_CELLS = 234278
 
 
 sha = bytes_sha256hex
@@ -58,14 +66,58 @@ def publish(path, raw):
     return {'path': str(path), 'sha256': sha(raw)}
 
 
-def add_overlay_format(formats_by_qname, qname, fmt):
-    """Insert ``fmt`` before ``qname``'s terminal BF16, as the loader reads it.
+def add_overlay_format(formats_by_qname, qname, formats):
+    """Insert ``formats`` (one or several) before ``qname``'s terminal BF16, as the loader reads it.
 
+    Several added formats go in sorted, once per unit.
     ``attach_candidate_overlay`` and ``verify_catalog_pair`` use the same
     order, and Stage B compares the prepared roster with the loaded one in
     order (RobTand/prismaquant#990).
     """
-    formats_by_qname[qname] = list(extended_roster(formats_by_qname[qname], fmt))
+    formats_by_qname[qname] = list(extended_roster(formats_by_qname[qname], formats))
+
+
+def add_overlay_formats(formats_by_qname, cells):
+    """Insert every catalog cell's format into its unit's roster, one insertion per unit."""
+    added = {}
+    for cell in cells:
+        added.setdefault(cell['qname'], []).append(cell['format'])
+    for qname, formats in added.items():
+        add_overlay_format(formats_by_qname, qname, formats)
+
+
+def qualified_dirs(parser, default, overrides):
+    """``format -> directory`` from repeated ``FORMAT=DIR`` flags; other formats use ``default``."""
+    dirs = {}
+    for value in overrides or ():
+        fmt, sep, directory = value.partition('=')
+        if not (sep and fmt and directory) or fmt in dirs:
+            parser.error(f'--format-qualified-dir {value!r}: expected one FORMAT=DIR per format')
+        dirs[fmt] = Path(directory)
+    return lambda fmt: dirs.get(fmt, Path(default))
+
+
+def rebinding_rows_for(rebinding, *, catalog_binding, catalog, qualified_dir):
+    """The rebinding's rows by ``(qname, format)``, checked against this catalog.
+
+    The rebinding binds this catalog, or one this catalog declares it carried
+    cells from (``carried_from``). Each row names a cell of this catalog, and
+    the result directory it was proven in is the one this run reads that
+    cell's format from.
+    """
+    assert rebinding['schema'] == REBINDING_SCHEMA
+    carried = catalog.get('carried_from', [])
+    assert rebinding['catalog'] == catalog_binding or rebinding['catalog'] in carried, \
+        'rebinding binds neither this catalog nor one it declares carried'
+    rows = {(row['qname'], row['format']): row for row in rebinding['rows']}
+    assert len(rows) == len(rebinding['rows'])
+    pairs = {(cell['qname'], cell['format']) for cell in catalog['cells']}
+    assert set(rows) <= pairs, 'rebinding names a cell this catalog does not carry'
+    if rebinding['catalog'] == catalog_binding:
+        assert len(rows) == len(catalog['cells']), 'a rebinding of this catalog covers every cell'
+    for fmt in {fmt for _qname, fmt in rows}:
+        assert Path(rebinding['qualified_dir']) == qualified_dir(fmt), (fmt, 'rebinding qualified_dir')
+    return rows
 
 
 def original_input(parser, path, digest, default, flag):
@@ -99,7 +151,7 @@ def bind_stage_b_resources(plan, prepared, policy_binding, resources):
 
 def qualified_result(cell, raw, rebinding_rows):
     """The result that qualified ``cell``, directly or through a rebinding row."""
-    if rebinding_rows is None:
+    if rebinding_rows is None or (cell['qname'], cell['format']) not in rebinding_rows:
         value = json.loads(raw)
         assert value['cell_sha256'] == cell_sha256(cell), cell['qname']
         return value
@@ -114,7 +166,10 @@ def main():
     parser.add_argument('--stage-b-resource-policy-sha256', required=True)
     parser.add_argument('--catalog', required=True)
     parser.add_argument('--catalog-sha256', required=True)
-    parser.add_argument('--qualified-dir', required=True)
+    parser.add_argument('--qualified-dir', required=True,
+                        help='result directory, keyed by qname, for every format without its own')
+    parser.add_argument('--format-qualified-dir', action='append', metavar='FORMAT=DIR',
+                        help='result directory for one added format (repeatable)')
     parser.add_argument('--rebinding')
     parser.add_argument('--rebinding-sha256')
     parser.add_argument('--original-plan', help='the plan the overlay extends (default: OLDPLAN)')
@@ -137,17 +192,15 @@ def main():
     raw = catalogpath.read_bytes()
     assert sha(raw) == args.catalog_sha256
     catalog = json.loads(raw)
+    qualified_dir = qualified_dirs(parser, args.qualified_dir, args.format_qualified_dir)
     rebinding_rows = None
     if args.rebinding is not None:
         assert args.rebinding_sha256, '--rebinding needs --rebinding-sha256'
         raw = Path(args.rebinding).read_bytes()
         assert sha(raw) == args.rebinding_sha256
-        rebinding = json.loads(raw)
-        assert rebinding['schema'] == REBINDING_SCHEMA
-        assert rebinding['catalog'] == {'path': str(catalogpath), 'sha256': args.catalog_sha256}
-        assert Path(rebinding['qualified_dir']) == Path(args.qualified_dir)
-        rebinding_rows = {(row['qname'], row['format']): row for row in rebinding['rows']}
-        assert len(rebinding_rows) == len(rebinding['rows']) == len(catalog['cells'])
+        rebinding_rows = rebinding_rows_for(
+            json.loads(raw), catalog_binding={'path': str(catalogpath), 'sha256': args.catalog_sha256},
+            catalog=catalog, qualified_dir=qualified_dir)
     oldprep = json.loads(prepraw)
     plan = json.loads(planraw)
     del planraw, prepraw
@@ -155,6 +208,7 @@ def main():
     assert sha(raw) == oldprep['production_cache']['sha256']
     cache = pickle.loads(raw)
     del raw
+    extended_cells = len(cache.weights) + len(catalog['cells'])
     overlay = Path(args.out)
     assert not overlay.exists(), 'immutable proposed overlay already exists'
     plan['inputs']['candidate_overlay'] = {'path': str(catalogpath), 'sha256': args.catalog_sha256}
@@ -167,7 +221,7 @@ def main():
         q, fmt = cell['qname'], cell['format']
         pair = (q, fmt)
         assert pair not in cache.weights
-        value = qualified_result(cell, (Path(args.qualified_dir) / (sha(q.encode()) + '.json')).read_bytes(),
+        value = qualified_result(cell, (qualified_dir(fmt) / (sha(q.encode()) + '.json')).read_bytes(),
                                  rebinding_rows)
         receipt = value['verified_cell']
         if 'verified_cell_sha256' in value:
@@ -183,8 +237,8 @@ def main():
         cache.weights[pair] = cell['render']
         cache._lru_paths[pair] = cell['render']
         cache.metadata['verified_cells'][pair] = receipt
-        add_overlay_format(prepared['formats_by_qname'], q, fmt)
-    assert len(cache.weights) == EXTENDED_CELLS
+    add_overlay_formats(prepared['formats_by_qname'], catalog['cells'])
+    assert len(cache.weights) == extended_cells, 'original PWC cells plus every catalog cell'
     planbinding = publish(overlay / 'plan.json', doc(plan))
     cache.metadata['inputs'] = plan['inputs']
     cache.metadata['plan_sha256'] = planbinding['sha256']
