@@ -41,13 +41,15 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .lane_spec import LaneSpec, lane_spec_for_container
+from .lane_spec import LaneSpec, lane_gate_report, lane_spec_for_container
 from .model_profiles.structure import canonical_export_lane
 from .shipcard import (
     SHIPCARD_FILENAME,
     build_shipcard,
     lane_gate_slots,
     load_shipcard,
+    required_slots,
+    verify,
     write_shipcard,
 )
 
@@ -75,6 +77,25 @@ def lane_spec_for_lane(lane: str) -> LaneSpec:
         ) from None
 
 
+def _build_lane_card(
+    root: Path, spec: LaneSpec, build: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    # The EXPORT_CONTAINER spelling, not the spec-file id: the card records
+    # what the operator set and what `canonical_export_lane` speaks.
+    #
+    # `export_container` is also stamped into the BUILD block, because a
+    # second obligation is derived from it: `shipcard._is_rate_axis_artifact`
+    # ORs the card's build block with the artifact's own `config.json`, and
+    # ORing is the whole design -- an obligation a single erasure removes is
+    # not an obligation (#121). Without the stamp the Tessera lane's
+    # `uniform_control` slot would rest on `config.json` alone, so a card
+    # opened beside a checkpoint whose config went missing would owe the
+    # control nothing. A caller that already declared the key keeps it.
+    build_payload = dict(build or {})
+    build_payload.setdefault("export_container", spec.export_container)
+    return build_shipcard(root, build=build_payload, lane=spec.export_container)
+
+
 def open_lane_shipcard(
     artifact_dir: str | Path,
     lane: str,
@@ -100,28 +121,69 @@ def open_lane_shipcard(
             "discard every slot the serve lane has filled. Pass --overwrite "
             "only when the artifact's bytes changed"
         )
-    # The EXPORT_CONTAINER spelling, not the spec-file id: the card records
-    # what the operator set and what `canonical_export_lane` speaks.
-    #
-    # `export_container` is also stamped into the BUILD block, because a
-    # second obligation is derived from it: `shipcard._is_rate_axis_artifact`
-    # ORs the card's build block with the artifact's own `config.json`, and
-    # ORing is the whole design -- an obligation a single erasure removes is
-    # not an obligation (#121). Without the stamp the Tessera lane's
-    # `uniform_control` slot would rest on `config.json` alone, so a card
-    # opened beside a checkpoint whose config went missing would owe the
-    # control nothing. A caller that already declared the key keeps it.
-    build_payload = dict(build or {})
-    build_payload.setdefault("export_container", spec.export_container)
-    card = build_shipcard(
-        root, build=build_payload, lane=spec.export_container)
+    card = _build_lane_card(root, spec, build)
     write_shipcard(path, card)
     return path
 
 
+def preflight_lane_shipcard(
+    artifact_dir: str | Path,
+    lane: str,
+    *,
+    build: Mapping[str, Any] | None = None,
+    shipcard_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Replay existing evidence, or diagnose a missing card without writing it.
+
+    This is the shared shipcard verifier, not publication approval. The
+    publisher still owns canonical-card, frozen-content and upload checks.
+    A missing default card is represented in memory and always refuses;
+    an explicit missing or malformed card is an input error, never replaced.
+    """
+    root = Path(artifact_dir)
+    if not root.is_dir():
+        raise LaneShipcardError(f"artifact directory does not exist: {root}")
+    spec = lane_spec_for_lane(lane)
+    path = Path(shipcard_path) if shipcard_path else root / SHIPCARD_FILENAME
+    provisional = shipcard_path is None and not (path.exists() or path.is_symlink())
+    if provisional:
+        card = _build_lane_card(root, spec, build)
+    else:
+        if build is not None:
+            raise LaneShipcardError(
+                "--build-json cannot override an existing shipcard during preflight")
+        card = load_shipcard(path)
+        if card.get("lane") != spec.export_container:
+            raise LaneShipcardError(
+                f"shipcard lane {card.get('lane')!r} does not match requested "
+                f"lane {spec.export_container!r}")
+    slots = card.get("slots")
+    if not isinstance(slots, Mapping):
+        raise LaneShipcardError(f"shipcard slots must be an object: {path}")
+    required = list(required_slots(card, model_dir=root))
+    problems = ([f"shipcard is missing: {path}; inspecting a provisional card"]
+                if provisional else [])
+    problems.extend(verify(card, model_dir=root))
+    gates = lane_gate_report(spec, card)
+    declared = {row["shipcard_slot"] for row in gates}
+    return {
+        "status": "refused" if problems else "verified",
+        "scope": "shipcard_evidence_only",
+        "publication_checked": False,
+        "lane": spec.export_container,
+        "shipcard_path": str(path),
+        "provisional": provisional,
+        "model_sha": card.get("model_sha"),
+        "required_slots": required,
+        "unfilled_slots": [slot for slot in required if slots.get(slot) is None],
+        "slots_without_declared_runner": [slot for slot in required if slot not in declared],
+        "problems": problems,
+        "gates": gates,
+    }
+
+
 def open_gate_report(spec: LaneSpec, card: Mapping[str, Any]) -> list[str]:
     """Human lines naming what this card has NOT closed, and what would."""
-    from .lane_spec import lane_gate_report
 
     lines: list[str] = []
     for row in lane_gate_report(spec, card):
@@ -158,6 +220,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="write here instead of <artifact>/shipcard.json")
     p_open.add_argument("--overwrite", action="store_true")
 
+    p_preflight = sub.add_parser(
+        "preflight", help="report all shipcard refusals as JSON without writes")
+    p_preflight.add_argument("--lane", required=True)
+    p_preflight.add_argument("--artifact", required=True)
+    p_preflight.add_argument("--shipcard", default=None,
+                             help="inspect this card instead of the canonical one")
+    p_preflight.add_argument("--build-json", default=None,
+                             help="build facts for an in-memory missing card only")
+
     p_slots = sub.add_parser(
         "slots", help="print the slots a lane's card must close")
     p_slots.add_argument("--lane", required=True)
@@ -188,14 +259,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(slot)
             return 0
 
-        build: dict[str, Any] = {}
+        build: dict[str, Any] | None = None
         if args.build_json:
             build = json.loads(Path(args.build_json).read_text(
                 encoding="utf-8"))
+            if not isinstance(build, dict):
+                raise LaneShipcardError("--build-json must contain a JSON object")
+        if args.cmd == "preflight":
+            report = preflight_lane_shipcard(
+                args.artifact, args.lane, build=build,
+                shipcard_path=args.shipcard)
+            print(json.dumps(report, indent=2, sort_keys=True))
+            return 1 if report["problems"] else 0
         path = open_lane_shipcard(
             args.artifact, args.lane, build=build,
             shipcard_path=args.shipcard, overwrite=args.overwrite)
-    except (LaneShipcardError, ValueError) as exc:
+    except (LaneShipcardError, ValueError, OSError) as exc:
         print(f"[lane-shipcard] ERROR: {exc}", file=sys.stderr)
         return 2
 
