@@ -149,6 +149,14 @@ def bind_stage_b_resources(plan, prepared, policy_binding, resources):
     prepared['stage_b_resource_policy'] = policy_binding
 
 
+def fence_cell_artifacts(cell):
+    """Hold a catalog cell's wire and render to the stat recorded at catalog build."""
+    for key in ('wire', 'render'):
+        s = Path(cell[key]).stat()
+        assert cell[key + '_stat'] == dict(inode=s.st_ino, bytes=s.st_size, mtime_ns=s.st_mtime_ns,
+                                           ctime_ns=s.st_ctime_ns)
+
+
 def qualified_result(cell, raw, rebinding_rows):
     """The result that qualified ``cell``, directly or through a rebinding row."""
     if rebinding_rows is None or (cell['qname'], cell['format']) not in rebinding_rows:
@@ -229,10 +237,7 @@ def main():
         for key in ('source_weight', 'activation', 'encoding_identity_sha256', 'render_origin',
                     'render_comparison', 'catalog_source_adoption'):
             assert receipt[key] == cell[key], (pair, key)
-        for key in ('wire', 'render'):
-            s = Path(cell[key]).stat()
-            assert cell[key + '_stat'] == dict(inode=s.st_ino, bytes=s.st_size, mtime_ns=s.st_mtime_ns,
-                                               ctime_ns=s.st_ctime_ns)
+        fence_cell_artifacts(cell)
         assert receipt['render_file_sha256'] and receipt['rendered_weight']['content_sha256']
         cache.weights[pair] = cell['render']
         cache._lru_paths[pair] = cell['render']
