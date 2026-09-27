@@ -3657,6 +3657,24 @@ one unit's latency plus one 30 s poll of quiet. The final cumulative record is
 unchanged. Writes stay O(1) per window and never happen per unit. Without an
 allowance the replay behaves exactly as #822 left it.
 
+Overlay fence pool (2026-09-27, PQ #1519): `attach_candidate_overlay` no longer
+re-hashes stat-drifted overlay wires serially inside its admission loop.
+`_fence_drift` still refuses a size change, and a drift with no recorded digest,
+before anything is hashed. Every other drift is hashed on a bounded pool
+(`_bounded_hash_pool`, sized by `_fence_hash_workers` to the PrismaBuild-assigned
+CPU set, which the loader passes as its walk worker count). Work streams in row
+order with at most twice the pool size of files in flight. A digest is accepted
+only while the file's stat holds through the read. The refusal names the file.
+Cells enter `data` in catalog order and only after their job resolves. With
+`verify_payloads`, the same job also verifies every wire and, unless
+`defer_render_hashes`, every render, so each file is read once. The loader
+passes its own `verify_payloads` and `defer_render_hashes` through, and its
+`verify_files` pass covers only the walk's base cells. Admitted overlay cells
+continue the loader's cumulative progress count on the #1518 cadence. The
+synchronous `_artifact_fence` used by `verify_catalog_pair` and
+`assemble_t4_overlay` keeps its serial form, and gains the same stat check
+around the read and the file's name in the refusal.
+
 As of: 2026-09-27 · `claude/a4-silent-phases`.
 Stamps follow, newest first, each recording its own branch and date.
 
@@ -3666,7 +3684,12 @@ derived cadence** (PQ #1518). `load_measured_anchor_input` takes an optional
 prefix during the drive. Without it, the progress stream is byte-identical to
 before.
 
-Gates: `tests/test_head_resume_progress_822.py`.
+Also for **the overlay fence pool** (PQ #1519): drifted overlay wires are
+re-hashed on a PB-sized bounded pool and streamed with admission in catalog
+order. Each file is hashed once per load, and the fence reports progress.
+
+Gates: `tests/test_head_resume_progress_822.py`,
+`tests/test_overlay_fence_pool_1519.py`, `tests/test_joint_catalog_extension.py`.
 
 Re-stamped (2026-09-27, `claude/planner-charge-1491`) for **the selected-row
 source-validation charge** (PQ #1491). The Stage A planner

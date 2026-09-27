@@ -143,3 +143,40 @@ def test_replay_inside_one_window_writes_its_first_and_final_count_only(tmp_path
         head_walk_workers=1, progress_allowance_s=600)
     assert resumed.head_walk_resumed_units == len(names)
     assert [(r['units_completed'], r['unit']) for r in writes] == [(1, names[0]), (len(names), names[-1])]
+
+
+def test_overlay_fence_continues_the_count_on_the_cadence(tmp_path, monkeypatch):
+    # #1519: the candidate overlay's fence runs after the replay's last
+    # commit. Its admitted cells continue the cumulative count on the same
+    # cadence, and progress_committed carries the final count onward.
+    from prismaquant import joint_catalog_extension as jce
+    config, names, _, journal, writes = _case(tmp_path, monkeypatch)
+    allowance_s = 0.2
+    cadence_s = allowance_s / bridge.PROGRESS_CADENCE_SAFETY_FACTOR
+    overlay_cells = 3
+    calls = []
+
+    def slow_overlay(data, bound, **kwargs):
+        import time as _time
+        calls.append(kwargs)
+        progress = kwargs.get('progress')
+        for index in range(overlay_cells):
+            _time.sleep(cadence_s * 1.5)
+            data.cells[names[0], f'OVERLAY_{index}'] = {'overlay': index}
+            if progress is not None:
+                progress(index + 1, f'{names[0]}@OVERLAY_{index}')
+        return data
+
+    monkeypatch.setattr(jce, 'attach_candidate_overlay', slow_overlay)
+    config = dict(config, candidate_overlay={'path': 'fake', 'sha256': '0' * 64})
+    before = len(writes)
+    resumed = bridge.load_measured_anchor_input(
+        config, verify_payloads=False, head_checkpoint=journal, head_resume=True,
+        head_walk_workers=1, progress_allowance_s=allowance_s)
+    assert calls and calls[0]['hash_workers'] == 1
+    overlay = [r['units_completed'] for r in writes[before:] if r['units_completed'] > len(names)]
+    assert len(overlay) >= 2, f'the overlay fence committed {len(overlay)} times'
+    assert overlay[-1] == len(names) + overlay_cells
+    units = [r['units_completed'] for r in writes]
+    assert units == sorted(set(units))
+    assert resumed.progress_committed == len(names) + overlay_cells

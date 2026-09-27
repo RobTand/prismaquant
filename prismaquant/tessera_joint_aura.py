@@ -1441,9 +1441,29 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                   head_walk_workers=walk_workers, head_walk_resumed_units=len(banked))
     result = MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
                                 formats, encoder_source_reuse=encoder_source_reuse, **scoped)
+    # The pairs the walk verified; the overlay authenticates its own cells.
+    base_pairs = tuple(cells)
     if inputs.get("candidate_overlay") is not None:
         from .joint_catalog_extension import attach_candidate_overlay
-        attach_candidate_overlay(result, inputs["candidate_overlay"])
+
+        def overlay_admitted(admitted, unit):
+            # The overlay fence establishes no durable unit either, and on
+            # GLM it re-hashed tens of GB of stat-drifted wires in silence
+            # until the watchdog killed A4 r7 (#1519). Its admitted cells
+            # continue the walk's cumulative count on the same cadence.
+            cadence.maybe_commit(resolved + admitted, unit=unit)
+
+        # The overlay hashes each of its files once, on the walk's pool
+        # size (the PB-assigned CPU set), for every check the file answers:
+        # its drifted fence and this load's payload verification (#1519).
+        attach_candidate_overlay(result, inputs["candidate_overlay"],
+                                 verify_payloads=verify_payloads,
+                                 defer_render_hashes=defer_render_hashes,
+                                 hash_workers=walk_workers, progress=overlay_admitted)
+        overlay_cells = len(cells) - len(base_pairs)
+        if cadence.active and overlay_cells:
+            cadence.commit(resolved + overlay_cells, unit=f"candidate_overlay:{overlay_cells}")
+            result.progress_committed = resolved + overlay_cells
     if not verify_payloads:
         return result
 
@@ -1463,15 +1483,16 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         _same(after, before, f"{pair}: input files changed while hashing")
         return pair, digest
 
+    base_cells = [(pair, cells[pair]) for pair in base_pairs]
     if file_hash_workers == 1:
-        verified_files = map(verify_files, cells.items())
+        verified_files = map(verify_files, base_cells)
         for pair, digest in verified_files:
             if digest is not None:
                 cells[pair]["render_file_sha256"] = digest
     else:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=file_hash_workers, thread_name_prefix="anchor-file-hash") as workers:
-            for pair, digest in workers.map(verify_files, cells.items()):
+            for pair, digest in workers.map(verify_files, base_cells):
                 if digest is not None:
                     cells[pair]["render_file_sha256"] = digest
     return result
