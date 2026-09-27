@@ -683,6 +683,7 @@ def test_the_plan_charges_the_staging_bound_where_the_anchors_live(monkeypatch):
                             body_layer_bytes={"0": 1000},
                             body_loader_transient_bytes={"0": 100},
                             body_source_file_bytes={"0": 900},
+                            body_source_shards={"0": ["model.safetensors"]},
                             unit_source_weight_bytes={"layers.0.proj": 24},
                             full_hessian_bytes=64, full_prefix_bytes=32,
                             source_header_sha256="a" * 64))
