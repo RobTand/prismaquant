@@ -374,6 +374,69 @@ def test_a_direct_submission_without_a_container_declares_nothing(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def _portable_spec(**extra):
+    return _base_spec(python="python3", container={
+        "image": "campaign:mutable", "content_sha256": CONTENT_SHA},
+        container_admission_reference="content:sha256:" + CONTENT_SHA, **extra)
+
+
+def test_shared_owner_and_campaign_row_honor_portable_admission():
+    spec = _portable_spec()
+    expected = spec["container_admission_reference"]
+    assert container_tool.admission_image_reference(spec) == expected
+    row = _row(spec)
+    assert row["container_images"] == [expected]
+    assert _embedded_spec(row["argv"])["container_admission_reference"] == expected
+
+
+def test_class_inherits_admission_only_with_its_container():
+    spec = _portable_spec(classes={
+        "same-image": {"env": {"EXAMPLE": "1"}},
+        "other-image": {"container": {"image": OTHER_IMAGE}},
+    })
+    inherited = _row(spec, row_class_name="same-image")
+    replaced = _row(spec, row_class_name="other-image")
+    assert inherited["container_images"] == [spec["container_admission_reference"]]
+    assert replaced["container_images"] == [OTHER_IMAGE]
+    assert "container_admission_reference" not in _embedded_spec(replaced["argv"])
+
+
+@pytest.mark.parametrize("reference", ["campaign:tag", "content:sha256:abc", 42])
+def test_portable_admission_refuses_bad_reference_through_campaign(reference):
+    spec = _portable_spec()
+    spec["container_admission_reference"] = reference
+    with pytest.raises(RuntimeError, match="portable image admission"):
+        _row(spec)
+
+
+def test_portable_admission_requires_inspected_image_identity():
+    spec = _portable_spec()
+    del spec["container"]["content_sha256"]
+    with pytest.raises(RuntimeError, match="portable image admission"):
+        container_tool.admission_image_reference(spec)
+
+
+def test_joint_and_direct_submission_keep_the_portable_reference(tmp_path):
+    spec = with_spool(_portable_spec())
+    path = tmp_path / "portable.json"
+    path.write_text(json.dumps(spec))
+    argv, reference = joint._container_wrap(
+        path, ["python3", "-V"], progress=[("head", 1800)])
+    assert reference == spec["container_admission_reference"]
+    assert _embedded_spec(argv)["container_admission_reference"] == reference
+    args = _direct_args(tmp_path, spec["container"])
+    direct = campaign._pbrun_argv(args, manifest=tmp_path / "read.json",
+                                  inner=["--resume"], container_spec=spec)
+    assert _pbrun_option(direct, IMAGE_FLAG) == reference
+
+
+def test_explicit_archive_admission_keeps_the_joint_override_semantics():
+    spec = _portable_spec()
+    spec["container"]["archive"] = {"path": "/mnt/shared/images/campaign.tar",
+                                     "sha256": ARCHIVE_SHA}
+    assert container_tool.admission_image_reference(spec) == spec["container_admission_reference"]
+
+
 def test_an_archive_backed_container_yields_no_admission_reference():
     container = {"image": IMAGE, "content_sha256": CONTENT_SHA,
                  "archive": {"path": "/mnt/shared/images/campaign.tar",
