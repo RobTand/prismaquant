@@ -3611,8 +3611,45 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/campaign-bind-served-quantizer-1481`.
+As of: 2026-09-27 · `claude/planner-charge-1491`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/planner-charge-1491`) for **the selected-row
+source-validation charge** (PQ #1491). The Stage A planner
+(`autoscale.selected_anchor_resources`) now charges source authentication in the
+phase that runs it, and charges the projection check for the bytes that the
+check reads.
+
+- **The hash runs in `source_preparation`.** The first payload read of a
+  source file hashes the whole file, once per row, under that file's own lock
+  (`CaptureSourceAuthentication._authenticate`). The selected row builds its
+  owner with `release_read_pages=True`, so `tessera_calibration_cache.sha256`
+  holds one `SOURCE_HASH_BLOCK_BYTES` (16 MiB) block and that block's pages at
+  a time. The phase gains `source_authentication_window_bytes`: two blocks for
+  each distinct file that the row's selected tensors live in.
+  `streamed_calibration_resources` reports those files as `body_source_shards`,
+  read through `artifact_completeness.read_artifact_shard_headers`. Kernel
+  readahead past the hashed offset is a mount property and is not charged.
+- **`source_validation_bytes` charges the selected tensors.** The term stays in
+  `resident_anchors` and `stream_projection`, where the only source read is
+  `_checked_projected_units`: the measured routed-expert tensors, with their
+  pages released after the loop. The term is the selected tensors' stored bytes,
+  plus two BF16 copies of the widest weight, plus one serial hash window. It
+  used to charge every tensor of every selected layer, about 13.8 GiB for each
+  GLM-5.3 MoE layer. Under `whole-layer-v1` the selected tensors are the whole
+  layer, so that policy's charge changes only by the hash window.
+- **Effect on GLM-5.3 rows.** A four-layer shared-expert row (#1479 A/B
+  `row-0006`) goes from 84 to 43 GiB of demand, against a measured box peak of
+  11.12 and 15.17 GiB. The three-layer `w02d` `row-0001` goes from 70 to
+  43 GiB, against 12.65 GiB measured. The routed `ab3` `row-0045` stays at
+  69 GiB, against 63.81 GiB measured. Across 352 planned rows (`w02d`, `d2`
+  and the four #1479 arms), no row is charged more, and all 132 routed rows of
+  the `ab3` plan keep their charge. Authentication itself is unchanged: every
+  file that a row reads is still hashed in full, once per row.
+
+Gates: `tests/test_selected_source_validation_charge.py`,
+`tests/test_selected_snapshot_scope.py` and the existing selected-anchor,
+row-stream, publication and verified-capture admission tests.
 
 Re-stamped (2026-09-27, `claude/campaign-bind-served-quantizer-1481`) for **the
 Stage A campaign's served-quantiser binding and failure contract** (PQ #1481,
@@ -10411,9 +10448,10 @@ authenticates its entire shard once per row. The initial policy supports
 unscaled floating checkpoints; scaled FP8/FP4 sources fail closed.
 
 Admission excludes unconsumed source tensors and nonbody materialization,
-retains selected H/X, encoder, packing and publication charges and the existing
-full-layer source-validation allowance, and preserves
-the full-header identity and decoder coverage check. Snapshot policy is an
+retains selected H/X, encoder, packing and publication charges, and preserves
+the full-header identity and decoder coverage check. (This stamp also retained a
+full-layer source-validation allowance. PQ #1491 replaced it with the selected
+tensors' bytes and a per-file hash window; see that stamp.) Snapshot policy is an
 execution choice outside cost identity, like compatible batch width: source
 weight bytes, calibration, encoder policy, wire format and shipping gates do
 not change. Qualification requires selected weight parity and a complete
