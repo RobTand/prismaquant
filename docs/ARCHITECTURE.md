@@ -1,5 +1,29 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-27 for the approved PACT M3 TP2 report protocol
+(PQ #1463, Tessera #650). The pure-artifact reader in
+`prismaquant/full_engine_resource_report.py` accepts v1/v2 and the distinct
+`tessera.full_engine_resource_report.v3`: v3 requires world size two, each
+rank's actual host/device identity, a shared `observations.rank_world` roster,
+and content-addressed raw-reference descriptors. It does not import Tessera.
+`consume_full_engine_rank_reports` checks each rank's recomputed captured Torch
+peak against **that rank's own** supplied device ceiling, never an average or
+redistribution of the world's capacity. Being below that ceiling is not a
+complete memory bound: unobserved allocations remain owed.
+
+The whole off-step Torch peak is independently swept from allocation lifetimes
+and carried observer views for the reference assignment. It is observation
+only, never an invariant fixed charge or a candidate placement certificate.
+V3 requires null `placement_obligation`, permits only false
+`certifies_placement`, and always returns a placement refusal. All existing
+fixed-observation, ownership, runtime-world equality and served-family gates
+remain; shape-only table emission still exits 3. Raw references are validated
+as descriptors here, not promoted to an admitted runtime closure. V1/v2 retain
+their separate schema rules; unknown schemas still refuse. Producer-path CPU
+fixtures demonstrate protocol compatibility, not a GPU capture or resource
+qualification. No runtime pin, contract cell, format menu or serving default
+changes.
+
 Tessera contract v39 (2026-09-27, Tessera #641, merge `52bc86ea1…`, closing
 tessera#604) is on Tessera master. It is **not** on PrismaQuant's pin. The pin
 stays at `09d6559d7…` with packaged contract v38 (SHA-256 `04d5a20a…9d22e4`),

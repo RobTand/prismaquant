@@ -1,4 +1,4 @@
-"""Pure artifact consumer for ``tessera.full_engine_resource_report.v1`` and ``.v2``.
+"""Pure artifact consumer for ``tessera.full_engine_resource_report.v1/v2/v3``.
 
 This module reads one producer-emitted JSON report and nothing else. It does
 not import, vendor, launch or link the serving runtime, and it adds no
@@ -27,7 +27,7 @@ recomputes both sides of that maximum.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -42,7 +42,10 @@ REPORT_SCHEMA = "tessera.full_engine_resource_report.v1"
 #: as null may be carried; this consumer recomputes no term and closes no
 #: domain from them, and says so by name where a domain is closed on one.
 REPORT_SCHEMA_V2 = "tessera.full_engine_resource_report.v2"
-REPORT_SCHEMAS = (REPORT_SCHEMA, REPORT_SCHEMA_V2)
+REPORT_SCHEMA_V3 = "tessera.full_engine_resource_report.v3"
+REPORT_SCHEMAS = (REPORT_SCHEMA, REPORT_SCHEMA_V2, REPORT_SCHEMA_V3)
+_EXTENDED_REPORT_SCHEMAS = (REPORT_SCHEMA_V2, REPORT_SCHEMA_V3)
+RANK_WORLD_SCHEMA = "tessera.full_engine_rank_world.v1"
 IDENTITY_SCHEMA = "tessera.full_engine_resource_identity.v1"
 PARTITION_SCHEMA = "tessera.full_engine_resource_partition.v1"
 
@@ -325,6 +328,13 @@ _ADMISSION_FIELDS = ("closed", "domains", "expressible", "open", "reason",
                      "refused", "scope", "uncharged_allocation_count",
                      "unclassified_allocation_count", "verdict")
 
+_RUN_FIELDS_V3 = _RUN_SCOPED_FIELDS + ("host",)
+_DERIVED_REQUIRED_V3 = ("off_step_torch_live_peak_bytes", "off_step_torch_live_peak_scope",
+                        "proposal_placement_rule")
+_RANK_WORLD_FIELDS = ("schema", "world_size", "run_identity", "ranks", "raw_plan", "raw_run", "scope")
+_RANK_WORLD_ROW_FIELDS = ("rank", "world_size", "host", "process_id", "device_id",
+                          "device_uuid", "capture", "runtime_evidence")
+
 
 # --------------------------------------------------------------------------
 # Reader. Structural faults raise before any arithmetic runs, exactly as the
@@ -428,11 +438,14 @@ def _terms(value: Any, where: str) -> dict[str, Any]:
 
 
 def _scope(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
-    scope = _object(value, _SCOPE_FIELDS_V2 if schema == REPORT_SCHEMA_V2 else _SCOPE_FIELDS,
+    scope = _object(value, _SCOPE_FIELDS_V2 if schema in _EXTENDED_REPORT_SCHEMAS else _SCOPE_FIELDS,
                     where)
-    if schema == REPORT_SCHEMA_V2:
+    if schema in _EXTENDED_REPORT_SCHEMAS:
         _index(scope["observer_allocation_count"], where + " observer allocation count")
-    for key, supported in SUPPORTED_SCOPE.items():
+    supported_scope = dict(SUPPORTED_SCOPE)
+    if schema == REPORT_SCHEMA_V3:
+        supported_scope["topology"] = "tp2_per_rank_resident_eager"
+    for key, supported in supported_scope.items():
         _string(scope[key], f"{where} {key}")
         if scope[key] != supported:
             raise RuntimePriceError(
@@ -523,7 +536,7 @@ def _recomputed_coverage_state(intervals, executed: Any) -> str:
     return "partial"
 
 
-def _run_identity(value: Any, where: str) -> Mapping:
+def _run_identity(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
     """One capture's run identity, optionally scoped to a rank of a world.
 
     A scalar capture names the device it observed and nothing else. A capture
@@ -532,11 +545,19 @@ def _run_identity(value: Any, where: str) -> Mapping:
     rank's if the report that carries them says which rank it is. The scope is
     all-or-nothing and the two shapes are separate field sets, so a document
     cannot carry a rank without a world for a consumer to check it against.
+    V3 requires TP2 and adds the actual host, joined to its carried rank roster.
     """
     if not isinstance(value, Mapping):
         raise RuntimePriceError(f"{where}: expected an object")
     fields = set(value)
-    if fields == set(_RUN_FIELDS):
+    if schema == REPORT_SCHEMA_V3:
+        run = _object(value, _RUN_FIELDS_V3, where)
+        if _index(run["world_size"], where + " world size") != 2:
+            raise RuntimePriceError(f"{where}: v3 requires world size 2")
+        if _index(run["rank"], where + " rank") not in (0, 1):
+            raise RuntimePriceError(f"{where}: v3 rank must be 0 or 1")
+        _host_identity(run["host"], where + " host")
+    elif fields == set(_RUN_FIELDS):
         run = _object(value, _RUN_FIELDS, where)
     elif fields == set(_RUN_SCOPED_FIELDS):
         run = _object(value, _RUN_SCOPED_FIELDS, where)
@@ -786,18 +807,21 @@ def _derived(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
     a registered block reads instead of refusing, while an unregistered one
     refuses by name rather than arriving as a claim no check knows.
     """
-    if schema != REPORT_SCHEMA_V2:
+    if schema not in _EXTENDED_REPORT_SCHEMAS:
         return _object(value, _DERIVED_FIELDS, where)
     if not isinstance(value, Mapping):
         raise RuntimePriceError(f"{where}: expected an object")
-    for key in _DERIVED_FIELDS_V2:
+    required = _DERIVED_FIELDS_V2 + (_DERIVED_REQUIRED_V3 if schema == REPORT_SCHEMA_V3 else ())
+    allowed = DERIVED_BLOCK_NAMES_V2 + (
+        _DERIVED_REQUIRED_V3 + ("certifies_placement",) if schema == REPORT_SCHEMA_V3 else ())
+    for key in required:
         if key not in value:
             raise RuntimePriceError(f"{where}: missing derived block {key!r}")
-    for key in sorted(set(value) - set(_DERIVED_FIELDS_V2)):
-        if key not in DERIVED_BLOCK_NAMES_V2:
+    for key in sorted(set(value) - set(required)):
+        if key not in allowed:
             raise RuntimePriceError(
-                f"{where}: derived block {key!r} is not a registered v2 block "
-                f"({sorted(DERIVED_BLOCK_NAMES_V2)}); a producer that adds a "
+                f"{where}: derived block {key!r} is not a registered {schema.rsplit('.', 1)[-1]} block "
+                f"({sorted(allowed)}); a producer that adds a "
                 "block registers its name and its reader here first")
     return value
 
@@ -812,7 +836,8 @@ def _observations(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Map
     # by name.
     if not isinstance(value, Mapping):
         raise RuntimePriceError(f"{where}: expected an object")
-    for key in sorted(set(value) - set(OBSERVATION_KEY_REGISTRY)):
+    allowed = OBSERVATION_KEY_REGISTRY | ({"rank_world"} if schema == REPORT_SCHEMA_V3 else set())
+    for key in sorted(set(value) - allowed):
         raise RuntimePriceError(
             f"{where}: observation {key!r} is not a registered observation "
             f"({sorted(OBSERVATION_KEY_REGISTRY)}); a producer that adds an "
@@ -865,7 +890,7 @@ def _observations(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Map
     for name in OWED_OBSERVATIONS:
         if observations[name] is None:
             continue
-        if schema != REPORT_SCHEMA_V2:
+        if schema not in _EXTENDED_REPORT_SCHEMAS:
             raise RuntimePriceError(
                 f"{where}: {name} is not null, but this schema version defines no shape for it, "
                 "so nothing here can recompute a term or close a domain from it")
@@ -932,21 +957,30 @@ def _resolved_evidence(domains: Mapping, observations: Mapping, where: str) -> N
 
 
 def _partition(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
-    partition = _object(value, _PARTITION_FIELDS_V2 if schema == REPORT_SCHEMA_V2
+    partition = _object(value, _PARTITION_FIELDS_V2 if schema in _EXTENDED_REPORT_SCHEMAS
                         else _PARTITION_FIELDS, where)
-    if schema == REPORT_SCHEMA_V2:
+    if schema in _EXTENDED_REPORT_SCHEMAS:
         observer = _list(partition["observer_allocations"], where + " observer allocations")
-        if observer:
+        if observer and schema == REPORT_SCHEMA_V2:
             raise RuntimePriceError(
                 f"{where}: carries {len(observer)} observer allocations, and this consumer "
                 "defines no shape for one, so it cannot tell them from the classes it recomputes")
+        for item in observer:
+            row = _object(item, ("allocation_id", "bytes", "allocate_index",
+                                 "free_completed_index", "site"), where + " observer row")
+            _string(row["allocation_id"], where + " observer allocation id")
+            _index(row["bytes"], where + " observer bytes")
+            _index(row["allocate_index"], where + " observer allocate index")
+            _optional_index(row["free_completed_index"], where + " observer free index")
+            if not isinstance(row["site"], Mapping):
+                raise RuntimePriceError(f"{where}: observer site must be an object")
         if partition["scope"].get("observer_allocation_count") != len(observer):
             raise RuntimePriceError(
                 f"{where}: scope claims another observer allocation count than the partition "
                 "carries")
     _require_partition_schema(partition["schema"], where + " schema")
     _sha(partition["capture_sha256"], where + " capture digest")
-    _run_identity(partition["identity"], where + " identity")
+    _run_identity(partition["identity"], where + " identity", schema=schema)
     _domains(partition["domains"], where + " domains")
     # A partition whose domains were handed in by a caller has had nothing
     # checked: every domain closes because an argument said so, and every term
@@ -1022,6 +1056,117 @@ def _partition(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mappin
     return partition
 
 
+def _host_identity(value: Any, where: str) -> Mapping:
+    host = _required(value, ("ip",), where)
+    _string(host["ip"], where + " IP")
+    return host
+
+
+def _rank_world(value: Any, run: Mapping) -> Mapping:
+    """Validate the carried TP2 roster without promoting raw references to proof.
+
+    These references identify the producer's raw artifacts. Closure still needs
+    the independently admitted runtime relation and all the owed observations.
+    """
+    where = "report rank_world"
+    world = _object(value, _RANK_WORLD_FIELDS, where)
+    _equal(world["schema"], RANK_WORLD_SCHEMA, where + " schema")
+    _equal(_index(world["world_size"], where + " world size"), 2, where + " world size")
+    _string(world["scope"], where + " scope")
+    identity = _object(world["run_identity"], _RUN_DIGESTS, where + " run identity")
+    for key in _RUN_DIGESTS:
+        _sha(identity[key], where + " " + key)
+        _equal(identity[key], run[key], where + " " + key)
+
+    def raw_reference(reference: Any, label: str) -> None:
+        ref = _object(reference, ("path", "sha256"), label)
+        _string(ref["path"], label + " path")
+        _sha(ref["sha256"], label + " digest")
+
+    for name in ("raw_plan", "raw_run"):
+        raw_reference(world[name], where + " " + name)
+    rows = _list(world["ranks"], where + " ranks")
+    if len(rows) != 2:
+        raise RuntimePriceError(f"{where}: exactly two rank captures are required")
+    devices, hosts, captures = set(), set(), set()
+    for rank, value in enumerate(rows):
+        label = f"{where} rank {rank}"
+        row = _object(value, _RANK_WORLD_ROW_FIELDS, label)
+        _equal(_index(row["rank"], label + " rank"), rank, label + " rank")
+        _equal(_index(row["world_size"], label + " world size"), 2, label + " world size")
+        if _index(row["process_id"], label + " process id") == 0:
+            raise RuntimePriceError(f"{label}: process id must be positive")
+        _index(row["device_id"], label + " device id")
+        uuid = _string(row["device_uuid"], label + " device UUID")
+        host = _host_identity(row["host"], label + " host")
+        for name in ("capture", "runtime_evidence"):
+            raw_reference(row[name], label + " " + name)
+        capture = row["capture"]["sha256"]
+        if uuid in devices or host["ip"] in hosts or capture in captures:
+            raise RuntimePriceError(f"{label}: rank devices, hosts and captures must be distinct")
+        devices.add(uuid)
+        hosts.add(host["ip"])
+        captures.add(capture)
+        if rank == run["rank"]:
+            for name in ("world_size", "device_id", "device_uuid", "host"):
+                _equal(row[name], run[name], label + " own " + name)
+    return world
+
+
+def _whole_off_step_peak(observations: Mapping) -> int | None:
+    """Sweep the captured assignment, never a transferable fixed charge.
+
+    Owner views only delimit the observer exclusion in this observation. They
+    still close no domain and establish no candidate-invariant ownership here.
+    """
+    if observations["step_coverage"]["state"] != ADMITTED_STEP_COVERAGE:
+        return None
+    owner = observations["owner_views"]
+    if not isinstance(owner, Mapping) or owner.get("schema") != "tessera.full_engine_ownership_observation.v1":
+        return None
+    views_block = _required(owner.get("views"), ("views",), "whole off-step owner views")
+    views = {}
+    for view in _list(views_block["views"], "whole off-step owner views"):
+        view = _required(view, ("allocation_id", "class"), "whole off-step owner view")
+        key = _string(view["allocation_id"], "whole off-step allocation id")
+        _optional_string(view["class"], "whole off-step owner class")
+        if key in views:
+            raise RuntimePriceError("whole off-step owner views repeat an allocation")
+        views[key] = view
+    allocations = observations["torch_allocations"]
+    ids = {row["allocation_id"] for row in allocations}
+    if set(views) - ids:
+        raise RuntimePriceError("whole off-step owner view names an unobserved allocation")
+    if not views or ids - set(views):
+        return None
+    steps = _step_intervals(observations["step_intervals"], "whole off-step intervals")
+    if not steps:
+        return None
+    endpoints = [index for row in allocations
+                 for index in (row["allocate_index"], row["free_completed_index"])
+                 if index is not None]
+    cuts = {index for begin, end, _ in steps for index in (begin, end)}
+    terminal = max([*endpoints, *cuts], default=0) + 1
+    deltas: dict[int, int] = {}
+    for row in allocations:
+        if views[row["allocation_id"]]["class"] == "observer":
+            continue
+        begin = row["allocate_index"]
+        end = terminal if row["free_completed_index"] is None else row["free_completed_index"]
+        deltas[begin] = deltas.get(begin, 0) + row["bytes"]
+        deltas[end] = deltas.get(end, 0) - row["bytes"]
+    points = sorted(cuts | set(deltas) | {terminal})
+    live = peak = step = 0
+    for index, following in zip(points, points[1:]):
+        live += deltas.get(index, 0)
+        while step < len(steps) and steps[step][1] <= index:
+            step += 1
+        inside = step < len(steps) and steps[step][0] <= index < steps[step][1]
+        if following > index and not inside:
+            peak = max(peak, live)
+    return peak
+
+
 def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mapping:
     """Rehash and structurally validate one report, before any arithmetic.
 
@@ -1043,9 +1188,12 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
     identity = _object(report["identity"], _IDENTITY_FIELDS, "report identity")
     _sha(identity["capture_sha256"], "report identity capture digest")
     _optional_string(identity["fixture_provenance"], "report fixture provenance")
-    _run_identity(identity["run"], "report identity run")
+    _run_identity(identity["run"], "report identity run", schema=schema)
     execution = _object(report["execution"], _EXECUTION_FIELDS, "report execution")
-    for key, supported in SUPPORTED_EXECUTION.items():
+    supported_execution = dict(SUPPORTED_EXECUTION)
+    if schema == REPORT_SCHEMA_V3:
+        supported_execution["topology"] = "tp2"
+    for key, supported in supported_execution.items():
         if _string(execution[key], "report execution " + key) != supported:
             raise RuntimePriceError(
                 f"report execution: unsupported {key} {execution[key]!r}; the scalar device budget "
@@ -1064,11 +1212,13 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
     workload = _object(report["workload"], _WORKLOAD_FIELDS, "report workload")
     _list(workload["prompt_ids"], "report workload prompt ids")
     observations = _observations(report["observations"], "report observations", schema=schema)
+    if schema == REPORT_SCHEMA_V3:
+        _rank_world(observations.get("rank_world"), identity["run"])
     partition = _partition(report["partition"], "report partition", schema=schema)
     _resolved_evidence(partition["domains"], observations, "report partition domain")
     derived = _derived(report["derived"], "report derived", schema=schema)
     _validate_reservation_witness(observations, derived)
-    if schema == REPORT_SCHEMA_V2:
+    if schema in _EXTENDED_REPORT_SCHEMAS:
         # The producer's own admission verdict, fixed-resource composition and
         # timing terms (PQ #731).  Each is admitted by NAME with its own shape
         # and read by nothing here, except that the admission verdict is
@@ -1090,7 +1240,16 @@ def read_full_engine_resource_report(reference: Mapping, *, root: Path) -> Mappi
                     "report derived non-step transient peak bytes")
     _string(derived["non_step_transient_peak_scope"],
             "report derived non-step transient peak scope")
-    _string(derived["placement_obligation"], "report derived placement obligation")
+    if schema == REPORT_SCHEMA_V3:
+        if derived["placement_obligation"] is not None:
+            raise RuntimePriceError("v3 placement obligation must be null")
+        if derived.get("certifies_placement", False) is not False:
+            raise RuntimePriceError("v3 certifies_placement must be false")
+        _optional_index(derived["off_step_torch_live_peak_bytes"], "v3 whole off-step peak")
+        _string(derived["off_step_torch_live_peak_scope"], "v3 whole off-step peak scope")
+        _string(derived["proposal_placement_rule"], "v3 proposal placement rule")
+    else:
+        _string(derived["placement_obligation"], "report derived placement obligation")
     return report
 
 
@@ -1720,7 +1879,7 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
         if claimed is not None and any(claimed[key] != row[key] for key in _MEMBERSHIP_FIELDS):
             disagree(f"allocation {allocation_id} is partitioned differently than it recomputes")
     owner_views_gap = (
-        report["schema"] == REPORT_SCHEMA_V2 and observations["owner_views"] is not None
+        report["schema"] in _EXTENDED_REPORT_SCHEMAS and observations["owner_views"] is not None
         and (set(by_id) != set(claimed_membership)
              or any(claimed_membership[key][field] != by_id[key][field]
                     for key in set(by_id) & set(claimed_membership)
@@ -1832,7 +1991,7 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
     if derived["non_step_transient_peak_scope"] != partition["non_step_transient_peak_scope"]:
         disagree("the derived and partition off-step peak scopes are two different claims")
     # A frozen contract spelling a gate reads, not prose: compared verbatim.
-    if derived["placement_obligation"] != PLACEMENT_OBLIGATION:
+    if report["schema"] != REPORT_SCHEMA_V3 and derived["placement_obligation"] != PLACEMENT_OBLIGATION:
         disagree(f"derived placement_obligation is {derived['placement_obligation']!r} where this "
                  f"consumer applies {PLACEMENT_OBLIGATION!r}")
 
@@ -1840,7 +1999,7 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
     # verdict is a witness, never the value: nothing below admits on it, and
     # a claim that contradicts this consumer's own recomputation is a
     # disagreement.  v1 carries no admission block and skips this entirely.
-    if report["schema"] == REPORT_SCHEMA_V2:
+    if report["schema"] in _EXTENDED_REPORT_SCHEMAS:
         admission_disagreements, admission_gaps = _admission_disagreements(
             derived["admission"],
             recompute_derived_admission(observations, identity),
@@ -1875,6 +2034,15 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
                         "declared engine step may still be live during an undeclared one and "
                         "the off-step classification is not licensed")
     obligation = _placement_obligation(budget, non_step_peak)
+    if report["schema"] == REPORT_SCHEMA_V3:
+        whole_peak = _whole_off_step_peak(observations)
+        if derived["off_step_torch_live_peak_bytes"] != whole_peak:
+            disagree("derived off_step_torch_live_peak_bytes disagrees with this rank's "
+                     "non-observer allocation lifetimes and declared steps")
+        # A captured assignment's whole peak is not an invariant fixed term.
+        # Keep all term/domain disagreements above, even when this witness agrees.
+        obligation = None
+        blocking.append("v3 is per-rank observation only and does not certify placement")
     if obligation is None:
         blocking.append("no placement obligation is recomputable from this report")
 
@@ -1885,3 +2053,33 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
                          open_domains=open_domains,
                          unclassified_allocations=tuple(row["allocation_id"] for row in unclassified),
                          disagreements=tuple(disagreements), blocking=tuple(blocking))
+
+
+def consume_full_engine_rank_reports(references: Sequence[Mapping], *, root: Path,
+                                     device_ceilings: Sequence[int]) -> tuple[ReportVerdict, ...]:
+    """Check each TP2 capture against its own ceiling; never pool rank capacity.
+
+    Passing the ceiling check proves only that the captured Torch witness did
+    not already exceed that rank's limit. Unobserved allocations and every
+    fixed-resource/placement refusal remain owed, even below both ceilings.
+    """
+    if len(references) != 2 or len(device_ceilings) != 2:
+        raise RuntimePriceError("rank reports require two reports and two own device ceilings")
+    reports = [read_full_engine_resource_report(ref, root=root) for ref in references]
+    first_world = reports[0]["observations"].get("rank_world")
+    verdicts = []
+    for rank, (ref, report, ceiling) in enumerate(zip(references, reports, device_ceilings)):
+        if report["schema"] != REPORT_SCHEMA_V3:
+            raise RuntimePriceError("rank reports require the v3 TP2 protocol")
+        _equal(report["identity"]["run"]["rank"], rank, f"rank {rank} report rank")
+        _equal(report["observations"]["rank_world"], first_world, f"rank {rank} world roster")
+        ceiling = _index(ceiling, f"rank {rank} own device ceiling")
+        verdict = consume_full_engine_resource_report(ref, root=root)
+        # Derive the witness from the raw allocation lifetimes, not the claimed
+        # derived peak; a corrupted claim cannot make the ceiling comparison pass.
+        peak = _simultaneous_peak(report["observations"]["torch_allocations"])
+        if peak > ceiling:
+            verdict = replace(verdict, blocking=verdict.blocking + (
+                f"rank {rank} captured Torch peak {peak} exceeds its own device ceiling {ceiling}",))
+        verdicts.append(verdict)
+    return tuple(verdicts)
