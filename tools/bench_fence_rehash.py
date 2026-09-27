@@ -14,6 +14,13 @@ bytes/s with those two to tell whether sha256 or the read bounds it.
 ``--cold`` drops each file's page cache before every repeat
 (``POSIX_FADV_DONTNEED``), so the reads come from the device.
 
+``--busy-consumer`` times a plain ``io_engine.read_stream`` over the same
+wires whose consumer does CPU work of its own after each take: a sha256 over
+an in-memory buffer as large as one wire, so it is busy about as long as one
+read. It reports the stream's ``peak_workers`` and its consumer busy and wait
+seconds, which show how many reads the engine ran beside a working consumer
+(PQ #1533).
+
 Run it through PrismaBuild (``pbrun --profile sample``) on each code version;
 it builds no threads of its own.
 """
@@ -99,6 +106,7 @@ def main(argv=None):
     parser.add_argument("--mib", type=int, default=96)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--cold", action="store_true")
+    parser.add_argument("--busy-consumer", action="store_true")
     args = parser.parse_args(argv)
 
     from prismaquant import joint_catalog_extension as jce
@@ -139,6 +147,11 @@ def main(argv=None):
         except ImportError:
             io_engine = None
 
+        if args.busy_consumer:
+            report["mode"] = "busy_consumer"
+            _busy_consumer(report, wires, total, args)
+            return _finish(report, root, total)
+        report["mode"] = "fence"
         for repeat in range(args.repeats):
             if args.cold:
                 for path, _, _ in wires:
@@ -164,13 +177,54 @@ def main(argv=None):
                 run["engine"] = {k: c.get(k) for k in ("pool_width", "peak_workers", "entries_read",
                                                          "consumer_wait_s", "per_stream_bytes_per_s")}
             report["runs"].append(run)
-        walls = sorted(r["wall_s"] for r in report["runs"])
-        report["median_wall_s"] = walls[len(walls) // 2]
-        report["median_bytes_per_s"] = total / report["median_wall_s"]
-    finally:
+    except BaseException:
         shutil.rmtree(root, ignore_errors=True)
+        raise
+    return _finish(report, root, total)
+
+
+def _finish(report, root, total):
+    shutil.rmtree(root, ignore_errors=True)
+    walls = sorted(r["wall_s"] for r in report["runs"])
+    report["median_wall_s"] = walls[len(walls) // 2]
+    report["median_bytes_per_s"] = total / report["median_wall_s"]
     print("BENCH " + json.dumps(report, sort_keys=True))
     return 0
+
+
+def _read_digest(path):
+    with open(path, "rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest(), None
+
+
+def _busy_consumer(report, wires, total, args):
+    """A stream whose consumer works: one wire-sized sha256 per take."""
+    from functools import partial
+
+    from prismaquant import io_engine
+    work = bytes(wires[0][1]["bytes"])
+    for repeat in range(args.repeats):
+        if args.cold:
+            for path, _, _ in wires:
+                _fadvise_drop(path)
+        entries = [io_engine.ReadEntry(key=i, path=None, size=recorded["bytes"],
+                                       limit=recorded["bytes"], held_bytes=0,
+                                       expected_sha256=None, decoder=None, group=i,
+                                       reader=partial(_read_digest, path))
+                   for i, (path, recorded, _) in enumerate(wires)]
+        started = time.perf_counter()
+        with io_engine.read_stream(entries, budget=io_engine.FixedBudget(buffer_bytes=1)) as stream:
+            for i, (_, _, digest) in enumerate(wires):
+                (delivered,) = stream.take(i)
+                assert delivered.value == digest
+                hashlib.sha256(work).digest()
+            stream.release()
+        wall = time.perf_counter() - started
+        c = stream.counters
+        report["runs"].append({"repeat": repeat, "wall_s": wall, "bytes_per_s": total / wall,
+                               "engine": {k: c.get(k) for k in (
+                                   "pool_width", "peak_workers", "consumer_busy_s",
+                                   "consumer_wait_s", "per_stream_bytes_per_s")}})
 
 
 if __name__ == "__main__":
