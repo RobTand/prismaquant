@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-27 for dense TP2 panel freezing (PQ #1429, Tessera #639).
+Both the joint-cost and pre-cost execution freezers share one bytes-only
+execution binding in `native_operator_panel.require_native_execution`. Legacy
+inputs without an execution declaration still mean TP1. Explicit TP2 requires
+input/output cut, world, rank, TCP rendezvous and positive timeout declared by
+independent inputs and equal to native preflight metadata. Local source/render
+and phase shapes must agree with the local panel; retained wire and scheme
+remain whole, with N doubled for output cuts or K doubled for input cuts.
+Neither freezer infers rank-local quality identities or row-reduced references
+from measured output. The resident PWC reference-preparation convenience path
+remains TP1; TP2 callers must supply independent local references and matching
+joint rows before this metadata-only join. No GPU execution, new cache, format
+menu, runtime pin or serving admission changes. Table world equality, native
+numerics, activation attestation, served-family and fixed-resource gates stay
+unchanged; this is not a real TP2 measurement or placement certificate.
+
 Tessera's exact pin advances again on 2026-09-26 from `d2a6455025…` to
 `09d6559d7…` (Tessera #633, PQ #1413). The new serving mapper and route-census
 implementation address GLM MTP layer 45's runtime `mtp_block` module names.
@@ -11834,7 +11850,12 @@ separate producer owns native preparation/execution. PQ consumes exact
 panel/runtime/route/tensor and resource-trace identities while retaining
 unknown fixed/full-model resources. Operator observations alone cannot become
 a measured-runtime table, and no pin, format default or serving gate changes.
-Gate: `tests/test_native_operator_panel.py`.
+Gates: `tests/test_native_operator_panel.py`, `tests/test_native_dense_tp_freeze.py`.
+The TP2 freezer accepts Tessera #639's explicit execution schema, while keeping
+the original wire whole and panel identities rank-local; joint and execution
+freezers use the same input-bound validation described in the current provenance
+block above. Raw execution projection remains identical to the corresponding
+joint panel after cost/probe coordinates are removed.
 
 **The activation reference is attested before it is frozen, and gated on codes
 (2026-09-13, #574).** `reference_qdq` is not a runtime artifact: it is
