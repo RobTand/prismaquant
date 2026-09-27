@@ -86,6 +86,8 @@ __all__ = [
     "tessera_wire_defaults",
     "clear_recipe_cache",
     "tessera_wire_recipe",
+    "tessera_served_wire_recipe",
+    "TesseraRouteRefused",
     "wire_overhead_q256",
     "SUPERBLOCK_WEIGHTS",
     "TesseraFamily",
@@ -425,6 +427,21 @@ def tessera_wire_recipe(
     """
     spec = get_tessera_family(family)
     return _recipe_for(spec.base, spec.base_size, spec.arity, rung)
+
+
+class TesseraRouteRefused(TesseraFormatError):
+    """The pinned contract attests no served wire for a (family, rung, structure)."""
+
+
+def tessera_served_wire_recipe(
+    family: "str | TesseraFamily", rung: int, *, structure: str
+) -> "WireRecipe":
+    """The wire a served unit of ``structure`` carries for ``family`` at ``rung``.
+
+    RED seam for RobTand/prismaquant#1502: this still resolves the research
+    recipe, which is the defect the test beside it pins.
+    """
+    return tessera_wire_recipe(family, rung)
 
 
 # ``recipe_is_shape_free(recipe) -> bool`` used to live here, and it answered
