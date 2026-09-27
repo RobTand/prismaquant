@@ -9,14 +9,19 @@ declared an ``export`` phase but never reported a unit, so the phase grace --
 sized for the whole run -- acted as a wall clock and discarded ~55 min of
 steady work (#1516).
 
-This module is the parent's half of the fix.  It watches the child's output
-directory and reports **one progress unit per durably committed shard**: a
-shard file that has been observed twice, at least one interval apart, with
-identical non-zero size and mtime, is committed.  A file still growing is
-never counted, so the counter cannot run ahead of the work it stands for --
-the same rule ``prismabuild_progress`` states for journal shards.  What the
-watcher certifies is *quiescence* (written and closed), not content: the
-export receipt's manifest asserts remain the gate on what the shards contain.
+This module is the parent's half of the fix.  The producer's exporter
+publishes every serving shard through :func:`save_serving_shard`
+(``experiments/export_tessera_serving.py``): the payload is written to a
+dot-prefixed ``.name.….partial`` staging file in the destination directory
+and moved onto its final name with one ``Path.replace`` (producer #366,
+"publish complete, host-readable main/twin bytes in one rename").  A file
+that appears under a final ``model-*-of-*.safetensors`` name is therefore
+complete and durable by construction, and the ``.partial`` staging names
+never match the pattern.  So the watcher counts **final names on first
+appearance** -- no quiescence heuristic, no second observation -- and reports
+one progress unit per shard.  What the watcher certifies is that the shard
+file was published, not what it contains: the export receipt's manifest
+asserts remain the gate on that.
 
 Follows the discipline of :mod:`prismaquant.joint_run_progress`: the phase
 name must be one the submission declared (``PRISMABUILD_ACTION_PROGRESS_
@@ -29,49 +34,30 @@ which is the failure mode #1516 filed.
 """
 from __future__ import annotations
 
-import json
 import os
 import time
 from pathlib import Path
 
+from .joint_run_progress import declared_phases
 from .prismabuild_progress import report as _report
 
-#: Default observation interval.  Two observations an interval apart are the
-#: quiescence proof, so a shard commits at most one interval after its last
-#: write, and a stall allowance of a few minutes spans many missed polls.
-DEFAULT_INTERVAL_SECONDS = 30.0
+__all__ = [
+    "DEFAULT_POLL_SECONDS",
+    "SHARD_PATTERN",
+    "ShardCommitProgress",
+    "declared_phases",
+    "stall_allowance",
+]
 
-#: The shard file name pattern the exporter writes (``model-00001-of-00120
-#: .safetensors`` and siblings), including the manifest the wrapper asserts
-#: on separately, which is excluded because it is not a progress unit.
+#: Default poll cadence.  A shard is committed on first appearance, so this
+#: only bounds how far behind the reports lag the renames (one interval), and
+#: a stall allowance of a few minutes spans many missed polls.
+DEFAULT_POLL_SECONDS = 30.0
+
+#: The shard file name pattern the exporter publishes by atomic rename
+#: (``model-00001-of-00120.safetensors`` and siblings).  The dot-prefixed
+#: ``.partial`` staging files never match a ``model-*`` glob.
 SHARD_PATTERN = "model-*-of-*.safetensors"
-
-
-def declared_phases(environ=None) -> tuple[str, ...] | None:
-    """The phases this action's submission sealed, or ``None`` if unset.
-
-    Same reading as :func:`prismaquant.joint_run_progress.declared_phases`:
-    the worker publishes the list as a JSON array
-    (``prismabuild.pool`` mints ``json.dumps([phase.name, ...])``), so a
-    bare comma list is unknown rather than a guess.  A8 r6 (PB action
-    ``0a8bdf67``, 2026-09-27) was killed by a comma parse that read
-    ``'["export"]'`` as one bogus phase name, refused the real one, and
-    turned a declared stall contract into a wall clock (#1516).
-    """
-
-    environ = os.environ if environ is None else environ
-    raw = environ.get("PRISMABUILD_ACTION_PROGRESS_PHASES", "")
-    if not raw:
-        return None
-    try:
-        names = json.loads(raw)
-    except ValueError:
-        return None
-    if not isinstance(names, list) or not names:
-        return None
-    if not all(isinstance(name, str) and name for name in names):
-        return None
-    return tuple(names)
 
 
 def _default_log(message):
@@ -92,8 +78,16 @@ def stall_allowance(seconds_per_shard: float, *, minimum: float = 300.0,
 
     The A8 export measured 3,241 s for 120 shards -- 27 s per shard -- so a
     stall of ten shards is under five minutes while a genuine wedged writer
-    trips it long before the run-length grace would have.  The floor keeps a
-    fast exporter from arming a grace tighter than PB's own poll cadence.
+    trips it long before the run-length grace would have.
+
+    ``minimum`` is literal because PQ's :mod:`prismabuild_progress` exposes no
+    poll-cadence constant to derive it from: the worker samples the progress
+    channel on a private timer (observed ~30 s in the A4 wrappers' read-only
+    observer logs), and the 300 s floor is ten such samples of slack so a
+    fast exporter cannot arm a grace tighter than the watchdog's own rhythm.
+    ``multiplier`` paces the *mean* per-shard time; replacing it with a
+    distribution-derived figure (p99 or max) is deferred until the r6
+    py-spy/Netdata profile yields a measured per-shard spread to derive from.
     """
 
     if seconds_per_shard <= 0:
@@ -102,31 +96,28 @@ def stall_allowance(seconds_per_shard: float, *, minimum: float = 300.0,
 
 
 class ShardCommitProgress:
-    """Watch one export output directory and report committed shards.
+    """Watch one export output directory and report published shards.
 
     ``poll`` is idempotent and cheap enough to call from any loop; ``watch``
-    drives it around a child process until the child exits, then commits the
-    remainder in a single scan -- after the writer is gone every remaining
-    pattern file is closed by definition, so the quiescence rule collapses to
-    existence and non-zero size.  Counting never regresses: a shard that was
-    committed stays committed even if a filesystem hiccup hides it briefly.
+    drives it around a child process until the child exits, then performs one
+    final scan.  Counting never regresses: a shard that was committed stays
+    committed even if a filesystem hiccup hides it briefly.
     """
 
     def __init__(self, out_dir, *, phase, pattern=SHARD_PATTERN,
-                 expected=None, interval_seconds=DEFAULT_INTERVAL_SECONDS,
+                 expected=None, poll_seconds=DEFAULT_POLL_SECONDS,
                  environ=None, log=None):
         self.out_dir = Path(out_dir)
         self.phase = str(phase)
         self.pattern = str(pattern)
         self.expected = None if expected is None else int(expected)
-        self.interval_seconds = float(interval_seconds)
-        if self.interval_seconds <= 0:
-            raise ValueError("interval_seconds must be positive")
+        self.poll_seconds = float(poll_seconds)
+        if self.poll_seconds <= 0:
+            raise ValueError("poll_seconds must be positive")
         self.environ = os.environ if environ is None else environ
         self._log = log if log is not None else _default_log
         self._phases = declared_phases(self.environ)
-        self._committed: dict[str, tuple[int, int]] = {}
-        self._pending: dict[str, tuple[int, int]] = {}
+        self._committed: set[str] = set()
         self._phase_refused = False
         if self._phases is not None and self.phase not in self._phases:
             self._emit(f"shard progress: phase {self.phase!r} is not declared; "
@@ -139,54 +130,44 @@ class ShardCommitProgress:
         self._log(message)
 
     def _scan(self):
-        observed = {}
+        published = set()
         for path in self.out_dir.glob(self.pattern):
             if path.is_symlink() or not path.is_file():
                 continue
-            stat = path.stat()
-            if stat.st_size <= 0:
+            if path.stat().st_size <= 0:
                 continue
-            observed[path.name] = (stat.st_size, stat.st_mtime_ns)
-        return observed
+            published.add(path.name)
+        return published
 
-    def poll(self, *, child_alive: bool = True) -> int:
-        """Observe the directory once; report if new shards committed.
+    def poll(self) -> int:
+        """Observe the directory once; report shards published since last time.
 
-        Returns the cumulative committed count.  While ``child_alive`` is
-        true a shard commits only on a second identical observation; with the
-        child gone, existence and non-zero size commit immediately.
+        A shard commits on its first appearance under a final name: the
+        exporter's ``Path.replace`` makes the final name complete and durable
+        by construction, so there is nothing to wait for.  Returns the
+        cumulative committed count.
         """
 
-        observed = self._scan()
-        newly = []
-        for name, fingerprint in sorted(observed.items()):
-            if name in self._committed:
-                continue
-            if not child_alive or self._pending.get(name) == fingerprint:
-                self._committed[name] = fingerprint
-                newly.append(name)
-            else:
-                self._pending[name] = fingerprint
-        for name in newly:
-            self._pending.pop(name, None)
+        newly = self._scan() - self._committed
+        self._committed |= newly
         if newly and not self._phase_refused:
             _report(self.phase, len(self._committed),
-                    unit=newly[-1])
+                    unit=sorted(newly)[-1])
         return len(self._committed)
 
     def watch(self, child, *, poll_seconds: float | None = None) -> int:
         """Poll around ``child`` (a :class:`subprocess.Popen`) until it exits.
 
-        The loop reports as it goes and one final scan after exit commits the
-        last shards, so the watcher never outlives the child by an interval.
-        The return is the cumulative committed count, not the child's status.
+        The loop reports as it goes and one final scan after exit picks up
+        shards renamed between the last poll and the child's exit.  The
+        return is the cumulative committed count, not the child's status.
         """
 
-        step = self.interval_seconds if poll_seconds is None else poll_seconds
+        step = self.poll_seconds if poll_seconds is None else poll_seconds
         while child.poll() is None:
-            self.poll(child_alive=True)
+            self.poll()
             time.sleep(step)
-        return self.poll(child_alive=False)
+        return self.poll()
 
     @property
     def committed(self) -> tuple[str, ...]:
@@ -198,5 +179,5 @@ class ShardCommitProgress:
         """Whether every expected shard has committed."""
 
         if self.expected is None:
-            raise ValueError("expected shard count was not provided")
+            raise ValueError("expected shard count was not declared")
         return len(self._committed) >= self.expected

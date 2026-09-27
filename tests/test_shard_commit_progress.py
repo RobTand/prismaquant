@@ -89,7 +89,7 @@ def test_steady_shard_writes_report_monotone_units(out, channel, monkeypatch):
     stop = threading.Event()
     steady_writer(out, names, interval=0.05, stop=stop)
     watcher = scp.ShardCommitProgress(out, phase="export",
-                                      interval_seconds=0.05)
+                                      poll_seconds=0.05)
     deadline = time.monotonic() + 10.0
     while watcher.poll() < len(names) and time.monotonic() < deadline:
         time.sleep(0.02)
@@ -105,31 +105,33 @@ def test_steady_shard_writes_report_monotone_units(out, channel, monkeypatch):
     assert records[-1]["schema"] == "prismabuild.action_progress.v1"
 
 
-def test_growing_file_is_not_committed_until_quiescent(out, channel, monkeypatch):
+def test_partial_staging_never_counts_only_renamed_names_do(out, channel,
+                                                             monkeypatch):
     monkeypatch.setattr(scp.os, "environ", channel.environ, raising=False)
-    # a quiescent shard commits on its second identical observation
-    write_shard(out, "model-00001-of-00002.safetensors", b"one")
+    # The producer publishes each shard with one rename (save_serving_shard,
+    # producer #366): bytes land in a dot-prefixed .partial staging name and
+    # Path.replace moves the complete payload onto its final name.  The
+    # watcher must count final names on first appearance and never the
+    # staging file, however long it sits there growing.
+    staging = out / ".model-00001-of-00002.safetensors.hj3k4n.partial"
+    staging.write_bytes(b"growing-payload")
     watcher = scp.ShardCommitProgress(out, phase="export",
-                                      interval_seconds=0.05)
-    watcher.poll()
-    assert watcher.poll() == 1
-    # a growing file: the first observation pends it, an append between
-    # polls resets its fingerprint, and only quiescence commits it
-    write_shard(out, "model-00002-of-00002.safetensors", b"two")
-    assert watcher.poll() == 1
-    with (out / "model-00002-of-00002.safetensors").open("ab") as handle:
-        handle.write(b"-grow")
-        handle.flush()
-        os.fsync(handle.fileno())
-    assert watcher.poll() == 1, "a changed fingerprint must restart quiescence"
-    assert watcher.poll() == 2
+                                      poll_seconds=0.05)
+    assert watcher.poll() == 0, "a .partial staging file must not count"
+    with staging.open("ab") as handle:
+        handle.write(b"-more")
+    assert watcher.poll() == 0, "a growing staging file must not count"
+    os.replace(staging, out / "model-00001-of-00002.safetensors")
+    assert watcher.poll() == 1, "a renamed final name commits at once"
+    assert channel.last()["units_completed"] == 1
+    assert channel.last()["unit"] == "model-00001-of-00002.safetensors"
 
 
 def test_stalled_writer_reports_no_new_units(out, channel, monkeypatch):
     monkeypatch.setattr(scp.os, "environ", channel.environ, raising=False)
     write_shard(out, "model-00001-of-00002.safetensors", b"one")
     watcher = scp.ShardCommitProgress(out, phase="export",
-                                      interval_seconds=0.05)
+                                      poll_seconds=0.05)
     deadline = time.monotonic() + 5.0
     while watcher.poll() < 1 and time.monotonic() < deadline:
         time.sleep(0.02)
@@ -152,7 +154,7 @@ def test_watch_reports_while_child_runs_and_settles_after_exit(out, channel,
 
     def drive():
         watcher = scp.ShardCommitProgress(out, phase="export",
-                                          interval_seconds=0.05, expected=4)
+                                          poll_seconds=0.05, expected=4)
         count = watcher.watch(child, poll_seconds=0.05)
         assert count == 4
         assert watcher.expected_complete()
@@ -167,7 +169,7 @@ def test_undeclared_phase_is_logged_and_not_committed(out, channel, monkeypatch)
     monkeypatch.setattr(scp.os, "environ", channel.environ, raising=False)
     write_shard(out, "model-00001-of-00001.safetensors", b"one")
     watcher = scp.ShardCommitProgress(out, phase="not-a-phase", log=logged.append,
-                                      interval_seconds=0.01)
+                                      poll_seconds=0.01)
     watcher.poll()
     watcher.poll()
     assert channel.records() == [], "an undeclared phase must not commit"
@@ -179,7 +181,7 @@ def test_without_channel_the_watcher_is_inert(out, monkeypatch):
     monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", raising=False)
     write_shard(out, "model-00001-of-00001.safetensors", b"one")
     watcher = scp.ShardCommitProgress(out, phase="export",
-                                      interval_seconds=0.01)
+                                      poll_seconds=0.01)
     watcher.poll()
     assert watcher.poll() == 1
     assert watcher.poll() == 1
@@ -198,7 +200,11 @@ def test_declared_phases_reads_the_worker_json_list():
     # (prismabuild pool.py: json.dumps([phase.name for phase in policy])).
     # A8 r6 (PB 0a8bdf67, 2026-09-27) died because a comma parse read
     # '["export"]' as one bogus phase name, refused the real one, and
-    # turned the contract into a wall clock.
+    # turned the contract into a wall clock.  The reading is imported from
+    # joint_run_progress: one implementation, no copy to drift (#1517).
+    from prismaquant import joint_run_progress as jrp
+    assert scp.declared_phases is jrp.declared_phases, (
+        "declared_phases must be imported, not copied")
     assert scp.declared_phases(
         {"PRISMABUILD_ACTION_PROGRESS_PHASES": '["export", "publish"]'}
     ) == ("export", "publish")
@@ -220,7 +226,7 @@ def test_worker_json_phase_list_commits_records(out, channel, monkeypatch):
     monkeypatch.setattr(scp.os, "environ", channel.environ, raising=False)
     write_shard(out, "model-00001-of-00002.safetensors", b"one")
     watcher = scp.ShardCommitProgress(out, phase="export",
-                                      interval_seconds=0.01)
+                                      poll_seconds=0.01)
     assert not watcher._phase_refused, (
         "a phase the worker declared must not be refused")
     watcher.poll()
