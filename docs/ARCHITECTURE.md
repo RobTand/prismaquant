@@ -3515,8 +3515,18 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/pact-gamut-stageb-multiformat`.
+As of: 2026-09-27 · `tooling/publish-license-gate-1268-20260927`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `tooling/publish-license-gate-1268-20260927`) for the
+approved **new-upload weights-license and auto-approve access gate** (PQ #1268).
+The publisher requires the repository-filled canonical LICENSE and model-card
+license metadata/TL;DR before evidence overrides and again on frozen bytes.
+Real publication sets and reads back `gated="auto"` before LFS preupload,
+then rechecks before reporting success. Dry-run makes no Hub requests. LICENSE
+remains in artifact identity and must be staged before authoritative evidence;
+no existing cards or remote repositories are migrated. The shipcard verifier,
+serving pin, formats, pipeline graph and numerical gates are unchanged.
 
 Re-stamped (2026-09-27, `claude/pact-gamut-stageb-multiformat`) for **Stage B
 inputs over a several-format catalog** (PQ #1437). The Stage B control
@@ -21840,7 +21850,7 @@ re-render, it is the render the gate declined to keep.
 | DSv4 CB matched-budget performance | `python -m prismaquant.validate_cb_performance` | no — operator-run after export | **blocking paired prefill/decode/mixed parity against the exact displaced container** |
 | DSv4 paired DSpark claim | `python -m prismaquant.dspark_matched_performance_collector {declare-policy,start-sampler,collect-arm}` → `python -m prismaquant.validate_dspark_target_draft attest` | no — lifecycle-owned collection around both exact operator-started serves; the collector does not launch or patch vLLM | **blocking only when `mtp.dspark` is claimed: source-closed/no-clobber arm reports, exact acceptance/routes plus matched no-MTP throughput non-regression, 256K KV, and 110/8/4-GiB headroom; target-only publication remains valid without the optional claim** |
 | Ship record | `exported/shipcard.json` — native lane: `export_native_compressed._write_shipcard`; Tessera lane: `python -m prismaquant.lane_shipcard open --lane tessera` → `python -m prismaquant.shipcard_cli verify` | opened by the native and Tessera lanes; **the GGUF arm opens none** | **refuses** until every serve-lane slot is closed |
-| **Publication** | `tools/publish_artifact.py` | no — operator-run | **BLOCKING**: refuses to upload (or even print the upload command) unless `shipcard.verify` passes |
+| **Publication** | `tools/publish_artifact.py` | no — operator-run | **BLOCKING**: shipcard evidence gate plus non-overrideable repository-specific LICENSE/card policy; real uploads require read-back-verified `gated="auto"` |
 
 Nothing in the ordinary quantization pipeline blocks on an artifact-quality number — and it
 should not: `vllm` is not
@@ -21977,9 +21987,26 @@ canonical tensor payload identity, and exact shard index; it does not reopen mut
 paths or invoke the independent path-based content scanner. Generic artifacts retain their
 historical freeze behavior, and the post-upload held-descriptor replay above is unchanged.
 
+**New-upload license/access policy (PQ #1268; approved 2026-09-27).** Every
+new publisher invocation requires an ordinary in-tree `LICENSE` exactly equal
+to `licenses/PRISMAQUANT-WEIGHTS-LICENSE-1.0.md` with `<repository>` filled for
+the destination `rdtand/<repository>`. `README.md` must have unambiguous YAML
+front matter with `license: other`, `license_name: prismaquant-weights-license-1.0`,
+and `license_link: https://huggingface.co/<repo-id>/blob/main/LICENSE`, plus the
+canonical license TL;DR in its body (ordinary Markdown reflow is permitted).
+Duplicate/merge YAML keys, nonregular/symlinked policy files, malformed UTF-8
+and policy files over 16 MiB refuse. This structural gate runs before any
+force stamp and replays from the existing frozen-byte reader; an evidence
+override cannot waive it. LICENSE remains part of `model_sha`: stage it before
+opening the authoritative card and collecting measurements, never exclude it
+or inject it after verification. The existing 25 cards remain untouched;
+there is no retroactive migration or remote bulk action. `--dry-run` performs
+only local validation and makes no Hub request.
+
 Remote replacement uses the low-level Hub commit API rather than `upload_folder`. The publisher
 resolves an explicit destination revision to one full parent commit, enumerates the remote file
-set at that immutable commit, pre-uploads the frozen LFS objects with ignore rules disabled,
+set at that immutable commit, sets `gated="auto"` and verifies it by reading
+repository metadata back **before any upload**, then pre-uploads the frozen LFS objects with ignore rules disabled,
 then submits every local addition plus every stale-file deletion in one `create_commit` with
 both `revision` and `parent_commit`. Identical additions are deliberately retained in the
 payload so the Hub client's no-op shortcut cannot bypass CAS. A concurrent head change is a
@@ -21992,8 +22019,14 @@ preserve these guarantees; a missing compatible `huggingface_hub` is a refusal, 
 deliberately expensive: `--force-unverified` requires the
 operator to **re-type the artifact directory's basename** (interactively, or `--confirm-name`
 for scripts) and stamps `forced_unverified: true` plus the overridden problems into the
-shipcard, so the artifact itself carries the record that it shipped ungated. Tests:
-`tests/test_publish_artifact.py`.
+shipcard, so the artifact itself carries the record that it shipped with an
+evidence override (never an access-gate or licensing bypass). Before reporting
+success, the publisher reads the access setting back again; a missing/manual/
+false setting or API error refuses. A post-commit failure names the existing
+commit and requires inspection before announcement. Publication output records
+`gated="auto"` as read-back verified alongside the snapshot and commit identities.
+Only an explicitly authorized real publish changes Hub settings; tests mock
+the Hub. Tests: `tests/test_publish_artifact.py`, `tests/test_publish_license.py`.
 
 **`uniform_control` (rate-axis artifacts only; PrismaQuant #121).** The
 shipcard of a Tessera artifact carries one more required slot: the verdict of
