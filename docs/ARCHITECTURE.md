@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+SHA-256 lexical validation (2026-09-27, `astra/dedup-hex-1457`, PQ #1457):
+`digests.is_sha256hex` and its compiled `SHA256_HEX` pattern own the exact
+regex acceptance used by artifact collection, prepriced cost and PrismaSnap
+bindings. Callers retain their own errors, coercions and returned objects.
+`tests/test_digest_hex_1457.py` freezes the old wrappers and pattern behavior,
+including string subclasses. No digest bytes, schema, default or gate changes.
+Inventory: `docs/design/digest_hex_1457.md`.
+
 Canonical pickle identity (2026-09-27, `astra/pickle-protocol-1450`, PQ #1450):
 `digests.canonical_pickle_bytes` explicitly selects protocol 4, the historical
 Python 3.12 producer encoding, rather than the interpreter's default. Python

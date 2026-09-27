@@ -52,7 +52,7 @@ from .prismasnap import (
     search_diagonal_scale,
 )
 from .schemas import strict_json_loads
-from .digests import file_sha256hex
+from .digests import SHA256_HEX, file_sha256hex, is_sha256hex
 from .tensor_digests import tensor_host_bytes
 
 
@@ -94,7 +94,7 @@ PART_MERGE_STATE_JSON = "part_merge_state.json"
 PART_MERGE_RECEIPTS_DIR = ".prismasnap-collation-receipts"
 PROBE_BINDING_SUFFIX = ".prismasnap-binding.json"
 
-_SHA256 = re.compile(r"[0-9a-f]{64}")
+_SHA256 = SHA256_HEX
 _BODY_LAYER = re.compile(r"^model[.]layers[.](?P<index>[0-9]+)[.]")
 _SOURCE_BODY_LAYER = re.compile(r"(?:^|[.])layers[.](?P<index>[0-9]+)[.]")
 
@@ -403,7 +403,7 @@ def _require_exact_keys(
 
 
 def _require_sha256(value: object, *, where: str) -> str:
-    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+    if not is_sha256hex(value):
         raise RuntimeError(f"{where} must be a full lowercase SHA-256")
     return value
 

@@ -65,6 +65,17 @@ import hashlib
 import json
 import math
 import os
+import re
+
+
+# A regex checks the underlying text, not a str subclass's Python length or
+# iteration hooks. Callers retain their own coercion, exact-type and errors.
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+def is_sha256hex(value: object) -> bool:
+    """Whether value is str (including subclasses) containing 64 lowercase hex digits."""
+    return isinstance(value, str) and SHA256_HEX.fullmatch(value) is not None
 
 
 def canonical_json(value: object, *, where: str) -> object:

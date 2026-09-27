@@ -49,7 +49,7 @@ from .prismasnap_checkpoint import (
     _derivation_digest,
 )
 from .schemas import strict_json_loads
-from .digests import file_sha256hex
+from .digests import SHA256_HEX, file_sha256hex, is_sha256hex
 
 
 PROVENANCE_SCHEMA = "prismaquant.prismasnap.provenance.v1"
@@ -66,7 +66,7 @@ ATTEST_NULL_FLOOR_MULTIPLIER = 2.0
 # Saturation is the licensing condition for a floor-derived threshold: the
 # independent null arms must agree, or the "floor" is not a floor.
 _NULL_FLOOR_ARM_AGREEMENT_MAX_RATIO = 3.0
-_SHA256 = re.compile(r"[0-9a-f]{64}")
+_SHA256 = SHA256_HEX
 _BASE_PROVENANCE_KEYS = frozenset(
     {
         "schema",
@@ -165,7 +165,7 @@ def _require_exact_mapping(
 
 
 def _require_sha256(value: object, *, where: str) -> str:
-    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+    if not is_sha256hex(value):
         raise RuntimeError(f"{where} is not a full lowercase SHA-256")
     return value
 
