@@ -65,11 +65,12 @@ repository does not satisfy the required `linked issue` check.
    still answers False for every rung — by the pin, not by an edit.
    `version_is_release` is recorded and advisory; no gate reads it. It is
    limited by each matched cell's published scope and the closed-world TP
-   ceiling. At the current pin (contract v22, lane schema v9), the two
-   `routed_moe` cells carry `evidence.smoke.status: "recorded"`, derived from
-   their smoke records, and pass the unchanged status-only evidence gate.
-   This follows the producer remeasurement resolving PrismaQuant #198;
-   it does not establish a shipped PrismaQuant MoE artifact. Preserve
+   ceiling. The current pin carries contract v39, lane schema v10; read each
+   matched cell's evidence from that packaged contract. The recorded routed
+   pair from v22 was historical, not a claim about today's cell roster. The
+   v39 GLM-image cells carry route-only evidence with smoke not recorded,
+   which the unchanged status-only evidence gate permits; that is not new
+   served KL or a shipped PrismaQuant MoE artifact. Preserve
    `lane_eligibility.cell_evidence_admits` and the independent export and
    serving gates; do not infer admission beyond a matched cell. The non-vLLM-native lanes are
    sanctioned, not exceptions; what is forbidden is a forked runtime.
