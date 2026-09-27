@@ -1,5 +1,25 @@
 # PrismaQuant Architecture
 
+## Offline release receipt ingestion (PQ #1487)
+
+The Tessera lane names its existing external `uniform_control.py verify` and
+`shipcard_cli fill-control` runner, closing the already required byte-matched
+control slot. The control family, integer-bit rule and byte slack are declared
+before measurement; uniform A4/A8 labels alone do not establish a byte match.
+
+`python -m prismaquant.release_receipts` is a dry-by-default, offline adapter.
+Producer slot records retain their exact artifact/provenance fields. U4's
+explicit full-config TP2 trace phase is replayed from both raw rank files by
+the existing trace constructor; body-only verdicts never substitute. All
+proposed records pass the unchanged verifier (including build/identity checks)
+before `--apply` uses the existing slot writer. Final verification still lists
+every missing slot. No serve, measurement, upload or manifest fabrication runs.
+Raw TR3 output is not gold-slot-shaped and lacks serialized shipcard identity
+and speculative-decoding observation; unsupported output remains a refusal,
+not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
+measurements must come from their existing producers. See
+`docs/operations/release_receipts.md` for inputs and failure semantics.
+
 SHA-256 lexical validation (2026-09-27, `astra/dedup-hex-1457`, PQ #1457):
 `digests.is_sha256hex` and its compiled `SHA256_HEX` pattern own the exact
 regex acceptance used by artifact collection, prepriced cost and PrismaSnap
@@ -3591,8 +3611,15 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/dense-same-shape-batching`.
+As of: 2026-09-27 · `tooling/release-window-slots-20260927`, including
+`astra/pq-pin-tessera-644` (PQ #1456) and the Stage B multiformat retake.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `tooling/release-window-slots-20260927`) for the
+approved Tessera uniform-control runner declaration and offline receipt
+adapter (PQ #1487). Existing record constructors, artifact identity and
+`shipcard.verify` remain unchanged. No measurement, numerical default,
+serving runtime or publication override is introduced.
 
 Re-stamped (2026-09-27, `claude/dense-same-shape-batching`) for **same-shape
 dense anchor batches** (PQ #1479). `_anchor_batches` now keys every unit, dense
