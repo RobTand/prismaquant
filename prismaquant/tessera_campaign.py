@@ -5466,6 +5466,13 @@ def _main(argv, *, source_scope) -> int:
                     help="Verified capture manifest; prefetch selected X/H before encoding.")
     ap.add_argument("--calibration-cache-sha256", default=None,
                     help="Expected capture manifest hash, sealed by the campaign planner.")
+    ap.add_argument("--source-identity-cache", default=None,
+                    help="A prismaquant.streamed_model.identity_cache.v1 proof of every source "
+                         "shard's full-file SHA256. A selected-source row adopts it before any "
+                         "payload read instead of hashing the shards it reads; a proof that "
+                         "refuses leaves every read to hash fresh (PQ #1497).")
+    ap.add_argument("--source-identity-cache-sha256", default=None,
+                    help="Expected SHA256 of the --source-identity-cache file, bound by the planner.")
     args = ap.parse_args(argv)
     if args.exhaustive_rate_grid and parse_rate_band(args.rate_band) is None:
         ap.error("--exhaustive-rate-grid requires --rate-band")
@@ -5479,6 +5486,10 @@ def _main(argv, *, source_scope) -> int:
     selected_source = bool(args.streaming and args.units and args.calibration_cache
                            and args.calibration_cache_sha256
                            and not (args.census_out or args.capture_calibration_out))
+    if bool(args.source_identity_cache) != bool(args.source_identity_cache_sha256):
+        ap.error('--source-identity-cache and --source-identity-cache-sha256 go together')
+    if args.source_identity_cache and not selected_source:
+        ap.error('--source-identity-cache requires selected streaming capture reuse')
     if args.campaign_identity_bytes and not selected_source:
         ap.error('--campaign-identity-bytes requires selected streaming capture reuse')
     if args.source_snapshot_policy != 'whole-layer-v1' and not selected_source:
@@ -5596,6 +5607,12 @@ def _main(argv, *, source_scope) -> int:
                 calibration_parameters=dict(nsamples=args.nsamples, seqlen=args.seqlen, seed=args.seed),
                 resource_check=None if selected_guard is None else selected_guard.check,
                 release_read_pages=True))
+        if args.source_identity_cache:
+            # Before the runner or any payload read: every shard the snapshot
+            # reads then carries the campaign's proof instead of a fresh hash
+            # under this GPU reservation (PQ #1497).
+            source_authentication.adopt_identity_proof_or_hash(
+                args.source_identity_cache, args.source_identity_cache_sha256)
 
     from .model_profiles import detect_profile
     profile = detect_profile(args.model)
