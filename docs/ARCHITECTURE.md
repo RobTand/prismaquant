@@ -10,6 +10,22 @@ and JSON candidate roster are different identities and remain unchanged.
 No arithmetic, schema, pipeline default, serving lane or ship gate changes.
 Inventory and remaining scope: `docs/design/digest_rosters_1446.md`.
 
+Re-stamped 2026-09-27 for dense TP2 panel freezing (PQ #1429, Tessera #639).
+Both the joint-cost and pre-cost execution freezers share one bytes-only
+execution binding in `native_operator_panel.require_native_execution`. Legacy
+inputs without an execution declaration still mean TP1. Explicit TP2 requires
+input/output cut, world, rank, TCP rendezvous and positive timeout declared by
+independent inputs and equal to native preflight metadata. Local source/render
+and phase shapes must agree with the local panel; retained wire and scheme
+remain whole, with N doubled for output cuts or K doubled for input cuts.
+Neither freezer infers rank-local quality identities or row-reduced references
+from measured output. The resident PWC reference-preparation convenience path
+remains TP1; TP2 callers must supply independent local references and matching
+joint rows before this metadata-only join. No GPU execution, new cache, format
+menu, runtime pin or serving admission changes. Table world equality, native
+numerics, activation attestation, served-family and fixed-resource gates stay
+unchanged; this is not a real TP2 measurement or placement certificate.
+
 Tessera contract v39 (2026-09-27, Tessera #641, merge `52bc86ea1…`, closing
 tessera#604) is on Tessera master. It is **not** on PrismaQuant's pin. The pin
 stays at `09d6559d7…` with packaged contract v38 (SHA-256 `04d5a20a…9d22e4`),
@@ -3348,7 +3364,13 @@ silently grows to complete the capture. No scientific plan is rewritten.
 
 An explicit `joint_served_activation_policy.v1` permits newly added routed
 E2M1-K2 q896 candidates to be priced at the fused MoE runtime's executed-stage
-scale. Its bound original full-512 preparation and census independently derive
+scale. A `joint_served_activation_policy.v2` (PQ #1437) names several added
+routed A4 formats in `formats` (`joint_served_activation.policy_formats`;
+`--format`, repeatable, on its CLI). Each must quantize its input to 4 bits,
+and no group member may already offer one. The group maximum belongs to the
+routed unit, not to the weight format, so every policy format of a member is
+priced at the same executed-group scale, and activation requires every member
+to carry every policy format. Its bound original full-512 preparation and census independently derive
 the complete w13/w2 maxima through `routed_executed_max_abs`. The old PWC maxima,
 candidate qualification activations, renders, wires and source/H identities stay
 unchanged. Only a transient A4-specific pricing view applies the grouped maxima;
@@ -3503,8 +3525,22 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/pact-gamut-export-optional-proof`.
+As of: 2026-09-27 · `claude/pact-gamut-stageb-multiformat`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/pact-gamut-stageb-multiformat`) for **Stage B
+inputs over a several-format catalog** (PQ #1437). The Stage B control
+closure (`tools/prepare_extended_joint_quanta.control_digests`) reads a v1 or
+v2 overlay catalog through `joint_catalog_extension.catalog_control_bindings`:
+each source's cost run, and each reseal proof with its fixture and arm
+results, where a source has one. The served activation policy gains a v2 that
+prices several added routed A4 formats. The resource derivation
+(`joint_stageb_resources.derive_policy`) takes the priced formats from that
+policy; a v1 catalog keeps its full-roster rule, and a v2 catalog's cells must
+each add a format its unit does not offer, with every executed-group member
+gaining exactly the policy's formats among its added A4 formats. Rosters
+extend by `extended_roster`, which for a v1 catalog is the order the
+derivation used before. No default, stage, format, lane or ship gate changes.
 
 Re-stamped (2026-09-27, `claude/pact-gamut-export-optional-proof`) for **an
 unproven adopted cell at export** (PQ #1438). The rooted selected-cache
@@ -11895,7 +11931,12 @@ separate producer owns native preparation/execution. PQ consumes exact
 panel/runtime/route/tensor and resource-trace identities while retaining
 unknown fixed/full-model resources. Operator observations alone cannot become
 a measured-runtime table, and no pin, format default or serving gate changes.
-Gate: `tests/test_native_operator_panel.py`.
+Gates: `tests/test_native_operator_panel.py`, `tests/test_native_dense_tp_freeze.py`.
+The TP2 freezer accepts Tessera #639's explicit execution schema, while keeping
+the original wire whole and panel identities rank-local; joint and execution
+freezers use the same input-bound validation described in the current provenance
+block above. Raw execution projection remains identical to the corresponding
+joint panel after cost/probe coordinates are removed.
 
 **The activation reference is attested before it is frozen, and gated on codes
 (2026-09-13, #574).** `reference_qdq` is not a runtime artifact: it is
