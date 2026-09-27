@@ -53,9 +53,9 @@ states a depth or a worker count:
   next group within the consumer's shortest measured group, and its whole
   width while the consumer waits or before it has measured anything. The pool
   is sized by the CPU affinity. A stream holds one core back for its
-  consumer only while the consumer needs it: never while the consumer is
-  blocked in ``take``, and otherwise only while the consumer's measured busy
-  time exceeds its measured wait time (``ReadStream._width``, PQ #1533).
+  consumer only while the consumer's measured work (take to take) exceeds its
+  measured wait in ``take``, and before it has measured a work interval
+  (``ReadStream._width``, PQ #1533).
 * **Order and verification.** A group is delivered only when every one of its
   entries is read, hashed, held to its digest and decoded; entries come back
   in stream order. The first failure in a taken group raises
@@ -727,6 +727,10 @@ class ReadStream:
         self._took_at = None
         self._took_bytes = 0
         self._busy_min_s = None
+        # When the last take returned; the next take's start closes the
+        # consumer's work interval (``consumer_work_s``, PQ #1533).
+        self._returned_at = None
+        self._worked = False
         # The lowest index still pending: everything before it is being
         # read, read, or delivered. A reclaimed entry moves it back.
         self._cursor = 0
@@ -739,6 +743,7 @@ class ReadStream:
             "ahead_deferrals": 0, "ahead_failures": 0,
             "peak_held_bytes": 0, "peak_workers": 0, "peak_workers_consumer_busy": 0,
             "consumer_wait_s": 0.0, "consumed_bytes": 0, "consumer_busy_s": 0.0,
+            "consumer_work_s": 0.0,
             "groups_taken": [],
         }
 
@@ -837,6 +842,12 @@ class ReadStream:
             if self._taken >= len(self._groups) or self._groups[self._taken] != group:
                 raise RuntimeError(f"io stream group {group!r} is not the next in order")
             now = time.monotonic()
+            if self._returned_at is not None:
+                # Take to take, whether or not the consumer released early:
+                # the time it spent outside the engine (PQ #1533).
+                self.counters["consumer_work_s"] += now - self._returned_at
+                self._returned_at = None
+                self._worked = True
             if self._took_at is not None:
                 self._release_locked(now)
             self._demanded.add(group)
@@ -873,10 +884,14 @@ class ReadStream:
                 self._held_actual -= self._actual[i]
                 delivered.append(Delivered(self._entries[i], value, observed, derived))
             self._taken += 1
-            self._took_at = time.monotonic()
+            self._took_at = self._returned_at = time.monotonic()
             self._took_bytes = nbytes
             self._unreleased = sum(self._entries[i].held_bytes for i in indices)
             self._pump()
+            # Reads in flight as the consumer goes back to work, including
+            # any started while it waited (PQ #1533).
+            self.counters["peak_workers_consumer_busy"] = max(
+                self.counters["peak_workers_consumer_busy"], self._active)
             return delivered
 
     def release(self) -> None:
@@ -974,20 +989,22 @@ class ReadStream:
         """The reads this stream may run at once: the pool, less the consumer's core when it works.
 
         The consumer runs on a core of the same affinity the pool is sized
-        by. While it is blocked in :meth:`take` it uses none, so every core
-        reads. Otherwise the core is held back when the consumer has spent
-        more of its measured time working than waiting: a held core then
-        idles for the consumer's wait share, and a shared one costs the
-        consumer its busy share in contention, so the core goes to whichever
-        share is larger. Before the consumer has measured either, the core is
-        held back, as it always was (PQ #1533).
+        by. The engine measures where the consumer's time goes: waiting in
+        :meth:`take` (``consumer_wait_s``) or working between one take's
+        return and the next take (``consumer_work_s``). A core held back for
+        the consumer idles for its wait share; a core given to the reads
+        costs the consumer its work share in contention. So the core is held
+        back while the measured work share is the larger, and given to the
+        reads while the wait share is. The decision is the measured shares,
+        not the consumer's state at this instant: a read started during a
+        short wait runs on into the consumer's next work interval. Before
+        the consumer has finished one work interval the core is held back,
+        as it always was (PQ #1533).
         """
         pool = self._engine.width
-        if self._consumer_waiting:
-            return pool
-        busy = self.counters["consumer_busy_s"]
-        wait = self.counters["consumer_wait_s"]
-        if busy + wait > 0 and busy <= wait:
+        if not self._worked:
+            return max(1, pool - 1)
+        if self.counters["consumer_work_s"] <= self.counters["consumer_wait_s"]:
             return pool
         return max(1, pool - 1)
 
@@ -1049,7 +1066,7 @@ class ReadStream:
             self.counters["peak_workers"] = max(self.counters["peak_workers"], self._active)
             if not self._consumer_waiting:
                 # Reads started while the consumer works, which _width holds
-                # to the pool less the consumer's core when its busy share
+                # to the pool less the consumer's core when its work share
                 # leads (PQ #1533).
                 self.counters["peak_workers_consumer_busy"] = max(
                     self.counters["peak_workers_consumer_busy"], self._active)

@@ -523,12 +523,15 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   `ReadEntry` (`:568`) and a budget, and reads the entries ahead of the
   consumer on the module's one thread pool, sized by the whole CPU affinity.
   A stream holds one core back for its consumer only while the consumer
-  needs it (`ReadStream._width`, PQ #1533): never while the consumer is
-  blocked in `take`, otherwise only while its measured busy time exceeds its
-  measured wait time, and before it has measured either. A consumer that only
-  waits (the fence re-hash) reads on every core; a CPU-heavy one keeps
-  affinity less one. The stream's `peak_workers_consumer_busy` counter records
-  the widest read set started while the consumer worked. The caller never states a depth or a worker count.
+  needs it (`ReadStream._width`, PQ #1533): while its measured work, take to
+  take (`consumer_work_s`), exceeds its measured wait in `take`
+  (`consumer_wait_s`), and before it has measured a work interval. The rule
+  reads the measured shares, not the consumer's state at one instant, since a
+  read started during a short wait runs on into the next work interval. A
+  consumer that only waits (the fence re-hash) reads on every core; a
+  CPU-heavy one keeps affinity less one. The stream's
+  `peak_workers_consumer_busy` counter records the most reads in flight while
+  the consumer worked. The caller never states a depth or a worker count.
   `tests/test_io_site_freeze.py` (PQ #1297) freezes every other thread or
   executor site; this change removes `ProductionWeightCache.retained_window`'s
   pool from that list. The per-file read moved from `production_weight_cache`
@@ -3752,8 +3755,8 @@ Stamps follow, newest first, each recording its own branch and date.
 Re-stamped (2026-09-27, `claude/pq-1533-engine-consumer-core`) for **the IO
 engine's consumer core** (PQ #1533): the engine's pool spans the whole CPU
 affinity, and each stream holds its consumer's core back only while the
-engine's own accounting says the consumer works more than it waits
-(`ReadStream._width`). No caller states a width and no constant is added.
+engine's own accounting says the consumer works (take to take) more than it
+waits in `take` (`ReadStream._width`). No caller states a width and no constant is added.
 Gates: `tests/test_io_engine.py`, `tests/test_io_site_freeze.py`.
 
 Re-stamped (2026-09-27, `claude/pq-1531-fence-hash-engine`) for **the fence
